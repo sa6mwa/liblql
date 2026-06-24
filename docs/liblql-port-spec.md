@@ -1,0 +1,346 @@
+# liblql Port Specification
+
+## Goal
+
+Port `pkt.systems/lql v0.17.1` from Go to C89 in this repository as
+`liblql`, with a companion CLI named `clql`.
+
+The C port must be suitable for lockd-style local JSON search and mutation
+workloads. It must preserve observable LQL behavior from the Go implementation
+where claimed, prove parity through executable tests and benchmarks, and use
+`lonejson` for JSON parsing, serialization, validation, stream framing,
+escaping, payload capture, and rewrite support.
+
+The implementation must not reference the adjacent Go source checkout from
+repository files. Go parity must go through the `parity/` Go module, which pins
+`pkt.systems/lql v0.17.1`.
+
+## Release Artifacts
+
+The repository produces two artifact families:
+
+1. `liblql`
+   - pkt.systems lifecycle-compatible C SDK tarballs;
+   - static and shared C libraries where supported;
+   - public headers under `include/lql/`;
+   - CMake package config and pkg-config metadata;
+   - license, README, examples, and dependency provenance.
+
+2. `clql`
+   - CLI tarballs named `clql-<VERSION>-<TARGET>.tar.gz`;
+   - equivalent to the Go `lql` binary for supported behavior;
+   - intentionally does not reimplement `pkt.systems/prettyx` colorized JSON.
+
+Target matrix follows the pkt.systems lifecycle:
+
+- `x86_64-linux-gnu`
+- `x86_64-linux-musl`
+- `aarch64-linux-gnu`
+- `aarch64-linux-musl`
+- `armhf-linux-gnu`
+- `armhf-linux-musl`
+- `arm64-apple-darwin` when the Darwin toolchain is available
+
+## Dependency Boundary
+
+`lonejson v0.33.0` or newer is the JSON substrate.
+
+liblql must not implement bespoke JSON parsing, tokenization, escaping,
+serialization, stream framing, compacting, or payload spooling when lonejson can
+own that behavior.
+
+If a required JSON capability is missing from the available lonejson release,
+liblql must treat that as an external dependency capability gap. It must not
+hide an alternate JSON implementation inside liblql.
+
+## Public C API Intent
+
+The public API is C89-compatible and installed under `include/lql/`.
+
+The API should be handle-oriented and explicit about ownership:
+
+- parser/compiled selector handles are owned by the caller and freed with
+  liblql cleanup functions;
+- result payload handles are valid for documented callback lifetimes;
+- all project-allocated strings or buffers are released through liblql cleanup
+  functions;
+- error messages are actionable and available through explicit error objects.
+
+The API should eventually expose these surfaces:
+
+- selector parse and free;
+- reusable selector plan/compiled state;
+- selector evaluation over one arbitrary JSON value;
+- streaming query over arbitrary candidate streams;
+- projection path parse/plan and projection execution;
+- mutation parse/plan and mutation execution;
+- streaming mutation over arbitrary candidate streams;
+- version and capability query helpers.
+
+The API must name behavior precisely. Do not call an API streaming unless bytes
+or records flow producer-to-consumer without full-message materialization.
+
+## Selector Scope
+
+Selectors must converge to Go `pkt.systems/lql v0.17.1` behavior.
+
+Required selector features:
+
+- explicit terms:
+  - `eq`
+  - `contains`
+  - `icontains`
+  - `prefix`
+  - `iprefix`
+  - `range`
+  - `date`
+  - `in`
+  - `exists`
+- logical composition:
+  - `and`
+  - `or`
+  - `not`
+- shorthand:
+  - `/field="value"`
+  - `/field!=value`
+  - `/field>10`
+  - `/field>=10`
+  - `/field<10`
+  - `/field<=10`
+- JSON Pointer field paths;
+- array indexes;
+- wildcard path semantics:
+  - `*` object child values only;
+  - `[]` array elements only;
+  - `**` object values or array elements one level down;
+  - `...` recursive descent;
+  - bracket sugar such as `/items[]/sku`;
+- temporal semantics:
+  - date-only values;
+  - RFC3339 and RFC3339Nano;
+  - naive UTC datetimes;
+  - date equality intersection;
+  - numeric and datetime range bounds;
+  - `date.since` macros: `now`, `today`, `yesterday`.
+
+Unsupported selector features must be explicit in tests and benchmark output
+until implemented. Silent omission is not allowed.
+
+## Projection Scope
+
+`clql -f/--field` and the C API projection surface must match Go behavior.
+
+Projection paths are JSON Pointer paths. Multiple fields should produce the
+same observable JSON structure as Go LQL. Missing projection paths should be
+handled according to Go parity, including whether an output is suppressed when
+no requested field is found.
+
+Projection must use lonejson path-aware visiting/capture where possible and
+must not materialize full streams unless the API is explicitly named buffered.
+
+## Mutation Scope
+
+Mutations must converge to Go `pkt.systems/lql v0.17.1` behavior.
+
+Required mutation features:
+
+- set:
+  - `/state/status=running`
+- numeric increment/add:
+  - `/state/retries++`
+  - `/state/retries=+3`
+- delete:
+  - `rm:/state/legacy`
+- time normalization:
+  - `time:/state/updated=NOW`
+- brace shorthand:
+  - `/state{/owner="alice",/note="hi"}`
+- wildcard path behavior matching selectors where Go supports it;
+- streaming file-backed mutation values:
+  - `file:`
+  - `textfile:`
+  - `base64file:`
+
+File-backed mutation values are opt-in and must be explicit in the API and CLI.
+They must stream through lonejson source/sink behavior rather than reading
+entire files into hidden buffers.
+
+## Streaming Query Scope
+
+Streaming query is a core requirement.
+
+The stream API must handle:
+
+- one top-level JSON value;
+- NDJSON / repeated top-level JSON values;
+- top-level arrays as streams of candidate values;
+- large candidates with bounded memory;
+- decision-only mode;
+- plus-value mode with payload access;
+- matched-only callbacks;
+- caller-managed or lonejson-managed payload sinks when supported;
+- stop controls:
+  - max matches;
+  - max candidates;
+  - max bytes read;
+  - callback-requested graceful stop.
+
+Candidate payload access must distinguish:
+
+- no payload captured;
+- in-memory compact JSON;
+- spooled payload;
+- caller-managed payload.
+
+## CLI Scope
+
+`clql` should mirror the Go `lql` CLI where supported:
+
+- selector arguments;
+- `--or` / `-O`;
+- `--field` / `-f`;
+- `--mutate` / `-m`;
+- `--inline` / `-i`;
+- `--write` / `-w`;
+- `--compact` / `-c`;
+- `--matches-only` / `-M`;
+- `--enable-file-mutations` / `-F`;
+- `--help` / `-h`;
+- `--version` / `-v`.
+
+`--theme` may be accepted only if it has a useful non-color behavior or a
+clear compatibility story. The C CLI does not need colorized pretty output.
+
+The CLI must produce actionable errors with stable wording where practical.
+
+## Lua Scope
+
+The Lua implementation is part of this repository's parity story.
+
+Lua should expose the same high-value behavior as the C library:
+
+- selector parse/evaluate;
+- streaming query;
+- projection;
+- mutation;
+- parity benchmark entry points.
+
+The Lua implementation should use public liblql/lonejson surfaces rather than
+duplicating LQL behavior independently unless an explicit Lua facade layer is
+needed for DX.
+
+## Verification Requirements
+
+Verification is the primary quality gate.
+
+Required gates:
+
+- C unit tests for every public behavior;
+- public header standalone compile tests;
+- C89 consumer tests;
+- CMake install-tree consumer tests;
+- pkg-config consumer tests;
+- `clql` smoke tests;
+- Go parity tests through `parity/`;
+- Lua parity tests when Lua facade exists;
+- sanitizer tests;
+- package verification and privacy/relocatability gates;
+- source archive smoke tests;
+- Go/C/Lua parity benchmarks.
+
+Parity benchmark spec:
+
+- `docs/liblql-parity-benchmark-spec.md`
+
+Tests should assert observable behavior, not implementation details.
+
+## Packaging Requirements
+
+Packaging follows the pkt.systems lifecycle.
+
+Binary SDK archives must be relocatable and must not contain:
+
+- source checkout paths;
+- build paths;
+- dependency cache paths;
+- `$HOME`;
+- absolute local `file://` URLs;
+- sanitizer runtime or debug metadata;
+- non-relocatable RPATH/RUNPATH or Darwin install names.
+
+`package-verify` must expand checksum-listed artifacts and nested archives
+before scanning.
+
+`dist/` is generated output. Checksums/manifests define upload artifacts.
+
+## Iteration Plan
+
+The port should progress in falsifiable slices:
+
+1. Lifecycle foundation
+   - CMake/Make/scripts/presets;
+   - lonejson dependency acquisition;
+   - initial package surfaces.
+
+2. Selector core
+   - parse/evaluate scalar selectors;
+   - Go parity tests for supported subset.
+
+3. lonejson upgrade integration
+   - consume path-aware visitor and JSON Pointer helpers;
+   - remove liblql-owned path reconstruction where possible.
+
+4. Full selector parity
+   - wildcards;
+   - temporal selectors;
+   - `in`;
+   - selector plans.
+
+5. Streaming query parity
+   - candidate stream;
+   - payload capture/spool;
+   - stop controls.
+
+6. Projection parity
+   - field selection;
+   - CLI `-f`.
+
+7. Mutation parity
+   - parse/plan;
+   - multi-path rewrite;
+   - file-backed mutation values;
+   - inline write behavior.
+
+8. Lua parity
+   - facade and tests;
+   - parity benchmarks.
+
+9. Packaging completion
+   - liblql SDK archives;
+   - clql archives;
+   - release matrix verification.
+
+Each slice must add or update parity tests before claiming support.
+
+## Current Repository Status
+
+Current implementation is an early slice:
+
+- lifecycle scaffold exists;
+- lonejson `v0.33.0` binary archive acquisition from GitHub release assets
+  exists;
+- first C selector parse/evaluate subset exists;
+- `clql` exists as a minimal selector smoke CLI;
+- Go parity tests exist for the initial selector subset;
+- package archive production is scaffolded, not complete.
+
+The repository must not claim full LQL parity until the verification gates prove
+it.
+
+## Non-goals
+
+- Do not reimplement `pkt.systems/prettyx` colorized JSON.
+- Do not vendor the adjacent Go source checkout.
+- Do not add hidden full-message buffering behind streaming-looking APIs.
+- Do not implement bespoke JSON parser/tokenizer/serializer logic in liblql.
+- Do not hide unsupported behavior by omitting tests or benchmark cases.

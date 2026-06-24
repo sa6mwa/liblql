@@ -1,0 +1,65 @@
+.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug test-all asan package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
+
+help:
+	@printf '%s\n' \
+	  'make deps-debug              fetch host lonejson SDK' \
+	  'make build                   configure and build debug preset' \
+	  'make test                    run debug tests' \
+	  'make asan                    run ASan/UBSan tests' \
+	  'make format                  clang-format project C sources' \
+	  'make package                 build host package artifacts' \
+	  'make package-verify          verify generated packages' \
+	  'make release-matrix          build release target matrix where toolchains exist' \
+	  'make clean                   remove generated build/dist/cache state'
+
+deps-debug:
+	@./scripts/deps.sh x86_64-linux-gnu
+
+deps-release:
+	@./scripts/deps.sh x86_64-linux-gnu
+
+deps-cross:
+	@./scripts/deps.sh all
+
+build build-debug: deps-debug
+	@cmake --preset debug
+	@cmake --build --preset debug
+
+build-release: deps-release
+	@cmake --preset x86_64-linux-gnu-release
+	@cmake --build --preset x86_64-linux-gnu-release
+
+test test-debug: build-debug
+	@ctest --preset debug
+
+test-all: test asan
+
+asan: deps-debug
+	@cmake --preset asan
+	@cmake --build --preset asan
+	@ctest --preset asan
+
+package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix:
+	@./scripts/package.sh $@
+
+finalize-slice: format test
+
+prerelease: format test-all package-verify
+
+prerelease-hardening: prerelease release-matrix
+
+release:
+	@printf '%s\n' 'release requires explicit engineer-controlled tag/publish flow'
+	@exit 2
+
+print-release-version:
+	@./scripts/release_version.sh
+
+format:
+	@clang-format -i include/lql/*.h src/*.c src/*.h tests/*.c examples/*.c
+
+clean:
+	@./scripts/clean.sh
+
+clean-dist:
+	@rm -rf dist
