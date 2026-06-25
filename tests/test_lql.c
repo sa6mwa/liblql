@@ -190,6 +190,26 @@ int main(void) {
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":10}", 0);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":20}", 1);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":21}", 0);
+  expect_match("range{field=/timestamp,gte=2026-03-05T10:28:21Z,lt=2026-03-05T10:30:00Z}",
+               "{\"timestamp\":\"2026-03-05T10:29:00Z\"}", 1);
+  expect_match("range{field=/timestamp,gte=2026-03-05T10:28:21Z,lt=2026-03-05T10:30:00Z}",
+               "{\"timestamp\":\"2026-03-05T10:30:00Z\"}", 0);
+  expect_match("date{field=/timestamp,after=2025-01-01,before=2025-01-03}",
+               "{\"timestamp\":\"2025-01-02T06:00:00Z\"}", 1);
+  expect_match("date{field=/timestamp,after=2025-01-01,before=2025-01-03}",
+               "{\"timestamp\":\"2025-01-03T00:00:00Z\"}", 0);
+  expect_match("date{f=/timestamp,a=2025-01-01,b=2025-01-03}",
+               "{\"timestamp\":\"2025-01-02T06:00:00Z\"}", 1);
+  expect_match("date{field=/timestamp,value=2025-01-01}",
+               "{\"timestamp\":\"2025-01-01T23:59:59Z\"}", 1);
+  expect_match("date{field=/timestamp,value=2025-01-01}",
+               "{\"timestamp\":\"2025-01-02T00:00:00Z\"}", 0);
+  expect_match("date{field=/timestamp,since=2025-01-01}",
+               "{\"timestamp\":\"2025-01-02T00:00:00Z\"}", 1);
+  expect_match("date{f=/timestamp,after=2026-03-05T10:28:21.123,before=2026-03-05T10:28:21.123456790}",
+               "{\"timestamp\":\"2026-03-05T10:28:21.123456789Z\"}", 1);
+  expect_match("date{f=/timestamp,after=2026-03-05T10:28:21.123,before=2026-03-05T10:28:21.123456790}",
+               "{\"timestamp\":\"2026-03-05T10:28:21.123+01:00\"}", 0);
   expect_match("contains{field=/message,value=timeout}",
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("contains{field=/metadata}", "{\"metadata\":{\"etag\":\"x\"}}",
@@ -249,6 +269,15 @@ int main(void) {
   expect_parse_error("eq{field=/status,value=open,ignoreCase=true}");
   expect_parse_error("range{field=/progress,gte=10,gte=20}");
   expect_parse_error("range{field=/progress,gte=10,foo=bar}");
+  expect_parse_error("range{field=/progress,gte=10,lt=2025-01-01}");
+  expect_parse_error("range{field=/timestamp,gte=yesterday}");
+  expect_parse_error("date{field=/timestamp,value=2025-01-01 00:00:00}");
+  expect_parse_error("date{field=/timestamp,after=2025-01-01,foo=bar}");
+  expect_parse_error("date{field=/timestamp,since=yesterday,after=2025-01-01}");
+  expect_parse_error("date{field=/timestamp,after=2025-01-01,gt=2025-01-02}");
+  expect_parse_error("date{field=/timestamp,before=2025-01-03,lt=2025-01-02}");
+  expect_parse_error("date{after=2025-01-01}");
+  expect_parse_error("date{field=/timestamp,since=tomorrowish}");
   expect_parse_error("prefix{field=/service,any=auth|edge}");
   expect_parse_error("in{field=/env}");
   expect_parse_error("in{field=/env,any=prod|stage,a=dev}");

@@ -15,9 +15,21 @@ typedef enum lql_node_kind {
   LQL_NODE_PREFIX,
   LQL_NODE_IPREFIX,
   LQL_NODE_RANGE,
+  LQL_NODE_DATE,
   LQL_NODE_IN,
   LQL_NODE_EXISTS
 } lql_node_kind;
+
+__extension__ typedef signed long long lql_int64;
+
+typedef struct lql_temporal {
+  lql_int64 seconds;
+  int nanoseconds;
+  int year;
+  int month;
+  int day;
+  int date_only;
+} lql_temporal;
 
 typedef struct lql_term {
   char *field;
@@ -30,10 +42,21 @@ typedef struct lql_term {
   double range_gte;
   double range_lt;
   double range_lte;
+  lql_temporal temporal_eq;
+  lql_temporal temporal_gt;
+  lql_temporal temporal_gte;
+  lql_temporal temporal_lt;
+  lql_temporal temporal_lte;
   int has_range_gt;
   int has_range_gte;
   int has_range_lt;
   int has_range_lte;
+  int has_temporal_eq;
+  int has_temporal_gt;
+  int has_temporal_gte;
+  int has_temporal_lt;
+  int has_temporal_lte;
+  int range_is_temporal;
 } lql_term;
 
 typedef struct lql_node {
@@ -60,5 +83,9 @@ lql_status
 lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
                               lql_query_decision_fn on_decision, void *user,
                               lql_query_result *out_result, lql_error *error);
+int lql_parse_temporal_literal(const char *raw, lql_temporal *out);
+int lql_temporal_compare(const lql_temporal *left,
+                         const lql_temporal *right);
+int lql_temporal_equal(const lql_temporal *left, const lql_temporal *right);
 
 #endif

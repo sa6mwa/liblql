@@ -277,6 +277,16 @@ static int key_is_range_bound(const char *key) {
          strcmp(key, "lt") == 0 || strcmp(key, "lte") == 0;
 }
 
+static int key_is_after(const char *key) {
+  return strcmp(key, "after") == 0 || strcmp(key, "a") == 0;
+}
+
+static int key_is_before(const char *key) {
+  return strcmp(key, "before") == 0 || strcmp(key, "b") == 0;
+}
+
+static int key_is_since(const char *key) { return strcmp(key, "since") == 0; }
+
 static int key_allowed_for_kind(lql_node_kind kind, const char *key) {
   if (key_is_field(key)) {
     return 1;
@@ -292,6 +302,9 @@ static int key_allowed_for_kind(lql_node_kind kind, const char *key) {
     return key_is_value(key) || key_is_ignore_case(key);
   case LQL_NODE_RANGE:
     return key_is_range_bound(key);
+  case LQL_NODE_DATE:
+    return key_is_value(key) || key_is_after(key) || key_is_before(key) ||
+           key_is_range_bound(key) || key_is_since(key);
   case LQL_NODE_IN:
     return key_is_any(key);
   default:
@@ -301,7 +314,8 @@ static int key_allowed_for_kind(lql_node_kind kind, const char *key) {
 
 static void free_seen_key_values(char *field, char *value, char *any,
                                  char *ignore_case, char *gt, char *gte,
-                                 char *lt, char *lte) {
+                                 char *lt, char *lte, char *after,
+                                 char *before, char *since) {
   free(field);
   free(value);
   free(any);
@@ -310,6 +324,9 @@ static void free_seen_key_values(char *field, char *value, char *any,
   free(gte);
   free(lt);
   free(lte);
+  free(after);
+  free(before);
+  free(since);
 }
 
 static int remember_key_value(char **slot, char **raw_value, int *skip,
@@ -351,6 +368,9 @@ static lql_node_kind kind_from_name(const char *name) {
   }
   if (strcmp(name, "range") == 0) {
     return LQL_NODE_RANGE;
+  }
+  if (strcmp(name, "date") == 0) {
+    return LQL_NODE_DATE;
   }
   if (strcmp(name, "in") == 0) {
     return LQL_NODE_IN;
@@ -394,6 +414,98 @@ static int parse_any_values(char *decoded, lql_term *term, lql_error *error) {
   return 1;
 }
 
+static int parse_number_literal(const char *decoded, double *out) {
+  char *end;
+  double value;
+  value = strtod(decoded, &end);
+  if (end == decoded) {
+    return 0;
+  }
+  while (isspace((unsigned char)*end)) {
+    ++end;
+  }
+  if (*end != '\0') {
+    return 0;
+  }
+  *out = value;
+  return 1;
+}
+
+static int set_range_bound(lql_term *term, const char *key,
+                           const char *decoded, lql_error *error) {
+  lql_temporal temporal;
+  double number;
+  int is_temporal;
+
+  is_temporal = lql_parse_temporal_literal(decoded, &temporal);
+  if (!is_temporal && !parse_number_literal(decoded, &number)) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "range selector bound invalid");
+    return 0;
+  }
+  if (is_temporal) {
+    term->range_is_temporal = 1;
+    if (strcmp(key, "gt") == 0) {
+      term->temporal_gt = temporal;
+      term->has_temporal_gt = 1;
+    } else if (strcmp(key, "gte") == 0) {
+      term->temporal_gte = temporal;
+      term->has_temporal_gte = 1;
+    } else if (strcmp(key, "lt") == 0) {
+      term->temporal_lt = temporal;
+      term->has_temporal_lt = 1;
+    } else {
+      term->temporal_lte = temporal;
+      term->has_temporal_lte = 1;
+    }
+    return 1;
+  }
+  if (strcmp(key, "gt") == 0) {
+    term->range_gt = number;
+    term->has_range_gt = 1;
+  } else if (strcmp(key, "gte") == 0) {
+    term->range_gte = number;
+    term->has_range_gte = 1;
+  } else if (strcmp(key, "lt") == 0) {
+    term->range_lt = number;
+    term->has_range_lt = 1;
+  } else {
+    term->range_lte = number;
+    term->has_range_lte = 1;
+  }
+  return 1;
+}
+
+static int set_date_bound(lql_term *term, const char *slot,
+                          const char *decoded, lql_error *error) {
+  lql_temporal temporal;
+  if (!lql_parse_temporal_literal(decoded, &temporal)) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "date selector bound invalid");
+    return 0;
+  }
+  if (strcmp(slot, "value") == 0) {
+    term->temporal_eq = temporal;
+    term->has_temporal_eq = 1;
+  } else if (strcmp(slot, "since") == 0) {
+    term->temporal_gte = temporal;
+    term->has_temporal_gte = 1;
+  } else if (strcmp(slot, "gt") == 0) {
+    term->temporal_gt = temporal;
+    term->has_temporal_gt = 1;
+  } else if (strcmp(slot, "gte") == 0) {
+    term->temporal_gte = temporal;
+    term->has_temporal_gte = 1;
+  } else if (strcmp(slot, "lt") == 0) {
+    term->temporal_lt = temporal;
+    term->has_temporal_lt = 1;
+  } else if (strcmp(slot, "lte") == 0) {
+    term->temporal_lte = temporal;
+    term->has_temporal_lte = 1;
+  }
+  return 1;
+}
+
 static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
                             lql_error *error) {
   lql_token_list parts;
@@ -414,7 +526,11 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
   char *seen_gte;
   char *seen_lt;
   char *seen_lte;
+  char *seen_after;
+  char *seen_before;
+  char *seen_since;
   char **seen_slot;
+  const char *date_slot;
   int skip_duplicate;
 
   memset(term, 0, sizeof(*term));
@@ -426,6 +542,9 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
   seen_gte = NULL;
   seen_lt = NULL;
   seen_lte = NULL;
+  seen_after = NULL;
+  seen_before = NULL;
+  seen_since = NULL;
   st = split_top(body, &parts, error);
   if (st != LQL_STATUS_OK) {
     return 0;
@@ -466,6 +585,12 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       seen_slot = &seen_field;
     } else if (key_is_value(key)) {
       seen_slot = &seen_value;
+    } else if (kind == LQL_NODE_DATE && key_is_after(key)) {
+      seen_slot = &seen_after;
+    } else if (kind == LQL_NODE_DATE && key_is_before(key)) {
+      seen_slot = &seen_before;
+    } else if (kind == LQL_NODE_DATE && key_is_since(key)) {
+      seen_slot = &seen_since;
     } else if (key_is_any(key)) {
       seen_slot = &seen_any;
     } else if (key_is_ignore_case(key)) {
@@ -478,6 +603,12 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       seen_slot = &seen_lt;
     } else if (strcmp(key, "lte") == 0) {
       seen_slot = &seen_lte;
+    } else if (key_is_after(key)) {
+      seen_slot = &seen_after;
+    } else if (key_is_before(key)) {
+      seen_slot = &seen_before;
+    } else if (key_is_since(key)) {
+      seen_slot = &seen_since;
     }
     if (seen_slot == NULL) {
       free(raw_value);
@@ -503,10 +634,25 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       }
       free(term->field);
       term->field = normalized;
+    } else if (kind == LQL_NODE_DATE && key_is_value(key)) {
+      if (!set_date_bound(term, "value", decoded, error)) {
+        free(decoded);
+        goto fail;
+      }
+      free(decoded);
     } else if (key_is_value(key)) {
       free(term->value);
       term->value = decoded;
       term->value_set = 1;
+    } else if (kind == LQL_NODE_DATE &&
+               (key_is_after(key) || key_is_before(key) ||
+                key_is_since(key))) {
+      date_slot = key_is_after(key) ? "gt" : key_is_before(key) ? "lt" : "since";
+      if (!set_date_bound(term, date_slot, decoded, error)) {
+        free(decoded);
+        goto fail;
+      }
+      free(decoded);
     } else if (key_is_any(key)) {
       if (!parse_any_values(decoded, term, error)) {
         free(decoded);
@@ -521,61 +667,95 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
         goto fail;
       }
       free(decoded);
-    } else if (strcmp(key, "gt") == 0) {
-      term->range_gt = strtod(decoded, NULL);
-      term->has_range_gt = 1;
-      free(decoded);
-    } else if (strcmp(key, "gte") == 0) {
-      term->range_gte = strtod(decoded, NULL);
-      term->has_range_gte = 1;
-      free(decoded);
-    } else if (strcmp(key, "lt") == 0) {
-      term->range_lt = strtod(decoded, NULL);
-      term->has_range_lt = 1;
-      free(decoded);
-    } else if (strcmp(key, "lte") == 0) {
-      term->range_lte = strtod(decoded, NULL);
-      term->has_range_lte = 1;
+    } else if (key_is_range_bound(key)) {
+      if (kind == LQL_NODE_DATE) {
+        if (!set_date_bound(term, key, decoded, error)) {
+          free(decoded);
+          goto fail;
+        }
+      } else if (!set_range_bound(term, key, decoded, error)) {
+        free(decoded);
+        goto fail;
+      }
       free(decoded);
     }
   }
   token_list_cleanup(&parts);
-  free_seen_key_values(seen_field, seen_value, seen_any, seen_ignore_case,
-                       seen_gt, seen_gte, seen_lt, seen_lte);
   if (term->field == NULL) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "selector field required");
-    return 0;
+    goto fail_after_tokens;
+  }
+  if (kind == LQL_NODE_DATE && seen_since != NULL &&
+      (seen_value != NULL || seen_after != NULL || seen_before != NULL ||
+       seen_gt != NULL || seen_gte != NULL || seen_lt != NULL ||
+       seen_lte != NULL)) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "date selector since cannot be combined with other bounds");
+    goto fail_after_tokens;
+  }
+  if (kind == LQL_NODE_DATE && seen_after != NULL && seen_gt != NULL) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "date selector cannot combine after and gt");
+    goto fail_after_tokens;
+  }
+  if (kind == LQL_NODE_DATE && seen_before != NULL && seen_lt != NULL) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "date selector cannot combine before and lt");
+    goto fail_after_tokens;
   }
   if (term->any_count != 0u) {
     if (kind != LQL_NODE_CONTAINS && kind != LQL_NODE_ICONTAINS &&
         kind != LQL_NODE_IN) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector operator does not support any");
-      return 0;
+      goto fail_after_tokens;
     }
     if (kind != LQL_NODE_IN && (term->value_set || term->value != NULL)) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector cannot set both value and any");
-      return 0;
+      goto fail_after_tokens;
     }
   }
   if (kind == LQL_NODE_IN && term->any_count == 0u) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "in selector requires any values");
-    return 0;
+    goto fail_after_tokens;
   }
   if (kind == LQL_NODE_RANGE && !term->has_range_gt && !term->has_range_gte &&
-      !term->has_range_lt && !term->has_range_lte) {
+      !term->has_range_lt && !term->has_range_lte &&
+      !term->has_temporal_gt && !term->has_temporal_gte &&
+      !term->has_temporal_lt && !term->has_temporal_lte) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "range selector requires at least one bound");
-    return 0;
+    goto fail_after_tokens;
   }
+  if (kind == LQL_NODE_RANGE &&
+      (term->has_range_gt || term->has_range_gte || term->has_range_lt ||
+       term->has_range_lte) &&
+      (term->has_temporal_gt || term->has_temporal_gte ||
+       term->has_temporal_lt || term->has_temporal_lte)) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "range selector cannot mix numeric and datetime bounds");
+    goto fail_after_tokens;
+  }
+  if (kind == LQL_NODE_DATE && !term->has_temporal_eq &&
+      !term->has_temporal_gt && !term->has_temporal_gte &&
+      !term->has_temporal_lt && !term->has_temporal_lte) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "date selector requires at least one bound");
+    goto fail_after_tokens;
+  }
+  free_seen_key_values(seen_field, seen_value, seen_any, seen_ignore_case,
+                       seen_gt, seen_gte, seen_lt, seen_lte, seen_after,
+                       seen_before, seen_since);
   return 1;
 
 fail:
   token_list_cleanup(&parts);
+fail_after_tokens:
   free_seen_key_values(seen_field, seen_value, seen_any, seen_ignore_case,
-                       seen_gt, seen_gte, seen_lt, seen_lte);
+                       seen_gt, seen_gte, seen_lt, seen_lte, seen_after,
+                       seen_before, seen_since);
   return 0;
 }
 
@@ -734,6 +914,7 @@ static int node_is_term(const lql_node *node) {
   case LQL_NODE_PREFIX:
   case LQL_NODE_IPREFIX:
   case LQL_NODE_RANGE:
+  case LQL_NODE_DATE:
   case LQL_NODE_IN:
   case LQL_NODE_EXISTS:
     return 1;

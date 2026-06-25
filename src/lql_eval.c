@@ -244,6 +244,7 @@ static int node_is_term(const lql_node *node) {
   case LQL_NODE_PREFIX:
   case LQL_NODE_IPREFIX:
   case LQL_NODE_RANGE:
+  case LQL_NODE_DATE:
   case LQL_NODE_IN:
   case LQL_NODE_EXISTS:
     return 1;
@@ -259,6 +260,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
   size_t n;
   size_t j;
   double number;
+  lql_temporal temporal;
   const char *needle;
   if (node == NULL) {
     return;
@@ -335,7 +337,19 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     }
     break;
   case LQL_NODE_RANGE:
-    if (!is_container && is_number) {
+    if (!is_container && node->term.range_is_temporal) {
+      if (lql_parse_temporal_literal(value, &temporal) &&
+          (!node->term.has_temporal_gt ||
+           lql_temporal_compare(&temporal, &node->term.temporal_gt) > 0) &&
+          (!node->term.has_temporal_gte ||
+           lql_temporal_compare(&temporal, &node->term.temporal_gte) >= 0) &&
+          (!node->term.has_temporal_lt ||
+           lql_temporal_compare(&temporal, &node->term.temporal_lt) < 0) &&
+          (!node->term.has_temporal_lte ||
+           lql_temporal_compare(&temporal, &node->term.temporal_lte) <= 0)) {
+        doc->hits[node->hit_index] = 1u;
+      }
+    } else if (!is_container && is_number) {
       number = strtod(value, NULL);
       if ((!node->term.has_range_gt || number > node->term.range_gt) &&
           (!node->term.has_range_gte || number >= node->term.range_gte) &&
@@ -343,6 +357,21 @@ static void observe_node(eval_doc *doc, const lql_node *node,
           (!node->term.has_range_lte || number <= node->term.range_lte)) {
         doc->hits[node->hit_index] = 1u;
       }
+    }
+    break;
+  case LQL_NODE_DATE:
+    if (!is_container && lql_parse_temporal_literal(value, &temporal) &&
+        (!node->term.has_temporal_eq ||
+         lql_temporal_equal(&temporal, &node->term.temporal_eq)) &&
+        (!node->term.has_temporal_gt ||
+         lql_temporal_compare(&temporal, &node->term.temporal_gt) > 0) &&
+        (!node->term.has_temporal_gte ||
+         lql_temporal_compare(&temporal, &node->term.temporal_gte) >= 0) &&
+        (!node->term.has_temporal_lt ||
+         lql_temporal_compare(&temporal, &node->term.temporal_lt) < 0) &&
+        (!node->term.has_temporal_lte ||
+         lql_temporal_compare(&temporal, &node->term.temporal_lte) <= 0)) {
+      doc->hits[node->hit_index] = 1u;
     }
     break;
   case LQL_NODE_IN:
