@@ -56,9 +56,11 @@ Current implementation status:
 - `make benchmarks-c` exercises the C CLI over a shared generated fixture.
 - `make benchmarks-go` exercises `parity/cmd/lqlbench`, which uses the pinned
   Go module and emits stable JSON Lines without scraping `go test` output.
+- the current executable dataset matrix covers NDJSON and top-level array
+  fixture shapes, with both generated once and shared by Go and C.
 - the current executable selector matrix covers equality, contains,
   case-insensitive contains, timestamp comparison, date window, and numeric
-  range terms over the shared fixture.
+  range terms over every generated fixture.
 - `make benchmarks-lua` emits an explicit unsupported record until the Lua
   facade benchmark runner exists.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
