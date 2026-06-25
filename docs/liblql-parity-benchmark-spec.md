@@ -6,13 +6,22 @@ Add an executable benchmark surface that compares the Go, C, and Lua
 implementations of LQL on the same generated payloads, selector expressions,
 execution modes, and result validation rules.
 
-The benchmark is not only a speed comparison. It is also a parity gate:
+The benchmark has two separate responsibilities. First, it is a behavioral
+oracle gate:
 
 - every implementation must scan the same logical candidates;
 - every implementation must produce the same match counts;
 - payload/capture modes must prove equivalent observable behavior;
 - failures must identify which language/backend diverged and on which dataset,
   selector, and mode.
+
+Second, it is a C-native performance and memory gate. The Go implementation is
+the semantic reference, not the speed target. A mature public liblql path that
+only matches Go throughput is a red flag unless the case is dominated by
+documented external costs such as process startup or disk I/O. Library-level C
+selector, projection, mutation, and payload access paths should normally have
+substantial headroom over Go while keeping steady-state memory independent of
+input size, candidate size, match count, and result size.
 
 The Go implementation is the behavioral reference because `parity/go.mod`
 already pins `pkt.systems/lql v0.17.1`. The C and Lua implementations live in
@@ -32,9 +41,9 @@ Add these repository targets when the C and Lua implementation surfaces exist:
 
 `make bench` and `make benchmarks` should run the normal local comparison with
 moderate dataset sizes. `make bench-check` should be suitable as a deterministic
-performance/parity gate. `make benchmarks-parity` should run all three
-language backends and fail on behavioral divergence even if timing collection
-succeeds.
+behavioral and C-native performance smoke gate once the relevant surfaces are
+mature. `make benchmarks-parity` should run all three language backends and
+fail on behavioral divergence even if timing collection succeeds.
 
 The benchmark runner should also be callable directly through one script, for
 example:
@@ -103,16 +112,21 @@ Current implementation status:
 
 ## Source Benchmark To Mirror
 
-Use the existing Go benchmark shapes as the baseline:
+Use the existing Go benchmark shapes as the semantic and dataset baseline:
 
 - library benchmark: `BenchmarkQueryStreamSynthetic`;
 - CLI benchmark: `BenchmarkLQLSelectionBaseline`;
 - mode helper: `runBenchmarkModes`, with `warmup_included` and `steady_state`.
 
-The new parity benchmark must not shell out to `go test` and scrape arbitrary
+The benchmark must not shell out to `go test` and scrape arbitrary
 human benchmark output as its primary data model. It may invoke Go benchmark
 code, but the shared comparison harness should emit a stable machine-readable
 result record.
+
+The benchmark must not normalize expectations around Go throughput. Go timing
+is recorded so C and Lua regressions have a familiar reference, but public
+liblql timing should be judged against C-native baselines or ratios once a
+surface is claimed complete.
 
 ## Dataset Matrix
 
@@ -400,19 +414,29 @@ through the Go module in `parity/`.
 Initial parity benchmark implementation should fail only on behavioral
 divergence and benchmark runner errors.
 
-Performance thresholds should be added only after:
+Performance thresholds should be added after:
 
 - C and Lua have feature parity for the relevant selector classes;
-- baseline logs exist for the local lifecycle environment;
-- thresholds are expressed as ratios or guarded baselines with enough tolerance
-  to avoid noisy failures.
+- baseline logs exist for the local lifecycle environment and release target;
+- the measured path is not dominated by process startup, shell orchestration,
+  temporary CLI facades, or disk I/O;
+- thresholds are expressed as C-native ratios or guarded baselines with enough
+  tolerance to avoid noisy failures.
 
-Suggested first gate:
+Suggested staged gates:
 
 - Go/C/Lua behavior must match for supported selector classes;
-- C must not be slower than Go by more than a documented exploratory ratio for
-  decision-only steady-state on `large_ndjson`;
-- Lua may be report-only until the Lua facade performance profile is known.
+- C library steady-state memory must remain bounded for streaming modes and
+  must not grow with total input size, candidate size, match count, or result
+  set size;
+- C library decision-only steady-state on `large_ndjson` should have a
+  documented minimum speedup over Go once the selector class is mature;
+- C library plus-value/open-read modes should prove callback-scoped payload
+  access without candidate retention and should have a documented baseline
+  distinct from CLI-mediated `clql` timing;
+- Lua may be report-only until the direct Lua module exists; the current
+  CLI-backed facade is expected to be dominated by `clql` process behavior and
+  should not define final Lua performance expectations.
 
 Any performance gate must print actionable diagnostics with dataset, selector,
 mode, observed value, baseline/threshold, and reproduction command.
@@ -420,6 +444,7 @@ mode, observed value, baseline/threshold, and reproduction command.
 ## Non-goals
 
 - Do not benchmark different generated datasets per language.
+- Do not treat Go throughput as the desired C performance level.
 - Do not compare pretty/colorized JSON output. `clql` intentionally does not
   reimplement `prettyx` colorized output.
 - Do not make benchmark success depend on exact allocation equivalence across
@@ -447,6 +472,8 @@ Add tests or smoke gates proving:
 - unsupported modes are represented explicitly;
 - the large-fixture profile fails when the implementation materializes the
   dataset or complete candidates;
+- C library performance gates can distinguish behavioral correctness from a
+  C-native performance regression;
 - `make benchmarks-parity` fails if any required implementation is missing;
 - `make bench-check` runs a small deterministic matrix suitable for local
   confidence.
