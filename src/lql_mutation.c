@@ -1641,6 +1641,10 @@ static lonejson_status
 begin_array_value_mutation(mutation_stream_state *state,
                            const lonejson_value_path *path,
                            lonejson_error *error, int *matched);
+static lonejson_status
+write_array_replacement_object(mutation_stream_state *state,
+                               const lonejson_value_path *path,
+                               lonejson_error *error);
 
 static lonejson_status mutation_object_begin(void *user,
                                              const lonejson_value_path *path,
@@ -1682,6 +1686,18 @@ static lonejson_status mutation_object_begin(void *user,
     ++state->skip_depth;
     ++state->source_depth;
     return LONEJSON_STATUS_OK;
+  }
+  if (value_path_is_array_element(state, path)) {
+    if (write_array_replacement_object(state, path, error) !=
+        LONEJSON_STATUS_OK) {
+      mutation_pop_path_frame(state);
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (state->skipping) {
+      ++state->skip_depth;
+      ++state->source_depth;
+      return LONEJSON_STATUS_OK;
+    }
   }
   ++state->source_depth;
   return lonejson_writer_begin_object(&state->writer, error);
@@ -1841,7 +1857,7 @@ immediate_array_object_mutation_index(const mutation_stream_state *state,
     item = &state->plan->items[i];
     if (state->applied[i] || item->kind == MUTATION_REMOVE ||
         mutation_path_has_wildcard(&item->path) ||
-        item->path.segment_count != path->segment_count + 1u ||
+        item->path.segment_count <= path->segment_count ||
         !stream_path_prefix_matches(&item->path, path, frame)) {
       continue;
     }

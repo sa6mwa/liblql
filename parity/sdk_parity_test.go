@@ -3,8 +3,11 @@
 package parity
 
 import (
+	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
+	"time"
 
 	"pkt.systems/lql"
 )
@@ -149,4 +152,201 @@ func TestSDKSelectorParseErrorParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSDKProjectionJSONParity(t *testing.T) {
+	cases := []struct {
+		name   string
+		fields []string
+		doc    string
+	}{
+		{
+			name:   "single root field",
+			fields: []string{"/id"},
+			doc:    `{"status":"open","id":"b","count":2}`,
+		},
+		{
+			name:   "multiple root fields",
+			fields: []string{"/id", "/count"},
+			doc:    `{"status":"open","id":"b","count":2}`,
+		},
+		{
+			name:   "nested object and array field",
+			fields: []string{"/id", "/meta/trace", "/meta/span", "/items/1/sku"},
+			doc:    `{"status":"open","id":"a","meta":{"trace":9,"span":"s","ignore":true},"items":[{"sku":"A"},{"sku":"B"}]}`,
+		},
+		{
+			name:   "escaped pointer fields",
+			fields: []string{"/a~1b/~0key"},
+			doc:    `{"status":"open","a/b":{"~key":7},"id":"a"}`,
+		},
+		{
+			name:   "missing root field suppresses output",
+			fields: []string{"/missing"},
+			doc:    `{"status":"open","id":"a"}`,
+		},
+		{
+			name:   "duplicate field is idempotent",
+			fields: []string{"/id", "/id"},
+			doc:    `{"status":"open","id":"a","other":true}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wantJSON, wantFound, err := goProjectJSON(tc.fields, tc.doc)
+			if err != nil {
+				t.Fatalf("go project: %v", err)
+			}
+			gotJSON, gotFound, err := cProjectJSON(tc.fields, tc.doc)
+			if err != nil {
+				t.Fatalf("liblql project: %v", err)
+			}
+			if gotFound != wantFound {
+				t.Fatalf("projection found mismatch: got=%v want=%v got_json=%q", gotFound, wantFound, string(gotJSON))
+			}
+			got, err := decodeJSONValues(gotJSON)
+			if err != nil {
+				t.Fatalf("decode liblql projection: %v json=%q", err, string(gotJSON))
+			}
+			want, err := decodeJSONValues(wantJSON)
+			if err != nil {
+				t.Fatalf("decode go projection: %v json=%q", err, string(wantJSON))
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("projection parity mismatch: got=%#v want=%#v got_json=%q want_json=%q", got, want, string(gotJSON), string(wantJSON))
+			}
+		})
+	}
+}
+
+func TestSDKProjectionErrorParity(t *testing.T) {
+	conflicts := [][]string{
+		{"/meta", "/meta/trace"},
+		{"/items/0/sku", "/items"},
+	}
+	for _, fields := range conflicts {
+		t.Run("conflict", func(t *testing.T) {
+			paths, err := lql.ParseProjectionPaths(fields)
+			if err != nil {
+				t.Fatalf("go projection parse: %v", err)
+			}
+			if _, err := lql.NewProjectionPlan(paths); err == nil {
+				t.Fatalf("go projection plan unexpectedly accepted fields: %#v", fields)
+			}
+			if _, _, err := cProjectJSON(fields, `{"meta":{"trace":7},"items":[{"sku":"A"}]}`); err == nil {
+				t.Fatalf("liblql projection unexpectedly accepted fields: %#v", fields)
+			}
+		})
+	}
+
+	if _, _, err := cProjectJSON([]string{"/id"}, `7`); err == nil {
+		t.Fatalf("liblql projection unexpectedly accepted scalar root")
+	}
+	if _, _, err := goProjectJSON([]string{"/id"}, `7`); err == nil {
+		t.Fatalf("go projection unexpectedly accepted scalar root")
+	}
+}
+
+func TestSDKMutationJSONParity(t *testing.T) {
+	cases := []struct {
+		name      string
+		doc       string
+		mutations []string
+	}{
+		{
+			name: "root set increment delete create",
+			doc:  `{"status":"open","count":1,"old":true}`,
+			mutations: []string{
+				"/status=done",
+				"/count++",
+				"rm:/old",
+				"/missing=value",
+			},
+		},
+		{
+			name: "nested set increment delete create",
+			doc:  `{"state":{"status":"open","count":1,"old":true},"id":"a"}`,
+			mutations: []string{
+				"/state/status=done",
+				"/state/count++",
+				"rm:/state/old",
+				"/state/missing=value",
+				"/added/nested=ok",
+				"/added/other=2",
+			},
+		},
+		{
+			name: "array element set",
+			doc:  `{"items":[{"sku":"A","qty":1},{"sku":"B","qty":2}]}`,
+			mutations: []string{
+				"/items/1/sku=C",
+				"/items/0/qty=+3",
+			},
+		},
+		{
+			name: "quoted numeric typing follows Go",
+			doc:  `{"value":"old"}`,
+			mutations: []string{
+				`/value="42"`,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wantJSON, err := goMutateJSON(tc.mutations, tc.doc)
+			if err != nil {
+				t.Fatalf("go mutate: %v", err)
+			}
+			gotJSON, err := cMutateJSON(tc.mutations, tc.doc)
+			if err != nil {
+				t.Fatalf("liblql mutate: %v", err)
+			}
+			got, err := decodeJSONValues(gotJSON)
+			if err != nil {
+				t.Fatalf("decode liblql mutation: %v json=%q", err, string(gotJSON))
+			}
+			want, err := decodeJSONValues(wantJSON)
+			if err != nil {
+				t.Fatalf("decode go mutation: %v json=%q", err, string(wantJSON))
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("mutation parity mismatch: got=%#v want=%#v got_json=%q want_json=%q", got, want, string(gotJSON), string(wantJSON))
+			}
+		})
+	}
+}
+
+func goProjectJSON(fields []string, doc string) ([]byte, bool, error) {
+	paths, err := lql.ParseProjectionPaths(fields)
+	if err != nil {
+		return nil, false, err
+	}
+	plan, err := lql.NewProjectionPlan(paths)
+	if err != nil {
+		return nil, false, err
+	}
+	var out bytes.Buffer
+	result, err := lql.ProjectFields(lql.ProjectFieldsRequest{
+		Reader: bytes.NewBufferString(doc),
+		Writer: &out,
+		Paths:  paths,
+		Plan:   plan,
+	})
+	return out.Bytes(), result.Found, err
+}
+
+func goMutateJSON(mutations []string, doc string) ([]byte, error) {
+	parsed, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	if err := lql.MutateStream(lql.MutateStreamRequest{
+		Reader:    bytes.NewBufferString(doc),
+		Writer:    &out,
+		Mutations: parsed,
+	}); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }

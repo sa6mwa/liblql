@@ -21,6 +21,9 @@ type sdkParityCoverageRequirement struct {
 var sdkParityCoverageManifest = []sdkParityCoverageRequirement{
 	{"selector", "public liblql lql_matches_json behavior matches Go lql.Matches for current selector corpus", []string{"TestSDKSelectorMatchesJSONParity"}},
 	{"selector", "public liblql selector parse failures match Go selector parse failures for current invalid corpus", []string{"TestSDKSelectorParseErrorParity"}},
+	{"projection", "public liblql buffered JSON projection behavior matches Go projection behavior for current projection corpus", []string{"TestSDKProjectionJSONParity"}},
+	{"projection", "public liblql projection errors match Go projection errors for current invalid corpus", []string{"TestSDKProjectionErrorParity"}},
+	{"mutation", "public liblql buffered JSON mutation behavior matches Go mutation behavior for current mutation corpus", []string{"TestSDKMutationJSONParity"}},
 }
 
 func TestSDKParityCoverageManifest(t *testing.T) {
