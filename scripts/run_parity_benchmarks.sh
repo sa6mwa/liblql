@@ -62,6 +62,8 @@ cli_single_fixture="$fixture_dir/selection_single_json.json"
 case_matrix="$fixture_dir/cases.tsv"
 go_counts_file="$fixture_dir/go-counts.txt"
 c_counts_file="$fixture_dir/c-counts.txt"
+inject_candidate_mismatch="${LQL_BENCH_INJECT_CANDIDATE_MISMATCH:-0}"
+inject_match_mismatch="${LQL_BENCH_INJECT_MATCH_MISMATCH:-0}"
 
 json_string() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -129,6 +131,16 @@ is_required() {
     *",$1,"*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+fault_count() {
+  value=$1
+  enabled=$2
+  if [ "$enabled" = "1" ]; then
+    printf '%s\n' $((value + 1))
+  else
+    printf '%s\n' "$value"
+  fi
 }
 
 record_json() {
@@ -287,6 +299,11 @@ run_c() {
   fi
   "$clql" "$expr" "$fixture_path" > "$out"
   matches=$(wc -l < "$out" | tr -d ' ')
+  if [ "$dataset_name" = "large_ndjson" ] &&
+    [ "$selector_name" = "eq_status_open" ]; then
+    candidates=$(fault_count "$candidates" "$inject_candidate_mismatch")
+    matches=$(fault_count "$matches" "$inject_match_mismatch")
+  fi
   printf '%s %s %s %s\n' "$dataset_name" "$selector_name" "$candidates" "$matches" >> "$c_counts_file"
   emit_record "c" "$dataset_name" "$selector_name" "$expr" \
     "decision_only_selector" "steady_state" "$bytes" "$candidates" "$matches" 0 0 null false ""
