@@ -1,4 +1,4 @@
-.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug test-all asan package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug test-all asan bench benchmarks bench-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -6,6 +6,9 @@ help:
 	  'make build                   configure and build debug preset' \
 	  'make test                    run debug tests' \
 	  'make asan                    run ASan/UBSan tests' \
+	  'make benchmarks             run local parity benchmark smoke' \
+	  'make bench-check            run deterministic benchmark smoke gate' \
+	  'make benchmarks-parity      require Go/C/Lua benchmark implementations' \
 	  'make format                  clang-format project C sources' \
 	  'make package                 build host package artifacts' \
 	  'make package-verify          verify generated packages' \
@@ -38,6 +41,24 @@ asan: deps-debug
 	@cmake --preset asan
 	@cmake --build --preset asan
 	@ctest --preset asan
+
+bench benchmarks: build-debug
+	@./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json
+
+bench-check: build-debug
+	@./scripts/run_parity_benchmarks.sh --impl c --format json --check
+
+benchmarks-go:
+	@./scripts/run_parity_benchmarks.sh --impl go --format json
+
+benchmarks-c: build-debug
+	@./scripts/run_parity_benchmarks.sh --impl c --format json
+
+benchmarks-lua:
+	@./scripts/run_parity_benchmarks.sh --impl lua --format json
+
+benchmarks-parity: build-debug
+	@./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --require go,c,lua
 
 package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix:
 	@./scripts/package.sh $@

@@ -46,6 +46,19 @@ scripts/run_parity_benchmarks.sh --impl go,c,lua --format json
 The exact script name can differ, but Make must remain the public command
 surface.
 
+Current implementation status:
+
+- `scripts/run_parity_benchmarks.sh` is the benchmark entry point.
+- `make bench` and `make benchmarks` run a small deterministic development
+  matrix and emit JSON Lines.
+- `make bench-check` runs the current deterministic smoke gate for the C
+  surface.
+- `make benchmarks-c` exercises the C CLI over a shared generated fixture.
+- `make benchmarks-go` and `make benchmarks-lua` emit explicit unsupported
+  records until dedicated stable JSONL runners exist.
+- `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
+  and therefore fails while Go/Lua benchmark runners are still missing.
+
 ## Source Benchmark To Mirror
 
 Use the existing Go benchmark shapes as the baseline:
