@@ -260,8 +260,10 @@ operation rather than truncating or wrapping the requested offset.
 - `--help` / `-h`;
 - `--version` / `-v`.
 
-`--theme` may be accepted only if it has a useful non-color behavior or a
-clear compatibility story. The C CLI does not need colorized pretty output.
+`--theme` / `-t` is accepted as a compatibility no-op. The Go CLI uses it only
+to select a prettyx palette; the C CLI intentionally does not implement
+colorized pretty output. Accepted theme spellings must not change compact JSON
+output, selector behavior, projection behavior, or mutation behavior.
 
 The CLI must produce actionable errors with stable wording where practical.
 

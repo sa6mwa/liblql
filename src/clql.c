@@ -254,8 +254,8 @@ static int create_inline_temp(const char *path, char **out_path,
 }
 
 static void usage(FILE *out) {
-  fprintf(out, "usage: clql [--or|-O] [-c] [-i|-w] [-F] [-f field] [-m expr] "
-               "[--matches-only|-M] selector [data.json]\n");
+  fprintf(out, "usage: clql [--or|-O] [-c] [-i|-w] [-F] [-t theme] [-f field] "
+               "[-m expr] [--matches-only|-M] selector [data.json]\n");
   fprintf(out, "       clql [--or|-O] [-c] [--matches-only|-M] selector < "
                "data.json\n");
   fprintf(out, "       clql --version\n");
@@ -329,6 +329,17 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--enable-file-mutations") == 0 ||
                strcmp(argv[i], "-F") == 0) {
       enable_file_mutations = 1;
+    } else if (strcmp(argv[i], "--theme") == 0 || strcmp(argv[i], "-t") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "clql: theme option requires an argument\n");
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        return 2;
+      }
+      ++i;
+    } else if (strncmp(argv[i], "--theme=", 8u) == 0) {
+      /* Accepted for Go CLI compatibility; colorized pretty output is out of
+       * scope. */
     } else if (strcmp(argv[i], "--mutate") == 0 || strcmp(argv[i], "-m") == 0) {
       if (i + 1 >= argc || !add_projection_arg(&mutations, argv[++i])) {
         fprintf(stderr, "clql: failed to record mutation expression\n");

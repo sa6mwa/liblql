@@ -470,6 +470,34 @@ func TestCLQLCompactSelectionParity(t *testing.T) {
 	}
 }
 
+func TestCLQLThemeFlagCompatibility(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := [][]string{
+		{"--theme", "default"},
+		{"--theme=default"},
+		{"-t", "default"},
+	}
+	for _, args := range cases {
+		args := args
+		t.Run(fmt.Sprint(args), func(t *testing.T) {
+			cmdArgs := append([]string{"-c"}, args...)
+			cmdArgs = append(cmdArgs, `/status="open"`)
+			cmd := exec.Command(clql, cmdArgs...)
+			cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("clql theme flag failed: %v out=%q", err, string(out))
+			}
+			if string(out) != "{\"status\":\"open\"}\n" {
+				t.Fatalf("theme flag changed compact output: %q", string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLMatchAllFileSelectionParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
