@@ -851,6 +851,7 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
   if (copy[0] == '/' && op != NULL) {
     int op2;
     char op0;
+    const char *bound_key;
     op2 = (op[1] == '=' || op[0] == '!') ? 1 : 0;
     op0 = op[0];
     value = op + 1 + (size_t)op2;
@@ -866,26 +867,20 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       out->kind = LQL_NODE_NE;
     } else if (strchr("><", op0) != NULL || op2) {
       if (op0 == '>') {
-        if (op2) {
-          out->term.range_gte = strtod(out->term.value, NULL);
-          out->term.has_range_gte = 1;
-        } else {
-          out->term.range_gt = strtod(out->term.value, NULL);
-          out->term.has_range_gt = 1;
-        }
+        bound_key = op2 ? "gte" : "gt";
       } else if (op0 == '<') {
-        if (op2) {
-          out->term.range_lte = strtod(out->term.value, NULL);
-          out->term.has_range_lte = 1;
-        } else {
-          out->term.range_lt = strtod(out->term.value, NULL);
-          out->term.has_range_lt = 1;
-        }
+        bound_key = op2 ? "lte" : "lt";
       } else {
-        out->term.has_range_gt = 0;
+        bound_key = NULL;
       }
-      if (out->term.has_range_gt || out->term.has_range_gte ||
-          out->term.has_range_lt || out->term.has_range_lte) {
+      if (bound_key != NULL) {
+        if (!set_range_bound(&out->term, bound_key, out->term.value, error)) {
+          lql_node_cleanup(out);
+          free(copy);
+          return error != NULL && error->code != LQL_STATUS_OK
+                     ? error->code
+                     : LQL_STATUS_PARSE_ERROR;
+        }
         out->kind = LQL_NODE_RANGE;
       } else {
         out->kind = LQL_NODE_EQ;

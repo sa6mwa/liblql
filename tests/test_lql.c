@@ -186,6 +186,18 @@ int main(void) {
                "{\"status\":\"open\"}", 1);
   expect_match("/progress>=50", "{\"progress\":72}", 1);
   expect_match("/progress<50", "{\"progress\":72}", 0);
+  expect_match("/timestamp=\"2025-01-01\"",
+               "{\"timestamp\":\"2025-01-01T15:00:00Z\"}", 1);
+  expect_match("/timestamp=\"2025-01-01\"",
+               "{\"timestamp\":\"2025-01-02T00:00:00Z\"}", 0);
+  expect_match("/timestamp!=2025-01-01",
+               "{\"timestamp\":\"2025-01-01T15:00:00Z\"}", 0);
+  expect_match("/timestamp>=2026-03-05T10:28:21Z",
+               "{\"timestamp\":\"2026-03-05T11:28:21+01:00\"}", 1);
+  expect_match("/timestamp>=2026-03-05T10:28:21",
+               "{\"timestamp\":\"2026-03-05T11:28:21+01:00\"}", 1);
+  expect_match("/timestamp>=2026-03-05T10:28:21",
+               "{\"timestamp\":\"2026-03-05T10:28:20Z\"}", 0);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":11}", 1);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":10}", 0);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":20}", 1);
@@ -291,6 +303,7 @@ int main(void) {
   expect_parse_error("range{field=/progress,gte=10,foo=bar}");
   expect_parse_error("range{field=/progress,gte=10,lt=2025-01-01}");
   expect_parse_error("range{field=/timestamp,gte=yesterday}");
+  expect_parse_error("/timestamp>=yesterday");
   expect_parse_error("date{field=/timestamp,value=2025-01-01 00:00:00}");
   expect_parse_error("date{field=/timestamp,after=2025-01-01,foo=bar}");
   expect_parse_error("date{field=/timestamp,since=yesterday,after=2025-01-01}");

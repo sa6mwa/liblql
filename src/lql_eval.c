@@ -274,6 +274,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
   size_t j;
   double number;
   lql_temporal temporal;
+  lql_temporal query_temporal;
   lql_temporal since_macro;
   const char *needle;
   if (node == NULL) {
@@ -296,13 +297,20 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     }
     if (strcmp(value, node->term.value == NULL ? "" : node->term.value) == 0) {
       doc->hits[node->hit_index] = 1u;
+    } else if (lql_parse_temporal_literal(node->term.value, &query_temporal) &&
+               lql_parse_temporal_literal(value, &temporal) &&
+               lql_temporal_equal(&temporal, &query_temporal)) {
+      doc->hits[node->hit_index] = 1u;
     }
     break;
   case LQL_NODE_NE:
     if (is_container) {
       break;
     }
-    if (strcmp(value, node->term.value == NULL ? "" : node->term.value) != 0) {
+    if (strcmp(value, node->term.value == NULL ? "" : node->term.value) != 0 &&
+        !(lql_parse_temporal_literal(node->term.value, &query_temporal) &&
+          lql_parse_temporal_literal(value, &temporal) &&
+          lql_temporal_equal(&temporal, &query_temporal))) {
       doc->hits[node->hit_index] = 1u;
     }
     break;
