@@ -7,6 +7,8 @@
 
 #include "lql_internal.h"
 
+#include <lql/version.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
@@ -107,6 +109,8 @@ const char *lql_status_string(lql_status status) {
   }
   return "unknown";
 }
+
+const char *lql_version(void) { return LQL_VERSION; }
 
 char *lql_strdup(const char *text) {
   size_t len;

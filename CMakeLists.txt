@@ -24,6 +24,10 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(LqlVersion)
 include(LqlLonejson)
 
+configure_file(cmake/lql_version.h.in
+  "${CMAKE_CURRENT_BINARY_DIR}/generated/include/lql/version.h"
+  @ONLY)
+
 set(CMAKE_C_STANDARD 90)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -50,6 +54,7 @@ set_target_properties(lql_common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(lql_common
   PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 target_link_libraries(lql_common PUBLIC lonejson::lonejson)
 lql_apply_project_warnings(lql_common)
@@ -61,6 +66,7 @@ if(LQL_BUILD_STATIC)
   target_link_libraries(lql_static PUBLIC lonejson::lonejson)
   target_include_directories(lql_static PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 endif()
 
@@ -74,6 +80,7 @@ if(LQL_BUILD_SHARED)
   target_link_libraries(lql_shared PUBLIC lonejson::lonejson)
   target_include_directories(lql_shared PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 endif()
 
@@ -109,6 +116,7 @@ if(LQL_BUILD_TESTS)
   add_test(NAME lql.header COMMAND
     ${CMAKE_C_COMPILER} -std=c90 ${LQL_HEADER_SMOKE_WARNINGS}
     -I${CMAKE_CURRENT_SOURCE_DIR}/include
+    -I${CMAKE_CURRENT_BINARY_DIR}/generated/include
     -c ${CMAKE_CURRENT_SOURCE_DIR}/tests/header_smoke.c -o ${CMAKE_CURRENT_BINARY_DIR}/header_smoke.o)
   set_tests_properties(lql.header PROPERTIES LABELS "unit;api" TIMEOUT 20)
 
@@ -125,6 +133,8 @@ endif()
 
 if(LQL_INSTALL)
   install(DIRECTORY include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/include/lql/version.h"
+          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/lql")
   if(LQL_BUILD_STATIC)
     install(TARGETS lql_static EXPORT liblqlTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
   endif()

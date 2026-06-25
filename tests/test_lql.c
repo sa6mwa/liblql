@@ -1,9 +1,21 @@
 #include "lql/lql.h"
+#include "lql/version.h"
 
 #include <stdio.h>
 #include <string.h>
 
 static int failures = 0;
+
+static void expect_version_api(void) {
+  if (strcmp(lql_version(), LQL_VERSION) != 0) {
+    printf("version API mismatch: %s != %s\n", lql_version(), LQL_VERSION);
+    ++failures;
+  }
+  if (strchr(LQL_VERSION, '.') == NULL) {
+    printf("version macro is not dotted semver: %s\n", LQL_VERSION);
+    ++failures;
+  }
+}
 
 typedef struct stream_seen {
   int calls;
@@ -1443,6 +1455,7 @@ int main(void) {
   expect_parse_error("in{field=/env,any=prod|stage,a=dev}");
   expect_parse_error("in{field=/env,any=prod|stage,foo=bar}");
   expect_parse_error("range{field=/progress}");
+  expect_version_api();
   expect_stream_file();
   expect_stream_array_items();
   expect_stream_stop_controls();

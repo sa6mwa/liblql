@@ -429,6 +429,9 @@ Current implementation is an early slice:
   file ranges;
 - the initial C compact API exposes `lql_compact_file_range()` for streaming
   seekable ranges and `lql_compact_json()` for explicitly buffered JSON values;
+- the public C API exposes `lql_version()` and installs generated
+  `lql/version.h` version macros, with package and source-archive verification
+  proving the generated header builds from installed and extracted trees;
 - the initial C mutation API exposes `lql_mutation_plan_parse()`,
   `lql_mutation_plan_parse_with_options()`, `lql_mutation_plan_count()`, and
   `lql_mutation_plan_free()` for CLI-style mutation parse/plan validation;

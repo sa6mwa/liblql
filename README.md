@@ -12,11 +12,13 @@ payload handles for matched candidates, object/array `clql -f` projection, and
 place.
 Object and array-index projection are also exposed through the initial
 `lql_projection` C API, and compact range helpers are exposed for seekable and
-explicitly buffered JSON values. Mutation parse/plan validation is exposed
-through `lql_mutation_plan`, and supported concrete-path mutations including
-Go-compatible numeric child handling under arrays and time normalization can be
-applied to seekable file ranges without full-document materialization. `clql`
-also supports seekable-file inline/write mutation through a temp-file rename.
+explicitly buffered JSON values. The SDK installs generated version metadata in
+`lql/version.h` and exposes `lql_version()`. Mutation parse/plan validation is
+exposed through `lql_mutation_plan`, and supported concrete-path mutations
+including Go-compatible numeric child handling under arrays and time
+normalization can be applied to seekable file ranges without full-document
+materialization. `clql` also supports seekable-file inline/write mutation
+through a temp-file rename.
 The same supported streaming mutation subset can run over non-seekable stdin
 through callback-scoped spooled candidate payloads.
 `file:`, `textfile:`, and `base64file:` mutation values can be parsed through

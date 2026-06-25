@@ -177,7 +177,9 @@ write_consumer_source() {
   out=$1
   cat >"$out" <<'EOF'
 #include <lql/lql.h>
+#include <lql/version.h>
 #include <stdio.h>
+#include <string.h>
 
 int main(void) {
   const char *expr = "contains{f=/status,v=open}";
@@ -188,6 +190,10 @@ int main(void) {
   status = lql_selector_parse(expr, &selector, &error);
   if (status != LQL_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
+    return 1;
+  }
+  if (strcmp(lql_version(), LQL_VERSION) != 0) {
+    fprintf(stderr, "version mismatch: %s != %s\n", lql_version(), LQL_VERSION);
     return 1;
   }
   lql_selector_free(selector);
@@ -329,6 +335,7 @@ verify_one_archive() {
     ${PROJECT}-${version_value}-*)
       target_id=${expected#${PROJECT}-${version_value}-}
       test -f "$root/include/lql/lql.h"
+      test -f "$root/include/lql/version.h"
       test -f "$root/lib/liblql.a"
       test -f "$root/lib/cmake/liblql/liblqlConfig.cmake"
       test -f "$root/lib/cmake/liblql/liblqlConfigVersion.cmake"

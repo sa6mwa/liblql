@@ -94,6 +94,8 @@ typedef lql_status (*lql_query_match_fn)(void *user,
 
 void lql_error_init(lql_error *error);
 const char *lql_status_string(lql_status status);
+/* Returns the resolved liblql semantic version string. */
+const char *lql_version(void);
 
 lql_status lql_selector_parse(const char *expr, lql_selector **out,
                               lql_error *error);
