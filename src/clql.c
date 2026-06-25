@@ -25,6 +25,7 @@ typedef struct output_ranges {
   FILE *source;
   FILE *out;
   const lql_projection *projection;
+  const lql_mutation_plan *mutation_plan;
   int compact;
   lql_uint64 matched;
 } output_ranges;
@@ -96,7 +97,24 @@ static lql_status output_match_range(void *user,
     return LQL_STATUS_OK;
   }
   ranges = (output_ranges *)user;
-  if (ranges->projection != NULL) {
+  if (ranges->mutation_plan != NULL) {
+    if (decision->matched) {
+      if (lql_mutate_file_range_root_fields(
+              ranges->mutation_plan, ranges->source, decision->offset,
+              decision->size, ranges->out, NULL) != LQL_STATUS_OK) {
+        return LQL_STATUS_UNSUPPORTED;
+      }
+    } else if (ranges->compact) {
+      if (lql_compact_file_range(ranges->source, decision->offset,
+                                 decision->size, ranges->out,
+                                 NULL) != LQL_STATUS_OK) {
+        return LQL_STATUS_JSON_ERROR;
+      }
+    } else if (!seek_u64(ranges->source, decision->offset) ||
+               !copy_range(ranges->source, ranges->out, decision->size)) {
+      return LQL_STATUS_JSON_ERROR;
+    }
+  } else if (ranges->projection != NULL) {
     int projected;
     if (lql_project_file_range(ranges->projection, ranges->source,
                                decision->offset, decision->size, ranges->out,
@@ -323,8 +341,9 @@ int main(int argc, char **argv) {
     free_projection_args(&mutations);
     return 2;
   }
-  if (mutation_plan != NULL) {
-    fprintf(stderr, "clql: mutation execution is not implemented\n");
+  if (mutation_plan != NULL && fields.count != 0u) {
+    fprintf(stderr,
+            "clql: mutation with field projection is not implemented\n");
     lql_selector_free(selector);
     lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
@@ -378,6 +397,7 @@ int main(int argc, char **argv) {
     ranges.source = range_source;
     ranges.out = stdout;
     ranges.projection = projection;
+    ranges.mutation_plan = mutation_plan;
     ranges.compact = compact;
     st = lql_query_file_decisions(selector, input, output_match_range, &ranges,
                                   &result, &error);
@@ -402,6 +422,17 @@ int main(int argc, char **argv) {
     free_projection_args(&fields);
     free_projection_args(&mutations);
     return 1;
+  }
+  if (mutation_plan != NULL) {
+    fprintf(stderr,
+            "clql: mutation execution requires a seekable input file\n");
+    free(json);
+    lql_selector_free(selector);
+    lql_mutation_plan_free(mutation_plan);
+    lql_projection_free(projection);
+    free_projection_args(&fields);
+    free_projection_args(&mutations);
+    return 2;
   }
   if (fields.count != 0u) {
     fprintf(stderr, "clql: field projection requires a seekable input file\n");

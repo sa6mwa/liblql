@@ -411,9 +411,13 @@ Current implementation is an early slice:
   seekable ranges and `lql_compact_json()` for explicitly buffered JSON values;
 - the initial C mutation API exposes `lql_mutation_plan_parse()`,
   `lql_mutation_plan_count()`, and `lql_mutation_plan_free()` for CLI-style
-  mutation parse/plan validation; mutation execution is not implemented yet;
-- `clql -m/--mutate` parses mutation expressions and fails explicitly at the
-  unsupported execution boundary after successful parse;
+  mutation parse/plan validation;
+- the initial mutation execution API exposes
+  `lql_mutate_file_range_root_fields()` for bounded source-backed rewrites of
+  root object fields over seekable file ranges; nested paths, wildcards, time
+  values, file-backed values, and non-root behavior still return unsupported;
+- `clql -m/--mutate` applies supported root-field mutations to matched seekable
+  file candidates and leaves broader mutation behavior unsupported;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;

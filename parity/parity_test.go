@@ -500,6 +500,67 @@ func TestCLQLMutationParseErrorParity(t *testing.T) {
 	}
 }
 
+func TestCLQLRootMutationParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"status":"open","count":1,"old":true}`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-root-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	cmd := exec.Command(
+		clql,
+		"-c",
+		"-m", "/status=done",
+		"-m", "/count++",
+		"-m", "rm:/old",
+		"-m", "/missing=value",
+		`contains{f=/}`,
+		tmp.Name(),
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql root mutation failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql mutation: %v out=%q", err, string(out))
+	}
+
+	doc := map[string]any{"status": "open", "count": float64(1), "old": true}
+	muts, err := lql.ParseMutations([]string{
+		"/status=done",
+		"/count++",
+		"rm:/old",
+		"/missing=value",
+	}, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatalf("go parse mutations: %v", err)
+	}
+	if err := lql.ApplyMutations(doc, muts); err != nil {
+		t.Fatalf("go apply mutations: %v", err)
+	}
+	wantBytes, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal go mutation result: %v", err)
+	}
+	want, err := decodeJSONValues(wantBytes)
+	if err != nil {
+		t.Fatalf("decode go mutation result: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mutation parity mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

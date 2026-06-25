@@ -1,8 +1,18 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
+
 #include "lql_internal.h"
 
 #include <ctype.h>
+#include <lonejson.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 typedef enum mutation_kind {
   MUTATION_SET = 0,
@@ -27,6 +37,29 @@ struct lql_mutation_plan {
   mutation_item *items;
   size_t count;
 };
+
+typedef struct limited_file_reader {
+  FILE *file;
+  lql_uint64 remaining;
+} limited_file_reader;
+
+typedef struct mutation_stream_state {
+  const lql_mutation_plan *plan;
+  lonejson_writer writer;
+  lonejson_error *error;
+  char *key_buf;
+  size_t key_len;
+  char *num_buf;
+  size_t num_len;
+  int *applied;
+  size_t source_depth;
+  int root_seen;
+  int root_is_object;
+  int skipping;
+  size_t skip_depth;
+  int active_increment;
+  size_t active_index;
+} mutation_stream_state;
 
 typedef struct string_list {
   char **items;
@@ -138,6 +171,72 @@ static int ascii_equal_ignore_case(const char *a, const char *b) {
     ++b;
   }
   return *a == '\0' && *b == '\0';
+}
+
+static int ascii_equal_ignore_case_n(const char *a, size_t a_len,
+                                     const char *b) {
+  size_t i;
+  for (i = 0u; i < a_len && b[i] != '\0'; ++i) {
+    if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i])) {
+      return 0;
+    }
+  }
+  return i == a_len && b[i] == '\0';
+}
+
+static int seek_u64(FILE *file, lql_uint64 offset) {
+  off_t seek_offset;
+  seek_offset = (off_t)offset;
+  if (seek_offset < (off_t)0 || (lql_uint64)seek_offset != offset) {
+    return 0;
+  }
+  return fseeko(file, seek_offset, SEEK_SET) == 0;
+}
+
+static lonejson_status file_sink(void *user, const void *data, size_t len,
+                                 lonejson_error *error) {
+  FILE *out;
+  (void)error;
+  out = (FILE *)user;
+  return fwrite(data, 1u, len, out) == len ? LONEJSON_STATUS_OK
+                                           : LONEJSON_STATUS_CALLBACK_FAILED;
+}
+
+static lonejson_read_result limited_read(void *user, unsigned char *buffer,
+                                         size_t capacity) {
+  limited_file_reader *reader;
+  lonejson_read_result result;
+  size_t want;
+  result = lonejson_default_read_result();
+  reader = (limited_file_reader *)user;
+  if (reader->remaining == 0u) {
+    result.eof = 1;
+    return result;
+  }
+  want = reader->remaining > (lql_uint64)capacity ? capacity
+                                                  : (size_t)reader->remaining;
+  result.bytes_read = fread(buffer, 1u, want, reader->file);
+  reader->remaining -= (lql_uint64)result.bytes_read;
+  if (result.bytes_read != want && ferror(reader->file)) {
+    result.error_code = 1;
+  }
+  if (reader->remaining == 0u) {
+    result.eof = 1;
+  }
+  return result;
+}
+
+static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
+  char *next;
+  next = (char *)realloc(*buf, *len + n + 1u);
+  if (next == NULL) {
+    return 0;
+  }
+  memcpy(next + *len, data, n);
+  *len += n;
+  next[*len] = '\0';
+  *buf = next;
+  return 1;
 }
 
 static int add_string(string_list *list, char *value) {
@@ -700,4 +799,481 @@ void lql_mutation_plan_free(lql_mutation_plan *plan) {
   }
   free(plan->items);
   free(plan);
+}
+
+static int mutation_is_root_field_supported(const mutation_item *item) {
+  return item->path.segment_count == 1u && item->path.segments[0][0] != '\0' &&
+         strcmp(item->path.segments[0], "*") != 0 &&
+         strcmp(item->path.segments[0], "[]") != 0 &&
+         strcmp(item->path.segments[0], "**") != 0 &&
+         strcmp(item->path.segments[0], "...") != 0 && !item->time_value;
+}
+
+static int mutation_plan_supports_root_fields(const lql_mutation_plan *plan) {
+  size_t i;
+  size_t j;
+  if (plan == NULL || plan->count == 0u) {
+    return 0;
+  }
+  for (i = 0u; i < plan->count; ++i) {
+    if (!mutation_is_root_field_supported(&plan->items[i])) {
+      return 0;
+    }
+    for (j = i + 1u; j < plan->count; ++j) {
+      if (plan->items[j].path.segment_count == 1u &&
+          strcmp(plan->items[i].path.segments[0],
+                 plan->items[j].path.segments[0]) == 0) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+static int root_mutation_index(const lql_mutation_plan *plan, const char *key,
+                               size_t *out) {
+  size_t i;
+  for (i = 0u; i < plan->count; ++i) {
+    if (plan->items[i].path.segment_count == 1u &&
+        strcmp(plan->items[i].path.segments[0], key) == 0) {
+      *out = i;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static const char *unquoted_value(const char *value, size_t *out_len) {
+  size_t len;
+  len = strlen(value);
+  if (len >= 2u && ((value[0] == '"' && value[len - 1u] == '"') ||
+                    (value[0] == '\'' && value[len - 1u] == '\''))) {
+    *out_len = len - 2u;
+    return value + 1;
+  }
+  *out_len = len;
+  return value;
+}
+
+static lonejson_status write_mutation_set_value(lonejson_writer *writer,
+                                                const mutation_item *item,
+                                                lonejson_error *error) {
+  const char *value;
+  const char *text;
+  size_t len;
+  double number;
+  char number_buf[64];
+  value = item->value == NULL ? "" : item->value;
+  text = unquoted_value(value, &len);
+  if (ascii_equal_ignore_case_n(text, len, "true")) {
+    return lonejson_writer_bool(writer, 1, error);
+  }
+  if (ascii_equal_ignore_case_n(text, len, "false")) {
+    return lonejson_writer_bool(writer, 0, error);
+  }
+  if (ascii_equal_ignore_case_n(text, len, "null")) {
+    return lonejson_writer_null(writer, error);
+  }
+  if (text == value && parse_number(value, &number)) {
+    (void)number;
+    return lonejson_writer_number_text(writer, value, strlen(value), error);
+  }
+  if (item->kind == MUTATION_INCREMENT) {
+    sprintf(number_buf, "%.17g", item->delta);
+    return lonejson_writer_number_text(writer, number_buf, strlen(number_buf),
+                                       error);
+  }
+  return lonejson_writer_string(writer, text, len, error);
+}
+
+static lonejson_status finish_skip_value(mutation_stream_state *state) {
+  if (state->skip_depth == 0u) {
+    state->skipping = 0;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status mutation_object_begin(void *user,
+                                             lonejson_error *error) {
+  mutation_stream_state *state;
+  state = (mutation_stream_state *)user;
+  if (state->active_increment) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (state->source_depth == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 1;
+    ++state->source_depth;
+    return lonejson_writer_begin_object(&state->writer, error);
+  }
+  if (state->skipping) {
+    ++state->skip_depth;
+    ++state->source_depth;
+    return LONEJSON_STATUS_OK;
+  }
+  ++state->source_depth;
+  return lonejson_writer_begin_object(&state->writer, error);
+}
+
+static lonejson_status
+write_missing_root_mutations(mutation_stream_state *state,
+                             lonejson_error *error) {
+  size_t i;
+  const mutation_item *item;
+  for (i = 0u; i < state->plan->count; ++i) {
+    item = &state->plan->items[i];
+    if (state->applied[i] || item->kind == MUTATION_REMOVE) {
+      continue;
+    }
+    if (lonejson_writer_key(&state->writer, item->path.segments[0],
+                            strlen(item->path.segments[0]),
+                            error) != LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (item->kind == MUTATION_INCREMENT) {
+      char number_buf[64];
+      sprintf(number_buf, "%.17g", item->delta);
+      if (lonejson_writer_number_text(&state->writer, number_buf,
+                                      strlen(number_buf),
+                                      error) != LONEJSON_STATUS_OK) {
+        return LONEJSON_STATUS_CALLBACK_FAILED;
+      }
+    } else if (write_mutation_set_value(&state->writer, item, error) !=
+               LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status mutation_object_end(void *user, lonejson_error *error) {
+  mutation_stream_state *state;
+  state = (mutation_stream_state *)user;
+  if (state->source_depth == 0u) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  --state->source_depth;
+  if (state->skipping) {
+    if (state->skip_depth != 0u) {
+      --state->skip_depth;
+    }
+    return finish_skip_value(state);
+  }
+  if (state->source_depth == 0u) {
+    if (write_missing_root_mutations(state, error) != LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+  }
+  return lonejson_writer_end_object(&state->writer, error);
+}
+
+static lonejson_status mutation_array_begin(void *user, lonejson_error *error) {
+  mutation_stream_state *state;
+  state = (mutation_stream_state *)user;
+  if (state->active_increment) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (state->source_depth == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 0;
+  }
+  if (state->skipping) {
+    ++state->skip_depth;
+    ++state->source_depth;
+    return LONEJSON_STATUS_OK;
+  }
+  ++state->source_depth;
+  return lonejson_writer_begin_array(&state->writer, error);
+}
+
+static lonejson_status mutation_array_end(void *user, lonejson_error *error) {
+  mutation_stream_state *state;
+  state = (mutation_stream_state *)user;
+  if (state->source_depth == 0u) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  --state->source_depth;
+  if (state->skipping) {
+    if (state->skip_depth != 0u) {
+      --state->skip_depth;
+    }
+    return finish_skip_value(state);
+  }
+  return lonejson_writer_end_array(&state->writer, error);
+}
+
+static lonejson_status mutation_key_begin(void *user, lonejson_error *error) {
+  mutation_stream_state *state;
+  (void)error;
+  state = (mutation_stream_state *)user;
+  free(state->key_buf);
+  state->key_buf = NULL;
+  state->key_len = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status mutation_key_chunk(void *user, const char *data,
+                                          size_t len, lonejson_error *error) {
+  mutation_stream_state *state;
+  (void)error;
+  state = (mutation_stream_state *)user;
+  return append_buf(&state->key_buf, &state->key_len, data, len)
+             ? LONEJSON_STATUS_OK
+             : LONEJSON_STATUS_ALLOCATION_FAILED;
+}
+
+static lonejson_status mutation_key_end(void *user, lonejson_error *error) {
+  mutation_stream_state *state;
+  const mutation_item *item;
+  size_t index;
+  state = (mutation_stream_state *)user;
+  if (state->skipping) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->source_depth == 1u &&
+      root_mutation_index(state->plan, state->key_buf, &index)) {
+    item = &state->plan->items[index];
+    if (item->kind == MUTATION_REMOVE) {
+      state->applied[index] = 1;
+      state->skipping = 1;
+      state->skip_depth = 0u;
+      return LONEJSON_STATUS_OK;
+    }
+    if (item->kind == MUTATION_SET) {
+      if (lonejson_writer_key(&state->writer, state->key_buf, state->key_len,
+                              error) != LONEJSON_STATUS_OK ||
+          write_mutation_set_value(&state->writer, item, error) !=
+              LONEJSON_STATUS_OK) {
+        return LONEJSON_STATUS_CALLBACK_FAILED;
+      }
+      state->applied[index] = 1;
+      state->skipping = 1;
+      state->skip_depth = 0u;
+      return LONEJSON_STATUS_OK;
+    }
+    state->active_increment = 1;
+    state->active_index = index;
+    free(state->num_buf);
+    state->num_buf = NULL;
+    state->num_len = 0u;
+    return LONEJSON_STATUS_OK;
+  }
+  return lonejson_writer_key(&state->writer, state->key_buf, state->key_len,
+                             error);
+}
+
+static lonejson_status mutation_string_begin(void *user,
+                                             lonejson_error *error) {
+  mutation_stream_state *state;
+  state = (mutation_stream_state *)user;
+  if (state->active_increment) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (state->source_depth == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 0;
+  }
+  if (state->skipping) {
+    return LONEJSON_STATUS_OK;
+  }
+  return lonejson_writer_string_begin(&state->writer, error);
+}
+
+static lonejson_status mutation_string_chunk(void *user, const char *data,
+                                             size_t len,
+                                             lonejson_error *error) {
+  mutation_stream_state *state;
+  state = (mutation_stream_state *)user;
+  if (state->skipping) {
+    return LONEJSON_STATUS_OK;
+  }
+  return lonejson_writer_string_chunk(&state->writer, data, len, error);
+}
+
+static lonejson_status mutation_string_end(void *user, lonejson_error *error) {
+  mutation_stream_state *state;
+  state = (mutation_stream_state *)user;
+  if (state->skipping) {
+    return finish_skip_value(state);
+  }
+  return lonejson_writer_string_end(&state->writer, error);
+}
+
+static lonejson_status mutation_number_begin(void *user,
+                                             lonejson_error *error) {
+  mutation_stream_state *state;
+  (void)error;
+  state = (mutation_stream_state *)user;
+  if (state->source_depth == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 0;
+  }
+  free(state->num_buf);
+  state->num_buf = NULL;
+  state->num_len = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status mutation_number_chunk(void *user, const char *data,
+                                             size_t len,
+                                             lonejson_error *error) {
+  mutation_stream_state *state;
+  (void)error;
+  state = (mutation_stream_state *)user;
+  return append_buf(&state->num_buf, &state->num_len, data, len)
+             ? LONEJSON_STATUS_OK
+             : LONEJSON_STATUS_ALLOCATION_FAILED;
+}
+
+static lonejson_status mutation_number_end(void *user, lonejson_error *error) {
+  mutation_stream_state *state;
+  double existing;
+  double next_value;
+  char number_buf[64];
+  const mutation_item *item;
+  state = (mutation_stream_state *)user;
+  if (state->skipping) {
+    return finish_skip_value(state);
+  }
+  if (!state->active_increment) {
+    return lonejson_writer_number_text(&state->writer, state->num_buf,
+                                       state->num_len, error);
+  }
+  if (!parse_number(state->num_buf, &existing)) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  item = &state->plan->items[state->active_index];
+  next_value = existing + item->delta;
+  sprintf(number_buf, "%.17g", next_value);
+  if (lonejson_writer_key(&state->writer, state->key_buf, state->key_len,
+                          error) != LONEJSON_STATUS_OK ||
+      lonejson_writer_number_text(&state->writer, number_buf,
+                                  strlen(number_buf),
+                                  error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  state->applied[state->active_index] = 1;
+  state->active_increment = 0;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status mutation_boolean(void *user, int value,
+                                        lonejson_error *error) {
+  mutation_stream_state *state;
+  state = (mutation_stream_state *)user;
+  if (state->source_depth == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 0;
+  }
+  if (state->active_increment) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (state->skipping) {
+    return finish_skip_value(state);
+  }
+  return lonejson_writer_bool(&state->writer, value, error);
+}
+
+static lonejson_status mutation_null(void *user, lonejson_error *error) {
+  mutation_stream_state *state;
+  state = (mutation_stream_state *)user;
+  if (state->source_depth == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 0;
+  }
+  if (state->active_increment) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (state->skipping) {
+    return finish_skip_value(state);
+  }
+  return lonejson_writer_null(&state->writer, error);
+}
+
+static void init_mutation_visitor(lonejson_value_visitor *visitor) {
+  *visitor = lonejson_default_value_visitor();
+  visitor->object_begin = mutation_object_begin;
+  visitor->object_end = mutation_object_end;
+  visitor->object_key_begin = mutation_key_begin;
+  visitor->object_key_chunk = mutation_key_chunk;
+  visitor->object_key_end = mutation_key_end;
+  visitor->array_begin = mutation_array_begin;
+  visitor->array_end = mutation_array_end;
+  visitor->string_begin = mutation_string_begin;
+  visitor->string_chunk = mutation_string_chunk;
+  visitor->string_end = mutation_string_end;
+  visitor->number_begin = mutation_number_begin;
+  visitor->number_chunk = mutation_number_chunk;
+  visitor->number_end = mutation_number_end;
+  visitor->boolean_value = mutation_boolean;
+  visitor->null_value = mutation_null;
+}
+
+lql_status lql_mutate_file_range_root_fields(const lql_mutation_plan *plan,
+                                             FILE *file, lql_uint64 offset,
+                                             lql_uint64 size, FILE *out,
+                                             lql_error *error) {
+  lonejson *runtime;
+  lonejson_error lj_error;
+  lonejson_value_visitor visitor;
+  lonejson_status st;
+  limited_file_reader reader;
+  mutation_stream_state state;
+
+  if (plan == NULL || file == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "plan, file, and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (!mutation_plan_supports_root_fields(plan)) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "mutation plan requires unsupported non-root behavior");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  if (!seek_u64(file, offset)) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to seek mutation source range");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  runtime = lonejson_new(NULL, &lj_error);
+  if (runtime == NULL) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  memset(&state, 0, sizeof(state));
+  state.plan = plan;
+  state.error = &lj_error;
+  state.applied = (int *)calloc(plan->count, sizeof(state.applied[0]));
+  if (state.applied == NULL) {
+    lonejson_free(runtime);
+    return LQL_STATUS_NO_MEMORY;
+  }
+  if (lonejson_writer_init_sink(runtime, &state.writer, file_sink, out,
+                                &lj_error) != LONEJSON_STATUS_OK) {
+    free(state.applied);
+    lonejson_free(runtime);
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  init_mutation_visitor(&visitor);
+  reader.file = file;
+  reader.remaining = size;
+  st = lonejson_visit_value_reader(runtime, limited_read, &reader, &visitor,
+                                   &state, &lj_error);
+  if (st == LONEJSON_STATUS_OK && (!state.root_seen || !state.root_is_object)) {
+    st = LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (st == LONEJSON_STATUS_OK) {
+    st = lonejson_writer_finish(&state.writer, &lj_error);
+  }
+  lonejson_writer_cleanup(&state.writer);
+  free(state.key_buf);
+  free(state.num_buf);
+  free(state.applied);
+  lonejson_free(runtime);
+  if (st != LONEJSON_STATUS_OK) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  return LQL_STATUS_OK;
 }

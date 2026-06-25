@@ -116,6 +116,13 @@ lql_status lql_mutation_plan_parse(const char *const *exprs, size_t expr_count,
 size_t lql_mutation_plan_count(const lql_mutation_plan *plan);
 /* Frees a mutation plan. NULL is accepted. */
 void lql_mutation_plan_free(lql_mutation_plan *plan);
+/* Applies supported root-object field mutations to one seekable file range.
+   This is a streaming rewrite for root object fields only; unsupported plans
+   return LQL_STATUS_UNSUPPORTED rather than materializing the document. */
+lql_status lql_mutate_file_range_root_fields(const lql_mutation_plan *plan,
+                                             FILE *file, lql_uint64 offset,
+                                             lql_uint64 size, FILE *out,
+                                             lql_error *error);
 
 char *lql_strdup(const char *text);
 void lql_free(void *ptr);
