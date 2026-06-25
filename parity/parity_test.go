@@ -131,6 +131,33 @@ func TestCLQLVersionSmoke(t *testing.T) {
 	}
 }
 
+func TestCLQLHelpSmoke(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	for _, flag := range []string{"--help", "-h"} {
+		t.Run(flag, func(t *testing.T) {
+			out, err := exec.Command(clql, flag).CombinedOutput()
+			if err != nil {
+				t.Fatalf("clql %s failed: %v out=%q", flag, err, string(out))
+			}
+			needles := [][]byte{
+				[]byte("usage: clql"),
+				[]byte("--field"),
+				[]byte("--mutate"),
+				[]byte("--matches-only"),
+				[]byte("--version"),
+			}
+			for _, needle := range needles {
+				if !bytes.Contains(out, needle) {
+					t.Fatalf("clql %s help missing %q: %q", flag, needle, string(out))
+				}
+			}
+		})
+	}
+}
+
 func TestCLQLSelectorSinceMacroParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

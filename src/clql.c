@@ -382,10 +382,14 @@ static int create_inline_temp(const char *path, char **out_path,
 }
 
 static void usage(FILE *out) {
-  fprintf(out, "usage: clql [--or|-O] [-c] [-i|-w] [-F] [-t theme] [-f field] "
-               "[-m expr] [--matches-only|-M] selector [data.json]\n");
-  fprintf(out, "       clql [--or|-O] [-c] [--matches-only|-M] selector < "
-               "data.json\n");
+  fprintf(out, "usage: clql [--or|-O] [--compact|-c] [--inline|-i|--write|-w] "
+               "[--enable-file-mutations|-F] [--theme|-t theme]\n");
+  fprintf(out, "            [--field|-f field] [--mutate|-m expr] "
+               "[--matches-only|-M] selector [data.json]\n");
+  fprintf(out,
+          "       clql [--or|-O] [--compact|-c] [--matches-only|-M] selector < "
+          "data.json\n");
+  fprintf(out, "       clql --help\n");
   fprintf(out, "       clql --version\n");
 }
 
