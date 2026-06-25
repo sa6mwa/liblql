@@ -493,8 +493,8 @@ Current implementation is an early slice:
   projection, mutation, and structured errors; this is not yet the final Lua C
   module or Lua release artifact surface;
 - the parity benchmark surface now has Go, C, and Lua runners over the shared
-  generated fixture matrix; the Lua runner currently uses the same CLI-backed
-  facade approach over public `clql`;
+  generated fixture matrix; the Lua runner currently loads `lua/lql.lua`, which
+  uses the same CLI-backed facade approach over public `clql`;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and

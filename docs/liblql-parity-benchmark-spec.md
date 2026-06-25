@@ -80,10 +80,10 @@ Current implementation status:
   equality/range, service contains, service case-insensitive contains, service
   `contains.any`, service `icontains.any`, and nested `/records[]/...`
   equivalents over the CLI-style single-root JSON fixture.
-- `make benchmarks-lua` exercises the initial Lua benchmark facade, which
+- `make benchmarks-lua` loads the initial `lua/lql.lua` facade, which
   orchestrates the public `clql` executable over the shared fixtures and emits
   stable JSON Lines records. This is a CLI-backed Lua parity runner, not yet
-  the final Lua C module or direct public Lua API.
+  the final Lua C module.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
   and fails on missing runners or counter divergence.
 
@@ -344,9 +344,10 @@ the contract for tools and regression gates.
 
 The Lua implementation lives in this repository and must be benchmarked through
 the repository's Lua facade, not by shelling out to Go or by calling C private
-test helpers directly. The initial Lua benchmark facade shells out to the
-public `clql` executable as an intentionally narrow bridge until the direct Lua
-C module exists.
+test helpers directly. The initial Lua benchmark runner must go through
+`lua/lql.lua`, whose current implementation shells out to the public `clql`
+executable as an intentionally narrow bridge until the direct Lua C module
+exists.
 
 Lua benchmark entry points should support:
 

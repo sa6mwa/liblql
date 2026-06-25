@@ -435,7 +435,8 @@ run_lua_mode() {
     emit_unsupported_impl "lua" "clql binary not found; run make build-debug or set CLQL_PATH"
     return 1
   fi
-  record=$("$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
+  record=$(LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
+    "$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
     "$fixture_path" "$candidates" "$clql")
   lua_candidates=$(kv_field candidates "$record")
   lua_matches=$(kv_field matches "$record")
