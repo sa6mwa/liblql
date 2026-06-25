@@ -363,6 +363,7 @@ static int liblql_mutate_file_range_value(const char *const *exprs,
                                           const char *suffix,
                                           int enable_file_values,
                                           const char *file_value_base_dir,
+                                          int root_fields_only,
                                           char **out_json, size_t *out_len,
                                           char *errbuf, size_t errbuf_len) {
 	lql_error error;
@@ -410,8 +411,13 @@ static int liblql_mutate_file_range_value(const char *const *exprs,
 		}
 		return -1;
 	}
-	status = lql_mutate_file_range_paths(plan, input, (lql_uint64)offset,
-	                                     (lql_uint64)size, tmp, &error);
+	if (root_fields_only) {
+		status = lql_mutate_file_range_root_fields(
+		    plan, input, (lql_uint64)offset, (lql_uint64)size, tmp, &error);
+	} else {
+		status = lql_mutate_file_range_paths(plan, input, (lql_uint64)offset,
+		                                     (lql_uint64)size, tmp, &error);
+	}
 	fclose(input);
 	lql_mutation_plan_free(plan);
 	if (status != LQL_STATUS_OK) {
@@ -892,6 +898,14 @@ func cMutateFileRange(mutations []string, prefix, doc, suffix string) ([]byte, e
 }
 
 func cMutateFileRangeWithOptions(mutations []string, prefix, doc, suffix string, enableFileValues bool, fileValueBaseDir string) ([]byte, error) {
+	return cMutateFileRangeMode(mutations, prefix, doc, suffix, enableFileValues, fileValueBaseDir, false)
+}
+
+func cMutateFileRangeRootFields(mutations []string, prefix, doc, suffix string) ([]byte, error) {
+	return cMutateFileRangeMode(mutations, prefix, doc, suffix, false, "", true)
+}
+
+func cMutateFileRangeMode(mutations []string, prefix, doc, suffix string, enableFileValues bool, fileValueBaseDir string, rootFieldsOnly bool) ([]byte, error) {
 	cExprs, freeExprs := cStringArray(mutations)
 	defer freeExprs()
 
@@ -911,8 +925,8 @@ func cMutateFileRangeWithOptions(mutations []string, prefix, doc, suffix string,
 	var outLen C.size_t
 	var errbuf [256]C.char
 	status := C.liblql_mutate_file_range_value(cExprs, C.size_t(len(mutations)),
-		cPrefix, cDoc, cSuffix, cBool(enableFileValues), cBaseDir, &out,
-		&outLen, &errbuf[0], C.size_t(len(errbuf)))
+		cPrefix, cDoc, cSuffix, cBool(enableFileValues), cBaseDir,
+		cBool(rootFieldsOnly), &out, &outLen, &errbuf[0], C.size_t(len(errbuf)))
 	if status != 0 {
 		return nil, sdkParityError(C.GoString(&errbuf[0]))
 	}

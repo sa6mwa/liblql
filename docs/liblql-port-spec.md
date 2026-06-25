@@ -548,8 +548,9 @@ Current implementation is an early slice:
   `lql_project_json()`, `lql_project_file_range()`,
   `lql_mutation_plan_parse()`,
   `lql_mutation_plan_parse_with_options()`, `lql_mutation_plan_count()`,
-  `lql_mutate_json()`, `lql_mutate_file_range_paths()`,
-  `lql_compact_json()`, `lql_compact_file_range()`,
+  `lql_mutate_json()`, `lql_mutate_file_range_root_fields()`,
+  `lql_mutate_file_range_paths()`, `lql_compact_json()`,
+  `lql_compact_file_range()`,
   `lql_query_file_decisions()`, `lql_query_source_decisions()`,
   `lql_query_file_matches()`, and
   `lql_query_source_spooled_matches()` against the pinned Go library or

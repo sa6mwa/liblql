@@ -292,6 +292,39 @@ func TestSDKMutationFileRangeParity(t *testing.T) {
 	}
 }
 
+func TestSDKMutationRootFieldFileRangeParity(t *testing.T) {
+	cases := []struct {
+		name      string
+		doc       string
+		mutations []string
+	}{
+		{
+			name: "root set increment delete create",
+			doc:  `{"status":"open","count":1,"old":true}`,
+			mutations: []string{
+				"/status=done",
+				"/count++",
+				"rm:/old",
+				"/missing=value",
+				`/quoted_number="2"`,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wantJSON, err := goMutateJSON(tc.mutations, tc.doc)
+			if err != nil {
+				t.Fatalf("go root mutate: %v", err)
+			}
+			gotJSON, err := cMutateFileRangeRootFields(tc.mutations, `{"outside":`, tc.doc, `}`)
+			if err != nil {
+				t.Fatalf("liblql root-field file-range mutate: %v", err)
+			}
+			assertDecodedJSONValuesParity(t, gotJSON, wantJSON, "root-field mutation")
+		})
+	}
+}
+
 func TestSDKMutationFileBackedValueParity(t *testing.T) {
 	dir := t.TempDir()
 	textPath := filepath.Join(dir, "blob.txt")
