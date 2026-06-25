@@ -1252,6 +1252,63 @@ func TestCLQLBraceMutationParity(t *testing.T) {
 	}
 }
 
+func TestCLQLEscapedMutationPathParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"a/b":{"~key":"old","remove":true},"plain":"keep"}`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-escaped-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	mutations := []string{
+		`/a~1b/~0key=ready`,
+		`rm:/a~1b/remove`,
+		`/a~1b/created=1`,
+	}
+	args := []string{"-c"}
+	for _, mutation := range mutations {
+		args = append(args, "-m", mutation)
+	}
+	args = append(args, `contains{f=/}`, tmp.Name())
+	cmd := exec.Command(clql, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql escaped mutation failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql escaped mutation: %v out=%q", err, string(out))
+	}
+
+	muts, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatalf("go parse escaped mutations: %v", err)
+	}
+	var wantOut bytes.Buffer
+	if err := lql.MutateStream(lql.MutateStreamRequest{
+		Reader:    bytes.NewBufferString(body),
+		Writer:    &wantOut,
+		Mutations: muts,
+	}); err != nil {
+		t.Fatalf("go stream escaped mutations: %v", err)
+	}
+	want, err := decodeJSONValues(wantOut.Bytes())
+	if err != nil {
+		t.Fatalf("decode go escaped mutation result: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("escaped mutation parity mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
 func TestCLQLArrayElementMutationParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

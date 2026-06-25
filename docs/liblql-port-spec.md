@@ -469,6 +469,8 @@ Current implementation is an early slice:
   existing-position recursive mutations to matched candidates;
 - brace shorthand mutation execution is covered by Go-backed parity tests for
   nested set, increment, delete, and path expansion behavior;
+- escaped JSON Pointer mutation paths are covered by Go-backed parity tests for
+  set, delete, and nested path expansion behavior;
 - quoted numeric mutation values follow Go typing behavior and are emitted as
   JSON numbers rather than strings;
 - `clql -m/--mutate selector < data.json` applies the same supported streaming
