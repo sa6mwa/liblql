@@ -8,6 +8,99 @@ static int failures = 0;
 
 static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len);
 
+static void expect_public_utility_api(void) {
+  lql_error error;
+  lql_selector *selector;
+  char *copy;
+  int matched;
+  lql_status st;
+
+  lql_error_init(&error);
+  if (error.code != LQL_STATUS_OK || error.message[0] != '\0') {
+    printf("error init mismatch\n");
+    ++failures;
+  }
+  lql_error_init(NULL);
+  if (strcmp(lql_status_string(LQL_STATUS_OK), "ok") != 0 ||
+      strcmp(lql_status_string(LQL_STATUS_INVALID_ARGUMENT),
+             "invalid argument") != 0 ||
+      strcmp(lql_status_string(LQL_STATUS_NO_MEMORY), "out of memory") != 0 ||
+      strcmp(lql_status_string(LQL_STATUS_PARSE_ERROR), "parse error") != 0 ||
+      strcmp(lql_status_string(LQL_STATUS_JSON_ERROR), "json error") != 0 ||
+      strcmp(lql_status_string(LQL_STATUS_UNSUPPORTED), "unsupported") != 0 ||
+      strcmp(lql_status_string(LQL_STATUS_STOP), "stop") != 0 ||
+      strcmp(lql_status_string((lql_status)999), "unknown") != 0) {
+    printf("status string mapping mismatch\n");
+    ++failures;
+  }
+
+  copy = lql_strdup("hello");
+  if (copy == NULL || strcmp(copy, "hello") != 0) {
+    printf("lql_strdup copy mismatch\n");
+    ++failures;
+  }
+  lql_free(copy);
+  if (lql_strdup(NULL) != NULL) {
+    printf("lql_strdup NULL mismatch\n");
+    ++failures;
+  }
+  lql_free(NULL);
+
+  lql_error_init(&error);
+  st = lql_selector_parse("/status=open", NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "out selector required") != 0) {
+    printf("selector parse NULL out mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  if (!lql_selector_is_empty(NULL)) {
+    printf("NULL selector should be empty\n");
+    ++failures;
+  }
+  selector = NULL;
+  lql_error_init(&error);
+  st = lql_selector_parse("", &selector, &error);
+  if (st != LQL_STATUS_OK || !lql_selector_is_empty(selector)) {
+    printf("empty selector parse mismatch: %s\n", error.message);
+    ++failures;
+  } else {
+    matched = 0;
+    st = lql_matches_json(selector, "{\"anything\":true}",
+                          strlen("{\"anything\":true}"), &matched, &error);
+    if (st != LQL_STATUS_OK || !matched) {
+      printf("empty selector match-all mismatch: %s\n", error.message);
+      ++failures;
+    }
+  }
+  lql_selector_free(selector);
+
+  selector = NULL;
+  lql_error_init(&error);
+  st = lql_selector_parse("/status=open", &selector, &error);
+  if (st != LQL_STATUS_OK || lql_selector_is_empty(selector)) {
+    printf("non-empty selector state mismatch: %s\n", error.message);
+    ++failures;
+  }
+  lql_selector_free(selector);
+
+  matched = 1;
+  lql_error_init(&error);
+  st = lql_matches_json(NULL, NULL, 0u, &matched, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "json and out_matched are required") != 0) {
+    printf("matches_json invalid json mismatch: %s\n", error.message);
+    ++failures;
+  }
+  lql_error_init(&error);
+  st = lql_matches_json(NULL, "{}", strlen("{}"), NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "json and out_matched are required") != 0) {
+    printf("matches_json invalid out mismatch: %s\n", error.message);
+    ++failures;
+  }
+}
+
 static void expect_version_api(void) {
   lql_capabilities caps;
 
@@ -1626,6 +1719,10 @@ static void expect_selector_parse_error_api(void);
 
 static void expect_sdk_parity_manifest(void) {
   static const sdk_parity_requirement manifest[] = {
+      {"utility",
+       "status, error, ownership, selector emptiness, and invalid "
+       "argument helpers",
+       expect_public_utility_api},
       {"version", "version and capability public API", expect_version_api},
       {"selector",
        "scalar, string, numeric, temporal, path, wildcard, "
@@ -1866,6 +1963,7 @@ static void expect_selector_parse_error_api(void) {
 
 int main(void) {
   expect_sdk_parity_manifest();
+  expect_public_utility_api();
   expect_selector_match_api();
   expect_selector_parse_error_api();
   expect_version_api();
