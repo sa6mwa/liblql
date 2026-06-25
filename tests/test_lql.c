@@ -198,6 +198,17 @@ int main(void) {
                "{\"service\":\"auth-api\"}", 1);
   expect_match("in{field=/env,any=prod|stage}", "{\"env\":\"prod\"}", 1);
   expect_match("in{field=/env,any=prod|stage}", "{\"env\":\"dev\"}", 0);
+  expect_match("contains{f=/hello/*}", "{\"hello\":{\"name\":\"alice\"}}", 1);
+  expect_match("contains{f=/hello/[]}", "{\"hello\":{\"0\":\"alice\"}}", 0);
+  expect_match("contains{f=/arrays/[]/id}", "{\"arrays\":[{\"id\":1}]}",
+               1);
+  expect_match("contains{f=/arrays/*/id}", "{\"arrays\":[{\"id\":1}]}", 0);
+  expect_match("contains{f=/items[]/sku}", "{\"items\":[{\"sku\":\"a\"}]}",
+               1);
+  expect_match("contains{f=/items/**/sku}", "{\"items\":[{\"sku\":\"a\"}]}",
+               1);
+  expect_match("contains{f=/groups/.../sku}",
+               "{\"groups\":[{\"items\":[{\"sku\":\"b\"}]}]}", 1);
   expect_match("exists{/metadata/etag}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
   expect_match("exists{/metadata}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
   expect_match("/metadata=\"\"", "{\"metadata\":{\"etag\":\"x\"}}", 0);

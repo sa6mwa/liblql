@@ -11,11 +11,17 @@ typedef struct eval_doc {
   unsigned char *hits;
   char *val_buf;
   size_t val_len;
+  int *container_types;
+  size_t *container_depths;
+  size_t container_count;
+  size_t container_cap;
 } eval_doc;
 
 static void free_doc(eval_doc *doc) {
   free(doc->hits);
   free(doc->val_buf);
+  free(doc->container_types);
+  free(doc->container_depths);
   memset(doc, 0, sizeof(*doc));
 }
 
@@ -38,6 +44,7 @@ static void reset_doc(eval_doc *doc) {
   free(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
+  doc->container_count = 0u;
 }
 
 static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
@@ -51,6 +58,43 @@ static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
   *len += n;
   (*buf)[*len] = '\0';
   return 1;
+}
+
+static lonejson_status push_container(eval_doc *doc,
+                                      const lonejson_value_path *path,
+                                      int type) {
+  int *next_types;
+  size_t *next_depths;
+  size_t next_cap;
+  if (doc->container_count == doc->container_cap) {
+    next_cap = doc->container_cap == 0u ? 8u : doc->container_cap * 2u;
+    next_types = (int *)realloc(doc->container_types, sizeof(int) * next_cap);
+    if (next_types == NULL) {
+      return LONEJSON_STATUS_ALLOCATION_FAILED;
+    }
+    doc->container_types = next_types;
+    next_depths =
+        (size_t *)realloc(doc->container_depths, sizeof(size_t) * next_cap);
+    if (next_depths == NULL) {
+      return LONEJSON_STATUS_ALLOCATION_FAILED;
+    }
+    doc->container_depths = next_depths;
+    doc->container_cap = next_cap;
+  }
+  doc->container_types[doc->container_count] = type;
+  doc->container_depths[doc->container_count] = path->segment_count;
+  ++doc->container_count;
+  return LONEJSON_STATUS_OK;
+}
+
+static void pop_container(eval_doc *doc, const lonejson_value_path *path) {
+  if (doc->container_count == 0u) {
+    return;
+  }
+  if (doc->container_depths[doc->container_count - 1u] ==
+      path->segment_count) {
+    --doc->container_count;
+  }
 }
 
 static int ascii_case_equal_prefix(const char *a, const char *b, size_t n) {
@@ -110,10 +154,77 @@ static int path_segment_matches(const char *start, size_t len,
   return i == len && j == segment->len;
 }
 
-static int path_matches(const char *pattern, const lonejson_value_path *path) {
-  const char *seg;
+static int parent_container_type(const eval_doc *doc, size_t depth,
+                                 int *out_type) {
+  size_t i;
+  for (i = doc->container_count; i > 0u; --i) {
+    if (doc->container_depths[i - 1u] == depth) {
+      *out_type = doc->container_types[i - 1u];
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int pattern_segment_is(const char *start, size_t len, const char *lit) {
+  return strlen(lit) == len && memcmp(start, lit, len) == 0;
+}
+
+static int pattern_segment_matches(const eval_doc *doc, const char *start,
+                                   size_t len,
+                                   const lonejson_value_path *path,
+                                   size_t path_idx) {
+  int parent_type;
+  if (path_idx >= path->segment_count ||
+      !parent_container_type(doc, path_idx, &parent_type)) {
+    return 0;
+  }
+  if (pattern_segment_is(start, len, "*")) {
+    return parent_type == '{';
+  }
+  if (pattern_segment_is(start, len, "[]")) {
+    return parent_type == '[';
+  }
+  if (pattern_segment_is(start, len, "**")) {
+    return parent_type == '{' || parent_type == '[';
+  }
+  return path_segment_matches(start, len, &path->segments[path_idx]);
+}
+
+static int path_matches_from(const eval_doc *doc, const char *seg,
+                             const lonejson_value_path *path,
+                             size_t path_idx) {
   const char *slash;
-  size_t idx;
+  size_t len;
+  size_t i;
+  if (*seg == '\0') {
+    return path_idx == path->segment_count;
+  }
+  slash = strchr(seg, '/');
+  len = slash == NULL ? strlen(seg) : (size_t)(slash - seg);
+  if (pattern_segment_is(seg, len, "...")) {
+    if (slash == NULL) {
+      return 1;
+    }
+    for (i = path_idx; i <= path->segment_count; ++i) {
+      if (path_matches_from(doc, slash + 1, path, i)) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+  if (!pattern_segment_matches(doc, seg, len, path, path_idx)) {
+    return 0;
+  }
+  if (slash == NULL) {
+    return path_idx + 1u == path->segment_count;
+  }
+  return path_matches_from(doc, slash + 1, path, path_idx + 1u);
+}
+
+static int path_matches(const eval_doc *doc, const char *pattern,
+                        const lonejson_value_path *path) {
+  const char *seg;
   if (pattern == NULL || path == NULL || pattern[0] != '/') {
     return 0;
   }
@@ -121,27 +232,7 @@ static int path_matches(const char *pattern, const lonejson_value_path *path) {
     return path->segment_count == 0u;
   }
   seg = pattern + 1;
-  idx = 0u;
-  while (*seg != '\0') {
-    slash = strchr(seg, '/');
-    if (idx >= path->segment_count) {
-      return 0;
-    }
-    if (slash == NULL) {
-      if (!path_segment_matches(seg, strlen(seg), &path->segments[idx])) {
-        return 0;
-      }
-      ++idx;
-      return idx == path->segment_count;
-    }
-    if (!path_segment_matches(seg, (size_t)(slash - seg),
-                              &path->segments[idx])) {
-      return 0;
-    }
-    ++idx;
-    seg = slash + 1;
-  }
-  return idx == path->segment_count;
+  return path_matches_from(doc, seg, path, 0u);
 }
 
 static int node_is_term(const lql_node *node) {
@@ -179,7 +270,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     }
     return;
   }
-  if (doc->hits == NULL || !path_matches(node->term.field, path)) {
+  if (doc->hits == NULL || !path_matches(doc, node->term.field, path)) {
     return;
   }
   switch (node->kind) {
@@ -297,11 +388,35 @@ static int eval_node(const lql_node *node, const eval_doc *doc) {
   }
 }
 
-static lonejson_status on_container(void *user, const lonejson_value_path *path,
-                                    lonejson_error *error) {
+static lonejson_status on_object_begin(void *user,
+                                       const lonejson_value_path *path,
+                                       lonejson_error *error) {
   eval_doc *doc = (eval_doc *)user;
   (void)error;
   observe_value(doc, path, "", 0, 1);
+  return push_container(doc, path, '{');
+}
+
+static lonejson_status on_object_end(void *user, const lonejson_value_path *path,
+                                     lonejson_error *error) {
+  (void)error;
+  pop_container((eval_doc *)user, path);
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status on_array_begin(void *user,
+                                      const lonejson_value_path *path,
+                                      lonejson_error *error) {
+  eval_doc *doc = (eval_doc *)user;
+  (void)error;
+  observe_value(doc, path, "", 0, 1);
+  return push_container(doc, path, '[');
+}
+
+static lonejson_status on_array_end(void *user, const lonejson_value_path *path,
+                                    lonejson_error *error) {
+  (void)error;
+  pop_container((eval_doc *)user, path);
   return LONEJSON_STATUS_OK;
 }
 
@@ -382,8 +497,10 @@ static lonejson_status on_null(void *user, const lonejson_value_path *path,
 
 static void init_eval_visitor(lonejson_path_value_visitor *visitor) {
   *visitor = lonejson_default_path_value_visitor();
-  visitor->object_begin = on_container;
-  visitor->array_begin = on_container;
+  visitor->object_begin = on_object_begin;
+  visitor->object_end = on_object_end;
+  visitor->array_begin = on_array_begin;
+  visitor->array_end = on_array_end;
   visitor->string_begin = on_string_begin;
   visitor->string_chunk = on_string_chunk;
   visitor->string_end = on_string_end;

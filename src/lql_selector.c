@@ -154,6 +154,95 @@ static char *unquote(char *value) {
   return lql_strdup(value);
 }
 
+static int append_text(char **buf, size_t *len, size_t *cap, const char *text,
+                       size_t n) {
+  char *next;
+  size_t next_cap;
+  if (*len + n + 1u > *cap) {
+    next_cap = *cap == 0u ? 32u : *cap;
+    while (*len + n + 1u > next_cap) {
+      next_cap *= 2u;
+    }
+    next = (char *)realloc(*buf, next_cap);
+    if (next == NULL) {
+      return 0;
+    }
+    *buf = next;
+    *cap = next_cap;
+  }
+  memcpy(*buf + *len, text, n);
+  *len += n;
+  (*buf)[*len] = '\0';
+  return 1;
+}
+
+static int raw_segment_is(const char *seg, size_t len, const char *lit) {
+  return strlen(lit) == len && memcmp(seg, lit, len) == 0;
+}
+
+static char *normalize_field_path(const char *field) {
+  char *out;
+  size_t out_len;
+  size_t out_cap;
+  const char *seg;
+  const char *slash;
+  size_t len;
+  size_t base_len;
+  size_t count;
+  size_t i;
+
+  if (field == NULL) {
+    return NULL;
+  }
+  if (field[0] != '/') {
+    return lql_strdup(field);
+  }
+  out = NULL;
+  out_len = 0u;
+  out_cap = 0u;
+  seg = field + 1;
+  if (!append_text(&out, &out_len, &out_cap, "/", 1u)) {
+    return NULL;
+  }
+  while (*seg != '\0') {
+    slash = strchr(seg, '/');
+    len = slash == NULL ? strlen(seg) : (size_t)(slash - seg);
+    base_len = len;
+    count = 0u;
+    if (!raw_segment_is(seg, len, "") && !raw_segment_is(seg, len, "[]") &&
+        !raw_segment_is(seg, len, "*") && !raw_segment_is(seg, len, "**") &&
+        !raw_segment_is(seg, len, "...")) {
+      while (base_len > 2u && seg[base_len - 2u] == '[' &&
+             seg[base_len - 1u] == ']') {
+        base_len -= 2u;
+        ++count;
+      }
+    }
+    if (out_len > 1u) {
+      if (!append_text(&out, &out_len, &out_cap, "/", 1u)) {
+        free(out);
+        return NULL;
+      }
+    }
+    if (!append_text(&out, &out_len, &out_cap, seg,
+                     count == 0u ? len : base_len)) {
+      free(out);
+      return NULL;
+    }
+    for (i = 0u; i < count; ++i) {
+      if (!append_text(&out, &out_len, &out_cap, "/[]", 3u)) {
+        free(out);
+        return NULL;
+      }
+    }
+    if (slash == NULL) {
+      break;
+    }
+    seg = slash + 1;
+  }
+  return out;
+}
+
 static lql_node_kind kind_from_name(const char *name) {
   if (strcmp(name, "eq") == 0) {
     return LQL_NODE_EQ;
@@ -224,6 +313,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
   char *key;
   char *val;
   char *decoded;
+  char *normalized;
 
   memset(term, 0, sizeof(*term));
   st = split_top(body, &parts, error);
@@ -253,8 +343,14 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       return 0;
     }
     if (strcmp(key, "field") == 0 || strcmp(key, "f") == 0) {
+      normalized = normalize_field_path(decoded);
+      free(decoded);
+      if (normalized == NULL) {
+        token_list_cleanup(&parts);
+        return 0;
+      }
       free(term->field);
-      term->field = decoded;
+      term->field = normalized;
     } else if (strcmp(key, "value") == 0 || strcmp(key, "v") == 0) {
       free(term->value);
       term->value = decoded;
@@ -386,7 +482,7 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     op0 = op[0];
     value = op + 1 + (size_t)op2;
     *op = '\0';
-    out->term.field = lql_strdup(copy);
+    out->term.field = normalize_field_path(copy);
     out->term.value = unquote(value);
     out->term.value_set = 1;
     if (out->term.field == NULL || out->term.value == NULL) {
@@ -429,7 +525,9 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       return LQL_STATUS_PARSE_ERROR;
     }
     if (out->kind == LQL_NODE_EXISTS) {
-      out->term.field = unquote(body + 1);
+      value = unquote(body + 1);
+      out->term.field = value == NULL ? NULL : normalize_field_path(value);
+      free(value);
       free(copy);
       return out->term.field == NULL ? LQL_STATUS_NO_MEMORY : LQL_STATUS_OK;
     }
