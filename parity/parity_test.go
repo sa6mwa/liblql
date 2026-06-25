@@ -383,6 +383,12 @@ func TestCLQLStdinProjectionParity(t *testing.T) {
 			fields: []string{"/a~1b/~0key"},
 			body:   "{\"status\":\"open\",\"a/b\":{\"~key\":7},\"id\":\"a\"}\n",
 		},
+		{
+			name:   "duplicate field is idempotent",
+			expr:   `/status="open"`,
+			fields: []string{"/id", "/id"},
+			body:   "{\"status\":\"open\",\"id\":\"a\",\"other\":true}\n",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -590,6 +596,12 @@ func TestCLQLSeekableFileProjectionParity(t *testing.T) {
 			fields: []string{"/missing"},
 			body:   "{\"status\":\"open\",\"id\":\"a\"}\n",
 		},
+		{
+			name:   "duplicate field is idempotent",
+			expr:   `/status="open"`,
+			fields: []string{"/id", "/id"},
+			body:   "{\"status\":\"open\",\"id\":\"a\",\"other\":true}\n",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -629,6 +641,48 @@ func TestCLQLSeekableFileProjectionParity(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("clql projection mismatch: got=%#v want=%#v output=%q", got, want, string(out))
+			}
+		})
+	}
+}
+
+func TestCLQLProjectionPathConflictParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []struct {
+		name   string
+		fields []string
+	}{
+		{
+			name:   "parent before descendant",
+			fields: []string{"/meta", "/meta/trace"},
+		},
+		{
+			name:   "descendant before parent",
+			fields: []string{"/items/0/sku", "/items"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			paths, err := lql.ParseProjectionPaths(tc.fields)
+			if err != nil {
+				t.Fatalf("go projection parse: %v", err)
+			}
+			if _, err := lql.NewProjectionPlan(paths); err == nil {
+				t.Fatalf("go projection plan unexpectedly accepted fields: %#v", tc.fields)
+			}
+			args := []string{"-c"}
+			for _, field := range tc.fields {
+				args = append(args, "-f", field)
+			}
+			args = append(args, `contains{f=/}`)
+			cmd := exec.Command(clql, args...)
+			cmd.Stdin = bytes.NewBufferString(`{"meta":{"trace":7},"items":[{"sku":"A"}]}`)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("clql projection unexpectedly accepted fields %#v: out=%q", tc.fields, string(out))
 			}
 		})
 	}
