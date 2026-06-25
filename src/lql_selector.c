@@ -1080,9 +1080,29 @@ static indexed_group *find_indexed_group(indexed_group *groups, size_t count,
   return NULL;
 }
 
+static int indexed_group_conflicts(const indexed_group *group,
+                                   const lql_node *child) {
+  size_t i;
+  const lql_node *current;
+  if (group == NULL || child == NULL || child->kind != LQL_NODE_EQ ||
+      child->term.field == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < group->node.child_count; ++i) {
+    current = &group->node.children[i];
+    if (current->kind == LQL_NODE_EQ && current->term.field != NULL &&
+        strcmp(current->term.field, child->term.field) == 0 &&
+        strcmp(current->term.value == NULL ? "" : current->term.value,
+               child->term.value == NULL ? "" : child->term.value) != 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int append_indexed_group(indexed_group **groups, size_t *count,
                                 lql_node_kind wrapper, char **index,
-                                lql_node *child) {
+                                lql_node *child, lql_error *error) {
   indexed_group *group;
   indexed_group *next;
   group = find_indexed_group(*groups, *count, wrapper, *index);
@@ -1101,6 +1121,11 @@ static int append_indexed_group(indexed_group **groups, size_t *count,
     group->node.kind = LQL_NODE_AND;
     ++*count;
   }
+  if (indexed_group_conflicts(group, child)) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "selector expression has conflicting indexed clauses");
+    return -1;
+  }
   return append_node(&group->node, child);
 }
 
@@ -1116,6 +1141,7 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
   const char *rest;
   size_t i;
   size_t group_count;
+  int append_status;
   lql_status st;
 
   if (out == NULL) {
@@ -1175,11 +1201,22 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
         break;
       case 1:
         st = parse_one(rest, &node, error);
-        if (st == LQL_STATUS_OK &&
-            !append_indexed_group(&groups, &group_count, wrapper, &index,
-                                  &node)) {
-          lql_node_cleanup(&node);
-          st = LQL_STATUS_NO_MEMORY;
+        if (st == LQL_STATUS_OK) {
+          append_status = append_indexed_group(&groups, &group_count, wrapper,
+                                               &index, &node, error);
+          if (append_status != 1) {
+            if (append_status < 0) {
+              st = LQL_STATUS_PARSE_ERROR;
+            } else {
+              st = LQL_STATUS_NO_MEMORY;
+            }
+            lql_node_cleanup(&node);
+          }
+        }
+        if (st == LQL_STATUS_PARSE_ERROR) {
+          if (error != NULL && error->code != LQL_STATUS_PARSE_ERROR) {
+            st = LQL_STATUS_PARSE_ERROR;
+          }
         }
         free(index);
         continue;

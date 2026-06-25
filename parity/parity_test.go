@@ -205,6 +205,8 @@ func TestCLQLSelectorParseErrorParity(t *testing.T) {
 		`eq{field=/status,f=/other,value=open}`,
 		`eq{field=/status,value=open,foo=bar}`,
 		`eq{field=/status,value=open,ignoreCase=true}`,
+		`or.0.eq{field=/status,value=open},or.0.eq{field=/status,value=closed}`,
+		`and.0.eq{field=/status,value=open},and.0.eq{field=/status,value=closed}`,
 		`range{field=/progress,gte=10,gte=20}`,
 		`range{field=/progress,gte=10,foo=bar}`,
 		`range{field=/progress,gte=10,lt=2025-01-01}`,

@@ -345,6 +345,8 @@ int main(void) {
   expect_parse_error("eq{field=/status,f=/other,value=open}");
   expect_parse_error("eq{field=/status,value=open,foo=bar}");
   expect_parse_error("eq{field=/status,value=open,ignoreCase=true}");
+  expect_parse_error("or.0.eq{field=/status,value=open},or.0.eq{field=/status,value=closed}");
+  expect_parse_error("and.0.eq{field=/status,value=open},and.0.eq{field=/status,value=closed}");
   expect_parse_error("range{field=/progress,gte=10,gte=20}");
   expect_parse_error("range{field=/progress,gte=10,foo=bar}");
   expect_parse_error("range{field=/progress,gte=10,lt=2025-01-01}");
