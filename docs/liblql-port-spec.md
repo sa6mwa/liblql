@@ -480,8 +480,9 @@ Current implementation is an early slice:
 - Go parity tests exist for the initial selector subset;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
-  verification; source archives and full cross-target release-matrix packaging
-  remain pending.
+  verification plus extracted host direct, CMake `find_package`, and
+  pkg-config consumer smokes; source archives and full cross-target
+  release-matrix packaging remain pending.
 
 The repository must not claim full LQL parity until the verification gates prove
 it.

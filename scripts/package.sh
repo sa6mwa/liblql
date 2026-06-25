@@ -136,6 +136,102 @@ verify_elf_runtime_paths() {
   fi
 }
 
+is_host_smoke_target() {
+  target_id=$1
+  machine=$(uname -m 2>/dev/null || printf unknown)
+  system=$(uname -s 2>/dev/null || printf unknown)
+  case "$system:$machine:$target_id" in
+    Linux:x86_64:x86_64-linux-gnu) return 0 ;;
+    Darwin:arm64:arm64-apple-darwin) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+write_consumer_source() {
+  out=$1
+  cat >"$out" <<'EOF'
+#include <lql/lql.h>
+#include <stdio.h>
+
+int main(void) {
+  const char *expr = "contains{f=/status,v=open}";
+  lql_selector *selector = NULL;
+  lql_error error;
+  lql_status status;
+  lql_error_init(&error);
+  status = lql_selector_parse(expr, &selector, &error);
+  if (status != LQL_STATUS_OK) {
+    fprintf(stderr, "parse failed: %s\n", error.message);
+    return 1;
+  }
+  lql_selector_free(selector);
+  return 0;
+}
+EOF
+}
+
+verify_host_consumers() {
+  artifact=$1
+  root=$2
+  target_id=$3
+  dep_root="$ROOT_DIR/.cache/deps/$target_id/lonejson"
+  cc=${CC:-cc}
+  smoke_dir="$ROOT_DIR/build/package-verify-consumer/$target_id"
+
+  if ! is_host_smoke_target "$target_id"; then
+    printf 'package-verify: skipping host consumer smoke for %s\n' "$target_id"
+    return
+  fi
+  if [ ! -d "$dep_root" ]; then
+    printf 'package-verify: missing lonejson SDK for consumer smoke: %s\n' "$dep_root" >&2
+    exit 1
+  fi
+  if ! command -v "$cc" >/dev/null 2>&1; then
+    printf 'package-verify: C compiler unavailable for consumer smoke: %s\n' "$cc" >&2
+    exit 1
+  fi
+
+  rm -rf "$smoke_dir"
+  mkdir -p "$smoke_dir/direct" "$smoke_dir/cmake" "$smoke_dir/pkgconfig"
+  write_consumer_source "$smoke_dir/consumer.c"
+
+  "$cc" -std=c90 -Wall -Wextra -Wpedantic -Werror \
+    -I"$root/include" -I"$dep_root/include" \
+    "$smoke_dir/consumer.c" "$root/lib/liblql.a" "$dep_root/lib/liblonejson.a" \
+    -o "$smoke_dir/direct/consumer"
+  "$smoke_dir/direct/consumer"
+
+  cat >"$smoke_dir/cmake/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.20)
+project(liblql_package_consumer C)
+set(CMAKE_C_STANDARD 90)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+  add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+endif()
+find_package(liblql CONFIG REQUIRED)
+add_executable(consumer ../consumer.c)
+target_link_libraries(consumer PRIVATE liblql::lql_static)
+EOF
+  cmake -S "$smoke_dir/cmake" -B "$smoke_dir/cmake-build" \
+    -DCMAKE_PREFIX_PATH="$root;$dep_root" >/dev/null
+  cmake --build "$smoke_dir/cmake-build" >/dev/null
+  "$smoke_dir/cmake-build/consumer"
+
+  if command -v pkg-config >/dev/null 2>&1; then
+    PKG_CONFIG_PATH="$root/lib/pkgconfig:$dep_root/lib/pkgconfig" \
+      "$cc" -std=c90 -Wall -Wextra -Wpedantic -Werror \
+      "$smoke_dir/consumer.c" \
+      $(PKG_CONFIG_PATH="$root/lib/pkgconfig:$dep_root/lib/pkgconfig" pkg-config --cflags --libs --static liblql) \
+      -o "$smoke_dir/pkgconfig/consumer"
+    LD_LIBRARY_PATH="$root/lib:$dep_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+      "$smoke_dir/pkgconfig/consumer"
+  else
+    printf 'package-verify: pkg-config unavailable; skipping pkg-config consumer smoke for %s\n' "$artifact"
+  fi
+}
+
 verify_one_archive() {
   artifact=$1
   version_value=$(version)
@@ -157,6 +253,7 @@ verify_one_archive() {
 
   case "$expected" in
     ${PROJECT}-${version_value}-*)
+      target_id=${expected#${PROJECT}-${version_value}-}
       test -f "$root/include/lql/lql.h"
       test -f "$root/lib/liblql.a"
       test -f "$root/lib/cmake/liblql/liblqlConfig.cmake"
@@ -186,6 +283,9 @@ verify_one_archive() {
 
   verify_no_local_paths "$artifact" "$root"
   verify_elf_runtime_paths "$artifact" "$root"
+  case "$expected" in
+    ${PROJECT}-${version_value}-*) verify_host_consumers "$artifact" "$root" "$target_id" ;;
+  esac
 }
 
 verify_checksums() {
