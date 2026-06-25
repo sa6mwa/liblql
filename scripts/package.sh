@@ -267,7 +267,7 @@ int main(void) {
     lql_capabilities_get(&caps);
     if (!caps.selector_parse || !caps.source_decision_stream ||
         !caps.source_spooled_match_stream || !caps.spooled_payloads ||
-        !caps.projection_buffered_json ||
+        !caps.projection_source || !caps.projection_buffered_json ||
         !caps.mutation_file_range || !caps.mutation_source ||
         !caps.mutation_buffered_json) {
       fprintf(stderr, "capability query mismatch\n");

@@ -413,6 +413,62 @@ static lql_read_result liblql_read_source_chunk(void *user,
 	return result;
 }
 
+static int liblql_project_source_value(const char *const *fields,
+                                       size_t field_count, const char *json,
+                                       size_t chunk_size, char **out_json,
+                                       size_t *out_len, int *out_found,
+                                       char *errbuf, size_t errbuf_len) {
+	lql_error error;
+	lql_projection *projection;
+	lql_status status;
+	liblql_source_reader reader;
+	FILE *tmp;
+
+	lql_error_init(&error);
+	projection = NULL;
+	*out_json = NULL;
+	*out_len = 0u;
+	*out_found = 0;
+	status = lql_projection_parse(fields, field_count, &projection, &error);
+	if (status != LQL_STATUS_OK) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	tmp = tmpfile();
+	if (tmp == NULL) {
+		lql_projection_free(projection);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	memset(&reader, 0, sizeof(reader));
+	reader.data = json;
+	reader.len = strlen(json);
+	reader.chunk_size = chunk_size;
+	status = lql_project_source(projection, liblql_read_source_chunk, &reader,
+	                            tmp, out_found, &error);
+	lql_projection_free(projection);
+	if (status != LQL_STATUS_OK) {
+		fclose(tmp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_read_tmp(tmp, out_json, out_len, errbuf, errbuf_len) != 0) {
+		fclose(tmp);
+		return -1;
+	}
+	fclose(tmp);
+	return 0;
+}
+
 static int liblql_mutate_source_value(const char *const *exprs,
                                       size_t expr_count, const char *json,
                                       size_t chunk_size, char **out_json,
@@ -977,6 +1033,27 @@ func cProjectFileRange(fields []string, prefix, doc, suffix string) ([]byte, boo
 	var errbuf [256]C.char
 	status := C.liblql_project_file_range_value(cFields, C.size_t(len(fields)),
 		cPrefix, cDoc, cSuffix, &out, &outLen, &found, &errbuf[0],
+		C.size_t(len(errbuf)))
+	if status != 0 {
+		return nil, false, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), found != 0, nil
+}
+
+func cProjectSource(fields []string, doc string) ([]byte, bool, error) {
+	cFields, freeFields := cStringArray(fields)
+	defer freeFields()
+
+	cDoc := C.CString(doc)
+	defer C.free(unsafe.Pointer(cDoc))
+
+	var out *C.char
+	var outLen C.size_t
+	var found C.int
+	var errbuf [256]C.char
+	status := C.liblql_project_source_value(cFields, C.size_t(len(fields)),
+		cDoc, C.size_t(3), &out, &outLen, &found, &errbuf[0],
 		C.size_t(len(errbuf)))
 	if status != 0 {
 		return nil, false, sdkParityError(C.GoString(&errbuf[0]))

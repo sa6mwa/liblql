@@ -24,6 +24,12 @@ typedef struct buffer_reader {
   size_t offset;
 } buffer_reader;
 
+typedef struct projection_source_reader {
+  lql_read_fn read;
+  void *user;
+  int error_code;
+} projection_source_reader;
+
 typedef struct projection_path {
   char **segments;
   size_t segment_count;
@@ -122,6 +128,30 @@ static lonejson_read_result buffer_read(void *user, unsigned char *buffer,
   if (reader->offset >= reader->len) {
     result.eof = 1;
   }
+  return result;
+}
+
+static lonejson_read_result
+projection_source_read(void *user, unsigned char *buffer, size_t capacity) {
+  projection_source_reader *reader;
+  lql_read_result source_result;
+  lonejson_read_result result;
+
+  result = lonejson_default_read_result();
+  reader = (projection_source_reader *)user;
+  source_result = reader->read(reader->user, buffer, capacity);
+  if (source_result.bytes_read > capacity) {
+    reader->error_code = 1;
+    result.error_code = 1;
+    return result;
+  }
+  if (source_result.error_code != 0) {
+    reader->error_code = source_result.error_code;
+    result.error_code = source_result.error_code;
+    return result;
+  }
+  result.bytes_read = source_result.bytes_read;
+  result.eof = source_result.eof;
   return result;
 }
 
@@ -1027,6 +1057,32 @@ lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
   reader.remaining = size;
   return lql_project_reader(projection, limited_read, &reader, out, out_found,
                             error);
+}
+
+lql_status lql_project_source(const lql_projection *projection,
+                              lql_read_fn read, void *read_user, FILE *out,
+                              int *out_found, lql_error *error) {
+  projection_source_reader reader;
+  lql_status st;
+
+  if (out_found != NULL) {
+    *out_found = 0;
+  }
+  if (read == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection source read callback is required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.read = read;
+  reader.user = read_user;
+  st = lql_project_reader(projection, projection_source_read, &reader, out,
+                          out_found, error);
+  if (st == LQL_STATUS_JSON_ERROR && reader.error_code != 0) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "projection source read failed");
+  }
+  return st;
 }
 
 lql_status lql_project_json(const lql_projection *projection, const char *json,

@@ -189,6 +189,22 @@ func TestSDKProjectionFileRangeParity(t *testing.T) {
 	}
 }
 
+func TestSDKProjectionSourceParity(t *testing.T) {
+	for _, tc := range sdkProjectionCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			wantJSON, wantFound, err := goProjectJSON(tc.fields, tc.doc)
+			if err != nil {
+				t.Fatalf("go project: %v", err)
+			}
+			gotJSON, gotFound, err := cProjectSource(tc.fields, tc.doc)
+			if err != nil {
+				t.Fatalf("liblql source project: %v", err)
+			}
+			assertProjectionJSONParity(t, gotJSON, gotFound, wantJSON, wantFound)
+		})
+	}
+}
+
 func sdkProjectionCases() []struct {
 	name   string
 	fields []string
@@ -304,6 +320,9 @@ func TestSDKProjectionExecutionErrorParity(t *testing.T) {
 			}
 			if _, _, err := cProjectJSON(fields, tc.doc); err == nil {
 				t.Fatalf("liblql buffered projection unexpectedly accepted malformed JSON: %q", tc.doc)
+			}
+			if _, _, err := cProjectSource(fields, tc.doc); err == nil {
+				t.Fatalf("liblql source projection unexpectedly accepted malformed JSON: %q", tc.doc)
 			}
 			if _, _, err := cProjectFileRange(fields, `{"outside":`, tc.doc, `}`); err == nil {
 				t.Fatalf("liblql file-range projection unexpectedly accepted malformed JSON: %q", tc.doc)

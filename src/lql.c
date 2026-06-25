@@ -135,6 +135,7 @@ void lql_capabilities_get(lql_capabilities *out) {
   out->source_spooled_match_stream = 1;
   out->spooled_payloads = 1;
   out->projection_file_range = 1;
+  out->projection_source = 1;
   out->projection_buffered_json = 1;
   out->compact_file_range = 1;
   out->compact_buffered_json = 1;

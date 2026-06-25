@@ -118,11 +118,11 @@ static void expect_version_api(void) {
       !caps.file_decision_stream || !caps.file_match_stream ||
       !caps.source_decision_stream || !caps.seekable_range_payloads ||
       !caps.source_spooled_match_stream || !caps.spooled_payloads ||
-      !caps.projection_file_range || !caps.projection_buffered_json ||
-      !caps.compact_file_range || !caps.compact_buffered_json ||
-      !caps.mutation_parse || !caps.mutation_file_range ||
-      !caps.mutation_source || !caps.mutation_buffered_json ||
-      !caps.mutation_file_values) {
+      !caps.projection_file_range || !caps.projection_source ||
+      !caps.projection_buffered_json || !caps.compact_file_range ||
+      !caps.compact_buffered_json || !caps.mutation_parse ||
+      !caps.mutation_file_range || !caps.mutation_source ||
+      !caps.mutation_buffered_json || !caps.mutation_file_values) {
     printf("capability query omitted an implemented public surface\n");
     ++failures;
   }
@@ -1403,6 +1403,115 @@ static void expect_buffered_projection_api(void) {
   if (out != NULL) {
     fclose(out);
   }
+}
+
+static void expect_source_projection_api(void) {
+  static const char doc[] =
+      "{\"id\":\"a\",\"count\":1,\"nested\":{\"x\":true},\"items\":[{\"sku\":"
+      "\"A\"},{\"sku\":\"B\"}]}";
+  const char *fields[3];
+  FILE *out;
+  lql_projection *projection;
+  lql_error error;
+  lql_status st;
+  chunk_reader reader;
+  int found;
+  char buf[128];
+  size_t len;
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("source projection tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  fields[0] = "/id";
+  fields[1] = "/nested/x";
+  fields[2] = "/items/1/sku";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(fields, 3u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source projection parse failed: %s\n", error.message);
+    fclose(out);
+    ++failures;
+    return;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = doc;
+  reader.len = strlen(doc);
+  reader.chunk_size = 4u;
+  found = 0;
+  st = lql_project_source(projection, read_chunk, &reader, out, &found, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source projection failed: %s\n", error.message);
+    ++failures;
+  } else if (!found) {
+    printf("source projection expected found\n");
+    ++failures;
+  } else if (reader.calls <= 1) {
+    printf("source projection did not consume fragmented reads\n");
+    ++failures;
+  } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+             strcmp(buf, "{\"id\":\"a\",\"nested\":{\"x\":true},\"items\":["
+                         "null,{\"sku\":\"B\"}]}") != 0) {
+    printf("source projection output mismatch: %s\n", buf);
+    ++failures;
+  }
+
+  found = 1;
+  lql_error_init(&error);
+  st = lql_project_source(projection, NULL, &reader, out, &found, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
+      strcmp(error.message, "projection source read callback is required") !=
+          0) {
+    printf("source projection NULL read mismatch: found=%d error=%s\n", found,
+           error.message);
+    ++failures;
+  }
+  found = 1;
+  lql_error_init(&error);
+  st = lql_project_source(NULL, read_chunk, &reader, out, &found, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
+      strcmp(error.message,
+             "projection, reader, out, and out_found are required") != 0) {
+    printf("source projection NULL projection mismatch: found=%d error=%s\n",
+           found, error.message);
+    ++failures;
+  }
+  found = 1;
+  lql_error_init(&error);
+  st =
+      lql_project_source(projection, read_chunk, &reader, NULL, &found, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
+      strcmp(error.message,
+             "projection, reader, out, and out_found are required") != 0) {
+    printf("source projection NULL out mismatch: found=%d error=%s\n", found,
+           error.message);
+    ++failures;
+  }
+  lql_error_init(&error);
+  st = lql_project_source(projection, read_chunk, &reader, out, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message,
+             "projection, reader, out, and out_found are required") != 0) {
+    printf("source projection NULL found mismatch: %s\n", error.message);
+    ++failures;
+  }
+  found = 1;
+  lql_error_init(&error);
+  st =
+      lql_project_source(projection, read_fail_once, NULL, out, &found, &error);
+  if (st != LQL_STATUS_JSON_ERROR || found ||
+      strcmp(error.message, "projection source read failed") != 0) {
+    printf("source projection read error mismatch: found=%d error=%s\n", found,
+           error.message);
+    ++failures;
+  }
+
+  lql_projection_free(projection);
+  fclose(out);
 }
 
 static void expect_projection_path_invariant_api(void) {
@@ -2950,6 +3059,8 @@ static void expect_sdk_contract_manifest(void) {
       {"projection", "seekable file-range projection", expect_projection_api},
       {"projection", "caller-buffered JSON projection",
        expect_buffered_projection_api},
+      {"projection", "caller-provided source projection",
+       expect_source_projection_api},
       {"projection", "duplicate and conflicting projection path invariants",
        expect_projection_path_invariant_api},
       {"projection", "projection parser failure corpus",
@@ -3220,6 +3331,7 @@ int main(void) {
   expect_seekable_payload_api();
   expect_projection_api();
   expect_buffered_projection_api();
+  expect_source_projection_api();
   expect_projection_path_invariant_api();
   expect_projection_parse_error_corpus_api();
   expect_projection_compact_error_api();
