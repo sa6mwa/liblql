@@ -56,6 +56,9 @@ mkdir -p "$fixture_dir"
 ndjson_fixture="$fixture_dir/large_ndjson.jsonl"
 array_fixture="$fixture_dir/large_array.json"
 single_fixture="$fixture_dir/large_single_json.json"
+cli_ndjson_fixture="$fixture_dir/selection_ndjson.jsonl"
+cli_array_fixture="$fixture_dir/selection_array.json"
+cli_single_fixture="$fixture_dir/selection_single_json.json"
 case_matrix="$fixture_dir/cases.tsv"
 go_counts_file="$fixture_dir/go-counts.txt"
 c_counts_file="$fixture_dir/c-counts.txt"
@@ -145,36 +148,73 @@ record_json() {
     "$i" "$status" $((i % 7)) $((i + 1)) "$timestamp"
 }
 
+selection_record_json() {
+  i=$1
+  case $((i % 4)) in
+    0) status=open ;;
+    1) status=queued ;;
+    2) status=closed ;;
+    *) status=new ;;
+  esac
+  case $((i % 3)) in
+    0) region=us-west ;;
+    1) region=eu-north ;;
+    *) region=us-east ;;
+  esac
+  case $((i % 4)) in
+    0) service=auth-api ;;
+    1) service=search-api ;;
+    2) service=gateway ;;
+    *) service=billing-api ;;
+  esac
+  printf '{"id":"id-%07d","region":"%s","service":"%s","status":"%s","metrics":{"latency_ms":%d,"qps":%d,"errors":%d},"message":"request-%d service=%s region=%s","tags":["prod","blue","v2"]}' \
+    "$i" "$region" "$service" "$status" $(((i * 17) % 700 + 10)) \
+    $((i + 1)) $((i % 5)) "$i" "$service" "$region"
+}
+
 generate_fixtures() {
   i=0
   : > "$ndjson_fixture"
   : > "$array_fixture"
   : > "$single_fixture"
+  : > "$cli_ndjson_fixture"
+  : > "$cli_array_fixture"
+  : > "$cli_single_fixture"
   while [ "$i" -lt "$count" ]; do
     record_json "$i" >> "$ndjson_fixture"
     printf '\n' >> "$ndjson_fixture"
+    selection_record_json "$i" >> "$cli_ndjson_fixture"
+    printf '\n' >> "$cli_ndjson_fixture"
     i=$((i + 1))
   done
   printf '[' > "$array_fixture"
+  printf '[' > "$cli_array_fixture"
   i=0
   while [ "$i" -lt "$count" ]; do
     if [ "$i" -ne 0 ]; then
       printf ',' >> "$array_fixture"
+      printf ',' >> "$cli_array_fixture"
     fi
     record_json "$i" >> "$array_fixture"
+    selection_record_json "$i" >> "$cli_array_fixture"
     i=$((i + 1))
   done
   printf ']\n' >> "$array_fixture"
+  printf ']\n' >> "$cli_array_fixture"
   printf '{"records":[' > "$single_fixture"
+  printf '{"records":[' > "$cli_single_fixture"
   i=0
   while [ "$i" -lt "$count" ]; do
     if [ "$i" -ne 0 ]; then
       printf ',' >> "$single_fixture"
+      printf ',' >> "$cli_single_fixture"
     fi
     record_json "$i" >> "$single_fixture"
+    selection_record_json "$i" >> "$cli_single_fixture"
     i=$((i + 1))
   done
   printf ']}\n' >> "$single_fixture"
+  printf ']}\n' >> "$cli_single_fixture"
 }
 
 generate_fixture() {
@@ -184,8 +224,12 @@ generate_fixture() {
   : > "$case_matrix"
   add_dataset_selector_cases "large_ndjson" "$ndjson_fixture" "$count"
   add_dataset_selector_cases "large_array" "$array_fixture" "$count"
+  add_selection_selector_cases "selection_ndjson" "$cli_ndjson_fixture" "$count" ""
+  add_selection_selector_cases "selection_array" "$cli_array_fixture" "$count" ""
   printf '%s %s %s %s %s\n' "large_single_json" "$single_fixture" 1 \
     "records_status_open" '/records[]/status="open"' >> "$case_matrix"
+  add_selection_selector_cases "selection_single_json" "$cli_single_fixture" 1 \
+    "/records[]"
 }
 
 add_dataset_selector_cases() {
@@ -207,6 +251,25 @@ add_dataset_selector_cases() {
       "date_window" 'date{field=/timestamp,after=2026-03-05T10:28:21Z,before=2026-03-05T10:29:50Z}'
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
       "range_qps" 'range{field=/metrics/qps,gte=100,lte=130}'
+  } >> "$case_matrix"
+}
+
+add_selection_selector_cases() {
+  dataset_name=$1
+  fixture_path=$2
+  candidates=$3
+  prefix=$4
+  {
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "and_region_latency" "and.eq{field=$prefix/region,value=us-west},and.range{field=$prefix/metrics/latency_ms,lt=350}"
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "contains_service" "contains{field=$prefix/service,value=auth}"
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "icontains_service" "icontains{field=$prefix/service,value=AUTH}"
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "contains_any_service" "contains{field=$prefix/service,any=auth|search}"
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "icontains_any_service" "icontains{field=$prefix/service,any=AUTH|GATEWAY}"
   } >> "$case_matrix"
 }
 
@@ -328,7 +391,8 @@ fi
 
 if [ "$check" -eq 1 ] && [ "$exit_status" -eq 0 ]; then
   if [ ! -s "$ndjson_fixture" ] || [ ! -s "$array_fixture" ] ||
-    [ ! -s "$single_fixture" ]; then
+    [ ! -s "$single_fixture" ] || [ ! -s "$cli_ndjson_fixture" ] ||
+    [ ! -s "$cli_array_fixture" ] || [ ! -s "$cli_single_fixture" ]; then
     printf 'benchmark check failed: fixture was not generated\n' >&2
     exit_status=1
   elif ! compare_go_c; then

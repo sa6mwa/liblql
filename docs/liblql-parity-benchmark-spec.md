@@ -57,12 +57,16 @@ Current implementation status:
 - `make benchmarks-go` exercises `parity/cmd/lqlbench`, which uses the pinned
   Go module and emits stable JSON Lines without scraping `go test` output.
 - the current executable dataset matrix covers NDJSON, top-level array, and
-  single-root JSON object fixture shapes, with all generated once and shared by
-  Go and C.
+  single-root JSON object fixture shapes for both library-style and CLI-style
+  record forms, with all generated once and shared by Go and C.
 - the current executable selector matrix covers equality, contains,
   `contains.any`, case-insensitive contains, timestamp comparison, date
   window, and numeric range terms over record-stream fixtures, plus nested
   `/records[]/...` selection over the single-root JSON fixture.
+- the current executable CLI-style selector matrix covers grouped
+  equality/range, service contains, service case-insensitive contains, service
+  `contains.any`, service `icontains.any`, and nested `/records[]/...`
+  equivalents over the CLI-style single-root JSON fixture.
 - `make benchmarks-lua` emits an explicit unsupported record until the Lua
   facade benchmark runner exists.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
