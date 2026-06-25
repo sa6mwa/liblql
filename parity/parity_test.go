@@ -315,6 +315,79 @@ func TestCLQLSeekableFileOutputParity(t *testing.T) {
 	}
 }
 
+func TestCLQLSeekableFileProjectionParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []struct {
+		name   string
+		expr   string
+		fields []string
+		body   string
+	}{
+		{
+			name:   "single root field",
+			expr:   `/status="open"`,
+			fields: []string{"/id"},
+			body:   "{\"status\":\"closed\",\"id\":\"a\"}\n{\"status\":\"open\",\"id\":\"b\",\"count\":2}\n",
+		},
+		{
+			name:   "multiple root fields",
+			expr:   `/status="open"`,
+			fields: []string{"/id", "/count"},
+			body:   `[{"status":"closed","id":"a"},{"status":"open","id":"b","count":2}]`,
+		},
+		{
+			name:   "missing root field suppresses output",
+			expr:   `/status="open"`,
+			fields: []string{"/missing"},
+			body:   "{\"status\":\"open\",\"id\":\"a\"}\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sel, err := lql.ParseSelectorString(tc.expr)
+			if err != nil {
+				t.Fatalf("go parse: %v", err)
+			}
+			want, err := goProjectedValues(tc.body, sel, tc.fields)
+			if err != nil {
+				t.Fatalf("go projected values: %v", err)
+			}
+			tmp, err := os.CreateTemp(t.TempDir(), "clql-project-*.json")
+			if err != nil {
+				t.Fatalf("create temp: %v", err)
+			}
+			if _, err := tmp.WriteString(tc.body); err != nil {
+				t.Fatalf("write temp: %v", err)
+			}
+			if err := tmp.Close(); err != nil {
+				t.Fatalf("close temp: %v", err)
+			}
+			args := []string{}
+			for _, field := range tc.fields {
+				args = append(args, "-f", field)
+			}
+			args = append(args, tc.expr, tmp.Name())
+			cmd := exec.Command(clql, args...)
+			out, err := cmd.CombinedOutput()
+			gotMatch := err == nil
+			wantMatch := len(want) != 0
+			if gotMatch != wantMatch {
+				t.Fatalf("clql projection match mismatch: got=%v want=%v err=%v out=%q", gotMatch, wantMatch, err, string(out))
+			}
+			got, err := decodeJSONValues(out)
+			if err != nil {
+				t.Fatalf("decode clql projection output: %v output=%q", err, string(out))
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("clql projection mismatch: got=%#v want=%#v output=%q", got, want, string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
@@ -365,6 +438,55 @@ func TestCLQLSelectorParseErrorParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func goProjectedValues(body string, selector lql.Selector, fields []string) ([]any, error) {
+	paths, err := lql.ParseProjectionPaths(fields)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := lql.NewProjectionPlan(paths)
+	if err != nil {
+		return nil, err
+	}
+	var values []any
+	_, err = lql.QueryStreamWithResult(lql.QueryStreamRequest{
+		Reader:      bytes.NewBufferString(body),
+		Selector:    selector,
+		IncludeJSON: true,
+		MatchedOnly: true,
+		OnValue: func(value lql.QueryStreamValue) error {
+			payload := value.JSON
+			if payload == nil && value.OpenJSON != nil {
+				rc, err := value.OpenJSON()
+				if err != nil {
+					return err
+				}
+				defer rc.Close()
+				payload, err = io.ReadAll(rc)
+				if err != nil {
+					return err
+				}
+			}
+			var out bytes.Buffer
+			result, err := lql.ProjectFields(lql.ProjectFieldsRequest{
+				Reader: bytes.NewReader(payload),
+				Writer: &out,
+				Paths:  paths,
+				Plan:   plan,
+			})
+			if err != nil || !result.Found {
+				return err
+			}
+			decoded, err := decodeJSONValues(out.Bytes())
+			if err != nil {
+				return err
+			}
+			values = append(values, decoded...)
+			return nil
+		},
+	})
+	return values, err
 }
 
 func goMatchedValues(body string, selector lql.Selector) ([]any, error) {

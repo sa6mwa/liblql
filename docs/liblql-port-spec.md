@@ -389,6 +389,8 @@ Current implementation is an early slice:
   and does not materialize candidate payloads or write matched JSON;
 - `clql selector data.json` uses seekable candidate offset/size ranges to
   reread and write matched payloads without full-input materialization;
+- `clql -f/--field selector data.json` supports direct root-field projection
+  on seekable file inputs using lonejson path visiting and writer output;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;
@@ -402,7 +404,8 @@ Current implementation is an early slice:
   duplicate-key validation, and invalid selector invariants;
 - `clql` exists as a minimal selector smoke CLI; default matched-JSON output
   from stdin still uses buffered input until non-seekable plus-value payload
-  handles are implemented;
+  handles are implemented, and projection is limited to direct root fields
+  until the full projection planner lands;
 - Go parity tests exist for the initial selector subset;
 - package archive production is scaffolded, not complete.
 
