@@ -93,10 +93,10 @@ static int add_projection_arg(projection_args *args, const char *path) {
 static lql_status output_match_range(void *user,
                                      const lql_query_decision *decision) {
   output_ranges *ranges;
-  if (!decision->matched) {
+  ranges = (output_ranges *)user;
+  if (!decision->matched && ranges->mutation_plan == NULL) {
     return LQL_STATUS_OK;
   }
-  ranges = (output_ranges *)user;
   if (ranges->mutation_plan != NULL) {
     if (decision->matched) {
       if (lql_mutate_file_range_root_fields(

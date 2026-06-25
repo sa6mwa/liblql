@@ -416,8 +416,9 @@ Current implementation is an early slice:
   `lql_mutate_file_range_root_fields()` for bounded source-backed rewrites of
   root object fields over seekable file ranges; nested paths, wildcards, time
   values, file-backed values, and non-root behavior still return unsupported;
-- `clql -m/--mutate` applies supported root-field mutations to matched seekable
-  file candidates and leaves broader mutation behavior unsupported;
+- `clql -m/--mutate` emits all seekable file candidates in mutation mode,
+  applies supported root-field mutations to matched candidates, and leaves
+  broader mutation behavior unsupported;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;

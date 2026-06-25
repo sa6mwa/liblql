@@ -561,6 +561,50 @@ func TestCLQLRootMutationParity(t *testing.T) {
 	}
 }
 
+func TestCLQLMutationPreservesUnmatchedCandidatesParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"id":"a","status":"open"}
+{"id":"b","status":"open"}`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-stream-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	cmd := exec.Command(
+		clql,
+		"-c",
+		"-m", "/status=done",
+		`/id="b"`,
+		tmp.Name(),
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql mutation passthrough failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql mutation passthrough: %v out=%q", err, string(out))
+	}
+
+	wantBody := `{"id":"a","status":"open"}
+{"id":"b","status":"done"}`
+	want, err := decodeJSONValues([]byte(wantBody))
+	if err != nil {
+		t.Fatalf("decode expected mutation passthrough: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mutation passthrough mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
