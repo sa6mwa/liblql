@@ -1,0 +1,28 @@
+package = "liblql"
+version = "@VERSION@-1"
+
+source = {
+   url = "@LUA_SOURCE_URL@",
+   dir = "liblql-lua-@VERSION@"
+}
+
+description = {
+   summary = "Lua facade for liblql",
+   detailed = [[
+      liblql is a C89 port of pkt.systems/lql. This Lua package currently
+      exposes the repository Lua facade over the public clql executable.
+   ]],
+   homepage = "https://github.com/sa6mwa/liblql",
+   license = "MIT"
+}
+
+dependencies = {
+   "lua >= 5.1"
+}
+
+build = {
+   type = "builtin",
+   modules = {
+      lql = "lua/lql.lua"
+   }
+}

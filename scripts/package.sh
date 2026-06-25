@@ -22,6 +22,8 @@ clean_dist() {
   find "$DIST_DIR" -maxdepth 1 \( \
     -name "${PROJECT}-*.tar.gz" -o \
     -name "${PROJECT}-lua-*.tar.gz" -o \
+    -name "${PROJECT}-*.rockspec" -o \
+    -name "${PROJECT}-*.src.rock" -o \
     -name "${CLI_PROJECT}-*.tar.gz" -o \
     -name "${PROJECT}-*-CHECKSUMS" \) -exec rm -f {} +
 }
@@ -107,17 +109,49 @@ package_lua_source() {
   version_value=$(version)
   work_dir="$ROOT_DIR/build/package/lua-source"
   source_root="$work_dir/${PROJECT}-lua-${version_value}"
-  manifest="$source_root/RELEASE_MANIFEST"
 
   rm -rf "$work_dir"
-  mkdir -p "$source_root/lua" "$source_root/scripts"
-  cp "$ROOT_DIR/LICENSE" "$source_root/LICENSE"
-  cp "$ROOT_DIR/README.md" "$source_root/README.md"
-  cp -R "$ROOT_DIR/lua/." "$source_root/lua/"
-  cp "$ROOT_DIR/scripts/run_lua_tests.sh" "$source_root/scripts/run_lua_tests.sh"
-  printf '%s\n' "$version_value" >"$source_root/VERSION"
-  (cd "$source_root" && find . -type f | sed 's#^\./##' | LC_ALL=C sort) >"$manifest"
+  "$ROOT_DIR/scripts/stage_lua_rock_sources.sh" "$source_root" "$version_value"
   make_tar_gz "$source_root" "$DIST_DIR/${PROJECT}-lua-${version_value}.tar.gz"
+}
+
+package_lua_rockspec() {
+  version_value=$(version)
+  "$ROOT_DIR/scripts/render_release_rockspec.sh" \
+    "$version_value" "$DIST_DIR/${PROJECT}-${version_value}-1.rockspec"
+}
+
+package_lua_source_rock() {
+  version_value=$(version)
+  source_tar="$DIST_DIR/${PROJECT}-lua-${version_value}.tar.gz"
+  release_rockspec="$DIST_DIR/${PROJECT}-${version_value}-1.rockspec"
+  work_dir="$ROOT_DIR/build/package/lua-rock"
+  pack_rockspec="$work_dir/${PROJECT}-${version_value}-1.rockspec"
+  packed_rock="$work_dir/${PROJECT}-${version_value}-1.src.rock"
+  unpack_dir="$work_dir/unpack"
+  out_rock="$DIST_DIR/${PROJECT}-${version_value}-1.src.rock"
+
+  if ! command -v luarocks >/dev/null 2>&1; then
+    printf 'release-lua-artifacts: luarocks executable not found\n' >&2
+    exit 1
+  fi
+  test -f "$source_tar"
+  test -f "$release_rockspec"
+  rm -rf "$work_dir"
+  mkdir -p "$work_dir" "$unpack_dir"
+
+  LQL_ALLOW_LOCAL_LUA_SOURCE_URL=1 \
+  LQL_LUA_SOURCE_URL="file://$source_tar" \
+    "$ROOT_DIR/scripts/render_release_rockspec.sh" "$version_value" "$pack_rockspec"
+  (cd "$work_dir" && luarocks pack "$pack_rockspec" >/dev/null)
+
+  unzip -q "$packed_rock" -d "$unpack_dir"
+  cp "$release_rockspec" "$unpack_dir/${PROJECT}-${version_value}-1.rockspec"
+  test -f "$unpack_dir/${PROJECT}-lua-${version_value}.tar.gz"
+  rm -f "$out_rock"
+  (cd "$unpack_dir" && zip -X -q "$out_rock" \
+    "${PROJECT}-${version_value}-1.rockspec" \
+    "${PROJECT}-lua-${version_value}.tar.gz")
 }
 
 package_all() {
@@ -127,6 +161,8 @@ package_all() {
   done
   package_source
   package_lua_source
+  package_lua_rockspec
+  package_lua_source_rock
   write_checksums
 }
 
@@ -137,7 +173,7 @@ write_checksums() {
   rm -f "$tmp"
   (
     cd "$DIST_DIR"
-    for artifact in "${PROJECT}-${version_value}.tar.gz" "${PROJECT}-lua-${version_value}.tar.gz" "${PROJECT}-${version_value}"-*.tar.gz "${CLI_PROJECT}-${version_value}"-*.tar.gz; do
+    for artifact in "${PROJECT}-${version_value}.tar.gz" "${PROJECT}-lua-${version_value}.tar.gz" "${PROJECT}-${version_value}-1.rockspec" "${PROJECT}-${version_value}-1.src.rock" "${PROJECT}-${version_value}"-*.tar.gz "${CLI_PROJECT}-${version_value}"-*.tar.gz; do
       [ -e "$artifact" ] || continue
       sha256sum "$artifact"
     done
@@ -368,7 +404,12 @@ verify_lua_source_archive() {
   test -f "$root/lua/lql.lua"
   test -f "$root/lua/tests/lql_smoke.lua"
   test -f "$root/lua/benchmarks/parity.lua"
+  test -f "$root/liblql.rockspec.in"
+  test -f "$root/scripts/build_lua_rock.sh"
+  test -f "$root/scripts/release_version.sh"
+  test -f "$root/scripts/render_release_rockspec.sh"
   test -f "$root/scripts/run_lua_tests.sh"
+  test -f "$root/scripts/stage_lua_rock_sources.sh"
   if [ "$(sed -n '1p' "$root/VERSION")" != "$version_value" ]; then
     printf 'package-verify: Lua source VERSION mismatch in %s\n' "$artifact" >&2
     exit 1
@@ -383,6 +424,45 @@ verify_lua_source_archive() {
     printf 'package-verify: Lua source archive contains generated state or C SDK payloads\n' >&2
     exit 1
   fi
+}
+
+verify_one_rockspec() {
+  artifact=$1
+  version_value=$(version)
+
+  test -f "$artifact"
+  grep -qx 'package = "liblql"' "$artifact"
+  grep -qx "version = \"${version_value}-1\"" "$artifact"
+  grep -q "url = \"https://github.com/sa6mwa/liblql/releases/download/v${version_value}/${PROJECT}-lua-${version_value}.tar.gz\"" "$artifact"
+  grep -qx "   dir = \"${PROJECT}-lua-${version_value}\"" "$artifact"
+  if grep -q 'file://' "$artifact"; then
+    printf 'package-verify: release rockspec contains local file URL: %s\n' "$artifact" >&2
+    exit 1
+  fi
+  verify_no_local_paths "$artifact" "$artifact"
+}
+
+verify_one_source_rock() {
+  artifact=$1
+  version_value=$(version)
+  tmp_dir="$ROOT_DIR/build/package-lua-rock-verify"
+  rockspec_name="${PROJECT}-${version_value}-1.rockspec"
+  source_name="${PROJECT}-lua-${version_value}.tar.gz"
+
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+  unzip -q "$artifact" -d "$tmp_dir"
+  test -f "$tmp_dir/$rockspec_name"
+  test -f "$tmp_dir/$source_name"
+  files=$(find "$tmp_dir" -type f | sed "s#^$tmp_dir/##" | LC_ALL=C sort | tr '\n' ' ')
+  if [ "$files" != "$rockspec_name $source_name " ]; then
+    printf 'package-verify: source rock payload mismatch in %s\n' "$artifact" >&2
+    find "$tmp_dir" -type f | sed "s#^$tmp_dir/##" | LC_ALL=C sort >&2
+    exit 1
+  fi
+  verify_one_rockspec "$tmp_dir/$rockspec_name"
+  verify_lua_source_archive "$tmp_dir/$source_name"
+  verify_no_local_paths "$artifact" "$tmp_dir"
 }
 
 verify_one_archive() {
@@ -470,6 +550,8 @@ verify_checksums() {
   while read -r _hash artifact_name; do
     case "$artifact_name" in
       *.tar.gz) verify_one_archive "$DIST_DIR/$artifact_name" ;;
+      *.rockspec) verify_one_rockspec "$DIST_DIR/$artifact_name" ;;
+      *.src.rock) verify_one_source_rock "$DIST_DIR/$artifact_name" ;;
       *) printf 'package-verify: unsupported checksum artifact: %s\n' "$artifact_name" >&2; exit 1 ;;
     esac
   done <"$manifest"
@@ -496,6 +578,8 @@ case "$TARGET" in
   release-lua-artifacts)
     mkdir -p "$DIST_DIR"
     package_lua_source
+    package_lua_rockspec
+    package_lua_source_rock
     write_checksums
     ;;
   package-verify|verify-release-archives|verify-release-privacy)

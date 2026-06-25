@@ -1,4 +1,4 @@
-.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan lua-test bench benchmarks bench-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan lua-rock lua-env lua-test bench benchmarks bench-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -8,13 +8,15 @@ help:
 	  'make parity-test             run Go-backed parity tests' \
 	  'make test-all                run tests, sanitizers, and Lua smoke tests' \
 	  'make asan                    run ASan/UBSan tests' \
+	  'make lua-rock                install Lua facade into build/luarocks' \
+	  'make lua-env                 print Lua facade environment exports' \
 	  'make lua-test                run Lua facade smoke tests' \
 	  'make benchmarks             run local parity benchmark smoke' \
 	  'make bench-check            run deterministic benchmark smoke gate' \
 	  'make benchmarks-parity      require Go/C/Lua benchmark implementations' \
 	  'make format                  clang-format project C sources' \
 	  'make package                 build host package artifacts' \
-	  'make release-lua-artifacts   build standalone Lua source package' \
+	  'make release-lua-artifacts   build Lua source, rockspec, and source rock' \
 	  'make package-verify          verify generated packages' \
 	  'make release-matrix          build release target matrix where toolchains exist' \
 	  'make clean                   remove generated build/dist/cache state'
@@ -51,6 +53,13 @@ asan: deps-debug
 
 lua-test: build-debug
 	@./scripts/run_lua_tests.sh
+
+lua-rock:
+	@./scripts/build_lua_rock.sh
+
+lua-env:
+	@printf 'export LUA_PATH=%s/build/luarocks/share/lua/5.5/?.lua;%s/build/luarocks/share/lua/5.5/?/init.lua;%s/lua/?.lua;%s/lua/?/init.lua;;\n' "$$(pwd)" "$$(pwd)" "$$(pwd)" "$$(pwd)"
+	@printf 'export CLQL_PATH=%s/build/debug/clql\n' "$$(pwd)"
 
 bench benchmarks: build-debug
 	@./scripts/check_parity_benchmark_schema.sh

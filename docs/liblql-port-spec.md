@@ -583,8 +583,7 @@ Current implementation is an early slice:
 - the Lua tree includes an initial CLI-backed facade over public `clql`, with
   deterministic smoke tests for selector decisions, selection output,
   file and buffered-JSON projection, file and buffered-JSON mutation, and
-  structured errors; this is not yet the final Lua C module or Lua release
-  artifact surface;
+  structured errors; this is not yet the final Lua C module;
 - the parity benchmark surface now has Go, C, and Lua runners over the shared
   generated fixture matrix; the Lua runner currently loads `lua/lql.lua`, which
   uses the same CLI-backed facade approach over public `clql`; Go helper
@@ -595,10 +594,13 @@ Current implementation is an early slice:
   pkg-config consumer smokes;
 - standalone Lua source package production now writes
   `dist/liblql-lua-<version>.tar.gz` with `VERSION`, exact
-  `RELEASE_MANIFEST`, Lua sources, tests, benchmark runner, and smoke-test
-  script, and package verification checks layout, manifest exactness, absence
-  of C SDK payloads, and local path privacy; rendered rockspec and `.src.rock`
-  artifacts remain pending;
+  `RELEASE_MANIFEST`, Lua sources, tests, benchmark runner, rockspec template,
+  and Lua release scripts; `make release-lua-artifacts` also renders
+  `dist/liblql-<version>-1.rockspec` with a public release URL and builds
+  `dist/liblql-<version>-1.src.rock` through LuaRocks from the staged source
+  package. Package verification checks checksum coverage, layout, manifest
+  exactness, absence of C SDK payloads, local path privacy, release-safe
+  rockspec URLs, and the nested Lua source package inside the source rock;
 - source archive production exists with injected `VERSION`, `RELEASE_MANIFEST`,
   exact manifest verification, and extracted-tree configure/build/test smoke;
 - host `clql` archive production carries required lonejson runtime libraries
