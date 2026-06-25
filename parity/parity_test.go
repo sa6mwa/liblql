@@ -561,6 +561,73 @@ func TestCLQLRootMutationParity(t *testing.T) {
 	}
 }
 
+func TestCLQLNestedMutationParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"state":{"status":"open","count":1,"old":true},"id":"a"}`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-nested-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	mutations := []string{
+		"/state/status=done",
+		"/state/count++",
+		"rm:/state/old",
+		"/state/missing=value",
+		"/added/nested=ok",
+		"/added/other=2",
+	}
+	args := []string{"-c"}
+	for _, mutation := range mutations {
+		args = append(args, "-m", mutation)
+	}
+	args = append(args, `contains{f=/}`, tmp.Name())
+	cmd := exec.Command(clql, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql nested mutation failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql nested mutation: %v out=%q", err, string(out))
+	}
+
+	doc := map[string]any{
+		"state": map[string]any{
+			"status": "open",
+			"count":  float64(1),
+			"old":    true,
+		},
+		"id": "a",
+	}
+	muts, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatalf("go parse nested mutations: %v", err)
+	}
+	if err := lql.ApplyMutations(doc, muts); err != nil {
+		t.Fatalf("go apply nested mutations: %v", err)
+	}
+	wantBytes, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal go nested mutation result: %v", err)
+	}
+	want, err := decodeJSONValues(wantBytes)
+	if err != nil {
+		t.Fatalf("decode go nested mutation result: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("nested mutation parity mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
 func TestCLQLMutationPreservesUnmatchedCandidatesParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

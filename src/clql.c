@@ -103,9 +103,9 @@ static lql_status output_match_range(void *user,
       return LQL_STATUS_OK;
     }
     if (decision->matched) {
-      if (lql_mutate_file_range_root_fields(
-              ranges->mutation_plan, ranges->source, decision->offset,
-              decision->size, ranges->out, NULL) != LQL_STATUS_OK) {
+      if (lql_mutate_file_range_paths(ranges->mutation_plan, ranges->source,
+                                      decision->offset, decision->size,
+                                      ranges->out, NULL) != LQL_STATUS_OK) {
         return LQL_STATUS_UNSUPPORTED;
       }
     } else if (ranges->compact) {

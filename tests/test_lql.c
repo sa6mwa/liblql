@@ -714,6 +714,69 @@ static void expect_root_field_mutation_api(void) {
   fclose(out);
 }
 
+static void expect_path_mutation_api(void) {
+  FILE *source;
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_mutation_plan *plan;
+  const char *exprs[6];
+  char buf[512];
+  size_t len;
+  static const char doc[] =
+      "{\"state\":{\"status\":\"open\",\"count\":1,\"old\":true},\"id\":\"a\"}";
+
+  source = tmpfile();
+  out = tmpfile();
+  if (source == NULL || out == NULL) {
+    printf("path mutation tmpfile failed\n");
+    if (source != NULL) {
+      fclose(source);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+  if (fwrite(doc, 1u, strlen(doc), source) != strlen(doc)) {
+    printf("path mutation source write failed\n");
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  exprs[0] = "/state/status=done";
+  exprs[1] = "/state/count++";
+  exprs[2] = "rm:/state/old";
+  exprs[3] = "/state/missing=value";
+  exprs[4] = "/added/nested=ok";
+  exprs[5] = "/added/other=2";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(exprs, 6u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("path mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    st = lql_mutate_file_range_paths(plan, source, 0u, (lql_uint64)strlen(doc),
+                                     out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("path mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf, "{\"state\":{\"status\":\"done\",\"count\":2,"
+                           "\"missing\":\"value\"},\"id\":\"a\","
+                           "\"added\":{\"nested\":\"ok\",\"other\":2}}") != 0) {
+      printf("path mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  lql_mutation_plan_free(plan);
+  fclose(source);
+  fclose(out);
+}
+
 int main(void) {
   expect_match("/status=\"open\"", "{\"status\":\"open\"}", 1);
   expect_match("/status=\"closed\"", "{\"status\":\"open\"}", 0);
@@ -892,5 +955,6 @@ int main(void) {
   expect_compact_api();
   expect_mutation_plan_api();
   expect_root_field_mutation_api();
+  expect_path_mutation_api();
   return failures == 0 ? 0 : 1;
 }

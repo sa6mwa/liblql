@@ -412,15 +412,18 @@ Current implementation is an early slice:
 - the initial C mutation API exposes `lql_mutation_plan_parse()`,
   `lql_mutation_plan_count()`, and `lql_mutation_plan_free()` for CLI-style
   mutation parse/plan validation;
-- the initial mutation execution API exposes
+- mutation execution APIs expose
   `lql_mutate_file_range_root_fields()` for bounded source-backed rewrites of
-  root object fields over seekable file ranges; nested paths, wildcards, time
-  values, file-backed values, and non-root behavior still return unsupported;
+  root object fields and `lql_mutate_file_range_paths()` for bounded
+  source-backed rewrites of concrete object/member paths with optional concrete
+  array indexes over seekable file ranges; wildcards, recursive paths, time
+  values, file-backed values, and non-seekable execution still return
+  unsupported;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
-  applies supported root-field mutations to matched candidates, and leaves
-  broader mutation behavior unsupported;
+  applies supported concrete-path mutations to matched candidates, and leaves
+  wildcard, time, file-backed, and non-seekable mutation behavior unsupported;
 - `clql -m -M/--matches-only` emits only matched seekable file candidates after
-  applying supported root-field mutations;
+  applying supported concrete-path mutations;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;

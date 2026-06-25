@@ -123,6 +123,15 @@ lql_status lql_mutate_file_range_root_fields(const lql_mutation_plan *plan,
                                              FILE *file, lql_uint64 offset,
                                              lql_uint64 size, FILE *out,
                                              lql_error *error);
+/* Applies supported concrete-path mutations to one seekable file range.
+   This streams the source through lonejson and never materializes the document.
+   Supported paths are concrete object/member paths with optional concrete array
+   indexes. Wildcards, recursive paths, time values, and file-backed values
+   return LQL_STATUS_UNSUPPORTED. */
+lql_status lql_mutate_file_range_paths(const lql_mutation_plan *plan,
+                                       FILE *file, lql_uint64 offset,
+                                       lql_uint64 size, FILE *out,
+                                       lql_error *error);
 
 char *lql_strdup(const char *text);
 void lql_free(void *ptr);
