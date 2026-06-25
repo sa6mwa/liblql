@@ -630,6 +630,139 @@ static void expect_stream_stop_controls(void) {
   lql_selector_free(selector);
 }
 
+static void expect_stream_error_api(void) {
+  FILE *source;
+  FILE *out;
+  lql_payload payload;
+  lql_error error;
+  lql_status st;
+
+  source = tmpfile();
+  out = tmpfile();
+  if (source == NULL || out == NULL) {
+    printf("stream error tmpfile failed\n");
+    if (source != NULL) {
+      fclose(source);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+
+  lql_error_init(&error);
+  st =
+      lql_query_file_decisions(NULL, NULL, record_decision, NULL, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "file and on_decision are required") != 0) {
+    printf("file decisions NULL file mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_query_file_decisions(NULL, source, NULL, NULL, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "file and on_decision are required") != 0) {
+    printf("file decisions NULL callback mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_query_source_decisions(NULL, NULL, NULL, record_decision, NULL, NULL,
+                                  &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "read and on_decision are required") != 0) {
+    printf("source decisions NULL read mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_query_source_decisions(NULL, read_chunk, NULL, NULL, NULL, NULL,
+                                  &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "read and on_decision are required") != 0) {
+    printf("source decisions NULL callback mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_query_source_spooled_matches(NULL, NULL, NULL, record_payload, NULL,
+                                        NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "read and on_match are required") != 0) {
+    printf("source spooled matches NULL read mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_query_source_spooled_matches(NULL, read_chunk, NULL, NULL, NULL,
+                                        NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "read and on_match are required") != 0) {
+    printf("source spooled matches NULL callback mismatch: %s\n",
+           error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_query_file_matches(NULL, NULL, record_payload, NULL, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "file and on_match are required") != 0) {
+    printf("file matches NULL file mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_query_file_matches(NULL, source, NULL, NULL, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "file and on_match are required") != 0) {
+    printf("file matches NULL callback mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_payload_write_json(NULL, out, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "payload and output file are required") != 0) {
+    printf("payload write NULL payload mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  memset(&payload, 0, sizeof(payload));
+  payload.kind = LQL_PAYLOAD_NONE;
+  lql_error_init(&error);
+  st = lql_payload_write_json(&payload, out, &error);
+  if (st != LQL_STATUS_UNSUPPORTED ||
+      strcmp(error.message, "payload is not a seekable source range") != 0) {
+    printf("payload write unsupported kind mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  payload.kind = LQL_PAYLOAD_SEEKABLE_RANGE;
+  payload.source = NULL;
+  lql_error_init(&error);
+  st = lql_payload_write_json(&payload, out, &error);
+  if (st != LQL_STATUS_UNSUPPORTED ||
+      strcmp(error.message, "payload is not a seekable source range") != 0) {
+    printf("payload write missing source mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  payload.kind = LQL_PAYLOAD_SEEKABLE_RANGE;
+  payload.source = source;
+  lql_error_init(&error);
+  st = lql_payload_write_json(&payload, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "payload and output file are required") != 0) {
+    printf("payload write NULL out mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  fclose(source);
+  fclose(out);
+}
+
 static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len) {
   long end;
   size_t got;
@@ -1971,6 +2104,8 @@ static void expect_sdk_parity_manifest(void) {
       {"streaming", "top-level array candidate streams",
        expect_stream_array_items},
       {"streaming", "stream stop controls", expect_stream_stop_controls},
+      {"streaming", "query and payload public API error contracts",
+       expect_stream_error_api},
       {"streaming", "seekable matched payload ranges",
        expect_seekable_payload_api},
       {"projection", "seekable file-range projection", expect_projection_api},
@@ -2210,6 +2345,7 @@ int main(void) {
   expect_source_spooled_payload_api();
   expect_stream_array_items();
   expect_stream_stop_controls();
+  expect_stream_error_api();
   expect_seekable_payload_api();
   expect_projection_api();
   expect_buffered_projection_api();
