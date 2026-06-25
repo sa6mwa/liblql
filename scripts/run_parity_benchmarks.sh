@@ -448,8 +448,10 @@ run_c_native_mode() {
   c_matches=$(kv_field matches "$record")
   c_payloads=$(kv_field payloads "$record")
   c_payload_bytes=$(kv_field payload_bytes "$record")
+  c_elapsed_ns=$(kv_field elapsed_ns "$record")
   if [ -z "$c_candidates" ] || [ -z "$c_matches" ] ||
-    [ -z "$c_payloads" ] || [ -z "$c_payload_bytes" ]; then
+    [ -z "$c_payloads" ] || [ -z "$c_payload_bytes" ] ||
+    [ -z "$c_elapsed_ns" ]; then
     printf 'C payload benchmark emitted an invalid record: %s\n' "$record" >&2
     return 1
   fi
@@ -474,7 +476,7 @@ run_c_native_mode() {
   esac
   emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
     "$mode" "$bytes" "$c_candidates" \
-    "$c_matches" "$c_payloads" "$c_payload_bytes" "$payload_source_type" null false \
+    "$c_matches" "$c_payloads" "$c_payload_bytes" "$payload_source_type" "$c_elapsed_ns" false \
     "" "$fixture_sha"
 }
 

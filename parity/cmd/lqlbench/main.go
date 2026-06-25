@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"pkt.systems/lql"
 )
@@ -79,9 +80,56 @@ func main() {
 		fmt.Fprintf(os.Stderr, "lqlbench: hash fixture: %v\n", err)
 		os.Exit(1)
 	}
+	payloadSourceType := "none"
+	if isPlusValueMode(mode) {
+		payloadSourceType = "callback_payload"
+	}
+	if submode == "steady_state" {
+		if _, _, _, err := runQuery(file, sel, mode); err != nil {
+			fmt.Fprintf(os.Stderr, "lqlbench: warmup query stream: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	start := time.Now()
+	result, payloads, payloadBytes, err := runQuery(file, sel, mode)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "lqlbench: query stream: %v\n", err)
+		os.Exit(1)
+	}
+	nsPerOp := time.Since(start).Nanoseconds()
+
+	rec := record{
+		Schema:            "liblql.parity_benchmark.v1",
+		Impl:              "go",
+		Dataset:           dataset,
+		Selector:          selectorName,
+		Expr:              expr,
+		Mode:              mode,
+		Submode:           submode,
+		BytesPerIter:      info.Size(),
+		Candidates:        result.CandidatesSeen,
+		Matches:           result.CandidatesMatched,
+		Payloads:          payloads,
+		PayloadBytes:      payloadBytes,
+		PayloadSourceType: payloadSourceType,
+		FixtureSHA256:     fixtureSHA256,
+		NsPerOp:           &nsPerOp,
+		Unsupported:       false,
+		UnsupportedReason: "",
+	}
+	enc := json.NewEncoder(os.Stdout)
+	if err := enc.Encode(rec); err != nil {
+		fmt.Fprintf(os.Stderr, "lqlbench: encode record: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runQuery(file *os.File, sel lql.Selector, mode string) (lql.QueryStreamResult, int64, int64, error) {
+	if _, err := file.Seek(0, 0); err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
 	payloads := int64(0)
 	payloadBytes := int64(0)
-	payloadSourceType := "none"
 	request := lql.QueryStreamRequest{
 		Ctx:      context.Background(),
 		Reader:   file,
@@ -90,14 +138,12 @@ func main() {
 	if isPlanMode(mode) {
 		plan, err := lql.NewQueryStreamPlan(sel)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "lqlbench: compile plan: %v\n", err)
-			os.Exit(1)
+			return lql.QueryStreamResult{}, 0, 0, err
 		}
 		request.Selector = lql.Selector{}
 		request.Plan = plan
 	}
 	if isPlusValueMode(mode) {
-		payloadSourceType = "callback_payload"
 		request.Mode = lql.QueryDecisionPlusValue
 		request.MatchedOnly = true
 		request.CapturePolicy = lql.QueryCaptureMatchesOnlyBestEffort
@@ -125,34 +171,7 @@ func main() {
 		}
 	}
 	result, err := lql.QueryStreamWithResult(request)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "lqlbench: query stream: %v\n", err)
-		os.Exit(1)
-	}
-
-	rec := record{
-		Schema:            "liblql.parity_benchmark.v1",
-		Impl:              "go",
-		Dataset:           dataset,
-		Selector:          selectorName,
-		Expr:              expr,
-		Mode:              mode,
-		Submode:           submode,
-		BytesPerIter:      info.Size(),
-		Candidates:        result.CandidatesSeen,
-		Matches:           result.CandidatesMatched,
-		Payloads:          payloads,
-		PayloadBytes:      payloadBytes,
-		PayloadSourceType: payloadSourceType,
-		FixtureSHA256:     fixtureSHA256,
-		Unsupported:       false,
-		UnsupportedReason: "",
-	}
-	enc := json.NewEncoder(os.Stdout)
-	if err := enc.Encode(rec); err != nil {
-		fmt.Fprintf(os.Stderr, "lqlbench: encode record: %v\n", err)
-		os.Exit(1)
-	}
+	return result, payloads, payloadBytes, err
 }
 
 func isSupportedMode(mode string) bool {

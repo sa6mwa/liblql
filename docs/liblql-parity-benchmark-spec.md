@@ -67,6 +67,8 @@ Current implementation status:
   shared generated fixture.
 - `make benchmarks-go` exercises `parity/cmd/lqlbench`, which uses the pinned
   Go module and emits stable JSON Lines without scraping `go test` output.
+  Go helper records report `ns_per_op`; `steady_state` performs one untimed
+  warmup fixture pass before the measured pass.
 - the current executable dataset matrix covers NDJSON, top-level array, and
   single-root JSON object fixture shapes for both library-style and CLI-style
   record forms, with all generated once and shared by Go, C, and Lua.
@@ -83,9 +85,8 @@ Current implementation status:
   candidate JSON after callback scope.
   The current C plan benchmark reuses the parsed public `lql_selector` handle;
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
-  The current `warmup_included` and `steady_state` records are behavioral
-  parity records with no timing field yet; timing-specific warmup separation
-  remains pending until the benchmark starts reporting `ns_per_op`.
+  The C native payload/plan helper reports `ns_per_op`; shell-mediated C CLI
+  selection records and Lua facade records may still report `null` timing.
 - the current executable CLI-style selector matrix covers grouped
   equality/range, service contains, service case-insensitive contains, service
   `contains.any`, service `icontains.any`, and nested `/records[]/...`

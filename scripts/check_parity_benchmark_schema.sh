@@ -18,3 +18,9 @@ LQL_BENCH_FIXTURE_DIR="$tmp/fixtures" \
   "$root/scripts/run_parity_benchmarks.sh" --impl go,c,lua --format json > "$log"
 
 (cd "$root/parity" && "$go_bin" run ./cmd/benchvalidate) < "$log"
+
+if ! grep -E '"unsupported":false,"unsupported_reason":""' "$log" | \
+  grep -E '"ns_per_op":[0-9]+' >/dev/null; then
+  printf 'benchmark schema check did not find any timed supported records\n' >&2
+  exit 1
+fi

@@ -587,7 +587,8 @@ Current implementation is an early slice:
   artifact surface;
 - the parity benchmark surface now has Go, C, and Lua runners over the shared
   generated fixture matrix; the Lua runner currently loads `lua/lql.lua`, which
-  uses the same CLI-backed facade approach over public `clql`;
+  uses the same CLI-backed facade approach over public `clql`; Go helper
+  records and C native payload/plan helper records now report `ns_per_op`;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and

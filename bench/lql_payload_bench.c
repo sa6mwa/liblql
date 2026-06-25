@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef struct payload_counts {
   lql_uint64 payloads;
@@ -62,6 +63,16 @@ static void print_u64(lql_uint64 value) {
   while (len != 0u) {
     fputc(buf[--len], stdout);
   }
+}
+
+static lql_uint64 elapsed_ns(clock_t start, clock_t end) {
+  double seconds;
+
+  if (end <= start) {
+    return 0u;
+  }
+  seconds = (double)(end - start) / (double)CLOCKS_PER_SEC;
+  return (lql_uint64)(seconds * 1000000000.0);
 }
 
 static lql_status count_payload(void *user, const lql_query_match *match) {
@@ -119,6 +130,8 @@ int main(int argc, char **argv) {
   lql_status st;
   payload_counts counts;
   file_reader reader;
+  clock_t start;
+  clock_t end;
 
   if (argc != 4) {
     fprintf(stderr, "usage: lql_payload_bench MODE SELECTOR FIXTURE\n");
@@ -145,6 +158,7 @@ int main(int argc, char **argv) {
 
   memset(&counts, 0, sizeof(counts));
   memset(&result, 0, sizeof(result));
+  start = clock();
   if (strcmp(mode, "decision_only_plan") == 0) {
     st = lql_query_file_decisions(selector, fixture, observe_decision, NULL,
                                   &result, &error);
@@ -182,6 +196,7 @@ int main(int argc, char **argv) {
     lql_selector_free(selector);
     return 2;
   }
+  end = clock();
   fclose(fixture);
   lql_selector_free(selector);
 
@@ -199,6 +214,8 @@ int main(int argc, char **argv) {
   print_u64(counts.payloads);
   fputs(" payload_bytes=", stdout);
   print_u64(counts.payload_bytes);
+  fputs(" elapsed_ns=", stdout);
+  print_u64(elapsed_ns(start, end));
   fputc('\n', stdout);
   return 0;
 }
