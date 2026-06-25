@@ -394,6 +394,44 @@ func TestCLQLSeekableFileProjectionParity(t *testing.T) {
 	}
 }
 
+func TestCLQLProjectionNonObjectRootParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	paths, err := lql.ParseProjectionPaths([]string{"/id"})
+	if err != nil {
+		t.Fatalf("go parse projection: %v", err)
+	}
+	var projected bytes.Buffer
+	if _, err := lql.ProjectFields(lql.ProjectFieldsRequest{
+		Reader: bytes.NewBufferString(`7`),
+		Writer: &projected,
+		Paths:  paths,
+	}); err == nil {
+		t.Fatalf("go projection unexpectedly accepted scalar root")
+	}
+
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-project-scalar-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString("7\n"); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	cmd := exec.Command(clql, "-f", "/id", "contains{f=/}", tmp.Name())
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("clql projection unexpectedly accepted scalar root: out=%q", string(out))
+	}
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+		t.Fatalf("clql projection scalar exit mismatch: err=%v out=%q", err, string(out))
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

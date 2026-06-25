@@ -309,6 +309,7 @@ static void expect_projection_api(void) {
   const char *root[1];
   const char *index[1];
   const char *conflict[2];
+  const char *root_field[1];
   FILE *source;
   FILE *out;
   lql_projection *projection;
@@ -368,6 +369,28 @@ static void expect_projection_api(void) {
              strcmp(buf, "{\"id\":\"a\",\"nested\":{\"x\":true},\"items\":[null,{\"sku\":\"B\"}]}") != 0) {
     printf("projection output mismatch: %s\n", buf);
     ++failures;
+  }
+  lql_projection_free(projection);
+  fclose(out);
+
+  out = tmpfile();
+  root_field[0] = "/id";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(root_field, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("root field projection parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    found = 0;
+    st = lql_project_file_range(projection, source,
+                                (lql_uint64)(strlen(first) + 1u),
+                                (lql_uint64)strlen(second), out, &found,
+                                &error);
+    if (st != LQL_STATUS_OK) {
+      printf("second object projection failed: %s\n", error.message);
+      ++failures;
+    }
   }
   lql_projection_free(projection);
   fclose(out);
@@ -434,6 +457,46 @@ static void expect_projection_api(void) {
     ++failures;
   }
   fclose(source);
+
+  source = tmpfile();
+  out = tmpfile();
+  if (source == NULL || out == NULL) {
+    printf("projection scalar tmpfile failed\n");
+    if (source != NULL) {
+      fclose(source);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+  if (fwrite("7", 1u, 1u, source) != 1u) {
+    printf("projection scalar write failed\n");
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  root_field[0] = "/id";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(root_field, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("scalar projection parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    found = 0;
+    st = lql_project_file_range(projection, source, 0u, 1u, out, &found,
+                                &error);
+    if (st == LQL_STATUS_OK) {
+      printf("scalar projection unexpectedly succeeded\n");
+      ++failures;
+    }
+  }
+  lql_projection_free(projection);
+  fclose(source);
+  fclose(out);
 }
 
 int main(void) {

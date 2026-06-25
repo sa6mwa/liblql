@@ -37,6 +37,8 @@ typedef struct projection_state {
   int in_number;
   int found;
   int object_started;
+  int root_seen;
+  int root_is_object;
   const projection_path *open_path;
   size_t open_count;
   char *open_kind;
@@ -529,6 +531,10 @@ static lonejson_status on_object_begin(void *user,
   const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
+  if (path != NULL && path->segment_count == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 1;
+  }
   projected_path = selected_path(state->projection, path);
   if (projected_path != NULL && !state->capturing) {
     if (projection_key(state, projected_path) != LONEJSON_STATUS_OK ||
@@ -574,6 +580,10 @@ static lonejson_status on_array_begin(void *user,
   const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
+  if (path != NULL && path->segment_count == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 0;
+  }
   projected_path = selected_path(state->projection, path);
   if (projected_path != NULL && !state->capturing) {
     if (projection_key(state, projected_path) != LONEJSON_STATUS_OK ||
@@ -659,6 +669,10 @@ static lonejson_status on_string_begin(void *user,
   const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
+  if (path != NULL && path->segment_count == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 0;
+  }
   projected_path = selected_path(state->projection, path);
   if (projected_path != NULL && !state->capturing) {
     if (projection_key(state, projected_path) != LONEJSON_STATUS_OK ||
@@ -715,6 +729,10 @@ static lonejson_status on_number_begin(void *user,
   projection_state *state;
   (void)error;
   state = (projection_state *)user;
+  if (path != NULL && path->segment_count == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 0;
+  }
   free(state->num_buf);
   state->num_buf = NULL;
   state->num_len = 0u;
@@ -745,6 +763,10 @@ static lonejson_status on_number_end(void *user,
   const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
+  if (path != NULL && path->segment_count == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 0;
+  }
   projected_path = selected_path(state->projection, path);
   if (projected_path != NULL && !state->capturing &&
       projection_key(state, projected_path) != LONEJSON_STATUS_OK) {
@@ -766,6 +788,10 @@ static lonejson_status on_boolean(void *user, const lonejson_value_path *path,
   const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
+  if (path != NULL && path->segment_count == 0u) {
+    state->root_seen = 1;
+    state->root_is_object = 0;
+  }
   projected_path = selected_path(state->projection, path);
   if (projected_path != NULL && !state->capturing &&
       projection_key(state, projected_path) != LONEJSON_STATUS_OK) {
@@ -914,6 +940,17 @@ lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
   }
   st = lonejson_visit_path_value_reader(runtime, limited_read, &reader,
                                         &visitor, &state, &lj_error);
+  if (st == LONEJSON_STATUS_OK && (!state.root_seen || !state.root_is_object)) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "projection source must be a JSON object");
+    lonejson_writer_cleanup(&state.writer);
+    lonejson_free(runtime);
+    free(state.key_buf);
+    free(state.num_buf);
+    free(state.open_kind);
+    free(state.open_array_next);
+    return LQL_STATUS_JSON_ERROR;
+  }
   if (st == LONEJSON_STATUS_OK && state.object_started) {
     st = close_open_containers(&state, 0u);
   }
