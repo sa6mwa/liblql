@@ -206,6 +206,17 @@ static void close_input_path(FILE *file) {
   }
 }
 
+static int is_regular_file_path(const char *path) {
+  struct stat st;
+  if (path == NULL || strcmp(path, "-") == 0) {
+    return 0;
+  }
+  if (stat(path, &st) != 0) {
+    return 0;
+  }
+  return S_ISREG(st.st_mode) != 0;
+}
+
 static int create_inline_temp(const char *path, char **out_path,
                               FILE **out_file) {
   char *template_path;
@@ -338,6 +349,17 @@ int main(int argc, char **argv) {
         free_projection_args(&mutations);
         return 2;
       }
+    } else if (strcmp(argv[i], "-") == 0) {
+      if (selector_expr == NULL) {
+        selector_expr = argv[i];
+      } else if (input_path == NULL) {
+        input_path = argv[i];
+      } else {
+        usage(stderr);
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        return 2;
+      }
     } else if (argv[i][0] == '-') {
       fprintf(stderr, "clql: unknown option %s\n", argv[i]);
       usage(stderr);
@@ -355,7 +377,27 @@ int main(int argc, char **argv) {
       return 2;
     }
   }
+  if (mutations.count != 0u && selector_expr != NULL && input_path != NULL &&
+      is_regular_file_path(selector_expr)) {
+    fprintf(stderr, "clql: mutation input accepts a single JSON file\n");
+    free_projection_args(&fields);
+    free_projection_args(&mutations);
+    return 2;
+  }
+  if (selector_expr != NULL && input_path == NULL &&
+      strcmp(selector_expr, "-") == 0) {
+    input_path = selector_expr;
+    selector_expr = "";
+  }
+  if (selector_expr != NULL && input_path == NULL &&
+      is_regular_file_path(selector_expr)) {
+    input_path = selector_expr;
+    selector_expr = "";
+  }
   if (selector_expr == NULL) {
+    selector_expr = "";
+  }
+  if (argc == 1) {
     usage(stderr);
     free_projection_args(&fields);
     free_projection_args(&mutations);

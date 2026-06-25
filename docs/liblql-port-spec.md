@@ -397,6 +397,9 @@ Current implementation is an early slice:
   candidate count, bytes read, and callback-requested graceful stop;
 - `clql -M/--matches-only` uses the decision-only streaming path over stdin
   and does not materialize candidate payloads or write matched JSON;
+- `clql` accepts an empty selector for match-all file selection, including the
+  Go-compatible shorthand where a single existing file path is the input rather
+  than selector text;
 - `clql selector data.json` uses seekable candidate offset/size ranges to
   reread and write matched payloads without full-input materialization;
 - `clql -c/--compact selector data.json` compacts matched seekable file ranges
@@ -424,6 +427,8 @@ Current implementation is an early slice:
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path mutations to matched candidates, and leaves
   wildcard, file-backed, and non-seekable mutation behavior unsupported;
+- `clql -m/--mutate` accepts a single file argument with no selector as
+  match-all mutation input and rejects multiple file inputs explicitly;
 - `clql -m -M/--matches-only` emits only matched seekable file candidates after
   applying supported concrete-path mutations;
 - `clql -m -i/--inline` and `clql -m -w/--write` rewrite a single seekable

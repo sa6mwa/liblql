@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -469,6 +470,41 @@ func TestCLQLCompactSelectionParity(t *testing.T) {
 	}
 }
 
+func TestCLQLMatchAllFileSelectionParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"id":"a","status":"open"}
+{"id":"b","status":"closed"}`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-match-all-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	cmd := exec.Command(clql, "-c", tmp.Name())
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql match-all file selection failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql match-all output: %v out=%q", err, string(out))
+	}
+	want, err := decodeJSONValues([]byte(body))
+	if err != nil {
+		t.Fatalf("decode expected match-all output: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("match-all selection mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
 func TestCLQLMutationParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
@@ -498,6 +534,69 @@ func TestCLQLMutationParseErrorParity(t *testing.T) {
 				t.Fatalf("clql mutation parse exit mismatch: err=%v out=%q", err, string(out))
 			}
 		})
+	}
+}
+
+func TestCLQLMatchAllMutationFileParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"id":"a","status":"open"}
+{"id":"b","status":"open"}`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-all-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	cmd := exec.Command(clql, "-c", "-m", "/status=done", tmp.Name())
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql match-all mutation failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql match-all mutation: %v out=%q", err, string(out))
+	}
+	want, err := decodeJSONValues([]byte(`{"id":"a","status":"done"}
+{"id":"b","status":"done"}`))
+	if err != nil {
+		t.Fatalf("decode expected match-all mutation: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("match-all mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
+func TestCLQLMutationRejectsMultipleInputFiles(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	dir := t.TempDir()
+	fileA := filepath.Join(dir, "a.json")
+	fileB := filepath.Join(dir, "b.json")
+	if err := os.WriteFile(fileA, []byte(`{"id":"a"}`), 0600); err != nil {
+		t.Fatalf("write file A: %v", err)
+	}
+	if err := os.WriteFile(fileB, []byte(`{"id":"b"}`), 0600); err != nil {
+		t.Fatalf("write file B: %v", err)
+	}
+	cmd := exec.Command(clql, "-m", "/status=done", fileA, fileB)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("multiple mutation input files unexpectedly succeeded: out=%q", string(out))
+	}
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
+		t.Fatalf("multiple mutation input exit mismatch: err=%v out=%q", err, string(out))
+	}
+	if !bytes.Contains(out, []byte("mutation input accepts a single JSON file")) {
+		t.Fatalf("multiple mutation input error mismatch: out=%q", string(out))
 	}
 }
 
