@@ -17,10 +17,12 @@ through `lql_mutation_plan`, and supported concrete-path mutations including
 Go-compatible numeric child handling under arrays and time normalization can be
 applied to seekable file ranges without full-document materialization. `clql`
 also supports seekable-file inline/write mutation through a temp-file rename.
+The same supported streaming mutation subset can run over non-seekable stdin
+through callback-scoped spooled candidate payloads.
 `file:`, `textfile:`, and `base64file:` mutation values can be parsed through
 the opt-in parse options and `clql -F`, and execute through source-backed
-lonejson writers. Non-seekable mutation, Lua parity, and full `clql` parity
-are still active porting work.
+lonejson writers. Lua parity and full `clql` parity are still active porting
+work.
 
 ```sh
 make deps-debug

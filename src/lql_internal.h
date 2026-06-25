@@ -94,15 +94,16 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
                               const lql_query_options *options,
                               lql_query_decision_fn on_decision, void *user,
                               lql_query_result *out_result, lql_error *error);
-lql_status lql_eval_query_file_spooled_matches(const lql_selector *selector,
-                                               FILE *file, FILE *out,
-                                               int compact,
-                                               const lql_projection *projection,
-                                               lql_query_result *out_result,
-                                               lql_error *error);
+lql_status lql_eval_query_file_spooled_matches(
+    const lql_selector *selector, FILE *file, FILE *out, int compact,
+    const lql_projection *projection, const lql_mutation_plan *mutation_plan,
+    int matches_only, lql_query_result *out_result, lql_error *error);
 lql_status lql_project_spooled(const lql_projection *projection,
                                const lonejson_spooled *spooled, FILE *out,
                                int *out_found, lql_error *error);
+lql_status lql_mutate_spooled_paths(const lql_mutation_plan *plan,
+                                    const lonejson_spooled *spooled, FILE *out,
+                                    lql_error *error);
 int lql_parse_temporal_literal(const char *raw, lql_temporal *out);
 int lql_temporal_compare(const lql_temporal *left, const lql_temporal *right);
 int lql_temporal_equal(const lql_temporal *left, const lql_temporal *right);

@@ -547,19 +547,10 @@ int main(int argc, char **argv) {
     }
     return ranges.matched == 0u ? 1 : 0;
   }
-  if (mutation_plan != NULL) {
-    fprintf(stderr,
-            "clql: mutation execution requires a seekable input file\n");
-    lql_selector_free(selector);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    return 2;
-  }
   memset(&result, 0, sizeof(result));
   st = lql_eval_query_file_spooled_matches(selector, stdin, stdout, compact,
-                                           projection, &result, &error);
+                                           projection, mutation_plan,
+                                           matches_only, &result, &error);
   lql_selector_free(selector);
   lql_mutation_plan_free(mutation_plan);
   lql_projection_free(projection);

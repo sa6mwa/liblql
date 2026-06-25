@@ -449,8 +449,11 @@ Current implementation is an early slice:
   values; non-seekable execution still returns unsupported;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path, existing-position wildcard, and
-  existing-position recursive mutations to matched candidates, and leaves
-  non-seekable mutation behavior unsupported;
+  existing-position recursive mutations to matched candidates;
+- `clql -m/--mutate selector < data.json` applies the same supported streaming
+  mutation subset to matched non-seekable stdin candidates through
+  callback-scoped spooled payloads, preserves unmatched candidates by default,
+  and honors `-M/--matches-only` without materializing the full input stream;
 - `clql -m/--mutate` accepts a single file argument with no selector as
   match-all mutation input and rejects multiple file inputs explicitly;
 - `clql -F/--enable-file-mutations` opts into parsing file-backed mutation
@@ -472,10 +475,8 @@ Current implementation is an early slice:
   `date.since` macros are implemented;
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, and invalid selector invariants;
-- `clql` exists as a selector/projection/mutation smoke CLI; projection path
-  behavior is still being expanded toward full parity, and mutation over
-  non-seekable stdin remains unsupported until its streaming composition is
-  implemented without hidden full-candidate materialization;
+- `clql` exists as a selector/projection/mutation smoke CLI; projection and
+  mutation path behavior are still being expanded toward full parity;
 - Go parity tests exist for the initial selector subset;
 - package archive production is scaffolded, not complete.
 

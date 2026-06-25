@@ -1237,6 +1237,39 @@ func TestCLQLMutationPreservesUnmatchedCandidatesParity(t *testing.T) {
 	}
 }
 
+func TestCLQLStdinMutationParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"id":"a","status":"open"}
+{"id":"b","status":"open"}`
+	cmd := exec.Command(
+		clql,
+		"-c",
+		"-m", "/status=done",
+		`/id="b"`,
+	)
+	cmd.Stdin = bytes.NewBufferString(body)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql stdin mutation failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql stdin mutation: %v out=%q", err, string(out))
+	}
+
+	want, err := decodeJSONValues([]byte(`{"id":"a","status":"open"}
+{"id":"b","status":"done"}`))
+	if err != nil {
+		t.Fatalf("decode expected stdin mutation: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("stdin mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
 func TestCLQLMutationMatchesOnlyParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
@@ -1276,6 +1309,38 @@ func TestCLQLMutationMatchesOnlyParity(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("mutation matches-only mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
+func TestCLQLStdinMutationMatchesOnlyParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"id":"a","status":"open"}
+{"id":"b","status":"open"}`
+	cmd := exec.Command(
+		clql,
+		"-c",
+		"-M",
+		"-m", "/status=done",
+		`/id="b"`,
+	)
+	cmd.Stdin = bytes.NewBufferString(body)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql stdin mutation matches-only failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql stdin mutation matches-only: %v out=%q", err, string(out))
+	}
+	want, err := decodeJSONValues([]byte(`{"id":"b","status":"done"}`))
+	if err != nil {
+		t.Fatalf("decode expected stdin mutation matches-only: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("stdin mutation matches-only mismatch: got=%#v want=%#v out=%q", got, want, string(out))
 	}
 }
 

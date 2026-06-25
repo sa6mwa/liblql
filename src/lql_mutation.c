@@ -363,13 +363,18 @@ static lonejson_read_result limited_read(void *user, unsigned char *buffer,
                                                   : (size_t)reader->remaining;
   result.bytes_read = fread(buffer, 1u, want, reader->file);
   reader->remaining -= (lql_uint64)result.bytes_read;
-  if (result.bytes_read != want && ferror(reader->file)) {
+  if (result.bytes_read != want) {
     result.error_code = 1;
   }
   if (reader->remaining == 0u) {
     result.eof = 1;
   }
   return result;
+}
+
+static lonejson_read_result spooled_read(void *user, unsigned char *buffer,
+                                         size_t capacity) {
+  return lonejson_spooled_read((lonejson_spooled *)user, buffer, capacity);
 }
 
 static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
@@ -2231,27 +2236,20 @@ static void init_mutation_visitor(lonejson_path_value_visitor *visitor) {
   visitor->null_value = mutation_null;
 }
 
-static lql_status
-mutate_file_range_with_supported_plan(const lql_mutation_plan *plan, FILE *file,
-                                      lql_uint64 offset, lql_uint64 size,
-                                      FILE *out, lql_error *error) {
+static lql_status mutate_reader_with_supported_plan(
+    const lql_mutation_plan *plan, lonejson_reader_fn reader_fn,
+    void *reader_user, FILE *out, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
   lonejson_status st;
-  limited_file_reader reader;
   mutation_stream_state state;
   size_t i;
 
-  if (plan == NULL || file == NULL || out == NULL) {
+  if (plan == NULL || reader_fn == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "plan, file, and out are required");
+                  "plan, reader, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
-  }
-  if (!seek_u64(file, offset)) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                  "failed to seek mutation source range");
-    return LQL_STATUS_JSON_ERROR;
   }
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
@@ -2279,9 +2277,7 @@ mutate_file_range_with_supported_plan(const lql_mutation_plan *plan, FILE *file,
     return LQL_STATUS_JSON_ERROR;
   }
   init_mutation_visitor(&visitor);
-  reader.file = file;
-  reader.remaining = size;
-  st = lonejson_visit_path_value_reader(runtime, limited_read, &reader,
+  st = lonejson_visit_path_value_reader(runtime, reader_fn, reader_user,
                                         &visitor, &state, &lj_error);
   if (st == LONEJSON_STATUS_OK && (!state.root_seen || !state.root_is_object)) {
     st = LONEJSON_STATUS_CALLBACK_FAILED;
@@ -2318,6 +2314,27 @@ mutate_file_range_with_supported_plan(const lql_mutation_plan *plan, FILE *file,
   return LQL_STATUS_OK;
 }
 
+static lql_status
+mutate_file_range_with_supported_plan(const lql_mutation_plan *plan, FILE *file,
+                                      lql_uint64 offset, lql_uint64 size,
+                                      FILE *out, lql_error *error) {
+  limited_file_reader reader;
+  if (file == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "mutation file is required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (!seek_u64(file, offset)) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to seek mutation source range");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  reader.file = file;
+  reader.remaining = size;
+  return mutate_reader_with_supported_plan(plan, limited_read, &reader, out,
+                                           error);
+}
+
 lql_status lql_mutate_file_range_root_fields(const lql_mutation_plan *plan,
                                              FILE *file, lql_uint64 offset,
                                              lql_uint64 size, FILE *out,
@@ -2352,4 +2369,24 @@ lql_status lql_mutate_file_range_paths(const lql_mutation_plan *plan,
   }
   return mutate_file_range_with_supported_plan(plan, file, offset, size, out,
                                                error);
+}
+
+lql_status lql_mutate_spooled_paths(const lql_mutation_plan *plan,
+                                    const lonejson_spooled *spooled, FILE *out,
+                                    lql_error *error) {
+  lonejson_spooled cursor;
+  if (plan == NULL || spooled == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "plan, spooled payload, and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (!mutation_plan_supports_stream_paths(plan)) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "mutation plan requires unsupported path behavior");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  cursor = *spooled;
+  cursor.read_offset = 0u;
+  return mutate_reader_with_supported_plan(plan, spooled_read, &cursor, out,
+                                           error);
 }
