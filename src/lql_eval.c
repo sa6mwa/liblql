@@ -292,6 +292,11 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     break;
   case LQL_NODE_CONTAINS:
   case LQL_NODE_ICONTAINS:
+    if (node->term.any_count == 0u && !node->term.value_set &&
+        node->term.value == NULL) {
+      doc->hits[node->hit_index] = 1u;
+      break;
+    }
     if (is_container) {
       break;
     }
@@ -314,6 +319,10 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     break;
   case LQL_NODE_PREFIX:
   case LQL_NODE_IPREFIX:
+    if (!node->term.value_set && node->term.value == NULL) {
+      doc->hits[node->hit_index] = 1u;
+      break;
+    }
     if (is_container) {
       break;
     }

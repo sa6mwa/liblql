@@ -192,6 +192,12 @@ int main(void) {
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":21}", 0);
   expect_match("contains{field=/message,value=timeout}",
                "{\"message\":\"upstream timeout\"}", 1);
+  expect_match("contains{field=/metadata}", "{\"metadata\":{\"etag\":\"x\"}}",
+               1);
+  expect_match("contains{field=/missing}", "{\"metadata\":{\"etag\":\"x\"}}",
+               0);
+  expect_match("contains{field=/metadata,value=\"\"}",
+               "{\"metadata\":{\"etag\":\"x\"}}", 0);
   expect_match("contains{field=/message,value=TIMEOUT,ignoreCase=true}",
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("contains{field=/message,value=TIMEOUT,ic=f}",
@@ -206,6 +212,12 @@ int main(void) {
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("prefix{field=/service,value=auth}",
                "{\"service\":\"auth-api\"}", 1);
+  expect_match("prefix{field=/metadata}", "{\"metadata\":{\"etag\":\"x\"}}",
+               1);
+  expect_match("iprefix{field=/metadata}", "{\"metadata\":{\"etag\":\"x\"}}",
+               1);
+  expect_match("prefix{field=/metadata,value=\"\"}",
+               "{\"metadata\":{\"etag\":\"x\"}}", 0);
   expect_match("prefix{field=/service,value=AUTH,ic=t}",
                "{\"service\":\"auth-api\"}", 1);
   expect_match("in{field=/env,any=prod|stage}", "{\"env\":\"prod\"}", 1);

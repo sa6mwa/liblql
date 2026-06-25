@@ -389,7 +389,8 @@ Current implementation is an early slice:
 - first C selector parse/evaluate subset exists, including
   `contains.any`, `icontains.any`, `in.any`, wildcard selector paths, and
   bracket-sugar array paths, string-term `ignoreCase`/`ic` flags, and
-  multi-bound numeric ranges;
+  multi-bound numeric ranges, with omitted string-term values treated as path
+  assertions;
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, and invalid selector invariants;
 - `clql` exists as a minimal selector smoke CLI;
