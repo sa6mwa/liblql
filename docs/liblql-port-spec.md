@@ -399,12 +399,16 @@ Current implementation is an early slice:
   and does not materialize candidate payloads or write matched JSON;
 - `clql selector data.json` uses seekable candidate offset/size ranges to
   reread and write matched payloads without full-input materialization;
+- `clql -c/--compact selector data.json` compacts matched seekable file ranges
+  through lonejson without candidate materialization;
 - `clql -f/--field selector data.json` supports root, nested object-field,
   and array-index projection on seekable file inputs using the public
   projection API, lonejson path visiting, and writer output;
 - the initial C projection API exposes `lql_projection_parse()` and
   `lql_project_file_range()` for object and array-index paths over seekable
   file ranges;
+- the initial C compact API exposes `lql_compact_file_range()` for streaming
+  seekable ranges and `lql_compact_json()` for explicitly buffered JSON values;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;

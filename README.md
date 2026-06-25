@@ -7,9 +7,11 @@ stream-aware JSON operations.
 Current implementation status: repository lifecycle, the first selector
 parse/evaluate slice, a decision-only `FILE *` candidate stream with stop
 controls, 64-bit lonejson candidate ranges, and object/array `clql -f`
-projection for seekable files are in place. Object and array-index projection
-are also exposed through the initial `lql_projection` C API. Payload handles,
-mutation, and full `clql` parity are still active porting work.
+projection plus `clql -c` compact output for seekable files are in place.
+Object and array-index projection are also exposed through the initial
+`lql_projection` C API, and compact range helpers are exposed for seekable and
+explicitly buffered JSON values. Payload handles, mutation, and full `clql`
+parity are still active porting work.
 
 ```sh
 make deps-debug

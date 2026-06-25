@@ -432,6 +432,43 @@ func TestCLQLProjectionNonObjectRootParity(t *testing.T) {
 	}
 }
 
+func TestCLQLCompactSelectionParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `[
+  { "id" : "a", "items" : [ { "sku" : "A" } ] },
+  { "id" : "b", "items" : [ { "sku" : "B" } ] }
+]`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-compact-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+
+	cmd := exec.Command(clql, "-c", `/items[]/sku="B"`, tmp.Name())
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql compact selection failed: %v out=%q", err, string(out))
+	}
+	if string(out) != "{\"id\":\"b\",\"items\":[{\"sku\":\"B\"}]}\n" {
+		t.Fatalf("compact output mismatch: %q", string(out))
+	}
+	values, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode compact output: %v", err)
+	}
+	if len(values) != 1 {
+		t.Fatalf("expected one compact value, got %d", len(values))
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

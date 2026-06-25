@@ -100,6 +100,13 @@ void lql_projection_free(lql_projection *projection);
 lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
                                   lql_uint64 offset, lql_uint64 size, FILE *out,
                                   int *out_found, lql_error *error);
+/* Compacts one seekable file range to out by streaming it through lonejson.
+   The caller owns file positioning before and after the call. */
+lql_status lql_compact_file_range(FILE *file, lql_uint64 offset,
+                                  lql_uint64 size, FILE *out, lql_error *error);
+/* Compacts one in-memory JSON value to out. */
+lql_status lql_compact_json(const char *json, size_t json_len, FILE *out,
+                            lql_error *error);
 
 char *lql_strdup(const char *text);
 void lql_free(void *ptr);

@@ -25,6 +25,7 @@ typedef struct output_ranges {
   FILE *source;
   FILE *out;
   const lql_projection *projection;
+  int compact;
   lql_uint64 matched;
 } output_ranges;
 
@@ -106,9 +107,17 @@ static lql_status output_match_range(void *user,
       return LQL_STATUS_OK;
     }
   } else {
-    if (!seek_u64(ranges->source, decision->offset) ||
-        !copy_range(ranges->source, ranges->out, decision->size)) {
-      return LQL_STATUS_JSON_ERROR;
+    if (ranges->compact) {
+      if (lql_compact_file_range(ranges->source, decision->offset,
+                                 decision->size, ranges->out,
+                                 NULL) != LQL_STATUS_OK) {
+        return LQL_STATUS_JSON_ERROR;
+      }
+    } else {
+      if (!seek_u64(ranges->source, decision->offset) ||
+          !copy_range(ranges->source, ranges->out, decision->size)) {
+        return LQL_STATUS_JSON_ERROR;
+      }
     }
   }
   if (fputc('\n', ranges->out) == EOF) {
@@ -171,10 +180,10 @@ static void close_input_path(FILE *file) {
 }
 
 static void usage(FILE *out) {
-  fprintf(out, "usage: clql [--or|-O] [-f field] [--matches-only|-M] selector "
-               "[data.json]\n");
-  fprintf(out,
-          "       clql [--or|-O] [--matches-only|-M] selector < data.json\n");
+  fprintf(out, "usage: clql [--or|-O] [-c] [-f field] [--matches-only|-M] "
+               "selector [data.json]\n");
+  fprintf(out, "       clql [--or|-O] [-c] [--matches-only|-M] selector < "
+               "data.json\n");
   fprintf(out, "       clql --version\n");
 }
 
@@ -190,6 +199,7 @@ int main(int argc, char **argv) {
   int matched;
   int matches_only;
   int or_mode;
+  int compact;
   int i;
   projection_args fields;
   lql_projection *projection;
@@ -202,6 +212,7 @@ int main(int argc, char **argv) {
   projection = NULL;
   or_mode = 0;
   matches_only = 0;
+  compact = 0;
   selector_expr = NULL;
   input_path = NULL;
   for (i = 1; i < argc; ++i) {
@@ -220,6 +231,9 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--matches-only") == 0 ||
                strcmp(argv[i], "-M") == 0) {
       matches_only = 1;
+    } else if (strcmp(argv[i], "--compact") == 0 ||
+               strcmp(argv[i], "-c") == 0) {
+      compact = 1;
     } else if (strcmp(argv[i], "--field") == 0 || strcmp(argv[i], "-f") == 0) {
       if (i + 1 >= argc || !add_projection_arg(&fields, argv[++i])) {
         fprintf(stderr, "clql: failed to record field path\n");
@@ -310,6 +324,7 @@ int main(int argc, char **argv) {
     ranges.source = range_source;
     ranges.out = stdout;
     ranges.projection = projection;
+    ranges.compact = compact;
     st = lql_query_file_decisions(selector, input, output_match_range, &ranges,
                                   &result, &error);
     close_input_path(input);
@@ -348,9 +363,22 @@ int main(int argc, char **argv) {
     return 1;
   }
   if (matched) {
-    fwrite(json, 1u, json_len, stdout);
-    if (json_len == 0u || json[json_len - 1u] != '\n') {
+    if (compact) {
+      st = lql_compact_json(json, json_len, stdout, &error);
+      if (st != LQL_STATUS_OK) {
+        fprintf(stderr, "clql: %s\n", error.message);
+        free(json);
+        lql_selector_free(selector);
+        lql_projection_free(projection);
+        free_projection_args(&fields);
+        return 1;
+      }
       fputc('\n', stdout);
+    } else {
+      fwrite(json, 1u, json_len, stdout);
+      if (json_len == 0u || json[json_len - 1u] != '\n') {
+        fputc('\n', stdout);
+      }
     }
   }
   free(json);

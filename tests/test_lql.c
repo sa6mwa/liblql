@@ -523,6 +523,76 @@ static void expect_projection_api(void) {
   fclose(out);
 }
 
+static void expect_compact_api(void) {
+  FILE *source;
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  char buf[256];
+  size_t len;
+  static const char first[] = "{\n  \"id\" : \"a\",\n  \"items\" : [ 1, 2 ]\n}";
+  static const char second[] = "{ \"id\" : \"b\" }";
+
+  source = tmpfile();
+  out = tmpfile();
+  if (source == NULL || out == NULL) {
+    printf("compact tmpfile failed\n");
+    if (source != NULL) {
+      fclose(source);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+  if (fwrite(first, 1u, strlen(first), source) != strlen(first) ||
+      fputc('\n', source) == EOF ||
+      fwrite(second, 1u, strlen(second), source) != strlen(second)) {
+    printf("compact source write failed\n");
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  lql_error_init(&error);
+  st = lql_compact_file_range(source, 0u, (lql_uint64)strlen(first), out,
+                              &error);
+  if (st != LQL_STATUS_OK) {
+    printf("compact file range failed: %s\n", error.message);
+    ++failures;
+  } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+             strcmp(buf, "{\"id\":\"a\",\"items\":[1,2]}") != 0) {
+    printf("compact file output mismatch: %s\n", buf);
+    ++failures;
+  }
+  fclose(out);
+
+  out = tmpfile();
+  lql_error_init(&error);
+  st = lql_compact_json("{ \"ok\" : true }", strlen("{ \"ok\" : true }"), out,
+                        &error);
+  if (st != LQL_STATUS_OK) {
+    printf("compact buffer failed: %s\n", error.message);
+    ++failures;
+  } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+             strcmp(buf, "{\"ok\":true}") != 0) {
+    printf("compact buffer output mismatch: %s\n", buf);
+    ++failures;
+  }
+  fclose(out);
+
+  out = tmpfile();
+  lql_error_init(&error);
+  st = lql_compact_file_range(source, 0u, (lql_uint64)3, out, &error);
+  if (st != LQL_STATUS_JSON_ERROR) {
+    printf("compact invalid range unexpectedly succeeded\n");
+    ++failures;
+  }
+  fclose(source);
+  fclose(out);
+}
+
 int main(void) {
   expect_match("/status=\"open\"", "{\"status\":\"open\"}", 1);
   expect_match("/status=\"closed\"", "{\"status\":\"open\"}", 0);
@@ -698,5 +768,6 @@ int main(void) {
   expect_stream_array_items();
   expect_stream_stop_controls();
   expect_projection_api();
+  expect_compact_api();
   return failures == 0 ? 0 : 1;
 }

@@ -974,3 +974,85 @@ lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
   }
   return LQL_STATUS_OK;
 }
+
+lql_status lql_compact_file_range(FILE *file, lql_uint64 offset,
+                                  lql_uint64 size, FILE *out,
+                                  lql_error *error) {
+  lonejson *runtime;
+  lonejson_error lj_error;
+  lonejson_writer writer;
+  limited_file_reader reader;
+  lonejson_status st;
+
+  if (file == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "file and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (!seek_u64(file, offset)) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to seek compact source range");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  runtime = lonejson_new(NULL, &lj_error);
+  if (runtime == NULL) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (lonejson_writer_init_sink(runtime, &writer, file_sink, out, &lj_error) !=
+      LONEJSON_STATUS_OK) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    lonejson_free(runtime);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  reader.file = file;
+  reader.remaining = size;
+  st = lonejson_writer_json_value_reader(&writer, limited_read, &reader,
+                                         &lj_error);
+  if (st == LONEJSON_STATUS_OK) {
+    st = lonejson_writer_finish(&writer, &lj_error);
+  }
+  lonejson_writer_cleanup(&writer);
+  lonejson_free(runtime);
+  if (st != LONEJSON_STATUS_OK) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  return LQL_STATUS_OK;
+}
+
+lql_status lql_compact_json(const char *json, size_t json_len, FILE *out,
+                            lql_error *error) {
+  lonejson *runtime;
+  lonejson_error lj_error;
+  lonejson_writer writer;
+  lonejson_status st;
+
+  if (json == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "json and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  runtime = lonejson_new(NULL, &lj_error);
+  if (runtime == NULL) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (lonejson_writer_init_sink(runtime, &writer, file_sink, out, &lj_error) !=
+      LONEJSON_STATUS_OK) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    lonejson_free(runtime);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  st = lonejson_writer_json_value_buffer(&writer, json, json_len, &lj_error);
+  if (st == LONEJSON_STATUS_OK) {
+    st = lonejson_writer_finish(&writer, &lj_error);
+  }
+  lonejson_writer_cleanup(&writer);
+  lonejson_free(runtime);
+  if (st != LONEJSON_STATUS_OK) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  return LQL_STATUS_OK;
+}
