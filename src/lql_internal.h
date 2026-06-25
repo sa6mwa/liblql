@@ -94,6 +94,7 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
                               lql_query_result *out_result, lql_error *error);
 lql_status lql_eval_query_file_spooled_matches(const lql_selector *selector,
                                                FILE *file, FILE *out,
+                                               int compact,
                                                lql_query_result *out_result,
                                                lql_error *error);
 int lql_parse_temporal_literal(const char *raw, lql_temporal *out);

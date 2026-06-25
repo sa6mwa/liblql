@@ -567,8 +567,8 @@ int main(int argc, char **argv) {
     return 2;
   }
   memset(&result, 0, sizeof(result));
-  st = lql_eval_query_file_spooled_matches(selector, stdin, stdout, &result,
-                                           &error);
+  st = lql_eval_query_file_spooled_matches(selector, stdin, stdout, compact,
+                                           &result, &error);
   lql_selector_free(selector);
   lql_mutation_plan_free(mutation_plan);
   lql_projection_free(projection);
@@ -578,6 +578,5 @@ int main(int argc, char **argv) {
     fprintf(stderr, "clql: %s\n", error.message);
     return 1;
   }
-  (void)compact;
   return result.candidates_matched == 0u ? 1 : 0;
 }

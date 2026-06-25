@@ -408,6 +408,9 @@ Current implementation is an early slice:
   through lonejson candidate parsing with callback-scoped spooled candidate
   payloads, so it no longer reads the complete stdin stream into memory before
   deciding matches;
+- `clql -c/--compact selector < data.json` compacts matched non-seekable stdin
+  candidates by streaming callback-scoped spooled payloads back through
+  lonejson rather than materializing complete candidates in liblql;
 - `clql` accepts an empty selector for match-all file selection, including the
   Go-compatible shorthand where a single existing file path is the input rather
   than selector text;

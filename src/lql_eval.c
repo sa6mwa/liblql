@@ -588,6 +588,8 @@ typedef struct query_stream_state {
 typedef struct spooled_match_state {
   const lql_selector *selector;
   FILE *out;
+  int compact;
+  lonejson *compact_runtime;
   lql_query_result result;
   eval_doc doc;
 } spooled_match_state;
@@ -684,16 +686,45 @@ static lonejson_candidate_callback_result
 on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
                          lonejson_error *error) {
   spooled_match_state *state = (spooled_match_state *)user;
+  lonejson_writer writer;
+  lonejson_status write_status;
+  int writer_initialized;
   int matched;
+  write_status = LONEJSON_STATUS_OK;
+  writer_initialized = 0;
   matched = state->selector == NULL ||
             state->selector->root.kind == LQL_NODE_ALL ||
             eval_node(&state->selector->root, &state->doc);
   if (matched) {
-    if (candidate->payload_spool == NULL ||
-        lonejson_spooled_write_to_sink(candidate->payload_spool, file_sink,
-                                       state->out,
-                                       error) != LONEJSON_STATUS_OK ||
-        fputc('\n', state->out) == EOF) {
+    if (candidate->payload_spool == NULL) {
+      reset_doc(&state->doc);
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+    if (state->compact) {
+      write_status = lonejson_writer_init_sink(state->compact_runtime, &writer,
+                                               file_sink, state->out, error);
+      if (write_status == LONEJSON_STATUS_OK) {
+        writer_initialized = 1;
+        write_status = lonejson_writer_json_value_spooled(
+            &writer, candidate->payload_spool, error);
+      }
+      if (write_status == LONEJSON_STATUS_OK) {
+        write_status = lonejson_writer_finish(&writer, error);
+      }
+      if (writer_initialized) {
+        lonejson_writer_cleanup(&writer);
+      }
+      if (write_status != LONEJSON_STATUS_OK) {
+        reset_doc(&state->doc);
+        return LONEJSON_CANDIDATE_ERROR;
+      }
+    } else if (lonejson_spooled_write_to_sink(candidate->payload_spool,
+                                              file_sink, state->out,
+                                              error) != LONEJSON_STATUS_OK) {
+      reset_doc(&state->doc);
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+    if (fputc('\n', state->out) == EOF) {
       reset_doc(&state->doc);
       return LONEJSON_CANDIDATE_ERROR;
     }
@@ -799,6 +830,7 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
 
 lql_status lql_eval_query_file_spooled_matches(const lql_selector *selector,
                                                FILE *file, FILE *out,
+                                               int compact,
                                                lql_query_result *out_result,
                                                lql_error *error) {
   lonejson *runtime;
@@ -816,6 +848,7 @@ lql_status lql_eval_query_file_spooled_matches(const lql_selector *selector,
   memset(&state, 0, sizeof(state));
   state.selector = selector;
   state.out = out;
+  state.compact = compact;
   if (!init_doc(&state.doc, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
@@ -824,6 +857,15 @@ lql_status lql_eval_query_file_spooled_matches(const lql_selector *selector,
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     free_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
+  }
+  if (compact) {
+    state.compact_runtime = lonejson_new(NULL, &lj_error);
+    if (state.compact_runtime == NULL) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+      lonejson_free(runtime);
+      free_doc(&state.doc);
+      return LQL_STATUS_JSON_ERROR;
+    }
   }
   init_eval_visitor(&visitor);
   options = lonejson_default_candidate_stream_options();
@@ -834,6 +876,9 @@ lql_status lql_eval_query_file_spooled_matches(const lql_selector *selector,
   options.candidate_end = on_spooled_candidate_end;
   options.candidate_user = &state;
   st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
+  if (state.compact_runtime != NULL) {
+    lonejson_free(state.compact_runtime);
+  }
   free_doc(&state.doc);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
