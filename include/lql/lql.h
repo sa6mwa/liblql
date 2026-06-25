@@ -115,6 +115,8 @@ typedef struct lql_capabilities {
   int spooled_payloads;
   /* Projection from one seekable file range is available. */
   int projection_file_range;
+  /* Projection from caller-buffered JSON is available. */
+  int projection_buffered_json;
   /* Compact serialization from one seekable file range is available. */
   int compact_file_range;
   /* Compact serialization from caller-buffered JSON is available. */
@@ -216,6 +218,12 @@ void lql_projection_free(lql_projection *projection);
 lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
                                   lql_uint64 offset, lql_uint64 size, FILE *out,
                                   int *out_found, lql_error *error);
+/* Projects one caller-buffered JSON value to out. This is an explicitly
+   buffered helper; use source-backed APIs for large values that must not be
+   materialized by the caller. */
+lql_status lql_project_json(const lql_projection *projection, const char *json,
+                            size_t json_len, FILE *out, int *out_found,
+                            lql_error *error);
 /* Compacts one seekable file range to out by streaming it through lonejson.
    The caller owns file positioning before and after the call. */
 lql_status lql_compact_file_range(FILE *file, lql_uint64 offset,

@@ -18,6 +18,12 @@ typedef struct limited_file_reader {
   lql_uint64 remaining;
 } limited_file_reader;
 
+typedef struct buffer_reader {
+  const unsigned char *data;
+  size_t len;
+  size_t offset;
+} buffer_reader;
+
 typedef struct projection_path {
   char **segments;
   size_t segment_count;
@@ -88,6 +94,32 @@ static lonejson_read_result limited_read(void *user, unsigned char *buffer,
     result.error_code = 1;
   }
   if (reader->remaining == 0u) {
+    result.eof = 1;
+  }
+  return result;
+}
+
+static lonejson_read_result buffer_read(void *user, unsigned char *buffer,
+                                        size_t capacity) {
+  buffer_reader *reader;
+  lonejson_read_result result;
+  size_t remaining;
+  size_t want;
+
+  result = lonejson_default_read_result();
+  reader = (buffer_reader *)user;
+  if (reader->offset >= reader->len) {
+    result.eof = 1;
+    return result;
+  }
+  remaining = reader->len - reader->offset;
+  want = remaining > capacity ? capacity : remaining;
+  if (want != 0u) {
+    memcpy(buffer, reader->data + reader->offset, want);
+    reader->offset += want;
+  }
+  result.bytes_read = want;
+  if (reader->offset >= reader->len) {
     result.eof = 1;
   }
   return result;
@@ -994,6 +1026,25 @@ lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
   reader.file = file;
   reader.remaining = size;
   return lql_project_reader(projection, limited_read, &reader, out, out_found,
+                            error);
+}
+
+lql_status lql_project_json(const lql_projection *projection, const char *json,
+                            size_t json_len, FILE *out, int *out_found,
+                            lql_error *error) {
+  buffer_reader reader;
+
+  if (out_found != NULL) {
+    *out_found = 0;
+  }
+  if (json == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "json is required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  reader.data = (const unsigned char *)json;
+  reader.len = json_len;
+  reader.offset = 0u;
+  return lql_project_reader(projection, buffer_read, &reader, out, out_found,
                             error);
 }
 

@@ -433,7 +433,8 @@ Current implementation is an early slice:
   projection API, lonejson path visiting, and writer output;
 - the initial C projection API exposes `lql_projection_parse()` and
   `lql_project_file_range()` for object and array-index paths over seekable
-  file ranges;
+  file ranges, plus `lql_project_json()` for explicitly caller-buffered JSON
+  values;
 - the initial C compact API exposes `lql_compact_file_range()` for streaming
   seekable ranges and `lql_compact_json()` for explicitly buffered JSON values;
 - the public C API exposes `lql_version()` and installs generated

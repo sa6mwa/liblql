@@ -25,10 +25,10 @@ static void expect_version_api(void) {
       !caps.file_decision_stream || !caps.file_match_stream ||
       !caps.source_decision_stream || !caps.seekable_range_payloads ||
       !caps.source_spooled_match_stream || !caps.spooled_payloads ||
-      !caps.projection_file_range || !caps.compact_file_range ||
-      !caps.compact_buffered_json || !caps.mutation_parse ||
-      !caps.mutation_file_range || !caps.mutation_buffered_json ||
-      !caps.mutation_file_values) {
+      !caps.projection_file_range || !caps.projection_buffered_json ||
+      !caps.compact_file_range || !caps.compact_buffered_json ||
+      !caps.mutation_parse || !caps.mutation_file_range ||
+      !caps.mutation_buffered_json || !caps.mutation_file_values) {
     printf("capability query omitted an implemented public surface\n");
     ++failures;
   }
@@ -888,6 +888,83 @@ static void expect_projection_api(void) {
   fclose(out);
 }
 
+static void expect_buffered_projection_api(void) {
+  static const char doc[] =
+      "{\"id\":\"a\",\"count\":1,\"nested\":{\"x\":true},\"items\":[{\"sku\":"
+      "\"A\"},{\"sku\":\"B\"}]}";
+  const char *fields[3];
+  const char *missing[1];
+  FILE *out;
+  lql_projection *projection;
+  lql_error error;
+  lql_status st;
+  int found;
+  char buf[128];
+  size_t len;
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("buffered projection tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  fields[0] = "/id";
+  fields[1] = "/nested/x";
+  fields[2] = "/items/1/sku";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(fields, 3u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("buffered projection parse failed: %s\n", error.message);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  found = 0;
+  st = lql_project_json(projection, doc, strlen(doc), out, &found, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("buffered projection failed: %s\n", error.message);
+    ++failures;
+  } else if (!found) {
+    printf("buffered projection expected found\n");
+    ++failures;
+  } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+             strcmp(buf, "{\"id\":\"a\",\"nested\":{\"x\":true},\"items\":["
+                         "null,{\"sku\":\"B\"}]}") != 0) {
+    printf("buffered projection output mismatch: %s\n", buf);
+    ++failures;
+  }
+  lql_projection_free(projection);
+  fclose(out);
+
+  out = tmpfile();
+  missing[0] = "/missing";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(missing, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK || out == NULL) {
+    printf("buffered missing projection setup failed\n");
+    ++failures;
+  } else {
+    found = 1;
+    st = lql_project_json(projection, doc, strlen(doc), out, &found, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("buffered missing projection failed: %s\n", error.message);
+      ++failures;
+    } else if (found) {
+      printf("buffered missing projection unexpectedly found\n");
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) || len != 0u) {
+      printf("buffered missing projection wrote output\n");
+      ++failures;
+    }
+  }
+  lql_projection_free(projection);
+  if (out != NULL) {
+    fclose(out);
+  }
+}
+
 static void expect_compact_api(void) {
   FILE *source;
   FILE *out;
@@ -1715,6 +1792,7 @@ int main(void) {
   expect_stream_stop_controls();
   expect_seekable_payload_api();
   expect_projection_api();
+  expect_buffered_projection_api();
   expect_compact_api();
   expect_mutation_plan_api();
   expect_root_field_mutation_api();
