@@ -31,6 +31,13 @@ typedef struct lql_temporal {
   int date_only;
 } lql_temporal;
 
+typedef enum lql_since_macro {
+  LQL_SINCE_NONE = 0,
+  LQL_SINCE_NOW,
+  LQL_SINCE_TODAY,
+  LQL_SINCE_YESTERDAY
+} lql_since_macro;
+
 typedef struct lql_term {
   char *field;
   char *value;
@@ -57,6 +64,7 @@ typedef struct lql_term {
   int has_temporal_lt;
   int has_temporal_lte;
   int range_is_temporal;
+  lql_since_macro since_macro;
 } lql_term;
 
 typedef struct lql_node {
@@ -87,5 +95,8 @@ int lql_parse_temporal_literal(const char *raw, lql_temporal *out);
 int lql_temporal_compare(const lql_temporal *left,
                          const lql_temporal *right);
 int lql_temporal_equal(const lql_temporal *left, const lql_temporal *right);
+int lql_temporal_now(lql_temporal *out);
+int lql_temporal_today(lql_temporal *out);
+int lql_temporal_yesterday(lql_temporal *out);
 
 #endif

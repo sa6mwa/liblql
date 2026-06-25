@@ -253,6 +253,19 @@ static int node_is_term(const lql_node *node) {
   }
 }
 
+static int resolve_since_macro(lql_since_macro macro, lql_temporal *out) {
+  switch (macro) {
+  case LQL_SINCE_NOW:
+    return lql_temporal_now(out);
+  case LQL_SINCE_TODAY:
+    return lql_temporal_today(out);
+  case LQL_SINCE_YESTERDAY:
+    return lql_temporal_yesterday(out);
+  default:
+    return 0;
+  }
+}
+
 static void observe_node(eval_doc *doc, const lql_node *node,
                          const lonejson_value_path *path, const char *value,
                          int is_number, int is_container) {
@@ -261,6 +274,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
   size_t j;
   double number;
   lql_temporal temporal;
+  lql_temporal since_macro;
   const char *needle;
   if (node == NULL) {
     return;
@@ -360,9 +374,14 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     }
     break;
   case LQL_NODE_DATE:
-    if (!is_container && lql_parse_temporal_literal(value, &temporal) &&
+    if (!is_container &&
+        (node->term.since_macro == LQL_SINCE_NONE ||
+         resolve_since_macro(node->term.since_macro, &since_macro)) &&
+        lql_parse_temporal_literal(value, &temporal) &&
         (!node->term.has_temporal_eq ||
          lql_temporal_equal(&temporal, &node->term.temporal_eq)) &&
+        (node->term.since_macro == LQL_SINCE_NONE ||
+         lql_temporal_compare(&temporal, &since_macro) >= 0) &&
         (!node->term.has_temporal_gt ||
          lql_temporal_compare(&temporal, &node->term.temporal_gt) > 0) &&
         (!node->term.has_temporal_gte ||

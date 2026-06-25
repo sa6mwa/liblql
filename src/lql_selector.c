@@ -431,6 +431,17 @@ static int parse_number_literal(const char *decoded, double *out) {
   return 1;
 }
 
+static int ascii_equal_ignore_case(const char *a, const char *b) {
+  while (*a != '\0' && *b != '\0') {
+    if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
+      return 0;
+    }
+    ++a;
+    ++b;
+  }
+  return *a == '\0' && *b == '\0';
+}
+
 static int set_range_bound(lql_term *term, const char *key,
                            const char *decoded, lql_error *error) {
   lql_temporal temporal;
@@ -479,6 +490,20 @@ static int set_range_bound(lql_term *term, const char *key,
 static int set_date_bound(lql_term *term, const char *slot,
                           const char *decoded, lql_error *error) {
   lql_temporal temporal;
+  if (strcmp(slot, "since") == 0) {
+    if (ascii_equal_ignore_case(decoded, "now")) {
+      term->since_macro = LQL_SINCE_NOW;
+      return 1;
+    }
+    if (ascii_equal_ignore_case(decoded, "today")) {
+      term->since_macro = LQL_SINCE_TODAY;
+      return 1;
+    }
+    if (ascii_equal_ignore_case(decoded, "yesterday")) {
+      term->since_macro = LQL_SINCE_YESTERDAY;
+      return 1;
+    }
+  }
   if (!lql_parse_temporal_literal(decoded, &temporal)) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "date selector bound invalid");
@@ -740,7 +765,8 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
   }
   if (kind == LQL_NODE_DATE && !term->has_temporal_eq &&
       !term->has_temporal_gt && !term->has_temporal_gte &&
-      !term->has_temporal_lt && !term->has_temporal_lte) {
+      !term->has_temporal_lt && !term->has_temporal_lte &&
+      term->since_macro == LQL_SINCE_NONE) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "date selector requires at least one bound");
     goto fail_after_tokens;

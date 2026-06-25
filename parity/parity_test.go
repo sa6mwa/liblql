@@ -3,9 +3,11 @@ package parity
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 
 	"pkt.systems/lql"
 )
@@ -83,6 +85,47 @@ func TestCLQLSelectorParity(t *testing.T) {
 			got := err == nil
 			if got != want {
 				t.Fatalf("clql parity mismatch: got match=%v want=%v err=%v out=%q", got, want, err, string(out))
+			}
+		})
+	}
+}
+
+func TestCLQLSelectorSinceMacroParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	now := time.Now().UTC()
+	y, m, d := now.Date()
+	today := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		expr string
+		doc  string
+	}{
+		{`date{field=/timestamp,since=now}`, fmt.Sprintf(`{"timestamp":%q}`, now.Add(2*time.Minute).Format(time.RFC3339Nano))},
+		{`date{field=/timestamp,since=now}`, fmt.Sprintf(`{"timestamp":%q}`, now.Add(-2*time.Minute).Format(time.RFC3339Nano))},
+		{`date{field=/timestamp,since=TODAY}`, fmt.Sprintf(`{"timestamp":%q}`, today.Add(12*time.Hour).Format(time.RFC3339Nano))},
+		{`date{field=/timestamp,since=today}`, fmt.Sprintf(`{"timestamp":%q}`, today.Add(-12*time.Hour).Format(time.RFC3339Nano))},
+		{`date{field=/timestamp,since=yesterday}`, fmt.Sprintf(`{"timestamp":%q}`, today.Add(12*time.Hour).Format(time.RFC3339Nano))},
+		{`date{field=/timestamp,since=yesterday}`, fmt.Sprintf(`{"timestamp":%q}`, today.Add(-36*time.Hour).Format(time.RFC3339Nano))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.expr+"/"+tc.doc, func(t *testing.T) {
+			var doc map[string]any
+			if err := json.Unmarshal([]byte(tc.doc), &doc); err != nil {
+				t.Fatal(err)
+			}
+			sel, err := lql.ParseSelectorString(tc.expr)
+			if err != nil {
+				t.Fatalf("go parse: %v", err)
+			}
+			want := lql.Matches(sel, doc)
+			cmd := exec.Command(clql, tc.expr)
+			cmd.Stdin = bytes.NewBufferString(tc.doc)
+			out, err := cmd.CombinedOutput()
+			got := err == nil
+			if got != want {
+				t.Fatalf("clql since macro parity mismatch: got match=%v want=%v err=%v out=%q", got, want, err, string(out))
 			}
 		})
 	}

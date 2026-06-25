@@ -206,6 +206,14 @@ int main(void) {
                "{\"timestamp\":\"2025-01-02T00:00:00Z\"}", 0);
   expect_match("date{field=/timestamp,since=2025-01-01}",
                "{\"timestamp\":\"2025-01-02T00:00:00Z\"}", 1);
+  expect_match("date{field=/timestamp,since=now}",
+               "{\"timestamp\":\"2099-01-01T00:00:00Z\"}", 1);
+  expect_match("date{field=/timestamp,since=now}",
+               "{\"timestamp\":\"1970-01-01T00:00:00Z\"}", 0);
+  expect_match("date{field=/timestamp,since=TODAY}",
+               "{\"timestamp\":\"2099-01-01T00:00:00Z\"}", 1);
+  expect_match("date{field=/timestamp,since=yesterday}",
+               "{\"timestamp\":\"1970-01-01T00:00:00Z\"}", 0);
   expect_match("date{f=/timestamp,after=2026-03-05T10:28:21.123,before=2026-03-05T10:28:21.123456790}",
                "{\"timestamp\":\"2026-03-05T10:28:21.123456789Z\"}", 1);
   expect_match("date{f=/timestamp,after=2026-03-05T10:28:21.123,before=2026-03-05T10:28:21.123456790}",

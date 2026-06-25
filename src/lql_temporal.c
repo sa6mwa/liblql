@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static int parse_ndigits(const char **p, int n, int *out) {
   int i;
@@ -48,6 +49,56 @@ static lql_int64 days_from_civil(int y, int m, int d) {
   doy = (unsigned)((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1);
   doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
   return era * (lql_int64)146097 + (lql_int64)doe - (lql_int64)719468;
+}
+
+static void civil_from_days(lql_int64 z, int *out_y, int *out_m, int *out_d) {
+  lql_int64 era;
+  unsigned doe;
+  unsigned yoe;
+  lql_int64 y;
+  unsigned doy;
+  unsigned mp;
+  unsigned d;
+  unsigned m;
+  z += (lql_int64)719468;
+  era = (z >= 0 ? z : z - (lql_int64)146096) / (lql_int64)146097;
+  doe = (unsigned)(z - era * (lql_int64)146097);
+  yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  mp = (5 * doy + 2) / 153;
+  d = doy - (153 * mp + 2) / 5 + 1;
+  m = mp + (mp < 10 ? 3 : (unsigned)-9);
+  y = (lql_int64)yoe + era * (lql_int64)400;
+  y += m <= 2 ? 1 : 0;
+  *out_y = (int)y;
+  *out_m = (int)m;
+  *out_d = (int)d;
+}
+
+static void temporal_from_seconds(lql_int64 seconds, int date_only,
+                                  lql_temporal *out) {
+  lql_int64 days;
+  lql_int64 rem;
+  days = seconds / (lql_int64)86400;
+  rem = seconds % (lql_int64)86400;
+  if (rem < 0) {
+    rem += (lql_int64)86400;
+    --days;
+  }
+  civil_from_days(days, &out->year, &out->month, &out->day);
+  out->seconds = date_only ? days * (lql_int64)86400 : seconds;
+  out->nanoseconds = 0;
+  out->date_only = date_only;
+}
+
+static int current_utc_seconds(lql_int64 *out) {
+  time_t now;
+  now = time(NULL);
+  if (now == (time_t)-1) {
+    return 0;
+  }
+  *out = (lql_int64)now;
+  return 1;
 }
 
 int lql_parse_temporal_literal(const char *raw, lql_temporal *out) {
@@ -165,4 +216,31 @@ int lql_temporal_equal(const lql_temporal *left, const lql_temporal *right) {
            left->day == right->day;
   }
   return lql_temporal_compare(left, right) == 0;
+}
+
+int lql_temporal_now(lql_temporal *out) {
+  lql_int64 seconds;
+  if (out == NULL || !current_utc_seconds(&seconds)) {
+    return 0;
+  }
+  temporal_from_seconds(seconds, 0, out);
+  return 1;
+}
+
+int lql_temporal_today(lql_temporal *out) {
+  lql_int64 seconds;
+  if (out == NULL || !current_utc_seconds(&seconds)) {
+    return 0;
+  }
+  temporal_from_seconds(seconds, 1, out);
+  return 1;
+}
+
+int lql_temporal_yesterday(lql_temporal *out) {
+  lql_int64 seconds;
+  if (out == NULL || !current_utc_seconds(&seconds)) {
+    return 0;
+  }
+  temporal_from_seconds(seconds - (lql_int64)86400, 1, out);
+  return 1;
 }

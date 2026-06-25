@@ -390,8 +390,8 @@ Current implementation is an early slice:
   `contains.any`, `icontains.any`, `in.any`, wildcard selector paths, and
   bracket-sugar array paths, string-term `ignoreCase`/`ic` flags, and
   multi-bound numeric ranges, with omitted string-term values treated as path
-  assertions; deterministic temporal `date` terms and datetime `range` bounds
-  are implemented, while relative `since` macros still need clock policy work;
+  assertions; temporal `date` terms, datetime `range` bounds, and relative
+  `date.since` macros are implemented;
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, and invalid selector invariants;
 - `clql` exists as a minimal selector smoke CLI;
