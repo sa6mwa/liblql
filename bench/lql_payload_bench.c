@@ -17,6 +17,13 @@ typedef struct payload_counts {
   FILE *sink;
 } payload_counts;
 
+static lql_status observe_decision(void *user,
+                                   const lql_query_decision *decision) {
+  (void)user;
+  (void)decision;
+  return LQL_STATUS_OK;
+}
+
 static void print_u64(lql_uint64 value) {
   char buf[32];
   size_t len;
@@ -57,6 +64,9 @@ static lql_status count_payload(void *user, const lql_query_match *match) {
 }
 
 int main(int argc, char **argv) {
+  const char *mode;
+  const char *expr;
+  const char *fixture_path;
   FILE *fixture;
   FILE *sink;
   lql_selector *selector;
@@ -65,45 +75,59 @@ int main(int argc, char **argv) {
   lql_status st;
   payload_counts counts;
 
-  if (argc != 3) {
-    fprintf(stderr, "usage: lql_payload_bench SELECTOR FIXTURE\n");
+  if (argc != 4) {
+    fprintf(stderr, "usage: lql_payload_bench MODE SELECTOR FIXTURE\n");
     return 2;
   }
+  mode = argv[1];
+  expr = argv[2];
+  fixture_path = argv[3];
 
   lql_error_init(&error);
   selector = NULL;
-  st = lql_selector_parse(argv[1], &selector, &error);
+  st = lql_selector_parse(expr, &selector, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "lql_payload_bench: parse selector: %s\n", error.message);
     return 1;
   }
 
-  fixture = fopen(argv[2], "rb");
+  fixture = fopen(fixture_path, "rb");
   if (fixture == NULL) {
     fprintf(stderr, "lql_payload_bench: failed to open fixture\n");
     lql_selector_free(selector);
     return 1;
   }
 
-  sink = fopen("/dev/null", "wb");
-  if (sink == NULL) {
-    fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
-    fclose(fixture);
-    lql_selector_free(selector);
-    return 1;
-  }
-
   memset(&counts, 0, sizeof(counts));
   memset(&result, 0, sizeof(result));
-  counts.sink = sink;
-  st = lql_query_file_matches(selector, fixture, count_payload, &counts,
-                              &result, &error);
-  fclose(sink);
+  if (strcmp(mode, "decision_only_plan") == 0) {
+    st = lql_query_file_decisions(selector, fixture, observe_decision, NULL,
+                                  &result, &error);
+  } else if (strcmp(mode, "plus_value_selector") == 0 ||
+             strcmp(mode, "plus_value_plan") == 0) {
+    sink = fopen("/dev/null", "wb");
+    if (sink == NULL) {
+      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
+      fclose(fixture);
+      lql_selector_free(selector);
+      return 1;
+    }
+    counts.sink = sink;
+    st = lql_query_file_matches(selector, fixture, count_payload, &counts,
+                                &result, &error);
+    fclose(sink);
+  } else {
+    fprintf(stderr, "lql_payload_bench: unsupported mode: %s\n", mode);
+    fclose(fixture);
+    lql_selector_free(selector);
+    return 2;
+  }
   fclose(fixture);
   lql_selector_free(selector);
 
   if (st != LQL_STATUS_OK) {
-    fprintf(stderr, "lql_payload_bench: query payloads: %s\n", error.message);
+    fprintf(stderr, "lql_payload_bench: query mode %s: %s\n", mode,
+            error.message);
     return 1;
   }
 

@@ -70,10 +70,12 @@ Current implementation status:
   `contains.any`, case-insensitive contains, timestamp comparison, date
   window, and numeric range terms over record-stream fixtures, plus nested
   `/records[]/...` selection over the single-root JSON fixture.
-- the current executable mode matrix covers `decision_only_selector` and the
-  matched-only subset of `plus_value_selector`; plus-value records assert
-  equivalent payload counts and payload byte totals, while C exposes
-  `seekable_range` payloads and does not retain candidate JSON.
+- the current executable mode matrix covers `decision_only_selector`,
+  `decision_only_plan`, `plus_value_selector`, and `plus_value_plan`.
+  Plus-value records assert equivalent payload counts and payload byte totals,
+  while C exposes `seekable_range` payloads and does not retain candidate JSON.
+  The current C plan benchmark reuses the parsed public `lql_selector` handle;
+  it is a plan-shaped steady-state path, not a distinct compiled-plan API.
 - the current executable CLI-style selector matrix covers grouped
   equality/range, service contains, service case-insensitive contains, service
   `contains.any`, service `icontains.any`, and nested `/records[]/...`
@@ -230,8 +232,10 @@ Mirror Go `BenchmarkQueryStreamSynthetic` modes:
 
 2. `decision_only_plan`
    - compile/reuse a plan when the implementation supports plans;
-   - if Lua or C does not expose a separate plan object yet, report
-     `unsupported` for this mode until implemented.
+   - the current C benchmark treats the parsed public `lql_selector` handle as
+     the reusable plan surface until liblql exposes a distinct compiled plan;
+   - if an implementation has neither a reusable selector nor a separate plan
+     object, report `unsupported` for this mode until implemented.
 
 3. `plus_value_selector`
    - include callback-scoped candidate payload access;
@@ -245,6 +249,9 @@ Mirror Go `BenchmarkQueryStreamSynthetic` modes:
 
 4. `plus_value_plan`
    - plan variant of plus-value mode.
+   - the current C benchmark uses the same seekable-range payload path as
+     `plus_value_selector`, with the parsed public selector reused across the
+     query run as the plan-like handle.
 
 5. `plus_value_openjson_selector`
    - force a very small memory threshold for `large_single_json`;

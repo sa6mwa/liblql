@@ -117,7 +117,7 @@ func validateRecord(line int, rec record) error {
 		return fmt.Errorf("line %d: dataset, selector, and expr are required", line)
 	}
 	switch rec.Mode {
-	case "decision_only_selector", "plus_value_selector":
+	case "decision_only_selector", "decision_only_plan", "plus_value_selector", "plus_value_plan":
 	default:
 		return fmt.Errorf("line %d: unsupported mode %q", line, rec.Mode)
 	}
@@ -149,12 +149,12 @@ func validateRecord(line int, rec record) error {
 	if rec.UnsupportedReason != "" {
 		return fmt.Errorf("line %d: supported record has unsupported_reason", line)
 	}
-	if rec.Mode == "decision_only_selector" {
+	if isDecisionOnlyMode(rec.Mode) {
 		if rec.Payloads != 0 || rec.PayloadBytes != 0 || rec.PayloadSourceType != "none" {
 			return fmt.Errorf("line %d: decision-only records must not report payloads", line)
 		}
 	}
-	if rec.Mode == "plus_value_selector" {
+	if isPlusValueMode(rec.Mode) {
 		if rec.Payloads != rec.Matches {
 			return fmt.Errorf("line %d: plus-value payload count must equal matches", line)
 		}
@@ -166,6 +166,14 @@ func validateRecord(line int, rec record) error {
 		}
 	}
 	return nil
+}
+
+func isDecisionOnlyMode(mode string) bool {
+	return mode == "decision_only_selector" || mode == "decision_only_plan"
+}
+
+func isPlusValueMode(mode string) bool {
+	return mode == "plus_value_selector" || mode == "plus_value_plan"
 }
 
 func isSHA256Hex(value string) bool {

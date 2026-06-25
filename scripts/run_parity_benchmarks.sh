@@ -125,7 +125,13 @@ emit_unsupported_impl() {
       "decision_only_selector" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
       "$(file_sha256 "$fixture_path")"
     emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "decision_only_plan" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
+    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
       "plus_value_selector" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
+    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "plus_value_plan" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
       "$(file_sha256 "$fixture_path")"
   done < "$case_matrix"
 }
@@ -334,22 +340,23 @@ run_c() {
     "decision_only_selector" "steady_state" "$bytes" "$candidates" "$matches" 0 0 "none" null false "" "$fixture_sha"
 }
 
-run_c_payload() {
-  dataset_name=$1
-  fixture_path=$2
-  candidates=$3
-  selector_name=$4
-  expr=$5
+run_c_native_mode() {
+  mode=$1
+  dataset_name=$2
+  fixture_path=$3
+  candidates=$4
+  selector_name=$5
+  expr=$6
   bytes=$(wc -c < "$fixture_path" | tr -d ' ')
   if [ ! -x "$payload_bench" ]; then
     emit_record "c" "$dataset_name" "$selector_name" "$expr" \
-      "plus_value_selector" "steady_state" 0 0 0 0 0 "none" null true \
+      "$mode" "steady_state" 0 0 0 0 0 "none" null true \
       "lql_payload_bench binary not found; run make build-debug or set LQL_PAYLOAD_BENCH_PATH" \
       "$(file_sha256 "$fixture_path")"
     return 1
   fi
   fixture_sha=$(file_sha256 "$fixture_path")
-  record=$("$payload_bench" "$expr" "$fixture_path")
+  record=$("$payload_bench" "$mode" "$expr" "$fixture_path")
   c_candidates=$(kv_field candidates "$record")
   c_matches=$(kv_field matches "$record")
   c_payloads=$(kv_field payloads "$record")
@@ -368,20 +375,25 @@ run_c_payload() {
   fi
   : "$candidates"
   printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
-    "plus_value_selector" "$c_candidates" "$c_matches" "$c_payloads" \
+    "$mode" "$c_candidates" "$c_matches" "$c_payloads" \
     "$c_payload_bytes" >> "$c_counts_file"
+  payload_source_type=none
+  case "$mode" in
+    plus_value_*) payload_source_type=seekable_range ;;
+  esac
   emit_record "c" "$dataset_name" "$selector_name" "$expr" \
-    "plus_value_selector" "steady_state" "$bytes" "$c_candidates" \
-    "$c_matches" "$c_payloads" "$c_payload_bytes" "seekable_range" null false \
+    "$mode" "steady_state" "$bytes" "$c_candidates" \
+    "$c_matches" "$c_payloads" "$c_payload_bytes" "$payload_source_type" null false \
     "" "$fixture_sha"
 }
 
-run_go() {
-  dataset_name=$1
-  fixture_path=$2
-  candidates=$3
-  selector_name=$4
-  expr=$5
+run_go_mode() {
+  mode=$1
+  dataset_name=$2
+  fixture_path=$3
+  candidates=$4
+  selector_name=$5
+  expr=$6
   : "$candidates"
   record=
   if ! command -v "$go_bin" >/dev/null 2>&1; then
@@ -393,37 +405,7 @@ run_go() {
     --dataset "$dataset_name" \
     --selector-name "$selector_name" \
     --expr "$expr" \
-    --mode decision_only_selector \
-    --submode steady_state)
-  printf '%s\n' "$record"
-  go_candidates=$(json_number_field candidates "$record")
-  go_matches=$(json_number_field matches "$record")
-  if [ -z "$go_candidates" ] || [ -z "$go_matches" ]; then
-    printf 'Go benchmark emitted an invalid record: %s\n' "$record" >&2
-    return 1
-  fi
-  printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
-    "decision_only_selector" "$go_candidates" "$go_matches" 0 0 >> "$go_counts_file"
-}
-
-run_go_payload() {
-  dataset_name=$1
-  fixture_path=$2
-  candidates=$3
-  selector_name=$4
-  expr=$5
-  : "$candidates"
-  record=
-  if ! command -v "$go_bin" >/dev/null 2>&1; then
-    emit_unsupported_impl "go" "go executable not found"
-    return 1
-  fi
-  record=$(cd "$root/parity" && "$go_bin" run ./cmd/lqlbench \
-    --fixture "$fixture_path" \
-    --dataset "$dataset_name" \
-    --selector-name "$selector_name" \
-    --expr "$expr" \
-    --mode plus_value_selector \
+    --mode "$mode" \
     --submode steady_state)
   printf '%s\n' "$record"
   go_candidates=$(json_number_field candidates "$record")
@@ -432,11 +414,11 @@ run_go_payload() {
   go_payload_bytes=$(json_number_field payload_bytes "$record")
   if [ -z "$go_candidates" ] || [ -z "$go_matches" ] ||
     [ -z "$go_payloads" ] || [ -z "$go_payload_bytes" ]; then
-    printf 'Go payload benchmark emitted an invalid record: %s\n' "$record" >&2
+    printf 'Go benchmark emitted an invalid record: %s\n' "$record" >&2
     return 1
   fi
   printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
-    "plus_value_selector" "$go_candidates" "$go_matches" "$go_payloads" \
+    "$mode" "$go_candidates" "$go_matches" "$go_payloads" \
     "$go_payload_bytes" >> "$go_counts_file"
 }
 
@@ -445,16 +427,24 @@ run_matrix_for_impl() {
   while read dataset_name fixture_path candidates selector_name expr; do
     case "$impl" in
       go)
-        run_go "$dataset_name" "$fixture_path" "$candidates" "$selector_name" \
-          "$expr" || return 1
-        run_go_payload "$dataset_name" "$fixture_path" "$candidates" \
-          "$selector_name" "$expr" || return 1
+        run_go_mode decision_only_selector "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_go_mode decision_only_plan "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_go_mode plus_value_selector "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_go_mode plus_value_plan "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
         ;;
       c)
         run_c "$dataset_name" "$fixture_path" "$candidates" "$selector_name" \
           "$expr" || return 1
-        run_c_payload "$dataset_name" "$fixture_path" "$candidates" \
-          "$selector_name" "$expr" || return 1
+        run_c_native_mode decision_only_plan "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_c_native_mode plus_value_selector "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_c_native_mode plus_value_plan "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
         ;;
       *)
         return 2

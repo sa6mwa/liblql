@@ -53,7 +53,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "lqlbench: --fixture is required")
 		os.Exit(2)
 	}
-	if mode != "decision_only_selector" && mode != "plus_value_selector" {
+	if mode != "decision_only_selector" && mode != "plus_value_selector" &&
+		mode != "decision_only_plan" && mode != "plus_value_plan" {
 		fmt.Fprintf(os.Stderr, "lqlbench: unsupported mode %q\n", mode)
 		os.Exit(2)
 	}
@@ -87,7 +88,16 @@ func main() {
 		Reader:   file,
 		Selector: sel,
 	}
-	if mode == "plus_value_selector" {
+	if mode == "decision_only_plan" || mode == "plus_value_plan" {
+		plan, err := lql.NewQueryStreamPlan(sel)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "lqlbench: compile plan: %v\n", err)
+			os.Exit(1)
+		}
+		request.Selector = lql.Selector{}
+		request.Plan = plan
+	}
+	if mode == "plus_value_selector" || mode == "plus_value_plan" {
 		payloadSourceType = "callback_payload"
 		request.Mode = lql.QueryDecisionPlusValue
 		request.MatchedOnly = true
