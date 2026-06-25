@@ -58,6 +58,12 @@ typedef struct buffer_reader {
   size_t offset;
 } buffer_reader;
 
+typedef struct mutation_source_reader {
+  lql_read_fn read;
+  void *user;
+  int error_code;
+} mutation_source_reader;
+
 typedef struct mutation_path_frame {
   unsigned char *array_segments;
   size_t segment_count;
@@ -401,6 +407,30 @@ static lonejson_read_result buffer_read(void *user, unsigned char *buffer,
   if (reader->offset >= reader->len) {
     result.eof = 1;
   }
+  return result;
+}
+
+static lonejson_read_result
+mutation_source_read(void *user, unsigned char *buffer, size_t capacity) {
+  mutation_source_reader *reader;
+  lql_read_result source_result;
+  lonejson_read_result result;
+
+  result = lonejson_default_read_result();
+  reader = (mutation_source_reader *)user;
+  source_result = reader->read(reader->user, buffer, capacity);
+  if (source_result.bytes_read > capacity) {
+    reader->error_code = 1;
+    result.error_code = 1;
+    return result;
+  }
+  if (source_result.error_code != 0) {
+    reader->error_code = source_result.error_code;
+    result.error_code = source_result.error_code;
+    return result;
+  }
+  result.bytes_read = source_result.bytes_read;
+  result.eof = source_result.eof;
   return result;
 }
 
@@ -2429,6 +2459,33 @@ lql_status lql_mutate_file_range_paths(const lql_mutation_plan *plan,
   }
   return mutate_file_range_with_supported_plan(plan, file, offset, size, out,
                                                error);
+}
+
+lql_status lql_mutate_source_paths(const lql_mutation_plan *plan,
+                                   lql_read_fn read, void *read_user, FILE *out,
+                                   lql_error *error) {
+  mutation_source_reader reader;
+  lql_status st;
+
+  if (plan == NULL || read == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "plan, read, and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (!mutation_plan_supports_stream_paths(plan)) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "mutation plan requires unsupported path behavior");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.read = read;
+  reader.user = read_user;
+  st = mutate_reader_with_supported_plan(plan, mutation_source_read, &reader,
+                                         out, error);
+  if (st == LQL_STATUS_JSON_ERROR && reader.error_code != 0) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, "mutation source read failed");
+  }
+  return st;
 }
 
 lql_status lql_mutate_json(const lql_mutation_plan *plan, const char *json,

@@ -558,8 +558,9 @@ Current implementation is an early slice:
   replacing the array value with an object keyed by the requested numeric
   segments; supported set values include `time:` normalization to UTC
   RFC3339Nano strings and `file:/textfile:/base64file:` source-backed file
-  values; public C execution is currently available for seekable file ranges
-  and explicitly caller-buffered JSON values through `lql_mutate_json()`;
+  values; public C execution is currently available for seekable file ranges,
+  caller-provided read callbacks through `lql_mutate_source_paths()`, and
+  explicitly caller-buffered JSON values through `lql_mutate_json()`;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path, existing-position wildcard, and
   existing-position recursive mutations to matched candidates;
@@ -614,11 +615,12 @@ Current implementation is an early slice:
   streaming, projection, compacting, mutation, version, and capability
   surfaces, including mutation plan parse success, expansion counts, default
   and explicit file-backed parse options, file-backed mutation value execution
-  over buffered and seekable file-range APIs, and mutation parse-error
-  invariants. This coverage is still too shallow for the final goal: the next
-  C test work should build a surface-by-surface API contract matrix covering
-  ownership, out-parameter state, callback error propagation, partial I/O,
-  cleanup after failures, and bounded-memory behavior;
+  over buffered and seekable file-range APIs, source-backed mutation over
+  fragmented caller reads, source callback read failures, and mutation
+  parse-error invariants. This coverage is still too shallow for the final
+  goal: the next C test work should build a surface-by-surface API contract
+  matrix covering ownership, out-parameter state, callback error propagation,
+  partial I/O, cleanup after failures, and bounded-memory behavior;
   an SDK coverage manifest now ties claimed C contract surfaces to C unit
   functions;
 - Go-backed parity tests exist for the current CLI surface and remain a
@@ -657,7 +659,8 @@ Current implementation is an early slice:
   `lql_mutation_plan_parse()`,
   `lql_mutation_plan_parse_with_options()`, `lql_mutation_plan_count()`,
   `lql_mutate_json()`, `lql_mutate_file_range_root_fields()`,
-  `lql_mutate_file_range_paths()`, `lql_compact_json()`,
+  `lql_mutate_file_range_paths()`, `lql_mutate_source_paths()`,
+  `lql_compact_json()`,
   `lql_compact_file_range()`,
   `lql_query_file_decisions()`, `lql_query_source_decisions()`,
   `lql_query_file_matches()`, and

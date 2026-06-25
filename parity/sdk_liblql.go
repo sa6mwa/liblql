@@ -375,6 +375,99 @@ static int liblql_mutate_json_value(const char *const *exprs,
 	return 0;
 }
 
+typedef struct liblql_source_reader {
+	const char *data;
+	size_t len;
+	size_t offset;
+	size_t chunk_size;
+} liblql_source_reader;
+
+static lql_read_result liblql_read_source_chunk(void *user,
+                                                unsigned char *buffer,
+                                                size_t capacity) {
+	liblql_source_reader *reader;
+	lql_read_result result;
+	size_t remaining;
+	size_t want;
+
+	reader = (liblql_source_reader *)user;
+	memset(&result, 0, sizeof(result));
+	if (reader->offset >= reader->len) {
+		result.eof = 1;
+		return result;
+	}
+	remaining = reader->len - reader->offset;
+	want = remaining;
+	if (want > reader->chunk_size) {
+		want = reader->chunk_size;
+	}
+	if (want > capacity) {
+		want = capacity;
+	}
+	memcpy(buffer, reader->data + reader->offset, want);
+	reader->offset += want;
+	result.bytes_read = want;
+	if (reader->offset >= reader->len) {
+		result.eof = 1;
+	}
+	return result;
+}
+
+static int liblql_mutate_source_value(const char *const *exprs,
+                                      size_t expr_count, const char *json,
+                                      size_t chunk_size, char **out_json,
+                                      size_t *out_len, char *errbuf,
+                                      size_t errbuf_len) {
+	lql_error error;
+	lql_mutation_plan *plan;
+	lql_status status;
+	liblql_source_reader reader;
+	FILE *tmp;
+
+	lql_error_init(&error);
+	plan = NULL;
+	*out_json = NULL;
+	*out_len = 0u;
+	status = lql_mutation_plan_parse(exprs, expr_count, &plan, &error);
+	if (status != LQL_STATUS_OK) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	tmp = tmpfile();
+	if (tmp == NULL) {
+		lql_mutation_plan_free(plan);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	memset(&reader, 0, sizeof(reader));
+	reader.data = json;
+	reader.len = strlen(json);
+	reader.chunk_size = chunk_size;
+	status = lql_mutate_source_paths(plan, liblql_read_source_chunk, &reader, tmp,
+	                                 &error);
+	lql_mutation_plan_free(plan);
+	if (status != LQL_STATUS_OK) {
+		fclose(tmp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_read_tmp(tmp, out_json, out_len, errbuf, errbuf_len) != 0) {
+		fclose(tmp);
+		return -1;
+	}
+	fclose(tmp);
+	return 0;
+}
+
 static int liblql_mutate_file_range_value(const char *const *exprs,
                                           size_t expr_count,
                                           const char *prefix, const char *json,
@@ -914,6 +1007,25 @@ func cMutateJSONWithOptions(mutations []string, doc string, enableFileValues boo
 	status := C.liblql_mutate_json_value(cExprs, C.size_t(len(mutations)), cDoc,
 		cBool(enableFileValues), cBaseDir, &out, &outLen, &errbuf[0],
 		C.size_t(len(errbuf)))
+	if status != 0 {
+		return nil, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
+}
+
+func cMutateSource(mutations []string, doc string) ([]byte, error) {
+	cExprs, freeExprs := cStringArray(mutations)
+	defer freeExprs()
+
+	cDoc := C.CString(doc)
+	defer C.free(unsafe.Pointer(cDoc))
+
+	var out *C.char
+	var outLen C.size_t
+	var errbuf [256]C.char
+	status := C.liblql_mutate_source_value(cExprs, C.size_t(len(mutations)),
+		cDoc, C.size_t(3), &out, &outLen, &errbuf[0], C.size_t(len(errbuf)))
 	if status != 0 {
 		return nil, sdkParityError(C.GoString(&errbuf[0]))
 	}

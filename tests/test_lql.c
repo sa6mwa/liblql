@@ -121,7 +121,8 @@ static void expect_version_api(void) {
       !caps.projection_file_range || !caps.projection_buffered_json ||
       !caps.compact_file_range || !caps.compact_buffered_json ||
       !caps.mutation_parse || !caps.mutation_file_range ||
-      !caps.mutation_buffered_json || !caps.mutation_file_values) {
+      !caps.mutation_source || !caps.mutation_buffered_json ||
+      !caps.mutation_file_values) {
     printf("capability query omitted an implemented public surface\n");
     ++failures;
   }
@@ -180,6 +181,18 @@ static lql_read_result read_chunk(void *user, unsigned char *buffer,
   if (reader->offset >= reader->len) {
     result.eof = 1;
   }
+  return result;
+}
+
+static lql_read_result read_fail_once(void *user, unsigned char *buffer,
+                                      size_t capacity) {
+  lql_read_result result;
+
+  (void)user;
+  (void)buffer;
+  (void)capacity;
+  memset(&result, 0, sizeof(result));
+  result.error_code = 7;
   return result;
 }
 
@@ -2325,6 +2338,86 @@ static void expect_buffered_mutation_api(void) {
   fclose(out);
 }
 
+static void expect_source_mutation_api(void) {
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_mutation_plan *plan;
+  const char *exprs[4];
+  chunk_reader reader;
+  char buf[256];
+  size_t len;
+  static const char doc[] =
+      "{\"state\":{\"status\":\"open\",\"count\":1,\"old\":true},\"id\":\"a\"}";
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("source mutation tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  exprs[0] = "/state/status=done";
+  exprs[1] = "/state/count++";
+  exprs[2] = "rm:/state/old";
+  exprs[3] = "/state/missing=value";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(exprs, 4u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    memset(&reader, 0, sizeof(reader));
+    reader.data = doc;
+    reader.len = strlen(doc);
+    reader.chunk_size = 3u;
+    st = lql_mutate_source_paths(plan, read_chunk, &reader, out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("source mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (reader.calls <= 1) {
+      printf("source mutation did not consume fragmented reads\n");
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf, "{\"state\":{\"status\":\"done\",\"count\":2,"
+                           "\"missing\":\"value\"},\"id\":\"a\"}") != 0) {
+      printf("source mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+
+    lql_error_init(&error);
+    st = lql_mutate_source_paths(NULL, read_chunk, &reader, out, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "plan, read, and out are required") != 0) {
+      printf("source mutation NULL plan mismatch: %s\n", error.message);
+      ++failures;
+    }
+    lql_error_init(&error);
+    st = lql_mutate_source_paths(plan, NULL, &reader, out, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "plan, read, and out are required") != 0) {
+      printf("source mutation NULL read mismatch: %s\n", error.message);
+      ++failures;
+    }
+    lql_error_init(&error);
+    st = lql_mutate_source_paths(plan, read_chunk, &reader, NULL, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "plan, read, and out are required") != 0) {
+      printf("source mutation NULL out mismatch: %s\n", error.message);
+      ++failures;
+    }
+    lql_error_init(&error);
+    st = lql_mutate_source_paths(plan, read_fail_once, NULL, out, &error);
+    if (st != LQL_STATUS_JSON_ERROR ||
+        strcmp(error.message, "mutation source read failed") != 0) {
+      printf("source mutation read error mismatch: %s\n", error.message);
+      ++failures;
+    }
+  }
+  lql_mutation_plan_free(plan);
+  fclose(out);
+}
+
 static void expect_mutation_quoted_value_api(void) {
   FILE *out;
   lql_error error;
@@ -2816,20 +2909,20 @@ static void expect_array_wildcard_value_mutation_api(void) {
   fclose(out);
 }
 
-typedef void (*sdk_parity_test_fn)(void);
+typedef void (*sdk_contract_test_fn)(void);
 
-typedef struct sdk_parity_requirement {
+typedef struct sdk_contract_requirement {
   const char *surface;
   const char *requirement;
-  sdk_parity_test_fn test;
-} sdk_parity_requirement;
+  sdk_contract_test_fn test;
+} sdk_contract_requirement;
 
 static void expect_selector_match_api(void);
 static void expect_selector_or_api(void);
 static void expect_selector_parse_error_api(void);
 
-static void expect_sdk_parity_manifest(void) {
-  static const sdk_parity_requirement manifest[] = {
+static void expect_sdk_contract_manifest(void) {
+  static const sdk_contract_requirement manifest[] = {
       {"utility",
        "status, error, ownership, selector emptiness, and invalid "
        "argument helpers",
@@ -2876,6 +2969,8 @@ static void expect_sdk_parity_manifest(void) {
        expect_path_mutation_api},
       {"mutation", "caller-buffered JSON mutation",
        expect_buffered_mutation_api},
+      {"mutation", "caller-provided source mutation",
+       expect_source_mutation_api},
       {"mutation", "quoted mutation value typing",
        expect_mutation_quoted_value_api},
       {"mutation", "file-backed mutation value execution",
@@ -2897,12 +2992,12 @@ static void expect_sdk_parity_manifest(void) {
   for (i = 0u; i < sizeof(manifest) / sizeof(manifest[0]); ++i) {
     if (manifest[i].surface == NULL || manifest[i].surface[0] == '\0' ||
         manifest[i].requirement == NULL || manifest[i].requirement[0] == '\0') {
-      printf("SDK parity manifest has an empty entry at %lu\n",
+      printf("SDK contract manifest has an empty entry at %lu\n",
              (unsigned long)i);
       ++failures;
     }
     if (manifest[i].test == NULL) {
-      printf("SDK parity manifest entry lacks a C unit function: %s/%s\n",
+      printf("SDK contract manifest entry lacks a C unit function: %s/%s\n",
              manifest[i].surface, manifest[i].requirement);
       ++failures;
     }
@@ -2911,7 +3006,7 @@ static void expect_sdk_parity_manifest(void) {
     }
   }
   if (selector_cases != 3) {
-    printf("SDK parity manifest selector accounting mismatch: %d\n",
+    printf("SDK contract manifest selector accounting mismatch: %d\n",
            selector_cases);
     ++failures;
   }
@@ -3109,7 +3204,7 @@ static void expect_selector_parse_error_api(void) {
 }
 
 int main(void) {
-  expect_sdk_parity_manifest();
+  expect_sdk_contract_manifest();
   expect_public_utility_api();
   expect_selector_match_api();
   expect_selector_or_api();
@@ -3135,6 +3230,7 @@ int main(void) {
   expect_root_field_mutation_api();
   expect_path_mutation_api();
   expect_buffered_mutation_api();
+  expect_source_mutation_api();
   expect_mutation_quoted_value_api();
   expect_mutation_file_backed_value_api();
   expect_mutation_shorthand_api();

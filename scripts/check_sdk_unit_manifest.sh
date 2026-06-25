@@ -23,11 +23,11 @@ main_file=$tmp_dir/main
 main_all_file=$tmp_dir/main-all
 
 sed -n 's/^static void \(expect_[A-Za-z0-9_]*\)(void) {$/\1/p' "$test_file" |
-  grep -v '^expect_sdk_parity_manifest$' |
+  grep -v '^expect_sdk_contract_manifest$' |
   sort > "$functions_file"
 
 awk '
-  /static void expect_sdk_parity_manifest\(void\)/ { in_manifest = 1 }
+  /static void expect_sdk_contract_manifest\(void\)/ { in_manifest = 1 }
   in_manifest && /};/ { in_manifest = 0 }
   in_manifest {
     while (match($0, /expect_[A-Za-z0-9_]*/)) {
@@ -35,7 +35,7 @@ awk '
       $0 = substr($0, RSTART + RLENGTH)
     }
   }
-' "$test_file" | grep -v '^expect_sdk_parity_manifest$' | sort > "$manifest_all_file"
+' "$test_file" | grep -v '^expect_sdk_contract_manifest$' | sort > "$manifest_all_file"
 sort -u "$manifest_all_file" > "$manifest_file"
 
 awk '
@@ -47,7 +47,7 @@ awk '
       $0 = substr($0, RSTART + RLENGTH)
     }
   }
-' "$test_file" | grep -v '^expect_sdk_parity_manifest$' | sort > "$main_all_file"
+' "$test_file" | grep -v '^expect_sdk_contract_manifest$' | sort > "$main_all_file"
 sort -u "$main_all_file" > "$main_file"
 
 if [ ! -s "$functions_file" ]; then

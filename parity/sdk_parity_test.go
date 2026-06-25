@@ -328,6 +328,22 @@ func TestSDKMutationJSONParity(t *testing.T) {
 	}
 }
 
+func TestSDKMutationSourceParity(t *testing.T) {
+	for _, tc := range sdkMutationCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			wantJSON, err := goMutateJSON(tc.mutations, tc.doc)
+			if err != nil {
+				t.Fatalf("go mutate: %v", err)
+			}
+			gotJSON, err := cMutateSource(tc.mutations, tc.doc)
+			if err != nil {
+				t.Fatalf("liblql source mutate: %v", err)
+			}
+			assertDecodedJSONValuesParity(t, gotJSON, wantJSON, "mutation")
+		})
+	}
+}
+
 func TestSDKMutationFileRangeParity(t *testing.T) {
 	for _, tc := range sdkMutationCases() {
 		t.Run(tc.name, func(t *testing.T) {

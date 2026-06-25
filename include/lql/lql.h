@@ -125,6 +125,8 @@ typedef struct lql_capabilities {
   int mutation_parse;
   /* Mutation execution against one seekable file range is available. */
   int mutation_file_range;
+  /* Mutation execution against caller-provided read callbacks is available. */
+  int mutation_source;
   /* Mutation execution against caller-buffered JSON is available. */
   int mutation_buffered_json;
   /* Explicit opt-in file-backed mutation values are available. */
@@ -265,6 +267,14 @@ lql_status lql_mutate_file_range_paths(const lql_mutation_plan *plan,
                                        FILE *file, lql_uint64 offset,
                                        lql_uint64 size, FILE *out,
                                        lql_error *error);
+/* Applies supported concrete-path mutations to one JSON value read from a
+   caller-provided source callback. This streams the source through lonejson and
+   never materializes the document. The read callback follows the same contract
+   as source query APIs: bytes_read must not exceed capacity, eof marks source
+   completion, and non-zero error_code aborts with LQL_STATUS_JSON_ERROR. */
+lql_status lql_mutate_source_paths(const lql_mutation_plan *plan,
+                                   lql_read_fn read, void *read_user, FILE *out,
+                                   lql_error *error);
 /* Applies supported concrete-path mutations to one caller-buffered JSON value.
    This is an explicitly buffered helper; use file/source-backed APIs for large
    values that must not be materialized by the caller. */
