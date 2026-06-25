@@ -24,7 +24,7 @@ var sdkParityCoverageManifest = []sdkParityCoverageRequirement{
 	{"projection", "public liblql buffered JSON projection behavior matches Go projection behavior for current projection corpus", []string{"TestSDKProjectionJSONParity"}},
 	{"projection", "public liblql projection errors match Go projection errors for current invalid corpus", []string{"TestSDKProjectionErrorParity"}},
 	{"mutation", "public liblql buffered JSON mutation behavior matches Go mutation behavior for current mutation corpus", []string{"TestSDKMutationJSONParity"}},
-	{"streaming", "public liblql decision stream summaries match Go query stream summaries for current stream corpus", []string{"TestSDKStreamingDecisionParity"}},
+	{"streaming", "public liblql file and callback-source decision stream summaries match Go query stream summaries for current stream corpus", []string{"TestSDKStreamingDecisionParity"}},
 	{"streaming", "public liblql seekable and spooled payload streams match Go query stream payload behavior for current stream corpus", []string{"TestSDKStreamingPayloadParity"}},
 	{"streaming", "public liblql stream stop controls match Go query stream stop behavior for current stop corpus", []string{"TestSDKStreamingStopParity"}},
 }

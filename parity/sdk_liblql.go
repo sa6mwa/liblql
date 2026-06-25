@@ -368,6 +368,13 @@ static int liblql_stream_query(const char *expr, const char *json, int mode,
 		    selector, input, &options, liblql_count_decision, &state, &result,
 		    &error);
 		fclose(input);
+	} else if (mode == 3) {
+		source.data = (const unsigned char *)json;
+		source.len = strlen(json);
+		source.chunk_size = 5u;
+		status = lql_query_source_decisions_with_options(
+		    selector, liblql_chunk_read, &source, &options,
+		    liblql_count_decision, &state, &result, &error);
 	} else {
 		payload_out = tmpfile();
 		if (payload_out == NULL) {
@@ -408,13 +415,21 @@ static int liblql_stream_query(const char *expr, const char *json, int mode,
 			    selector, input, &options, liblql_collect_match, &state, &result,
 			    &error);
 			fclose(input);
-		} else {
+		} else if (mode == 2) {
 			source.data = (const unsigned char *)json;
 			source.len = strlen(json);
 			source.chunk_size = 7u;
 			status = lql_query_source_spooled_matches_with_options(
 			    selector, liblql_chunk_read, &source, &options,
 			    liblql_collect_match, &state, &result, &error);
+		} else {
+			fclose(payload_out);
+			lql_selector_free(selector);
+			if (errbuf != NULL && errbuf_len > 0u) {
+				strncpy(errbuf, "unsupported stream parity mode", errbuf_len - 1u);
+				errbuf[errbuf_len - 1u] = '\0';
+			}
+			return -1;
 		}
 		if (status == LQL_STATUS_OK &&
 		    liblql_read_tmp(payload_out, &summary->payload_json,

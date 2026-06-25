@@ -335,20 +335,28 @@ func TestSDKStreamingDecisionParity(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			want, err := goStreamQuery(tc.expr, tc.doc, 0, 0, 0, 0, false)
-			if err != nil {
-				t.Fatalf("go stream decision: %v", err)
-			}
-			got, err := cStreamQuery(tc.expr, tc.doc, 0, 0, 0, 0, false)
-			if err != nil {
-				t.Fatalf("liblql stream decision: %v", err)
-			}
-			assertStreamSummaryParity(t, got, want)
-			if got.DecisionCallbacks != want.DecisionCallbacks {
-				t.Fatalf("decision callback mismatch: got=%d want=%d", got.DecisionCallbacks, want.DecisionCallbacks)
-			}
-		})
+		for _, mode := range []struct {
+			name string
+			id   int
+		}{
+			{name: "file", id: 0},
+			{name: "source", id: 3},
+		} {
+			t.Run(tc.name+"/"+mode.name, func(t *testing.T) {
+				want, err := goStreamQuery(tc.expr, tc.doc, mode.id, 0, 0, 0, false)
+				if err != nil {
+					t.Fatalf("go stream decision: %v", err)
+				}
+				got, err := cStreamQuery(tc.expr, tc.doc, mode.id, 0, 0, 0, false)
+				if err != nil {
+					t.Fatalf("liblql stream decision: %v", err)
+				}
+				assertStreamSummaryParity(t, got, want)
+				if got.DecisionCallbacks != want.DecisionCallbacks {
+					t.Fatalf("decision callback mismatch: got=%d want=%d", got.DecisionCallbacks, want.DecisionCallbacks)
+				}
+			})
+		}
 	}
 }
 
@@ -408,6 +416,10 @@ func TestSDKStreamingStopParity(t *testing.T) {
 		{name: "max candidates", mode: 0, maxCandidates: 2},
 		{name: "max bytes", mode: 0, maxBytes: 17},
 		{name: "decision callback stop", mode: 0, stopCallback: true},
+		{name: "source max matches", mode: 3, maxMatches: 1},
+		{name: "source max candidates", mode: 3, maxCandidates: 2},
+		{name: "source max bytes", mode: 3, maxBytes: 17},
+		{name: "source decision callback stop", mode: 3, stopCallback: true},
 		{name: "payload callback stop", mode: 1, stopCallback: true},
 	}
 	for _, tc := range cases {
@@ -473,7 +485,7 @@ func goStreamQuery(expr, doc string, mode int, maxMatches, maxCandidates, maxByt
 		MaxCandidates: maxCandidates,
 		MaxBytesRead:  maxBytes,
 	}
-	if mode == 0 {
+	if mode == 0 || mode == 3 {
 		req.Mode = lql.QueryDecisionOnly
 		req.OnDecision = func(decision lql.QueryStreamDecision) error {
 			summary.DecisionCallbacks++

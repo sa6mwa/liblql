@@ -542,10 +542,11 @@ Current implementation is an early slice:
   and current streaming query behavior through the C API, comparing
   `lql_selector_parse()`, `lql_selector_parse_or()`, `lql_matches_json()`,
   `lql_project_json()`, `lql_mutate_json()`, `lql_query_file_decisions()`,
-  `lql_query_file_matches()`, and `lql_query_source_spooled_matches()` against
-  the pinned Go library over the current selector, projection, mutation, and
-  stream corpora; this is behavioral lib-to-lib parity, not a requirement that
-  the C API mirror Go API shape;
+  `lql_query_source_decisions()`, `lql_query_file_matches()`, and
+  `lql_query_source_spooled_matches()` against the pinned Go library over the
+  current selector, projection, mutation, and stream corpora; this is
+  behavioral lib-to-lib parity, not a requirement that the C API mirror Go API
+  shape;
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
   payload kinds, and decoded matched payload JSON. Full non-stopped streams
