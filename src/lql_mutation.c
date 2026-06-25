@@ -1172,6 +1172,49 @@ write_missing_object_mutations(mutation_stream_state *state,
   return LONEJSON_STATUS_OK;
 }
 
+static int
+immediate_array_object_mutation_index(const mutation_stream_state *state,
+                                      const lonejson_value_path *path,
+                                      size_t *out_index) {
+  size_t i;
+  const mutation_item *item;
+  if (path == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < state->plan->count; ++i) {
+    item = &state->plan->items[i];
+    if (state->applied[i] || item->kind == MUTATION_REMOVE ||
+        item->path.segment_count != path->segment_count + 1u ||
+        !value_path_prefix_matches(&item->path, path)) {
+      continue;
+    }
+    *out_index = i;
+    return 1;
+  }
+  return 0;
+}
+
+static lonejson_status
+write_array_replacement_object(mutation_stream_state *state,
+                               const lonejson_value_path *path,
+                               lonejson_error *error) {
+  size_t index;
+  if (!immediate_array_object_mutation_index(state, path, &index)) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (lonejson_writer_begin_object(&state->writer, error) !=
+          LONEJSON_STATUS_OK ||
+      write_synthetic_subtree(state, &state->plan->items[index],
+                              path->segment_count,
+                              error) != LONEJSON_STATUS_OK ||
+      lonejson_writer_end_object(&state->writer, error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  state->skipping = 1;
+  state->skip_depth = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status mutation_object_end(void *user,
                                            const lonejson_value_path *path,
                                            lonejson_error *error) {
@@ -1198,7 +1241,6 @@ static lonejson_status mutation_array_begin(void *user,
                                             const lonejson_value_path *path,
                                             lonejson_error *error) {
   mutation_stream_state *state;
-  (void)path;
   state = (mutation_stream_state *)user;
   if (state->active_increment) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -1206,6 +1248,15 @@ static lonejson_status mutation_array_begin(void *user,
   if (state->source_depth == 0u) {
     state->root_seen = 1;
     state->root_is_object = 0;
+  }
+  if (state->skipping) {
+    ++state->skip_depth;
+    ++state->source_depth;
+    return LONEJSON_STATUS_OK;
+  }
+  if (write_array_replacement_object(state, path, error) !=
+      LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   if (state->skipping) {
     ++state->skip_depth;
@@ -1371,6 +1422,12 @@ static lonejson_status mutation_number_begin(void *user,
     state->root_seen = 1;
     state->root_is_object = 0;
   }
+  if (state->skipping) {
+    free(state->num_buf);
+    state->num_buf = NULL;
+    state->num_len = 0u;
+    return LONEJSON_STATUS_OK;
+  }
   free(state->num_buf);
   state->num_buf = NULL;
   state->num_len = 0u;
@@ -1385,6 +1442,9 @@ static lonejson_status mutation_number_chunk(void *user,
   (void)path;
   (void)error;
   state = (mutation_stream_state *)user;
+  if (state->skipping) {
+    return LONEJSON_STATUS_OK;
+  }
   return append_buf(&state->num_buf, &state->num_len, data, len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
@@ -1414,8 +1474,10 @@ static lonejson_status mutation_number_end(void *user,
   next_value = existing + item->delta;
   sprintf(number_buf, "%.17g", next_value);
   if (lonejson_writer_key(&state->writer, state->key_buf, state->key_len,
-                          error) != LONEJSON_STATUS_OK ||
-      lonejson_writer_number_text(&state->writer, number_buf,
+                          error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (lonejson_writer_number_text(&state->writer, number_buf,
                                   strlen(number_buf),
                                   error) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
