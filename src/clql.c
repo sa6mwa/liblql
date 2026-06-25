@@ -37,6 +37,8 @@ typedef struct output_ranges {
   lql_error callback_error;
 } output_ranges;
 
+static int is_regular_file_path(const char *path);
+
 static lql_status count_match(void *user, const lql_query_decision *decision) {
   match_count *count;
   count = (match_count *)user;
@@ -260,6 +262,64 @@ static char *join_selector_args(const projection_args *args, size_t skip_index,
   return out;
 }
 
+static char *join_selector_args_excluding_inputs(const projection_args *args) {
+  size_t i;
+  size_t count;
+  size_t total;
+  char *out;
+  char *cursor;
+
+  count = 0u;
+  total = 1u;
+  for (i = 0u; i < args->count; ++i) {
+    if (strcmp(args->items[i], "-") == 0 ||
+        is_regular_file_path(args->items[i])) {
+      continue;
+    }
+    total += strlen(args->items[i]);
+    if (count != 0u) {
+      ++total;
+    }
+    ++count;
+  }
+  if (count == 0u) {
+    return lql_strdup("");
+  }
+  out = (char *)malloc(total);
+  if (out == NULL) {
+    return NULL;
+  }
+  cursor = out;
+  count = 0u;
+  for (i = 0u; i < args->count; ++i) {
+    size_t len;
+    if (strcmp(args->items[i], "-") == 0 ||
+        is_regular_file_path(args->items[i])) {
+      continue;
+    }
+    if (count != 0u) {
+      *cursor++ = ',';
+    }
+    len = strlen(args->items[i]);
+    memcpy(cursor, args->items[i], len);
+    cursor += len;
+    ++count;
+  }
+  *cursor = '\0';
+  return out;
+}
+
+static void collect_input_args(const projection_args *args,
+                               projection_args *inputs) {
+  size_t i;
+  for (i = 0u; i < args->count; ++i) {
+    if (strcmp(args->items[i], "-") == 0 ||
+        is_regular_file_path(args->items[i])) {
+      (void)add_projection_arg(inputs, args->items[i]);
+    }
+  }
+}
+
 static lql_status output_match_range(void *user,
                                      const lql_query_decision *decision) {
   output_ranges *ranges;
@@ -444,6 +504,7 @@ int main(int argc, char **argv) {
   projection_args fields;
   projection_args mutations;
   projection_args positionals;
+  projection_args input_paths;
   lql_projection *projection;
   lql_mutation_plan *mutation_plan;
   lql_mutation_parse_options mutation_options;
@@ -457,6 +518,7 @@ int main(int argc, char **argv) {
   memset(&fields, 0, sizeof(fields));
   memset(&mutations, 0, sizeof(mutations));
   memset(&positionals, 0, sizeof(positionals));
+  memset(&input_paths, 0, sizeof(input_paths));
   projection = NULL;
   mutation_plan = NULL;
   or_mode = 0;
@@ -535,8 +597,7 @@ int main(int argc, char **argv) {
       }
     } else if (strncmp(argv[i], "--write=", 8u) == 0) {
       int matched;
-      if (!parse_long_bool_option(argv[i], "--write", &inline_mode,
-                                  &matched)) {
+      if (!parse_long_bool_option(argv[i], "--write", &inline_mode, &matched)) {
         fprintf(stderr, "clql: invalid boolean value for --write\n");
         free_projection_args(&fields);
         free_projection_args(&mutations);
@@ -627,27 +688,11 @@ int main(int argc, char **argv) {
     }
   }
   if (mutations.count != 0u) {
-    size_t input_index;
-    int has_input;
-    has_input = 0;
-    input_index = positionals.count;
-    for (i = 0; i < (int)positionals.count; ++i) {
-      if (strcmp(positionals.items[i], "-") == 0 ||
-          is_regular_file_path(positionals.items[i])) {
-        if (has_input) {
-          fprintf(stderr, "clql: mutation input accepts a single JSON file\n");
-          free_projection_args(&fields);
-          free_projection_args(&mutations);
-          free_projection_args(&positionals);
-          return 2;
-        }
-        input_path = positionals.items[i];
-        input_index = (size_t)i;
-        has_input = 1;
-      }
+    collect_input_args(&positionals, &input_paths);
+    if (input_paths.count != 0u) {
+      input_path = input_paths.items[0];
     }
-    selector_expr_owned =
-        join_selector_args(&positionals, input_index, has_input);
+    selector_expr_owned = join_selector_args_excluding_inputs(&positionals);
   } else {
     size_t input_index;
     int has_input;
@@ -669,6 +714,7 @@ int main(int argc, char **argv) {
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&positionals);
+    free_projection_args(&input_paths);
     return 2;
   }
   selector_expr = selector_expr_owned;
@@ -678,6 +724,7 @@ int main(int argc, char **argv) {
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&positionals);
+    free_projection_args(&input_paths);
     return 2;
   }
   free_projection_args(&positionals);
@@ -690,6 +737,7 @@ int main(int argc, char **argv) {
       free(selector_expr_owned);
       free_projection_args(&fields);
       free_projection_args(&mutations);
+      free_projection_args(&input_paths);
       return 2;
     }
   }
@@ -706,6 +754,7 @@ int main(int argc, char **argv) {
       lql_projection_free(projection);
       free_projection_args(&fields);
       free_projection_args(&mutations);
+      free_projection_args(&input_paths);
       return 2;
     }
   }
@@ -718,6 +767,7 @@ int main(int argc, char **argv) {
     lql_projection_free(projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
+    free_projection_args(&input_paths);
     return 2;
   }
   if (inline_mode && mutation_plan == NULL) {
@@ -728,9 +778,11 @@ int main(int argc, char **argv) {
     lql_projection_free(projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
+    free_projection_args(&input_paths);
     return 2;
   }
-  if (inline_mode && (input_path == NULL || strcmp(input_path, "-") == 0)) {
+  if (inline_mode && (input_paths.count != 1u || input_path == NULL ||
+                      strcmp(input_path, "-") == 0)) {
     fprintf(stderr, "clql: inline mode requires a single JSON file\n");
     free(selector_expr_owned);
     lql_selector_free(selector);
@@ -738,6 +790,7 @@ int main(int argc, char **argv) {
     lql_projection_free(projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
+    free_projection_args(&input_paths);
     return 2;
   }
   if (matches_only && mutation_plan == NULL) {
@@ -752,6 +805,7 @@ int main(int argc, char **argv) {
       lql_projection_free(projection);
       free_projection_args(&fields);
       free_projection_args(&mutations);
+      free_projection_args(&input_paths);
       return 1;
     }
     st = lql_query_file_decisions(selector, input, count_match, &count, &result,
@@ -763,11 +817,89 @@ int main(int argc, char **argv) {
     lql_projection_free(projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
+    free_projection_args(&input_paths);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
       return 1;
     }
     return count.matched == 0u ? 1 : 0;
+  }
+  if (mutation_plan != NULL && !inline_mode && input_paths.count > 1u) {
+    lql_uint64 total_matched;
+    total_matched = 0u;
+    for (i = 0; i < (int)input_paths.count; ++i) {
+      if (strcmp(input_paths.items[i], "-") == 0) {
+        memset(&result, 0, sizeof(result));
+        st = lql_eval_query_file_spooled_matches(
+            selector, stdin, stdout, compact, projection, mutation_plan,
+            matches_only, &result, &error);
+        if (st != LQL_STATUS_OK) {
+          fprintf(stderr, "clql: %s\n", error.message);
+          free(selector_expr_owned);
+          lql_selector_free(selector);
+          lql_mutation_plan_free(mutation_plan);
+          lql_projection_free(projection);
+          free_projection_args(&fields);
+          free_projection_args(&mutations);
+          free_projection_args(&input_paths);
+          return 1;
+        }
+        total_matched += result.candidates_matched;
+        continue;
+      }
+      input = fopen(input_paths.items[i], "rb");
+      range_source = fopen(input_paths.items[i], "rb");
+      if (input == NULL || range_source == NULL) {
+        fprintf(stderr, "clql: failed to open input %s\n",
+                input_paths.items[i]);
+        close_input_path(input);
+        close_input_path(range_source);
+        free(selector_expr_owned);
+        lql_selector_free(selector);
+        lql_mutation_plan_free(mutation_plan);
+        lql_projection_free(projection);
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        free_projection_args(&input_paths);
+        return 1;
+      }
+      memset(&ranges, 0, sizeof(ranges));
+      memset(&result, 0, sizeof(result));
+      ranges.source = range_source;
+      ranges.out = stdout;
+      ranges.projection = projection;
+      ranges.mutation_plan = mutation_plan;
+      ranges.compact = compact;
+      ranges.matches_only = matches_only;
+      lql_error_init(&ranges.callback_error);
+      st = lql_query_file_decisions(selector, input, output_match_range,
+                                    &ranges, &result, &error);
+      if (st != LQL_STATUS_OK && ranges.callback_error.code != LQL_STATUS_OK) {
+        error = ranges.callback_error;
+      }
+      close_input_path(input);
+      close_input_path(range_source);
+      if (st != LQL_STATUS_OK) {
+        fprintf(stderr, "clql: %s\n", error.message);
+        free(selector_expr_owned);
+        lql_selector_free(selector);
+        lql_mutation_plan_free(mutation_plan);
+        lql_projection_free(projection);
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        free_projection_args(&input_paths);
+        return 1;
+      }
+      total_matched += ranges.matched;
+    }
+    free(selector_expr_owned);
+    lql_selector_free(selector);
+    lql_mutation_plan_free(mutation_plan);
+    lql_projection_free(projection);
+    free_projection_args(&fields);
+    free_projection_args(&mutations);
+    free_projection_args(&input_paths);
+    return total_matched == 0u ? 1 : 0;
   }
   if (input_path != NULL && strcmp(input_path, "-") != 0) {
     input = fopen(input_path, "rb");
@@ -782,6 +914,7 @@ int main(int argc, char **argv) {
       lql_projection_free(projection);
       free_projection_args(&fields);
       free_projection_args(&mutations);
+      free_projection_args(&input_paths);
       return 1;
     }
     memset(&ranges, 0, sizeof(ranges));
@@ -797,6 +930,7 @@ int main(int argc, char **argv) {
       lql_projection_free(projection);
       free_projection_args(&fields);
       free_projection_args(&mutations);
+      free_projection_args(&input_paths);
       return 1;
     }
     ranges.source = range_source;
@@ -842,6 +976,7 @@ int main(int argc, char **argv) {
     lql_projection_free(projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
+    free_projection_args(&input_paths);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
       return 1;
@@ -858,6 +993,7 @@ int main(int argc, char **argv) {
   lql_projection_free(projection);
   free_projection_args(&fields);
   free_projection_args(&mutations);
+  free_projection_args(&input_paths);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
     return 1;

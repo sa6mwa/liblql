@@ -556,6 +556,10 @@ Current implementation is an early slice:
   boolean flags that affect observable behavior, including
   `--compact=true`, `--matches-only=true|false`, `--or=true|false`, and
   `--enable-file-mutations=true|false`;
+- CLI non-inline mutation supports multiple seekable input files and mixed
+  file/stdin inputs in argument order, matching the Go CLI's
+  `splitMutationArgs` behavior while preserving inline mode's single-file
+  restriction;
 - Go-backed SDK parity tests now exist for public `liblql` selector
   parse/evaluate behavior, projection parser failures, buffered and seekable
   file-range JSON projection including malformed JSON execution errors,

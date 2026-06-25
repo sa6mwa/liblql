@@ -1248,7 +1248,7 @@ func TestCLQLMatchAllMutationFileParity(t *testing.T) {
 	}
 }
 
-func TestCLQLMutationRejectsMultipleInputFiles(t *testing.T) {
+func TestCLQLMutationMultipleInputFilesParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
 		t.Skip("CLQL_PATH not set")
@@ -1262,16 +1262,41 @@ func TestCLQLMutationRejectsMultipleInputFiles(t *testing.T) {
 	if err := os.WriteFile(fileB, []byte(`{"id":"b"}`), 0600); err != nil {
 		t.Fatalf("write file B: %v", err)
 	}
-	cmd := exec.Command(clql, "-m", "/status=done", fileA, fileB)
+	cmd := exec.Command(clql, "-c", "-m", "/status=done", fileA, fileB)
 	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("multiple mutation input files unexpectedly succeeded: out=%q", string(out))
+	if err != nil {
+		t.Fatalf("multiple mutation input files failed: %v out=%q", err, string(out))
 	}
-	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
-		t.Fatalf("multiple mutation input exit mismatch: err=%v out=%q", err, string(out))
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode multiple mutation inputs: %v out=%q", err, string(out))
 	}
-	if !bytes.Contains(out, []byte("mutation input accepts a single JSON file")) {
-		t.Fatalf("multiple mutation input error mismatch: out=%q", string(out))
+	want, err := decodeJSONValues([]byte(`{"id":"a","status":"done"}
+{"id":"b","status":"done"}`))
+	if err != nil {
+		t.Fatalf("decode expected multiple mutation inputs: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("multiple mutation input mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+
+	cmd = exec.Command(clql, "-c", "-m", "/status=done", fileA, "-")
+	cmd.Stdin = bytes.NewBufferString(`{"id":"stdin"}`)
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("mixed mutation input files failed: %v out=%q", err, string(out))
+	}
+	got, err = decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode mixed mutation inputs: %v out=%q", err, string(out))
+	}
+	want, err = decodeJSONValues([]byte(`{"id":"a","status":"done"}
+{"id":"stdin","status":"done"}`))
+	if err != nil {
+		t.Fatalf("decode expected mixed mutation inputs: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mixed mutation input mismatch: got=%#v want=%#v out=%q", got, want, string(out))
 	}
 }
 

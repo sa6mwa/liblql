@@ -42,7 +42,7 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"mutation", "stdin file-backed mutation values", []string{"TestCLQLStdinFileBackedMutationParity"}},
 	{"mutation", "home-expanded file-backed mutation paths", []string{"TestCLQLFileBackedMutationExpandsHomeParity"}},
 	{"mutation", "match-all file mutation", []string{"TestCLQLMatchAllMutationFileParity"}},
-	{"mutation", "multiple input file rejection", []string{"TestCLQLMutationRejectsMultipleInputFiles"}},
+	{"mutation", "multiple input file streaming", []string{"TestCLQLMutationMultipleInputFilesParity"}},
 	{"mutation", "root set, increment, delete, and create", []string{"TestCLQLRootMutationParity"}},
 	{"mutation", "nested set, increment, delete, create, and time normalization", []string{"TestCLQLNestedMutationParity"}},
 	{"mutation", "quoted value typing", []string{"TestCLQLQuotedMutationValueParity"}},
