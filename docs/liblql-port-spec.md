@@ -43,7 +43,7 @@ Target matrix follows the pkt.systems lifecycle:
 
 ## Dependency Boundary
 
-`lonejson v0.33.0` or newer is the JSON substrate.
+`lonejson v0.35.0` or newer is the JSON substrate.
 
 liblql must not implement bespoke JSON parsing, tokenization, escaping,
 serialization, stream framing, compacting, or payload spooling when lonejson can
@@ -61,7 +61,8 @@ The API should be handle-oriented and explicit about ownership:
 
 - parser/compiled selector handles are owned by the caller and freed with
   liblql cleanup functions;
-- result payload handles are valid for documented callback lifetimes;
+- result payload handles are valid only for documented callback lifetimes and
+  must not imply retained candidate copies;
 - all project-allocated strings or buffers are released through liblql cleanup
   functions;
 - error messages are actionable and available through explicit error objects.
@@ -79,6 +80,12 @@ The API should eventually expose these surfaces:
 
 The API must name behavior precisely. Do not call an API streaming unless bytes
 or records flow producer-to-consumer without full-message materialization.
+In particular, streaming query APIs must not copy, concatenate, retain, or
+materialize complete candidate payloads behind the caller's back.
+The ideal is zero allocation during steady-state query execution. Where
+allocation is unavoidable, it must be explicit, bounded, and attributable to
+selector state, caller-provided buffers, small parser state, or documented
+spooling handles rather than total input size.
 
 ## Selector Scope
 
@@ -169,6 +176,15 @@ entire files into hidden buffers.
 
 Streaming query is a core requirement.
 
+The design target is that very large JSON inputs remain queryable on very small
+machines. A 1 GB JSON input under a 128 MB process memory budget is the baseline
+acceptance profile; a 1 TB JSON input on an 8 MB embedded machine is the
+architectural stress model. These are not tuning goals: steady-state query
+memory must be bounded by configured working buffers and parser/selector state,
+not by total input size, candidate size, match count, or result set size. The
+implementation must not require a complete candidate, complete stream, or
+complete result set to reside in memory.
+
 The stream API must handle:
 
 - one top-level JSON value;
@@ -176,9 +192,14 @@ The stream API must handle:
 - top-level arrays as streams of candidate values;
 - large candidates with bounded memory;
 - decision-only mode;
-- plus-value mode with payload access;
+- plus-value mode with callback-scoped payload access;
 - matched-only callbacks;
-- caller-managed or lonejson-managed payload sinks when supported;
+- seekable/rewindable sources where matched payload access is reconstructed
+  from candidate offsets and byte sizes without capture;
+- caller-managed or lonejson-managed payload sinks when supported, without
+  liblql retaining complete candidate copies;
+- non-seekable sources where plus-value output uses caller sinks or bounded
+  spooled handles rather than memory capture;
 - stop controls:
   - max matches;
   - max candidates;
@@ -188,9 +209,33 @@ The stream API must handle:
 Candidate payload access must distinguish:
 
 - no payload captured;
-- in-memory compact JSON;
-- spooled payload;
-- caller-managed payload.
+- seekable source range: candidate offset plus byte size, read only after a
+  match decision;
+- callback-scoped streaming/sink payload access;
+- callback-scoped spooled payload handles;
+- caller-managed payload sinks.
+
+Streaming query must not use in-memory compact JSON capture as an
+implementation shortcut. Any future API that deliberately materializes complete
+candidate payloads must be named as buffered/materialized behavior, must be
+opt-in, and must not be used to satisfy the streaming query requirement.
+For very large matching values, plus-value behavior must expose a streaming
+seekable range, sink/source, or spooled handle; it must not construct one
+contiguous in-memory JSON value merely to return it to the caller. If the input
+source is seekable or rewindable, liblql must prefer offset/size based reread
+over candidate capture. Capture is only justified when the source cannot be
+revisited or when the caller explicitly selects a capture mode.
+
+As of lonejson `v0.35.0`, `lonejson_candidate_info` exposes candidate index,
+stream offset, byte size, and payload size as 64-bit range values. liblql should
+therefore treat CR 3 plus CR 6 as sufficient for decision-only candidate
+streaming and seekable-source payload reconstruction. The remaining work is
+liblql source policy, not JSON parser work:
+
+- classify public input sources as seekable/rewindable or non-seekable;
+- expose seekable source ranges as callback-scoped payload handles;
+- use lonejson `CAPTURE_NONE` for decision-only and seekable plus-value paths;
+- use caller sinks or spooled handles only for non-seekable plus-value paths.
 
 ## CLI Scope
 
@@ -287,35 +332,41 @@ The port should progress in falsifiable slices:
    - Go parity tests for supported subset.
 
 3. lonejson upgrade integration
+   - consume candidate stream with 64-bit ranges;
    - consume path-aware visitor and JSON Pointer helpers;
    - remove liblql-owned path reconstruction where possible.
 
-4. Full selector parity
+4. Streaming query foundation
+   - decision-only candidate stream over `FILE *`;
+   - candidate index, offset, and byte size callbacks;
+   - no payload capture in decision-only mode.
+
+5. Full selector parity
    - wildcards;
    - temporal selectors;
    - `in`;
    - selector plans.
 
-5. Streaming query parity
-   - candidate stream;
-   - payload capture/spool;
+6. Streaming query parity
+   - seekable source range payload handles;
+   - non-seekable caller sink/spool payload handles;
    - stop controls.
 
-6. Projection parity
+7. Projection parity
    - field selection;
    - CLI `-f`.
 
-7. Mutation parity
+8. Mutation parity
    - parse/plan;
    - multi-path rewrite;
    - file-backed mutation values;
    - inline write behavior.
 
-8. Lua parity
+9. Lua parity
    - facade and tests;
    - parity benchmarks.
 
-9. Packaging completion
+10. Packaging completion
    - liblql SDK archives;
    - clql archives;
    - release matrix verification.
@@ -327,8 +378,10 @@ Each slice must add or update parity tests before claiming support.
 Current implementation is an early slice:
 
 - lifecycle scaffold exists;
-- lonejson `v0.33.0` binary archive acquisition from GitHub release assets
+- lonejson `v0.35.0` binary archive acquisition from GitHub release assets
   exists;
+- decision-only candidate streaming over `FILE *` uses lonejson candidate
+  streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - first C selector parse/evaluate subset exists;
 - `clql` exists as a minimal selector smoke CLI;
 - Go parity tests exist for the initial selector subset;

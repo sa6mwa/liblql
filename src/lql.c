@@ -112,3 +112,16 @@ lql_status lql_matches_json(const lql_selector *selector, const char *json,
   }
   return lql_eval_selector(selector, json, json_len, out_matched, error);
 }
+
+lql_status lql_query_file_decisions(const lql_selector *selector, FILE *file,
+                                    lql_query_decision_fn on_decision,
+                                    void *user, lql_query_result *out_result,
+                                    lql_error *error) {
+  if (file == NULL || on_decision == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "file and on_decision are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return lql_eval_query_file_decisions(selector, file, on_decision, user,
+                                       out_result, error);
+}

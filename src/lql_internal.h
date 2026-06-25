@@ -44,5 +44,9 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
 lql_status lql_eval_selector(const lql_selector *selector, const char *json,
                              size_t json_len, int *out_matched,
                              lql_error *error);
+lql_status
+lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
+                              lql_query_decision_fn on_decision, void *user,
+                              lql_query_result *out_result, lql_error *error);
 
 #endif

@@ -93,6 +93,15 @@ The generator should write dataset files under generated state such as
 `build/bench-fixtures/` or `.cache/bench-fixtures/`, never under source control
 unless explicitly producing a tiny checked-in smoke fixture.
 
+The benchmark suite must include a large-fixture profile that proves C and Lua
+can query a 1 GB JSON input while constrained to a 128 MB process memory
+budget. This is the runnable gate, not the architectural ceiling: the design
+must also remain valid for a 1 TB JSON input on an 8 MB embedded machine by
+keeping steady-state memory independent of total input size, candidate size,
+match count, and result set size. Passing this profile requires bounded
+streaming behavior; a benchmark that materializes the input, candidate payloads,
+or complete result set fails the requirement even if it reports correct matches.
+
 ## Record Shape
 
 For the library-style query benchmark, records should match the Go benchmark's
@@ -188,20 +197,25 @@ Mirror Go `BenchmarkQueryStreamSynthetic` modes:
      `unsupported` for this mode until implemented.
 
 3. `plus_value_selector`
-   - include candidate payload access;
+   - include callback-scoped candidate payload access;
    - verify a payload handle/source exists for every candidate callback where
-     the mode promises payload access.
+     the mode promises payload access;
+   - for seekable fixture files, verify payload access can be satisfied by
+     candidate offset and byte size without candidate capture;
+   - do not copy or retain full candidate payloads in the benchmark harness.
 
 4. `plus_value_plan`
    - plan variant of plus-value mode.
 
 5. `plus_value_openjson_selector`
    - force a very small memory threshold for `large_single_json`;
-   - read each matched/callback payload through the open/read source path;
+   - read each matched/callback payload through the callback-scoped open/read
+     source path, preferring seek/reread by candidate offset for seekable
+     inputs and using spooled handles only for non-seekable inputs;
    - verify byte counts and cleanup behavior.
 
 6. `plus_value_openjson_plan`
-   - plan variant of forced-spool/open-read mode.
+   - plan variant of seekable-range or spool/open-read mode.
 
 Also mirror CLI benchmark parse behavior:
 
@@ -228,6 +242,7 @@ Each implementation and mode must report:
 - match count;
 - payload count when payload mode is enabled;
 - payload bytes read when payload mode opens/reads payloads;
+- payload source type: seekable range, callback sink, or spool;
 - elapsed time or ns/op;
 - allocations or allocator counters when available;
 - unsupported reason, if applicable.
@@ -289,7 +304,7 @@ Lua benchmark entry points should support:
 - optional reusable compiled selector/plan if the Lua API exposes one;
 - streaming candidates from a dataset file;
 - returning candidate and match counts;
-- payload/open-read modes when Lua exposes payload handles.
+- callback-scoped payload/open-read modes when Lua exposes payload handles.
 
 Lua unsupported modes must be explicit result records. Silent absence is a
 benchmark failure.
@@ -346,6 +361,14 @@ mode, observed value, baseline/threshold, and reproduction command.
   languages.
 - Do not hide unsupported selector classes by filtering them out.
 - Do not call a benchmark streaming if it materializes the full dataset first.
+- Do not satisfy payload modes by retaining complete candidate copies outside
+  the callback lifetime.
+- Do not pass the 1 GB / 128 MB profile by increasing memory limits, using
+  temporary files as an undisclosed full-input staging substitute, or disabling
+  payload modes that the profile requires.
+- Do not treat the 1 GB / 128 MB profile as permission for memory growth
+  proportional to input size; it is only the practical CI-sized proxy for the
+  1 TB / 8 MB stress model.
 
 ## Acceptance Tests
 
@@ -357,7 +380,8 @@ Add tests or smoke gates proving:
 - comparison fails on an injected match-count mismatch;
 - comparison fails on an injected candidate-count mismatch;
 - unsupported modes are represented explicitly;
+- the large-fixture profile fails when the implementation materializes the
+  dataset or complete candidates;
 - `make benchmarks-parity` fails if any required implementation is missing;
 - `make bench-check` runs a small deterministic matrix suitable for local
   confidence.
-

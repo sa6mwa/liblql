@@ -4,9 +4,10 @@
 SDK releases. It uses `lonejson` for JSON parsing, visiting, serialization, and
 stream-aware JSON operations.
 
-Current implementation status: repository lifecycle and the first selector
-parse/evaluate slice are in place. Streaming query, projection, mutation, and
-full `clql` parity are still active porting work.
+Current implementation status: repository lifecycle, the first selector
+parse/evaluate slice, and a decision-only `FILE *` candidate stream are in
+place. Payload handles, projection, mutation, and full `clql` parity are still
+active porting work.
 
 ```sh
 make deps-debug

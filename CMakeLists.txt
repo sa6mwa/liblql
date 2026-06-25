@@ -28,6 +28,17 @@ set(CMAKE_C_STANDARD 90)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+set(LQL_PROJECT_WARNINGS)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+  set(LQL_PROJECT_WARNINGS -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+function(lql_apply_project_warnings target)
+  if(LQL_PROJECT_WARNINGS)
+    target_compile_options(${target} PRIVATE ${LQL_PROJECT_WARNINGS})
+  endif()
+endfunction()
+
 add_library(lql_common OBJECT
   src/lql.c
   src/lql_selector.c
@@ -38,9 +49,7 @@ target_include_directories(lql_common
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 target_link_libraries(lql_common PUBLIC lonejson::lonejson)
-if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-  target_compile_options(lql_common PRIVATE -Wall -Wextra -Wpedantic -Werror)
-endif()
+lql_apply_project_warnings(lql_common)
 
 if(LQL_BUILD_STATIC)
   add_library(lql_static STATIC $<TARGET_OBJECTS:lql_common>)
@@ -68,14 +77,13 @@ endif()
 if(LQL_BUILD_BINARY)
   add_executable(clql src/clql.c)
   target_link_libraries(clql PRIVATE $<IF:$<BOOL:${LQL_BUILD_STATIC}>,lql_static,lql_shared>)
-  if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(clql PRIVATE -Wall -Wextra -Wpedantic -Werror)
-  endif()
+  lql_apply_project_warnings(clql)
 endif()
 
 if(LQL_BUILD_EXAMPLES)
   add_executable(lql_match_example examples/match.c)
   target_link_libraries(lql_match_example PRIVATE $<IF:$<BOOL:${LQL_BUILD_STATIC}>,lql_static,lql_shared>)
+  lql_apply_project_warnings(lql_match_example)
 endif()
 
 include(CTest)
@@ -83,11 +91,17 @@ if(LQL_BUILD_TESTS)
   enable_testing()
   add_executable(test_lql tests/test_lql.c)
   target_link_libraries(test_lql PRIVATE $<IF:$<BOOL:${LQL_BUILD_STATIC}>,lql_static,lql_shared>)
+  lql_apply_project_warnings(test_lql)
   add_test(NAME lql.unit COMMAND test_lql)
   set_tests_properties(lql.unit PROPERTIES LABELS "unit;local" TIMEOUT 20)
 
+  set(LQL_HEADER_SMOKE_WARNINGS)
+  if(LQL_PROJECT_WARNINGS)
+    set(LQL_HEADER_SMOKE_WARNINGS ${LQL_PROJECT_WARNINGS})
+  endif()
   add_test(NAME lql.header COMMAND
-    ${CMAKE_C_COMPILER} -std=c90 -I${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_C_COMPILER} -std=c90 ${LQL_HEADER_SMOKE_WARNINGS}
+    -I${CMAKE_CURRENT_SOURCE_DIR}/include
     -c ${CMAKE_CURRENT_SOURCE_DIR}/tests/header_smoke.c -o ${CMAKE_CURRENT_BINARY_DIR}/header_smoke.o)
   set_tests_properties(lql.header PROPERTIES LABELS "unit;api" TIMEOUT 20)
 
