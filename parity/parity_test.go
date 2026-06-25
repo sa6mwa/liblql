@@ -340,6 +340,64 @@ func TestCLQLStdinCompactOutputParity(t *testing.T) {
 	}
 }
 
+func TestCLQLStdinProjectionParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []struct {
+		name   string
+		expr   string
+		fields []string
+		body   string
+	}{
+		{
+			name:   "project matched stdin candidate",
+			expr:   `/status="open"`,
+			fields: []string{"/id", "/meta/trace", "/items/1/sku"},
+			body:   "{\"status\":\"closed\",\"id\":\"a\"}\n { \"status\" : \"open\" , \"id\" : \"b\" , \"meta\" : { \"trace\" : 7 }, \"items\" : [ { \"sku\" : \"A\" }, { \"sku\" : \"B\" } ] }\n",
+		},
+		{
+			name:   "missing field suppresses stdin output",
+			expr:   `/status="open"`,
+			fields: []string{"/missing"},
+			body:   "{\"status\":\"open\",\"id\":\"a\"}\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sel, err := lql.ParseSelectorString(tc.expr)
+			if err != nil {
+				t.Fatalf("go parse: %v", err)
+			}
+			want, err := goProjectedValues(tc.body, sel, tc.fields)
+			if err != nil {
+				t.Fatalf("go projected values: %v", err)
+			}
+			args := []string{}
+			for _, field := range tc.fields {
+				args = append(args, "-f", field)
+			}
+			args = append(args, tc.expr)
+			cmd := exec.Command(clql, args...)
+			cmd.Stdin = bytes.NewBufferString(tc.body)
+			out, err := cmd.CombinedOutput()
+			gotMatch := err == nil
+			wantMatch := len(want) != 0
+			if gotMatch != wantMatch {
+				t.Fatalf("clql stdin projection match mismatch: got=%v want=%v err=%v out=%q", gotMatch, wantMatch, err, string(out))
+			}
+			got, err := decodeJSONValues(out)
+			if err != nil {
+				t.Fatalf("decode clql stdin projection output: %v output=%q", err, string(out))
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("clql stdin projection mismatch: got=%#v want=%#v output=%q", got, want, string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLSeekableFileOutputParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

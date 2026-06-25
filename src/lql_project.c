@@ -84,13 +84,18 @@ static lonejson_read_result limited_read(void *user, unsigned char *buffer,
                                                   : (size_t)reader->remaining;
   result.bytes_read = fread(buffer, 1u, want, reader->file);
   reader->remaining -= (lql_uint64)result.bytes_read;
-  if (result.bytes_read != want && ferror(reader->file)) {
+  if (result.bytes_read != want) {
     result.error_code = 1;
   }
   if (reader->remaining == 0u) {
     result.eof = 1;
   }
   return result;
+}
+
+static lonejson_read_result spooled_read(void *user, unsigned char *buffer,
+                                         size_t capacity) {
+  return lonejson_spooled_read((lonejson_spooled *)user, buffer, capacity);
 }
 
 static int segment_is_array_index(const char *field) {
@@ -900,26 +905,22 @@ void lql_projection_free(lql_projection *projection) {
   free(projection);
 }
 
-lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
-                                  lql_uint64 offset, lql_uint64 size, FILE *out,
-                                  int *out_found, lql_error *error) {
+static lql_status lql_project_reader(const lql_projection *projection,
+                                     lonejson_reader_fn reader_fn,
+                                     void *reader_user, FILE *out,
+                                     int *out_found, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
   projection_state state;
-  limited_file_reader reader;
   lonejson_status st;
-  if (projection == NULL || file == NULL || out == NULL || out_found == NULL) {
+  if (projection == NULL || reader_fn == NULL || out == NULL ||
+      out_found == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "projection, file, out, and out_found are required");
+                  "projection, reader, out, and out_found are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   *out_found = 0;
-  if (!seek_u64(file, offset)) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                  "failed to seek projection source");
-    return LQL_STATUS_JSON_ERROR;
-  }
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
@@ -928,8 +929,6 @@ lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
   memset(&state, 0, sizeof(state));
   state.projection = projection;
   state.error = &lj_error;
-  reader.file = file;
-  reader.remaining = size;
   init_projection_visitor(&visitor);
   if (lonejson_writer_init_sink(runtime, &state.writer, file_sink, out,
                                 &lj_error) != LONEJSON_STATUS_OK) {
@@ -939,7 +938,7 @@ lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
     free(state.num_buf);
     return LQL_STATUS_JSON_ERROR;
   }
-  st = lonejson_visit_path_value_reader(runtime, limited_read, &reader,
+  st = lonejson_visit_path_value_reader(runtime, reader_fn, reader_user,
                                         &visitor, &state, &lj_error);
   if (st == LONEJSON_STATUS_OK && (!state.root_seen || !state.root_is_object)) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
@@ -973,6 +972,44 @@ lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
     return LQL_STATUS_JSON_ERROR;
   }
   return LQL_STATUS_OK;
+}
+
+lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
+                                  lql_uint64 offset, lql_uint64 size, FILE *out,
+                                  int *out_found, lql_error *error) {
+  limited_file_reader reader;
+  if (out_found != NULL) {
+    *out_found = 0;
+  }
+  if (file == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection file is required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (!seek_u64(file, offset)) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to seek projection source");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  reader.file = file;
+  reader.remaining = size;
+  return lql_project_reader(projection, limited_read, &reader, out, out_found,
+                            error);
+}
+
+lql_status lql_project_spooled(const lql_projection *projection,
+                               const lonejson_spooled *spooled, FILE *out,
+                               int *out_found, lql_error *error) {
+  lonejson_spooled cursor;
+  if (spooled == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection spooled payload is required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  cursor = *spooled;
+  cursor.read_offset = 0u;
+  return lql_project_reader(projection, spooled_read, &cursor, out, out_found,
+                            error);
 }
 
 lql_status lql_compact_file_range(FILE *file, lql_uint64 offset,

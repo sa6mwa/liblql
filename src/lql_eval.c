@@ -589,8 +589,10 @@ typedef struct spooled_match_state {
   const lql_selector *selector;
   FILE *out;
   int compact;
+  const lql_projection *projection;
   lonejson *compact_runtime;
   lql_query_result result;
+  lql_error projection_error;
   eval_doc doc;
 } spooled_match_state;
 
@@ -690,8 +692,10 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
   lonejson_status write_status;
   int writer_initialized;
   int matched;
+  int projected;
   write_status = LONEJSON_STATUS_OK;
   writer_initialized = 0;
+  projected = 0;
   matched = state->selector == NULL ||
             state->selector->root.kind == LQL_NODE_ALL ||
             eval_node(&state->selector->root, &state->doc);
@@ -700,7 +704,25 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
       reset_doc(&state->doc);
       return LONEJSON_CANDIDATE_ERROR;
     }
-    if (state->compact) {
+    if (state->projection != NULL) {
+      if (lql_project_spooled(state->projection, candidate->payload_spool,
+                              state->out, &projected,
+                              &state->projection_error) != LQL_STATUS_OK) {
+        error->code = LONEJSON_STATUS_CALLBACK_FAILED;
+        strncpy(error->message, state->projection_error.message,
+                sizeof(error->message) - 1u);
+        error->message[sizeof(error->message) - 1u] = '\0';
+        reset_doc(&state->doc);
+        return LONEJSON_CANDIDATE_ERROR;
+      }
+      if (!projected) {
+        state->result.candidates_seen++;
+        state->result.bytes_read =
+            (lql_uint64)(candidate->stream_offset + candidate->byte_size);
+        reset_doc(&state->doc);
+        return LONEJSON_CANDIDATE_CONTINUE;
+      }
+    } else if (state->compact) {
       write_status = lonejson_writer_init_sink(state->compact_runtime, &writer,
                                                file_sink, state->out, error);
       if (write_status == LONEJSON_STATUS_OK) {
@@ -831,6 +853,7 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
 lql_status lql_eval_query_file_spooled_matches(const lql_selector *selector,
                                                FILE *file, FILE *out,
                                                int compact,
+                                               const lql_projection *projection,
                                                lql_query_result *out_result,
                                                lql_error *error) {
   lonejson *runtime;
@@ -849,6 +872,8 @@ lql_status lql_eval_query_file_spooled_matches(const lql_selector *selector,
   state.selector = selector;
   state.out = out;
   state.compact = compact;
+  state.projection = projection;
+  lql_error_init(&state.projection_error);
   if (!init_doc(&state.doc, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
@@ -882,6 +907,11 @@ lql_status lql_eval_query_file_spooled_matches(const lql_selector *selector,
   free_doc(&state.doc);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
+    if (state.projection_error.code != LQL_STATUS_OK) {
+      lql_set_error(error, state.projection_error.code,
+                    state.projection_error.message);
+      return state.projection_error.code;
+    }
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }

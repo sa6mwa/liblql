@@ -411,6 +411,9 @@ Current implementation is an early slice:
 - `clql -c/--compact selector < data.json` compacts matched non-seekable stdin
   candidates by streaming callback-scoped spooled payloads back through
   lonejson rather than materializing complete candidates in liblql;
+- `clql -f/--field selector < data.json` projects matched non-seekable stdin
+  candidates by streaming callback-scoped spooled payloads through the public
+  projection visitor path, without retaining complete candidates in liblql;
 - `clql` accepts an empty selector for match-all file selection, including the
   Go-compatible shorthand where a single existing file path is the input rather
   than selector text;
@@ -469,9 +472,9 @@ Current implementation is an early slice:
   `date.since` macros are implemented;
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, and invalid selector invariants;
-- `clql` exists as a minimal selector smoke CLI; projection path behavior is
-  still being expanded toward full parity, and projection/mutation over
-  non-seekable stdin remain unsupported until their streaming composition is
+- `clql` exists as a selector/projection/mutation smoke CLI; projection path
+  behavior is still being expanded toward full parity, and mutation over
+  non-seekable stdin remains unsupported until its streaming composition is
   implemented without hidden full-candidate materialization;
 - Go parity tests exist for the initial selector subset;
 - package archive production is scaffolded, not complete.

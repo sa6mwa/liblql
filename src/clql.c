@@ -557,18 +557,9 @@ int main(int argc, char **argv) {
     free_projection_args(&mutations);
     return 2;
   }
-  if (fields.count != 0u) {
-    fprintf(stderr, "clql: field projection requires a seekable input file\n");
-    lql_selector_free(selector);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    return 2;
-  }
   memset(&result, 0, sizeof(result));
   st = lql_eval_query_file_spooled_matches(selector, stdin, stdout, compact,
-                                           &result, &error);
+                                           projection, &result, &error);
   lql_selector_free(selector);
   lql_mutation_plan_free(mutation_plan);
   lql_projection_free(projection);

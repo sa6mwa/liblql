@@ -3,6 +3,8 @@
 
 #include "lql/lql.h"
 
+#include <lonejson.h>
+
 typedef enum lql_node_kind {
   LQL_NODE_ALL = 0,
   LQL_NODE_AND,
@@ -95,8 +97,12 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
 lql_status lql_eval_query_file_spooled_matches(const lql_selector *selector,
                                                FILE *file, FILE *out,
                                                int compact,
+                                               const lql_projection *projection,
                                                lql_query_result *out_result,
                                                lql_error *error);
+lql_status lql_project_spooled(const lql_projection *projection,
+                               const lonejson_spooled *spooled, FILE *out,
+                               int *out_found, lql_error *error);
 int lql_parse_temporal_literal(const char *raw, lql_temporal *out);
 int lql_temporal_compare(const lql_temporal *left, const lql_temporal *right);
 int lql_temporal_equal(const lql_temporal *left, const lql_temporal *right);
