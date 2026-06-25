@@ -2347,22 +2347,61 @@ func TestCLQLInlineMutationParity(t *testing.T) {
 	}
 }
 
-func TestCLQLInlineMutationRejectsStdin(t *testing.T) {
+func TestCLQLInlineMutationRejectsInvalidInputs(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
 		t.Skip("CLQL_PATH not set")
 	}
-	cmd := exec.Command(clql, "-i", "-m", "/status=done", `contains{f=/}`)
-	cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("inline mutation on stdin unexpectedly succeeded: out=%q", string(out))
+	dir := t.TempDir()
+	fileA := filepath.Join(dir, "a.json")
+	fileB := filepath.Join(dir, "b.json")
+	if err := os.WriteFile(fileA, []byte(`{"id":"a"}`), 0600); err != nil {
+		t.Fatalf("write file A: %v", err)
 	}
-	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
-		t.Fatalf("inline stdin exit mismatch: err=%v out=%q", err, string(out))
+	if err := os.WriteFile(fileB, []byte(`{"id":"b"}`), 0600); err != nil {
+		t.Fatalf("write file B: %v", err)
 	}
-	if !bytes.Contains(out, []byte("inline mode requires a single JSON file")) {
-		t.Fatalf("inline stdin error mismatch: out=%q", string(out))
+	cases := []struct {
+		name   string
+		args   []string
+		stdin  string
+		needle string
+	}{
+		{
+			name:   "no file path",
+			args:   []string{"-i", "-m", "/status=done", `contains{f=/}`},
+			stdin:  `{"status":"open"}`,
+			needle: "inline mode requires a file path",
+		},
+		{
+			name:   "stdin marker",
+			args:   []string{"-i", "-m", "/status=done", `contains{f=/}`, "-"},
+			stdin:  `{"status":"open"}`,
+			needle: "inline mode requires a single JSON file",
+		},
+		{
+			name:   "multiple files",
+			args:   []string{"-i", "-m", "/status=done", fileA, fileB},
+			needle: "inline mode requires a single JSON file",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(clql, tc.args...)
+			if tc.stdin != "" {
+				cmd.Stdin = bytes.NewBufferString(tc.stdin)
+			}
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("inline mutation unexpectedly succeeded: out=%q", string(out))
+			}
+			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
+				t.Fatalf("inline rejection exit mismatch: err=%v out=%q", err, string(out))
+			}
+			if !bytes.Contains(out, []byte(tc.needle)) {
+				t.Fatalf("inline rejection error mismatch: want %q out=%q", tc.needle, string(out))
+			}
+		})
 	}
 }
 

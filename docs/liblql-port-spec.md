@@ -560,6 +560,9 @@ Current implementation is an early slice:
   file/stdin inputs in argument order, matching the Go CLI's
   `splitMutationArgs` behavior while preserving inline mode's single-file
   restriction;
+- CLI inline mutation input rejection matches the Go CLI distinction between
+  missing file path and invalid single-file input forms such as stdin or
+  multiple files;
 - Go-backed SDK parity tests now exist for public `liblql` selector
   parse/evaluate behavior, projection parser failures, buffered and seekable
   file-range JSON projection including malformed JSON execution errors,

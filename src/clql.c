@@ -781,6 +781,17 @@ int main(int argc, char **argv) {
     free_projection_args(&input_paths);
     return 2;
   }
+  if (inline_mode && input_paths.count == 0u) {
+    fprintf(stderr, "clql: inline mode requires a file path\n");
+    free(selector_expr_owned);
+    lql_selector_free(selector);
+    lql_mutation_plan_free(mutation_plan);
+    lql_projection_free(projection);
+    free_projection_args(&fields);
+    free_projection_args(&mutations);
+    free_projection_args(&input_paths);
+    return 2;
+  }
   if (inline_mode && (input_paths.count != 1u || input_path == NULL ||
                       strcmp(input_path, "-") == 0)) {
     fprintf(stderr, "clql: inline mode requires a single JSON file\n");
