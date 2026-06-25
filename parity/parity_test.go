@@ -191,6 +191,64 @@ func TestCLQLOrFlagParity(t *testing.T) {
 	}
 }
 
+func TestCLQLMatchesOnlyStreamingParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []struct {
+		name string
+		expr string
+		body string
+	}{
+		{
+			name: "ndjson match",
+			expr: `/status="open"`,
+			body: "{\"status\":\"closed\"}\n{\"status\":\"open\"}\n",
+		},
+		{
+			name: "array match",
+			expr: `/status="open"`,
+			body: `[{"status":"closed"},{"status":"open"}]`,
+		},
+		{
+			name: "no match",
+			expr: `/status="open"`,
+			body: "{\"status\":\"closed\"}\n{\"status\":\"done\"}\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sel, err := lql.ParseSelectorString(tc.expr)
+			if err != nil {
+				t.Fatalf("go parse: %v", err)
+			}
+			result, err := lql.QueryStreamWithResult(lql.QueryStreamRequest{
+				Reader:   bytes.NewBufferString(tc.body),
+				Selector: sel,
+				Mode:     lql.QueryDecisionOnly,
+				OnDecision: func(lql.QueryStreamDecision) error {
+					return nil
+				},
+			})
+			if err != nil {
+				t.Fatalf("go query stream: %v", err)
+			}
+			cmd := exec.Command(clql, "--matches-only", tc.expr)
+			cmd.Stdin = bytes.NewBufferString(tc.body)
+			out, err := cmd.CombinedOutput()
+			got := err == nil
+			want := result.CandidatesMatched > 0
+			if got != want {
+				t.Fatalf("clql -M parity mismatch: got match=%v want=%v err=%v out=%q", got, want, err, string(out))
+			}
+			if len(out) != 0 {
+				t.Fatalf("clql -M wrote output: %q", string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

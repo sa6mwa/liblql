@@ -4,6 +4,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct match_count {
+  lql_uint64 matched;
+} match_count;
+
+static lql_status count_match(void *user, const lql_query_decision *decision) {
+  match_count *count;
+  count = (match_count *)user;
+  if (decision->matched) {
+    ++count->matched;
+  }
+  return LQL_STATUS_OK;
+}
+
 static int read_stdin(char **out, size_t *out_len) {
   char *buf;
   size_t cap;
@@ -44,7 +57,7 @@ static int read_stdin(char **out, size_t *out_len) {
 }
 
 static void usage(FILE *out) {
-  fprintf(out, "usage: clql [--or|-O] selector < data.json\n");
+  fprintf(out, "usage: clql [--or|-O] [--matches-only|-M] selector < data.json\n");
   fprintf(out, "       clql --version\n");
 }
 
@@ -55,23 +68,42 @@ int main(int argc, char **argv) {
   const char *selector_expr;
   size_t json_len;
   int matched;
+  int matches_only;
   int or_mode;
+  int i;
   lql_status st;
+  match_count count;
+  lql_query_result result;
 
-  if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-    printf("clql 0.0.0\n");
-    return 0;
-  }
-  if (argc == 2 && strcmp(argv[1], "--help") == 0) {
-    usage(stdout);
-    return 0;
-  }
   or_mode = 0;
-  selector_expr = argv[1];
-  if (argc == 3 && (strcmp(argv[1], "--or") == 0 || strcmp(argv[1], "-O") == 0)) {
-    or_mode = 1;
-    selector_expr = argv[2];
-  } else if (argc != 2) {
+  matches_only = 0;
+  selector_expr = NULL;
+  for (i = 1; i < argc; ++i) {
+    if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+      printf("clql 0.0.0\n");
+      return 0;
+    }
+    if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+      usage(stdout);
+      return 0;
+    }
+    if (strcmp(argv[i], "--or") == 0 || strcmp(argv[i], "-O") == 0) {
+      or_mode = 1;
+    } else if (strcmp(argv[i], "--matches-only") == 0 ||
+               strcmp(argv[i], "-M") == 0) {
+      matches_only = 1;
+    } else if (argv[i][0] == '-') {
+      fprintf(stderr, "clql: unknown option %s\n", argv[i]);
+      usage(stderr);
+      return 2;
+    } else if (selector_expr == NULL) {
+      selector_expr = argv[i];
+    } else {
+      usage(stderr);
+      return 2;
+    }
+  }
+  if (selector_expr == NULL) {
     usage(stderr);
     return 2;
   }
@@ -81,6 +113,18 @@ int main(int argc, char **argv) {
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
     return 2;
+  }
+  if (matches_only) {
+    count.matched = 0u;
+    memset(&result, 0, sizeof(result));
+    st = lql_query_file_decisions(selector, stdin, count_match, &count, &result,
+                                  &error);
+    lql_selector_free(selector);
+    if (st != LQL_STATUS_OK) {
+      fprintf(stderr, "clql: %s\n", error.message);
+      return 1;
+    }
+    return count.matched == 0u ? 1 : 0;
   }
   if (!read_stdin(&json, &json_len)) {
     fprintf(stderr, "clql: failed to read stdin\n");

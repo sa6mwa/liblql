@@ -383,6 +383,8 @@ Current implementation is an early slice:
   exists;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
+- `clql -M/--matches-only` uses the decision-only streaming path over stdin
+  and does not materialize candidate payloads or write matched JSON;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;
@@ -394,7 +396,8 @@ Current implementation is an early slice:
   `date.since` macros are implemented;
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, and invalid selector invariants;
-- `clql` exists as a minimal selector smoke CLI;
+- `clql` exists as a minimal selector smoke CLI; default matched-JSON output
+  still uses buffered stdin until plus-value payload handles are implemented;
 - Go parity tests exist for the initial selector subset;
 - package archive production is scaffolded, not complete.
 
