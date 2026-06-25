@@ -619,6 +619,7 @@ typedef struct source_reader_adapter {
   lql_read_fn read;
   void *user;
   int error_code;
+  lql_uint64 total_read;
 } source_reader_adapter;
 
 typedef struct eval_limited_file_reader {
@@ -716,8 +717,28 @@ source_reader_read(void *user, unsigned char *buffer, size_t capacity) {
     return result;
   }
   result.bytes_read = lql_result.bytes_read;
+  adapter->total_read += (lql_uint64)lql_result.bytes_read;
   result.eof = lql_result.eof;
   return result;
+}
+
+static void query_finish_file_bytes(lql_query_result *result, FILE *file) {
+  off_t pos;
+  if (result == NULL || file == NULL || result->stopped_early) {
+    return;
+  }
+  pos = ftello(file);
+  if (pos >= (off_t)0 && (off_t)((lql_uint64)pos) == pos) {
+    result->bytes_read = (lql_uint64)pos;
+  }
+}
+
+static void query_finish_source_bytes(lql_query_result *result,
+                                      const source_reader_adapter *adapter) {
+  if (result == NULL || adapter == NULL || result->stopped_early) {
+    return;
+  }
+  result->bytes_read = adapter->total_read;
 }
 
 static lonejson_read_result
@@ -1248,6 +1269,7 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
   st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
+  query_finish_file_bytes(&state.result, file);
   if (st != LONEJSON_STATUS_OK) {
     free_doc(&state.doc);
     lonejson_free(runtime);
@@ -1299,6 +1321,7 @@ lql_status lql_eval_query_source_decisions(
   adapter.read = read;
   adapter.user = read_user;
   adapter.error_code = 0;
+  adapter.total_read = 0u;
   init_eval_visitor(&visitor);
   options = lonejson_default_candidate_stream_options();
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
@@ -1309,6 +1332,7 @@ lql_status lql_eval_query_source_decisions(
   options.candidate_user = &state;
   st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
                                         &options, &lj_error);
+  query_finish_source_bytes(&state.result, &adapter);
   if (st != LONEJSON_STATUS_OK) {
     free_doc(&state.doc);
     lonejson_free(runtime);
@@ -1364,6 +1388,7 @@ lql_status lql_eval_query_source_spooled_matches(
   adapter.read = read;
   adapter.user = read_user;
   adapter.error_code = 0;
+  adapter.total_read = 0u;
   init_eval_visitor(&visitor);
   options = lonejson_default_candidate_stream_options();
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
@@ -1374,6 +1399,7 @@ lql_status lql_eval_query_source_spooled_matches(
   options.candidate_user = &state;
   st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
                                         &options, &lj_error);
+  query_finish_source_bytes(&state.result, &adapter);
   if (st != LONEJSON_STATUS_OK) {
     free_doc(&state.doc);
     lonejson_free(runtime);

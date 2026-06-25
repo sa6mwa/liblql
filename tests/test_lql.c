@@ -366,7 +366,8 @@ static void expect_stream_file(void) {
   }
   if (seen.calls != 2 || seen.matched != 1 ||
       result.candidates_seen != (lql_uint64)2 ||
-      result.candidates_matched != (lql_uint64)1) {
+      result.candidates_matched != (lql_uint64)1 ||
+      result.bytes_read != (lql_uint64)38) {
     printf("stream counts mismatch calls=%d matched=%d\n", seen.calls,
            seen.matched);
     ++failures;
@@ -546,7 +547,8 @@ static void expect_stream_array_items(void) {
   }
   if (seen.calls != 2 || seen.matched != 1 ||
       result.candidates_seen != (lql_uint64)2 ||
-      result.candidates_matched != (lql_uint64)1) {
+      result.candidates_matched != (lql_uint64)1 ||
+      result.bytes_read != (lql_uint64)40) {
     printf("array stream counts mismatch calls=%d matched=%d\n", seen.calls,
            seen.matched);
     ++failures;
@@ -845,7 +847,8 @@ static void expect_seekable_payload_api(void) {
     return;
   }
   if (seen.calls != 2 || result.candidates_seen != (lql_uint64)3 ||
-      result.candidates_matched != (lql_uint64)2) {
+      result.candidates_matched != (lql_uint64)2 ||
+      result.bytes_read != (lql_uint64)77) {
     printf("payload counts mismatch calls=%d seen=%lu matched=%lu\n",
            seen.calls, (unsigned long)result.candidates_seen,
            (unsigned long)result.candidates_matched);

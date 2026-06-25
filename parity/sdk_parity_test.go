@@ -527,6 +527,7 @@ func assertStreamSummaryParity(t *testing.T, got, want cStreamSummary) {
 	t.Helper()
 	if got.CandidatesSeen != want.CandidatesSeen ||
 		got.CandidatesMatched != want.CandidatesMatched ||
+		got.BytesRead != want.BytesRead ||
 		got.StoppedEarly != want.StoppedEarly ||
 		got.StopReason != want.StopReason {
 		t.Fatalf("stream summary mismatch: got=%+v want=%+v", got, want)
