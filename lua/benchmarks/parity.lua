@@ -41,7 +41,9 @@ local ok, message = pcall(function()
   local matches, output_bytes = count_lines_and_bytes(output)
   local payloads = 0
   local payload_bytes = 0
-  if mode == "plus_value_selector" or mode == "plus_value_plan" then
+  if mode == "plus_value_selector" or mode == "plus_value_plan" or
+      mode == "plus_value_openjson_selector" or
+      mode == "plus_value_openjson_plan" then
     payloads = matches
     payload_bytes = output_bytes - matches
     if payload_bytes < 0 then

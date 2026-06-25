@@ -135,6 +135,12 @@ emit_unsupported_impl() {
     emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
       "plus_value_plan" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
       "$(file_sha256 "$fixture_path")"
+    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "plus_value_openjson_selector" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
+    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "plus_value_openjson_plan" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
   done < "$case_matrix"
 }
 
@@ -375,6 +381,7 @@ run_c_native_mode() {
     "$c_payload_bytes" >> "$c_counts_file"
   payload_source_type=none
   case "$mode" in
+    plus_value_openjson_*) payload_source_type=spool ;;
     plus_value_*) payload_source_type=seekable_range ;;
   esac
   emit_record "c" "$dataset_name" "$selector_name" "$expr" \
@@ -473,6 +480,10 @@ run_matrix_for_impl() {
           "$candidates" "$selector_name" "$expr" || return 1
         run_go_mode plus_value_plan "$dataset_name" "$fixture_path" \
           "$candidates" "$selector_name" "$expr" || return 1
+        run_go_mode plus_value_openjson_selector "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_go_mode plus_value_openjson_plan "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
         ;;
       c)
         run_c "$dataset_name" "$fixture_path" "$candidates" "$selector_name" \
@@ -483,6 +494,10 @@ run_matrix_for_impl() {
           "$candidates" "$selector_name" "$expr" || return 1
         run_c_native_mode plus_value_plan "$dataset_name" "$fixture_path" \
           "$candidates" "$selector_name" "$expr" || return 1
+        run_c_native_mode plus_value_openjson_selector "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_c_native_mode plus_value_openjson_plan "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
         ;;
       lua)
         run_lua_mode decision_only_selector "$dataset_name" "$fixture_path" \
@@ -492,6 +507,10 @@ run_matrix_for_impl() {
         run_lua_mode plus_value_selector "$dataset_name" "$fixture_path" \
           "$candidates" "$selector_name" "$expr" || return 1
         run_lua_mode plus_value_plan "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_lua_mode plus_value_openjson_selector "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_lua_mode plus_value_openjson_plan "$dataset_name" "$fixture_path" \
           "$candidates" "$selector_name" "$expr" || return 1
         ;;
       *)

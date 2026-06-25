@@ -71,9 +71,12 @@ Current implementation status:
   window, and numeric range terms over record-stream fixtures, plus nested
   `/records[]/...` selection over the single-root JSON fixture.
 - the current executable mode matrix covers `decision_only_selector`,
-  `decision_only_plan`, `plus_value_selector`, and `plus_value_plan`.
+  `decision_only_plan`, `plus_value_selector`, `plus_value_plan`,
+  `plus_value_openjson_selector`, and `plus_value_openjson_plan`.
   Plus-value records assert equivalent payload counts and payload byte totals,
-  while C exposes `seekable_range` payloads and does not retain candidate JSON.
+  while C exposes `seekable_range` payloads for seekable fixture files and
+  `spool` payloads for callback-source open-read modes without retaining
+  candidate JSON after callback scope.
   The current C plan benchmark reuses the parsed public `lql_selector` handle;
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
 - the current executable CLI-style selector matrix covers grouped

@@ -17,6 +17,28 @@ typedef struct payload_counts {
   FILE *sink;
 } payload_counts;
 
+typedef struct file_reader {
+  FILE *file;
+} file_reader;
+
+static lql_read_result read_file_chunk(void *user, unsigned char *buffer,
+                                       size_t capacity) {
+  file_reader *reader;
+  lql_read_result result;
+
+  reader = (file_reader *)user;
+  memset(&result, 0, sizeof(result));
+  result.bytes_read = fread(buffer, 1u, capacity, reader->file);
+  if (result.bytes_read < capacity) {
+    if (ferror(reader->file)) {
+      result.error_code = 1;
+    } else {
+      result.eof = 1;
+    }
+  }
+  return result;
+}
+
 static lql_status observe_decision(void *user,
                                    const lql_query_decision *decision) {
   (void)user;
@@ -63,6 +85,28 @@ static lql_status count_payload(void *user, const lql_query_match *match) {
   return LQL_STATUS_OK;
 }
 
+static lql_status count_spooled_payload(void *user,
+                                        const lql_query_match *match) {
+  payload_counts *counts;
+  lql_status st;
+  lql_error error;
+
+  counts = (payload_counts *)user;
+  if (match->payload.kind != LQL_PAYLOAD_SPOOLED ||
+      match->payload.size != match->decision.size ||
+      match->payload.offset != match->decision.offset) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  lql_error_init(&error);
+  st = lql_payload_write_json(&match->payload, counts->sink, &error);
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  counts->payloads++;
+  counts->payload_bytes += match->payload.size;
+  return LQL_STATUS_OK;
+}
+
 int main(int argc, char **argv) {
   const char *mode;
   const char *expr;
@@ -74,6 +118,7 @@ int main(int argc, char **argv) {
   lql_error error;
   lql_status st;
   payload_counts counts;
+  file_reader reader;
 
   if (argc != 4) {
     fprintf(stderr, "usage: lql_payload_bench MODE SELECTOR FIXTURE\n");
@@ -115,6 +160,21 @@ int main(int argc, char **argv) {
     counts.sink = sink;
     st = lql_query_file_matches(selector, fixture, count_payload, &counts,
                                 &result, &error);
+    fclose(sink);
+  } else if (strcmp(mode, "plus_value_openjson_selector") == 0 ||
+             strcmp(mode, "plus_value_openjson_plan") == 0) {
+    sink = fopen("/dev/null", "wb");
+    if (sink == NULL) {
+      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
+      fclose(fixture);
+      lql_selector_free(selector);
+      return 1;
+    }
+    counts.sink = sink;
+    reader.file = fixture;
+    st = lql_query_source_spooled_matches(selector, read_file_chunk, &reader,
+                                          count_spooled_payload, &counts,
+                                          &result, &error);
     fclose(sink);
   } else {
     fprintf(stderr, "lql_payload_bench: unsupported mode: %s\n", mode);

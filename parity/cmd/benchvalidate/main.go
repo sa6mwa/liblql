@@ -117,7 +117,8 @@ func validateRecord(line int, rec record) error {
 		return fmt.Errorf("line %d: dataset, selector, and expr are required", line)
 	}
 	switch rec.Mode {
-	case "decision_only_selector", "decision_only_plan", "plus_value_selector", "plus_value_plan":
+	case "decision_only_selector", "decision_only_plan", "plus_value_selector",
+		"plus_value_plan", "plus_value_openjson_selector", "plus_value_openjson_plan":
 	default:
 		return fmt.Errorf("line %d: unsupported mode %q", line, rec.Mode)
 	}
@@ -173,7 +174,8 @@ func isDecisionOnlyMode(mode string) bool {
 }
 
 func isPlusValueMode(mode string) bool {
-	return mode == "plus_value_selector" || mode == "plus_value_plan"
+	return mode == "plus_value_selector" || mode == "plus_value_plan" ||
+		mode == "plus_value_openjson_selector" || mode == "plus_value_openjson_plan"
 }
 
 func isSHA256Hex(value string) bool {
