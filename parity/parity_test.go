@@ -605,6 +605,48 @@ func TestCLQLMutationPreservesUnmatchedCandidatesParity(t *testing.T) {
 	}
 }
 
+func TestCLQLMutationMatchesOnlyParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"id":"a","status":"open"}
+{"id":"b","status":"open"}`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-matches-only-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	cmd := exec.Command(
+		clql,
+		"-c",
+		"-M",
+		"-m", "/status=done",
+		`/id="b"`,
+		tmp.Name(),
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql mutation matches-only failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql mutation matches-only: %v out=%q", err, string(out))
+	}
+	want, err := decodeJSONValues([]byte(`{"id":"b","status":"done"}`))
+	if err != nil {
+		t.Fatalf("decode expected mutation matches-only: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mutation matches-only mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

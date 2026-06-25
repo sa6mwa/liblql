@@ -419,6 +419,8 @@ Current implementation is an early slice:
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported root-field mutations to matched candidates, and leaves
   broader mutation behavior unsupported;
+- `clql -m -M/--matches-only` emits only matched seekable file candidates after
+  applying supported root-field mutations;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;

@@ -27,6 +27,7 @@ typedef struct output_ranges {
   const lql_projection *projection;
   const lql_mutation_plan *mutation_plan;
   int compact;
+  int matches_only;
   lql_uint64 matched;
 } output_ranges;
 
@@ -98,6 +99,9 @@ static lql_status output_match_range(void *user,
     return LQL_STATUS_OK;
   }
   if (ranges->mutation_plan != NULL) {
+    if (!decision->matched && ranges->matches_only) {
+      return LQL_STATUS_OK;
+    }
     if (decision->matched) {
       if (lql_mutate_file_range_root_fields(
               ranges->mutation_plan, ranges->source, decision->offset,
@@ -351,7 +355,7 @@ int main(int argc, char **argv) {
     free_projection_args(&mutations);
     return 2;
   }
-  if (matches_only) {
+  if (matches_only && mutation_plan == NULL) {
     count.matched = 0u;
     memset(&result, 0, sizeof(result));
     input = open_input_path(input_path);
@@ -399,6 +403,7 @@ int main(int argc, char **argv) {
     ranges.projection = projection;
     ranges.mutation_plan = mutation_plan;
     ranges.compact = compact;
+    ranges.matches_only = matches_only;
     st = lql_query_file_decisions(selector, input, output_match_range, &ranges,
                                   &result, &error);
     close_input_path(input);
