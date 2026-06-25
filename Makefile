@@ -80,7 +80,7 @@ print-release-version:
 	@./scripts/release_version.sh
 
 format:
-	@clang-format -i include/lql/*.h src/*.c src/*.h tests/*.c examples/*.c
+	@clang-format -i include/lql/*.h src/*.c src/*.h tests/*.c examples/*.c bench/*.c
 
 clean:
 	@./scripts/clean.sh

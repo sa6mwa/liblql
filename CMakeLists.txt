@@ -81,6 +81,10 @@ if(LQL_BUILD_BINARY)
   add_executable(clql src/clql.c)
   target_link_libraries(clql PRIVATE $<IF:$<BOOL:${LQL_BUILD_STATIC}>,lql_static,lql_shared>)
   lql_apply_project_warnings(clql)
+
+  add_executable(lql_payload_bench bench/lql_payload_bench.c)
+  target_link_libraries(lql_payload_bench PRIVATE $<IF:$<BOOL:${LQL_BUILD_STATIC}>,lql_static,lql_shared>)
+  lql_apply_project_warnings(lql_payload_bench)
 endif()
 
 if(LQL_BUILD_EXAMPLES)

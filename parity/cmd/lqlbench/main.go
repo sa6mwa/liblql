@@ -53,7 +53,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "lqlbench: --fixture is required")
 		os.Exit(2)
 	}
-	if mode != "decision_only_selector" {
+	if mode != "decision_only_selector" && mode != "plus_value_selector" {
 		fmt.Fprintf(os.Stderr, "lqlbench: unsupported mode %q\n", mode)
 		os.Exit(2)
 	}
@@ -79,15 +79,43 @@ func main() {
 		fmt.Fprintf(os.Stderr, "lqlbench: hash fixture: %v\n", err)
 		os.Exit(1)
 	}
-	result, err := lql.QueryStreamWithResult(lql.QueryStreamRequest{
+	payloads := int64(0)
+	payloadBytes := int64(0)
+	payloadSourceType := "none"
+	request := lql.QueryStreamRequest{
 		Ctx:      context.Background(),
 		Reader:   file,
 		Selector: sel,
-		Mode:     lql.QueryDecisionOnly,
-		OnDecision: func(lql.QueryStreamDecision) error {
+	}
+	if mode == "plus_value_selector" {
+		payloadSourceType = "callback_payload"
+		request.Mode = lql.QueryDecisionPlusValue
+		request.MatchedOnly = true
+		request.CapturePolicy = lql.QueryCaptureMatchesOnlyBestEffort
+		request.OnValue = func(value lql.QueryStreamValue) error {
+			payloads++
+			payloadBytes += value.Size
+			if value.JSON != nil {
+				return nil
+			}
+			if value.OpenJSON == nil {
+				return fmt.Errorf("missing payload reader")
+			}
+			reader, err := value.OpenJSON()
+			if err != nil {
+				return err
+			}
+			defer reader.Close()
+			_, err = io.Copy(io.Discard, reader)
+			return err
+		}
+	} else {
+		request.Mode = lql.QueryDecisionOnly
+		request.OnDecision = func(lql.QueryStreamDecision) error {
 			return nil
-		},
-	})
+		}
+	}
+	result, err := lql.QueryStreamWithResult(request)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "lqlbench: query stream: %v\n", err)
 		os.Exit(1)
@@ -104,9 +132,9 @@ func main() {
 		BytesPerIter:      info.Size(),
 		Candidates:        result.CandidatesSeen,
 		Matches:           result.CandidatesMatched,
-		Payloads:          0,
-		PayloadBytes:      0,
-		PayloadSourceType: "none",
+		Payloads:          payloads,
+		PayloadBytes:      payloadBytes,
+		PayloadSourceType: payloadSourceType,
 		FixtureSHA256:     fixtureSHA256,
 		Unsupported:       false,
 		UnsupportedReason: "",

@@ -51,6 +51,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 fixture_dir="${LQL_BENCH_FIXTURE_DIR:-$root/build/bench-fixtures}"
 count="${LQL_BENCH_NDJSON_COUNT:-128}"
 clql="${CLQL_PATH:-$root/build/debug/clql}"
+payload_bench="${LQL_PAYLOAD_BENCH_PATH:-$root/build/debug/lql_payload_bench}"
 go_bin="${GO:-go}"
 mkdir -p "$fixture_dir"
 ndjson_fixture="$fixture_dir/large_ndjson.jsonl"
@@ -89,10 +90,11 @@ emit_record() {
   matches=$9
   payloads=${10}
   payload_bytes=${11}
-  ns_per_op=${12}
-  unsupported=${13}
-  reason=${14}
-  fixture_sha256=${15}
+  payload_source_type=${12}
+  ns_per_op=${13}
+  unsupported=${14}
+  reason=${15}
+  fixture_sha256=${16}
   printf '{"schema":"liblql.parity_benchmark.v1","impl":"%s","dataset":"%s","selector":"%s","expr":"%s","mode":"%s","submode":"%s","bytes_per_iter":%s,"candidates":%s,"matches":%s,"payloads":%s,"payload_bytes":%s,"payload_source_type":"%s","fixture_sha256":"%s","ns_per_op":%s,"allocs_per_op":null,"unsupported":%s,"unsupported_reason":"%s"}\n' \
     "$(json_string "$impl")" \
     "$(json_string "$dataset")" \
@@ -105,7 +107,7 @@ emit_record() {
     "$matches" \
     "$payloads" \
     "$payload_bytes" \
-    "none" \
+    "$(json_string "$payload_source_type")" \
     "$(json_string "$fixture_sha256")" \
     "$ns_per_op" \
     "$unsupported" \
@@ -118,7 +120,10 @@ emit_unsupported_impl() {
   while read dataset_name fixture_path candidates selector_name expr; do
     : "$candidates"
     emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "decision_only_selector" "steady_state" 0 0 0 0 0 null true "$reason" \
+      "decision_only_selector" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
+    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "plus_value_selector" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
       "$(file_sha256 "$fixture_path")"
   done < "$case_matrix"
 }
@@ -127,6 +132,12 @@ json_number_field() {
   field=$1
   record=$2
   printf '%s\n' "$record" | sed -n "s/.*\"$field\":\\([0-9][0-9]*\\).*/\\1/p"
+}
+
+kv_field() {
+  field=$1
+  record=$2
+  printf '%s\n' "$record" | sed -n "s/.*$field=\\([0-9][0-9]*\\).*/\\1/p"
 }
 
 is_selected() {
@@ -315,9 +326,50 @@ run_c() {
     candidates=$(fault_count "$candidates" "$inject_candidate_mismatch")
     matches=$(fault_count "$matches" "$inject_match_mismatch")
   fi
-  printf '%s %s %s %s\n' "$dataset_name" "$selector_name" "$candidates" "$matches" >> "$c_counts_file"
+  printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+    "decision_only_selector" "$candidates" "$matches" 0 0 >> "$c_counts_file"
   emit_record "c" "$dataset_name" "$selector_name" "$expr" \
-    "decision_only_selector" "steady_state" "$bytes" "$candidates" "$matches" 0 0 null false "" "$fixture_sha"
+    "decision_only_selector" "steady_state" "$bytes" "$candidates" "$matches" 0 0 "none" null false "" "$fixture_sha"
+}
+
+run_c_payload() {
+  dataset_name=$1
+  fixture_path=$2
+  candidates=$3
+  selector_name=$4
+  expr=$5
+  bytes=$(wc -c < "$fixture_path" | tr -d ' ')
+  if [ ! -x "$payload_bench" ]; then
+    emit_record "c" "$dataset_name" "$selector_name" "$expr" \
+      "plus_value_selector" "steady_state" 0 0 0 0 0 "none" null true \
+      "lql_payload_bench binary not found; run make build-debug or set LQL_PAYLOAD_BENCH_PATH" \
+      "$(file_sha256 "$fixture_path")"
+    return 1
+  fi
+  fixture_sha=$(file_sha256 "$fixture_path")
+  record=$("$payload_bench" "$expr" "$fixture_path")
+  c_candidates=$(kv_field candidates "$record")
+  c_matches=$(kv_field matches "$record")
+  c_payloads=$(kv_field payloads "$record")
+  c_payload_bytes=$(kv_field payload_bytes "$record")
+  if [ -z "$c_candidates" ] || [ -z "$c_matches" ] ||
+    [ -z "$c_payloads" ] || [ -z "$c_payload_bytes" ]; then
+    printf 'C payload benchmark emitted an invalid record: %s\n' "$record" >&2
+    return 1
+  fi
+  if [ "$dataset_name" = "large_ndjson" ] &&
+    [ "$selector_name" = "eq_status_open" ]; then
+    c_candidates=$(fault_count "$c_candidates" "$inject_candidate_mismatch")
+    c_matches=$(fault_count "$c_matches" "$inject_match_mismatch")
+  fi
+  : "$candidates"
+  printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+    "plus_value_selector" "$c_candidates" "$c_matches" "$c_payloads" \
+    "$c_payload_bytes" >> "$c_counts_file"
+  emit_record "c" "$dataset_name" "$selector_name" "$expr" \
+    "plus_value_selector" "steady_state" "$bytes" "$c_candidates" \
+    "$c_matches" "$c_payloads" "$c_payload_bytes" "seekable_range" null false \
+    "" "$fixture_sha"
 }
 
 run_go() {
@@ -346,7 +398,42 @@ run_go() {
     printf 'Go benchmark emitted an invalid record: %s\n' "$record" >&2
     return 1
   fi
-  printf '%s %s %s %s\n' "$dataset_name" "$selector_name" "$go_candidates" "$go_matches" >> "$go_counts_file"
+  printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+    "decision_only_selector" "$go_candidates" "$go_matches" 0 0 >> "$go_counts_file"
+}
+
+run_go_payload() {
+  dataset_name=$1
+  fixture_path=$2
+  candidates=$3
+  selector_name=$4
+  expr=$5
+  : "$candidates"
+  record=
+  if ! command -v "$go_bin" >/dev/null 2>&1; then
+    emit_unsupported_impl "go" "go executable not found"
+    return 1
+  fi
+  record=$(cd "$root/parity" && "$go_bin" run ./cmd/lqlbench \
+    --fixture "$fixture_path" \
+    --dataset "$dataset_name" \
+    --selector-name "$selector_name" \
+    --expr "$expr" \
+    --mode plus_value_selector \
+    --submode steady_state)
+  printf '%s\n' "$record"
+  go_candidates=$(json_number_field candidates "$record")
+  go_matches=$(json_number_field matches "$record")
+  go_payloads=$(json_number_field payloads "$record")
+  go_payload_bytes=$(json_number_field payload_bytes "$record")
+  if [ -z "$go_candidates" ] || [ -z "$go_matches" ] ||
+    [ -z "$go_payloads" ] || [ -z "$go_payload_bytes" ]; then
+    printf 'Go payload benchmark emitted an invalid record: %s\n' "$record" >&2
+    return 1
+  fi
+  printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+    "plus_value_selector" "$go_candidates" "$go_matches" "$go_payloads" \
+    "$go_payload_bytes" >> "$go_counts_file"
 }
 
 run_matrix_for_impl() {
@@ -356,10 +443,14 @@ run_matrix_for_impl() {
       go)
         run_go "$dataset_name" "$fixture_path" "$candidates" "$selector_name" \
           "$expr" || return 1
+        run_go_payload "$dataset_name" "$fixture_path" "$candidates" \
+          "$selector_name" "$expr" || return 1
         ;;
       c)
         run_c "$dataset_name" "$fixture_path" "$candidates" "$selector_name" \
           "$expr" || return 1
+        run_c_payload "$dataset_name" "$fixture_path" "$candidates" \
+          "$selector_name" "$expr" || return 1
         ;;
       *)
         return 2
@@ -372,23 +463,35 @@ compare_go_c() {
   if [ ! -s "$go_counts_file" ] || [ ! -s "$c_counts_file" ]; then
     return 0
   fi
-  while read dataset_name selector_name go_candidates go_matches; do
-    c_line=$(sed -n "s/^$dataset_name $selector_name //p" "$c_counts_file")
+  while read dataset_name selector_name mode go_candidates go_matches go_payloads go_payload_bytes; do
+    c_line=$(sed -n "s/^$dataset_name $selector_name $mode //p" "$c_counts_file")
     if [ -z "$c_line" ]; then
-      printf 'benchmark missing C count record: dataset=%s selector=%s\n' "$dataset_name" "$selector_name" >&2
+      printf 'benchmark missing C count record: dataset=%s selector=%s mode=%s\n' "$dataset_name" "$selector_name" "$mode" >&2
       return 1
     fi
     set -- $c_line
     c_candidates=$1
     c_matches=$2
+    c_payloads=$3
+    c_payload_bytes=$4
     if [ "$go_candidates" != "$c_candidates" ]; then
-      printf 'benchmark candidate-count mismatch: go=%s c=%s dataset=%s selector=%s\n' \
-        "$go_candidates" "$c_candidates" "$dataset_name" "$selector_name" >&2
+      printf 'benchmark candidate-count mismatch: go=%s c=%s dataset=%s selector=%s mode=%s\n' \
+        "$go_candidates" "$c_candidates" "$dataset_name" "$selector_name" "$mode" >&2
       return 1
     fi
     if [ "$go_matches" != "$c_matches" ]; then
-      printf 'benchmark match-count mismatch: go=%s c=%s dataset=%s selector=%s\n' \
-        "$go_matches" "$c_matches" "$dataset_name" "$selector_name" >&2
+      printf 'benchmark match-count mismatch: go=%s c=%s dataset=%s selector=%s mode=%s\n' \
+        "$go_matches" "$c_matches" "$dataset_name" "$selector_name" "$mode" >&2
+      return 1
+    fi
+    if [ "$go_payloads" != "$c_payloads" ]; then
+      printf 'benchmark payload-count mismatch: go=%s c=%s dataset=%s selector=%s mode=%s\n' \
+        "$go_payloads" "$c_payloads" "$dataset_name" "$selector_name" "$mode" >&2
+      return 1
+    fi
+    if [ "$go_payload_bytes" != "$c_payload_bytes" ]; then
+      printf 'benchmark payload-byte mismatch: go=%s c=%s dataset=%s selector=%s mode=%s\n' \
+        "$go_payload_bytes" "$c_payload_bytes" "$dataset_name" "$selector_name" "$mode" >&2
       return 1
     fi
   done < "$go_counts_file"

@@ -53,12 +53,14 @@ Current implementation status:
   matrix, emit JSON Lines, and validate every result record against the
   benchmark schema.
 - `make bench-check` runs the current deterministic Go/C smoke gate and fails
-  if candidate or match counts diverge. It also runs deterministic negative
-  checks proving candidate-count and match-count mismatch failures are detected
-  and validates benchmark JSON Lines records. It verifies deterministic fixture
-  regeneration and every result record includes a SHA-256 digest for its
-  generated fixture.
-- `make benchmarks-c` exercises the C CLI over a shared generated fixture.
+  if candidate, match, payload-count, or payload-byte counts diverge. It also
+  runs deterministic negative checks proving candidate-count and match-count
+  mismatch failures are detected and validates benchmark JSON Lines records. It
+  verifies deterministic fixture regeneration and every result record includes
+  a SHA-256 digest for its generated fixture.
+- `make benchmarks-c` exercises the C CLI for decision-only output and the
+  public liblql API for matched-only seekable plus-value payload access over a
+  shared generated fixture.
 - `make benchmarks-go` exercises `parity/cmd/lqlbench`, which uses the pinned
   Go module and emits stable JSON Lines without scraping `go test` output.
 - the current executable dataset matrix covers NDJSON, top-level array, and
@@ -68,6 +70,10 @@ Current implementation status:
   `contains.any`, case-insensitive contains, timestamp comparison, date
   window, and numeric range terms over record-stream fixtures, plus nested
   `/records[]/...` selection over the single-root JSON fixture.
+- the current executable mode matrix covers `decision_only_selector` and the
+  matched-only subset of `plus_value_selector`; plus-value records assert
+  equivalent payload counts and payload byte totals, while C exposes
+  `seekable_range` payloads and does not retain candidate JSON.
 - the current executable CLI-style selector matrix covers grouped
   equality/range, service contains, service case-insensitive contains, service
   `contains.any`, service `icontains.any`, and nested `/records[]/...`

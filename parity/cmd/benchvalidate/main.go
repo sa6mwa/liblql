@@ -116,7 +116,9 @@ func validateRecord(line int, rec record) error {
 	if rec.Dataset == "" || rec.Selector == "" || rec.Expr == "" {
 		return fmt.Errorf("line %d: dataset, selector, and expr are required", line)
 	}
-	if rec.Mode != "decision_only_selector" {
+	switch rec.Mode {
+	case "decision_only_selector", "plus_value_selector":
+	default:
 		return fmt.Errorf("line %d: unsupported mode %q", line, rec.Mode)
 	}
 	if rec.Submode != "steady_state" {
@@ -146,6 +148,22 @@ func validateRecord(line int, rec record) error {
 	}
 	if rec.UnsupportedReason != "" {
 		return fmt.Errorf("line %d: supported record has unsupported_reason", line)
+	}
+	if rec.Mode == "decision_only_selector" {
+		if rec.Payloads != 0 || rec.PayloadBytes != 0 || rec.PayloadSourceType != "none" {
+			return fmt.Errorf("line %d: decision-only records must not report payloads", line)
+		}
+	}
+	if rec.Mode == "plus_value_selector" {
+		if rec.Payloads != rec.Matches {
+			return fmt.Errorf("line %d: plus-value payload count must equal matches", line)
+		}
+		if rec.Matches != 0 && rec.PayloadBytes <= 0 {
+			return fmt.Errorf("line %d: plus-value payload bytes are required", line)
+		}
+		if rec.PayloadSourceType == "none" {
+			return fmt.Errorf("line %d: plus-value payload source type is required", line)
+		}
 	}
 	return nil
 }
