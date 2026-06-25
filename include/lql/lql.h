@@ -32,6 +32,7 @@ typedef struct lql_error {
 } lql_error;
 
 typedef struct lql_selector lql_selector;
+typedef struct lql_projection lql_projection;
 
 typedef struct lql_query_decision {
   int matched;
@@ -86,6 +87,19 @@ lql_status lql_query_file_decisions_with_options(
     const lql_selector *selector, FILE *file,
     const lql_query_options *options, lql_query_decision_fn on_decision,
     void *user, lql_query_result *out_result, lql_error *error);
+
+/* Parses JSON Pointer projection fields into a caller-owned projection handle.
+   The current implementation supports direct root object fields. */
+lql_status lql_projection_parse(const char *const *fields, size_t field_count,
+                                lql_projection **out, lql_error *error);
+/* Frees a projection handle. NULL is accepted. */
+void lql_projection_free(lql_projection *projection);
+/* Projects one seekable file range to out. Missing fields write no bytes and
+   set out_found to 0; selected values are streamed to out as they are visited. */
+lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
+                                  lql_uint64 offset, lql_uint64 size,
+                                  FILE *out, int *out_found,
+                                  lql_error *error);
 
 char *lql_strdup(const char *text);
 void lql_free(void *ptr);

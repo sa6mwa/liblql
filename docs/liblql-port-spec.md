@@ -390,7 +390,10 @@ Current implementation is an early slice:
 - `clql selector data.json` uses seekable candidate offset/size ranges to
   reread and write matched payloads without full-input materialization;
 - `clql -f/--field selector data.json` supports direct root-field projection
-  on seekable file inputs using lonejson path visiting and writer output;
+  on seekable file inputs using the public projection API, lonejson path
+  visiting, and writer output;
+- the initial C projection API exposes `lql_projection_parse()` and
+  `lql_project_file_range()` for direct root fields over seekable file ranges;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;

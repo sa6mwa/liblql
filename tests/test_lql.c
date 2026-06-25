@@ -277,6 +277,135 @@ static void expect_stream_stop_controls(void) {
   lql_selector_free(selector);
 }
 
+static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len) {
+  long end;
+  size_t got;
+  if (fseek(fp, 0L, SEEK_END) != 0) {
+    return 0;
+  }
+  end = ftell(fp);
+  if (end < 0 || (size_t)end + 1u > cap) {
+    return 0;
+  }
+  if (fseek(fp, 0L, SEEK_SET) != 0) {
+    return 0;
+  }
+  got = fread(buf, 1u, (size_t)end, fp);
+  if (got != (size_t)end) {
+    return 0;
+  }
+  buf[got] = '\0';
+  *out_len = got;
+  return 1;
+}
+
+static void expect_projection_api(void) {
+  static const char first[] =
+      "{\"id\":\"a\",\"count\":1,\"nested\":{\"x\":true}}";
+  static const char second[] = "{\"id\":\"b\"}";
+  const char *fields[2];
+  const char *missing[1];
+  const char *invalid[1];
+  FILE *source;
+  FILE *out;
+  lql_projection *projection;
+  lql_error error;
+  lql_status st;
+  int found;
+  char buf[128];
+  size_t len;
+
+  source = tmpfile();
+  out = tmpfile();
+  if (source == NULL || out == NULL) {
+    printf("projection tmpfile failed\n");
+    if (source != NULL) {
+      fclose(source);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+  if (fwrite(first, 1u, strlen(first), source) != strlen(first) ||
+      fputc('\n', source) == EOF ||
+      fwrite(second, 1u, strlen(second), source) != strlen(second)) {
+    printf("projection source write failed\n");
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+
+  fields[0] = "/id";
+  fields[1] = "/nested";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(fields, 2u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("projection parse failed: %s\n", error.message);
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  found = 0;
+  st = lql_project_file_range(projection, source, 0u,
+                              (lql_uint64)strlen(first), out, &found, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("projection range failed: %s\n", error.message);
+    ++failures;
+  } else if (!found) {
+    printf("projection expected found\n");
+    ++failures;
+  } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+             strcmp(buf, "{\"id\":\"a\",\"nested\":{\"x\":true}}") != 0) {
+    printf("projection output mismatch: %s\n", buf);
+    ++failures;
+  }
+  lql_projection_free(projection);
+  fclose(out);
+
+  out = tmpfile();
+  missing[0] = "/missing";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(missing, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("missing projection parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    found = 1;
+    st = lql_project_file_range(projection, source, 0u,
+                                (lql_uint64)strlen(first), out, &found,
+                                &error);
+    if (st != LQL_STATUS_OK) {
+      printf("missing projection range failed: %s\n", error.message);
+      ++failures;
+    } else if (found) {
+      printf("missing projection unexpectedly found\n");
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) || len != 0u) {
+      printf("missing projection wrote output\n");
+      ++failures;
+    }
+  }
+  lql_projection_free(projection);
+  fclose(out);
+
+  invalid[0] = "/nested/id";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(invalid, 1u, &projection, &error);
+  if (st == LQL_STATUS_OK) {
+    printf("invalid projection path parsed\n");
+    lql_projection_free(projection);
+    ++failures;
+  }
+  fclose(source);
+}
+
 int main(void) {
   expect_match("/status=\"open\"", "{\"status\":\"open\"}", 1);
   expect_match("/status=\"closed\"", "{\"status\":\"open\"}", 0);
@@ -441,5 +570,6 @@ int main(void) {
   expect_stream_file();
   expect_stream_array_items();
   expect_stream_stop_controls();
+  expect_projection_api();
   return failures == 0 ? 0 : 1;
 }

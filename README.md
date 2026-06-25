@@ -7,8 +7,9 @@ stream-aware JSON operations.
 Current implementation status: repository lifecycle, the first selector
 parse/evaluate slice, a decision-only `FILE *` candidate stream with stop
 controls, and direct root-field `clql -f` projection for seekable files are in
-place. Full projection, payload handles, mutation, and full `clql` parity are
-still active porting work.
+place. Direct root-field projection is also exposed through the initial
+`lql_projection` C API. Full projection, payload handles, mutation, and full
+`clql` parity are still active porting work.
 
 ```sh
 make deps-debug
