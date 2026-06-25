@@ -290,6 +290,14 @@ int main(void) {
                "{\"status\":\"open\",\"progress\":72}", 1);
   expect_match("and.eq{field=/status,value=open},and.range{field=/progress,gte=50}",
                "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match("and.0.eq{field=/status,value=open},and.0.range{field=/progress,gte=50}",
+               "{\"status\":\"open\",\"progress\":72}", 1);
+  expect_match("and.0.eq{field=/status,value=open},and.0.range{field=/progress,gte=50}",
+               "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match("or.0.eq{field=/status,value=open},or.0.range{field=/progress,gte=50}",
+               "{\"status\":\"open\",\"progress\":72}", 1);
+  expect_match("or.0.eq{field=/status,value=open},or.0.range{field=/progress,gte=50}",
+               "{\"status\":\"closed\",\"progress\":72}", 0);
   expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"open\"}",
                1);
   expect_match("not.eq{field=/status,value=closed}",
