@@ -297,13 +297,15 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     }
     if (node->term.any_count == 0u) {
       if (contains_case(value, node->term.value == NULL ? "" : node->term.value,
-                        node->kind == LQL_NODE_ICONTAINS)) {
+                        node->kind == LQL_NODE_ICONTAINS ||
+                            node->term.ignore_case)) {
         doc->hits[node->hit_index] = 1u;
       }
     } else {
       for (j = 0u; j < node->term.any_count; ++j) {
         if (contains_case(value, node->term.any[j],
-                          node->kind == LQL_NODE_ICONTAINS)) {
+                          node->kind == LQL_NODE_ICONTAINS ||
+                              node->term.ignore_case)) {
           doc->hits[node->hit_index] = 1u;
           break;
         }
@@ -317,7 +319,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     }
     n = strlen(node->term.value == NULL ? "" : node->term.value);
     if (strlen(value) >= n &&
-        (node->kind == LQL_NODE_IPREFIX
+        (node->kind == LQL_NODE_IPREFIX || node->term.ignore_case
              ? ascii_case_equal_prefix(value, node->term.value, n)
              : memcmp(value, node->term.value, n) == 0)) {
       doc->hits[node->hit_index] = 1u;

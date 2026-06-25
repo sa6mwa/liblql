@@ -186,6 +186,10 @@ int main(void) {
   expect_match("/progress<50", "{\"progress\":72}", 0);
   expect_match("contains{field=/message,value=timeout}",
                "{\"message\":\"upstream timeout\"}", 1);
+  expect_match("contains{field=/message,value=TIMEOUT,ignoreCase=true}",
+               "{\"message\":\"upstream timeout\"}", 1);
+  expect_match("contains{field=/message,value=TIMEOUT,ic=f}",
+               "{\"message\":\"upstream timeout\"}", 0);
   expect_match("contains{field=/message,any=timeout|degraded}",
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("contains{field=/message,any=missing|degraded}",
@@ -195,6 +199,8 @@ int main(void) {
   expect_match("icontains{f=/message,a=TIMEOUT|DEGRADED}",
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("prefix{field=/service,value=auth}",
+               "{\"service\":\"auth-api\"}", 1);
+  expect_match("prefix{field=/service,value=AUTH,ic=t}",
                "{\"service\":\"auth-api\"}", 1);
   expect_match("in{field=/env,any=prod|stage}", "{\"env\":\"prod\"}", 1);
   expect_match("in{field=/env,any=prod|stage}", "{\"env\":\"dev\"}", 0);
@@ -218,6 +224,7 @@ int main(void) {
   expect_match("/status=\"open\",/progress>=50",
                "{\"status\":\"open\",\"progress\":4}", 0);
   expect_parse_error("contains{field=/message,value=timeout,any=error}");
+  expect_parse_error("contains{field=/message,value=timeout,ignoreCase=maybe}");
   expect_parse_error("prefix{field=/service,any=auth|edge}");
   expect_parse_error("in{field=/env}");
   expect_stream_file();

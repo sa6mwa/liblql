@@ -388,7 +388,7 @@ Current implementation is an early slice:
   per-candidate scalar document list;
 - first C selector parse/evaluate subset exists, including
   `contains.any`, `icontains.any`, `in.any`, wildcard selector paths, and
-  bracket-sugar array paths;
+  bracket-sugar array paths, and string-term `ignoreCase`/`ic` flags;
 - `clql` exists as a minimal selector smoke CLI;
 - Go parity tests exist for the initial selector subset;
 - package archive production is scaffolded, not complete.

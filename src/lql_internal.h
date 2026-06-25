@@ -23,6 +23,7 @@ typedef struct lql_term {
   char *field;
   char *value;
   int value_set;
+  int ignore_case;
   char **any;
   size_t any_count;
   double number;

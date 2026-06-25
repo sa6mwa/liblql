@@ -243,6 +243,18 @@ static char *normalize_field_path(const char *field) {
   return out;
 }
 
+static int parse_bool_value(const char *value, int *out) {
+  if (strcmp(value, "true") == 0 || strcmp(value, "t") == 0) {
+    *out = 1;
+    return 1;
+  }
+  if (strcmp(value, "false") == 0 || strcmp(value, "f") == 0) {
+    *out = 0;
+    return 1;
+  }
+  return 0;
+}
+
 static lql_node_kind kind_from_name(const char *name) {
   if (strcmp(name, "eq") == 0) {
     return LQL_NODE_EQ;
@@ -359,6 +371,15 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       if (!parse_any_values(decoded, term, error)) {
         free(decoded);
         token_list_cleanup(&parts);
+        return 0;
+      }
+      free(decoded);
+    } else if (strcmp(key, "ignoreCase") == 0 || strcmp(key, "ic") == 0) {
+      if (!parse_bool_value(decoded, &term->ignore_case)) {
+        free(decoded);
+        token_list_cleanup(&parts);
+        lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                      "selector ignoreCase must be true/false/t/f");
         return 0;
       }
       free(decoded);
