@@ -842,6 +842,127 @@ static void expect_stream_error_api(void) {
   fclose(out);
 }
 
+static void expect_stream_malformed_doc(lql_selector *selector,
+                                        const char *label, const char *doc) {
+  FILE *source;
+  FILE *out;
+  stream_seen seen;
+  payload_seen payload_seen_value;
+  chunk_reader reader;
+  lql_error error;
+  lql_status st;
+
+  source = tmpfile();
+  out = tmpfile();
+  if (source == NULL || out == NULL) {
+    printf("stream malformed corpus tmpfile failed: %s\n", label);
+    if (source != NULL) {
+      fclose(source);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+  if (fwrite(doc, 1u, strlen(doc), source) != strlen(doc) ||
+      fseek(source, 0L, SEEK_SET) != 0) {
+    printf("stream malformed corpus source setup failed: %s\n", label);
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  lql_error_init(&error);
+  st = lql_query_file_decisions(selector, source, record_decision, &seen, NULL,
+                                &error);
+  if (st != LQL_STATUS_JSON_ERROR) {
+    printf("stream malformed file decisions mismatch: %s status=%s error=%s\n",
+           label, lql_status_string(st), error.message);
+    ++failures;
+  }
+
+  if (fseek(source, 0L, SEEK_SET) != 0) {
+    printf("stream malformed corpus source rewind failed: %s\n", label);
+    ++failures;
+  } else {
+    memset(&payload_seen_value, 0, sizeof(payload_seen_value));
+    payload_seen_value.out = out;
+    lql_error_init(&error);
+    st = lql_query_file_matches(selector, source, record_payload,
+                                &payload_seen_value, NULL, &error);
+    if (st != LQL_STATUS_JSON_ERROR) {
+      printf("stream malformed file payload mismatch: %s status=%s error=%s\n",
+             label, lql_status_string(st), error.message);
+      ++failures;
+    }
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&reader, 0, sizeof(reader));
+  reader.data = doc;
+  reader.len = strlen(doc);
+  reader.chunk_size = 5u;
+  lql_error_init(&error);
+  st = lql_query_source_decisions(selector, read_chunk, &reader,
+                                  record_decision, &seen, NULL, &error);
+  if (st != LQL_STATUS_JSON_ERROR) {
+    printf("stream malformed source decisions mismatch: %s status=%s "
+           "error=%s\n",
+           label, lql_status_string(st), error.message);
+    ++failures;
+  }
+
+  memset(&payload_seen_value, 0, sizeof(payload_seen_value));
+  memset(&reader, 0, sizeof(reader));
+  reader.data = doc;
+  reader.len = strlen(doc);
+  reader.chunk_size = 5u;
+  payload_seen_value.out = out;
+  lql_error_init(&error);
+  st = lql_query_source_spooled_matches(selector, read_chunk, &reader,
+                                        record_spooled_payload,
+                                        &payload_seen_value, NULL, &error);
+  if (st != LQL_STATUS_JSON_ERROR) {
+    printf("stream malformed source payload mismatch: %s status=%s error=%s\n",
+           label, lql_status_string(st), error.message);
+    ++failures;
+  }
+
+  fclose(source);
+  fclose(out);
+}
+
+static void expect_stream_error_corpus_api(void) {
+  static const struct {
+    const char *name;
+    const char *doc;
+  } cases[] = {
+      {"truncated object candidate", "{\"status\":\"open\"}\n{\"status\":"},
+      {"truncated array stream", "[{\"status\":\"open\"},{\"status\":"},
+      {"invalid literal", "{\"status\": tru}"}};
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  size_t i;
+
+  selector = NULL;
+  lql_error_init(&error);
+  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("stream malformed corpus selector parse failed: %s\n",
+           error.message);
+    ++failures;
+    return;
+  }
+  for (i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    expect_stream_malformed_doc(selector, cases[i].name, cases[i].doc);
+  }
+  lql_selector_free(selector);
+}
+
 static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len) {
   long end;
   size_t got;
@@ -2677,6 +2798,8 @@ static void expect_sdk_parity_manifest(void) {
       {"streaming", "stream stop controls", expect_stream_stop_controls},
       {"streaming", "query and payload public API error contracts",
        expect_stream_error_api},
+      {"streaming", "malformed JSON corpus across stream modes",
+       expect_stream_error_corpus_api},
       {"streaming", "seekable matched payload ranges",
        expect_seekable_payload_api},
       {"projection", "seekable file-range projection", expect_projection_api},
@@ -2944,6 +3067,7 @@ int main(void) {
   expect_stream_array_items();
   expect_stream_stop_controls();
   expect_stream_error_api();
+  expect_stream_error_corpus_api();
   expect_seekable_payload_api();
   expect_projection_api();
   expect_buffered_projection_api();

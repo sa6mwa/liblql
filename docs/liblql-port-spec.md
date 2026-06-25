@@ -611,6 +611,9 @@ Current implementation is an early slice:
   the public projection API;
 - native C SDK compact tests assert the current malformed JSON corpus through
   both buffered and seekable file-range public compaction APIs;
+- native C SDK streaming tests assert the current malformed JSON corpus across
+  seekable file decision streams, seekable file payload streams,
+  callback-source decision streams, and callback-source spooled payload streams;
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
   payload kinds, decoded matched payload JSON, and malformed JSON stream
