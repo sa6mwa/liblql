@@ -39,7 +39,8 @@ host `clql` archive carries the lonejson runtime libraries it needs and is
 verified with an extracted `--version` smoke. The Lua tree now includes an
 initial `clql`-backed facade with deterministic smoke tests, and the parity
 benchmark surface has Go, C, and Lua runners over shared generated fixtures.
-The direct Lua C module, Lua release artifacts, full cross-target release
+A standalone Lua source package is produced and verified locally. The direct
+Lua C module, release rockspec/source-rock artifacts, full cross-target release
 matrix, and full `clql` parity are still active porting work.
 
 ```sh

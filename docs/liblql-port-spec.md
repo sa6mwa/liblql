@@ -593,6 +593,12 @@ Current implementation is an early slice:
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and
   pkg-config consumer smokes;
+- standalone Lua source package production now writes
+  `dist/liblql-lua-<version>.tar.gz` with `VERSION`, exact
+  `RELEASE_MANIFEST`, Lua sources, tests, benchmark runner, and smoke-test
+  script, and package verification checks layout, manifest exactness, absence
+  of C SDK payloads, and local path privacy; rendered rockspec and `.src.rock`
+  artifacts remain pending;
 - source archive production exists with injected `VERSION`, `RELEASE_MANIFEST`,
   exact manifest verification, and extracted-tree configure/build/test smoke;
 - host `clql` archive production carries required lonejson runtime libraries

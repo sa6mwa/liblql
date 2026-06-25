@@ -21,6 +21,7 @@ clean_dist() {
   mkdir -p "$DIST_DIR"
   find "$DIST_DIR" -maxdepth 1 \( \
     -name "${PROJECT}-*.tar.gz" -o \
+    -name "${PROJECT}-lua-*.tar.gz" -o \
     -name "${CLI_PROJECT}-*.tar.gz" -o \
     -name "${PROJECT}-*-CHECKSUMS" \) -exec rm -f {} +
 }
@@ -102,12 +103,30 @@ package_source() {
   make_tar_gz "$source_root" "$DIST_DIR/${PROJECT}-${version_value}.tar.gz"
 }
 
+package_lua_source() {
+  version_value=$(version)
+  work_dir="$ROOT_DIR/build/package/lua-source"
+  source_root="$work_dir/${PROJECT}-lua-${version_value}"
+  manifest="$source_root/RELEASE_MANIFEST"
+
+  rm -rf "$work_dir"
+  mkdir -p "$source_root/lua" "$source_root/scripts"
+  cp "$ROOT_DIR/LICENSE" "$source_root/LICENSE"
+  cp "$ROOT_DIR/README.md" "$source_root/README.md"
+  cp -R "$ROOT_DIR/lua/." "$source_root/lua/"
+  cp "$ROOT_DIR/scripts/run_lua_tests.sh" "$source_root/scripts/run_lua_tests.sh"
+  printf '%s\n' "$version_value" >"$source_root/VERSION"
+  (cd "$source_root" && find . -type f | sed 's#^\./##' | LC_ALL=C sort) >"$manifest"
+  make_tar_gz "$source_root" "$DIST_DIR/${PROJECT}-lua-${version_value}.tar.gz"
+}
+
 package_all() {
   clean_dist
   for target_id in $TARGETS; do
     package_one "$target_id"
   done
   package_source
+  package_lua_source
   write_checksums
 }
 
@@ -118,7 +137,7 @@ write_checksums() {
   rm -f "$tmp"
   (
     cd "$DIST_DIR"
-    for artifact in "${PROJECT}-${version_value}.tar.gz" "${PROJECT}-${version_value}"-*.tar.gz "${CLI_PROJECT}-${version_value}"-*.tar.gz; do
+    for artifact in "${PROJECT}-${version_value}.tar.gz" "${PROJECT}-lua-${version_value}.tar.gz" "${PROJECT}-${version_value}"-*.tar.gz "${CLI_PROJECT}-${version_value}"-*.tar.gz; do
       [ -e "$artifact" ] || continue
       sha256sum "$artifact"
     done
@@ -329,6 +348,43 @@ verify_source_archive() {
   ctest --test-dir "$tmp_dir/build" --output-on-failure
 }
 
+verify_lua_source_archive() {
+  artifact=$1
+  version_value=$(version)
+  tmp_dir="$ROOT_DIR/build/package-lua-source-verify"
+  root="$tmp_dir/${PROJECT}-lua-${version_value}"
+
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+  tar -xzf "$artifact" -C "$tmp_dir"
+  if [ ! -d "$root" ]; then
+    printf 'package-verify: Lua source archive root missing: %s\n' "$root" >&2
+    exit 1
+  fi
+  test -f "$root/VERSION"
+  test -f "$root/RELEASE_MANIFEST"
+  test -f "$root/LICENSE"
+  test -f "$root/README.md"
+  test -f "$root/lua/lql.lua"
+  test -f "$root/lua/tests/lql_smoke.lua"
+  test -f "$root/lua/benchmarks/parity.lua"
+  test -f "$root/scripts/run_lua_tests.sh"
+  if [ "$(sed -n '1p' "$root/VERSION")" != "$version_value" ]; then
+    printf 'package-verify: Lua source VERSION mismatch in %s\n' "$artifact" >&2
+    exit 1
+  fi
+  (cd "$root" && find . -type f | sed 's#^\./##' | LC_ALL=C sort) >"$tmp_dir/payload-files.txt"
+  if ! cmp -s "$root/RELEASE_MANIFEST" "$tmp_dir/payload-files.txt"; then
+    printf 'package-verify: Lua source archive payload does not match RELEASE_MANIFEST\n' >&2
+    diff -u "$root/RELEASE_MANIFEST" "$tmp_dir/payload-files.txt" >&2 || true
+    exit 1
+  fi
+  if find "$root" \( -name .git -o -name build -o -name dist -o -name .cache -o -name bin -o -name lib -o -name include \) | grep . >/dev/null; then
+    printf 'package-verify: Lua source archive contains generated state or C SDK payloads\n' >&2
+    exit 1
+  fi
+}
+
 verify_one_archive() {
   artifact=$1
   version_value=$(version)
@@ -352,6 +408,11 @@ verify_one_archive() {
     ${PROJECT}-${version_value})
       verify_no_local_paths "$artifact" "$root"
       verify_source_archive "$artifact"
+      return
+      ;;
+    ${PROJECT}-lua-${version_value})
+      verify_no_local_paths "$artifact" "$root"
+      verify_lua_source_archive "$artifact"
       return
       ;;
     ${PROJECT}-${version_value}-*)
@@ -430,6 +491,11 @@ case "$TARGET" in
     verify_one_archive "$DIST_DIR/${PROJECT}-$(version).tar.gz"
     ;;
   package-checksums)
+    write_checksums
+    ;;
+  release-lua-artifacts)
+    mkdir -p "$DIST_DIR"
+    package_lua_source
     write_checksums
     ;;
   package-verify|verify-release-archives|verify-release-privacy)

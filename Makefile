@@ -1,4 +1,4 @@
-.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan lua-test bench benchmarks bench-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan lua-test bench benchmarks bench-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -14,6 +14,7 @@ help:
 	  'make benchmarks-parity      require Go/C/Lua benchmark implementations' \
 	  'make format                  clang-format project C sources' \
 	  'make package                 build host package artifacts' \
+	  'make release-lua-artifacts   build standalone Lua source package' \
 	  'make package-verify          verify generated packages' \
 	  'make release-matrix          build release target matrix where toolchains exist' \
 	  'make clean                   remove generated build/dist/cache state'
@@ -73,7 +74,7 @@ benchmarks-lua:
 benchmarks-parity: build-debug
 	@./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --require go,c,lua
 
-package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix:
+package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix:
 	@./scripts/package.sh $@
 
 finalize-slice: format test
