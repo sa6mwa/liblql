@@ -593,6 +593,12 @@ typedef struct query_stream_state {
   eval_doc doc;
 } query_stream_state;
 
+typedef struct source_reader_adapter {
+  lql_read_fn read;
+  void *user;
+  int error_code;
+} source_reader_adapter;
+
 typedef struct spooled_match_state {
   const lql_selector *selector;
   FILE *out;
@@ -650,6 +656,30 @@ static int eval_copy_range(FILE *in, FILE *out, lql_uint64 size) {
     size -= (lql_uint64)got;
   }
   return 1;
+}
+
+static lonejson_read_result
+source_reader_read(void *user, unsigned char *buffer, size_t capacity) {
+  source_reader_adapter *adapter;
+  lql_read_result lql_result;
+  lonejson_read_result result;
+
+  result = lonejson_default_read_result();
+  adapter = (source_reader_adapter *)user;
+  lql_result = adapter->read(adapter->user, buffer, capacity);
+  if (lql_result.bytes_read > capacity) {
+    adapter->error_code = 1;
+    result.error_code = 1;
+    return result;
+  }
+  if (lql_result.error_code != 0) {
+    adapter->error_code = lql_result.error_code;
+    result.error_code = lql_result.error_code;
+    return result;
+  }
+  result.bytes_read = lql_result.bytes_read;
+  result.eof = lql_result.eof;
+  return result;
 }
 
 static lql_status eval_project_then_maybe_mutate_spooled(
@@ -995,6 +1025,71 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
       lql_set_error(error, state.callback_status,
                     "query decision callback failed");
       return state.callback_status;
+    }
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  free_doc(&state.doc);
+  lonejson_free(runtime);
+  if (out_result != NULL) {
+    *out_result = state.result;
+  }
+  return LQL_STATUS_OK;
+}
+
+lql_status lql_eval_query_source_decisions(
+    const lql_selector *selector, lql_read_fn read, void *read_user,
+    const lql_query_options *query_options, lql_query_decision_fn on_decision,
+    void *user, lql_query_result *out_result, lql_error *error) {
+  lonejson *runtime;
+  lonejson_error lj_error;
+  lonejson_path_value_visitor visitor;
+  lonejson_candidate_stream_options options;
+  lonejson_status st;
+  query_stream_state state;
+  source_reader_adapter adapter;
+
+  memset(&state, 0, sizeof(state));
+  state.selector = selector;
+  state.on_decision = on_decision;
+  state.user = user;
+  state.callback_status = LQL_STATUS_OK;
+  if (query_options != NULL) {
+    state.options = *query_options;
+  }
+  if (!init_doc(&state.doc, selector)) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  runtime = lonejson_new(NULL, &lj_error);
+  if (runtime == NULL) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    free_doc(&state.doc);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  adapter.read = read;
+  adapter.user = read_user;
+  adapter.error_code = 0;
+  init_eval_visitor(&visitor);
+  options = lonejson_default_candidate_stream_options();
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  options.path_visitor = &visitor;
+  options.visitor_user = &state.doc;
+  options.candidate_begin = on_candidate_begin;
+  options.candidate_end = on_candidate_end;
+  options.candidate_user = &state;
+  st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
+                                        &options, &lj_error);
+  if (st != LONEJSON_STATUS_OK) {
+    free_doc(&state.doc);
+    lonejson_free(runtime);
+    if (state.callback_status != LQL_STATUS_OK) {
+      lql_set_error(error, state.callback_status,
+                    "query decision callback failed");
+      return state.callback_status;
+    }
+    if (adapter.error_code != 0) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR, "query source reader failed");
+      return LQL_STATUS_JSON_ERROR;
     }
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;

@@ -397,6 +397,9 @@ Current implementation is an early slice:
   truncated;
 - decision-only `FILE *` query streams expose stop controls for match count,
   candidate count, bytes read, and callback-requested graceful stop;
+- decision-only callback-source query streams expose the same decision and
+  stop-control behavior over caller-provided read callbacks with no candidate
+  payload capture;
 - matched-candidate `FILE *` query streams expose callback-scoped
   `LQL_PAYLOAD_SEEKABLE_RANGE` payload handles, with
   `lql_payload_write_json()` preserving the parser source position while it

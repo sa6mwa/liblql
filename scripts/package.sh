@@ -210,8 +210,8 @@ int main(void) {
   {
     lql_capabilities caps;
     lql_capabilities_get(&caps);
-    if (!caps.selector_parse || !caps.mutation_file_range ||
-        !caps.mutation_buffered_json) {
+    if (!caps.selector_parse || !caps.source_decision_stream ||
+        !caps.mutation_file_range || !caps.mutation_buffered_json) {
       fprintf(stderr, "capability query mismatch\n");
       return 1;
     }

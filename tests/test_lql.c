@@ -21,10 +21,11 @@ static void expect_version_api(void) {
   lql_capabilities_get(&caps);
   if (!caps.selector_parse || !caps.matches_json ||
       !caps.file_decision_stream || !caps.file_match_stream ||
-      !caps.seekable_range_payloads || !caps.projection_file_range ||
-      !caps.compact_file_range || !caps.compact_buffered_json ||
-      !caps.mutation_parse || !caps.mutation_file_range ||
-      !caps.mutation_buffered_json || !caps.mutation_file_values) {
+      !caps.source_decision_stream || !caps.seekable_range_payloads ||
+      !caps.projection_file_range || !caps.compact_file_range ||
+      !caps.compact_buffered_json || !caps.mutation_parse ||
+      !caps.mutation_file_range || !caps.mutation_buffered_json ||
+      !caps.mutation_file_values) {
     printf("capability query omitted an implemented public surface\n");
     ++failures;
   }
@@ -46,6 +47,45 @@ typedef struct payload_seen {
   lql_uint64 sizes[4];
   FILE *out;
 } payload_seen;
+
+typedef struct chunk_reader {
+  const char *data;
+  size_t len;
+  size_t offset;
+  size_t chunk_size;
+  int calls;
+} chunk_reader;
+
+static lql_read_result read_chunk(void *user, unsigned char *buffer,
+                                  size_t capacity) {
+  chunk_reader *reader;
+  lql_read_result result;
+  size_t remaining;
+  size_t want;
+
+  reader = (chunk_reader *)user;
+  memset(&result, 0, sizeof(result));
+  ++reader->calls;
+  if (reader->offset >= reader->len) {
+    result.eof = 1;
+    return result;
+  }
+  remaining = reader->len - reader->offset;
+  want = remaining;
+  if (want > reader->chunk_size) {
+    want = reader->chunk_size;
+  }
+  if (want > capacity) {
+    want = capacity;
+  }
+  memcpy(buffer, reader->data + reader->offset, want);
+  reader->offset += want;
+  result.bytes_read = want;
+  if (reader->offset >= reader->len) {
+    result.eof = 1;
+  }
+  return result;
+}
 
 static lql_status record_decision(void *user,
                                   const lql_query_decision *decision) {
@@ -209,6 +249,60 @@ static void expect_stream_file(void) {
   if (seen.offsets[0] != (lql_uint64)0 || seen.sizes[0] != (lql_uint64)17 ||
       seen.offsets[1] != (lql_uint64)18 || seen.sizes[1] != (lql_uint64)19) {
     printf("stream ranges mismatch\n");
+    ++failures;
+  }
+}
+
+static void expect_source_stream(void) {
+  static const char input[] =
+      "{\"status\":\"closed\"}\n{\"status\":\"open\"}\n{\"status\":\"done\"}\n";
+  lql_selector *selector;
+  lql_query_options options;
+  lql_query_result result;
+  stream_seen seen;
+  chunk_reader reader;
+  lql_error error;
+  lql_status st;
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&reader, 0, sizeof(reader));
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 5u;
+  options.max_candidates = 2u;
+  lql_error_init(&error);
+  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source stream parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  st = lql_query_source_decisions_with_options(selector, read_chunk, &reader,
+                                               &options, record_decision, &seen,
+                                               &result, &error);
+  lql_selector_free(selector);
+  if (st != LQL_STATUS_OK) {
+    printf("source stream query failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  if (reader.calls <= 1) {
+    printf("source stream did not use chunked reads\n");
+    ++failures;
+  }
+  if (seen.calls != 2 || seen.matched != 1 ||
+      result.candidates_seen != (lql_uint64)2 ||
+      result.candidates_matched != (lql_uint64)1 || !result.stopped_early ||
+      result.stop_reason != LQL_QUERY_STOP_CANDIDATE_LIMIT) {
+    printf("source stream counts mismatch calls=%d matched=%d stop=%d\n",
+           seen.calls, seen.matched, (int)result.stop_reason);
+    ++failures;
+  }
+  if (seen.offsets[0] != (lql_uint64)0 || seen.sizes[0] != (lql_uint64)19 ||
+      seen.offsets[1] != (lql_uint64)20 || seen.sizes[1] != (lql_uint64)17) {
+    printf("source stream ranges mismatch\n");
     ++failures;
   }
 }
@@ -1514,6 +1608,7 @@ int main(void) {
   expect_parse_error("range{field=/progress}");
   expect_version_api();
   expect_stream_file();
+  expect_source_stream();
   expect_stream_array_items();
   expect_stream_stop_controls();
   expect_seekable_payload_api();

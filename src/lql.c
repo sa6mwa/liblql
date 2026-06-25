@@ -120,6 +120,7 @@ void lql_capabilities_get(lql_capabilities *out) {
   out->selector_parse = 1;
   out->matches_json = 1;
   out->file_decision_stream = 1;
+  out->source_decision_stream = 1;
   out->file_match_stream = 1;
   out->seekable_range_payloads = 1;
   out->projection_file_range = 1;
@@ -221,6 +222,28 @@ lql_status lql_query_file_decisions_with_options(
   }
   return lql_eval_query_file_decisions(selector, file, options, on_decision,
                                        user, out_result, error);
+}
+
+lql_status lql_query_source_decisions(const lql_selector *selector,
+                                      lql_read_fn read, void *read_user,
+                                      lql_query_decision_fn on_decision,
+                                      void *user, lql_query_result *out_result,
+                                      lql_error *error) {
+  return lql_query_source_decisions_with_options(
+      selector, read, read_user, NULL, on_decision, user, out_result, error);
+}
+
+lql_status lql_query_source_decisions_with_options(
+    const lql_selector *selector, lql_read_fn read, void *read_user,
+    const lql_query_options *options, lql_query_decision_fn on_decision,
+    void *user, lql_query_result *out_result, lql_error *error) {
+  if (read == NULL || on_decision == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "read and on_decision are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return lql_eval_query_source_decisions(selector, read, read_user, options,
+                                         on_decision, user, out_result, error);
 }
 
 lql_status lql_query_file_matches(const lql_selector *selector, FILE *file,

@@ -74,6 +74,12 @@ typedef struct lql_query_options {
   lql_uint64 max_bytes_read;
 } lql_query_options;
 
+typedef struct lql_read_result {
+  size_t bytes_read;
+  int eof;
+  int error_code;
+} lql_read_result;
+
 typedef struct lql_mutation_parse_options {
   int enable_file_values;
   const char *file_value_base_dir;
@@ -94,6 +100,8 @@ typedef struct lql_capabilities {
   int matches_json;
   /* FILE * candidate decision streaming is available. */
   int file_decision_stream;
+  /* Callback-source candidate decision streaming is available. */
+  int source_decision_stream;
   /* FILE * matched-candidate payload streaming is available. */
   int file_match_stream;
   /* Match payloads can identify callback-scoped seekable source ranges. */
@@ -118,6 +126,8 @@ typedef lql_status (*lql_query_decision_fn)(void *user,
                                             const lql_query_decision *decision);
 typedef lql_status (*lql_query_match_fn)(void *user,
                                          const lql_query_match *match);
+typedef lql_read_result (*lql_read_fn)(void *user, unsigned char *buffer,
+                                       size_t capacity);
 
 void lql_error_init(lql_error *error);
 const char *lql_status_string(lql_status status);
@@ -144,6 +154,19 @@ lql_status lql_query_file_decisions_with_options(
     const lql_selector *selector, FILE *file, const lql_query_options *options,
     lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
     lql_error *error);
+/* Streams candidate decisions from a caller-provided source callback.
+   This is a no-capture decision stream: callback decisions receive candidate
+   offsets and byte sizes, but no payload handle is exposed for source readers.
+ */
+lql_status lql_query_source_decisions(const lql_selector *selector,
+                                      lql_read_fn read, void *read_user,
+                                      lql_query_decision_fn on_decision,
+                                      void *user, lql_query_result *out_result,
+                                      lql_error *error);
+lql_status lql_query_source_decisions_with_options(
+    const lql_selector *selector, lql_read_fn read, void *read_user,
+    const lql_query_options *options, lql_query_decision_fn on_decision,
+    void *user, lql_query_result *out_result, lql_error *error);
 /* Calls on_match for each matched candidate in a seekable FILE * stream.
    Match payloads are callback-scoped seekable ranges; liblql does not capture
    or retain candidate JSON. */
