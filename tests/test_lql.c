@@ -2018,6 +2018,89 @@ static void expect_buffered_mutation_api(void) {
   fclose(out);
 }
 
+static void expect_mutation_shorthand_api(void) {
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_mutation_plan *plan;
+  const char *brace_exprs[2];
+  const char *escaped_exprs[3];
+  char buf[512];
+  size_t len;
+  static const char brace_doc[] =
+      "{\"state\":{\"status\":\"open\",\"count\":1,\"old\":true,\"owner\":"
+      "\"bob\"},\"id\":\"a\"}";
+  static const char escaped_doc[] =
+      "{\"a/b\":{\"~key\":\"old\",\"remove\":true},\"plain\":\"keep\"}";
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("mutation shorthand tmpfile failed\n");
+    ++failures;
+    return;
+  }
+
+  brace_exprs[0] = "/state{/status=done,/count=+2,rm:/old,/owner=\"alice\"}";
+  brace_exprs[1] = "/audit{/created=true,/nested/score=3}";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(brace_exprs, 2u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("brace mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else if (lql_mutation_plan_count(plan) != 6u) {
+    printf("brace mutation expansion count mismatch: %lu\n",
+           (unsigned long)lql_mutation_plan_count(plan));
+    ++failures;
+  } else {
+    st = lql_mutate_json(plan, brace_doc, strlen(brace_doc), out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("brace mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf,
+                      "{\"state\":{\"status\":\"done\",\"count\":3,\"owner\":"
+                      "\"alice\"},\"id\":\"a\",\"audit\":{\"created\":true,"
+                      "\"nested\":{\"score\":3}}}") != 0) {
+      printf("brace mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  lql_mutation_plan_free(plan);
+  fclose(out);
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("escaped mutation tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  escaped_exprs[0] = "/a~1b/~0key=ready";
+  escaped_exprs[1] = "rm:/a~1b/remove";
+  escaped_exprs[2] = "/a~1b/created=1";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(escaped_exprs, 3u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("escaped mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    st = lql_mutate_json(plan, escaped_doc, strlen(escaped_doc), out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("escaped mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf,
+                      "{\"a/b\":{\"~key\":\"ready\",\"created\":1},\"plain\":"
+                      "\"keep\"}") != 0) {
+      printf("escaped mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  lql_mutation_plan_free(plan);
+  fclose(out);
+}
+
 static void expect_array_element_mutation_api(void) {
   FILE *source;
   FILE *out;
@@ -2324,6 +2407,8 @@ static void expect_sdk_parity_manifest(void) {
        expect_path_mutation_api},
       {"mutation", "caller-buffered JSON mutation",
        expect_buffered_mutation_api},
+      {"mutation", "brace shorthand and escaped JSON Pointer mutation",
+       expect_mutation_shorthand_api},
       {"mutation", "concrete array element mutation",
        expect_array_element_mutation_api},
       {"mutation", "wildcard path mutation", expect_wildcard_mutation_api},
@@ -2573,6 +2658,7 @@ int main(void) {
   expect_root_field_mutation_api();
   expect_path_mutation_api();
   expect_buffered_mutation_api();
+  expect_mutation_shorthand_api();
   expect_array_element_mutation_api();
   expect_wildcard_mutation_api();
   expect_recursive_mutation_api();

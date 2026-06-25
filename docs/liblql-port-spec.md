@@ -507,10 +507,12 @@ Current implementation is an early slice:
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path, existing-position wildcard, and
   existing-position recursive mutations to matched candidates;
-- brace shorthand mutation execution is covered by Go-backed parity tests for
-  nested set, increment, delete, and path expansion behavior;
-- escaped JSON Pointer mutation paths are covered by Go-backed parity tests for
-  set, delete, and nested path expansion behavior;
+- brace shorthand mutation execution is covered by C-only SDK tests and
+  Go-backed CLI parity tests for nested set, increment, delete, and path
+  expansion behavior;
+- escaped JSON Pointer mutation paths are covered by C-only SDK tests and
+  Go-backed CLI parity tests for set, delete, and nested path expansion
+  behavior;
 - quoted numeric mutation values follow Go typing behavior and are emitted as
   JSON numbers rather than strings;
 - `clql -m/--mutate selector < data.json` applies the same supported streaming
