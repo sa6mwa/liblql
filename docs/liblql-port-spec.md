@@ -609,6 +609,8 @@ Current implementation is an early slice:
 - native C SDK projection tests assert duplicate projection paths are
   idempotent and parent/child projection path conflicts are rejected through
   the public projection API;
+- native C SDK compact tests assert the current malformed JSON corpus through
+  both buffered and seekable file-range public compaction APIs;
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
   payload kinds, decoded matched payload JSON, and malformed JSON stream

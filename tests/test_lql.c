@@ -1556,6 +1556,70 @@ static void expect_compact_api(void) {
   fclose(out);
 }
 
+static void expect_compact_error_corpus_api(void) {
+  static const struct {
+    const char *name;
+    const char *json;
+  } cases[] = {{"truncated object", "{\"id\":"},
+               {"trailing comma", "[1,]"},
+               {"invalid literal", "{\"ok\":tru}"},
+               {"trailing token", "{\"ok\":true} false"}};
+  FILE *source;
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  size_t i;
+
+  for (i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    out = tmpfile();
+    if (out == NULL) {
+      printf("compact error corpus output tmpfile failed: %s\n", cases[i].name);
+      ++failures;
+      continue;
+    }
+    lql_error_init(&error);
+    st = lql_compact_json(cases[i].json, strlen(cases[i].json), out, &error);
+    if (st != LQL_STATUS_JSON_ERROR) {
+      printf("compact_json invalid corpus mismatch: %s status=%s error=%s\n",
+             cases[i].name, lql_status_string(st), error.message);
+      ++failures;
+    }
+    fclose(out);
+
+    source = tmpfile();
+    out = tmpfile();
+    if (source == NULL || out == NULL) {
+      printf("compact error corpus file tmpfile failed: %s\n", cases[i].name);
+      if (source != NULL) {
+        fclose(source);
+      }
+      if (out != NULL) {
+        fclose(out);
+      }
+      ++failures;
+      continue;
+    }
+    if (fwrite(cases[i].json, 1u, strlen(cases[i].json), source) !=
+            strlen(cases[i].json) ||
+        fseek(source, 0L, SEEK_SET) != 0) {
+      printf("compact error corpus source setup failed: %s\n", cases[i].name);
+      ++failures;
+    } else {
+      lql_error_init(&error);
+      st = lql_compact_file_range(source, 0u, (lql_uint64)strlen(cases[i].json),
+                                  out, &error);
+      if (st != LQL_STATUS_JSON_ERROR) {
+        printf("compact_file_range invalid corpus mismatch: %s status=%s "
+               "error=%s\n",
+               cases[i].name, lql_status_string(st), error.message);
+        ++failures;
+      }
+    }
+    fclose(source);
+    fclose(out);
+  }
+}
+
 static void expect_mutation_plan_api(void) {
   lql_mutation_plan *plan;
   lql_mutation_parse_options options;
@@ -2623,6 +2687,8 @@ static void expect_sdk_parity_manifest(void) {
       {"projection", "projection and compact public API error contracts",
        expect_projection_compact_error_api},
       {"compact", "seekable and buffered JSON compaction", expect_compact_api},
+      {"compact", "buffered and seekable malformed JSON error corpus",
+       expect_compact_error_corpus_api},
       {"mutation", "mutation parse/plan public API success and parse errors",
        expect_mutation_plan_api},
       {"mutation", "mutation public API error contracts",
@@ -2884,6 +2950,7 @@ int main(void) {
   expect_projection_path_invariant_api();
   expect_projection_compact_error_api();
   expect_compact_api();
+  expect_compact_error_corpus_api();
   expect_mutation_plan_api();
   expect_mutation_error_api();
   expect_root_field_mutation_api();
