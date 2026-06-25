@@ -2062,6 +2062,116 @@ static void expect_mutation_quoted_value_api(void) {
   fclose(out);
 }
 
+static void expect_mutation_file_backed_value_api(void) {
+  FILE *payload;
+  FILE *source;
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_mutation_plan *plan;
+  lql_mutation_parse_options options;
+  const char *exprs[4];
+  char buf[512];
+  size_t len;
+  static const char expected[] =
+      "{\"payload\":\"hello\\n\\\"quoted\\\"\",\"encoded\":\"AAECYQ==\","
+      "\"auto_text\":\"hello\\n\\\"quoted\\\"\",\"auto_bin\":\"AAECYQ==\"}";
+
+  payload = fopen("lql-test-sdk-file-backed.txt", "wb");
+  if (payload == NULL) {
+    printf("SDK file-backed text payload open failed\n");
+    ++failures;
+    return;
+  }
+  if (fwrite("hello\n\"quoted\"", 1u, strlen("hello\n\"quoted\""), payload) !=
+          strlen("hello\n\"quoted\"") ||
+      fclose(payload) != 0) {
+    printf("SDK file-backed text payload write failed\n");
+    ++failures;
+    return;
+  }
+  payload = fopen("lql-test-sdk-file-backed.bin", "wb");
+  if (payload == NULL) {
+    printf("SDK file-backed binary payload open failed\n");
+    remove("lql-test-sdk-file-backed.txt");
+    ++failures;
+    return;
+  }
+  if (fwrite("\000\001\002a", 1u, 4u, payload) != 4u || fclose(payload) != 0) {
+    printf("SDK file-backed binary payload write failed\n");
+    remove("lql-test-sdk-file-backed.txt");
+    ++failures;
+    return;
+  }
+
+  exprs[0] = "textfile:/payload=lql-test-sdk-file-backed.txt";
+  exprs[1] = "base64file:/encoded=lql-test-sdk-file-backed.bin";
+  exprs[2] = "file:/auto_text=lql-test-sdk-file-backed.txt";
+  exprs[3] = "file:/auto_bin=lql-test-sdk-file-backed.bin";
+  memset(&options, 0, sizeof(options));
+  options.enable_file_values = 1;
+  options.file_value_base_dir = ".";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse_with_options(exprs, 4u, &options, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("SDK file-backed mutation parse failed: %s\n", error.message);
+    ++failures;
+    remove("lql-test-sdk-file-backed.txt");
+    remove("lql-test-sdk-file-backed.bin");
+    return;
+  }
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("SDK file-backed buffered output tmpfile failed\n");
+    ++failures;
+  } else {
+    st = lql_mutate_json(plan, "{}", strlen("{}"), out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("SDK file-backed buffered mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf, expected) != 0) {
+      printf("SDK file-backed buffered output mismatch: %s\n", buf);
+      ++failures;
+    }
+    fclose(out);
+  }
+
+  source = tmpfile();
+  out = tmpfile();
+  if (source == NULL || out == NULL) {
+    printf("SDK file-backed range tmpfile failed\n");
+    ++failures;
+  } else if (fwrite("{}", 1u, strlen("{}"), source) != strlen("{}") ||
+             fflush(source) != 0 || fseek(source, 0L, SEEK_SET) != 0) {
+    printf("SDK file-backed range source setup failed\n");
+    ++failures;
+  } else {
+    st = lql_mutate_file_range_paths(plan, source, 0u, (lql_uint64)strlen("{}"),
+                                     out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("SDK file-backed range mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf, expected) != 0) {
+      printf("SDK file-backed range output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  if (source != NULL) {
+    fclose(source);
+  }
+  if (out != NULL) {
+    fclose(out);
+  }
+
+  lql_mutation_plan_free(plan);
+  remove("lql-test-sdk-file-backed.txt");
+  remove("lql-test-sdk-file-backed.bin");
+}
+
 static void expect_mutation_shorthand_api(void) {
   FILE *out;
   lql_error error;
@@ -2453,6 +2563,8 @@ static void expect_sdk_parity_manifest(void) {
        expect_buffered_mutation_api},
       {"mutation", "quoted mutation value typing",
        expect_mutation_quoted_value_api},
+      {"mutation", "file-backed mutation value execution",
+       expect_mutation_file_backed_value_api},
       {"mutation", "brace shorthand and escaped JSON Pointer mutation",
        expect_mutation_shorthand_api},
       {"mutation", "concrete array element mutation",
@@ -2705,6 +2817,7 @@ int main(void) {
   expect_path_mutation_api();
   expect_buffered_mutation_api();
   expect_mutation_quoted_value_api();
+  expect_mutation_file_backed_value_api();
   expect_mutation_shorthand_api();
   expect_array_element_mutation_api();
   expect_wildcard_mutation_api();
