@@ -41,6 +41,7 @@ func validate(r io.Reader) error {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	line := 0
 	records := 0
+	submodes := make(map[string]map[string]bool)
 	for scanner.Scan() {
 		line++
 		text := scanner.Bytes()
@@ -61,6 +62,11 @@ func validate(r io.Reader) error {
 		if err := validateRecord(line, rec); err != nil {
 			return err
 		}
+		key := fmt.Sprintf("%s\x00%s\x00%s\x00%s", rec.Impl, rec.Dataset, rec.Selector, rec.Mode)
+		if submodes[key] == nil {
+			submodes[key] = make(map[string]bool)
+		}
+		submodes[key][rec.Submode] = true
 		records++
 	}
 	if err := scanner.Err(); err != nil {
@@ -68,6 +74,11 @@ func validate(r io.Reader) error {
 	}
 	if records == 0 {
 		return fmt.Errorf("no benchmark records")
+	}
+	for key, seen := range submodes {
+		if !seen["warmup_included"] || !seen["steady_state"] {
+			return fmt.Errorf("benchmark tuple %q must include warmup_included and steady_state records", key)
+		}
 	}
 	return nil
 }
@@ -122,7 +133,9 @@ func validateRecord(line int, rec record) error {
 	default:
 		return fmt.Errorf("line %d: unsupported mode %q", line, rec.Mode)
 	}
-	if rec.Submode != "steady_state" {
+	switch rec.Submode {
+	case "warmup_included", "steady_state":
+	default:
 		return fmt.Errorf("line %d: unsupported submode %q", line, rec.Submode)
 	}
 	if rec.BytesPerIter < 0 || rec.Candidates < 0 || rec.Matches < 0 ||

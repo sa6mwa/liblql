@@ -118,28 +118,54 @@ emit_record() {
     "$(json_string "$reason")"
 }
 
+emit_submode_records() {
+  impl=$1
+  dataset=$2
+  selector=$3
+  expr=$4
+  mode=$5
+  bytes=$6
+  candidates=$7
+  matches=$8
+  payloads=$9
+  payload_bytes=${10}
+  payload_source_type=${11}
+  ns_per_op=${12}
+  unsupported=${13}
+  reason=${14}
+  fixture_sha256=${15}
+  emit_record "$impl" "$dataset" "$selector" "$expr" "$mode" \
+    "warmup_included" "$bytes" "$candidates" "$matches" "$payloads" \
+    "$payload_bytes" "$payload_source_type" "$ns_per_op" "$unsupported" \
+    "$reason" "$fixture_sha256"
+  emit_record "$impl" "$dataset" "$selector" "$expr" "$mode" \
+    "steady_state" "$bytes" "$candidates" "$matches" "$payloads" \
+    "$payload_bytes" "$payload_source_type" "$ns_per_op" "$unsupported" \
+    "$reason" "$fixture_sha256"
+}
+
 emit_unsupported_impl() {
   impl=$1
   reason=$2
   while read dataset_name fixture_path candidates selector_name expr; do
     : "$candidates"
-    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "decision_only_selector" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "decision_only_selector" 0 0 0 0 0 "none" null true "$reason" \
       "$(file_sha256 "$fixture_path")"
-    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "decision_only_plan" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "decision_only_plan" 0 0 0 0 0 "none" null true "$reason" \
       "$(file_sha256 "$fixture_path")"
-    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "plus_value_selector" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "plus_value_selector" 0 0 0 0 0 "none" null true "$reason" \
       "$(file_sha256 "$fixture_path")"
-    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "plus_value_plan" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "plus_value_plan" 0 0 0 0 0 "none" null true "$reason" \
       "$(file_sha256 "$fixture_path")"
-    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "plus_value_openjson_selector" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "plus_value_openjson_selector" 0 0 0 0 0 "none" null true "$reason" \
       "$(file_sha256 "$fixture_path")"
-    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "plus_value_openjson_plan" "steady_state" 0 0 0 0 0 "none" null true "$reason" \
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "plus_value_openjson_plan" 0 0 0 0 0 "none" null true "$reason" \
       "$(file_sha256 "$fixture_path")"
   done < "$case_matrix"
 }
@@ -336,10 +362,12 @@ run_c() {
     candidates=$(fault_count "$candidates" "$inject_candidate_mismatch")
     matches=$(fault_count "$matches" "$inject_match_mismatch")
   fi
-  printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
-    "decision_only_selector" "$candidates" "$matches" 0 0 >> "$c_counts_file"
-  emit_record "c" "$dataset_name" "$selector_name" "$expr" \
-    "decision_only_selector" "steady_state" "$bytes" "$candidates" "$matches" 0 0 "none" null false "" "$fixture_sha"
+  printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+    "decision_only_selector" "warmup_included" "$candidates" "$matches" 0 0 >> "$c_counts_file"
+  printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+    "decision_only_selector" "steady_state" "$candidates" "$matches" 0 0 >> "$c_counts_file"
+  emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
+    "decision_only_selector" "$bytes" "$candidates" "$matches" 0 0 "none" null false "" "$fixture_sha"
 }
 
 run_c_native_mode() {
@@ -351,8 +379,8 @@ run_c_native_mode() {
   expr=$6
   bytes=$(wc -c < "$fixture_path" | tr -d ' ')
   if [ ! -x "$payload_bench" ]; then
-    emit_record "c" "$dataset_name" "$selector_name" "$expr" \
-      "$mode" "steady_state" 0 0 0 0 0 "none" null true \
+    emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
+      "$mode" 0 0 0 0 0 "none" null true \
       "lql_payload_bench binary not found; run make build-debug or set LQL_PAYLOAD_BENCH_PATH" \
       "$(file_sha256 "$fixture_path")"
     return 1
@@ -376,16 +404,19 @@ run_c_native_mode() {
     c_payload_bytes=$(fault_count "$c_payload_bytes" "$inject_payload_byte_mismatch")
   fi
   : "$candidates"
-  printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
-    "$mode" "$c_candidates" "$c_matches" "$c_payloads" \
+  printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+    "$mode" "warmup_included" "$c_candidates" "$c_matches" "$c_payloads" \
+    "$c_payload_bytes" >> "$c_counts_file"
+  printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+    "$mode" "steady_state" "$c_candidates" "$c_matches" "$c_payloads" \
     "$c_payload_bytes" >> "$c_counts_file"
   payload_source_type=none
   case "$mode" in
     plus_value_openjson_*) payload_source_type=spool ;;
     plus_value_*) payload_source_type=seekable_range ;;
   esac
-  emit_record "c" "$dataset_name" "$selector_name" "$expr" \
-    "$mode" "steady_state" "$bytes" "$c_candidates" \
+  emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
+    "$mode" "$bytes" "$c_candidates" \
     "$c_matches" "$c_payloads" "$c_payload_bytes" "$payload_source_type" null false \
     "" "$fixture_sha"
 }
@@ -403,26 +434,28 @@ run_go_mode() {
     emit_unsupported_impl "go" "go executable not found"
     return 1
   fi
-  record=$(cd "$root/parity" && "$go_bin" run ./cmd/lqlbench \
-    --fixture "$fixture_path" \
-    --dataset "$dataset_name" \
-    --selector-name "$selector_name" \
-    --expr "$expr" \
-    --mode "$mode" \
-    --submode steady_state)
-  printf '%s\n' "$record"
-  go_candidates=$(json_number_field candidates "$record")
-  go_matches=$(json_number_field matches "$record")
-  go_payloads=$(json_number_field payloads "$record")
-  go_payload_bytes=$(json_number_field payload_bytes "$record")
-  if [ -z "$go_candidates" ] || [ -z "$go_matches" ] ||
-    [ -z "$go_payloads" ] || [ -z "$go_payload_bytes" ]; then
-    printf 'Go benchmark emitted an invalid record: %s\n' "$record" >&2
-    return 1
-  fi
-  printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
-    "$mode" "$go_candidates" "$go_matches" "$go_payloads" \
-    "$go_payload_bytes" >> "$go_counts_file"
+  for submode in warmup_included steady_state; do
+    record=$(cd "$root/parity" && "$go_bin" run ./cmd/lqlbench \
+      --fixture "$fixture_path" \
+      --dataset "$dataset_name" \
+      --selector-name "$selector_name" \
+      --expr "$expr" \
+      --mode "$mode" \
+      --submode "$submode")
+    printf '%s\n' "$record"
+    go_candidates=$(json_number_field candidates "$record")
+    go_matches=$(json_number_field matches "$record")
+    go_payloads=$(json_number_field payloads "$record")
+    go_payload_bytes=$(json_number_field payload_bytes "$record")
+    if [ -z "$go_candidates" ] || [ -z "$go_matches" ] ||
+      [ -z "$go_payloads" ] || [ -z "$go_payload_bytes" ]; then
+      printf 'Go benchmark emitted an invalid record: %s\n' "$record" >&2
+      return 1
+    fi
+    printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+      "$mode" "$submode" "$go_candidates" "$go_matches" "$go_payloads" \
+      "$go_payload_bytes" >> "$go_counts_file"
+  done
 }
 
 run_lua_mode() {
@@ -454,15 +487,18 @@ run_lua_mode() {
     printf 'Lua benchmark emitted an invalid record: %s\n' "$record" >&2
     return 1
   fi
-  printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
-    "$mode" "$lua_candidates" "$lua_matches" "$lua_payloads" \
+  printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+    "$mode" "warmup_included" "$lua_candidates" "$lua_matches" "$lua_payloads" \
+    "$lua_payload_bytes" >> "$lua_counts_file"
+  printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+    "$mode" "steady_state" "$lua_candidates" "$lua_matches" "$lua_payloads" \
     "$lua_payload_bytes" >> "$lua_counts_file"
   payload_source_type=none
   case "$mode" in
     plus_value_*) payload_source_type=clql_output ;;
   esac
-  emit_record "lua" "$dataset_name" "$selector_name" "$expr" \
-    "$mode" "steady_state" "$bytes" "$lua_candidates" "$lua_matches" \
+  emit_submode_records "lua" "$dataset_name" "$selector_name" "$expr" \
+    "$mode" "$bytes" "$lua_candidates" "$lua_matches" \
     "$lua_payloads" "$lua_payload_bytes" "$payload_source_type" null false \
     "" "$fixture_sha"
 }
@@ -526,11 +562,11 @@ compare_go_impl() {
   if [ ! -s "$go_counts_file" ] || [ ! -s "$impl_counts_file" ]; then
     return 0
   fi
-  while read dataset_name selector_name mode go_candidates go_matches go_payloads go_payload_bytes; do
-    impl_line=$(sed -n "s/^$dataset_name $selector_name $mode //p" "$impl_counts_file")
+  while read dataset_name selector_name mode submode go_candidates go_matches go_payloads go_payload_bytes; do
+    impl_line=$(sed -n "s/^$dataset_name $selector_name $mode $submode //p" "$impl_counts_file")
     if [ -z "$impl_line" ]; then
-      printf 'benchmark missing %s count record: dataset=%s selector=%s mode=%s\n' \
-        "$impl" "$dataset_name" "$selector_name" "$mode" >&2
+      printf 'benchmark missing %s count record: dataset=%s selector=%s mode=%s submode=%s\n' \
+        "$impl" "$dataset_name" "$selector_name" "$mode" "$submode" >&2
       return 1
     fi
     set -- $impl_line
@@ -539,23 +575,23 @@ compare_go_impl() {
     impl_payloads=$3
     impl_payload_bytes=$4
     if [ "$go_candidates" != "$impl_candidates" ]; then
-      printf 'benchmark candidate-count mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s\n' \
-        "$go_candidates" "$impl" "$impl_candidates" "$dataset_name" "$selector_name" "$mode" >&2
+      printf 'benchmark candidate-count mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s submode=%s\n' \
+        "$go_candidates" "$impl" "$impl_candidates" "$dataset_name" "$selector_name" "$mode" "$submode" >&2
       return 1
     fi
     if [ "$go_matches" != "$impl_matches" ]; then
-      printf 'benchmark match-count mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s\n' \
-        "$go_matches" "$impl" "$impl_matches" "$dataset_name" "$selector_name" "$mode" >&2
+      printf 'benchmark match-count mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s submode=%s\n' \
+        "$go_matches" "$impl" "$impl_matches" "$dataset_name" "$selector_name" "$mode" "$submode" >&2
       return 1
     fi
     if [ "$go_payloads" != "$impl_payloads" ]; then
-      printf 'benchmark payload-count mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s\n' \
-        "$go_payloads" "$impl" "$impl_payloads" "$dataset_name" "$selector_name" "$mode" >&2
+      printf 'benchmark payload-count mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s submode=%s\n' \
+        "$go_payloads" "$impl" "$impl_payloads" "$dataset_name" "$selector_name" "$mode" "$submode" >&2
       return 1
     fi
     if [ "$go_payload_bytes" != "$impl_payload_bytes" ]; then
-      printf 'benchmark payload-byte mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s\n' \
-        "$go_payload_bytes" "$impl" "$impl_payload_bytes" "$dataset_name" "$selector_name" "$mode" >&2
+      printf 'benchmark payload-byte mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s submode=%s\n' \
+        "$go_payload_bytes" "$impl" "$impl_payload_bytes" "$dataset_name" "$selector_name" "$mode" "$submode" >&2
       return 1
     fi
   done < "$go_counts_file"
