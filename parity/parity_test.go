@@ -469,6 +469,37 @@ func TestCLQLCompactSelectionParity(t *testing.T) {
 	}
 }
 
+func TestCLQLMutationParseErrorParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []string{
+		`badexpr`,
+		`/`,
+		`/count=+0`,
+		`time:/state/updated=tomorrowish`,
+		`file:/payload=blob.txt`,
+		`/state/details{/owner="alice"}}`,
+	}
+	for _, expr := range cases {
+		t.Run(expr, func(t *testing.T) {
+			if _, err := lql.ParseMutations([]string{expr}, time.Unix(1700000000, 0)); err == nil {
+				t.Fatalf("go mutation parser unexpectedly accepted %q", expr)
+			}
+			cmd := exec.Command(clql, "-m", expr, `contains{f=/}`)
+			cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("clql mutation parser unexpectedly accepted %q: out=%q", expr, string(out))
+			}
+			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
+				t.Fatalf("clql mutation parse exit mismatch: err=%v out=%q", err, string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

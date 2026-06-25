@@ -33,6 +33,7 @@ typedef struct lql_error {
 
 typedef struct lql_selector lql_selector;
 typedef struct lql_projection lql_projection;
+typedef struct lql_mutation_plan lql_mutation_plan;
 
 typedef struct lql_query_decision {
   int matched;
@@ -107,6 +108,14 @@ lql_status lql_compact_file_range(FILE *file, lql_uint64 offset,
 /* Compacts one in-memory JSON value to out. */
 lql_status lql_compact_json(const char *json, size_t json_len, FILE *out,
                             lql_error *error);
+/* Parses CLI-style mutation expressions into a caller-owned mutation plan.
+   This validates the mutation language only; execution is a separate API. */
+lql_status lql_mutation_plan_parse(const char *const *exprs, size_t expr_count,
+                                   lql_mutation_plan **out, lql_error *error);
+/* Returns the number of parsed mutation operations in a plan. */
+size_t lql_mutation_plan_count(const lql_mutation_plan *plan);
+/* Frees a mutation plan. NULL is accepted. */
+void lql_mutation_plan_free(lql_mutation_plan *plan);
 
 char *lql_strdup(const char *text);
 void lql_free(void *ptr);

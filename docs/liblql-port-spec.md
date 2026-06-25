@@ -409,6 +409,11 @@ Current implementation is an early slice:
   file ranges;
 - the initial C compact API exposes `lql_compact_file_range()` for streaming
   seekable ranges and `lql_compact_json()` for explicitly buffered JSON values;
+- the initial C mutation API exposes `lql_mutation_plan_parse()`,
+  `lql_mutation_plan_count()`, and `lql_mutation_plan_free()` for CLI-style
+  mutation parse/plan validation; mutation execution is not implemented yet;
+- `clql -m/--mutate` parses mutation expressions and fails explicitly at the
+  unsupported execution boundary after successful parse;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;

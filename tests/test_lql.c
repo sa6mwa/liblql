@@ -593,6 +593,50 @@ static void expect_compact_api(void) {
   fclose(out);
 }
 
+static void expect_mutation_plan_api(void) {
+  lql_mutation_plan *plan;
+  lql_error error;
+  lql_status st;
+  const char *valid[6];
+  const char *invalid[5];
+  size_t i;
+
+  valid[0] = "/state/progress=ready";
+  valid[1] = "/state/metrics++";
+  valid[2] = "/state/details{/owner=\"alice\",/note=\"hi, world\"}";
+  valid[3] = "/state/metrics=+3";
+  valid[4] = "time:/state/updated=NOW";
+  valid[5] = "rm:/state/legacy";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(valid, 6u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else if (lql_mutation_plan_count(plan) != 7u) {
+    printf("mutation plan count mismatch: %lu\n",
+           (unsigned long)lql_mutation_plan_count(plan));
+    ++failures;
+  }
+  lql_mutation_plan_free(plan);
+
+  invalid[0] = "badexpr";
+  invalid[1] = "/";
+  invalid[2] = "/count=+0";
+  invalid[3] = "time:/state/updated=tomorrowish";
+  invalid[4] = "file:/payload=blob.txt";
+  for (i = 0u; i < 5u; ++i) {
+    plan = NULL;
+    lql_error_init(&error);
+    st = lql_mutation_plan_parse(&invalid[i], 1u, &plan, &error);
+    if (st == LQL_STATUS_OK) {
+      printf("invalid mutation parsed: %s\n", invalid[i]);
+      ++failures;
+    }
+    lql_mutation_plan_free(plan);
+  }
+}
+
 int main(void) {
   expect_match("/status=\"open\"", "{\"status\":\"open\"}", 1);
   expect_match("/status=\"closed\"", "{\"status\":\"open\"}", 0);
@@ -769,5 +813,6 @@ int main(void) {
   expect_stream_stop_controls();
   expect_projection_api();
   expect_compact_api();
+  expect_mutation_plan_api();
   return failures == 0 ? 0 : 1;
 }

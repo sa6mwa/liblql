@@ -180,8 +180,8 @@ static void close_input_path(FILE *file) {
 }
 
 static void usage(FILE *out) {
-  fprintf(out, "usage: clql [--or|-O] [-c] [-f field] [--matches-only|-M] "
-               "selector [data.json]\n");
+  fprintf(out, "usage: clql [--or|-O] [-c] [-f field] [-m expr] "
+               "[--matches-only|-M] selector [data.json]\n");
   fprintf(out, "       clql [--or|-O] [-c] [--matches-only|-M] selector < "
                "data.json\n");
   fprintf(out, "       clql --version\n");
@@ -202,14 +202,18 @@ int main(int argc, char **argv) {
   int compact;
   int i;
   projection_args fields;
+  projection_args mutations;
   lql_projection *projection;
+  lql_mutation_plan *mutation_plan;
   lql_status st;
   match_count count;
   output_ranges ranges;
   lql_query_result result;
 
   memset(&fields, 0, sizeof(fields));
+  memset(&mutations, 0, sizeof(mutations));
   projection = NULL;
+  mutation_plan = NULL;
   or_mode = 0;
   matches_only = 0;
   compact = 0;
@@ -219,11 +223,13 @@ int main(int argc, char **argv) {
     if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
       printf("clql 0.0.0\n");
       free_projection_args(&fields);
+      free_projection_args(&mutations);
       return 0;
     }
     if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
       usage(stdout);
       free_projection_args(&fields);
+      free_projection_args(&mutations);
       return 0;
     }
     if (strcmp(argv[i], "--or") == 0 || strcmp(argv[i], "-O") == 0) {
@@ -234,22 +240,39 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--compact") == 0 ||
                strcmp(argv[i], "-c") == 0) {
       compact = 1;
+    } else if (strcmp(argv[i], "--mutate") == 0 || strcmp(argv[i], "-m") == 0) {
+      if (i + 1 >= argc || !add_projection_arg(&mutations, argv[++i])) {
+        fprintf(stderr, "clql: failed to record mutation expression\n");
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        return 2;
+      }
+    } else if (strncmp(argv[i], "--mutate=", 9u) == 0) {
+      if (!add_projection_arg(&mutations, argv[i] + 9u)) {
+        fprintf(stderr, "clql: failed to record mutation expression\n");
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        return 2;
+      }
     } else if (strcmp(argv[i], "--field") == 0 || strcmp(argv[i], "-f") == 0) {
       if (i + 1 >= argc || !add_projection_arg(&fields, argv[++i])) {
         fprintf(stderr, "clql: failed to record field path\n");
         free_projection_args(&fields);
+        free_projection_args(&mutations);
         return 2;
       }
     } else if (strncmp(argv[i], "--field=", 8u) == 0) {
       if (!add_projection_arg(&fields, argv[i] + 8u)) {
         fprintf(stderr, "clql: failed to record field path\n");
         free_projection_args(&fields);
+        free_projection_args(&mutations);
         return 2;
       }
     } else if (argv[i][0] == '-') {
       fprintf(stderr, "clql: unknown option %s\n", argv[i]);
       usage(stderr);
       free_projection_args(&fields);
+      free_projection_args(&mutations);
       return 2;
     } else if (selector_expr == NULL) {
       selector_expr = argv[i];
@@ -258,12 +281,14 @@ int main(int argc, char **argv) {
     } else {
       usage(stderr);
       free_projection_args(&fields);
+      free_projection_args(&mutations);
       return 2;
     }
   }
   if (selector_expr == NULL) {
     usage(stderr);
     free_projection_args(&fields);
+    free_projection_args(&mutations);
     return 2;
   }
   lql_error_init(&error);
@@ -273,6 +298,18 @@ int main(int argc, char **argv) {
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
       free_projection_args(&fields);
+      free_projection_args(&mutations);
+      return 2;
+    }
+  }
+  if (mutations.count != 0u) {
+    st = lql_mutation_plan_parse((const char *const *)mutations.items,
+                                 mutations.count, &mutation_plan, &error);
+    if (st != LQL_STATUS_OK) {
+      fprintf(stderr, "clql: %s\n", error.message);
+      lql_projection_free(projection);
+      free_projection_args(&fields);
+      free_projection_args(&mutations);
       return 2;
     }
   }
@@ -280,8 +317,19 @@ int main(int argc, char **argv) {
                : lql_selector_parse(selector_expr, &selector, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
+    lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
     free_projection_args(&fields);
+    free_projection_args(&mutations);
+    return 2;
+  }
+  if (mutation_plan != NULL) {
+    fprintf(stderr, "clql: mutation execution is not implemented\n");
+    lql_selector_free(selector);
+    lql_mutation_plan_free(mutation_plan);
+    lql_projection_free(projection);
+    free_projection_args(&fields);
+    free_projection_args(&mutations);
     return 2;
   }
   if (matches_only) {
@@ -291,16 +339,20 @@ int main(int argc, char **argv) {
     if (input == NULL) {
       fprintf(stderr, "clql: failed to open input %s\n", input_path);
       lql_selector_free(selector);
+      lql_mutation_plan_free(mutation_plan);
       lql_projection_free(projection);
       free_projection_args(&fields);
+      free_projection_args(&mutations);
       return 1;
     }
     st = lql_query_file_decisions(selector, input, count_match, &count, &result,
                                   &error);
     close_input_path(input);
     lql_selector_free(selector);
+    lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
     free_projection_args(&fields);
+    free_projection_args(&mutations);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
       return 1;
@@ -315,8 +367,10 @@ int main(int argc, char **argv) {
       close_input_path(input);
       close_input_path(range_source);
       lql_selector_free(selector);
+      lql_mutation_plan_free(mutation_plan);
       lql_projection_free(projection);
       free_projection_args(&fields);
+      free_projection_args(&mutations);
       return 1;
     }
     memset(&ranges, 0, sizeof(ranges));
@@ -330,8 +384,10 @@ int main(int argc, char **argv) {
     close_input_path(input);
     close_input_path(range_source);
     lql_selector_free(selector);
+    lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
     free_projection_args(&fields);
+    free_projection_args(&mutations);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
       return 1;
@@ -341,16 +397,20 @@ int main(int argc, char **argv) {
   if (!read_stdin(&json, &json_len)) {
     fprintf(stderr, "clql: failed to read stdin\n");
     lql_selector_free(selector);
+    lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
     free_projection_args(&fields);
+    free_projection_args(&mutations);
     return 1;
   }
   if (fields.count != 0u) {
     fprintf(stderr, "clql: field projection requires a seekable input file\n");
     free(json);
     lql_selector_free(selector);
+    lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
     free_projection_args(&fields);
+    free_projection_args(&mutations);
     return 2;
   }
   st = lql_matches_json(selector, json, json_len, &matched, &error);
@@ -358,8 +418,10 @@ int main(int argc, char **argv) {
     fprintf(stderr, "clql: %s\n", error.message);
     free(json);
     lql_selector_free(selector);
+    lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
     free_projection_args(&fields);
+    free_projection_args(&mutations);
     return 1;
   }
   if (matched) {
@@ -369,8 +431,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "clql: %s\n", error.message);
         free(json);
         lql_selector_free(selector);
+        lql_mutation_plan_free(mutation_plan);
         lql_projection_free(projection);
         free_projection_args(&fields);
+        free_projection_args(&mutations);
         return 1;
       }
       fputc('\n', stdout);
@@ -383,7 +447,9 @@ int main(int argc, char **argv) {
   }
   free(json);
   lql_selector_free(selector);
+  lql_mutation_plan_free(mutation_plan);
   lql_projection_free(projection);
   free_projection_args(&fields);
+  free_projection_args(&mutations);
   return matched ? 0 : 1;
 }
