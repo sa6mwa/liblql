@@ -44,7 +44,8 @@ typedef struct lql_query_decision {
 
 typedef enum lql_payload_kind {
   LQL_PAYLOAD_NONE = 0,
-  LQL_PAYLOAD_SEEKABLE_RANGE = 1
+  LQL_PAYLOAD_SEEKABLE_RANGE = 1,
+  LQL_PAYLOAD_SPOOLED = 2
 } lql_payload_kind;
 
 typedef struct lql_payload {
@@ -53,6 +54,7 @@ typedef struct lql_payload {
   lql_uint64 offset;
   lql_uint64 size;
   FILE *source;
+  const void *spooled;
 } lql_payload;
 
 typedef struct lql_query_match {
@@ -106,6 +108,11 @@ typedef struct lql_capabilities {
   int file_match_stream;
   /* Match payloads can identify callback-scoped seekable source ranges. */
   int seekable_range_payloads;
+  /* Callback-source matched payload streaming with spooled payloads is
+     available. */
+  int source_spooled_match_stream;
+  /* Match payloads can identify callback-scoped spooled handles. */
+  int spooled_payloads;
   /* Projection from one seekable file range is available. */
   int projection_file_range;
   /* Compact serialization from one seekable file range is available. */
@@ -167,6 +174,19 @@ lql_status lql_query_source_decisions_with_options(
     const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *options, lql_query_decision_fn on_decision,
     void *user, lql_query_result *out_result, lql_error *error);
+/* Calls on_match for each matched candidate in a caller-provided source
+   callback stream. Match payloads are callback-scoped spooled handles; liblql
+   does not retain payloads after on_match returns. */
+lql_status lql_query_source_spooled_matches(const lql_selector *selector,
+                                            lql_read_fn read, void *read_user,
+                                            lql_query_match_fn on_match,
+                                            void *user,
+                                            lql_query_result *out_result,
+                                            lql_error *error);
+lql_status lql_query_source_spooled_matches_with_options(
+    const lql_selector *selector, lql_read_fn read, void *read_user,
+    const lql_query_options *options, lql_query_match_fn on_match, void *user,
+    lql_query_result *out_result, lql_error *error);
 /* Calls on_match for each matched candidate in a seekable FILE * stream.
    Match payloads are callback-scoped seekable ranges; liblql does not capture
    or retain candidate JSON. */
@@ -178,9 +198,9 @@ lql_status lql_query_file_matches_with_options(
     const lql_selector *selector, FILE *file, const lql_query_options *options,
     lql_query_match_fn on_match, void *user, lql_query_result *out_result,
     lql_error *error);
-/* Writes a callback-scoped seekable range payload to out. The helper preserves
-   the source FILE * position so it is safe to call from an active match
-   callback. */
+/* Writes a callback-scoped payload to out. Seekable range payloads preserve the
+   source FILE * position; spooled payload handles are valid only for the active
+   match callback. */
 lql_status lql_payload_write_json(const lql_payload *payload, FILE *out,
                                   lql_error *error);
 

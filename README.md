@@ -6,9 +6,9 @@ stream-aware JSON operations.
 
 Current implementation status: repository lifecycle, the first selector
 parse/evaluate slice, a decision-only `FILE *` candidate stream with stop
-controls, a decision-only callback-source candidate stream, 64-bit lonejson
-candidate ranges, callback-scoped seekable range payload handles for matched
-candidates, object/array `clql -f` projection, and
+controls, callback-source decision and spooled-payload match streams, 64-bit
+lonejson candidate ranges, callback-scoped seekable range payload handles for
+matched file candidates, object/array `clql -f` projection, and
 `clql -c` compact output for seekable files and non-seekable stdin are in
 place.
 Object and array-index projection are also exposed through the initial

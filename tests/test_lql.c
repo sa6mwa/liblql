@@ -6,6 +6,8 @@
 
 static int failures = 0;
 
+static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len);
+
 static void expect_version_api(void) {
   lql_capabilities caps;
 
@@ -22,6 +24,7 @@ static void expect_version_api(void) {
   if (!caps.selector_parse || !caps.matches_json ||
       !caps.file_decision_stream || !caps.file_match_stream ||
       !caps.source_decision_stream || !caps.seekable_range_payloads ||
+      !caps.source_spooled_match_stream || !caps.spooled_payloads ||
       !caps.projection_file_range || !caps.compact_file_range ||
       !caps.compact_buffered_json || !caps.mutation_parse ||
       !caps.mutation_file_range || !caps.mutation_buffered_json ||
@@ -116,6 +119,35 @@ static lql_status record_payload(void *user, const lql_query_match *match) {
   if (!match->decision.matched ||
       match->payload.kind != LQL_PAYLOAD_SEEKABLE_RANGE ||
       match->payload.source == NULL ||
+      match->payload.offset != match->decision.offset ||
+      match->payload.size != match->decision.size ||
+      match->payload.index != match->decision.index) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  lql_error_init(&error);
+  st = lql_payload_write_json(&match->payload, seen->out, &error);
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  ++seen->calls;
+  if (seen->stop_after_first) {
+    return LQL_STATUS_STOP;
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status record_spooled_payload(void *user,
+                                         const lql_query_match *match) {
+  payload_seen *seen = (payload_seen *)user;
+  lql_error error;
+  lql_status st;
+
+  if (seen->calls < 4) {
+    seen->offsets[seen->calls] = match->payload.offset;
+    seen->sizes[seen->calls] = match->payload.size;
+  }
+  if (!match->decision.matched || match->payload.kind != LQL_PAYLOAD_SPOOLED ||
+      match->payload.spooled == NULL || match->payload.source != NULL ||
       match->payload.offset != match->decision.offset ||
       match->payload.size != match->decision.size ||
       match->payload.index != match->decision.index) {
@@ -305,6 +337,75 @@ static void expect_source_stream(void) {
     printf("source stream ranges mismatch\n");
     ++failures;
   }
+}
+
+static void expect_source_spooled_payload_api(void) {
+  static const char input[] =
+      "{\"status\":\"closed\",\"id\":\"a\"}\n{\"status\":\"open\",\"id\":\"b\"}"
+      "\n{\"status\":\"open\",\"id\":\"c\"}\n";
+  lql_selector *selector;
+  lql_query_options options;
+  lql_query_result result;
+  payload_seen seen;
+  chunk_reader reader;
+  lql_error error;
+  lql_status st;
+  char buf[256];
+  size_t len;
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&reader, 0, sizeof(reader));
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 7u;
+  seen.stop_after_first = 1;
+  seen.out = tmpfile();
+  if (seen.out == NULL) {
+    printf("source spooled payload tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  lql_error_init(&error);
+  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source spooled payload parse failed: %s\n", error.message);
+    fclose(seen.out);
+    ++failures;
+    return;
+  }
+  st = lql_query_source_spooled_matches_with_options(
+      selector, read_chunk, &reader, &options, record_spooled_payload, &seen,
+      &result, &error);
+  lql_selector_free(selector);
+  if (st != LQL_STATUS_OK) {
+    printf("source spooled payload query failed: %s\n", error.message);
+    fclose(seen.out);
+    ++failures;
+    return;
+  }
+  if (seen.calls != 1 || result.candidates_seen != (lql_uint64)2 ||
+      result.candidates_matched != (lql_uint64)1 || !result.stopped_early ||
+      result.stop_reason != LQL_QUERY_STOP_CALLBACK) {
+    printf("source spooled payload counts mismatch calls=%d seen=%lu "
+           "matched=%lu stop=%d\n",
+           seen.calls, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched, (int)result.stop_reason);
+    ++failures;
+  }
+  if (seen.offsets[0] != (lql_uint64)29 || seen.sizes[0] != (lql_uint64)26) {
+    printf("source spooled payload range mismatch\n");
+    ++failures;
+  }
+  if (!read_tmpfile(seen.out, buf, sizeof(buf), &len)) {
+    printf("source spooled payload output read failed\n");
+    ++failures;
+  } else if (strcmp(buf, "{\"status\":\"open\",\"id\":\"b\"}") != 0) {
+    printf("source spooled payload output mismatch: %s\n", buf);
+    ++failures;
+  }
+  fclose(seen.out);
 }
 
 static void expect_stream_array_items(void) {
@@ -1609,6 +1710,7 @@ int main(void) {
   expect_version_api();
   expect_stream_file();
   expect_source_stream();
+  expect_source_spooled_payload_api();
   expect_stream_array_items();
   expect_stream_stop_controls();
   expect_seekable_payload_api();

@@ -46,6 +46,15 @@ static int copy_range(FILE *in, FILE *out, lql_uint64 size) {
   return 1;
 }
 
+static lonejson_status payload_file_sink(void *user, const void *data,
+                                         size_t len, lonejson_error *error) {
+  FILE *out;
+  (void)error;
+  out = (FILE *)user;
+  return fwrite(data, 1u, len, out) == len ? LONEJSON_STATUS_OK
+                                           : LONEJSON_STATUS_IO_ERROR;
+}
+
 static lql_status on_match_decision(void *user,
                                     const lql_query_decision *decision) {
   lql_match_adapter *adapter;
@@ -123,6 +132,8 @@ void lql_capabilities_get(lql_capabilities *out) {
   out->source_decision_stream = 1;
   out->file_match_stream = 1;
   out->seekable_range_payloads = 1;
+  out->source_spooled_match_stream = 1;
+  out->spooled_payloads = 1;
   out->projection_file_range = 1;
   out->compact_file_range = 1;
   out->compact_buffered_json = 1;
@@ -246,6 +257,29 @@ lql_status lql_query_source_decisions_with_options(
                                          on_decision, user, out_result, error);
 }
 
+lql_status lql_query_source_spooled_matches(const lql_selector *selector,
+                                            lql_read_fn read, void *read_user,
+                                            lql_query_match_fn on_match,
+                                            void *user,
+                                            lql_query_result *out_result,
+                                            lql_error *error) {
+  return lql_query_source_spooled_matches_with_options(
+      selector, read, read_user, NULL, on_match, user, out_result, error);
+}
+
+lql_status lql_query_source_spooled_matches_with_options(
+    const lql_selector *selector, lql_read_fn read, void *read_user,
+    const lql_query_options *options, lql_query_match_fn on_match, void *user,
+    lql_query_result *out_result, lql_error *error) {
+  if (read == NULL || on_match == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "read and on_match are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return lql_eval_query_source_spooled_matches(
+      selector, read, read_user, options, on_match, user, out_result, error);
+}
+
 lql_status lql_query_file_matches(const lql_selector *selector, FILE *file,
                                   lql_query_match_fn on_match, void *user,
                                   lql_query_result *out_result,
@@ -280,6 +314,16 @@ lql_status lql_payload_write_json(const lql_payload *payload, FILE *out,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   if (payload->kind != LQL_PAYLOAD_SEEKABLE_RANGE || payload->source == NULL) {
+    if (payload->kind == LQL_PAYLOAD_SPOOLED && payload->spooled != NULL) {
+      lonejson_error lj_error;
+      if (lonejson_spooled_write_to_sink(
+              (const lonejson_spooled *)payload->spooled, payload_file_sink,
+              out, &lj_error) == LONEJSON_STATUS_OK) {
+        return LQL_STATUS_OK;
+      }
+      lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+      return LQL_STATUS_JSON_ERROR;
+    }
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                   "payload is not a seekable source range");
     return LQL_STATUS_UNSUPPORTED;
