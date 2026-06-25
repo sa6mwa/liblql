@@ -573,6 +573,12 @@ func TestCLQLSeekableFileProjectionParity(t *testing.T) {
 			body:   `{"status":"open","id":"a","meta":{"trace":9,"span":"s","ignore":true},"items":[{"sku":"A"},{"sku":"B"}]}` + "\n",
 		},
 		{
+			name:   "escaped pointer fields",
+			expr:   `/status="open"`,
+			fields: []string{"/a~1b/~0key"},
+			body:   "{\"status\":\"open\",\"a/b\":{\"~key\":7},\"id\":\"a\"}\n",
+		},
+		{
 			name:   "missing root field suppresses output",
 			expr:   `/status="open"`,
 			fields: []string{"/missing"},
@@ -1129,6 +1135,64 @@ func TestCLQLNestedMutationParity(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("nested mutation parity mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
+func TestCLQLQuotedMutationValueParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"state":{"status":"open"}}`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-quoted-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	mutations := []string{
+		`/state/text="a\"b\\c"`,
+		`/state/truth="true"`,
+		`/state/nothing="null"`,
+		`/state/number="2"`,
+	}
+	args := []string{"-c"}
+	for _, mutation := range mutations {
+		args = append(args, "-m", mutation)
+	}
+	args = append(args, `contains{f=/}`, tmp.Name())
+	cmd := exec.Command(clql, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql quoted mutation failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql quoted mutation: %v out=%q", err, string(out))
+	}
+
+	muts, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatalf("go parse quoted mutations: %v", err)
+	}
+	var wantOut bytes.Buffer
+	if err := lql.MutateStream(lql.MutateStreamRequest{
+		Reader:    bytes.NewBufferString(body),
+		Writer:    &wantOut,
+		Mutations: muts,
+	}); err != nil {
+		t.Fatalf("go stream quoted mutations: %v", err)
+	}
+	want, err := decodeJSONValues(wantOut.Bytes())
+	if err != nil {
+		t.Fatalf("decode go quoted mutation result: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("quoted mutation parity mismatch: got=%#v want=%#v out=%q", got, want, string(out))
 	}
 }
 

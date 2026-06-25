@@ -432,8 +432,8 @@ Current implementation is an early slice:
 - `clql -c/--compact selector data.json` compacts matched seekable file ranges
   through lonejson without candidate materialization;
 - `clql -f/--field selector data.json` supports root, nested object-field,
-  and array-index projection on seekable file inputs using the public
-  projection API, lonejson path visiting, and writer output;
+  array-index, and escaped JSON Pointer projection on seekable file inputs
+  using the public projection API, lonejson path visiting, and writer output;
 - the initial C projection API exposes `lql_projection_parse()` and
   `lql_project_file_range()` for object and array-index paths over seekable
   file ranges, plus `lql_project_json()` for explicitly caller-buffered JSON
@@ -467,6 +467,8 @@ Current implementation is an early slice:
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path, existing-position wildcard, and
   existing-position recursive mutations to matched candidates;
+- quoted numeric mutation values follow Go typing behavior and are emitted as
+  JSON numbers rather than strings;
 - `clql -m/--mutate selector < data.json` applies the same supported streaming
   mutation subset to matched non-seekable stdin candidates through
   callback-scoped spooled payloads, preserves unmatched candidates by default,

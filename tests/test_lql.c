@@ -1117,7 +1117,7 @@ static void expect_root_field_mutation_api(void) {
   lql_error error;
   lql_status st;
   lql_mutation_plan *plan;
-  const char *exprs[4];
+  const char *exprs[5];
   const char *file_exprs[4];
   lql_mutation_parse_options options;
   char buf[256];
@@ -1148,9 +1148,10 @@ static void expect_root_field_mutation_api(void) {
   exprs[1] = "/count++";
   exprs[2] = "rm:/old";
   exprs[3] = "/missing=value";
+  exprs[4] = "/quoted_number=\"2\"";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 4u, &plan, &error);
+  st = lql_mutation_plan_parse(exprs, 5u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("root mutation plan parse failed: %s\n", error.message);
     ++failures;
@@ -1161,10 +1162,9 @@ static void expect_root_field_mutation_api(void) {
       printf("root mutation failed: %s\n", error.message);
       ++failures;
     } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
-               strcmp(
-                   buf,
-                   "{\"status\":\"done\",\"count\":2,\"missing\":\"value\"}") !=
-                   0) {
+               strcmp(buf,
+                      "{\"status\":\"done\",\"count\":2,\"missing\":\"value\","
+                      "\"quoted_number\":2}") != 0) {
       printf("root mutation output mismatch: %s\n", buf);
       ++failures;
     }

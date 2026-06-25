@@ -689,6 +689,18 @@ static int parse_number(const char *s, double *out) {
   return 1;
 }
 
+static int parse_number_slice(const char *s, size_t len, double *out) {
+  char *copy;
+  int ok;
+  copy = trimmed_dup_range(s, len);
+  if (copy == NULL) {
+    return 0;
+  }
+  ok = parse_number(copy, out);
+  free(copy);
+  return ok;
+}
+
 static const char *unquoted_value(const char *value, size_t *out_len);
 
 static int parse_mutation_expr(const char *expr, lql_mutation_plan *plan,
@@ -1539,9 +1551,9 @@ static lonejson_status write_mutation_set_value(lonejson_writer *writer,
   if (ascii_equal_ignore_case_n(text, len, "null")) {
     return lonejson_writer_null(writer, error);
   }
-  if (text == value && parse_number(value, &number)) {
+  if (parse_number_slice(text, len, &number)) {
     (void)number;
-    return lonejson_writer_number_text(writer, value, strlen(value), error);
+    return lonejson_writer_number_text(writer, text, len, error);
   }
   if (item->kind == MUTATION_INCREMENT) {
     sprintf(number_buf, "%.17g", item->delta);
