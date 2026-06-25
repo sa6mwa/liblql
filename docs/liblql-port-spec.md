@@ -478,6 +478,9 @@ Current implementation is an early slice:
   JSON in memory;
 - `clql -m/--mutate` accepts a single file argument with no selector as
   match-all mutation input and rejects multiple file inputs explicitly;
+- match-all `clql -m/--mutate` over mixed candidate streams preserves
+  non-object candidates unchanged while applying field mutations to object
+  candidates;
 - `clql -F/--enable-file-mutations` opts into parsing file-backed mutation
   values and supports `file:`, `textfile:`, and `base64file:` streaming
   execution over seekable file input and supported spooled stdin mutation,

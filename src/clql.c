@@ -73,6 +73,28 @@ static int copy_range(FILE *in, FILE *out, lql_uint64 size) {
   return 1;
 }
 
+static int range_root_kind(FILE *file, lql_uint64 offset, lql_uint64 size,
+                           char *out_kind) {
+  int ch;
+  if (file == NULL || out_kind == NULL || !seek_u64(file, offset)) {
+    return 0;
+  }
+  *out_kind = '\0';
+  while (size != 0u) {
+    ch = fgetc(file);
+    if (ch == EOF) {
+      return 0;
+    }
+    --size;
+    if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+      continue;
+    }
+    *out_kind = (char)ch;
+    return 1;
+  }
+  return 0;
+}
+
 static int file_size_u64(FILE *file, lql_uint64 *out) {
   off_t end;
   if (file == NULL || out == NULL) {
@@ -227,10 +249,37 @@ static lql_status output_match_range(void *user,
         return LQL_STATUS_OK;
       }
     } else if (decision->matched) {
-      if (lql_mutate_file_range_paths(ranges->mutation_plan, ranges->source,
-                                      decision->offset, decision->size,
-                                      ranges->out, &ranges->callback_error) !=
-          LQL_STATUS_OK) {
+      char root_kind;
+      if (!range_root_kind(ranges->source, decision->offset, decision->size,
+                           &root_kind)) {
+        return LQL_STATUS_JSON_ERROR;
+      }
+      if (root_kind == '[') {
+        lql_query_result nested_result;
+        memset(&nested_result, 0, sizeof(nested_result));
+        if (lql_eval_query_file_range_spooled_matches(
+                NULL, ranges->source, decision->offset, decision->size,
+                ranges->out, ranges->compact, NULL, ranges->mutation_plan, 0,
+                &nested_result, &ranges->callback_error) != LQL_STATUS_OK) {
+          return LQL_STATUS_UNSUPPORTED;
+        }
+        ranges->matched += nested_result.candidates_matched;
+        return LQL_STATUS_OK;
+      } else if (root_kind != '{' && ranges->compact) {
+        if (lql_compact_file_range(ranges->source, decision->offset,
+                                   decision->size, ranges->out,
+                                   NULL) != LQL_STATUS_OK) {
+          return LQL_STATUS_JSON_ERROR;
+        }
+      } else if (root_kind != '{') {
+        if (!seek_u64(ranges->source, decision->offset) ||
+            !copy_range(ranges->source, ranges->out, decision->size)) {
+          return LQL_STATUS_JSON_ERROR;
+        }
+      } else if (lql_mutate_file_range_paths(
+                     ranges->mutation_plan, ranges->source, decision->offset,
+                     decision->size, ranges->out,
+                     &ranges->callback_error) != LQL_STATUS_OK) {
         return LQL_STATUS_UNSUPPORTED;
       }
     } else if (ranges->compact) {
