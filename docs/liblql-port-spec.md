@@ -488,9 +488,13 @@ Current implementation is an early slice:
 - `clql` exists as a selector/projection/mutation smoke CLI; projection and
   mutation path behavior are still being expanded toward full parity;
 - Go parity tests exist for the initial selector subset;
-- the parity benchmark surface now has Go, C, and initial Lua runners over the
-  shared generated fixture matrix; the Lua runner is currently a CLI-backed
-  facade over public `clql`, not the final Lua C module or direct Lua API;
+- the Lua tree includes an initial CLI-backed facade over public `clql`, with
+  deterministic smoke tests for selector decisions, selection output,
+  projection, mutation, and structured errors; this is not yet the final Lua C
+  module or Lua release artifact surface;
+- the parity benchmark surface now has Go, C, and Lua runners over the shared
+  generated fixture matrix; the Lua runner currently uses the same CLI-backed
+  facade approach over public `clql`;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and
