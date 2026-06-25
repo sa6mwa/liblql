@@ -53,6 +53,17 @@ static int token_list_push(lql_token_list *list, char *item) {
   return 1;
 }
 
+static int term_any_push(lql_term *term, char *item) {
+  char **next;
+  next = (char **)realloc(term->any, sizeof(char *) * (term->any_count + 1u));
+  if (next == NULL) {
+    return 0;
+  }
+  term->any = next;
+  term->any[term->any_count++] = item;
+  return 1;
+}
+
 static lql_status split_top(const char *expr, lql_token_list *out,
                             lql_error *error) {
   const char *start;
@@ -162,13 +173,50 @@ static lql_node_kind kind_from_name(const char *name) {
   if (strcmp(name, "range") == 0) {
     return LQL_NODE_RANGE;
   }
+  if (strcmp(name, "in") == 0) {
+    return LQL_NODE_IN;
+  }
   if (strcmp(name, "exists") == 0) {
     return LQL_NODE_EXISTS;
   }
   return LQL_NODE_ALL;
 }
 
-static int parse_key_values(char *body, lql_term *term, lql_error *error) {
+static int parse_any_values(char *decoded, lql_term *term, lql_error *error) {
+  char *cursor;
+  char *bar;
+  char *item;
+
+  cursor = decoded;
+  while (cursor != NULL) {
+    bar = strchr(cursor, '|');
+    if (bar != NULL) {
+      *bar = '\0';
+    }
+    item = trim_dup(cursor, strlen(cursor));
+    if (item == NULL) {
+      return 0;
+    }
+    if (item[0] != '\0') {
+      if (!term_any_push(term, item)) {
+        free(item);
+        return 0;
+      }
+    } else {
+      free(item);
+    }
+    cursor = bar == NULL ? NULL : bar + 1;
+  }
+  if (term->any_count == 0u) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "selector any requires values");
+    return 0;
+  }
+  return 1;
+}
+
+static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
+                            lql_error *error) {
   lql_token_list parts;
   size_t i;
   lql_status st;
@@ -210,6 +258,14 @@ static int parse_key_values(char *body, lql_term *term, lql_error *error) {
     } else if (strcmp(key, "value") == 0 || strcmp(key, "v") == 0) {
       free(term->value);
       term->value = decoded;
+      term->value_set = 1;
+    } else if (strcmp(key, "any") == 0 || strcmp(key, "a") == 0) {
+      if (!parse_any_values(decoded, term, error)) {
+        free(decoded);
+        token_list_cleanup(&parts);
+        return 0;
+      }
+      free(decoded);
     } else if (strcmp(key, "gt") == 0) {
       term->range_op = '>';
       term->number = strtod(decoded, NULL);
@@ -237,6 +293,24 @@ static int parse_key_values(char *body, lql_term *term, lql_error *error) {
   token_list_cleanup(&parts);
   if (term->field == NULL) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "selector field required");
+    return 0;
+  }
+  if (term->any_count != 0u) {
+    if (kind != LQL_NODE_CONTAINS && kind != LQL_NODE_ICONTAINS &&
+        kind != LQL_NODE_IN) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "selector operator does not support any");
+      return 0;
+    }
+    if (kind != LQL_NODE_IN && (term->value_set || term->value != NULL)) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "selector cannot set both value and any");
+      return 0;
+    }
+  }
+  if (kind == LQL_NODE_IN && term->any_count == 0u) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "in selector requires any values");
     return 0;
   }
   return 1;
@@ -314,6 +388,7 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     *op = '\0';
     out->term.field = lql_strdup(copy);
     out->term.value = unquote(value);
+    out->term.value_set = 1;
     if (out->term.field == NULL || out->term.value == NULL) {
       free(copy);
       return LQL_STATUS_NO_MEMORY;
@@ -358,9 +433,12 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       free(copy);
       return out->term.field == NULL ? LQL_STATUS_NO_MEMORY : LQL_STATUS_OK;
     }
-    if (!parse_key_values(body + 1, &out->term, error)) {
+    if (!parse_key_values(body + 1, out->kind, &out->term, error)) {
       free(copy);
-      return error != NULL ? error->code : LQL_STATUS_PARSE_ERROR;
+      if (error != NULL && error->code != LQL_STATUS_OK) {
+        return error->code;
+      }
+      return LQL_STATUS_NO_MEMORY;
     }
     free(copy);
     return LQL_STATUS_OK;
@@ -380,6 +458,7 @@ static int node_is_term(const lql_node *node) {
   case LQL_NODE_PREFIX:
   case LQL_NODE_IPREFIX:
   case LQL_NODE_RANGE:
+  case LQL_NODE_IN:
   case LQL_NODE_EXISTS:
     return 1;
   default:

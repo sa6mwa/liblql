@@ -15,12 +15,16 @@ typedef enum lql_node_kind {
   LQL_NODE_PREFIX,
   LQL_NODE_IPREFIX,
   LQL_NODE_RANGE,
+  LQL_NODE_IN,
   LQL_NODE_EXISTS
 } lql_node_kind;
 
 typedef struct lql_term {
   char *field;
   char *value;
+  int value_set;
+  char **any;
+  size_t any_count;
   double number;
   int has_number;
   int range_op;

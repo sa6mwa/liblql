@@ -50,6 +50,21 @@ static void expect_match(const char *expr, const char *json, int want) {
   lql_selector_free(selector);
 }
 
+static void expect_parse_error(const char *expr) {
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+
+  selector = NULL;
+  lql_error_init(&error);
+  st = lql_selector_parse(expr, &selector, &error);
+  if (st == LQL_STATUS_OK) {
+    printf("parse unexpectedly succeeded for %s\n", expr);
+    lql_selector_free(selector);
+    ++failures;
+  }
+}
+
 static void expect_stream_file(void) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n";
@@ -171,10 +186,18 @@ int main(void) {
   expect_match("/progress<50", "{\"progress\":72}", 0);
   expect_match("contains{field=/message,value=timeout}",
                "{\"message\":\"upstream timeout\"}", 1);
+  expect_match("contains{field=/message,any=timeout|degraded}",
+               "{\"message\":\"upstream timeout\"}", 1);
+  expect_match("contains{field=/message,any=missing|degraded}",
+               "{\"message\":\"upstream timeout\"}", 0);
   expect_match("icontains{field=/message,value=TIMEOUT}",
+               "{\"message\":\"upstream timeout\"}", 1);
+  expect_match("icontains{f=/message,a=TIMEOUT|DEGRADED}",
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("prefix{field=/service,value=auth}",
                "{\"service\":\"auth-api\"}", 1);
+  expect_match("in{field=/env,any=prod|stage}", "{\"env\":\"prod\"}", 1);
+  expect_match("in{field=/env,any=prod|stage}", "{\"env\":\"dev\"}", 0);
   expect_match("exists{/metadata/etag}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
   expect_match("exists{/metadata}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
   expect_match("/metadata=\"\"", "{\"metadata\":{\"etag\":\"x\"}}", 0);
@@ -183,6 +206,9 @@ int main(void) {
                "{\"status\":\"open\",\"progress\":72}", 1);
   expect_match("/status=\"open\",/progress>=50",
                "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_parse_error("contains{field=/message,value=timeout,any=error}");
+  expect_parse_error("prefix{field=/service,any=auth|edge}");
+  expect_parse_error("in{field=/env}");
   expect_stream_file();
   expect_stream_array_items();
   return failures == 0 ? 0 : 1;

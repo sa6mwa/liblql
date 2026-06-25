@@ -70,6 +70,10 @@ void lql_node_cleanup(lql_node *node) {
   }
   free(node->term.field);
   free(node->term.value);
+  for (i = 0u; i < node->term.any_count; ++i) {
+    free(node->term.any[i]);
+  }
+  free(node->term.any);
   for (i = 0u; i < node->child_count; ++i) {
     lql_node_cleanup(&node->children[i]);
   }

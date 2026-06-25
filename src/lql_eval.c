@@ -153,6 +153,7 @@ static int node_is_term(const lql_node *node) {
   case LQL_NODE_PREFIX:
   case LQL_NODE_IPREFIX:
   case LQL_NODE_RANGE:
+  case LQL_NODE_IN:
   case LQL_NODE_EXISTS:
     return 1;
   default:
@@ -165,7 +166,9 @@ static void observe_node(eval_doc *doc, const lql_node *node,
                          int is_number, int is_container) {
   size_t i;
   size_t n;
+  size_t j;
   double number;
+  const char *needle;
   if (node == NULL) {
     return;
   }
@@ -201,9 +204,19 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     if (is_container) {
       break;
     }
-    if (contains_case(value, node->term.value == NULL ? "" : node->term.value,
-                      node->kind == LQL_NODE_ICONTAINS)) {
-      doc->hits[node->hit_index] = 1u;
+    if (node->term.any_count == 0u) {
+      if (contains_case(value, node->term.value == NULL ? "" : node->term.value,
+                        node->kind == LQL_NODE_ICONTAINS)) {
+        doc->hits[node->hit_index] = 1u;
+      }
+    } else {
+      for (j = 0u; j < node->term.any_count; ++j) {
+        if (contains_case(value, node->term.any[j],
+                          node->kind == LQL_NODE_ICONTAINS)) {
+          doc->hits[node->hit_index] = 1u;
+          break;
+        }
+      }
     }
     break;
   case LQL_NODE_PREFIX:
@@ -227,6 +240,18 @@ static void observe_node(eval_doc *doc, const lql_node *node,
           (node->term.range_op == '<' && number < node->term.number) ||
           (node->term.range_op == 'L' && number <= node->term.number)) {
         doc->hits[node->hit_index] = 1u;
+      }
+    }
+    break;
+  case LQL_NODE_IN:
+    if (is_container) {
+      break;
+    }
+    for (j = 0u; j < node->term.any_count; ++j) {
+      needle = node->term.any[j];
+      if (strcmp(value, needle) == 0) {
+        doc->hits[node->hit_index] = 1u;
+        break;
       }
     }
     break;

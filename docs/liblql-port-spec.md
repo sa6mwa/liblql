@@ -386,7 +386,8 @@ Current implementation is an early slice:
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;
-- first C selector parse/evaluate subset exists;
+- first C selector parse/evaluate subset exists, including
+  `contains.any`, `icontains.any`, and `in.any`;
 - `clql` exists as a minimal selector smoke CLI;
 - Go parity tests exist for the initial selector subset;
 - package archive production is scaffolded, not complete.
