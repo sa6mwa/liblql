@@ -54,10 +54,9 @@ clql="${CLQL_PATH:-$root/build/debug/clql}"
 go_bin="${GO:-go}"
 mkdir -p "$fixture_dir"
 fixture="$fixture_dir/large_ndjson.jsonl"
-go_candidates=""
-go_matches=""
-c_candidates=""
-c_matches=""
+selector_matrix="$fixture_dir/selectors.tsv"
+go_counts_file="$fixture_dir/go-counts.txt"
+c_counts_file="$fixture_dir/c-counts.txt"
 
 json_string() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -99,8 +98,10 @@ emit_record() {
 emit_unsupported_impl() {
   impl=$1
   reason=$2
-  emit_record "$impl" "large_ndjson" "eq_status_open" "/status=\"open\"" \
-    "decision_only_selector" "steady_state" 0 0 0 0 0 null true "$reason"
+  while read selector_name expr; do
+    emit_record "$impl" "large_ndjson" "$selector_name" "$expr" \
+      "decision_only_selector" "steady_state" 0 0 0 0 0 null true "$reason"
+  done < "$selector_matrix"
 }
 
 json_number_field() {
@@ -126,6 +127,8 @@ is_required() {
 generate_fixture() {
   i=0
   : > "$fixture"
+  : > "$go_counts_file"
+  : > "$c_counts_file"
   while [ "$i" -lt "$count" ]; do
     case $((i % 4)) in
       0) status=new ;;
@@ -142,12 +145,20 @@ generate_fixture() {
       "$i" "$status" $((i % 7)) $((i + 1)) "$timestamp" >> "$fixture"
     i=$((i + 1))
   done
+  {
+    printf '%s %s\n' "eq_status_open" '/status="open"'
+    printf '%s %s\n' "contains_blob" 'contains{field=/blob,value=xxxx}'
+    printf '%s %s\n' "icontains_blob" 'icontains{field=/blob,value=XXXX}'
+    printf '%s %s\n' "timestamp_gte" '/timestamp>=2026-03-05T10:28:21Z'
+    printf '%s %s\n' "date_window" 'date{field=/timestamp,after=2026-03-05T10:28:21Z,before=2026-03-05T10:29:50Z}'
+    printf '%s %s\n' "range_qps" 'range{field=/metrics/qps,gte=100,lte=130}'
+  } > "$selector_matrix"
 }
 
 run_c() {
-  out="$fixture_dir/c-eq-status-open.out"
-  expr='/status="open"'
-  expected=$(((count + 2) / 4))
+  selector_name=$1
+  expr=$2
+  out="$fixture_dir/c-$selector_name.out"
   bytes=$(wc -c < "$fixture" | tr -d ' ')
   if [ ! -x "$clql" ]; then
     emit_unsupported_impl "c" "clql binary not found; run make build-debug or set CLQL_PATH"
@@ -155,19 +166,14 @@ run_c() {
   fi
   "$clql" "$expr" "$fixture" > "$out"
   matches=$(wc -l < "$out" | tr -d ' ')
-  if [ "$matches" -ne "$expected" ]; then
-    printf 'C benchmark mismatch: selector=%s got_matches=%s expected_matches=%s fixture=%s\n' \
-      "$expr" "$matches" "$expected" "$fixture" >&2
-    return 1
-  fi
-  c_candidates=$count
-  c_matches=$matches
-  emit_record "c" "large_ndjson" "eq_status_open" "$expr" \
+  printf '%s %s %s\n' "$selector_name" "$count" "$matches" >> "$c_counts_file"
+  emit_record "c" "large_ndjson" "$selector_name" "$expr" \
     "decision_only_selector" "steady_state" "$bytes" "$count" "$matches" 0 0 null false ""
 }
 
 run_go() {
-  expr='/status="open"'
+  selector_name=$1
+  expr=$2
   record=
   if ! command -v "$go_bin" >/dev/null 2>&1; then
     emit_unsupported_impl "go" "go executable not found"
@@ -176,7 +182,7 @@ run_go() {
   record=$(cd "$root/parity" && "$go_bin" run ./cmd/lqlbench \
     --fixture "$fixture" \
     --dataset large_ndjson \
-    --selector-name eq_status_open \
+    --selector-name "$selector_name" \
     --expr "$expr" \
     --mode decision_only_selector \
     --submode steady_state)
@@ -187,22 +193,50 @@ run_go() {
     printf 'Go benchmark emitted an invalid record: %s\n' "$record" >&2
     return 1
   fi
+  printf '%s %s %s\n' "$selector_name" "$go_candidates" "$go_matches" >> "$go_counts_file"
+}
+
+run_matrix_for_impl() {
+  impl=$1
+  while read selector_name expr; do
+    case "$impl" in
+      go)
+        run_go "$selector_name" "$expr" || return 1
+        ;;
+      c)
+        run_c "$selector_name" "$expr" || return 1
+        ;;
+      *)
+        return 2
+        ;;
+    esac
+  done < "$selector_matrix"
 }
 
 compare_go_c() {
-  if [ -z "$go_candidates" ] || [ -z "$c_candidates" ]; then
+  if [ ! -s "$go_counts_file" ] || [ ! -s "$c_counts_file" ]; then
     return 0
   fi
-  if [ "$go_candidates" != "$c_candidates" ]; then
-    printf 'benchmark candidate-count mismatch: go=%s c=%s dataset=large_ndjson selector=eq_status_open\n' \
-      "$go_candidates" "$c_candidates" >&2
-    return 1
-  fi
-  if [ "$go_matches" != "$c_matches" ]; then
-    printf 'benchmark match-count mismatch: go=%s c=%s dataset=large_ndjson selector=eq_status_open\n' \
-      "$go_matches" "$c_matches" >&2
-    return 1
-  fi
+  while read selector_name go_candidates go_matches; do
+    c_line=$(sed -n "s/^$selector_name //p" "$c_counts_file")
+    if [ -z "$c_line" ]; then
+      printf 'benchmark missing C count record: dataset=large_ndjson selector=%s\n' "$selector_name" >&2
+      return 1
+    fi
+    set -- $c_line
+    c_candidates=$1
+    c_matches=$2
+    if [ "$go_candidates" != "$c_candidates" ]; then
+      printf 'benchmark candidate-count mismatch: go=%s c=%s dataset=large_ndjson selector=%s\n' \
+        "$go_candidates" "$c_candidates" "$selector_name" >&2
+      return 1
+    fi
+    if [ "$go_matches" != "$c_matches" ]; then
+      printf 'benchmark match-count mismatch: go=%s c=%s dataset=large_ndjson selector=%s\n' \
+        "$go_matches" "$c_matches" "$selector_name" >&2
+      return 1
+    fi
+  done < "$go_counts_file"
   return 0
 }
 
@@ -210,13 +244,13 @@ exit_status=0
 generate_fixture
 
 if is_selected go; then
-  if ! run_go; then
+  if ! run_matrix_for_impl go; then
     exit_status=1
   fi
 fi
 
 if is_selected c; then
-  if ! run_c; then
+  if ! run_matrix_for_impl c; then
     exit_status=1
   fi
 fi
