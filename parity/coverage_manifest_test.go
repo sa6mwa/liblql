@@ -10,13 +10,13 @@ import (
 	"testing"
 )
 
-type parityCoverageRequirement struct {
+type cliParityCoverageRequirement struct {
 	Surface     string
 	Requirement string
 	Tests       []string
 }
 
-var parityCoverageManifest = []parityCoverageRequirement{
+var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"cli", "version output", []string{"TestCLQLVersionSmoke"}},
 	{"cli", "help output", []string{"TestCLQLHelpSmoke"}},
 	{"cli", "prettyx theme compatibility no-op", []string{"TestCLQLThemeFlagCompatibility"}},
@@ -64,29 +64,29 @@ var parityCoverageManifest = []parityCoverageRequirement{
 	{"mutation", "inline mutation rejects stdin", []string{"TestCLQLInlineMutationRejectsStdin"}},
 }
 
-func TestParityCoverageManifest(t *testing.T) {
+func TestCLQLParityCoverageManifest(t *testing.T) {
 	tests := collectCLQLParityTests(t)
 	covered := make(map[string]string)
-	for _, req := range parityCoverageManifest {
+	for _, req := range cliParityCoverageManifest {
 		if req.Surface == "" || req.Requirement == "" {
-			t.Fatalf("coverage manifest has empty surface or requirement: %#v", req)
+			t.Fatalf("CLI parity manifest has empty surface or requirement: %#v", req)
 		}
 		if len(req.Tests) == 0 {
-			t.Fatalf("coverage manifest requirement has no tests: %s/%s", req.Surface, req.Requirement)
+			t.Fatalf("CLI parity manifest requirement has no tests: %s/%s", req.Surface, req.Requirement)
 		}
 		for _, name := range req.Tests {
 			if !tests[name] {
-				t.Fatalf("coverage manifest references missing test %s for %s/%s", name, req.Surface, req.Requirement)
+				t.Fatalf("CLI parity manifest references missing test %s for %s/%s", name, req.Surface, req.Requirement)
 			}
 			if prev, ok := covered[name]; ok {
-				t.Fatalf("coverage manifest lists %s twice: %s and %s/%s", name, prev, req.Surface, req.Requirement)
+				t.Fatalf("CLI parity manifest lists %s twice: %s and %s/%s", name, prev, req.Surface, req.Requirement)
 			}
 			covered[name] = req.Surface + "/" + req.Requirement
 		}
 	}
 	for name := range tests {
 		if _, ok := covered[name]; !ok {
-			t.Fatalf("CLQL parity test %s is missing from the coverage manifest", name)
+			t.Fatalf("CLQL parity test %s is missing from the CLI coverage manifest", name)
 		}
 	}
 }
@@ -112,6 +112,9 @@ func collectCLQLParityTests(t *testing.T) map[string]bool {
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Recv != nil || !strings.HasPrefix(fn.Name.Name, "TestCLQL") {
+				continue
+			}
+			if strings.Contains(fn.Name.Name, "CoverageManifest") {
 				continue
 			}
 			tests[fn.Name.Name] = true

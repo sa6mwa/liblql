@@ -1613,7 +1613,82 @@ static void expect_array_wildcard_value_mutation_api(void) {
   fclose(out);
 }
 
-int main(void) {
+typedef void (*sdk_parity_test_fn)(void);
+
+typedef struct sdk_parity_requirement {
+  const char *surface;
+  const char *requirement;
+  sdk_parity_test_fn test;
+} sdk_parity_requirement;
+
+static void expect_selector_match_api(void);
+static void expect_selector_parse_error_api(void);
+
+static void expect_sdk_parity_manifest(void) {
+  static const sdk_parity_requirement manifest[] = {
+      {"version", "version and capability public API", expect_version_api},
+      {"selector",
+       "scalar, string, numeric, temporal, path, wildcard, "
+       "existence, and logical matching",
+       expect_selector_match_api},
+      {"selector", "OR parse/evaluation public API", expect_selector_match_api},
+      {"selector", "parse-error invariants", expect_selector_parse_error_api},
+      {"streaming", "seekable FILE decision streams", expect_stream_file},
+      {"streaming", "callback-source decision streams", expect_source_stream},
+      {"streaming", "callback-source spooled matched payloads",
+       expect_source_spooled_payload_api},
+      {"streaming", "top-level array candidate streams",
+       expect_stream_array_items},
+      {"streaming", "stream stop controls", expect_stream_stop_controls},
+      {"streaming", "seekable matched payload ranges",
+       expect_seekable_payload_api},
+      {"projection", "seekable file-range projection", expect_projection_api},
+      {"projection", "caller-buffered JSON projection",
+       expect_buffered_projection_api},
+      {"compact", "seekable and buffered JSON compaction", expect_compact_api},
+      {"mutation", "mutation parse/plan public API", expect_mutation_plan_api},
+      {"mutation", "root field mutation over seekable ranges",
+       expect_root_field_mutation_api},
+      {"mutation", "nested path mutation over seekable ranges",
+       expect_path_mutation_api},
+      {"mutation", "caller-buffered JSON mutation",
+       expect_buffered_mutation_api},
+      {"mutation", "concrete array element mutation",
+       expect_array_element_mutation_api},
+      {"mutation", "wildcard path mutation", expect_wildcard_mutation_api},
+      {"mutation", "one-child and recursive path mutation",
+       expect_recursive_mutation_api},
+      {"mutation", "array wildcard value mutation",
+       expect_array_wildcard_value_mutation_api},
+  };
+  size_t i;
+  int selector_cases;
+
+  selector_cases = 0;
+  for (i = 0u; i < sizeof(manifest) / sizeof(manifest[0]); ++i) {
+    if (manifest[i].surface == NULL || manifest[i].surface[0] == '\0' ||
+        manifest[i].requirement == NULL || manifest[i].requirement[0] == '\0') {
+      printf("SDK parity manifest has an empty entry at %lu\n",
+             (unsigned long)i);
+      ++failures;
+    }
+    if (manifest[i].test == NULL) {
+      printf("SDK parity manifest entry lacks a C unit function: %s/%s\n",
+             manifest[i].surface, manifest[i].requirement);
+      ++failures;
+    }
+    if (strcmp(manifest[i].surface, "selector") == 0) {
+      ++selector_cases;
+    }
+  }
+  if (selector_cases != 3) {
+    printf("SDK parity manifest selector accounting mismatch: %d\n",
+           selector_cases);
+    ++failures;
+  }
+}
+
+static void expect_selector_match_api(void) {
   expect_match("/status=\"open\"", "{\"status\":\"open\"}", 1);
   expect_match("/status=\"closed\"", "{\"status\":\"open\"}", 0);
   expect_match("eq{field=/status,field=/status,value=open,value=open}",
@@ -1755,6 +1830,9 @@ int main(void) {
                1);
   expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"closed\"}",
                0);
+}
+
+static void expect_selector_parse_error_api(void) {
   expect_parse_error("contains{field=/message,value=timeout,any=error}");
   expect_parse_error("contains{field=/message,any=}");
   expect_parse_error("contains{field=/message,any=||}");
@@ -1784,6 +1862,12 @@ int main(void) {
   expect_parse_error("in{field=/env,any=prod|stage,a=dev}");
   expect_parse_error("in{field=/env,any=prod|stage,foo=bar}");
   expect_parse_error("range{field=/progress}");
+}
+
+int main(void) {
+  expect_sdk_parity_manifest();
+  expect_selector_match_api();
+  expect_selector_parse_error_api();
   expect_version_api();
   expect_stream_file();
   expect_source_stream();

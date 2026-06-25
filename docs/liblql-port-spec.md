@@ -289,13 +289,17 @@ Verification is the primary quality gate.
 
 Required gates:
 
-- C unit tests for every public behavior;
+- C-only SDK unit tests for every public liblql behavior, with exhaustive
+  observable assertions for every parity surface claimed by the C SDK;
 - public header standalone compile tests;
 - C89 consumer tests;
 - CMake install-tree consumer tests;
 - pkg-config consumer tests;
 - `clql` smoke tests;
-- Go parity tests through `parity/`;
+- Go library parity tests through `parity/` while the port is converging; these
+  are migration/reference checks and must not replace C-only SDK unit coverage;
+- Go CLI parity tests for `clql` versus the Go `lql` binary behavior where the
+  C CLI claims compatibility;
 - Lua parity tests when Lua facade exists;
 - sanitizer tests;
 - package verification and privacy/relocatability gates;
@@ -307,6 +311,23 @@ Parity benchmark spec:
 - `docs/liblql-parity-benchmark-spec.md`
 
 Tests should assert observable behavior, not implementation details.
+
+Parity has two separate meanings in this repository:
+
+- SDK parity: public `liblql` behavior must converge to the Go `pkt.systems/lql`
+  library behavior. The final authority for this surface is C-only unit and
+  integration tests over the installed/public SDK API. The Go-backed parity
+  suite is a transitional oracle that helps derive and validate those C tests;
+  once a behavior is understood, the corresponding undesirable behavior must be
+  catchable by C tests alone.
+- CLI parity: `clql` must converge to the Go `lql` command's observable CLI
+  behavior for supported flags and workflows, excluding prettyx colorized JSON.
+  CLI parity tests must not be counted as proof of SDK parity unless the same
+  behavior is also asserted through public liblql APIs.
+
+Both surfaces need executable coverage manifests. Adding a new claimed parity
+test without classifying it, or claiming a public SDK surface without C-only
+coverage, is a test failure.
 
 ## Packaging Requirements
 
@@ -507,9 +528,15 @@ Current implementation is an early slice:
   `date.since` macros are implemented;
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, and invalid selector invariants;
-- `clql` exists as a selector/projection/mutation smoke CLI; projection and
-  mutation path behavior are still being expanded toward full parity;
-- Go parity tests exist for the initial selector subset;
+- `clql` exists as a selector/projection/mutation compatibility CLI;
+  projection and mutation path behavior are still being expanded toward full
+  CLI parity;
+- C-only SDK unit tests cover the currently implemented public liblql selector,
+  streaming, projection, compacting, mutation, version, and capability
+  surfaces, and an SDK coverage manifest now ties claimed SDK parity surfaces
+  to C unit functions;
+- Go-backed parity tests exist for the current CLI surface and remain a
+  transitional oracle for deriving exhaustive C-only SDK tests;
 - the Lua tree includes an initial CLI-backed facade over public `clql`, with
   deterministic smoke tests for selector decisions, selection output,
   file and buffered-JSON projection, file and buffered-JSON mutation, and
