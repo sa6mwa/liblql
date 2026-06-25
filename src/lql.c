@@ -1,7 +1,67 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
+
 #include "lql_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+
+typedef struct lql_match_adapter {
+  FILE *file;
+  lql_query_match_fn on_match;
+  void *user;
+} lql_match_adapter;
+
+static int seek_u64(FILE *file, lql_uint64 offset) {
+  off_t seek_offset;
+  seek_offset = (off_t)offset;
+  if (seek_offset < (off_t)0 || (lql_uint64)seek_offset != offset) {
+    return 0;
+  }
+  return fseeko(file, seek_offset, SEEK_SET) == 0;
+}
+
+static int copy_range(FILE *in, FILE *out, lql_uint64 size) {
+  char buf[8192];
+  size_t want;
+  size_t got;
+  while (size != 0u) {
+    want = size > (lql_uint64)sizeof(buf) ? sizeof(buf) : (size_t)size;
+    got = fread(buf, 1u, want, in);
+    if (got == 0u) {
+      return 0;
+    }
+    if (fwrite(buf, 1u, got, out) != got) {
+      return 0;
+    }
+    size -= (lql_uint64)got;
+  }
+  return 1;
+}
+
+static lql_status on_match_decision(void *user,
+                                    const lql_query_decision *decision) {
+  lql_match_adapter *adapter;
+  lql_query_match match;
+
+  if (!decision->matched) {
+    return LQL_STATUS_OK;
+  }
+  adapter = (lql_match_adapter *)user;
+  memset(&match, 0, sizeof(match));
+  match.decision = *decision;
+  match.payload.kind = LQL_PAYLOAD_SEEKABLE_RANGE;
+  match.payload.index = decision->index;
+  match.payload.offset = decision->offset;
+  match.payload.size = decision->size;
+  match.payload.source = adapter->file;
+  return adapter->on_match(adapter->user, &match);
+}
 
 void lql_error_init(lql_error *error) {
   if (error != NULL) {
@@ -138,4 +198,58 @@ lql_status lql_query_file_decisions_with_options(
   }
   return lql_eval_query_file_decisions(selector, file, options, on_decision,
                                        user, out_result, error);
+}
+
+lql_status lql_query_file_matches(const lql_selector *selector, FILE *file,
+                                  lql_query_match_fn on_match, void *user,
+                                  lql_query_result *out_result,
+                                  lql_error *error) {
+  return lql_query_file_matches_with_options(selector, file, NULL, on_match,
+                                             user, out_result, error);
+}
+
+lql_status lql_query_file_matches_with_options(
+    const lql_selector *selector, FILE *file, const lql_query_options *options,
+    lql_query_match_fn on_match, void *user, lql_query_result *out_result,
+    lql_error *error) {
+  lql_match_adapter adapter;
+  if (file == NULL || on_match == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "file and on_match are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  adapter.file = file;
+  adapter.on_match = on_match;
+  adapter.user = user;
+  return lql_query_file_decisions_with_options(
+      selector, file, options, on_match_decision, &adapter, out_result, error);
+}
+
+lql_status lql_payload_write_json(const lql_payload *payload, FILE *out,
+                                  lql_error *error) {
+  off_t current;
+  if (payload == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "payload and output file are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (payload->kind != LQL_PAYLOAD_SEEKABLE_RANGE || payload->source == NULL) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "payload is not a seekable source range");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  current = ftello(payload->source);
+  if (current < (off_t)0) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "failed to record source position");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  if (!seek_u64(payload->source, payload->offset) ||
+      !copy_range(payload->source, out, payload->size) ||
+      fseeko(payload->source, current, SEEK_SET) != 0) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to write seekable payload range");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  return LQL_STATUS_OK;
 }

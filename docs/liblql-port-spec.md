@@ -397,6 +397,11 @@ Current implementation is an early slice:
   truncated;
 - decision-only `FILE *` query streams expose stop controls for match count,
   candidate count, bytes read, and callback-requested graceful stop;
+- matched-candidate `FILE *` query streams expose callback-scoped
+  `LQL_PAYLOAD_SEEKABLE_RANGE` payload handles, with
+  `lql_payload_write_json()` preserving the parser source position while it
+  rereads the matched candidate range; this path still uses candidate
+  `CAPTURE_NONE` and does not retain candidate JSON;
 - `clql -M/--matches-only` uses the decision-only streaming path over stdin
   and does not materialize candidate payloads or write matched JSON;
 - default `clql selector < data.json` output streams non-seekable stdin

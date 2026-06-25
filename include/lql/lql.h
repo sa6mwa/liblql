@@ -42,6 +42,24 @@ typedef struct lql_query_decision {
   lql_uint64 size;
 } lql_query_decision;
 
+typedef enum lql_payload_kind {
+  LQL_PAYLOAD_NONE = 0,
+  LQL_PAYLOAD_SEEKABLE_RANGE = 1
+} lql_payload_kind;
+
+typedef struct lql_payload {
+  lql_payload_kind kind;
+  lql_uint64 index;
+  lql_uint64 offset;
+  lql_uint64 size;
+  FILE *source;
+} lql_payload;
+
+typedef struct lql_query_match {
+  lql_query_decision decision;
+  lql_payload payload;
+} lql_query_match;
+
 typedef enum lql_query_stop_reason {
   LQL_QUERY_STOP_NONE = 0,
   LQL_QUERY_STOP_MATCH_LIMIT = 1,
@@ -71,6 +89,8 @@ typedef struct lql_query_result {
 
 typedef lql_status (*lql_query_decision_fn)(void *user,
                                             const lql_query_decision *decision);
+typedef lql_status (*lql_query_match_fn)(void *user,
+                                         const lql_query_match *match);
 
 void lql_error_init(lql_error *error);
 const char *lql_status_string(lql_status status);
@@ -93,6 +113,22 @@ lql_status lql_query_file_decisions_with_options(
     const lql_selector *selector, FILE *file, const lql_query_options *options,
     lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
     lql_error *error);
+/* Calls on_match for each matched candidate in a seekable FILE * stream.
+   Match payloads are callback-scoped seekable ranges; liblql does not capture
+   or retain candidate JSON. */
+lql_status lql_query_file_matches(const lql_selector *selector, FILE *file,
+                                  lql_query_match_fn on_match, void *user,
+                                  lql_query_result *out_result,
+                                  lql_error *error);
+lql_status lql_query_file_matches_with_options(
+    const lql_selector *selector, FILE *file, const lql_query_options *options,
+    lql_query_match_fn on_match, void *user, lql_query_result *out_result,
+    lql_error *error);
+/* Writes a callback-scoped seekable range payload to out. The helper preserves
+   the source FILE * position so it is safe to call from an active match
+   callback. */
+lql_status lql_payload_write_json(const lql_payload *payload, FILE *out,
+                                  lql_error *error);
 
 /* Parses JSON Pointer projection fields into a caller-owned projection handle.
    The root path is rejected, and paths must not start with an array index. */

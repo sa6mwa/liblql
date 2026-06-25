@@ -13,6 +13,14 @@ typedef struct stream_seen {
   int stop_after_first;
 } stream_seen;
 
+typedef struct payload_seen {
+  int calls;
+  int stop_after_first;
+  lql_uint64 offsets[4];
+  lql_uint64 sizes[4];
+  FILE *out;
+} payload_seen;
+
 static lql_status record_decision(void *user,
                                   const lql_query_decision *decision) {
   stream_seen *seen = (stream_seen *)user;
@@ -22,6 +30,35 @@ static lql_status record_decision(void *user,
   }
   if (decision->matched) {
     ++seen->matched;
+  }
+  ++seen->calls;
+  if (seen->stop_after_first) {
+    return LQL_STATUS_STOP;
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status record_payload(void *user, const lql_query_match *match) {
+  payload_seen *seen = (payload_seen *)user;
+  lql_error error;
+  lql_status st;
+
+  if (seen->calls < 4) {
+    seen->offsets[seen->calls] = match->payload.offset;
+    seen->sizes[seen->calls] = match->payload.size;
+  }
+  if (!match->decision.matched ||
+      match->payload.kind != LQL_PAYLOAD_SEEKABLE_RANGE ||
+      match->payload.source == NULL ||
+      match->payload.offset != match->decision.offset ||
+      match->payload.size != match->decision.size ||
+      match->payload.index != match->decision.index) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  lql_error_init(&error);
+  st = lql_payload_write_json(&match->payload, seen->out, &error);
+  if (st != LQL_STATUS_OK) {
+    return st;
   }
   ++seen->calls;
   if (seen->stop_after_first) {
@@ -299,6 +336,113 @@ static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len) {
   buf[got] = '\0';
   *out_len = got;
   return 1;
+}
+
+static void expect_seekable_payload_api(void) {
+  static const char input[] =
+      "{\"status\":\"open\",\"id\":1}\n{\"status\":\"closed\",\"id\":2}\n"
+      "{\"status\":\"open\",\"id\":3}\n";
+  FILE *fp;
+  FILE *out;
+  lql_selector *selector;
+  lql_query_result result;
+  payload_seen seen;
+  lql_query_options options;
+  lql_error error;
+  lql_status st;
+  char buf[128];
+  size_t len;
+
+  fp = tmpfile();
+  out = tmpfile();
+  if (fp == NULL || out == NULL) {
+    printf("payload tmpfile failed\n");
+    if (fp != NULL) {
+      fclose(fp);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+  if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||
+      fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("payload input write failed\n");
+    fclose(fp);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  lql_error_init(&error);
+  selector = NULL;
+  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("payload parse failed: %s\n", error.message);
+    fclose(fp);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  memset(&seen, 0, sizeof(seen));
+  seen.out = out;
+  memset(&result, 0, sizeof(result));
+  st = lql_query_file_matches(selector, fp, record_payload, &seen, &result,
+                              &error);
+  if (st != LQL_STATUS_OK) {
+    printf("payload query failed: %s\n", error.message);
+    fclose(fp);
+    fclose(out);
+    lql_selector_free(selector);
+    ++failures;
+    return;
+  }
+  if (seen.calls != 2 || result.candidates_seen != (lql_uint64)3 ||
+      result.candidates_matched != (lql_uint64)2) {
+    printf("payload counts mismatch calls=%d seen=%lu matched=%lu\n",
+           seen.calls, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched);
+    ++failures;
+  }
+  if (seen.offsets[0] != (lql_uint64)0 || seen.sizes[0] != (lql_uint64)24 ||
+      seen.offsets[1] != (lql_uint64)52 || seen.sizes[1] != (lql_uint64)24) {
+    printf("payload ranges mismatch\n");
+    ++failures;
+  }
+  if (!read_tmpfile(out, buf, sizeof(buf), &len)) {
+    printf("payload output read failed\n");
+    ++failures;
+  } else if (strcmp(buf, "{\"status\":\"open\",\"id\":1}"
+                         "{\"status\":\"open\",\"id\":3}") != 0) {
+    printf("payload output mismatch: %s\n", buf);
+    ++failures;
+  }
+
+  if (fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("payload rewind failed\n");
+    ++failures;
+  } else {
+    memset(&seen, 0, sizeof(seen));
+    memset(&options, 0, sizeof(options));
+    memset(&result, 0, sizeof(result));
+    seen.out = out;
+    seen.stop_after_first = 1;
+    st = lql_query_file_matches_with_options(
+        selector, fp, &options, record_payload, &seen, &result, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("payload stop query failed: %s\n", error.message);
+      ++failures;
+    } else if (seen.calls != 1 || !result.stopped_early ||
+               result.stop_reason != LQL_QUERY_STOP_CALLBACK) {
+      printf("payload stop mismatch calls=%d stopped=%d reason=%d\n",
+             seen.calls, result.stopped_early, (int)result.stop_reason);
+      ++failures;
+    }
+  }
+
+  lql_selector_free(selector);
+  fclose(fp);
+  fclose(out);
 }
 
 static void expect_projection_api(void) {
@@ -1302,6 +1446,7 @@ int main(void) {
   expect_stream_file();
   expect_stream_array_items();
   expect_stream_stop_controls();
+  expect_seekable_payload_api();
   expect_projection_api();
   expect_compact_api();
   expect_mutation_plan_api();
