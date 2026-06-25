@@ -192,6 +192,7 @@ int main(void) {
                "{\"timestamp\":\"2025-01-02T00:00:00Z\"}", 0);
   expect_match("/timestamp!=2025-01-01",
                "{\"timestamp\":\"2025-01-01T15:00:00Z\"}", 0);
+  expect_match("/timestamp!=2025-01-01", "{\"status\":\"open\"}", 1);
   expect_match("/timestamp>=2026-03-05T10:28:21Z",
                "{\"timestamp\":\"2026-03-05T11:28:21+01:00\"}", 1);
   expect_match("/timestamp>=2026-03-05T10:28:21",

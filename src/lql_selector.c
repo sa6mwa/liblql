@@ -852,6 +852,7 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     int op2;
     char op0;
     const char *bound_key;
+    lql_node child;
     op2 = (op[1] == '=' || op[0] == '!') ? 1 : 0;
     op0 = op[0];
     value = op + 1 + (size_t)op2;
@@ -864,7 +865,19 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       return LQL_STATUS_NO_MEMORY;
     }
     if (op0 == '!') {
-      out->kind = LQL_NODE_NE;
+      memset(&child, 0, sizeof(child));
+      child.kind = LQL_NODE_EQ;
+      child.term = out->term;
+      memset(&out->term, 0, sizeof(out->term));
+      out->children = (lql_node *)calloc(1u, sizeof(lql_node));
+      if (out->children == NULL) {
+        lql_node_cleanup(&child);
+        free(copy);
+        return LQL_STATUS_NO_MEMORY;
+      }
+      out->kind = LQL_NODE_NOT;
+      out->children[0] = child;
+      out->child_count = 1u;
     } else if (strchr("><", op0) != NULL || op2) {
       if (op0 == '>') {
         bound_key = op2 ? "gte" : "gt";
