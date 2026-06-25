@@ -481,8 +481,10 @@ Current implementation is an early slice:
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and
-  pkg-config consumer smokes; source archives and full cross-target
-  release-matrix packaging remain pending.
+  pkg-config consumer smokes;
+- source archive production exists with injected `VERSION`, `RELEASE_MANIFEST`,
+  exact manifest verification, and extracted-tree configure/build/test smoke;
+  full cross-target release-matrix packaging remains pending.
 
 The repository must not claim full LQL parity until the verification gates prove
 it.

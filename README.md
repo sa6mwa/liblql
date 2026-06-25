@@ -23,9 +23,10 @@ through callback-scoped spooled candidate payloads.
 the opt-in parse options and `clql -F`, and execute through source-backed
 lonejson writers on both seekable file input and the supported spooled stdin
 mutation path. Host `liblql` and `clql` package archives are produced and
-verified locally, including extracted SDK consumer smokes; source archives,
-the full cross-target release matrix, Lua parity, and full `clql` parity are
-still active porting work.
+verified locally, including extracted SDK consumer smokes; the source archive
+is produced and verified through an extracted-tree build/test smoke. The full
+cross-target release matrix, Lua parity, and full `clql` parity are still
+active porting work.
 
 ```sh
 make deps-debug

@@ -66,11 +66,37 @@ package_one() {
   make_tar_gz "$cli_root" "$DIST_DIR/${CLI_PROJECT}-${version_value}-${target_id}.tar.gz"
 }
 
+package_source() {
+  version_value=$(version)
+  work_dir="$ROOT_DIR/build/package/source"
+  source_root="$work_dir/${PROJECT}-${version_value}"
+  manifest="$work_dir/source-files.txt"
+
+  rm -rf "$work_dir"
+  mkdir -p "$source_root"
+  if [ -d "$ROOT_DIR/.git" ]; then
+    (cd "$ROOT_DIR" && git ls-files) >"$manifest"
+  elif [ -f "$ROOT_DIR/RELEASE_MANIFEST" ]; then
+    sed '/^VERSION$/d;/^RELEASE_MANIFEST$/d' "$ROOT_DIR/RELEASE_MANIFEST" >"$manifest"
+  else
+    printf 'package-source: git metadata or RELEASE_MANIFEST is required\n' >&2
+    exit 1
+  fi
+  (cd "$ROOT_DIR" && tar -cf - -T "$manifest") | (cd "$source_root" && tar -xf -)
+  printf '%s\n' "$version_value" >"$source_root/VERSION"
+  {
+    cat "$manifest"
+    printf '%s\n' VERSION RELEASE_MANIFEST
+  } | LC_ALL=C sort >"$source_root/RELEASE_MANIFEST"
+  make_tar_gz "$source_root" "$DIST_DIR/${PROJECT}-${version_value}.tar.gz"
+}
+
 package_all() {
   clean_dist
   for target_id in $TARGETS; do
     package_one "$target_id"
   done
+  package_source
   write_checksums
 }
 
@@ -81,7 +107,7 @@ write_checksums() {
   rm -f "$tmp"
   (
     cd "$DIST_DIR"
-    for artifact in "${PROJECT}-${version_value}"-*.tar.gz "${CLI_PROJECT}-${version_value}"-*.tar.gz; do
+    for artifact in "${PROJECT}-${version_value}.tar.gz" "${PROJECT}-${version_value}"-*.tar.gz "${CLI_PROJECT}-${version_value}"-*.tar.gz; do
       [ -e "$artifact" ] || continue
       sha256sum "$artifact"
     done
@@ -97,7 +123,7 @@ write_checksums() {
 verify_no_local_paths() {
   artifact=$1
   extracted=$2
-  for needle in "$ROOT_DIR" "$HOME" "$ROOT_DIR/build" "$ROOT_DIR/.cache" 'file:///'; do
+  for needle in "$ROOT_DIR" "$HOME" "$ROOT_DIR/build" "$ROOT_DIR/.cache" "file://$ROOT_DIR" "file://$HOME"; do
     [ -n "$needle" ] || continue
     if grep -R -I -a -F "$needle" "$extracted" >/tmp/lql-package-grep.$$ 2>/dev/null; then
       printf 'package-verify: local path leak in %s: %s\n' "$artifact" "$needle" >&2
@@ -232,6 +258,49 @@ EOF
   fi
 }
 
+verify_source_archive() {
+  artifact=$1
+  version_value=$(version)
+  tmp_dir="$ROOT_DIR/build/package-source-verify"
+  root="$tmp_dir/${PROJECT}-${version_value}"
+  dep_root="$ROOT_DIR/.cache/deps/x86_64-linux-gnu/lonejson"
+
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+  tar -xzf "$artifact" -C "$tmp_dir"
+  if [ ! -d "$root" ]; then
+    printf 'package-verify: source archive root missing: %s\n' "$root" >&2
+    exit 1
+  fi
+  test -f "$root/VERSION"
+  test -f "$root/RELEASE_MANIFEST"
+  if [ "$(sed -n '1p' "$root/VERSION")" != "$version_value" ]; then
+    printf 'package-verify: source VERSION mismatch in %s\n' "$artifact" >&2
+    exit 1
+  fi
+  (cd "$root" && find . -type f | sed 's#^\./##' | LC_ALL=C sort) >"$tmp_dir/payload-files.txt"
+  if ! cmp -s "$root/RELEASE_MANIFEST" "$tmp_dir/payload-files.txt"; then
+    printf 'package-verify: source archive payload does not match RELEASE_MANIFEST\n' >&2
+    diff -u "$root/RELEASE_MANIFEST" "$tmp_dir/payload-files.txt" >&2 || true
+    exit 1
+  fi
+  if find "$root" \( -name .git -o -name build -o -name dist -o -name .cache \) | grep . >/dev/null; then
+    printf 'package-verify: source archive contains generated or VCS state\n' >&2
+    exit 1
+  fi
+  if [ ! -d "$dep_root" ]; then
+    "$ROOT_DIR/scripts/deps.sh" x86_64-linux-gnu
+  fi
+  cmake -S "$root" -B "$tmp_dir/build" \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DLQL_TARGET_ID=x86_64-linux-gnu \
+    -DLQL_DEPENDENCY_MODE=bundled \
+    -DLQL_EXTERNAL_ROOT="$dep_root" >/dev/null
+  cmake --build "$tmp_dir/build" >/dev/null
+  ctest --test-dir "$tmp_dir/build" --output-on-failure
+}
+
 verify_one_archive() {
   artifact=$1
   version_value=$(version)
@@ -252,6 +321,11 @@ verify_one_archive() {
   fi
 
   case "$expected" in
+    ${PROJECT}-${version_value})
+      verify_no_local_paths "$artifact" "$root"
+      verify_source_archive "$artifact"
+      return
+      ;;
     ${PROJECT}-${version_value}-*)
       target_id=${expected#${PROJECT}-${version_value}-}
       test -f "$root/include/lql/lql.h"
@@ -313,8 +387,14 @@ case "$TARGET" in
   package)
     package_all
     ;;
-  package-source|package-source-smoke)
-    printf '%s: source archive production is pending the complete port.\n' "$TARGET"
+  package-source)
+    mkdir -p "$DIST_DIR"
+    package_source
+    ;;
+  package-source-smoke)
+    mkdir -p "$DIST_DIR"
+    package_source
+    verify_one_archive "$DIST_DIR/${PROJECT}-$(version).tar.gz"
     ;;
   package-checksums)
     write_checksums
