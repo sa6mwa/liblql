@@ -535,7 +535,8 @@ Current implementation is an early slice:
   file ranges, `lql_project_source()` for caller-provided read callbacks, plus
   `lql_project_json()` for explicitly caller-buffered JSON values;
 - the initial C compact API exposes `lql_compact_file_range()` for streaming
-  seekable ranges and `lql_compact_json()` for explicitly buffered JSON values;
+  seekable ranges, `lql_compact_source()` for caller-provided read callbacks,
+  and `lql_compact_json()` for explicitly buffered JSON values;
 - the public C API exposes `lql_version()` and installs generated
   `lql/version.h` version macros, plus `lql_capabilities_get()` for the
   currently implemented public API surfaces, with package and source-archive
@@ -615,13 +616,13 @@ Current implementation is an early slice:
   streaming, projection, compacting, mutation, version, and capability
   surfaces, including mutation plan parse success, expansion counts, default
   and explicit file-backed parse options, file-backed mutation value execution
-  over buffered and seekable file-range APIs, source-backed projection and
-  mutation over fragmented caller reads, source callback read failures, and
-  mutation parse-error invariants. This coverage is still too shallow for the
-  final goal: the next C test work should build a surface-by-surface API
-  contract matrix covering ownership, out-parameter state, callback error
-  propagation, partial I/O, cleanup after failures, and bounded-memory
-  behavior;
+  over buffered and seekable file-range APIs, source-backed projection,
+  compacting, and mutation over fragmented caller reads, source callback read
+  failures, and mutation parse-error invariants. This coverage is still too
+  shallow for the final goal: the next C test work should build a
+  surface-by-surface API contract matrix covering ownership, out-parameter
+  state, callback error propagation, partial I/O, cleanup after failures, and
+  bounded-memory behavior;
   an SDK coverage manifest now ties claimed C contract surfaces to C unit
   functions;
 - Go-backed parity tests exist for the current CLI surface and remain a
@@ -661,7 +662,7 @@ Current implementation is an early slice:
   `lql_mutation_plan_parse_with_options()`, `lql_mutation_plan_count()`,
   `lql_mutate_json()`, `lql_mutate_file_range_root_fields()`,
   `lql_mutate_file_range_paths()`, `lql_mutate_source_paths()`,
-  `lql_compact_json()`,
+  `lql_compact_json()`, `lql_compact_source()`,
   `lql_compact_file_range()`,
   `lql_query_file_decisions()`, `lql_query_source_decisions()`,
   `lql_query_file_matches()`, and
@@ -677,7 +678,7 @@ Current implementation is an early slice:
   corpus, including empty, blank, root, missing-leading-slash, leading-index,
   and oversized-index field sets;
 - C SDK compact tests assert the current malformed JSON corpus through
-  both buffered and seekable file-range public compaction APIs;
+  buffered, source-backed, and seekable file-range public compaction APIs;
 - C SDK streaming tests assert the current malformed JSON corpus across
   seekable file decision streams, seekable file payload streams,
   callback-source decision streams, and callback-source spooled payload streams;

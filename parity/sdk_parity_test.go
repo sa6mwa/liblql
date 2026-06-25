@@ -640,12 +640,19 @@ func TestSDKCompactParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("liblql compact json: %v", err)
 			}
+			gotSource, err := cCompactSource(tc.doc)
+			if err != nil {
+				t.Fatalf("liblql compact source: %v", err)
+			}
 			gotRange, err := cCompactFileRange(`{"outside":`, tc.doc, `}`)
 			if err != nil {
 				t.Fatalf("liblql compact file range: %v", err)
 			}
 			if !bytes.Equal(gotBuffered, wantJSON) {
 				t.Fatalf("buffered compact mismatch: got=%q want=%q", string(gotBuffered), string(wantJSON))
+			}
+			if !bytes.Equal(gotSource, wantJSON) {
+				t.Fatalf("source compact mismatch: got=%q want=%q", string(gotSource), string(wantJSON))
 			}
 			if !bytes.Equal(gotRange, wantJSON) {
 				t.Fatalf("file-range compact mismatch: got=%q want=%q", string(gotRange), string(wantJSON))
@@ -671,6 +678,9 @@ func TestSDKCompactErrorParity(t *testing.T) {
 			}
 			if _, err := cCompactJSON(tc.doc); err == nil {
 				t.Fatalf("liblql buffered compact unexpectedly accepted invalid JSON: %q", tc.doc)
+			}
+			if _, err := cCompactSource(tc.doc); err == nil {
+				t.Fatalf("liblql source compact unexpectedly accepted invalid JSON: %q", tc.doc)
 			}
 			if _, err := cCompactFileRange(`{"outside":`, tc.doc, `}`); err == nil {
 				t.Fatalf("liblql file-range compact unexpectedly accepted invalid JSON: %q", tc.doc)

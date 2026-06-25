@@ -138,6 +138,7 @@ void lql_capabilities_get(lql_capabilities *out) {
   out->projection_source = 1;
   out->projection_buffered_json = 1;
   out->compact_file_range = 1;
+  out->compact_source = 1;
   out->compact_buffered_json = 1;
   out->mutation_parse = 1;
   out->mutation_file_range = 1;

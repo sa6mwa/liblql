@@ -120,9 +120,10 @@ static void expect_version_api(void) {
       !caps.source_spooled_match_stream || !caps.spooled_payloads ||
       !caps.projection_file_range || !caps.projection_source ||
       !caps.projection_buffered_json || !caps.compact_file_range ||
-      !caps.compact_buffered_json || !caps.mutation_parse ||
-      !caps.mutation_file_range || !caps.mutation_source ||
-      !caps.mutation_buffered_json || !caps.mutation_file_values) {
+      !caps.compact_source || !caps.compact_buffered_json ||
+      !caps.mutation_parse || !caps.mutation_file_range ||
+      !caps.mutation_source || !caps.mutation_buffered_json ||
+      !caps.mutation_file_values) {
     printf("capability query omitted an implemented public surface\n");
     ++failures;
   }
@@ -1762,6 +1763,30 @@ static void expect_projection_compact_error_api(void) {
   }
 
   lql_error_init(&error);
+  st = lql_compact_source(NULL, NULL, out, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "read and out are required") != 0) {
+    printf("compact_source NULL read error mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_compact_source(read_chunk, NULL, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "read and out are required") != 0) {
+    printf("compact_source NULL out error mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_compact_source(read_fail_once, NULL, out, &error);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message, "compact source read failed") != 0) {
+    printf("compact_source read error mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
   st = lql_compact_json(NULL, 0u, out, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "json and out are required") != 0) {
@@ -1784,6 +1809,7 @@ static void expect_projection_compact_error_api(void) {
 static void expect_compact_api(void) {
   FILE *source;
   FILE *out;
+  chunk_reader reader;
   lql_error error;
   lql_status st;
   char buf[256];
@@ -1827,6 +1853,26 @@ static void expect_compact_api(void) {
   fclose(out);
 
   out = tmpfile();
+  memset(&reader, 0, sizeof(reader));
+  reader.data = first;
+  reader.len = strlen(first);
+  reader.chunk_size = 4u;
+  lql_error_init(&error);
+  st = lql_compact_source(read_chunk, &reader, out, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("compact source failed: %s\n", error.message);
+    ++failures;
+  } else if (reader.calls <= 1) {
+    printf("compact source did not consume fragmented reads\n");
+    ++failures;
+  } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+             strcmp(buf, "{\"id\":\"a\",\"items\":[1,2]}") != 0) {
+    printf("compact source output mismatch: %s\n", buf);
+    ++failures;
+  }
+  fclose(out);
+
+  out = tmpfile();
   lql_error_init(&error);
   st = lql_compact_json("{ \"ok\" : true }", strlen("{ \"ok\" : true }"), out,
                         &error);
@@ -1861,6 +1907,7 @@ static void expect_compact_error_corpus_api(void) {
                {"trailing token", "{\"ok\":true} false"}};
   FILE *source;
   FILE *out;
+  chunk_reader reader;
   lql_error error;
   lql_status st;
   size_t i;
@@ -1876,6 +1923,26 @@ static void expect_compact_error_corpus_api(void) {
     st = lql_compact_json(cases[i].json, strlen(cases[i].json), out, &error);
     if (st != LQL_STATUS_JSON_ERROR) {
       printf("compact_json invalid corpus mismatch: %s status=%s error=%s\n",
+             cases[i].name, lql_status_string(st), error.message);
+      ++failures;
+    }
+    fclose(out);
+
+    out = tmpfile();
+    if (out == NULL) {
+      printf("compact error corpus source output tmpfile failed: %s\n",
+             cases[i].name);
+      ++failures;
+      continue;
+    }
+    memset(&reader, 0, sizeof(reader));
+    reader.data = cases[i].json;
+    reader.len = strlen(cases[i].json);
+    reader.chunk_size = 5u;
+    lql_error_init(&error);
+    st = lql_compact_source(read_chunk, &reader, out, &error);
+    if (st != LQL_STATUS_JSON_ERROR) {
+      printf("compact_source invalid corpus mismatch: %s status=%s error=%s\n",
              cases[i].name, lql_status_string(st), error.message);
       ++failures;
     }

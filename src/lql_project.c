@@ -1119,25 +1119,13 @@ lql_status lql_project_spooled(const lql_projection *projection,
                             error);
 }
 
-lql_status lql_compact_file_range(FILE *file, lql_uint64 offset,
-                                  lql_uint64 size, FILE *out,
-                                  lql_error *error) {
+static lql_status compact_reader(lonejson_reader_fn read, void *read_user,
+                                 FILE *out, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_writer writer;
-  limited_file_reader reader;
   lonejson_status st;
 
-  if (file == NULL || out == NULL) {
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "file and out are required");
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
-  if (!seek_u64(file, offset)) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                  "failed to seek compact source range");
-    return LQL_STATUS_JSON_ERROR;
-  }
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
@@ -1149,10 +1137,7 @@ lql_status lql_compact_file_range(FILE *file, lql_uint64 offset,
     lonejson_free(runtime);
     return LQL_STATUS_JSON_ERROR;
   }
-  reader.file = file;
-  reader.remaining = size;
-  st = lonejson_writer_json_value_reader(&writer, limited_read, &reader,
-                                         &lj_error);
+  st = lonejson_writer_json_value_reader(&writer, read, read_user, &lj_error);
   if (st == LONEJSON_STATUS_OK) {
     st = lonejson_writer_finish(&writer, &lj_error);
   }
@@ -1163,6 +1148,46 @@ lql_status lql_compact_file_range(FILE *file, lql_uint64 offset,
     return LQL_STATUS_JSON_ERROR;
   }
   return LQL_STATUS_OK;
+}
+
+lql_status lql_compact_file_range(FILE *file, lql_uint64 offset,
+                                  lql_uint64 size, FILE *out,
+                                  lql_error *error) {
+  limited_file_reader reader;
+
+  if (file == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "file and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (!seek_u64(file, offset)) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to seek compact source range");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  reader.file = file;
+  reader.remaining = size;
+  return compact_reader(limited_read, &reader, out, error);
+}
+
+lql_status lql_compact_source(lql_read_fn read, void *read_user, FILE *out,
+                              lql_error *error) {
+  projection_source_reader reader;
+  lql_status st;
+
+  if (read == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "read and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.read = read;
+  reader.user = read_user;
+  st = compact_reader(projection_source_read, &reader, out, error);
+  if (st == LQL_STATUS_JSON_ERROR && reader.error_code != 0) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, "compact source read failed");
+  }
+  return st;
 }
 
 lql_status lql_compact_json(const char *json, size_t json_len, FILE *out,

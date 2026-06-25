@@ -121,6 +121,8 @@ typedef struct lql_capabilities {
   int projection_buffered_json;
   /* Compact serialization from one seekable file range is available. */
   int compact_file_range;
+  /* Compact serialization from caller-provided read callbacks is available. */
+  int compact_source;
   /* Compact serialization from caller-buffered JSON is available. */
   int compact_buffered_json;
   /* Mutation expression parse and plan validation are available. */
@@ -240,6 +242,13 @@ lql_status lql_project_json(const lql_projection *projection, const char *json,
    The caller owns file positioning before and after the call. */
 lql_status lql_compact_file_range(FILE *file, lql_uint64 offset,
                                   lql_uint64 size, FILE *out, lql_error *error);
+/* Compacts one JSON value read from a caller-provided source callback to out.
+   This streams the source through lonejson and never materializes the document.
+   The read callback follows the same contract as source query APIs:
+   bytes_read must not exceed capacity, eof marks source completion, and
+   non-zero error_code aborts with LQL_STATUS_JSON_ERROR. */
+lql_status lql_compact_source(lql_read_fn read, void *read_user, FILE *out,
+                              lql_error *error);
 /* Compacts one in-memory JSON value to out. */
 lql_status lql_compact_json(const char *json, size_t json_len, FILE *out,
                             lql_error *error);

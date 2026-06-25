@@ -14,8 +14,8 @@ place.
 Object and array-index projection are also exposed through the initial
 `lql_projection` C API for seekable ranges, caller-provided read callbacks, and
 explicitly buffered JSON values, and compact range helpers are exposed for
-seekable and explicitly buffered JSON values. The SDK installs generated
-version metadata in
+seekable ranges, caller-provided read callbacks, and explicitly buffered JSON
+values. The SDK installs generated version metadata in
 `lql/version.h` and exposes `lql_version()` plus
 `lql_capabilities_get()`. Mutation parse/plan validation is exposed through
 `lql_mutation_plan`, and supported concrete-path mutations

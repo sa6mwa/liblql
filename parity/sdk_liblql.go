@@ -638,6 +638,46 @@ static int liblql_compact_json_value(const char *json, char **out_json,
 	return 0;
 }
 
+static int liblql_compact_source_value(const char *json, size_t chunk_size,
+                                       char **out_json, size_t *out_len,
+                                       char *errbuf, size_t errbuf_len) {
+	lql_error error;
+	lql_status status;
+	liblql_source_reader reader;
+	FILE *tmp;
+
+	lql_error_init(&error);
+	*out_json = NULL;
+	*out_len = 0u;
+	tmp = tmpfile();
+	if (tmp == NULL) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	memset(&reader, 0, sizeof(reader));
+	reader.data = json;
+	reader.len = strlen(json);
+	reader.chunk_size = chunk_size;
+	status = lql_compact_source(liblql_read_source_chunk, &reader, tmp, &error);
+	if (status != LQL_STATUS_OK) {
+		fclose(tmp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_read_tmp(tmp, out_json, out_len, errbuf, errbuf_len) != 0) {
+		fclose(tmp);
+		return -1;
+	}
+	fclose(tmp);
+	return 0;
+}
+
 static int liblql_compact_file_range_value(const char *prefix, const char *json,
                                            const char *suffix,
                                            char **out_json, size_t *out_len,
@@ -1160,6 +1200,22 @@ func cCompactJSON(doc string) ([]byte, error) {
 	var errbuf [256]C.char
 	status := C.liblql_compact_json_value(cDoc, &out, &outLen, &errbuf[0],
 		C.size_t(len(errbuf)))
+	if status != 0 {
+		return nil, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
+}
+
+func cCompactSource(doc string) ([]byte, error) {
+	cDoc := C.CString(doc)
+	defer C.free(unsafe.Pointer(cDoc))
+
+	var out *C.char
+	var outLen C.size_t
+	var errbuf [256]C.char
+	status := C.liblql_compact_source_value(cDoc, C.size_t(3), &out, &outLen,
+		&errbuf[0], C.size_t(len(errbuf)))
 	if status != 0 {
 		return nil, sdkParityError(C.GoString(&errbuf[0]))
 	}
