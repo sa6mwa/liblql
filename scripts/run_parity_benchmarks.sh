@@ -198,6 +198,8 @@ add_dataset_selector_cases() {
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
       "contains_blob" 'contains{field=/blob,value=xxxx}'
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "contains_any_blob" 'contains{field=/blob,any=xxxx|nomatch}'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
       "icontains_blob" 'icontains{field=/blob,value=XXXX}'
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
       "timestamp_gte" '/timestamp>=2026-03-05T10:28:21Z'

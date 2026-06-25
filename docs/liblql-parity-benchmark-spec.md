@@ -60,9 +60,9 @@ Current implementation status:
   single-root JSON object fixture shapes, with all generated once and shared by
   Go and C.
 - the current executable selector matrix covers equality, contains,
-  case-insensitive contains, timestamp comparison, date window, and numeric
-  range terms over record-stream fixtures, plus nested `/records[]/...`
-  selection over the single-root JSON fixture.
+  `contains.any`, case-insensitive contains, timestamp comparison, date
+  window, and numeric range terms over record-stream fixtures, plus nested
+  `/records[]/...` selection over the single-root JSON fixture.
 - `make benchmarks-lua` emits an explicit unsupported record until the Lua
   facade benchmark runner exists.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
