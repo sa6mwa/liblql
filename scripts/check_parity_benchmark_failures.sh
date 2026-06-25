@@ -37,3 +37,13 @@ expect_failure "match-mismatch" "benchmark match-count mismatch" \
   env LQL_BENCH_FIXTURE_DIR="$tmp/match" \
     LQL_BENCH_INJECT_MATCH_MISMATCH=1 \
     "$runner" --impl go,c --format json --check --require go,c
+
+expect_failure "payload-count-mismatch" "benchmark payload-count mismatch" \
+  env LQL_BENCH_FIXTURE_DIR="$tmp/payload-count" \
+    LQL_BENCH_INJECT_PAYLOAD_MISMATCH=1 \
+    "$runner" --impl go,c --format json --check --require go,c
+
+expect_failure "payload-byte-mismatch" "benchmark payload-byte mismatch" \
+  env LQL_BENCH_FIXTURE_DIR="$tmp/payload-byte" \
+    LQL_BENCH_INJECT_PAYLOAD_BYTE_MISMATCH=1 \
+    "$runner" --impl go,c --format json --check --require go,c

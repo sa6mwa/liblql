@@ -54,10 +54,10 @@ Current implementation status:
   benchmark schema.
 - `make bench-check` runs the current deterministic Go/C smoke gate and fails
   if candidate, match, payload-count, or payload-byte counts diverge. It also
-  runs deterministic negative checks proving candidate-count and match-count
-  mismatch failures are detected and validates benchmark JSON Lines records. It
-  verifies deterministic fixture regeneration and every result record includes
-  a SHA-256 digest for its generated fixture.
+  runs deterministic negative checks proving candidate-count, match-count,
+  payload-count, and payload-byte mismatch failures are detected and validates
+  benchmark JSON Lines records. It verifies deterministic fixture regeneration
+  and every result record includes a SHA-256 digest for its generated fixture.
 - `make benchmarks-c` exercises the C CLI for decision-only output and the
   public liblql API for matched-only seekable plus-value payload access over a
   shared generated fixture.

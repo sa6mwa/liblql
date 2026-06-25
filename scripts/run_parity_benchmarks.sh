@@ -65,6 +65,8 @@ go_counts_file="$fixture_dir/go-counts.txt"
 c_counts_file="$fixture_dir/c-counts.txt"
 inject_candidate_mismatch="${LQL_BENCH_INJECT_CANDIDATE_MISMATCH:-0}"
 inject_match_mismatch="${LQL_BENCH_INJECT_MATCH_MISMATCH:-0}"
+inject_payload_mismatch="${LQL_BENCH_INJECT_PAYLOAD_MISMATCH:-0}"
+inject_payload_byte_mismatch="${LQL_BENCH_INJECT_PAYLOAD_BYTE_MISMATCH:-0}"
 
 json_string() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -361,6 +363,8 @@ run_c_payload() {
     [ "$selector_name" = "eq_status_open" ]; then
     c_candidates=$(fault_count "$c_candidates" "$inject_candidate_mismatch")
     c_matches=$(fault_count "$c_matches" "$inject_match_mismatch")
+    c_payloads=$(fault_count "$c_payloads" "$inject_payload_mismatch")
+    c_payload_bytes=$(fault_count "$c_payload_bytes" "$inject_payload_byte_mismatch")
   fi
   : "$candidates"
   printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
