@@ -51,6 +51,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 fixture_dir="${LQL_BENCH_FIXTURE_DIR:-$root/build/bench-fixtures}"
 count="${LQL_BENCH_NDJSON_COUNT:-128}"
 clql="${CLQL_PATH:-$root/build/debug/clql}"
+go_bin="${GO:-go}"
 mkdir -p "$fixture_dir"
 fixture="$fixture_dir/large_ndjson.jsonl"
 
@@ -153,12 +154,26 @@ run_c() {
     "decision_only_selector" "steady_state" "$bytes" "$count" "$matches" 0 0 null false ""
 }
 
+run_go() {
+  expr='/status="open"'
+  if ! command -v "$go_bin" >/dev/null 2>&1; then
+    emit_unsupported_impl "go" "go executable not found"
+    return 1
+  fi
+  (cd "$root/parity" && "$go_bin" run ./cmd/lqlbench \
+    --fixture "$fixture" \
+    --dataset large_ndjson \
+    --selector-name eq_status_open \
+    --expr "$expr" \
+    --mode decision_only_selector \
+    --submode steady_state)
+}
+
 exit_status=0
 generate_fixture
 
 if is_selected go; then
-  emit_unsupported_impl "go" "stable JSONL Go benchmark runner is not implemented yet"
-  if is_required go; then
+  if ! run_go; then
     exit_status=1
   fi
 fi

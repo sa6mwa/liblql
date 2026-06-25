@@ -54,10 +54,12 @@ Current implementation status:
 - `make bench-check` runs the current deterministic smoke gate for the C
   surface.
 - `make benchmarks-c` exercises the C CLI over a shared generated fixture.
-- `make benchmarks-go` and `make benchmarks-lua` emit explicit unsupported
-  records until dedicated stable JSONL runners exist.
+- `make benchmarks-go` exercises `parity/cmd/lqlbench`, which uses the pinned
+  Go module and emits stable JSON Lines without scraping `go test` output.
+- `make benchmarks-lua` emits an explicit unsupported record until the Lua
+  facade benchmark runner exists.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
-  and therefore fails while Go/Lua benchmark runners are still missing.
+  and therefore fails while the Lua benchmark runner is still missing.
 
 ## Source Benchmark To Mirror
 
