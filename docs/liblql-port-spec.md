@@ -556,6 +556,8 @@ Current implementation is an early slice:
   boolean flags that affect observable behavior, including
   `--compact=true`, `--matches-only=true|false`, `--or=true|false`, and
   `--enable-file-mutations=true|false`;
+- CLI pflag-compatible `--` end-of-options handling is covered so
+  dash-prefixed positional input paths can be selected after the terminator;
 - CLI non-inline mutation supports multiple seekable input files and mixed
   file/stdin inputs in argument order, matching the Go CLI's
   `splitMutationArgs` behavior while preserving inline mode's single-file

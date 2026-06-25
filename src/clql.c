@@ -500,6 +500,7 @@ int main(int argc, char **argv) {
   int compact;
   int inline_mode;
   int enable_file_mutations;
+  int end_options;
   int i;
   projection_args fields;
   projection_args mutations;
@@ -526,12 +527,27 @@ int main(int argc, char **argv) {
   compact = 0;
   inline_mode = 0;
   enable_file_mutations = 0;
+  end_options = 0;
   inline_tmp_path = NULL;
   inline_out = NULL;
   selector_expr = NULL;
   selector_expr_owned = NULL;
   input_path = NULL;
   for (i = 1; i < argc; ++i) {
+    if (end_options) {
+      if (!add_projection_arg(&positionals, argv[i])) {
+        fprintf(stderr, "clql: failed to record positional argument\n");
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        free_projection_args(&positionals);
+        return 2;
+      }
+      continue;
+    }
+    if (strcmp(argv[i], "--") == 0) {
+      end_options = 1;
+      continue;
+    }
     if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
       printf("clql %s\n", lql_version());
       free_projection_args(&fields);

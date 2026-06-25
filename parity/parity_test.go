@@ -935,6 +935,31 @@ func TestCLQLBooleanFlagValueCompatibility(t *testing.T) {
 	})
 }
 
+func TestCLQLEndOfOptionsCompatibility(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	clqlPath, err := filepath.Abs(clql)
+	if err != nil {
+		t.Fatalf("resolve clql path: %v", err)
+	}
+	dir := t.TempDir()
+	inputName := "--input.json"
+	if err := os.WriteFile(filepath.Join(dir, inputName), []byte(`{"status":"open"}`), 0600); err != nil {
+		t.Fatalf("write dash-prefixed input: %v", err)
+	}
+	cmd := exec.Command(clqlPath, "-c", `/status="open"`, "--", inputName)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql -- terminator failed: %v out=%q", err, string(out))
+	}
+	if string(out) != "{\"status\":\"open\"}\n" {
+		t.Fatalf("clql -- terminator output mismatch: %q", string(out))
+	}
+}
+
 func TestCLQLMatchAllFileSelectionParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
