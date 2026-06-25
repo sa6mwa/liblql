@@ -550,11 +550,11 @@ Current implementation is an early slice:
   the explicit `make parity-test` target and broader gates, not the fast
   `make test` target;
 - Go-backed SDK parity tests now exist for public `liblql` selector
-  parse/evaluate behavior, buffered and seekable file-range JSON projection,
-  mutation plan parsing and parse failures, buffered and seekable file-range
-  JSON mutation including file-backed mutation values, compact serialization,
-  compact error behavior, and current streaming query behavior through the C
-  API, comparing
+  parse/evaluate behavior, projection parser failures, buffered and seekable
+  file-range JSON projection, mutation plan parsing and parse failures,
+  buffered and seekable file-range JSON mutation including file-backed mutation
+  values, compact serialization, compact error behavior, and current streaming
+  query behavior through the C API, comparing
   `lql_selector_parse()`, `lql_selector_parse_or()`, `lql_matches_json()`,
   `lql_project_json()`, `lql_project_file_range()`,
   `lql_mutation_plan_parse()`,

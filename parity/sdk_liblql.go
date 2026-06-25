@@ -61,6 +61,24 @@ static int liblql_parse_selector(const char *expr, int or_mode, char *errbuf,
 	return (int)status;
 }
 
+static int liblql_parse_projection(const char *const *fields,
+                                   size_t field_count, char *errbuf,
+                                   size_t errbuf_len) {
+	lql_error error;
+	lql_projection *projection;
+	lql_status status;
+
+	lql_error_init(&error);
+	projection = NULL;
+	status = lql_projection_parse(fields, field_count, &projection, &error);
+	lql_projection_free(projection);
+	if (status != LQL_STATUS_OK && errbuf != NULL && errbuf_len > 0u) {
+		strncpy(errbuf, error.message, errbuf_len - 1u);
+		errbuf[errbuf_len - 1u] = '\0';
+	}
+	return (int)status;
+}
+
 static int liblql_parse_mutations(const char *const *exprs, size_t expr_count,
                                   int enable_file_values,
                                   const char *file_value_base_dir,
@@ -795,6 +813,16 @@ func cParseSelector(expr string, orMode bool) (int, string) {
 	var errbuf [256]C.char
 	status := C.liblql_parse_selector(cExpr, cBool(orMode), &errbuf[0],
 		C.size_t(len(errbuf)))
+	return int(status), C.GoString(&errbuf[0])
+}
+
+func cParseProjection(fields []string) (int, string) {
+	cFields, freeFields := cStringArray(fields)
+	defer freeFields()
+
+	var errbuf [256]C.char
+	status := C.liblql_parse_projection(cFields, C.size_t(len(fields)),
+		&errbuf[0], C.size_t(len(errbuf)))
 	return int(status), C.GoString(&errbuf[0])
 }
 

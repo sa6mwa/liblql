@@ -24,6 +24,7 @@ var sdkParityCoverageManifest = []sdkParityCoverageRequirement{
 	{"projection", "public liblql buffered JSON projection behavior matches Go projection behavior for current projection corpus", []string{"TestSDKProjectionJSONParity"}},
 	{"projection", "public liblql seekable file-range projection behavior matches Go projection behavior for current projection corpus", []string{"TestSDKProjectionFileRangeParity"}},
 	{"projection", "public liblql projection errors match Go projection errors for current invalid corpus", []string{"TestSDKProjectionErrorParity"}},
+	{"projection", "public liblql projection parser failures match Go projection parser failures for current invalid field corpus", []string{"TestSDKProjectionParseErrorParity"}},
 	{"mutation", "public liblql buffered JSON mutation behavior matches Go mutation behavior for current mutation corpus", []string{"TestSDKMutationJSONParity"}},
 	{"mutation", "public liblql seekable file-range mutation behavior matches Go mutation behavior for current mutation corpus", []string{"TestSDKMutationFileRangeParity"}},
 	{"mutation", "public liblql root-field seekable file-range mutation behavior matches Go mutation behavior for supported root-field corpus", []string{"TestSDKMutationRootFieldFileRangeParity"}},

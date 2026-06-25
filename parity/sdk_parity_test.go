@@ -260,6 +260,33 @@ func TestSDKProjectionErrorParity(t *testing.T) {
 	}
 }
 
+func TestSDKProjectionParseErrorParity(t *testing.T) {
+	cases := []struct {
+		name   string
+		fields []string
+	}{
+		{name: "empty field set", fields: nil},
+		{name: "blank field set", fields: []string{"  ", "\t"}},
+		{name: "root path", fields: []string{"/"}},
+		{name: "missing leading slash", fields: []string{"id"}},
+		{name: "leading array index", fields: []string{"/0/id"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			paths, goErr := lql.ParseProjectionPaths(tc.fields)
+			if goErr == nil {
+				_, goErr = lql.NewProjectionPlan(paths)
+			}
+			if goErr == nil {
+				t.Fatalf("go projection unexpectedly accepted fields: %#v", tc.fields)
+			}
+			if status, message := cParseProjection(tc.fields); status == 0 {
+				t.Fatalf("liblql projection unexpectedly accepted fields: %#v message=%q", tc.fields, message)
+			}
+		})
+	}
+}
+
 func TestSDKMutationJSONParity(t *testing.T) {
 	for _, tc := range sdkMutationCases() {
 		t.Run(tc.name, func(t *testing.T) {
