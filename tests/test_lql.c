@@ -301,9 +301,9 @@ static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len) {
 
 static void expect_projection_api(void) {
   static const char first[] =
-      "{\"id\":\"a\",\"count\":1,\"nested\":{\"x\":true}}";
+      "{\"id\":\"a\",\"count\":1,\"nested\":{\"x\":true},\"items\":[{\"sku\":\"A\"},{\"sku\":\"B\"}]}";
   static const char second[] = "{\"id\":\"b\"}";
-  const char *fields[3];
+  const char *fields[4];
   const char *missing[1];
   const char *invalid[1];
   const char *root[1];
@@ -344,9 +344,10 @@ static void expect_projection_api(void) {
   fields[0] = "/id";
   fields[1] = "/nested/x";
   fields[2] = "/nested/x";
+  fields[3] = "/items/1/sku";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(fields, 3u, &projection, &error);
+  st = lql_projection_parse(fields, 4u, &projection, &error);
   if (st != LQL_STATUS_OK) {
     printf("projection parse failed: %s\n", error.message);
     fclose(source);
@@ -364,7 +365,7 @@ static void expect_projection_api(void) {
     printf("projection expected found\n");
     ++failures;
   } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
-             strcmp(buf, "{\"id\":\"a\",\"nested\":{\"x\":true}}") != 0) {
+             strcmp(buf, "{\"id\":\"a\",\"nested\":{\"x\":true},\"items\":[null,{\"sku\":\"B\"}]}") != 0) {
     printf("projection output mismatch: %s\n", buf);
     ++failures;
   }
@@ -398,12 +399,12 @@ static void expect_projection_api(void) {
   lql_projection_free(projection);
   fclose(out);
 
-  invalid[0] = "/items/1/sku";
+  invalid[0] = "/items/999999999999999999999999/sku";
   projection = NULL;
   lql_error_init(&error);
   st = lql_projection_parse(invalid, 1u, &projection, &error);
   if (st == LQL_STATUS_OK) {
-    printf("array projection path parsed\n");
+    printf("oversized array projection path parsed\n");
     lql_projection_free(projection);
     ++failures;
   }

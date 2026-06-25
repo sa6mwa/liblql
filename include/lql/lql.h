@@ -89,8 +89,7 @@ lql_status lql_query_file_decisions_with_options(
     void *user, lql_query_result *out_result, lql_error *error);
 
 /* Parses JSON Pointer projection fields into a caller-owned projection handle.
-   The current implementation supports object paths; array projection paths are
-   rejected until array output planning lands. */
+   The root path is rejected, and paths must not start with an array index. */
 lql_status lql_projection_parse(const char *const *fields, size_t field_count,
                                 lql_projection **out, lql_error *error);
 /* Frees a projection handle. NULL is accepted. */

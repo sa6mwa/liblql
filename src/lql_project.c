@@ -39,6 +39,9 @@ typedef struct projection_state {
   int object_started;
   const projection_path *open_path;
   size_t open_count;
+  char *open_kind;
+  size_t *open_array_next;
+  size_t open_capacity;
 } projection_state;
 
 struct lql_projection {
@@ -94,6 +97,28 @@ static int segment_is_array_index(const char *field) {
     }
   }
   return 1;
+}
+
+static int parse_array_index(const char *field, size_t *out) {
+  unsigned long value;
+  char *end;
+  if (!segment_is_array_index(field)) {
+    return 0;
+  }
+  value = strtoul(field, &end, 10);
+  if (end == field || *end != '\0' || value > 1048576ul) {
+    return 0;
+  }
+  *out = (size_t)value;
+  return 1;
+}
+
+static char path_container_kind(const projection_path *path, size_t index) {
+  if (index + 1u < path->segment_count &&
+      segment_is_array_index(path->segments[index + 1u])) {
+    return 'a';
+  }
+  return 'o';
 }
 
 static int add_segment(projection_path *path, char *segment) {
@@ -196,9 +221,12 @@ static int parse_projection_path(const char *raw, projection_path *out) {
       return 0;
     }
     if (segment_is_array_index(decoded)) {
-      free(decoded);
-      projection_path_cleanup(out);
-      return 0;
+      size_t index;
+      if (!parse_array_index(decoded, &index)) {
+        free(decoded);
+        projection_path_cleanup(out);
+        return 0;
+      }
     }
     if (!add_segment(out, decoded)) {
       free(decoded);
@@ -241,6 +269,24 @@ static int projection_path_is_prefix(const projection_path *prefix,
   return 1;
 }
 
+static int projection_paths_have_container_conflict(const projection_path *a,
+                                                    const projection_path *b) {
+  size_t i;
+  size_t a_parent_count;
+  size_t b_parent_count;
+  a_parent_count = a->segment_count == 0u ? 0u : a->segment_count - 1u;
+  b_parent_count = b->segment_count == 0u ? 0u : b->segment_count - 1u;
+  for (i = 0u; i < a_parent_count && i < b_parent_count; ++i) {
+    if (strcmp(a->segments[i], b->segments[i]) != 0) {
+      return 0;
+    }
+    if (path_container_kind(a, i) != path_container_kind(b, i)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int add_path(lql_projection *projection, projection_path *path) {
   projection_path *next;
   size_t i;
@@ -254,6 +300,10 @@ static int add_path(lql_projection *projection, projection_path *path) {
     }
     if (projection_path_is_prefix(&projection->paths[i], path) ||
         projection_path_is_prefix(path, &projection->paths[i])) {
+      return 0;
+    }
+    if (projection_paths_have_container_conflict(&projection->paths[i],
+                                                 path)) {
       return 0;
     }
   }
@@ -321,18 +371,26 @@ static size_t common_open_prefix(const projection_state *state,
   common = 0u;
   while (common < state->open_count && common < parent_count &&
          strcmp(state->open_path->segments[common], path->segments[common]) ==
-             0) {
+             0 &&
+         state->open_kind[common] == path_container_kind(path, common)) {
     ++common;
   }
   return common;
 }
 
-static lonejson_status close_open_objects(projection_state *state,
-                                          size_t keep_count) {
+static lonejson_status close_open_containers(projection_state *state,
+                                             size_t keep_count) {
   while (state->open_count > keep_count) {
-    if (lonejson_writer_end_object(&state->writer, state->error) !=
-        LONEJSON_STATUS_OK) {
-      return LONEJSON_STATUS_CALLBACK_FAILED;
+    if (state->open_kind[state->open_count - 1u] == 'a') {
+      if (lonejson_writer_end_array(&state->writer, state->error) !=
+          LONEJSON_STATUS_OK) {
+        return LONEJSON_STATUS_CALLBACK_FAILED;
+      }
+    } else {
+      if (lonejson_writer_end_object(&state->writer, state->error) !=
+          LONEJSON_STATUS_OK) {
+        return LONEJSON_STATUS_CALLBACK_FAILED;
+      }
     }
     --state->open_count;
   }
@@ -342,11 +400,83 @@ static lonejson_status close_open_objects(projection_state *state,
   return LONEJSON_STATUS_OK;
 }
 
+static int ensure_open_capacity(projection_state *state, size_t need) {
+  char *next_kind;
+  size_t *next_array_next;
+  size_t next_capacity;
+  if (state->open_capacity >= need) {
+    return 1;
+  }
+  next_capacity = state->open_capacity == 0u ? 4u : state->open_capacity;
+  while (next_capacity < need) {
+    next_capacity *= 2u;
+  }
+  next_kind = (char *)realloc(state->open_kind,
+                              sizeof(state->open_kind[0]) * next_capacity);
+  if (next_kind == NULL) {
+    return 0;
+  }
+  state->open_kind = next_kind;
+  next_array_next = (size_t *)realloc(
+      state->open_array_next,
+      sizeof(state->open_array_next[0]) * next_capacity);
+  if (next_array_next == NULL) {
+    return 0;
+  }
+  state->open_array_next = next_array_next;
+  state->open_capacity = next_capacity;
+  return 1;
+}
+
+static lonejson_status write_array_index_prefix(projection_state *state,
+                                                size_t level,
+                                                const char *segment) {
+  size_t index;
+  if (!parse_array_index(segment, &index)) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  while (state->open_array_next[level] < index) {
+    if (lonejson_writer_null(&state->writer, state->error) !=
+        LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    ++state->open_array_next[level];
+  }
+  if (state->open_array_next[level] != index) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  ++state->open_array_next[level];
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status write_member_prefix(projection_state *state,
+                                           const projection_path *path,
+                                           size_t index) {
+  if (index == 0u) {
+    if (lonejson_writer_key(&state->writer, path->segments[index],
+                            strlen(path->segments[index]),
+                            state->error) != LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->open_kind[index - 1u] == 'a') {
+    return write_array_index_prefix(state, index - 1u, path->segments[index]);
+  }
+  if (lonejson_writer_key(&state->writer, path->segments[index],
+                          strlen(path->segments[index]),
+                          state->error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status projection_key(projection_state *state,
                                       const projection_path *path) {
   size_t parent_count;
   size_t common;
   size_t i;
+  char kind;
   if (!state->object_started) {
     if (lonejson_writer_begin_object(&state->writer, state->error) !=
         LONEJSON_STATUS_OK) {
@@ -356,24 +486,35 @@ static lonejson_status projection_key(projection_state *state,
   }
   parent_count = path->segment_count - 1u;
   common = common_open_prefix(state, path, parent_count);
-  if (close_open_objects(state, common) != LONEJSON_STATUS_OK) {
+  if (close_open_containers(state, common) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
+  if (!ensure_open_capacity(state, parent_count)) {
+    return LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
   for (i = common; i < parent_count; ++i) {
-    const char *segment;
-    segment = path->segments[i];
-    if (lonejson_writer_key(&state->writer, segment, strlen(segment),
-                            state->error) != LONEJSON_STATUS_OK ||
-        lonejson_writer_begin_object(&state->writer, state->error) !=
-            LONEJSON_STATUS_OK) {
+    if (write_member_prefix(state, path, i) != LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
+    kind = path_container_kind(path, i);
+    if (kind == 'a') {
+      if (lonejson_writer_begin_array(&state->writer, state->error) !=
+          LONEJSON_STATUS_OK) {
+        return LONEJSON_STATUS_CALLBACK_FAILED;
+      }
+      state->open_array_next[i] = 0u;
+    } else {
+      if (lonejson_writer_begin_object(&state->writer, state->error) !=
+          LONEJSON_STATUS_OK) {
+        return LONEJSON_STATUS_CALLBACK_FAILED;
+      }
+      state->open_array_next[i] = 0u;
+    }
     state->open_path = path;
+    state->open_kind[i] = kind;
     ++state->open_count;
   }
-  if (lonejson_writer_key(&state->writer, path->segments[parent_count],
-                          strlen(path->segments[parent_count]),
-                          state->error) != LONEJSON_STATUS_OK) {
+  if (write_member_prefix(state, path, parent_count) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   state->open_path = parent_count == 0u ? NULL : path;
@@ -774,7 +915,7 @@ lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
   st = lonejson_visit_path_value_reader(runtime, limited_read, &reader,
                                         &visitor, &state, &lj_error);
   if (st == LONEJSON_STATUS_OK && state.object_started) {
-    st = close_open_objects(&state, 0u);
+    st = close_open_containers(&state, 0u);
   }
   if (st == LONEJSON_STATUS_OK && state.object_started) {
     st = lonejson_writer_end_object(&state.writer, &lj_error);
@@ -787,6 +928,8 @@ lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
   lonejson_free(runtime);
   free(state.key_buf);
   free(state.num_buf);
+  free(state.open_kind);
+  free(state.open_array_next);
   if (st != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;

@@ -339,10 +339,10 @@ func TestCLQLSeekableFileProjectionParity(t *testing.T) {
 			body:   `[{"status":"closed","id":"a"},{"status":"open","id":"b","count":2}]`,
 		},
 		{
-			name:   "nested object field",
+			name:   "nested object and array field",
 			expr:   `/status="open"`,
-			fields: []string{"/id", "/meta/trace", "/meta/span"},
-			body:   `{"status":"open","id":"a","meta":{"trace":9,"span":"s","ignore":true}}` + "\n",
+			fields: []string{"/id", "/meta/trace", "/meta/span", "/items/1/sku"},
+			body:   `{"status":"open","id":"a","meta":{"trace":9,"span":"s","ignore":true},"items":[{"sku":"A"},{"sku":"B"}]}` + "\n",
 		},
 		{
 			name:   "missing root field suppresses output",
