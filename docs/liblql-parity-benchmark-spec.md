@@ -60,7 +60,8 @@ Current implementation status:
   deterministic fixture regeneration, every result record includes a SHA-256
   digest for its generated fixture, and every
   implementation/dataset/selector/mode tuple emits both `warmup_included` and
-  `steady_state` records.
+  `steady_state` records. The smoke gate is explicit and is not part of
+  `make test-all`; `make prerelease` runs it after the normal test gate.
 - `make benchmarks-c` exercises the C CLI for decision-only output and the
   public liblql API for matched-only seekable plus-value payload access over a
   shared generated fixture.

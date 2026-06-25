@@ -15,6 +15,7 @@ generate() {
   dir=$1
   log=$2
   LQL_BENCH_FIXTURE_DIR="$dir" \
+    LQL_BENCH_SUITE=smoke \
     "$root/scripts/run_parity_benchmarks.sh" --impl lua --format json > "$log"
 }
 

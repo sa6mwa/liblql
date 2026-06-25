@@ -539,13 +539,17 @@ Current implementation is an early slice:
   transitional oracle for deriving exhaustive C-only SDK tests;
 - Go-backed SDK parity tests now exist for public `liblql` selector
   parse/evaluate behavior, buffered and seekable file-range JSON projection,
-  buffered and seekable file-range JSON mutation, compact serialization, and
-  current streaming query behavior through the C API, comparing
+  mutation plan parsing and parse failures, buffered and seekable file-range
+  JSON mutation, compact serialization, and current streaming query behavior
+  through the C API, comparing
   `lql_selector_parse()`, `lql_selector_parse_or()`, `lql_matches_json()`,
-  `lql_project_json()`, `lql_project_file_range()`, `lql_mutate_json()`,
-  `lql_mutate_file_range_paths()`, `lql_compact_json()`,
-  `lql_compact_file_range()`, `lql_query_file_decisions()`,
-  `lql_query_source_decisions()`, `lql_query_file_matches()`, and
+  `lql_project_json()`, `lql_project_file_range()`,
+  `lql_mutation_plan_parse()`,
+  `lql_mutation_plan_parse_with_options()`, `lql_mutation_plan_count()`,
+  `lql_mutate_json()`, `lql_mutate_file_range_paths()`,
+  `lql_compact_json()`, `lql_compact_file_range()`,
+  `lql_query_file_decisions()`, `lql_query_source_decisions()`,
+  `lql_query_file_matches()`, and
   `lql_query_source_spooled_matches()` against the pinned Go library or
   standard compact JSON behavior over the current selector, projection,
   mutation, compact, and stream corpora; this is behavioral lib-to-lib parity,

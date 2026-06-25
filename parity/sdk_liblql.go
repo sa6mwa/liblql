@@ -61,6 +61,45 @@ static int liblql_parse_selector(const char *expr, int or_mode, char *errbuf,
 	return (int)status;
 }
 
+static int liblql_parse_mutations(const char *const *exprs, size_t expr_count,
+                                  int enable_file_values,
+                                  const char *file_value_base_dir,
+                                  size_t *out_count, char *errbuf,
+                                  size_t errbuf_len) {
+	lql_error error;
+	lql_mutation_plan *plan;
+	lql_mutation_parse_options options;
+	lql_status status;
+
+	lql_error_init(&error);
+	memset(&options, 0, sizeof(options));
+	plan = NULL;
+	if (out_count != NULL) {
+		*out_count = 0u;
+	}
+	if (enable_file_values) {
+		options.enable_file_values = 1;
+		options.file_value_base_dir = file_value_base_dir;
+		status = lql_mutation_plan_parse_with_options(exprs, expr_count, &options,
+		                                              &plan, &error);
+	} else {
+		status = lql_mutation_plan_parse(exprs, expr_count, &plan, &error);
+	}
+	if (status != LQL_STATUS_OK) {
+		lql_mutation_plan_free(plan);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (out_count != NULL) {
+		*out_count = lql_mutation_plan_count(plan);
+	}
+	lql_mutation_plan_free(plan);
+	return 0;
+}
+
 static int liblql_read_tmp(FILE *tmp, char **out_json, size_t *out_len,
                            char *errbuf, size_t errbuf_len) {
 	long size;
@@ -729,6 +768,27 @@ func cParseSelector(expr string, orMode bool) (int, string) {
 	status := C.liblql_parse_selector(cExpr, cBool(orMode), &errbuf[0],
 		C.size_t(len(errbuf)))
 	return int(status), C.GoString(&errbuf[0])
+}
+
+func cParseMutations(mutations []string, enableFileValues bool, fileValueBaseDir string) (int, int, string) {
+	cExprs, freeExprs := cStringArray(mutations)
+	defer freeExprs()
+
+	var cBaseDir *C.char
+	if fileValueBaseDir != "" {
+		cBaseDir = C.CString(fileValueBaseDir)
+		defer C.free(unsafe.Pointer(cBaseDir))
+	}
+
+	var count C.size_t
+	var errbuf [256]C.char
+	status := C.liblql_parse_mutations(cExprs, C.size_t(len(mutations)),
+		cBool(enableFileValues), cBaseDir, &count, &errbuf[0],
+		C.size_t(len(errbuf)))
+	if status != 0 {
+		return int(status), 0, C.GoString(&errbuf[0])
+	}
+	return int(status), int(count), ""
 }
 
 func cProjectJSON(fields []string, doc string) ([]byte, bool, error) {

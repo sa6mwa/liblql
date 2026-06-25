@@ -50,9 +50,12 @@ fi
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 fixture_dir="${LQL_BENCH_FIXTURE_DIR:-$root/build/bench-fixtures}"
 count="${LQL_BENCH_NDJSON_COUNT:-128}"
+suite="${LQL_BENCH_SUITE:-full}"
 clql="${CLQL_PATH:-$root/build/debug/clql}"
 payload_bench="${LQL_PAYLOAD_BENCH_PATH:-$root/build/debug/lql_payload_bench}"
 go_bin="${GO:-go}"
+go_bench="${LQL_GO_BENCH_PATH:-$root/build/bench-tools/lqlbench}"
+go_bench_ready=0
 lua_bin="${LUA:-lua}"
 mkdir -p "$fixture_dir"
 ndjson_fixture="$fixture_dir/large_ndjson.jsonl"
@@ -216,6 +219,18 @@ validate_required_impls() {
   return 0
 }
 
+ensure_go_bench() {
+  if [ "$go_bench_ready" -eq 1 ]; then
+    return 0
+  fi
+  if ! command -v "$go_bin" >/dev/null 2>&1; then
+    return 1
+  fi
+  mkdir -p "$(dirname "$go_bench")"
+  (cd "$root/parity" && "$go_bin" build -o "$go_bench" ./cmd/lqlbench)
+  go_bench_ready=1
+}
+
 fault_count() {
   value=$1
   enabled=$2
@@ -326,6 +341,21 @@ generate_fixture() {
     "records_status_open" '/records[]/status="open"' >> "$case_matrix"
   add_selection_selector_cases "selection_single_json" "$cli_single_fixture" 1 \
     "/records[]"
+  case "$suite" in
+    full) ;;
+    smoke)
+      awk '
+        ($1 == "large_ndjson" && $4 == "eq_status_open") ||
+        ($1 == "large_array" && $4 == "date_window") ||
+        ($1 == "selection_single_json" && $4 == "contains_service")
+      ' "$case_matrix" > "$case_matrix.smoke"
+      mv "$case_matrix.smoke" "$case_matrix"
+      ;;
+    *)
+      printf 'unsupported benchmark suite: %s\n' "$suite" >&2
+      return 2
+      ;;
+  esac
 }
 
 add_dataset_selector_cases() {
@@ -457,12 +487,12 @@ run_go_mode() {
   expr=$6
   : "$candidates"
   record=
-  if ! command -v "$go_bin" >/dev/null 2>&1; then
+  if ! ensure_go_bench; then
     emit_unsupported_impl "go" "go executable not found"
     return 1
   fi
   for submode in warmup_included steady_state; do
-    record=$(cd "$root/parity" && "$go_bin" run ./cmd/lqlbench \
+    record=$("$go_bench" \
       --fixture "$fixture_path" \
       --dataset "$dataset_name" \
       --selector-name "$selector_name" \

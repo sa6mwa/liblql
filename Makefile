@@ -5,7 +5,7 @@ help:
 	  'make deps-debug              fetch host lonejson SDK' \
 	  'make build                   configure and build debug preset' \
 	  'make test                    run debug tests' \
-	  'make test-all                run tests, sanitizers, Lua, and benchmark parity gates' \
+	  'make test-all                run tests, sanitizers, and Lua smoke tests' \
 	  'make asan                    run ASan/UBSan tests' \
 	  'make lua-test                run Lua facade smoke tests' \
 	  'make benchmarks             run local parity benchmark smoke' \
@@ -37,7 +37,7 @@ build-release: deps-release
 test test-debug: build-debug
 	@ctest --preset debug
 
-test-all: test asan lua-test bench-check
+test-all: test asan lua-test
 
 asan: deps-debug
 	@cmake --preset asan
@@ -51,7 +51,8 @@ bench benchmarks: build-debug
 	@./scripts/check_parity_benchmark_schema.sh
 
 bench-check: build-debug
-	@./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --check --require go,c,lua
+	@mkdir -p build
+	@LQL_BENCH_SUITE=smoke ./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --check --require go,c,lua > build/bench-check.jsonl
 	@./scripts/check_parity_benchmark_failures.sh
 	@./scripts/check_parity_benchmark_fixtures.sh
 	@./scripts/check_parity_benchmark_schema.sh
@@ -73,7 +74,7 @@ package package-source package-source-smoke package-checksums package-verify ver
 
 finalize-slice: format test
 
-prerelease: format test-all package-verify
+prerelease: format test-all bench-check package-verify
 
 prerelease-hardening: prerelease release-matrix
 

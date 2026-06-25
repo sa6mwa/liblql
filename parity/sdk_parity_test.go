@@ -290,6 +290,104 @@ func TestSDKMutationFileRangeParity(t *testing.T) {
 	}
 }
 
+func TestSDKMutationPlanParseParity(t *testing.T) {
+	cases := []struct {
+		name             string
+		mutations        []string
+		enableFileValues bool
+		baseDir          string
+	}{
+		{
+			name: "brace pointer time and remove",
+			mutations: []string{
+				"/state/progress=ready",
+				"/state/metrics++",
+				`/state/details{/owner="alice",/note="hi, world"}`,
+				"/state/metrics=+3",
+				"time:/state/updated=NOW",
+				"rm:/state/legacy",
+			},
+		},
+		{
+			name: "wildcard and recursive paths",
+			mutations: []string{
+				"/items/*/status=ready",
+				"/groups/.../sku=ok",
+				"/records[]/count=+1",
+			},
+		},
+		{
+			name:             "explicit file backed values",
+			mutations:        []string{`textfile:/payload=blob.txt`, `base64file:/encoded=blob.bin`},
+			enableFileValues: true,
+			baseDir:          "temp",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			baseDir := tc.baseDir
+			if baseDir == "temp" {
+				baseDir = t.TempDir()
+			}
+			opts := lql.ParseMutationsOptions{
+				EnableFileValues: tc.enableFileValues,
+				FileValueBaseDir: baseDir,
+			}
+			want, err := lql.ParseMutationsWithOptions(tc.mutations, time.Unix(1700000000, 0), opts)
+			if err != nil {
+				t.Fatalf("go mutation parse: %v", err)
+			}
+			status, count, message := cParseMutations(tc.mutations, tc.enableFileValues, baseDir)
+			if status != 0 {
+				t.Fatalf("liblql mutation parse failed: status=%d message=%s", status, message)
+			}
+			if count != len(want) {
+				t.Fatalf("liblql mutation plan count mismatch: got=%d want=%d", count, len(want))
+			}
+		})
+	}
+}
+
+func TestSDKMutationParseErrorParity(t *testing.T) {
+	cases := []struct {
+		name             string
+		mutations        []string
+		enableFileValues bool
+		baseDir          string
+	}{
+		{name: "empty", mutations: nil},
+		{name: "blank only", mutations: []string{""}},
+		{name: "bad expression", mutations: []string{`badexpr`}},
+		{name: "root path", mutations: []string{`/`}},
+		{name: "zero increment", mutations: []string{`/count=+0`}},
+		{name: "invalid time", mutations: []string{`time:/state/updated=tomorrowish`}},
+		{name: "date only time value", mutations: []string{`time:/state/updated=2025-01-01`}},
+		{name: "disabled file backed value", mutations: []string{`file:/payload=blob.txt`}},
+		{name: "relative file backed without base dir", mutations: []string{`file:/payload=blob.txt`}, enableFileValues: true},
+		{name: "file backed increment", mutations: []string{`file:/payload++`}, enableFileValues: true, baseDir: "temp"},
+		{name: "file backed remove", mutations: []string{`file:rm:/payload=blob.txt`}, enableFileValues: true, baseDir: "temp"},
+		{name: "file backed time", mutations: []string{`file:time:/payload=blob.txt`}, enableFileValues: true, baseDir: "temp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			baseDir := tc.baseDir
+			if baseDir == "temp" {
+				baseDir = t.TempDir()
+			}
+			opts := lql.ParseMutationsOptions{
+				EnableFileValues: tc.enableFileValues,
+				FileValueBaseDir: baseDir,
+			}
+			if _, err := lql.ParseMutationsWithOptions(tc.mutations, time.Unix(1700000000, 0), opts); err == nil {
+				t.Fatalf("go mutation parse unexpectedly succeeded")
+			}
+			if status, _, message := cParseMutations(tc.mutations, tc.enableFileValues, baseDir); status == 0 {
+				t.Fatalf("liblql mutation parse unexpectedly succeeded: %s", message)
+			}
+		})
+	}
+}
+
 func sdkMutationCases() []struct {
 	name      string
 	doc       string

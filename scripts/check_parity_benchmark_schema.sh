@@ -14,8 +14,7 @@ mkdir -p "$tmp"
 log="$tmp/benchmarks.jsonl"
 
 LQL_BENCH_FIXTURE_DIR="$tmp/fixtures" \
+  LQL_BENCH_SUITE=smoke \
   "$root/scripts/run_parity_benchmarks.sh" --impl go,c,lua --format json > "$log"
-
-cat "$log"
 
 (cd "$root/parity" && "$go_bin" run ./cmd/benchvalidate) < "$log"

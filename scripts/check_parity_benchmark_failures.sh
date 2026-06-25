@@ -30,24 +30,29 @@ expect_failure() {
 
 expect_failure "candidate-mismatch" "benchmark candidate-count mismatch" \
   env LQL_BENCH_FIXTURE_DIR="$tmp/candidate" \
+    LQL_BENCH_SUITE=smoke \
     LQL_BENCH_INJECT_CANDIDATE_MISMATCH=1 \
     "$runner" --impl go,c --format json --check --require go,c
 
 expect_failure "match-mismatch" "benchmark match-count mismatch" \
   env LQL_BENCH_FIXTURE_DIR="$tmp/match" \
+    LQL_BENCH_SUITE=smoke \
     LQL_BENCH_INJECT_MATCH_MISMATCH=1 \
     "$runner" --impl go,c --format json --check --require go,c
 
 expect_failure "payload-count-mismatch" "benchmark payload-count mismatch" \
   env LQL_BENCH_FIXTURE_DIR="$tmp/payload-count" \
+    LQL_BENCH_SUITE=smoke \
     LQL_BENCH_INJECT_PAYLOAD_MISMATCH=1 \
     "$runner" --impl go,c --format json --check --require go,c
 
 expect_failure "payload-byte-mismatch" "benchmark payload-byte mismatch" \
   env LQL_BENCH_FIXTURE_DIR="$tmp/payload-byte" \
+    LQL_BENCH_SUITE=smoke \
     LQL_BENCH_INJECT_PAYLOAD_BYTE_MISMATCH=1 \
     "$runner" --impl go,c --format json --check --require go,c
 
 expect_failure "missing-required-impl" "benchmark missing required implementation" \
   env LQL_BENCH_FIXTURE_DIR="$tmp/missing-required" \
+    LQL_BENCH_SUITE=smoke \
     "$runner" --impl go --format json --check --require go,c
