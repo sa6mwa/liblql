@@ -785,6 +785,32 @@ fail_after_tokens:
   return 0;
 }
 
+static int string_term_is_match_all_alias(lql_node_kind kind,
+                                          const lql_term *term) {
+  int empty_value;
+  if (kind != LQL_NODE_CONTAINS && kind != LQL_NODE_ICONTAINS &&
+      kind != LQL_NODE_PREFIX && kind != LQL_NODE_IPREFIX) {
+    return 0;
+  }
+  if (term->field == NULL || term->any_count != 0u) {
+    return 0;
+  }
+  empty_value = (!term->value_set && term->value == NULL) ||
+                (term->value_set && term->value != NULL &&
+                 term->value[0] == '\0');
+  if (!empty_value) {
+    return 0;
+  }
+  if (strcmp(term->field, "/") == 0) {
+    return 1;
+  }
+  if ((kind == LQL_NODE_CONTAINS || kind == LQL_NODE_ICONTAINS) &&
+      (strcmp(term->field, "/*") == 0 || strcmp(term->field, "/...") == 0)) {
+    return 1;
+  }
+  return 0;
+}
+
 static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
   char *copy;
   char *body;
@@ -929,6 +955,10 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
         return error->code;
       }
       return LQL_STATUS_NO_MEMORY;
+    }
+    if (string_term_is_match_all_alias(out->kind, &out->term)) {
+      lql_node_cleanup(out);
+      out->kind = LQL_NODE_ALL;
     }
     free(copy);
     return LQL_STATUS_OK;

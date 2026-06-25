@@ -263,6 +263,13 @@ int main(void) {
                0);
   expect_match("contains{field=/metadata,value=\"\"}",
                "{\"metadata\":{\"etag\":\"x\"}}", 0);
+  expect_match("contains{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("icontains{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("prefix{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("iprefix{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("contains{f=/*}", "{\"status\":\"open\"}", 1);
+  expect_match("icontains{f=/...,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("not.icontains{f=/,v=\"\"}", "{\"status\":\"open\"}", 0);
   expect_match("contains{field=/message,value=TIMEOUT,ignoreCase=true}",
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("contains{field=/message,value=TIMEOUT,ic=f}",
