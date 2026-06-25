@@ -1320,6 +1320,123 @@ static void expect_mutation_plan_api(void) {
   lql_mutation_plan_free(plan);
 }
 
+static void expect_mutation_error_api(void) {
+  FILE *source;
+  FILE *out;
+  lql_mutation_plan *plan;
+  lql_error error;
+  lql_status st;
+  const char *expr;
+
+  source = tmpfile();
+  out = tmpfile();
+  if (source == NULL || out == NULL) {
+    printf("mutation error tmpfile failed\n");
+    if (source != NULL) {
+      fclose(source);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+
+  if (lql_mutation_plan_count(NULL) != 0u) {
+    printf("NULL mutation plan count mismatch\n");
+    ++failures;
+  }
+  lql_mutation_plan_free(NULL);
+
+  expr = "/status=done";
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(&expr, 1u, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "out is required") != 0) {
+    printf("mutation parse NULL out mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  plan = (lql_mutation_plan *)1;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(NULL, 0u, &plan, &error);
+  if (st != LQL_STATUS_PARSE_ERROR || plan != NULL ||
+      strcmp(error.message, "no field mutations provided") != 0) {
+    printf("mutation parse empty input mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  expr = NULL;
+  plan = (lql_mutation_plan *)1;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(&expr, 1u, &plan, &error);
+  if (st != LQL_STATUS_PARSE_ERROR || plan != NULL ||
+      strcmp(error.message, "no valid field mutations parsed") != 0) {
+    printf("mutation parse NULL expression mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  expr = "/status=done";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(&expr, 1u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("mutation error plan setup failed: %s\n", error.message);
+    ++failures;
+  } else {
+    lql_error_init(&error);
+    st = lql_mutate_file_range_root_fields(NULL, source, 0u, 2u, out, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "plan, file, and out are required") != 0) {
+      printf("root mutation NULL plan mismatch: %s\n", error.message);
+      ++failures;
+    }
+
+    lql_error_init(&error);
+    st = lql_mutate_file_range_root_fields(plan, NULL, 0u, 2u, out, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "plan, file, and out are required") != 0) {
+      printf("root mutation NULL file mismatch: %s\n", error.message);
+      ++failures;
+    }
+
+    lql_error_init(&error);
+    st = lql_mutate_file_range_paths(plan, source, 0u, 2u, NULL, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "plan, file, and out are required") != 0) {
+      printf("path mutation NULL out mismatch: %s\n", error.message);
+      ++failures;
+    }
+
+    lql_error_init(&error);
+    st = lql_mutate_json(NULL, "{}", strlen("{}"), out, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "plan, json, and out are required") != 0) {
+      printf("json mutation NULL plan mismatch: %s\n", error.message);
+      ++failures;
+    }
+
+    lql_error_init(&error);
+    st = lql_mutate_json(plan, NULL, 0u, out, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "plan, json, and out are required") != 0) {
+      printf("json mutation NULL json mismatch: %s\n", error.message);
+      ++failures;
+    }
+
+    lql_error_init(&error);
+    st = lql_mutate_json(plan, "{}", strlen("{}"), NULL, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "plan, json, and out are required") != 0) {
+      printf("json mutation NULL out mismatch: %s\n", error.message);
+      ++failures;
+    }
+  }
+  lql_mutation_plan_free(plan);
+  fclose(source);
+  fclose(out);
+}
+
 static void expect_root_field_mutation_api(void) {
   FILE *source;
   FILE *out;
@@ -1863,6 +1980,8 @@ static void expect_sdk_parity_manifest(void) {
        expect_projection_compact_error_api},
       {"compact", "seekable and buffered JSON compaction", expect_compact_api},
       {"mutation", "mutation parse/plan public API", expect_mutation_plan_api},
+      {"mutation", "mutation public API error contracts",
+       expect_mutation_error_api},
       {"mutation", "root field mutation over seekable ranges",
        expect_root_field_mutation_api},
       {"mutation", "nested path mutation over seekable ranges",
@@ -2097,6 +2216,7 @@ int main(void) {
   expect_projection_compact_error_api();
   expect_compact_api();
   expect_mutation_plan_api();
+  expect_mutation_error_api();
   expect_root_field_mutation_api();
   expect_path_mutation_api();
   expect_buffered_mutation_api();
