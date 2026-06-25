@@ -73,6 +73,67 @@ static int copy_range(FILE *in, FILE *out, lql_uint64 size) {
   return 1;
 }
 
+static int file_size_u64(FILE *file, lql_uint64 *out) {
+  off_t end;
+  if (file == NULL || out == NULL) {
+    return 0;
+  }
+  if (fseeko(file, (off_t)0, SEEK_END) != 0) {
+    return 0;
+  }
+  end = ftello(file);
+  if (end < (off_t)0) {
+    return 0;
+  }
+  *out = (lql_uint64)end;
+  return (off_t)(*out) == end;
+}
+
+static lql_status project_then_maybe_mutate_range(
+    const lql_projection *projection, const lql_mutation_plan *mutation_plan,
+    int matched, FILE *source, lql_uint64 offset, lql_uint64 size, FILE *out,
+    int *out_projected, lql_error *error) {
+  FILE *projected_file;
+  lql_uint64 projected_size;
+  lql_status st;
+
+  if (out_projected != NULL) {
+    *out_projected = 0;
+  }
+  projected_file = tmpfile();
+  if (projected_file == NULL) {
+    lql_error_init(error);
+    if (error != NULL) {
+      error->code = LQL_STATUS_JSON_ERROR;
+      strcpy(error->message, "failed to create projection temp file");
+    }
+    return LQL_STATUS_JSON_ERROR;
+  }
+  st = lql_project_file_range(projection, source, offset, size, projected_file,
+                              out_projected, error);
+  if (st == LQL_STATUS_OK && out_projected != NULL && *out_projected) {
+    if (!file_size_u64(projected_file, &projected_size)) {
+      st = LQL_STATUS_JSON_ERROR;
+      if (error != NULL) {
+        error->code = st;
+        strcpy(error->message, "failed to size projection temp file");
+      }
+    } else if (matched && mutation_plan != NULL) {
+      st = lql_mutate_file_range_paths(mutation_plan, projected_file, 0u,
+                                       projected_size, out, error);
+    } else if (!seek_u64(projected_file, 0u) ||
+               !copy_range(projected_file, out, projected_size)) {
+      st = LQL_STATUS_JSON_ERROR;
+      if (error != NULL) {
+        error->code = st;
+        strcpy(error->message, "failed to write projected candidate");
+      }
+    }
+  }
+  fclose(projected_file);
+  return st;
+}
+
 static void free_projection_args(projection_args *args) {
   if (args == NULL) {
     return;
@@ -108,7 +169,18 @@ static lql_status output_match_range(void *user,
     if (!decision->matched && ranges->matches_only) {
       return LQL_STATUS_OK;
     }
-    if (decision->matched) {
+    if (ranges->projection != NULL) {
+      int projected;
+      if (project_then_maybe_mutate_range(
+              ranges->projection, ranges->mutation_plan, decision->matched,
+              ranges->source, decision->offset, decision->size, ranges->out,
+              &projected, &ranges->callback_error) != LQL_STATUS_OK) {
+        return LQL_STATUS_UNSUPPORTED;
+      }
+      if (!projected) {
+        return LQL_STATUS_OK;
+      }
+    } else if (decision->matched) {
       if (lql_mutate_file_range_paths(ranges->mutation_plan, ranges->source,
                                       decision->offset, decision->size,
                                       ranges->out, &ranges->callback_error) !=
@@ -410,16 +482,6 @@ int main(int argc, char **argv) {
                : lql_selector_parse(selector_expr, &selector, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    return 2;
-  }
-  if (mutation_plan != NULL && fields.count != 0u) {
-    fprintf(stderr,
-            "clql: mutation with field projection is not implemented\n");
-    lql_selector_free(selector);
     lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
     free_projection_args(&fields);

@@ -1,3 +1,10 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
+
 #include "lql_internal.h"
 
 #include <ctype.h>
@@ -5,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 typedef struct eval_doc {
   const lql_selector *selector;
@@ -601,6 +609,87 @@ typedef struct spooled_match_state {
 
 static int query_limit_enabled(lql_uint64 limit) { return limit != 0u; }
 
+static int eval_seek_u64(FILE *file, lql_uint64 offset) {
+  off_t seek_offset;
+  seek_offset = (off_t)offset;
+  if (seek_offset < (off_t)0 || (lql_uint64)seek_offset != offset) {
+    return 0;
+  }
+  return fseeko(file, seek_offset, SEEK_SET) == 0;
+}
+
+static int eval_file_size_u64(FILE *file, lql_uint64 *out) {
+  off_t end;
+  if (file == NULL || out == NULL) {
+    return 0;
+  }
+  if (fseeko(file, (off_t)0, SEEK_END) != 0) {
+    return 0;
+  }
+  end = ftello(file);
+  if (end < (off_t)0) {
+    return 0;
+  }
+  *out = (lql_uint64)end;
+  return (off_t)(*out) == end;
+}
+
+static int eval_copy_range(FILE *in, FILE *out, lql_uint64 size) {
+  char buf[8192];
+  size_t want;
+  size_t got;
+  while (size != 0u) {
+    want = size > (lql_uint64)sizeof(buf) ? sizeof(buf) : (size_t)size;
+    got = fread(buf, 1u, want, in);
+    if (got == 0u) {
+      return 0;
+    }
+    if (fwrite(buf, 1u, got, out) != got) {
+      return 0;
+    }
+    size -= (lql_uint64)got;
+  }
+  return 1;
+}
+
+static lql_status eval_project_then_maybe_mutate_spooled(
+    const lql_projection *projection, const lql_mutation_plan *mutation_plan,
+    int matched, const lonejson_spooled *spooled, FILE *out, int *out_projected,
+    lql_error *error) {
+  FILE *projected_file;
+  lql_uint64 projected_size;
+  lql_status st;
+
+  if (out_projected != NULL) {
+    *out_projected = 0;
+  }
+  projected_file = tmpfile();
+  if (projected_file == NULL) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to create projection temp file");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  st = lql_project_spooled(projection, spooled, projected_file, out_projected,
+                           error);
+  if (st == LQL_STATUS_OK && out_projected != NULL && *out_projected) {
+    if (!eval_file_size_u64(projected_file, &projected_size)) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "failed to size projection temp file");
+      st = LQL_STATUS_JSON_ERROR;
+    } else if (matched && mutation_plan != NULL) {
+      st = lql_mutate_file_range_paths(mutation_plan, projected_file, 0u,
+                                       projected_size, out, error);
+    } else if (!eval_seek_u64(projected_file, 0u) ||
+               !eval_copy_range(projected_file, out, projected_size)) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "failed to write projected candidate");
+      st = LQL_STATUS_JSON_ERROR;
+    }
+  }
+  fclose(projected_file);
+  return st;
+}
+
 static void query_stop(query_stream_state *state,
                        lql_query_stop_reason reason) {
   state->result.stopped_early = 1;
@@ -715,7 +804,26 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
         reset_doc(&state->doc);
         return LONEJSON_CANDIDATE_CONTINUE;
       }
-      if (matched) {
+      if (state->projection != NULL) {
+        if (eval_project_then_maybe_mutate_spooled(
+                state->projection, state->mutation_plan, matched,
+                candidate->payload_spool, state->out, &projected,
+                &state->mutation_error) != LQL_STATUS_OK) {
+          error->code = LONEJSON_STATUS_CALLBACK_FAILED;
+          strncpy(error->message, state->mutation_error.message,
+                  sizeof(error->message) - 1u);
+          error->message[sizeof(error->message) - 1u] = '\0';
+          reset_doc(&state->doc);
+          return LONEJSON_CANDIDATE_ERROR;
+        }
+        if (!projected) {
+          state->result.candidates_seen++;
+          state->result.bytes_read =
+              (lql_uint64)(candidate->stream_offset + candidate->byte_size);
+          reset_doc(&state->doc);
+          return LONEJSON_CANDIDATE_CONTINUE;
+        }
+      } else if (matched) {
         if (lql_mutate_spooled_paths(state->mutation_plan,
                                      candidate->payload_spool, state->out,
                                      &state->mutation_error) != LQL_STATUS_OK) {

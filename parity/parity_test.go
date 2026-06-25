@@ -1369,6 +1369,115 @@ func TestCLQLMutationMatchesOnlyParity(t *testing.T) {
 	}
 }
 
+func TestCLQLMutationProjectionParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"uri":"/a","status":404,"drop":true}
+{"uri":"/b","status":200,"drop":true}`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-project-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	cmd := exec.Command(
+		clql,
+		"-c",
+		"-f", "/uri",
+		"-m", "/hello=world",
+		`/status=404`,
+		tmp.Name(),
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql mutation projection failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql mutation projection: %v out=%q", err, string(out))
+	}
+	want, err := decodeJSONValues([]byte(`{"uri":"/a","hello":"world"}
+{"uri":"/b"}`))
+	if err != nil {
+		t.Fatalf("decode expected mutation projection: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mutation projection mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
+func TestCLQLStdinMutationProjectionMatchesOnlyParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"uri":"/a","status":404,"drop":true}
+{"uri":"/b","status":200,"drop":true}`
+	cmd := exec.Command(
+		clql,
+		"-c",
+		"-M",
+		"-f", "/uri",
+		"-m", "/hello=world",
+		`/status=404`,
+	)
+	cmd.Stdin = bytes.NewBufferString(body)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql stdin mutation projection matches-only failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql stdin mutation projection matches-only: %v out=%q", err, string(out))
+	}
+	want, err := decodeJSONValues([]byte(`{"uri":"/a","hello":"world"}`))
+	if err != nil {
+		t.Fatalf("decode expected stdin mutation projection matches-only: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("stdin mutation projection matches-only mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
+func TestCLQLStdinMutationProjectionPreservesUnmatchedParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"uri":"/a","status":404,"drop":true}
+{"uri":"/b","status":200,"drop":true}`
+	cmd := exec.Command(
+		clql,
+		"-c",
+		"-f", "/uri",
+		"-m", "/hello=world",
+		`/status=404`,
+	)
+	cmd.Stdin = bytes.NewBufferString(body)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql stdin mutation projection failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql stdin mutation projection: %v out=%q", err, string(out))
+	}
+	want, err := decodeJSONValues([]byte(`{"uri":"/a","hello":"world"}
+{"uri":"/b"}`))
+	if err != nil {
+		t.Fatalf("decode expected stdin mutation projection: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("stdin mutation projection mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
 func TestCLQLStdinMutationMatchesOnlyParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

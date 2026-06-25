@@ -21,6 +21,10 @@ materialization. `clql` also supports seekable-file inline/write mutation
 through a temp-file rename.
 The same supported streaming mutation subset can run over non-seekable stdin
 through callback-scoped spooled candidate payloads.
+`clql -m -f` composes mutation and projection in Go-compatible order by
+projecting each output candidate first, then mutating the projected value for
+matched candidates; this uses a callback-scoped temp-file spill for the
+projected candidate rather than retaining it in memory.
 `file:`, `textfile:`, and `base64file:` mutation values can be parsed through
 the opt-in parse options and `clql -F`, and execute through source-backed
 lonejson writers on both seekable file input and the supported spooled stdin

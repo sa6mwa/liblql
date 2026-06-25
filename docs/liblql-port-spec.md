@@ -457,6 +457,11 @@ Current implementation is an early slice:
   mutation subset to matched non-seekable stdin candidates through
   callback-scoped spooled payloads, preserves unmatched candidates by default,
   and honors `-M/--matches-only` without materializing the full input stream;
+- `clql -m/--mutate -f/--field` follows Go CLI order for seekable file input
+  and non-seekable stdin: project each output candidate first, then mutate the
+  projected value only for matched candidates; this path uses callback-scoped
+  temp-file spill for the projected candidate and does not retain projected
+  JSON in memory;
 - `clql -m/--mutate` accepts a single file argument with no selector as
   match-all mutation input and rejects multiple file inputs explicitly;
 - `clql -F/--enable-file-mutations` opts into parsing file-backed mutation
