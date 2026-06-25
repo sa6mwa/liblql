@@ -446,7 +446,7 @@ Current implementation is an early slice:
   replacing the array value with an object keyed by the requested numeric
   segments; supported set values include `time:` normalization to UTC
   RFC3339Nano strings and `file:/textfile:/base64file:` source-backed file
-  values; non-seekable execution still returns unsupported;
+  values; public C execution is currently seekable-file-range only;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path, existing-position wildcard, and
   existing-position recursive mutations to matched candidates;
@@ -458,7 +458,7 @@ Current implementation is an early slice:
   match-all mutation input and rejects multiple file inputs explicitly;
 - `clql -F/--enable-file-mutations` opts into parsing file-backed mutation
   values and supports `file:`, `textfile:`, and `base64file:` streaming
-  execution;
+  execution over seekable file input and supported spooled stdin mutation;
 - `clql -m -M/--matches-only` emits only matched seekable file candidates after
   applying supported concrete-path mutations;
 - `clql -m -i/--inline` and `clql -m -w/--write` rewrite a single seekable

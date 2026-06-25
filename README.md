@@ -21,8 +21,8 @@ The same supported streaming mutation subset can run over non-seekable stdin
 through callback-scoped spooled candidate payloads.
 `file:`, `textfile:`, and `base64file:` mutation values can be parsed through
 the opt-in parse options and `clql -F`, and execute through source-backed
-lonejson writers. Lua parity and full `clql` parity are still active porting
-work.
+lonejson writers on both seekable file input and the supported spooled stdin
+mutation path. Lua parity and full `clql` parity are still active porting work.
 
 ```sh
 make deps-debug

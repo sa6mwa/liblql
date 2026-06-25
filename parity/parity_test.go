@@ -769,6 +769,49 @@ func TestCLQLEnableFileMutationsStreamsExplicitFileBackedValues(t *testing.T) {
 	}
 }
 
+func TestCLQLStdinFileBackedMutationParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	dir := t.TempDir()
+	textPath := filepath.Join(dir, "blob.txt")
+	binPath := filepath.Join(dir, "blob.bin")
+	if err := os.WriteFile(textPath, []byte("stdin\npayload"), 0600); err != nil {
+		t.Fatalf("write text blob: %v", err)
+	}
+	if err := os.WriteFile(binPath, []byte{0x00, 0x10, 0x20, 0x7f}, 0600); err != nil {
+		t.Fatalf("write binary blob: %v", err)
+	}
+
+	cmd := exec.Command(
+		clql,
+		"-F",
+		"-c",
+		"-m", `textfile:/payload=`+textPath,
+		"-m", `base64file:/encoded=`+binPath,
+		`/id="b"`,
+	)
+	cmd.Stdin = bytes.NewBufferString(`{"id":"a"}
+{"id":"b"}`)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("stdin file-backed mutation failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode stdin file-backed mutation output: %v out=%q", err, string(out))
+	}
+	want, err := decodeJSONValues([]byte(`{"id":"a"}
+{"id":"b","payload":"stdin\npayload","encoded":"ABAgfw=="}`))
+	if err != nil {
+		t.Fatalf("decode expected stdin file-backed mutation output: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("stdin file-backed mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
 func TestCLQLMatchAllMutationFileParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
