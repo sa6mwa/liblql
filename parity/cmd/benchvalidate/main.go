@@ -163,6 +163,9 @@ func validateRecord(line int, rec record) error {
 	if rec.UnsupportedReason != "" {
 		return fmt.Errorf("line %d: supported record has unsupported_reason", line)
 	}
+	if requiresTiming(rec) && rec.NsPerOp == nil {
+		return fmt.Errorf("line %d: %s/%s records must report ns_per_op", line, rec.Impl, rec.Mode)
+	}
 	if isDecisionOnlyMode(rec.Mode) {
 		if rec.Payloads != 0 || rec.PayloadBytes != 0 || rec.PayloadSourceType != "none" {
 			return fmt.Errorf("line %d: decision-only records must not report payloads", line)
@@ -189,6 +192,16 @@ func isDecisionOnlyMode(mode string) bool {
 func isPlusValueMode(mode string) bool {
 	return mode == "plus_value_selector" || mode == "plus_value_plan" ||
 		mode == "plus_value_openjson_selector" || mode == "plus_value_openjson_plan"
+}
+
+func requiresTiming(rec record) bool {
+	if rec.Impl == "go" {
+		return true
+	}
+	if rec.Impl == "c" && rec.Mode != "decision_only_selector" {
+		return true
+	}
+	return false
 }
 
 func isSHA256Hex(value string) bool {

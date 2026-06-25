@@ -11,6 +11,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$tmp"
+go_bin="${GO:-go}"
 
 expect_failure() {
   name=$1
@@ -27,6 +28,27 @@ expect_failure() {
     return 1
   fi
 }
+
+expect_validator_failure() {
+  name=$1
+  expected=$2
+  log="$tmp/$name.jsonl"
+  output="$tmp/$name.out"
+  cat > "$log"
+  if (cd "$root/parity" && "$go_bin" run ./cmd/benchvalidate) < "$log" > "$output" 2>&1; then
+    printf 'benchmark validator negative check unexpectedly passed: %s\n' "$name" >&2
+    return 1
+  fi
+  if ! grep -q "$expected" "$output"; then
+    printf 'benchmark validator negative check did not report %s: %s\n' "$expected" "$name" >&2
+    cat "$output" >&2
+    return 1
+  fi
+}
+
+expect_validator_failure "missing-required-timing" "must report ns_per_op" <<'JSONL'
+{"schema":"liblql.parity_benchmark.v1","impl":"go","dataset":"large_ndjson","selector":"eq_status_open","expr":"/status=\"open\"","mode":"decision_only_selector","submode":"warmup_included","bytes_per_iter":1,"candidates":1,"matches":1,"payloads":0,"payload_bytes":0,"payload_source_type":"none","fixture_sha256":"0000000000000000000000000000000000000000000000000000000000000000","ns_per_op":null,"allocs_per_op":null,"unsupported":false,"unsupported_reason":""}
+JSONL
 
 expect_failure "candidate-mismatch" "benchmark candidate-count mismatch" \
   env LQL_BENCH_FIXTURE_DIR="$tmp/candidate" \
