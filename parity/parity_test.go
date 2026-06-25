@@ -1672,6 +1672,81 @@ func TestCLQLStdinMutationParity(t *testing.T) {
 	}
 }
 
+func TestCLQLTopLevelArrayMutationParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `[{"id":"a","status":"open"},{"id":"b","status":"open"}]`
+	mutations := []string{`/status=done`}
+	muts, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatalf("go parse mutations: %v", err)
+	}
+	var wantOut bytes.Buffer
+	if err := lql.MutateStream(lql.MutateStreamRequest{
+		Reader:    bytes.NewBufferString(body),
+		Writer:    &wantOut,
+		Mutations: muts,
+	}); err != nil {
+		t.Fatalf("go mutate top-level array: %v", err)
+	}
+	want, err := decodeJSONValues(wantOut.Bytes())
+	if err != nil {
+		t.Fatalf("decode go top-level array mutation: %v", err)
+	}
+
+	t.Run("stdin", func(t *testing.T) {
+		args := []string{"-c"}
+		for _, mutation := range mutations {
+			args = append(args, "-m", mutation)
+		}
+		cmd := exec.Command(clql, args...)
+		cmd.Stdin = bytes.NewBufferString(body)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql stdin top-level array mutation failed: %v out=%q", err, string(out))
+		}
+		got, err := decodeJSONValues(out)
+		if err != nil {
+			t.Fatalf("decode clql stdin top-level array mutation: %v out=%q", err, string(out))
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("stdin top-level array mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+		}
+	})
+
+	t.Run("file", func(t *testing.T) {
+		tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-top-array-*.json")
+		if err != nil {
+			t.Fatalf("create temp: %v", err)
+		}
+		if _, err := tmp.WriteString(body); err != nil {
+			t.Fatalf("write temp: %v", err)
+		}
+		if err := tmp.Close(); err != nil {
+			t.Fatalf("close temp: %v", err)
+		}
+		args := []string{"-c"}
+		for _, mutation := range mutations {
+			args = append(args, "-m", mutation)
+		}
+		args = append(args, tmp.Name())
+		cmd := exec.Command(clql, args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql file top-level array mutation failed: %v out=%q", err, string(out))
+		}
+		got, err := decodeJSONValues(out)
+		if err != nil {
+			t.Fatalf("decode clql file top-level array mutation: %v out=%q", err, string(out))
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("file top-level array mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+		}
+	})
+}
+
 func TestCLQLMatchAllMutationMixedStreamParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
