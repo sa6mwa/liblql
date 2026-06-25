@@ -533,8 +533,10 @@ Current implementation is an early slice:
   CLI parity;
 - C-only SDK unit tests cover the currently implemented public liblql selector,
   streaming, projection, compacting, mutation, version, and capability
-  surfaces, and an SDK coverage manifest now ties claimed SDK parity surfaces
-  to C unit functions;
+  surfaces, including mutation plan parse success, expansion counts, default
+  and explicit file-backed parse options, and mutation parse-error invariants;
+  an SDK coverage manifest now ties claimed SDK parity surfaces to C unit
+  functions;
 - Go-backed parity tests exist for the current CLI surface and remain a
   transitional oracle for deriving exhaustive C-only SDK tests;
 - Go-backed SDK parity tests now exist for public `liblql` selector

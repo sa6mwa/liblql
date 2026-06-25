@@ -1387,8 +1387,11 @@ static void expect_mutation_plan_api(void) {
   lql_error error;
   lql_status st;
   const char *valid[6];
-  const char *invalid[6];
-  const char *file_backed;
+  const char *wildcards[3];
+  const char *file_backed[2];
+  const char *invalid_default[8];
+  const char *invalid_file_options[4];
+  const char *blank;
   size_t i;
 
   valid[0] = "/state/progress=ready";
@@ -1410,32 +1413,63 @@ static void expect_mutation_plan_api(void) {
   }
   lql_mutation_plan_free(plan);
 
-  invalid[0] = "badexpr";
-  invalid[1] = "/";
-  invalid[2] = "/count=+0";
-  invalid[3] = "time:/state/updated=tomorrowish";
-  invalid[4] = "file:/payload=blob.txt";
-  invalid[5] = "time:/state/updated=2025-01-01";
-  for (i = 0u; i < 6u; ++i) {
+  wildcards[0] = "/items/*/status=ready";
+  wildcards[1] = "/groups/.../sku=ok";
+  wildcards[2] = "/records[]/count=+1";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(wildcards, 3u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("wildcard mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else if (lql_mutation_plan_count(plan) != 3u) {
+    printf("wildcard mutation plan count mismatch: %lu\n",
+           (unsigned long)lql_mutation_plan_count(plan));
+    ++failures;
+  }
+  lql_mutation_plan_free(plan);
+
+  invalid_default[0] = "badexpr";
+  invalid_default[1] = "/";
+  invalid_default[2] = "/count=+0";
+  invalid_default[3] = "time:/state/updated=tomorrowish";
+  invalid_default[4] = "file:/payload=blob.txt";
+  invalid_default[5] = "time:/state/updated=2025-01-01";
+  invalid_default[6] = "textfile:/payload=blob.txt";
+  invalid_default[7] = "base64file:/payload=blob.bin";
+  for (i = 0u; i < sizeof(invalid_default) / sizeof(invalid_default[0]); ++i) {
     plan = NULL;
     lql_error_init(&error);
-    st = lql_mutation_plan_parse(&invalid[i], 1u, &plan, &error);
-    if (st == LQL_STATUS_OK) {
-      printf("invalid mutation parsed: %s\n", invalid[i]);
+    st = lql_mutation_plan_parse(&invalid_default[i], 1u, &plan, &error);
+    if (st != LQL_STATUS_PARSE_ERROR || plan != NULL) {
+      printf("invalid mutation parse mismatch: %s status=%s error=%s\n",
+             invalid_default[i], lql_status_string(st), error.message);
       ++failures;
     }
     lql_mutation_plan_free(plan);
   }
 
-  file_backed = "textfile:/payload=blob.txt";
+  blank = "";
+  plan = (lql_mutation_plan *)1;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(&blank, 1u, &plan, &error);
+  if (st != LQL_STATUS_PARSE_ERROR || plan != NULL ||
+      strcmp(error.message, "no valid field mutations parsed") != 0) {
+    printf("blank mutation parse mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  file_backed[0] = "textfile:/payload=blob.txt";
+  file_backed[1] = "base64file:/encoded=blob.bin";
   memset(&options, 0, sizeof(options));
   options.enable_file_values = 1;
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse_with_options(&file_backed, 1u, &options, &plan,
+  st = lql_mutation_plan_parse_with_options(file_backed, 1u, &options, &plan,
                                             &error);
-  if (st == LQL_STATUS_OK) {
-    printf("relative file-backed mutation parsed without base dir\n");
+  if (st != LQL_STATUS_PARSE_ERROR || plan != NULL) {
+    printf("relative file-backed mutation status mismatch: %s\n",
+           error.message);
     ++failures;
   }
   lql_mutation_plan_free(plan);
@@ -1443,17 +1477,41 @@ static void expect_mutation_plan_api(void) {
   options.file_value_base_dir = "/tmp";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse_with_options(&file_backed, 1u, &options, &plan,
+  st = lql_mutation_plan_parse_with_options(file_backed, 2u, &options, &plan,
                                             &error);
   if (st != LQL_STATUS_OK) {
     printf("enabled file-backed mutation parse failed: %s\n", error.message);
     ++failures;
-  } else if (lql_mutation_plan_count(plan) != 1u) {
+  } else if (lql_mutation_plan_count(plan) != 2u) {
     printf("enabled file-backed mutation count mismatch: %lu\n",
            (unsigned long)lql_mutation_plan_count(plan));
     ++failures;
   }
   lql_mutation_plan_free(plan);
+
+  invalid_file_options[0] = "file:/payload++";
+  invalid_file_options[1] = "file:rm:/payload=blob.txt";
+  invalid_file_options[2] = "file:time:/payload=blob.txt";
+  invalid_file_options[3] = "textfile:/payload=blob.txt";
+  for (i = 0u;
+       i < sizeof(invalid_file_options) / sizeof(invalid_file_options[0]);
+       ++i) {
+    memset(&options, 0, sizeof(options));
+    options.enable_file_values = 1;
+    if (i < 3u) {
+      options.file_value_base_dir = "/tmp";
+    }
+    plan = NULL;
+    lql_error_init(&error);
+    st = lql_mutation_plan_parse_with_options(&invalid_file_options[i], 1u,
+                                              &options, &plan, &error);
+    if (st != LQL_STATUS_PARSE_ERROR || plan != NULL) {
+      printf("invalid file-backed mutation parsed: %s status=%s error=%s\n",
+             invalid_file_options[i], lql_status_string(st), error.message);
+      ++failures;
+    }
+    lql_mutation_plan_free(plan);
+  }
 }
 
 static void expect_mutation_error_api(void) {
@@ -2117,7 +2175,8 @@ static void expect_sdk_parity_manifest(void) {
       {"projection", "projection and compact public API error contracts",
        expect_projection_compact_error_api},
       {"compact", "seekable and buffered JSON compaction", expect_compact_api},
-      {"mutation", "mutation parse/plan public API", expect_mutation_plan_api},
+      {"mutation", "mutation parse/plan public API success and parse errors",
+       expect_mutation_plan_api},
       {"mutation", "mutation public API error contracts",
        expect_mutation_error_api},
       {"mutation", "root field mutation over seekable ranges",
