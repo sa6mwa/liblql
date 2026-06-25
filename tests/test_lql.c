@@ -338,6 +338,8 @@ int main(void) {
   expect_match("not.eq{field=/status,value=closed}",
                "{\"status\":\"closed\"}", 0);
   expect_parse_error("contains{field=/message,value=timeout,any=error}");
+  expect_parse_error("contains{field=/message,any=}");
+  expect_parse_error("contains{field=/message,any=||}");
   expect_parse_error("contains{field=/message,value=timeout,value=error}");
   expect_parse_error("contains{field=/message,value=timeout,ignoreCase=maybe}");
   expect_parse_error("eq{field=/status,f=/other,value=open}");

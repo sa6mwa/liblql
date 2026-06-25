@@ -198,6 +198,8 @@ func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	}
 	cases := []string{
 		`contains{field=/message,value=timeout,any=error}`,
+		`contains{field=/message,any=}`,
+		`contains{field=/message,any=||}`,
 		`contains{field=/message,value=timeout,value=error}`,
 		`contains{field=/message,value=timeout,ignoreCase=maybe}`,
 		`eq{field=/status,f=/other,value=open}`,
