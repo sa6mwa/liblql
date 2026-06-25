@@ -1012,9 +1012,6 @@ void lql_mutation_plan_free(lql_mutation_plan *plan) {
 }
 
 static int mutation_is_root_field_supported(const mutation_item *item) {
-  if (item->file_mode == MUTATION_FILE_AUTO) {
-    return 0;
-  }
   return item->path.segment_count == 1u && item->path.segments[0][0] != '\0' &&
          strcmp(item->path.segments[0], "*") != 0 &&
          strcmp(item->path.segments[0], "[]") != 0 &&
@@ -1045,9 +1042,6 @@ static int mutation_plan_supports_root_fields(const lql_mutation_plan *plan) {
 
 static int mutation_is_concrete_path_supported(const mutation_item *item) {
   size_t i;
-  if (item->file_mode == MUTATION_FILE_AUTO) {
-    return 0;
-  }
   if (item->path.segment_count == 0u) {
     return 0;
   }
@@ -1174,6 +1168,107 @@ static const char *unquoted_value(const char *value, size_t *out_len) {
   return value;
 }
 
+static void set_lonejson_error(lonejson_error *error, lonejson_status status,
+                               const char *message) {
+  size_t len;
+  if (error == NULL) {
+    return;
+  }
+  error->code = status;
+  error->line = 0u;
+  error->column = 0u;
+  error->offset = 0u;
+  error->system_errno = 0;
+  error->truncated = 0;
+  len = strlen(message);
+  if (len >= sizeof(error->message)) {
+    len = sizeof(error->message) - 1u;
+  }
+  memcpy(error->message, message, len);
+  error->message[len] = '\0';
+}
+
+static int inspect_file_textlike(const char *path, lonejson_error *error) {
+  FILE *file;
+  unsigned char buf[8192];
+  size_t got;
+  size_t i;
+  unsigned int expected;
+  unsigned int min_next;
+  unsigned int max_next;
+  unsigned int b;
+  file = fopen(path, "rb");
+  if (file == NULL) {
+    set_lonejson_error(error, LONEJSON_STATUS_IO_ERROR,
+                       "failed to open file-backed mutation value");
+    return -1;
+  }
+  expected = 0u;
+  min_next = 0x80u;
+  max_next = 0xBFu;
+  while ((got = fread(buf, 1u, sizeof(buf), file)) != 0u) {
+    for (i = 0u; i < got; ++i) {
+      b = (unsigned int)buf[i];
+      if (b == 0u) {
+        fclose(file);
+        return 0;
+      }
+      if (expected == 0u) {
+        if (b < 0x80u) {
+          continue;
+        } else if (b >= 0xC2u && b <= 0xDFu) {
+          expected = 1u;
+          min_next = 0x80u;
+          max_next = 0xBFu;
+        } else if (b == 0xE0u) {
+          expected = 2u;
+          min_next = 0xA0u;
+          max_next = 0xBFu;
+        } else if ((b >= 0xE1u && b <= 0xECu) || (b >= 0xEEu && b <= 0xEFu)) {
+          expected = 2u;
+          min_next = 0x80u;
+          max_next = 0xBFu;
+        } else if (b == 0xEDu) {
+          expected = 2u;
+          min_next = 0x80u;
+          max_next = 0x9Fu;
+        } else if (b == 0xF0u) {
+          expected = 3u;
+          min_next = 0x90u;
+          max_next = 0xBFu;
+        } else if (b >= 0xF1u && b <= 0xF3u) {
+          expected = 3u;
+          min_next = 0x80u;
+          max_next = 0xBFu;
+        } else if (b == 0xF4u) {
+          expected = 3u;
+          min_next = 0x80u;
+          max_next = 0x8Fu;
+        } else {
+          fclose(file);
+          return 0;
+        }
+      } else {
+        if (b < min_next || b > max_next) {
+          fclose(file);
+          return 0;
+        }
+        --expected;
+        min_next = 0x80u;
+        max_next = 0xBFu;
+      }
+    }
+  }
+  if (ferror(file)) {
+    fclose(file);
+    set_lonejson_error(error, LONEJSON_STATUS_IO_ERROR,
+                       "failed to read file-backed mutation value");
+    return -1;
+  }
+  fclose(file);
+  return expected == 0u ? 1 : 0;
+}
+
 static lonejson_status write_mutation_set_value(lonejson_writer *writer,
                                                 const mutation_item *item,
                                                 lonejson_error *error) {
@@ -1184,12 +1279,21 @@ static lonejson_status write_mutation_set_value(lonejson_writer *writer,
   char number_buf[64];
   lonejson_source source;
   lonejson_status st;
-  if (item->file_mode == MUTATION_FILE_TEXT ||
-      item->file_mode == MUTATION_FILE_BASE64) {
+  mutation_file_mode file_mode;
+  int textlike;
+  file_mode = item->file_mode;
+  if (file_mode == MUTATION_FILE_AUTO) {
+    textlike = inspect_file_textlike(item->file_path, error);
+    if (textlike < 0) {
+      return LONEJSON_STATUS_IO_ERROR;
+    }
+    file_mode = textlike ? MUTATION_FILE_TEXT : MUTATION_FILE_BASE64;
+  }
+  if (file_mode == MUTATION_FILE_TEXT || file_mode == MUTATION_FILE_BASE64) {
     lonejson_source_init(&source);
     st = lonejson_source_set_path(&source, item->file_path, error);
     if (st == LONEJSON_STATUS_OK) {
-      if (item->file_mode == MUTATION_FILE_TEXT) {
+      if (file_mode == MUTATION_FILE_TEXT) {
         st = lonejson_writer_source_text(writer, &source, error);
       } else {
         st = lonejson_writer_source_base64(writer, &source, error);

@@ -552,7 +552,12 @@ func TestCLQLEnableFileMutationsStreamsExplicitFileBackedValues(t *testing.T) {
 		t.Fatalf("write binary blob: %v", err)
 	}
 	if _, err := lql.ParseMutationsWithOptions(
-		[]string{`textfile:/payload=` + textPath, `base64file:/encoded=` + binPath},
+		[]string{
+			`textfile:/payload=` + textPath,
+			`base64file:/encoded=` + binPath,
+			`file:/auto_text=` + textPath,
+			`file:/auto_bin=` + binPath,
+		},
 		time.Unix(1700000000, 0),
 		lql.ParseMutationsOptions{EnableFileValues: true},
 	); err != nil {
@@ -568,6 +573,8 @@ func TestCLQLEnableFileMutationsStreamsExplicitFileBackedValues(t *testing.T) {
 		"-c",
 		"-m", `textfile:/payload=`+textPath,
 		"-m", `base64file:/encoded=`+binPath,
+		"-m", `file:/auto_text=`+textPath,
+		"-m", `file:/auto_bin=`+binPath,
 		`contains{f=/}`,
 		inputPath,
 	)
@@ -579,7 +586,7 @@ func TestCLQLEnableFileMutationsStreamsExplicitFileBackedValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode file-backed mutation output: %v out=%q", err, string(out))
 	}
-	want, err := decodeJSONValues([]byte(`{"payload":"hello\n\"quoted\"","encoded":"AAECYQ=="}`))
+	want, err := decodeJSONValues([]byte(`{"payload":"hello\n\"quoted\"","encoded":"AAECYQ==","auto_text":"hello\n\"quoted\"","auto_bin":"AAECYQ=="}`))
 	if err != nil {
 		t.Fatalf("decode expected file-backed mutation output: %v", err)
 	}
