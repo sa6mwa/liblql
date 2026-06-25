@@ -1271,6 +1271,76 @@ static void expect_buffered_projection_api(void) {
   }
 }
 
+static void expect_projection_path_invariant_api(void) {
+  static const char doc[] =
+      "{\"id\":\"a\",\"meta\":{\"trace\":7},\"items\":[{\"sku\":\"A\"}]}";
+  const char *duplicate[2];
+  const char *conflict_parent_first[2];
+  const char *conflict_child_first[2];
+  FILE *out;
+  lql_projection *projection;
+  lql_error error;
+  lql_status st;
+  int found;
+  char buf[64];
+  size_t len;
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("projection invariant tmpfile failed\n");
+    ++failures;
+    return;
+  }
+
+  duplicate[0] = "/id";
+  duplicate[1] = "/id";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(duplicate, 2u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("duplicate projection path rejected: %s\n", error.message);
+    ++failures;
+  } else {
+    found = 0;
+    st = lql_project_json(projection, doc, strlen(doc), out, &found, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("duplicate projection failed: %s\n", error.message);
+      ++failures;
+    } else if (!found) {
+      printf("duplicate projection expected found\n");
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf, "{\"id\":\"a\"}") != 0) {
+      printf("duplicate projection output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  lql_projection_free(projection);
+  fclose(out);
+
+  conflict_parent_first[0] = "/meta";
+  conflict_parent_first[1] = "/meta/trace";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(conflict_parent_first, 2u, &projection, &error);
+  if (st == LQL_STATUS_OK) {
+    printf("parent-first projection conflict parsed\n");
+    lql_projection_free(projection);
+    ++failures;
+  }
+
+  conflict_child_first[0] = "/items/0/sku";
+  conflict_child_first[1] = "/items";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(conflict_child_first, 2u, &projection, &error);
+  if (st == LQL_STATUS_OK) {
+    printf("child-first projection conflict parsed\n");
+    lql_projection_free(projection);
+    ++failures;
+  }
+}
+
 static void expect_projection_compact_error_api(void) {
   static const char malformed[] = "{\"id\":";
   const char *field;
@@ -2548,6 +2618,8 @@ static void expect_sdk_parity_manifest(void) {
       {"projection", "seekable file-range projection", expect_projection_api},
       {"projection", "caller-buffered JSON projection",
        expect_buffered_projection_api},
+      {"projection", "duplicate and conflicting projection path invariants",
+       expect_projection_path_invariant_api},
       {"projection", "projection and compact public API error contracts",
        expect_projection_compact_error_api},
       {"compact", "seekable and buffered JSON compaction", expect_compact_api},
@@ -2809,6 +2881,7 @@ int main(void) {
   expect_seekable_payload_api();
   expect_projection_api();
   expect_buffered_projection_api();
+  expect_projection_path_invariant_api();
   expect_projection_compact_error_api();
   expect_compact_api();
   expect_mutation_plan_api();

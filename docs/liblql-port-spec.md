@@ -606,6 +606,9 @@ Current implementation is an early slice:
   success/error, mutation success/error, compact success/error, and stream
   corpora; this is behavioral lib-to-lib parity, not a requirement that the C
   API mirror Go API shape;
+- native C SDK projection tests assert duplicate projection paths are
+  idempotent and parent/child projection path conflicts are rejected through
+  the public projection API;
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
   payload kinds, decoded matched payload JSON, and malformed JSON stream
