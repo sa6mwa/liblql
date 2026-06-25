@@ -156,6 +156,109 @@ static int liblql_project_json_value(const char *const *fields,
 	return 0;
 }
 
+static int liblql_prepare_range_input(const char *prefix, const char *json,
+                                      const char *suffix, FILE **out_file,
+                                      unsigned long long *out_offset,
+                                      unsigned long long *out_size,
+                                      char *errbuf, size_t errbuf_len) {
+	FILE *input;
+	size_t prefix_len;
+	size_t json_len;
+	size_t suffix_len;
+
+	input = tmpfile();
+	if (input == NULL) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to create temporary input", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	prefix_len = strlen(prefix);
+	json_len = strlen(json);
+	suffix_len = strlen(suffix);
+	if (fwrite(prefix, 1u, prefix_len, input) != prefix_len ||
+	    fwrite(json, 1u, json_len, input) != json_len ||
+	    fwrite(suffix, 1u, suffix_len, input) != suffix_len ||
+	    fseek(input, 0L, SEEK_SET) != 0) {
+		fclose(input);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to prepare temporary input", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	*out_file = input;
+	*out_offset = (unsigned long long)prefix_len;
+	*out_size = (unsigned long long)json_len;
+	return 0;
+}
+
+static int liblql_project_file_range_value(const char *const *fields,
+                                           size_t field_count,
+                                           const char *prefix,
+                                           const char *json,
+                                           const char *suffix,
+                                           char **out_json, size_t *out_len,
+                                           int *out_found, char *errbuf,
+                                           size_t errbuf_len) {
+	lql_error error;
+	lql_projection *projection;
+	lql_status status;
+	FILE *input;
+	FILE *tmp;
+	unsigned long long offset;
+	unsigned long long size;
+
+	lql_error_init(&error);
+	projection = NULL;
+	input = NULL;
+	*out_json = NULL;
+	*out_len = 0u;
+	*out_found = 0;
+	status = lql_projection_parse(fields, field_count, &projection, &error);
+	if (status != LQL_STATUS_OK) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_prepare_range_input(prefix, json, suffix, &input, &offset, &size,
+	                               errbuf, errbuf_len) != 0) {
+		lql_projection_free(projection);
+		return -1;
+	}
+	tmp = tmpfile();
+	if (tmp == NULL) {
+		fclose(input);
+		lql_projection_free(projection);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	status = lql_project_file_range(projection, input, (lql_uint64)offset,
+	                                (lql_uint64)size, tmp, out_found, &error);
+	fclose(input);
+	lql_projection_free(projection);
+	if (status != LQL_STATUS_OK) {
+		fclose(tmp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_read_tmp(tmp, out_json, out_len, errbuf, errbuf_len) != 0) {
+		fclose(tmp);
+		return -1;
+	}
+	fclose(tmp);
+	return 0;
+}
+
 static int liblql_mutate_json_value(const char *const *exprs,
                                     size_t expr_count, const char *json,
                                     char **out_json, size_t *out_len,
@@ -188,6 +291,150 @@ static int liblql_mutate_json_value(const char *const *exprs,
 	}
 	status = lql_mutate_json(plan, json, strlen(json), tmp, &error);
 	lql_mutation_plan_free(plan);
+	if (status != LQL_STATUS_OK) {
+		fclose(tmp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_read_tmp(tmp, out_json, out_len, errbuf, errbuf_len) != 0) {
+		fclose(tmp);
+		return -1;
+	}
+	fclose(tmp);
+	return 0;
+}
+
+static int liblql_mutate_file_range_value(const char *const *exprs,
+                                          size_t expr_count,
+                                          const char *prefix, const char *json,
+                                          const char *suffix, char **out_json,
+                                          size_t *out_len, char *errbuf,
+                                          size_t errbuf_len) {
+	lql_error error;
+	lql_mutation_plan *plan;
+	lql_status status;
+	FILE *input;
+	FILE *tmp;
+	unsigned long long offset;
+	unsigned long long size;
+
+	lql_error_init(&error);
+	plan = NULL;
+	input = NULL;
+	*out_json = NULL;
+	*out_len = 0u;
+	status = lql_mutation_plan_parse(exprs, expr_count, &plan, &error);
+	if (status != LQL_STATUS_OK) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_prepare_range_input(prefix, json, suffix, &input, &offset, &size,
+	                               errbuf, errbuf_len) != 0) {
+		lql_mutation_plan_free(plan);
+		return -1;
+	}
+	tmp = tmpfile();
+	if (tmp == NULL) {
+		fclose(input);
+		lql_mutation_plan_free(plan);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	status = lql_mutate_file_range_paths(plan, input, (lql_uint64)offset,
+	                                     (lql_uint64)size, tmp, &error);
+	fclose(input);
+	lql_mutation_plan_free(plan);
+	if (status != LQL_STATUS_OK) {
+		fclose(tmp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_read_tmp(tmp, out_json, out_len, errbuf, errbuf_len) != 0) {
+		fclose(tmp);
+		return -1;
+	}
+	fclose(tmp);
+	return 0;
+}
+
+static int liblql_compact_json_value(const char *json, char **out_json,
+                                     size_t *out_len, char *errbuf,
+                                     size_t errbuf_len) {
+	lql_error error;
+	lql_status status;
+	FILE *tmp;
+
+	lql_error_init(&error);
+	*out_json = NULL;
+	*out_len = 0u;
+	tmp = tmpfile();
+	if (tmp == NULL) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	status = lql_compact_json(json, strlen(json), tmp, &error);
+	if (status != LQL_STATUS_OK) {
+		fclose(tmp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_read_tmp(tmp, out_json, out_len, errbuf, errbuf_len) != 0) {
+		fclose(tmp);
+		return -1;
+	}
+	fclose(tmp);
+	return 0;
+}
+
+static int liblql_compact_file_range_value(const char *prefix, const char *json,
+                                           const char *suffix,
+                                           char **out_json, size_t *out_len,
+                                           char *errbuf, size_t errbuf_len) {
+	lql_error error;
+	lql_status status;
+	FILE *input;
+	FILE *tmp;
+	unsigned long long offset;
+	unsigned long long size;
+
+	lql_error_init(&error);
+	input = NULL;
+	*out_json = NULL;
+	*out_len = 0u;
+	if (liblql_prepare_range_input(prefix, json, suffix, &input, &offset, &size,
+	                               errbuf, errbuf_len) != 0) {
+		return -1;
+	}
+	tmp = tmpfile();
+	if (tmp == NULL) {
+		fclose(input);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	status = lql_compact_file_range(input, (lql_uint64)offset, (lql_uint64)size,
+	                                tmp, &error);
+	fclose(input);
 	if (status != LQL_STATUS_OK) {
 		fclose(tmp);
 		if (errbuf != NULL && errbuf_len > 0u) {
@@ -504,6 +751,31 @@ func cProjectJSON(fields []string, doc string) ([]byte, bool, error) {
 	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), found != 0, nil
 }
 
+func cProjectFileRange(fields []string, prefix, doc, suffix string) ([]byte, bool, error) {
+	cFields, freeFields := cStringArray(fields)
+	defer freeFields()
+
+	cPrefix := C.CString(prefix)
+	cDoc := C.CString(doc)
+	cSuffix := C.CString(suffix)
+	defer C.free(unsafe.Pointer(cPrefix))
+	defer C.free(unsafe.Pointer(cDoc))
+	defer C.free(unsafe.Pointer(cSuffix))
+
+	var out *C.char
+	var outLen C.size_t
+	var found C.int
+	var errbuf [256]C.char
+	status := C.liblql_project_file_range_value(cFields, C.size_t(len(fields)),
+		cPrefix, cDoc, cSuffix, &out, &outLen, &found, &errbuf[0],
+		C.size_t(len(errbuf)))
+	if status != 0 {
+		return nil, false, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), found != 0, nil
+}
+
 func cMutateJSON(mutations []string, doc string) ([]byte, error) {
 	cExprs, freeExprs := cStringArray(mutations)
 	defer freeExprs()
@@ -516,6 +788,66 @@ func cMutateJSON(mutations []string, doc string) ([]byte, error) {
 	var errbuf [256]C.char
 	status := C.liblql_mutate_json_value(cExprs, C.size_t(len(mutations)), cDoc,
 		&out, &outLen, &errbuf[0], C.size_t(len(errbuf)))
+	if status != 0 {
+		return nil, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
+}
+
+func cMutateFileRange(mutations []string, prefix, doc, suffix string) ([]byte, error) {
+	cExprs, freeExprs := cStringArray(mutations)
+	defer freeExprs()
+
+	cPrefix := C.CString(prefix)
+	cDoc := C.CString(doc)
+	cSuffix := C.CString(suffix)
+	defer C.free(unsafe.Pointer(cPrefix))
+	defer C.free(unsafe.Pointer(cDoc))
+	defer C.free(unsafe.Pointer(cSuffix))
+
+	var out *C.char
+	var outLen C.size_t
+	var errbuf [256]C.char
+	status := C.liblql_mutate_file_range_value(cExprs, C.size_t(len(mutations)),
+		cPrefix, cDoc, cSuffix, &out, &outLen, &errbuf[0],
+		C.size_t(len(errbuf)))
+	if status != 0 {
+		return nil, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
+}
+
+func cCompactJSON(doc string) ([]byte, error) {
+	cDoc := C.CString(doc)
+	defer C.free(unsafe.Pointer(cDoc))
+
+	var out *C.char
+	var outLen C.size_t
+	var errbuf [256]C.char
+	status := C.liblql_compact_json_value(cDoc, &out, &outLen, &errbuf[0],
+		C.size_t(len(errbuf)))
+	if status != 0 {
+		return nil, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
+}
+
+func cCompactFileRange(prefix, doc, suffix string) ([]byte, error) {
+	cPrefix := C.CString(prefix)
+	cDoc := C.CString(doc)
+	cSuffix := C.CString(suffix)
+	defer C.free(unsafe.Pointer(cPrefix))
+	defer C.free(unsafe.Pointer(cDoc))
+	defer C.free(unsafe.Pointer(cSuffix))
+
+	var out *C.char
+	var outLen C.size_t
+	var errbuf [256]C.char
+	status := C.liblql_compact_file_range_value(cPrefix, cDoc, cSuffix, &out,
+		&outLen, &errbuf[0], C.size_t(len(errbuf)))
 	if status != 0 {
 		return nil, sdkParityError(C.GoString(&errbuf[0]))
 	}

@@ -156,7 +156,43 @@ func TestSDKSelectorParseErrorParity(t *testing.T) {
 }
 
 func TestSDKProjectionJSONParity(t *testing.T) {
-	cases := []struct {
+	for _, tc := range sdkProjectionCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			wantJSON, wantFound, err := goProjectJSON(tc.fields, tc.doc)
+			if err != nil {
+				t.Fatalf("go project: %v", err)
+			}
+			gotJSON, gotFound, err := cProjectJSON(tc.fields, tc.doc)
+			if err != nil {
+				t.Fatalf("liblql project: %v", err)
+			}
+			assertProjectionJSONParity(t, gotJSON, gotFound, wantJSON, wantFound)
+		})
+	}
+}
+
+func TestSDKProjectionFileRangeParity(t *testing.T) {
+	for _, tc := range sdkProjectionCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			wantJSON, wantFound, err := goProjectJSON(tc.fields, tc.doc)
+			if err != nil {
+				t.Fatalf("go project: %v", err)
+			}
+			gotJSON, gotFound, err := cProjectFileRange(tc.fields, `{"outside":`, tc.doc, `}`)
+			if err != nil {
+				t.Fatalf("liblql file-range project: %v", err)
+			}
+			assertProjectionJSONParity(t, gotJSON, gotFound, wantJSON, wantFound)
+		})
+	}
+}
+
+func sdkProjectionCases() []struct {
+	name   string
+	fields []string
+	doc    string
+} {
+	return []struct {
 		name   string
 		fields []string
 		doc    string
@@ -192,32 +228,6 @@ func TestSDKProjectionJSONParity(t *testing.T) {
 			doc:    `{"status":"open","id":"a","other":true}`,
 		},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			wantJSON, wantFound, err := goProjectJSON(tc.fields, tc.doc)
-			if err != nil {
-				t.Fatalf("go project: %v", err)
-			}
-			gotJSON, gotFound, err := cProjectJSON(tc.fields, tc.doc)
-			if err != nil {
-				t.Fatalf("liblql project: %v", err)
-			}
-			if gotFound != wantFound {
-				t.Fatalf("projection found mismatch: got=%v want=%v got_json=%q", gotFound, wantFound, string(gotJSON))
-			}
-			got, err := decodeJSONValues(gotJSON)
-			if err != nil {
-				t.Fatalf("decode liblql projection: %v json=%q", err, string(gotJSON))
-			}
-			want, err := decodeJSONValues(wantJSON)
-			if err != nil {
-				t.Fatalf("decode go projection: %v json=%q", err, string(wantJSON))
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("projection parity mismatch: got=%#v want=%#v got_json=%q want_json=%q", got, want, string(gotJSON), string(wantJSON))
-			}
-		})
-	}
 }
 
 func TestSDKProjectionErrorParity(t *testing.T) {
@@ -249,7 +259,43 @@ func TestSDKProjectionErrorParity(t *testing.T) {
 }
 
 func TestSDKMutationJSONParity(t *testing.T) {
-	cases := []struct {
+	for _, tc := range sdkMutationCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			wantJSON, err := goMutateJSON(tc.mutations, tc.doc)
+			if err != nil {
+				t.Fatalf("go mutate: %v", err)
+			}
+			gotJSON, err := cMutateJSON(tc.mutations, tc.doc)
+			if err != nil {
+				t.Fatalf("liblql mutate: %v", err)
+			}
+			assertDecodedJSONValuesParity(t, gotJSON, wantJSON, "mutation")
+		})
+	}
+}
+
+func TestSDKMutationFileRangeParity(t *testing.T) {
+	for _, tc := range sdkMutationCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			wantJSON, err := goMutateJSON(tc.mutations, tc.doc)
+			if err != nil {
+				t.Fatalf("go mutate: %v", err)
+			}
+			gotJSON, err := cMutateFileRange(tc.mutations, `{"outside":`, tc.doc, `}`)
+			if err != nil {
+				t.Fatalf("liblql file-range mutate: %v", err)
+			}
+			assertDecodedJSONValuesParity(t, gotJSON, wantJSON, "mutation")
+		})
+	}
+}
+
+func sdkMutationCases() []struct {
+	name      string
+	doc       string
+	mutations []string
+} {
+	return []struct {
 		name      string
 		doc       string
 		mutations []string
@@ -292,26 +338,36 @@ func TestSDKMutationJSONParity(t *testing.T) {
 			},
 		},
 	}
+}
+
+func TestSDKCompactParity(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  string
+	}{
+		{name: "object", doc: "{ \"id\" : 1, \"items\" : [ true, null, \"x\" ] }"},
+		{name: "array", doc: "[ { \"id\" : 1 }, { \"id\" : 2 } ]"},
+		{name: "escaped string", doc: "{ \"message\" : \"line\\nfeed\", \"slash\" : \"a/b\" }"},
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			wantJSON, err := goMutateJSON(tc.mutations, tc.doc)
+			wantJSON, err := goCompactJSON(tc.doc)
 			if err != nil {
-				t.Fatalf("go mutate: %v", err)
+				t.Fatalf("go compact: %v", err)
 			}
-			gotJSON, err := cMutateJSON(tc.mutations, tc.doc)
+			gotBuffered, err := cCompactJSON(tc.doc)
 			if err != nil {
-				t.Fatalf("liblql mutate: %v", err)
+				t.Fatalf("liblql compact json: %v", err)
 			}
-			got, err := decodeJSONValues(gotJSON)
+			gotRange, err := cCompactFileRange(`{"outside":`, tc.doc, `}`)
 			if err != nil {
-				t.Fatalf("decode liblql mutation: %v json=%q", err, string(gotJSON))
+				t.Fatalf("liblql compact file range: %v", err)
 			}
-			want, err := decodeJSONValues(wantJSON)
-			if err != nil {
-				t.Fatalf("decode go mutation: %v json=%q", err, string(wantJSON))
+			if !bytes.Equal(gotBuffered, wantJSON) {
+				t.Fatalf("buffered compact mismatch: got=%q want=%q", string(gotBuffered), string(wantJSON))
 			}
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("mutation parity mismatch: got=%#v want=%#v got_json=%q want_json=%q", got, want, string(gotJSON), string(wantJSON))
+			if !bytes.Equal(gotRange, wantJSON) {
+				t.Fatalf("file-range compact mismatch: got=%q want=%q", string(gotRange), string(wantJSON))
 			}
 		})
 	}
@@ -472,6 +528,14 @@ func goMutateJSON(mutations []string, doc string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+func goCompactJSON(doc string) ([]byte, error) {
+	var out bytes.Buffer
+	if err := json.Compact(&out, []byte(doc)); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
 func goStreamQuery(expr, doc string, mode int, maxMatches, maxCandidates, maxBytes int64, stopAfterFirst bool) (cStreamSummary, error) {
 	sel, err := lql.ParseSelectorString(expr)
 	if err != nil {
@@ -533,6 +597,29 @@ func goStreamQuery(expr, doc string, mode int, maxMatches, maxCandidates, maxByt
 	summary.StoppedEarly = result.StoppedEarly
 	summary.StopReason = goStopReasonCode(result.StopReason)
 	return summary, nil
+}
+
+func assertProjectionJSONParity(t *testing.T, gotJSON []byte, gotFound bool, wantJSON []byte, wantFound bool) {
+	t.Helper()
+	if gotFound != wantFound {
+		t.Fatalf("projection found mismatch: got=%v want=%v got_json=%q", gotFound, wantFound, string(gotJSON))
+	}
+	assertDecodedJSONValuesParity(t, gotJSON, wantJSON, "projection")
+}
+
+func assertDecodedJSONValuesParity(t *testing.T, gotJSON []byte, wantJSON []byte, label string) {
+	t.Helper()
+	got, err := decodeJSONValues(gotJSON)
+	if err != nil {
+		t.Fatalf("decode liblql %s: %v json=%q", label, err, string(gotJSON))
+	}
+	want, err := decodeJSONValues(wantJSON)
+	if err != nil {
+		t.Fatalf("decode go %s: %v json=%q", label, err, string(wantJSON))
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%s parity mismatch: got=%#v want=%#v got_json=%q want_json=%q", label, got, want, string(gotJSON), string(wantJSON))
+	}
 }
 
 func assertStreamSummaryParity(t *testing.T, got, want cStreamSummary) {

@@ -538,15 +538,18 @@ Current implementation is an early slice:
 - Go-backed parity tests exist for the current CLI surface and remain a
   transitional oracle for deriving exhaustive C-only SDK tests;
 - Go-backed SDK parity tests now exist for public `liblql` selector
-  parse/evaluate behavior, buffered JSON projection, buffered JSON mutation,
-  and current streaming query behavior through the C API, comparing
+  parse/evaluate behavior, buffered and seekable file-range JSON projection,
+  buffered and seekable file-range JSON mutation, compact serialization, and
+  current streaming query behavior through the C API, comparing
   `lql_selector_parse()`, `lql_selector_parse_or()`, `lql_matches_json()`,
-  `lql_project_json()`, `lql_mutate_json()`, `lql_query_file_decisions()`,
+  `lql_project_json()`, `lql_project_file_range()`, `lql_mutate_json()`,
+  `lql_mutate_file_range_paths()`, `lql_compact_json()`,
+  `lql_compact_file_range()`, `lql_query_file_decisions()`,
   `lql_query_source_decisions()`, `lql_query_file_matches()`, and
-  `lql_query_source_spooled_matches()` against the pinned Go library over the
-  current selector, projection, mutation, and stream corpora; this is
-  behavioral lib-to-lib parity, not a requirement that the C API mirror Go API
-  shape;
+  `lql_query_source_spooled_matches()` against the pinned Go library or
+  standard compact JSON behavior over the current selector, projection,
+  mutation, compact, and stream corpora; this is behavioral lib-to-lib parity,
+  not a requirement that the C API mirror Go API shape;
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
   payload kinds, and decoded matched payload JSON. Full non-stopped streams
