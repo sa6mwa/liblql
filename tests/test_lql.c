@@ -598,7 +598,7 @@ static void expect_mutation_plan_api(void) {
   lql_error error;
   lql_status st;
   const char *valid[6];
-  const char *invalid[5];
+  const char *invalid[6];
   size_t i;
 
   valid[0] = "/state/progress=ready";
@@ -625,7 +625,8 @@ static void expect_mutation_plan_api(void) {
   invalid[2] = "/count=+0";
   invalid[3] = "time:/state/updated=tomorrowish";
   invalid[4] = "file:/payload=blob.txt";
-  for (i = 0u; i < 5u; ++i) {
+  invalid[5] = "time:/state/updated=2025-01-01";
+  for (i = 0u; i < 6u; ++i) {
     plan = NULL;
     lql_error_init(&error);
     st = lql_mutation_plan_parse(&invalid[i], 1u, &plan, &error);
@@ -720,7 +721,7 @@ static void expect_path_mutation_api(void) {
   lql_error error;
   lql_status st;
   lql_mutation_plan *plan;
-  const char *exprs[6];
+  const char *exprs[7];
   char buf[512];
   size_t len;
   static const char doc[] =
@@ -752,9 +753,10 @@ static void expect_path_mutation_api(void) {
   exprs[3] = "/state/missing=value";
   exprs[4] = "/added/nested=ok";
   exprs[5] = "/added/other=2";
+  exprs[6] = "time:/state/updated=2025-01-02T03:04:05.123456789+02:30";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 6u, &plan, &error);
+  st = lql_mutation_plan_parse(exprs, 7u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("path mutation plan parse failed: %s\n", error.message);
     ++failures;
@@ -766,7 +768,8 @@ static void expect_path_mutation_api(void) {
       ++failures;
     } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                strcmp(buf, "{\"state\":{\"status\":\"done\",\"count\":2,"
-                           "\"missing\":\"value\"},\"id\":\"a\","
+                           "\"missing\":\"value\",\"updated\":\"2025-01-"
+                           "02T00:34:05.123456789Z\"},\"id\":\"a\","
                            "\"added\":{\"nested\":\"ok\",\"other\":2}}") != 0) {
       printf("path mutation output mismatch: %s\n", buf);
       ++failures;

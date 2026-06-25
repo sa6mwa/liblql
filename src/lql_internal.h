@@ -95,6 +95,8 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
 int lql_parse_temporal_literal(const char *raw, lql_temporal *out);
 int lql_temporal_compare(const lql_temporal *left, const lql_temporal *right);
 int lql_temporal_equal(const lql_temporal *left, const lql_temporal *right);
+int lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
+                                     size_t buf_len);
 int lql_temporal_now(lql_temporal *out);
 int lql_temporal_today(lql_temporal *out);
 int lql_temporal_yesterday(lql_temporal *out);

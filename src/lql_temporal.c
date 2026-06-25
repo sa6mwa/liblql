@@ -1,6 +1,7 @@
 #include "lql_internal.h"
 
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -212,6 +213,47 @@ int lql_temporal_equal(const lql_temporal *left, const lql_temporal *right) {
            left->day == right->day;
   }
   return lql_temporal_compare(left, right) == 0;
+}
+
+int lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
+                                     size_t buf_len) {
+  lql_int64 days;
+  lql_int64 rem;
+  int y;
+  int m;
+  int d;
+  int h;
+  int mi;
+  int s;
+  char frac[16];
+  int frac_len;
+  if (value == NULL || buf == NULL || buf_len < 31u || value->date_only ||
+      value->nanoseconds < 0 || value->nanoseconds > 999999999) {
+    return 0;
+  }
+  days = value->seconds / (lql_int64)86400;
+  rem = value->seconds % (lql_int64)86400;
+  if (rem < 0) {
+    rem += (lql_int64)86400;
+    --days;
+  }
+  civil_from_days(days, &y, &m, &d);
+  h = (int)(rem / (lql_int64)3600);
+  rem %= (lql_int64)3600;
+  mi = (int)(rem / (lql_int64)60);
+  s = (int)(rem % (lql_int64)60);
+  if (value->nanoseconds == 0) {
+    sprintf(buf, "%04d-%02d-%02dT%02d:%02d:%02dZ", y, m, d, h, mi, s);
+    return 1;
+  }
+  sprintf(frac, "%09d", value->nanoseconds);
+  frac_len = 9;
+  while (frac_len > 0 && frac[frac_len - 1] == '0') {
+    --frac_len;
+  }
+  frac[frac_len] = '\0';
+  sprintf(buf, "%04d-%02d-%02dT%02d:%02d:%02d.%sZ", y, m, d, h, mi, s, frac);
+  return 1;
 }
 
 int lql_temporal_now(lql_temporal *out) {

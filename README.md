@@ -11,10 +11,10 @@ projection plus `clql -c` compact output for seekable files are in place.
 Object and array-index projection are also exposed through the initial
 `lql_projection` C API, and compact range helpers are exposed for seekable and
 explicitly buffered JSON values. Mutation parse/plan validation is exposed
-through `lql_mutation_plan`, and supported concrete-path mutations can be
-applied to seekable file ranges without full-document materialization. Wildcard
-mutation execution, file-backed mutation values, payload handles, and full
-`clql` parity are still active porting work.
+through `lql_mutation_plan`, and supported concrete-path mutations including
+time normalization can be applied to seekable file ranges without full-document
+materialization. Wildcard mutation execution, file-backed mutation values,
+payload handles, and full `clql` parity are still active porting work.
 
 ```sh
 make deps-debug

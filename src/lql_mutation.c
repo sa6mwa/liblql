@@ -185,6 +185,29 @@ static int ascii_equal_ignore_case_n(const char *a, size_t a_len,
   return i == a_len && b[i] == '\0';
 }
 
+static int time_literal_has_zone(const char *value) {
+  const char *p;
+  int colon_count;
+  p = value;
+  while (*p != '\0' && *p != 'T') {
+    ++p;
+  }
+  if (*p != 'T') {
+    return 0;
+  }
+  ++p;
+  colon_count = 0;
+  while (*p != '\0') {
+    if (*p == ':') {
+      ++colon_count;
+    } else if (colon_count >= 2 && (*p == 'Z' || *p == '+' || *p == '-')) {
+      return 1;
+    }
+    ++p;
+  }
+  return 0;
+}
+
 static int seek_u64(FILE *file, lql_uint64 offset) {
   off_t seek_offset;
   seek_offset = (off_t)offset;
@@ -507,6 +530,8 @@ static int parse_number(const char *s, double *out) {
   return 1;
 }
 
+static const char *unquoted_value(const char *value, size_t *out_len);
+
 static int parse_mutation_expr(const char *expr, lql_mutation_plan *plan,
                                lql_error *error);
 
@@ -586,13 +611,43 @@ static int parse_brace_mutation(const char *expr, lql_mutation_plan *plan,
 static int parse_set_value(char *value, int time_mode, mutation_item *item,
                            lql_error *error) {
   lql_temporal temporal;
+  const char *text;
+  size_t len;
+  char normalized[40];
+  char *copy;
   if (time_mode) {
-    if (!ascii_equal_ignore_case(value, "NOW") &&
-        !lql_parse_temporal_literal(value, &temporal)) {
+    text = unquoted_value(value, &len);
+    copy = trimmed_dup_range(text, len);
+    if (copy == NULL) {
+      return 0;
+    }
+    if (ascii_equal_ignore_case(copy, "NOW")) {
+      if (!lql_temporal_now(&temporal)) {
+        free(copy);
+        lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                      "failed to resolve current time");
+        return 0;
+      }
+    } else if (!time_literal_has_zone(copy) ||
+               !lql_parse_temporal_literal(copy, &temporal) ||
+               temporal.date_only) {
+      free(copy);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR, "invalid time literal");
       return 0;
     }
+    free(copy);
+    if (!lql_temporal_format_rfc3339_nano(&temporal, normalized,
+                                          sizeof(normalized))) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR, "invalid time literal");
+      return 0;
+    }
+    item->value = lql_strdup(normalized);
+    if (item->value == NULL) {
+      return 0;
+    }
+    free(value);
     item->time_value = 1;
+    return 1;
   }
   item->value = value;
   return 1;
@@ -807,7 +862,7 @@ static int mutation_is_root_field_supported(const mutation_item *item) {
          strcmp(item->path.segments[0], "*") != 0 &&
          strcmp(item->path.segments[0], "[]") != 0 &&
          strcmp(item->path.segments[0], "**") != 0 &&
-         strcmp(item->path.segments[0], "...") != 0 && !item->time_value;
+         strcmp(item->path.segments[0], "...") != 0;
 }
 
 static int mutation_plan_supports_root_fields(const lql_mutation_plan *plan) {
@@ -833,7 +888,7 @@ static int mutation_plan_supports_root_fields(const lql_mutation_plan *plan) {
 
 static int mutation_is_concrete_path_supported(const mutation_item *item) {
   size_t i;
-  if (item->path.segment_count == 0u || item->time_value) {
+  if (item->path.segment_count == 0u) {
     return 0;
   }
   for (i = 0u; i < item->path.segment_count; ++i) {

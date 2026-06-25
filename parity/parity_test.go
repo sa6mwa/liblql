@@ -479,6 +479,7 @@ func TestCLQLMutationParseErrorParity(t *testing.T) {
 		`/`,
 		`/count=+0`,
 		`time:/state/updated=tomorrowish`,
+		`time:/state/updated=2025-01-01`,
 		`file:/payload=blob.txt`,
 		`/state/details{/owner="alice"}}`,
 	}
@@ -582,6 +583,7 @@ func TestCLQLNestedMutationParity(t *testing.T) {
 		"/state/count++",
 		"rm:/state/old",
 		"/state/missing=value",
+		"time:/state/updated=2025-01-02T03:04:05.123456789+02:30",
 		"/added/nested=ok",
 		"/added/other=2",
 	}

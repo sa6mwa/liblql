@@ -416,12 +416,12 @@ Current implementation is an early slice:
   `lql_mutate_file_range_root_fields()` for bounded source-backed rewrites of
   root object fields and `lql_mutate_file_range_paths()` for bounded
   source-backed rewrites of concrete object/member paths with optional concrete
-  array indexes over seekable file ranges; wildcards, recursive paths, time
-  values, file-backed values, and non-seekable execution still return
-  unsupported;
+  array indexes over seekable file ranges; supported set values include
+  `time:` normalization to UTC RFC3339Nano strings; wildcards, recursive paths,
+  file-backed values, and non-seekable execution still return unsupported;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path mutations to matched candidates, and leaves
-  wildcard, time, file-backed, and non-seekable mutation behavior unsupported;
+  wildcard, file-backed, and non-seekable mutation behavior unsupported;
 - `clql -m -M/--matches-only` emits only matched seekable file candidates after
   applying supported concrete-path mutations;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
