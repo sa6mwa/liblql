@@ -5,6 +5,7 @@ package parity
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"reflect"
 	"testing"
 	"time"
@@ -316,6 +317,114 @@ func TestSDKMutationJSONParity(t *testing.T) {
 	}
 }
 
+func TestSDKStreamingDecisionParity(t *testing.T) {
+	cases := []struct {
+		name string
+		expr string
+		doc  string
+	}{
+		{
+			name: "ndjson candidates",
+			expr: `/status="open"`,
+			doc:  "{\"status\":\"open\",\"id\":1}\n{\"status\":\"closed\",\"id\":2}\n{\"status\":\"open\",\"id\":3}\n",
+		},
+		{
+			name: "array candidates",
+			expr: `/status="open"`,
+			doc:  `[{"status":"open","id":1},{"status":"closed","id":2},{"status":"open","id":3}]`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := goStreamQuery(tc.expr, tc.doc, 0, 0, 0, 0, false)
+			if err != nil {
+				t.Fatalf("go stream decision: %v", err)
+			}
+			got, err := cStreamQuery(tc.expr, tc.doc, 0, 0, 0, 0, false)
+			if err != nil {
+				t.Fatalf("liblql stream decision: %v", err)
+			}
+			assertStreamSummaryParity(t, got, want)
+			if got.DecisionCallbacks != want.DecisionCallbacks {
+				t.Fatalf("decision callback mismatch: got=%d want=%d", got.DecisionCallbacks, want.DecisionCallbacks)
+			}
+		})
+	}
+}
+
+func TestSDKStreamingPayloadParity(t *testing.T) {
+	doc := "{\"status\":\"open\",\"id\":1}\n{\"status\":\"closed\",\"id\":2}\n{\"status\":\"open\",\"id\":3}\n"
+	for _, tc := range []struct {
+		name                 string
+		mode                 int
+		wantSeekablePayloads int
+		wantSpooledPayloads  int
+	}{
+		{name: "seekable file ranges", mode: 1, wantSeekablePayloads: 2},
+		{name: "callback source spooled payloads", mode: 2, wantSpooledPayloads: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := goStreamQuery(`/status="open"`, doc, tc.mode, 0, 0, 0, false)
+			if err != nil {
+				t.Fatalf("go stream payload: %v", err)
+			}
+			got, err := cStreamQuery(`/status="open"`, doc, tc.mode, 0, 0, 0, false)
+			if err != nil {
+				t.Fatalf("liblql stream payload: %v", err)
+			}
+			assertStreamSummaryParity(t, got, want)
+			if got.MatchCallbacks != want.MatchCallbacks {
+				t.Fatalf("match callback mismatch: got=%d want=%d", got.MatchCallbacks, want.MatchCallbacks)
+			}
+			if got.SeekablePayloads != tc.wantSeekablePayloads || got.SpooledPayloads != tc.wantSpooledPayloads {
+				t.Fatalf("payload kind mismatch: seekable=%d spooled=%d", got.SeekablePayloads, got.SpooledPayloads)
+			}
+			gotPayload, err := decodeJSONValues(got.PayloadJSON)
+			if err != nil {
+				t.Fatalf("decode liblql payload: %v json=%q", err, string(got.PayloadJSON))
+			}
+			wantPayload, err := decodeJSONValues(want.PayloadJSON)
+			if err != nil {
+				t.Fatalf("decode go payload: %v json=%q", err, string(want.PayloadJSON))
+			}
+			if !reflect.DeepEqual(gotPayload, wantPayload) {
+				t.Fatalf("payload parity mismatch: got=%#v want=%#v got_json=%q want_json=%q", gotPayload, wantPayload, string(got.PayloadJSON), string(want.PayloadJSON))
+			}
+		})
+	}
+}
+
+func TestSDKStreamingStopParity(t *testing.T) {
+	doc := "{\"status\":\"open\"}\n{\"status\":\"open\"}\n{\"status\":\"closed\"}\n"
+	cases := []struct {
+		name          string
+		mode          int
+		maxMatches    int64
+		maxCandidates int64
+		maxBytes      int64
+		stopCallback  bool
+	}{
+		{name: "max matches", mode: 0, maxMatches: 1},
+		{name: "max candidates", mode: 0, maxCandidates: 2},
+		{name: "max bytes", mode: 0, maxBytes: 17},
+		{name: "decision callback stop", mode: 0, stopCallback: true},
+		{name: "payload callback stop", mode: 1, stopCallback: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := goStreamQuery(`/status="open"`, doc, tc.mode, tc.maxMatches, tc.maxCandidates, tc.maxBytes, tc.stopCallback)
+			if err != nil {
+				t.Fatalf("go stream stop: %v", err)
+			}
+			got, err := cStreamQuery(`/status="open"`, doc, tc.mode, tc.maxMatches, tc.maxCandidates, tc.maxBytes, tc.stopCallback)
+			if err != nil {
+				t.Fatalf("liblql stream stop: %v", err)
+			}
+			assertStreamSummaryParity(t, got, want)
+		})
+	}
+}
+
 func goProjectJSON(fields []string, doc string) ([]byte, bool, error) {
 	paths, err := lql.ParseProjectionPaths(fields)
 	if err != nil {
@@ -349,4 +458,94 @@ func goMutateJSON(mutations []string, doc string) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+func goStreamQuery(expr, doc string, mode int, maxMatches, maxCandidates, maxBytes int64, stopAfterFirst bool) (cStreamSummary, error) {
+	sel, err := lql.ParseSelectorString(expr)
+	if err != nil {
+		return cStreamSummary{}, err
+	}
+	var summary cStreamSummary
+	req := lql.QueryStreamRequest{
+		Reader:        bytes.NewBufferString(doc),
+		Selector:      sel,
+		MaxMatches:    maxMatches,
+		MaxCandidates: maxCandidates,
+		MaxBytesRead:  maxBytes,
+	}
+	if mode == 0 {
+		req.Mode = lql.QueryDecisionOnly
+		req.OnDecision = func(decision lql.QueryStreamDecision) error {
+			summary.DecisionCallbacks++
+			if decision.Matched {
+				summary.MatchCallbacks++
+			}
+			if stopAfterFirst && summary.DecisionCallbacks == 1 {
+				return lql.ErrStreamStop
+			}
+			return nil
+		}
+	} else {
+		req.Mode = lql.QueryDecisionPlusValue
+		req.MatchedOnly = true
+		req.OnValue = func(value lql.QueryStreamValue) error {
+			summary.MatchCallbacks++
+			var payload []byte
+			if value.JSON != nil {
+				payload = value.JSON
+			} else if value.OpenJSON != nil {
+				rc, err := value.OpenJSON()
+				if err != nil {
+					return err
+				}
+				defer rc.Close()
+				payload, err = io.ReadAll(rc)
+				if err != nil {
+					return err
+				}
+			}
+			summary.PayloadJSON = append(summary.PayloadJSON, payload...)
+			if stopAfterFirst && summary.MatchCallbacks == 1 {
+				return lql.ErrStreamStop
+			}
+			return nil
+		}
+	}
+	result, err := lql.QueryStreamWithResult(req)
+	if err != nil {
+		return cStreamSummary{}, err
+	}
+	summary.CandidatesSeen = result.CandidatesSeen
+	summary.CandidatesMatched = result.CandidatesMatched
+	summary.BytesRead = result.BytesRead
+	summary.StoppedEarly = result.StoppedEarly
+	summary.StopReason = goStopReasonCode(result.StopReason)
+	return summary, nil
+}
+
+func assertStreamSummaryParity(t *testing.T, got, want cStreamSummary) {
+	t.Helper()
+	if got.CandidatesSeen != want.CandidatesSeen ||
+		got.CandidatesMatched != want.CandidatesMatched ||
+		got.StoppedEarly != want.StoppedEarly ||
+		got.StopReason != want.StopReason {
+		t.Fatalf("stream summary mismatch: got=%+v want=%+v", got, want)
+	}
+}
+
+func goStopReasonCode(reason lql.QueryStreamStopReason) int {
+	switch reason {
+	case lql.QueryStreamStopNone:
+		return 0
+	case lql.QueryStreamStopMatchLimit:
+		return 1
+	case lql.QueryStreamStopCandidateLimit:
+		return 2
+	case lql.QueryStreamStopByteLimit:
+		return 3
+	case lql.QueryStreamStopCallbackStop:
+		return 4
+	default:
+		return -1
+	}
 }

@@ -538,12 +538,20 @@ Current implementation is an early slice:
 - Go-backed parity tests exist for the current CLI surface and remain a
   transitional oracle for deriving exhaustive C-only SDK tests;
 - Go-backed SDK parity tests now exist for public `liblql` selector
-  parse/evaluate behavior, buffered JSON projection, and buffered JSON
-  mutation behavior through the C API, comparing `lql_selector_parse()`,
-  `lql_selector_parse_or()`, `lql_matches_json()`, `lql_project_json()`, and
-  `lql_mutate_json()` against the pinned Go library over the current selector,
-  projection, and mutation corpora; this is behavioral lib-to-lib parity, not a
-  requirement that the C API mirror Go API shape;
+  parse/evaluate behavior, buffered JSON projection, buffered JSON mutation,
+  and current streaming query behavior through the C API, comparing
+  `lql_selector_parse()`, `lql_selector_parse_or()`, `lql_matches_json()`,
+  `lql_project_json()`, `lql_mutate_json()`, `lql_query_file_decisions()`,
+  `lql_query_file_matches()`, and `lql_query_source_spooled_matches()` against
+  the pinned Go library over the current selector, projection, mutation, and
+  stream corpora; this is behavioral lib-to-lib parity, not a requirement that
+  the C API mirror Go API shape;
+- SDK streaming parity currently asserts candidate counts, match counts, stop
+  state/reason, callback counts, seekable/spooled payload kinds, and decoded
+  matched payload JSON. `bytes_read` is intentionally not yet asserted against
+  Go because liblql reports the last candidate end offset while Go reports
+  consumed stream bytes including a trailing delimiter; this public accounting
+  difference remains a parity decision/gap;
 - the Go-backed SDK parity suite is intentionally excluded from sanitizer CTest
   presets because the cgo test process cannot reliably load an
   ASan-instrumented shared liblql with the ASan runtime first; project-owned C

@@ -203,6 +203,239 @@ static int liblql_mutate_json_value(const char *const *exprs,
 	fclose(tmp);
 	return 0;
 }
+
+typedef struct liblql_stream_summary {
+	unsigned long long candidates_seen;
+	unsigned long long candidates_matched;
+	unsigned long long bytes_read;
+	int stopped_early;
+	int stop_reason;
+	int decision_callbacks;
+	int match_callbacks;
+	int seekable_payloads;
+	int spooled_payloads;
+	char *payload_json;
+	size_t payload_len;
+} liblql_stream_summary;
+
+typedef struct liblql_stream_state {
+	liblql_stream_summary *summary;
+	FILE *payload_out;
+	int stop_after_first;
+} liblql_stream_state;
+
+typedef struct liblql_chunk_source {
+	const unsigned char *data;
+	size_t len;
+	size_t offset;
+	size_t chunk_size;
+} liblql_chunk_source;
+
+static lql_status liblql_count_decision(void *user,
+                                        const lql_query_decision *decision) {
+	liblql_stream_state *state;
+	state = (liblql_stream_state *)user;
+	++state->summary->decision_callbacks;
+	if (decision->matched) {
+		++state->summary->match_callbacks;
+	}
+	if (state->stop_after_first && state->summary->decision_callbacks == 1) {
+		return LQL_STATUS_STOP;
+	}
+	return LQL_STATUS_OK;
+}
+
+static lql_status liblql_collect_match(void *user,
+                                       const lql_query_match *match) {
+	liblql_stream_state *state;
+	lql_error error;
+	lql_status status;
+	state = (liblql_stream_state *)user;
+	++state->summary->match_callbacks;
+	if (match->payload.kind == LQL_PAYLOAD_SEEKABLE_RANGE) {
+		++state->summary->seekable_payloads;
+	}
+	if (match->payload.kind == LQL_PAYLOAD_SPOOLED) {
+		++state->summary->spooled_payloads;
+	}
+	lql_error_init(&error);
+	status = lql_payload_write_json(&match->payload, state->payload_out, &error);
+	if (status != LQL_STATUS_OK) {
+		return status;
+	}
+	if (state->stop_after_first && state->summary->match_callbacks == 1) {
+		return LQL_STATUS_STOP;
+	}
+	return LQL_STATUS_OK;
+}
+
+static lql_read_result liblql_chunk_read(void *user, unsigned char *buffer,
+                                         size_t capacity) {
+	liblql_chunk_source *source;
+	lql_read_result result;
+	size_t remaining;
+	size_t count;
+	source = (liblql_chunk_source *)user;
+	memset(&result, 0, sizeof(result));
+	if (source->offset >= source->len) {
+		result.eof = 1;
+		return result;
+	}
+	remaining = source->len - source->offset;
+	count = source->chunk_size;
+	if (count == 0u || count > capacity) {
+		count = capacity;
+	}
+	if (count > remaining) {
+		count = remaining;
+	}
+	memcpy(buffer, source->data + source->offset, count);
+	source->offset += count;
+	result.bytes_read = count;
+	result.eof = source->offset >= source->len ? 1 : 0;
+	return result;
+}
+
+static void liblql_copy_query_result(liblql_stream_summary *summary,
+                                     const lql_query_result *result) {
+	summary->candidates_seen = (unsigned long long)result->candidates_seen;
+	summary->candidates_matched = (unsigned long long)result->candidates_matched;
+	summary->bytes_read = (unsigned long long)result->bytes_read;
+	summary->stopped_early = result->stopped_early;
+	summary->stop_reason = (int)result->stop_reason;
+}
+
+static int liblql_stream_query(const char *expr, const char *json, int mode,
+                               unsigned long long max_matches,
+                               unsigned long long max_candidates,
+                               unsigned long long max_bytes_read,
+                               int stop_after_first,
+                               liblql_stream_summary *summary, char *errbuf,
+                               size_t errbuf_len) {
+	lql_error error;
+	lql_selector *selector;
+	lql_query_options options;
+	lql_query_result result;
+	lql_status status;
+	FILE *input;
+	FILE *payload_out;
+	liblql_stream_state state;
+	liblql_chunk_source source;
+
+	lql_error_init(&error);
+	memset(summary, 0, sizeof(*summary));
+	memset(&options, 0, sizeof(options));
+	memset(&result, 0, sizeof(result));
+	memset(&state, 0, sizeof(state));
+	memset(&source, 0, sizeof(source));
+	selector = NULL;
+	input = NULL;
+	payload_out = NULL;
+	options.max_matches = (lql_uint64)max_matches;
+	options.max_candidates = (lql_uint64)max_candidates;
+	options.max_bytes_read = (lql_uint64)max_bytes_read;
+	status = lql_selector_parse(expr, &selector, &error);
+	if (status != LQL_STATUS_OK) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	state.summary = summary;
+	state.stop_after_first = stop_after_first;
+	if (mode == 0) {
+		input = tmpfile();
+		if (input == NULL) {
+			lql_selector_free(selector);
+			if (errbuf != NULL && errbuf_len > 0u) {
+				strncpy(errbuf, "failed to create temporary input", errbuf_len - 1u);
+				errbuf[errbuf_len - 1u] = '\0';
+			}
+			return -1;
+		}
+		if (fwrite(json, 1u, strlen(json), input) != strlen(json) ||
+		    fseek(input, 0L, SEEK_SET) != 0) {
+			fclose(input);
+			lql_selector_free(selector);
+			if (errbuf != NULL && errbuf_len > 0u) {
+				strncpy(errbuf, "failed to prepare temporary input", errbuf_len - 1u);
+				errbuf[errbuf_len - 1u] = '\0';
+			}
+			return -1;
+		}
+		status = lql_query_file_decisions_with_options(
+		    selector, input, &options, liblql_count_decision, &state, &result,
+		    &error);
+		fclose(input);
+	} else {
+		payload_out = tmpfile();
+		if (payload_out == NULL) {
+			lql_selector_free(selector);
+			if (errbuf != NULL && errbuf_len > 0u) {
+				strncpy(errbuf, "failed to create temporary payload output",
+				        errbuf_len - 1u);
+				errbuf[errbuf_len - 1u] = '\0';
+			}
+			return -1;
+		}
+		state.payload_out = payload_out;
+		if (mode == 1) {
+			input = tmpfile();
+			if (input == NULL) {
+				fclose(payload_out);
+				lql_selector_free(selector);
+				if (errbuf != NULL && errbuf_len > 0u) {
+					strncpy(errbuf, "failed to create temporary input",
+					        errbuf_len - 1u);
+					errbuf[errbuf_len - 1u] = '\0';
+				}
+				return -1;
+			}
+			if (fwrite(json, 1u, strlen(json), input) != strlen(json) ||
+			    fseek(input, 0L, SEEK_SET) != 0) {
+				fclose(input);
+				fclose(payload_out);
+				lql_selector_free(selector);
+				if (errbuf != NULL && errbuf_len > 0u) {
+					strncpy(errbuf, "failed to prepare temporary input",
+					        errbuf_len - 1u);
+					errbuf[errbuf_len - 1u] = '\0';
+				}
+				return -1;
+			}
+			status = lql_query_file_matches_with_options(
+			    selector, input, &options, liblql_collect_match, &state, &result,
+			    &error);
+			fclose(input);
+		} else {
+			source.data = (const unsigned char *)json;
+			source.len = strlen(json);
+			source.chunk_size = 7u;
+			status = lql_query_source_spooled_matches_with_options(
+			    selector, liblql_chunk_read, &source, &options,
+			    liblql_collect_match, &state, &result, &error);
+		}
+		if (status == LQL_STATUS_OK &&
+		    liblql_read_tmp(payload_out, &summary->payload_json,
+		                    &summary->payload_len, errbuf, errbuf_len) != 0) {
+			fclose(payload_out);
+			lql_selector_free(selector);
+			return -1;
+		}
+		fclose(payload_out);
+	}
+	lql_selector_free(selector);
+	if (status != LQL_STATUS_OK) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	liblql_copy_query_result(summary, &result);
+	return 0;
+}
 */
 import "C"
 
@@ -273,6 +506,57 @@ func cMutateJSON(mutations []string, doc string) ([]byte, error) {
 	}
 	defer C.free(unsafe.Pointer(out))
 	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
+}
+
+type cStreamSummary struct {
+	CandidatesSeen    int64
+	CandidatesMatched int64
+	BytesRead         int64
+	StoppedEarly      bool
+	StopReason        int
+	DecisionCallbacks int
+	MatchCallbacks    int
+	SeekablePayloads  int
+	SpooledPayloads   int
+	PayloadJSON       []byte
+}
+
+func cStreamQuery(expr, doc string, mode int, maxMatches, maxCandidates, maxBytes int64, stopAfterFirst bool) (cStreamSummary, error) {
+	cExpr := C.CString(expr)
+	cDoc := C.CString(doc)
+	defer C.free(unsafe.Pointer(cExpr))
+	defer C.free(unsafe.Pointer(cDoc))
+
+	var summary C.liblql_stream_summary
+	var errbuf [256]C.char
+	status := C.liblql_stream_query(
+		cExpr,
+		cDoc,
+		C.int(mode),
+		C.ulonglong(maxMatches),
+		C.ulonglong(maxCandidates),
+		C.ulonglong(maxBytes),
+		cBool(stopAfterFirst),
+		&summary,
+		&errbuf[0],
+		C.size_t(len(errbuf)),
+	)
+	if status != 0 {
+		return cStreamSummary{}, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(summary.payload_json))
+	return cStreamSummary{
+		CandidatesSeen:    int64(summary.candidates_seen),
+		CandidatesMatched: int64(summary.candidates_matched),
+		BytesRead:         int64(summary.bytes_read),
+		StoppedEarly:      summary.stopped_early != 0,
+		StopReason:        int(summary.stop_reason),
+		DecisionCallbacks: int(summary.decision_callbacks),
+		MatchCallbacks:    int(summary.match_callbacks),
+		SeekablePayloads:  int(summary.seekable_payloads),
+		SpooledPayloads:   int(summary.spooled_payloads),
+		PayloadJSON:       C.GoBytes(unsafe.Pointer(summary.payload_json), C.int(summary.payload_len)),
+	}, nil
 }
 
 func cStringArray(values []string) (**C.char, func()) {
