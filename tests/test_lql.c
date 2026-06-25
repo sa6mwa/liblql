@@ -1000,6 +1000,70 @@ static void expect_wildcard_mutation_api(void) {
   fclose(out);
 }
 
+static void expect_recursive_mutation_api(void) {
+  FILE *source;
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_mutation_plan *plan;
+  const char *exprs[4];
+  char buf[1024];
+  size_t len;
+  static const char doc[] =
+      "{\"items\":[{\"status\":\"old\"}],\"boxes\":{\"a\":{\"status\":\"old\"}}"
+      ","
+      "\"groups\":[{\"items\":[{\"sku\":\"A\",\"count\":1,\"drop\":true}]}]}";
+
+  source = tmpfile();
+  out = tmpfile();
+  if (source == NULL || out == NULL) {
+    printf("recursive mutation tmpfile failed\n");
+    if (source != NULL) {
+      fclose(source);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+  if (fwrite(doc, 1u, strlen(doc), source) != strlen(doc)) {
+    printf("recursive mutation source write failed\n");
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  exprs[0] = "/items/**/status=ready";
+  exprs[1] = "/boxes/**/status=ready";
+  exprs[2] = "/groups/.../sku=Z";
+  exprs[3] = "/groups/.../count=+2";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(exprs, 4u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("recursive mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    st = lql_mutate_file_range_paths(plan, source, 0u, (lql_uint64)strlen(doc),
+                                     out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("recursive mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf,
+                      "{\"items\":[{\"status\":\"ready\"}],\"boxes\":{\"a\":{"
+                      "\"status\":\"ready\"}},\"groups\":[{\"items\":[{"
+                      "\"sku\":\"Z\",\"count\":3,\"drop\":true}]}]}") != 0) {
+      printf("recursive mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  lql_mutation_plan_free(plan);
+  fclose(source);
+  fclose(out);
+}
+
 int main(void) {
   expect_match("/status=\"open\"", "{\"status\":\"open\"}", 1);
   expect_match("/status=\"closed\"", "{\"status\":\"open\"}", 0);
@@ -1181,5 +1245,6 @@ int main(void) {
   expect_path_mutation_api();
   expect_array_element_mutation_api();
   expect_wildcard_mutation_api();
+  expect_recursive_mutation_api();
   return failures == 0 ? 0 : 1;
 }

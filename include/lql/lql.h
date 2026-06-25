@@ -140,8 +140,9 @@ lql_status lql_mutate_file_range_root_fields(const lql_mutation_plan *plan,
    This streams the source through lonejson and never materializes the document.
    Supported paths are concrete object/member paths with optional concrete array
    indexes plus existing-position `*` object-child and `[]` array-element
-   wildcards. File-backed values stream from source-backed paths. Recursive
-   `**` and `...` paths return LQL_STATUS_UNSUPPORTED. */
+   wildcards. Existing object-member mutation positions also support `**`
+   one-child and `...` recursive path segments. File-backed values stream from
+   source-backed paths. */
 lql_status lql_mutate_file_range_paths(const lql_mutation_plan *plan,
                                        FILE *file, lql_uint64 offset,
                                        lql_uint64 size, FILE *out,
