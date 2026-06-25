@@ -112,12 +112,12 @@ if(LQL_BUILD_TESTS)
   target_link_libraries(test_lql PRIVATE $<IF:$<BOOL:${LQL_BUILD_STATIC}>,lql_static,lql_shared>)
   lql_apply_project_warnings(test_lql)
   add_test(NAME lql.unit COMMAND test_lql)
-  set_tests_properties(lql.unit PROPERTIES LABELS "unit;local" TIMEOUT 20)
+  set_tests_properties(lql.unit PROPERTIES LABELS "unit;local" TIMEOUT 2)
 
   add_test(NAME lql.sdk-manifest
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_sdk_unit_manifest.sh
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lql.c)
-  set_tests_properties(lql.sdk-manifest PROPERTIES LABELS "unit;api" TIMEOUT 20)
+  set_tests_properties(lql.sdk-manifest PROPERTIES LABELS "unit;api" TIMEOUT 5)
 
   set(LQL_HEADER_SMOKE_WARNINGS)
   if(LQL_PROJECT_WARNINGS)
@@ -128,7 +128,7 @@ if(LQL_BUILD_TESTS)
     -I${CMAKE_CURRENT_SOURCE_DIR}/include
     -I${CMAKE_CURRENT_BINARY_DIR}/generated/include
     -c ${CMAKE_CURRENT_SOURCE_DIR}/tests/header_smoke.c -o ${CMAKE_CURRENT_BINARY_DIR}/header_smoke.o)
-  set_tests_properties(lql.header PROPERTIES LABELS "unit;api" TIMEOUT 20)
+  set_tests_properties(lql.header PROPERTIES LABELS "unit;api" TIMEOUT 5)
 
   find_program(GO_EXECUTABLE go)
   if(GO_EXECUTABLE AND LQL_BUILD_BINARY)

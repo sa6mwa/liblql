@@ -310,6 +310,15 @@ Fast test command contract:
 
 - `make test` runs the fast C/API test surface and excludes parity-labeled
   transitional Go checks;
+- native `lql.unit` coverage must stay effectively immediate and subsecond on
+  ordinary developer hardware; if a C unit test needs corpus-scale input,
+  sleeps, retries, benchmark timing, release packaging, Go execution, Lua
+  execution, or large-fixture generation, it belongs in a narrower explicit
+  parity, benchmark, fuzz, package, or release gate instead;
+- C-only unit tests may assert streaming and bounded-memory behavior with small
+  deterministic fixtures and instrumentation, but must not prove those
+  properties by spending noticeable wall-clock time or materializing large
+  documents;
 - `make parity-test` runs the Go-backed CLI and SDK parity suites explicitly;
 - `make test-all` includes both the fast C/API tests and parity tests before
   sanitizer and Lua checks.
