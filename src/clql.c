@@ -44,7 +44,7 @@ static int read_stdin(char **out, size_t *out_len) {
 }
 
 static void usage(FILE *out) {
-  fprintf(out, "usage: clql selector < data.json\n");
+  fprintf(out, "usage: clql [--or|-O] selector < data.json\n");
   fprintf(out, "       clql --version\n");
 }
 
@@ -52,20 +52,32 @@ int main(int argc, char **argv) {
   lql_selector *selector;
   lql_error error;
   char *json;
+  const char *selector_expr;
   size_t json_len;
   int matched;
+  int or_mode;
   lql_status st;
 
   if (argc == 2 && strcmp(argv[1], "--version") == 0) {
     printf("clql 0.0.0\n");
     return 0;
   }
-  if (argc != 2 || strcmp(argv[1], "--help") == 0) {
-    usage(argc == 2 ? stdout : stderr);
-    return argc == 2 ? 0 : 2;
+  if (argc == 2 && strcmp(argv[1], "--help") == 0) {
+    usage(stdout);
+    return 0;
+  }
+  or_mode = 0;
+  selector_expr = argv[1];
+  if (argc == 3 && (strcmp(argv[1], "--or") == 0 || strcmp(argv[1], "-O") == 0)) {
+    or_mode = 1;
+    selector_expr = argv[2];
+  } else if (argc != 2) {
+    usage(stderr);
+    return 2;
   }
   lql_error_init(&error);
-  st = lql_selector_parse(argv[1], &selector, &error);
+  st = or_mode ? lql_selector_parse_or(selector_expr, &selector, &error)
+               : lql_selector_parse(selector_expr, &selector, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
     return 2;

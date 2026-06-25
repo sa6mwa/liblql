@@ -65,6 +65,30 @@ static void expect_parse_error(const char *expr) {
   }
 }
 
+static void expect_match_or(const char *expr, const char *json, int want) {
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  int got;
+
+  lql_error_init(&error);
+  st = lql_selector_parse_or(expr, &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("parse-or failed for %s: %s\n", expr, error.message);
+    ++failures;
+    return;
+  }
+  st = lql_matches_json(selector, json, strlen(json), &got, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("eval-or failed for %s: %s\n", expr, error.message);
+    ++failures;
+  } else if (got != want) {
+    printf("or match mismatch for %s: got %d want %d\n", expr, got, want);
+    ++failures;
+  }
+  lql_selector_free(selector);
+}
+
 static void expect_stream_file(void) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n";
@@ -282,6 +306,10 @@ int main(void) {
                "{\"status\":\"open\",\"progress\":72}", 1);
   expect_match("/status=\"open\",/progress>=50",
                "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match_or("/status=\"open\",/progress>=50",
+                  "{\"status\":\"closed\",\"progress\":72}", 1);
+  expect_match_or("/status=\"open\",/progress>=50",
+                  "{\"status\":\"closed\",\"progress\":4}", 0);
   expect_match("or.eq{field=/msg,value=warn},or.eq{field=/msg,value=timeout}",
                "{\"msg\":\"timeout\"}", 1);
   expect_match("or.eq{field=/msg,value=warn},or.eq{field=/msg,value=timeout}",

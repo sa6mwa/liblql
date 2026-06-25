@@ -148,6 +148,42 @@ func TestCLQLSelectorSinceMacroParity(t *testing.T) {
 	}
 }
 
+func TestCLQLOrFlagParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []struct {
+		args []string
+		expr string
+		doc  string
+	}{
+		{[]string{"--or"}, `/status="open",/progress>=50`, `{"status":"closed","progress":72}`},
+		{[]string{"-O"}, `/status="open",/progress>=50`, `{"status":"closed","progress":4}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.args[0]+"/"+tc.doc, func(t *testing.T) {
+			var doc map[string]any
+			if err := json.Unmarshal([]byte(tc.doc), &doc); err != nil {
+				t.Fatal(err)
+			}
+			sel, err := lql.ParseSelectorStringOr(tc.expr)
+			if err != nil {
+				t.Fatalf("go parse or: %v", err)
+			}
+			want := lql.Matches(sel, doc)
+			args := append(append([]string{}, tc.args...), tc.expr)
+			cmd := exec.Command(clql, args...)
+			cmd.Stdin = bytes.NewBufferString(tc.doc)
+			out, err := cmd.CombinedOutput()
+			got := err == nil
+			if got != want {
+				t.Fatalf("clql --or parity mismatch: got match=%v want=%v err=%v out=%q", got, want, err, string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
