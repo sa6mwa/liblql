@@ -180,6 +180,40 @@ static int add_projection_arg(projection_args *args, const char *path) {
   return 1;
 }
 
+static int parse_bool_text(const char *text, int *out) {
+  if (text == NULL || out == NULL) {
+    return 0;
+  }
+  if (strcmp(text, "true") == 0 || strcmp(text, "True") == 0 ||
+      strcmp(text, "TRUE") == 0 || strcmp(text, "t") == 0 ||
+      strcmp(text, "T") == 0 || strcmp(text, "1") == 0) {
+    *out = 1;
+    return 1;
+  }
+  if (strcmp(text, "false") == 0 || strcmp(text, "False") == 0 ||
+      strcmp(text, "FALSE") == 0 || strcmp(text, "f") == 0 ||
+      strcmp(text, "F") == 0 || strcmp(text, "0") == 0) {
+    *out = 0;
+    return 1;
+  }
+  return 0;
+}
+
+static int parse_long_bool_option(const char *arg, const char *name,
+                                  int *target, int *matched) {
+  size_t len;
+  if (arg == NULL || name == NULL || target == NULL || matched == NULL) {
+    return 0;
+  }
+  *matched = 0;
+  len = strlen(name);
+  if (strncmp(arg, name, len) != 0 || arg[len] != '=') {
+    return 1;
+  }
+  *matched = 1;
+  return parse_bool_text(arg + len + 1u, target);
+}
+
 static char *join_selector_args(const projection_args *args, size_t skip_index,
                                 int has_skip) {
   size_t i;
@@ -452,18 +486,77 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[i], "--or") == 0 || strcmp(argv[i], "-O") == 0) {
       or_mode = 1;
+    } else if (strncmp(argv[i], "--or=", 5u) == 0) {
+      int matched;
+      if (!parse_long_bool_option(argv[i], "--or", &or_mode, &matched)) {
+        fprintf(stderr, "clql: invalid boolean value for --or\n");
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        free_projection_args(&positionals);
+        return 2;
+      }
     } else if (strcmp(argv[i], "--matches-only") == 0 ||
                strcmp(argv[i], "-M") == 0) {
       matches_only = 1;
+    } else if (strncmp(argv[i], "--matches-only=", 15u) == 0) {
+      int matched;
+      if (!parse_long_bool_option(argv[i], "--matches-only", &matches_only,
+                                  &matched)) {
+        fprintf(stderr, "clql: invalid boolean value for --matches-only\n");
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        free_projection_args(&positionals);
+        return 2;
+      }
     } else if (strcmp(argv[i], "--compact") == 0 ||
                strcmp(argv[i], "-c") == 0) {
       compact = 1;
+    } else if (strncmp(argv[i], "--compact=", 10u) == 0) {
+      int matched;
+      if (!parse_long_bool_option(argv[i], "--compact", &compact, &matched)) {
+        fprintf(stderr, "clql: invalid boolean value for --compact\n");
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        free_projection_args(&positionals);
+        return 2;
+      }
     } else if (strcmp(argv[i], "--inline") == 0 || strcmp(argv[i], "-i") == 0 ||
                strcmp(argv[i], "--write") == 0 || strcmp(argv[i], "-w") == 0) {
       inline_mode = 1;
+    } else if (strncmp(argv[i], "--inline=", 9u) == 0) {
+      int matched;
+      if (!parse_long_bool_option(argv[i], "--inline", &inline_mode,
+                                  &matched)) {
+        fprintf(stderr, "clql: invalid boolean value for --inline\n");
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        free_projection_args(&positionals);
+        return 2;
+      }
+    } else if (strncmp(argv[i], "--write=", 8u) == 0) {
+      int matched;
+      if (!parse_long_bool_option(argv[i], "--write", &inline_mode,
+                                  &matched)) {
+        fprintf(stderr, "clql: invalid boolean value for --write\n");
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        free_projection_args(&positionals);
+        return 2;
+      }
     } else if (strcmp(argv[i], "--enable-file-mutations") == 0 ||
                strcmp(argv[i], "-F") == 0) {
       enable_file_mutations = 1;
+    } else if (strncmp(argv[i], "--enable-file-mutations=", 24u) == 0) {
+      int matched;
+      if (!parse_long_bool_option(argv[i], "--enable-file-mutations",
+                                  &enable_file_mutations, &matched)) {
+        fprintf(stderr,
+                "clql: invalid boolean value for --enable-file-mutations\n");
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        free_projection_args(&positionals);
+        return 2;
+      }
     } else if (strcmp(argv[i], "--theme") == 0 || strcmp(argv[i], "-t") == 0) {
       if (i + 1 >= argc) {
         fprintf(stderr, "clql: theme option requires an argument\n");

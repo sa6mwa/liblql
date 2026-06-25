@@ -552,6 +552,10 @@ Current implementation is an early slice:
 - CLI malformed JSON execution is covered by Go-backed parity tests over stdin
   and seekable file inputs for selection, matches-only selection, compact
   output, projection, and mutation, with exit-code and diagnostic assertions;
+- CLI pflag-compatible long boolean value forms are covered for existing
+  boolean flags that affect observable behavior, including
+  `--compact=true`, `--matches-only=true|false`, `--or=true|false`, and
+  `--enable-file-mutations=true|false`;
 - Go-backed SDK parity tests now exist for public `liblql` selector
   parse/evaluate behavior, projection parser failures, buffered and seekable
   file-range JSON projection including malformed JSON execution errors,

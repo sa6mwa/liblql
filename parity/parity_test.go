@@ -818,6 +818,123 @@ func TestCLQLThemeFlagCompatibility(t *testing.T) {
 	}
 }
 
+func TestCLQLBooleanFlagValueCompatibility(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	t.Run("compact true", func(t *testing.T) {
+		cmd := exec.Command(clql, "--compact=true", `/status="open"`)
+		cmd.Stdin = bytes.NewBufferString("{\n  \"status\" : \"open\" , \"id\" : \"a\"\n}")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql --compact=true failed: %v out=%q", err, string(out))
+		}
+		if string(out) != "{\"status\":\"open\",\"id\":\"a\"}\n" {
+			t.Fatalf("clql --compact=true output mismatch: %q", string(out))
+		}
+	})
+	t.Run("matches only true", func(t *testing.T) {
+		cmd := exec.Command(clql, "--matches-only=true", `/status="open"`)
+		cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql --matches-only=true failed: %v out=%q", err, string(out))
+		}
+		if len(out) != 0 {
+			t.Fatalf("clql --matches-only=true wrote output: %q", string(out))
+		}
+	})
+	t.Run("matches only false", func(t *testing.T) {
+		cmd := exec.Command(clql, "--matches-only=false", "-c", `/status="open"`)
+		cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql --matches-only=false failed: %v out=%q", err, string(out))
+		}
+		if string(out) != "{\"status\":\"open\"}\n" {
+			t.Fatalf("clql --matches-only=false output mismatch: %q", string(out))
+		}
+	})
+	t.Run("or true", func(t *testing.T) {
+		cmd := exec.Command(clql, "--or=true", "-c", `/status="open",/progress>=50`)
+		cmd.Stdin = bytes.NewBufferString(`{"status":"closed","progress":72}`)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql --or=true failed: %v out=%q", err, string(out))
+		}
+		if string(out) != "{\"status\":\"closed\",\"progress\":72}\n" {
+			t.Fatalf("clql --or=true output mismatch: %q", string(out))
+		}
+	})
+	t.Run("or false", func(t *testing.T) {
+		cmd := exec.Command(clql, "--or=false", "-c", `/status="open",/progress>=50`)
+		cmd.Stdin = bytes.NewBufferString(`{"status":"closed","progress":72}`)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("clql --or=false unexpectedly matched: out=%q", string(out))
+		}
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("clql --or=false exit mismatch: err=%v out=%q", err, string(out))
+		}
+		if len(out) != 0 {
+			t.Fatalf("clql --or=false wrote output: %q", string(out))
+		}
+	})
+	t.Run("uppercase aliases", func(t *testing.T) {
+		cmd := exec.Command(clql, "--compact=TRUE", "--matches-only=F", `/status="open"`)
+		cmd.Stdin = bytes.NewBufferString("{\n  \"status\" : \"open\"\n}")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql uppercase boolean aliases failed: %v out=%q", err, string(out))
+		}
+		if string(out) != "{\"status\":\"open\"}\n" {
+			t.Fatalf("clql uppercase boolean aliases output mismatch: %q", string(out))
+		}
+	})
+	t.Run("enable file mutations true", func(t *testing.T) {
+		dir := t.TempDir()
+		blob := filepath.Join(dir, "blob.txt")
+		if err := os.WriteFile(blob, []byte("hello"), 0600); err != nil {
+			t.Fatalf("write blob: %v", err)
+		}
+		cmd := exec.Command(clql, "--enable-file-mutations=true", "-c", "-m", `textfile:/payload=`+blob, `contains{f=/}`)
+		cmd.Stdin = bytes.NewBufferString(`{}`)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql --enable-file-mutations=true failed: %v out=%q", err, string(out))
+		}
+		if string(out) != "{\"payload\":\"hello\"}\n" {
+			t.Fatalf("clql --enable-file-mutations=true output mismatch: %q", string(out))
+		}
+	})
+	t.Run("enable file mutations false", func(t *testing.T) {
+		cmd := exec.Command(clql, "--enable-file-mutations=false", "-m", `textfile:/payload=blob.txt`, `contains{f=/}`)
+		cmd.Stdin = bytes.NewBufferString(`{}`)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("clql --enable-file-mutations=false unexpectedly accepted file value: out=%q", string(out))
+		}
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
+			t.Fatalf("clql --enable-file-mutations=false exit mismatch: err=%v out=%q", err, string(out))
+		}
+	})
+	t.Run("invalid boolean", func(t *testing.T) {
+		cmd := exec.Command(clql, "--compact=maybe", `/status="open"`)
+		cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("clql invalid boolean unexpectedly succeeded: out=%q", string(out))
+		}
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
+			t.Fatalf("clql invalid boolean exit mismatch: err=%v out=%q", err, string(out))
+		}
+		if !bytes.Contains(out, []byte("invalid boolean value for --compact")) {
+			t.Fatalf("clql invalid boolean diagnostic mismatch: out=%q", string(out))
+		}
+	})
+}
+
 func TestCLQLMatchAllFileSelectionParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
