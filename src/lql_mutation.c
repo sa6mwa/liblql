@@ -52,6 +52,12 @@ typedef struct limited_file_reader {
   lql_uint64 remaining;
 } limited_file_reader;
 
+typedef struct mutation_path_frame {
+  unsigned char *array_segments;
+  size_t segment_count;
+  char container;
+} mutation_path_frame;
+
 typedef struct mutation_stream_state {
   const lql_mutation_plan *plan;
   lonejson_writer writer;
@@ -69,6 +75,8 @@ typedef struct mutation_stream_state {
   size_t skip_depth;
   int active_increment;
   size_t active_index;
+  mutation_path_frame *path_frames;
+  size_t path_frame_count;
 } mutation_stream_state;
 
 typedef struct string_list {
@@ -1040,21 +1048,35 @@ static int mutation_plan_supports_root_fields(const lql_mutation_plan *plan) {
   return 1;
 }
 
-static int mutation_is_concrete_path_supported(const mutation_item *item) {
+static int mutation_is_stream_path_supported(const mutation_item *item) {
   size_t i;
   if (item->path.segment_count == 0u) {
     return 0;
   }
   for (i = 0u; i < item->path.segment_count; ++i) {
     if (item->path.segments[i][0] == '\0' ||
-        strcmp(item->path.segments[i], "*") == 0 ||
-        strcmp(item->path.segments[i], "[]") == 0 ||
         strcmp(item->path.segments[i], "**") == 0 ||
         strcmp(item->path.segments[i], "...") == 0) {
       return 0;
     }
   }
   return 1;
+}
+
+static int mutation_path_has_wildcard(const mutation_path *path) {
+  size_t i;
+  if (path == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < path->segment_count; ++i) {
+    if (strcmp(path->segments[i], "*") == 0 ||
+        strcmp(path->segments[i], "[]") == 0 ||
+        strcmp(path->segments[i], "**") == 0 ||
+        strcmp(path->segments[i], "...") == 0) {
+      return 1;
+    }
+  }
+  return 0;
 }
 
 static int mutation_paths_equal(const mutation_path *a,
@@ -1085,21 +1107,26 @@ static int mutation_path_is_prefix(const mutation_path *prefix,
   return 1;
 }
 
-static int
-mutation_plan_supports_concrete_paths(const lql_mutation_plan *plan) {
+static int mutation_plan_supports_stream_paths(const lql_mutation_plan *plan) {
   size_t i;
   size_t j;
   if (plan == NULL || plan->count == 0u) {
     return 0;
   }
   for (i = 0u; i < plan->count; ++i) {
-    if (!mutation_is_concrete_path_supported(&plan->items[i])) {
+    if (!mutation_is_stream_path_supported(&plan->items[i])) {
       return 0;
     }
     for (j = i + 1u; j < plan->count; ++j) {
-      if (mutation_paths_equal(&plan->items[i].path, &plan->items[j].path) ||
-          mutation_path_is_prefix(&plan->items[i].path, &plan->items[j].path) ||
-          mutation_path_is_prefix(&plan->items[j].path, &plan->items[i].path)) {
+      if (mutation_paths_equal(&plan->items[i].path, &plan->items[j].path)) {
+        return 0;
+      }
+      if (!mutation_path_has_wildcard(&plan->items[i].path) &&
+          !mutation_path_has_wildcard(&plan->items[j].path) &&
+          (mutation_path_is_prefix(&plan->items[i].path,
+                                   &plan->items[j].path) ||
+           mutation_path_is_prefix(&plan->items[j].path,
+                                   &plan->items[i].path))) {
         return 0;
       }
     }
@@ -1107,16 +1134,42 @@ mutation_plan_supports_concrete_paths(const lql_mutation_plan *plan) {
   return 1;
 }
 
-static int value_path_prefix_matches(const mutation_path *item_path,
-                                     const lonejson_value_path *path) {
+static int stream_path_segment_matches(const char *expected,
+                                       const lonejson_path_segment *actual,
+                                       int actual_is_array) {
+  if (strcmp(expected, "*") == 0) {
+    return !actual_is_array;
+  }
+  if (strcmp(expected, "[]") == 0) {
+    return actual_is_array;
+  }
+  return strlen(expected) == actual->len &&
+         memcmp(expected, actual->data, actual->len) == 0;
+}
+
+static const mutation_path_frame *
+current_path_frame(const mutation_stream_state *state,
+                   const lonejson_value_path *path) {
+  const mutation_path_frame *frame;
+  if (state == NULL || path == NULL || state->path_frame_count == 0u) {
+    return NULL;
+  }
+  frame = &state->path_frames[state->path_frame_count - 1u];
+  return frame->segment_count == path->segment_count ? frame : NULL;
+}
+
+static int stream_path_prefix_matches(const mutation_path *item_path,
+                                      const lonejson_value_path *path,
+                                      const mutation_path_frame *frame) {
   size_t i;
-  if (path == NULL || path->segment_count > item_path->segment_count) {
+  if (path == NULL || frame == NULL ||
+      path->segment_count > item_path->segment_count ||
+      frame->segment_count != path->segment_count) {
     return 0;
   }
   for (i = 0u; i < path->segment_count; ++i) {
-    if (strlen(item_path->segments[i]) != path->segments[i].len ||
-        memcmp(item_path->segments[i], path->segments[i].data,
-               path->segments[i].len) != 0) {
+    if (!stream_path_segment_matches(item_path->segments[i], &path->segments[i],
+                                     frame->array_segments[i] ? 1 : 0)) {
       return 0;
     }
   }
@@ -1125,30 +1178,41 @@ static int value_path_prefix_matches(const mutation_path *item_path,
 
 static int mutation_key_matches_path(const mutation_item *item,
                                      const lonejson_value_path *parent,
+                                     const mutation_path_frame *frame,
                                      const char *key, size_t key_len) {
+  const char *segment;
   size_t key_index;
   if (parent == NULL ||
       item->path.segment_count != parent->segment_count + 1u ||
-      !value_path_prefix_matches(&item->path, parent)) {
+      !stream_path_prefix_matches(&item->path, parent, frame)) {
     return 0;
   }
   key_index = parent->segment_count;
-  return strlen(item->path.segments[key_index]) == key_len &&
-         memcmp(item->path.segments[key_index], key, key_len) == 0;
+  segment = item->path.segments[key_index];
+  if (strcmp(segment, "*") == 0) {
+    return 1;
+  }
+  if (strcmp(segment, "[]") == 0) {
+    return 0;
+  }
+  return strlen(segment) == key_len && memcmp(segment, key, key_len) == 0;
 }
 
 static int mutation_descends_from_object(const mutation_item *item,
-                                         const lonejson_value_path *path) {
+                                         const lonejson_value_path *path,
+                                         const mutation_path_frame *frame) {
   return path != NULL && item->path.segment_count > path->segment_count &&
-         value_path_prefix_matches(&item->path, path);
+         stream_path_prefix_matches(&item->path, path, frame);
 }
 
 static int mutation_key_index(const lql_mutation_plan *plan,
                               const lonejson_value_path *parent,
-                              const char *key, size_t key_len, size_t *out) {
+                              const mutation_path_frame *frame, const char *key,
+                              size_t key_len, size_t *out) {
   size_t i;
   for (i = 0u; i < plan->count; ++i) {
-    if (mutation_key_matches_path(&plan->items[i], parent, key, key_len)) {
+    if (mutation_key_matches_path(&plan->items[i], parent, frame, key,
+                                  key_len)) {
       *out = i;
       return 1;
     }
@@ -1332,14 +1396,85 @@ static lonejson_status finish_skip_value(mutation_stream_state *state) {
   return LONEJSON_STATUS_OK;
 }
 
+static const mutation_path_frame *
+mutation_parent_frame(const mutation_stream_state *state) {
+  if (state == NULL || state->path_frame_count == 0u) {
+    return NULL;
+  }
+  return &state->path_frames[state->path_frame_count - 1u];
+}
+
+static lonejson_status mutation_push_path_frame(mutation_stream_state *state,
+                                                const lonejson_value_path *path,
+                                                char container,
+                                                lonejson_error *error) {
+  const mutation_path_frame *parent;
+  mutation_path_frame frame;
+  mutation_path_frame *next;
+  size_t i;
+  (void)error;
+  memset(&frame, 0, sizeof(frame));
+  frame.container = container;
+  if (path != NULL && path->segment_count != 0u) {
+    frame.array_segments = (unsigned char *)calloc(
+        path->segment_count, sizeof(frame.array_segments[0]));
+    if (frame.array_segments == NULL) {
+      return LONEJSON_STATUS_ALLOCATION_FAILED;
+    }
+    parent = mutation_parent_frame(state);
+    if (parent != NULL) {
+      for (i = 0u; i < parent->segment_count && i < path->segment_count; ++i) {
+        frame.array_segments[i] = parent->array_segments[i];
+      }
+      if (path->segment_count > parent->segment_count &&
+          parent->container == 'a') {
+        frame.array_segments[path->segment_count - 1u] = 1u;
+      }
+    }
+  }
+  frame.segment_count = path == NULL ? 0u : path->segment_count;
+  next = (mutation_path_frame *)realloc(state->path_frames,
+                                        sizeof(state->path_frames[0]) *
+                                            (state->path_frame_count + 1u));
+  if (next == NULL) {
+    free(frame.array_segments);
+    return LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  state->path_frames = next;
+  state->path_frames[state->path_frame_count++] = frame;
+  return LONEJSON_STATUS_OK;
+}
+
+static void mutation_pop_path_frame(mutation_stream_state *state) {
+  if (state == NULL || state->path_frame_count == 0u) {
+    return;
+  }
+  --state->path_frame_count;
+  free(state->path_frames[state->path_frame_count].array_segments);
+  if (state->path_frame_count == 0u) {
+    free(state->path_frames);
+    state->path_frames = NULL;
+  }
+}
+
+static void mutation_cleanup_path_frames(mutation_stream_state *state) {
+  while (state != NULL && state->path_frame_count != 0u) {
+    mutation_pop_path_frame(state);
+  }
+}
+
 static lonejson_status mutation_object_begin(void *user,
                                              const lonejson_value_path *path,
                                              lonejson_error *error) {
   mutation_stream_state *state;
-  (void)path;
+  lonejson_status frame_status;
   state = (mutation_stream_state *)user;
   if (state->active_increment) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  frame_status = mutation_push_path_frame(state, path, 'o', error);
+  if (frame_status != LONEJSON_STATUS_OK) {
+    return frame_status;
   }
   if (state->source_depth == 0u) {
     state->root_seen = 1;
@@ -1437,10 +1572,14 @@ write_missing_object_mutations(mutation_stream_state *state,
                                lonejson_error *error) {
   size_t i;
   const mutation_item *item;
+  const mutation_path_frame *frame;
+  frame = current_path_frame(state, path);
   for (i = 0u; i < state->plan->count; ++i) {
     item = &state->plan->items[i];
     if (state->applied[i] || item->kind == MUTATION_REMOVE ||
-        !mutation_descends_from_object(item, path) ||
+        !mutation_descends_from_object(item, path, frame) ||
+        strcmp(item->path.segments[path->segment_count], "*") == 0 ||
+        strcmp(item->path.segments[path->segment_count], "[]") == 0 ||
         state->prefix_seen_depth[i] > path->segment_count) {
       continue;
     }
@@ -1458,14 +1597,18 @@ immediate_array_object_mutation_index(const mutation_stream_state *state,
                                       size_t *out_index) {
   size_t i;
   const mutation_item *item;
+  const mutation_path_frame *frame;
   if (path == NULL) {
     return 0;
   }
+  frame = current_path_frame(state, path);
   for (i = 0u; i < state->plan->count; ++i) {
     item = &state->plan->items[i];
     if (state->applied[i] || item->kind == MUTATION_REMOVE ||
         item->path.segment_count != path->segment_count + 1u ||
-        !value_path_prefix_matches(&item->path, path)) {
+        !stream_path_prefix_matches(&item->path, path, frame) ||
+        strcmp(item->path.segments[path->segment_count], "*") == 0 ||
+        strcmp(item->path.segments[path->segment_count], "[]") == 0) {
       continue;
     }
     *out_index = i;
@@ -1499,6 +1642,7 @@ static lonejson_status mutation_object_end(void *user,
                                            const lonejson_value_path *path,
                                            lonejson_error *error) {
   mutation_stream_state *state;
+  lonejson_status status;
   state = (mutation_stream_state *)user;
   if (state->source_depth == 0u) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -1508,22 +1652,32 @@ static lonejson_status mutation_object_end(void *user,
     if (state->skip_depth != 0u) {
       --state->skip_depth;
     }
-    return finish_skip_value(state);
+    status = finish_skip_value(state);
+    mutation_pop_path_frame(state);
+    return status;
   }
   if (write_missing_object_mutations(state, path, error) !=
       LONEJSON_STATUS_OK) {
+    mutation_pop_path_frame(state);
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
-  return lonejson_writer_end_object(&state->writer, error);
+  status = lonejson_writer_end_object(&state->writer, error);
+  mutation_pop_path_frame(state);
+  return status;
 }
 
 static lonejson_status mutation_array_begin(void *user,
                                             const lonejson_value_path *path,
                                             lonejson_error *error) {
   mutation_stream_state *state;
+  lonejson_status frame_status;
   state = (mutation_stream_state *)user;
   if (state->active_increment) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  frame_status = mutation_push_path_frame(state, path, 'a', error);
+  if (frame_status != LONEJSON_STATUS_OK) {
+    return frame_status;
   }
   if (state->source_depth == 0u) {
     state->root_seen = 1;
@@ -1536,6 +1690,7 @@ static lonejson_status mutation_array_begin(void *user,
   }
   if (write_array_replacement_object(state, path, error) !=
       LONEJSON_STATUS_OK) {
+    mutation_pop_path_frame(state);
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   if (state->skipping) {
@@ -1551,6 +1706,7 @@ static lonejson_status mutation_array_end(void *user,
                                           const lonejson_value_path *path,
                                           lonejson_error *error) {
   mutation_stream_state *state;
+  lonejson_status status;
   (void)path;
   state = (mutation_stream_state *)user;
   if (state->source_depth == 0u) {
@@ -1561,9 +1717,13 @@ static lonejson_status mutation_array_end(void *user,
     if (state->skip_depth != 0u) {
       --state->skip_depth;
     }
-    return finish_skip_value(state);
+    status = finish_skip_value(state);
+    mutation_pop_path_frame(state);
+    return status;
   }
-  return lonejson_writer_end_array(&state->writer, error);
+  status = lonejson_writer_end_array(&state->writer, error);
+  mutation_pop_path_frame(state);
+  return status;
 }
 
 static lonejson_status mutation_key_begin(void *user,
@@ -1597,26 +1757,30 @@ static lonejson_status mutation_key_end(void *user,
                                         lonejson_error *error) {
   mutation_stream_state *state;
   const mutation_item *item;
+  const mutation_path_frame *frame;
   size_t index;
   size_t i;
   state = (mutation_stream_state *)user;
   if (state->skipping) {
     return LONEJSON_STATUS_OK;
   }
+  frame = current_path_frame(state, path);
   for (i = 0u; i < state->plan->count; ++i) {
     if (path != NULL &&
         state->plan->items[i].path.segment_count > path->segment_count &&
-        value_path_prefix_matches(&state->plan->items[i].path, path) &&
-        strlen(state->plan->items[i].path.segments[path->segment_count]) ==
-            state->key_len &&
-        memcmp(state->plan->items[i].path.segments[path->segment_count],
-               state->key_buf, state->key_len) == 0 &&
+        stream_path_prefix_matches(&state->plan->items[i].path, path, frame) &&
+        (strcmp(state->plan->items[i].path.segments[path->segment_count],
+                "*") == 0 ||
+         (strlen(state->plan->items[i].path.segments[path->segment_count]) ==
+              state->key_len &&
+          memcmp(state->plan->items[i].path.segments[path->segment_count],
+                 state->key_buf, state->key_len) == 0)) &&
         state->prefix_seen_depth[i] < path->segment_count + 1u) {
       state->prefix_seen_depth[i] = path->segment_count + 1u;
     }
   }
-  if (mutation_key_index(state->plan, path, state->key_buf, state->key_len,
-                         &index)) {
+  if (mutation_key_index(state->plan, path, frame, state->key_buf,
+                         state->key_len, &index)) {
     item = &state->plan->items[index];
     if (item->kind == MUTATION_REMOVE) {
       state->applied[index] = 1;
@@ -1881,7 +2045,8 @@ mutate_file_range_with_supported_plan(const lql_mutation_plan *plan, FILE *file,
   }
   if (st == LONEJSON_STATUS_OK) {
     for (i = 0u; i < plan->count; ++i) {
-      if (!state.applied[i] && plan->items[i].kind != MUTATION_REMOVE) {
+      if (!state.applied[i] && plan->items[i].kind != MUTATION_REMOVE &&
+          !mutation_path_has_wildcard(&plan->items[i].path)) {
         st = LONEJSON_STATUS_CALLBACK_FAILED;
         lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                       "mutation path could not be applied without "
@@ -1894,6 +2059,7 @@ mutate_file_range_with_supported_plan(const lql_mutation_plan *plan, FILE *file,
     st = lonejson_writer_finish(&state.writer, &lj_error);
   }
   lonejson_writer_cleanup(&state.writer);
+  mutation_cleanup_path_frames(&state);
   free(state.key_buf);
   free(state.num_buf);
   free(state.applied);
@@ -1936,7 +2102,7 @@ lql_status lql_mutate_file_range_paths(const lql_mutation_plan *plan,
                   "plan, file, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  if (!mutation_plan_supports_concrete_paths(plan)) {
+  if (!mutation_plan_supports_stream_paths(plan)) {
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                   "mutation plan requires unsupported path behavior");
     return LQL_STATUS_UNSUPPORTED;

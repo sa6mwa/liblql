@@ -423,15 +423,17 @@ Current implementation is an early slice:
   `lql_mutate_file_range_root_fields()` for bounded source-backed rewrites of
   root object fields and `lql_mutate_file_range_paths()` for bounded
   source-backed rewrites of concrete object/member paths with optional concrete
-  array indexes over seekable file ranges; immediate concrete child mutations
+  array indexes and existing-position `*` object-child or `[]` array-element
+  wildcards over seekable file ranges; immediate concrete child mutations
   under arrays follow Go stream behavior by replacing the array value with an
   object keyed by the requested numeric segments; supported set values include
   `time:` normalization to UTC RFC3339Nano strings and
-  `file:/textfile:/base64file:` source-backed file values; wildcards,
-  recursive paths, and non-seekable execution still return unsupported;
+  `file:/textfile:/base64file:` source-backed file values; recursive paths and
+  non-seekable execution still return unsupported;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
-  applies supported concrete-path mutations to matched candidates, and leaves
-  wildcard and non-seekable mutation behavior unsupported;
+  applies supported concrete-path and existing-position wildcard mutations to
+  matched candidates, and leaves recursive and non-seekable mutation behavior
+  unsupported;
 - `clql -m/--mutate` accepts a single file argument with no selector as
   match-all mutation input and rejects multiple file inputs explicitly;
 - `clql -F/--enable-file-mutations` opts into parsing file-backed mutation
