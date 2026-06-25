@@ -5,6 +5,7 @@ help:
 	  'make deps-debug              fetch host lonejson SDK' \
 	  'make build                   configure and build debug preset' \
 	  'make test                    run debug tests' \
+	  'make test-all                run tests, sanitizers, Lua, and benchmark parity gates' \
 	  'make asan                    run ASan/UBSan tests' \
 	  'make lua-test                run Lua facade smoke tests' \
 	  'make benchmarks             run local parity benchmark smoke' \
@@ -36,7 +37,7 @@ build-release: deps-release
 test test-debug: build-debug
 	@ctest --preset debug
 
-test-all: test asan lua-test
+test-all: test asan lua-test bench-check
 
 asan: deps-debug
 	@cmake --preset asan
