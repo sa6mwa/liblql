@@ -18,6 +18,11 @@ typedef struct limited_file_reader {
   lql_uint64 remaining;
 } limited_file_reader;
 
+typedef struct projection_path {
+  char **segments;
+  size_t segment_count;
+} projection_path;
+
 typedef struct projection_state {
   const lql_projection *projection;
   lonejson_writer writer;
@@ -32,11 +37,13 @@ typedef struct projection_state {
   int in_number;
   int found;
   int object_started;
+  const projection_path *open_path;
+  size_t open_count;
 } projection_state;
 
 struct lql_projection {
-  char **fields;
-  size_t field_count;
+  projection_path *paths;
+  size_t path_count;
 };
 
 static int seek_u64(FILE *file, lql_uint64 offset) {
@@ -76,7 +83,7 @@ static lonejson_read_result limited_read(void *user, unsigned char *buffer,
   return result;
 }
 
-static int field_is_array_index(const char *field) {
+static int segment_is_array_index(const char *field) {
   size_t i;
   if (field == NULL || field[0] == '\0') {
     return 0;
@@ -89,29 +96,31 @@ static int field_is_array_index(const char *field) {
   return 1;
 }
 
-static char *decode_root_field_path(const char *path) {
-  const char *src;
+static int add_segment(projection_path *path, char *segment) {
+  char **next;
+  next = (char **)realloc(path->segments,
+                          sizeof(path->segments[0]) *
+                              (path->segment_count + 1u));
+  if (next == NULL) {
+    return 0;
+  }
+  path->segments = next;
+  path->segments[path->segment_count++] = segment;
+  return 1;
+}
+
+static char *decode_path_segment(const char *src, size_t len) {
   char *out;
-  size_t len;
   size_t i;
   size_t j;
-  if (path == NULL || path[0] != '/' || path[1] == '\0') {
-    return NULL;
-  }
-  src = path + 1;
-  len = strlen(src);
   out = (char *)malloc(len + 1u);
   if (out == NULL) {
     return NULL;
   }
   i = 0u;
   j = 0u;
-  while (src[i] != '\0') {
-    if (src[i] == '/') {
-      free(out);
-      return NULL;
-    }
-    if (src[i] == '~' && src[i + 1u] != '\0') {
+  while (i < len) {
+    if (src[i] == '~' && i + 1u < len) {
       if (src[i + 1u] == '0') {
         out[j++] = '~';
         i += 2u;
@@ -126,55 +135,167 @@ static char *decode_root_field_path(const char *path) {
     out[j++] = src[i++];
   }
   out[j] = '\0';
-  if (out[0] == '\0' || field_is_array_index(out)) {
-    free(out);
-    return NULL;
-  }
   return out;
 }
 
-static int add_field(lql_projection *projection, const char *path) {
-  char *decoded;
-  char **next;
+static void projection_path_cleanup(projection_path *path) {
   size_t i;
-  decoded = decode_root_field_path(path);
-  if (decoded == NULL) {
+  if (path == NULL) {
+    return;
+  }
+  for (i = 0u; i < path->segment_count; ++i) {
+    free(path->segments[i]);
+  }
+  free(path->segments);
+  path->segments = NULL;
+  path->segment_count = 0u;
+}
+
+static int parse_projection_path(const char *raw, projection_path *out) {
+  const char *start;
+  const char *end;
+  const char *seg;
+  char *decoded;
+  size_t len;
+  memset(out, 0, sizeof(*out));
+  if (raw == NULL) {
     return 0;
   }
-  for (i = 0u; i < projection->field_count; ++i) {
-    if (strcmp(projection->fields[i], decoded) == 0) {
+  start = raw;
+  while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
+    ++start;
+  }
+  end = start + strlen(start);
+  while (end > start &&
+         (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' ||
+          end[-1] == '\n')) {
+    --end;
+  }
+  if (end == start) {
+    return 1;
+  }
+  if (*start != '/' || end == start + 1) {
+    return 0;
+  }
+  seg = start + 1;
+  while (seg <= end) {
+    const char *slash;
+    slash = seg;
+    while (slash < end && *slash != '/') {
+      ++slash;
+    }
+    len = (size_t)(slash - seg);
+    decoded = decode_path_segment(seg, len);
+    if (decoded == NULL) {
+      projection_path_cleanup(out);
+      return 0;
+    }
+    if (out->segment_count == 0u && segment_is_array_index(decoded)) {
       free(decoded);
-      return 1;
+      projection_path_cleanup(out);
+      return 0;
+    }
+    if (segment_is_array_index(decoded)) {
+      free(decoded);
+      projection_path_cleanup(out);
+      return 0;
+    }
+    if (!add_segment(out, decoded)) {
+      free(decoded);
+      projection_path_cleanup(out);
+      return 0;
+    }
+    if (slash == end) {
+      break;
+    }
+    seg = slash + 1;
+  }
+  return out->segment_count != 0u;
+}
+
+static int projection_paths_equal(const projection_path *a,
+                                  const projection_path *b) {
+  size_t i;
+  if (a->segment_count != b->segment_count) {
+    return 0;
+  }
+  for (i = 0u; i < a->segment_count; ++i) {
+    if (strcmp(a->segments[i], b->segments[i]) != 0) {
+      return 0;
     }
   }
-  next = (char **)realloc(projection->fields,
-                          sizeof(projection->fields[0]) *
-                              (projection->field_count + 1u));
-  if (next == NULL) {
-    free(decoded);
-    return 0;
-  }
-  projection->fields = next;
-  projection->fields[projection->field_count++] = decoded;
   return 1;
 }
 
-static int path_is_root_field(const lonejson_value_path *path,
-                              const char *field) {
-  return path != NULL && path->segment_count == 1u &&
-         strlen(field) == path->segments[0].len &&
-         memcmp(field, path->segments[0].data, path->segments[0].len) == 0;
+static int projection_path_is_prefix(const projection_path *prefix,
+                                     const projection_path *path) {
+  size_t i;
+  if (prefix->segment_count >= path->segment_count) {
+    return 0;
+  }
+  for (i = 0u; i < prefix->segment_count; ++i) {
+    if (strcmp(prefix->segments[i], path->segments[i]) != 0) {
+      return 0;
+    }
+  }
+  return 1;
 }
 
-static const char *selected_field(const lql_projection *projection,
-                                  const lonejson_value_path *path) {
+static int add_path(lql_projection *projection, projection_path *path) {
+  projection_path *next;
+  size_t i;
+  if (path->segment_count == 0u) {
+    return 1;
+  }
+  for (i = 0u; i < projection->path_count; ++i) {
+    if (projection_paths_equal(&projection->paths[i], path)) {
+      projection_path_cleanup(path);
+      return 1;
+    }
+    if (projection_path_is_prefix(&projection->paths[i], path) ||
+        projection_path_is_prefix(path, &projection->paths[i])) {
+      return 0;
+    }
+  }
+  next = (projection_path *)realloc(
+      projection->paths, sizeof(projection->paths[0]) *
+                             (projection->path_count + 1u));
+  if (next == NULL) {
+    return 0;
+  }
+  projection->paths = next;
+  projection->paths[projection->path_count++] = *path;
+  path->segments = NULL;
+  path->segment_count = 0u;
+  return 1;
+}
+
+static int value_path_matches(const lonejson_value_path *value_path,
+                              const projection_path *projection_path) {
+  size_t i;
+  if (value_path == NULL ||
+      value_path->segment_count != projection_path->segment_count) {
+    return 0;
+  }
+  for (i = 0u; i < projection_path->segment_count; ++i) {
+    if (strlen(projection_path->segments[i]) != value_path->segments[i].len ||
+        memcmp(projection_path->segments[i], value_path->segments[i].data,
+               value_path->segments[i].len) != 0) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static const projection_path *selected_path(const lql_projection *projection,
+                                            const lonejson_value_path *path) {
   size_t i;
   if (projection == NULL) {
     return NULL;
   }
-  for (i = 0u; i < projection->field_count; ++i) {
-    if (path_is_root_field(path, projection->fields[i])) {
-      return projection->fields[i];
+  for (i = 0u; i < projection->path_count; ++i) {
+    if (value_path_matches(path, &projection->paths[i])) {
+      return &projection->paths[i];
     }
   }
   return NULL;
@@ -193,8 +314,39 @@ static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
   return 1;
 }
 
+static size_t common_open_prefix(const projection_state *state,
+                                 const projection_path *path,
+                                 size_t parent_count) {
+  size_t common;
+  common = 0u;
+  while (common < state->open_count && common < parent_count &&
+         strcmp(state->open_path->segments[common], path->segments[common]) ==
+             0) {
+    ++common;
+  }
+  return common;
+}
+
+static lonejson_status close_open_objects(projection_state *state,
+                                          size_t keep_count) {
+  while (state->open_count > keep_count) {
+    if (lonejson_writer_end_object(&state->writer, state->error) !=
+        LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    --state->open_count;
+  }
+  if (state->open_count == 0u) {
+    state->open_path = NULL;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status projection_key(projection_state *state,
-                                      const char *key) {
+                                      const projection_path *path) {
+  size_t parent_count;
+  size_t common;
+  size_t i;
   if (!state->object_started) {
     if (lonejson_writer_begin_object(&state->writer, state->error) !=
         LONEJSON_STATUS_OK) {
@@ -202,10 +354,29 @@ static lonejson_status projection_key(projection_state *state,
     }
     state->object_started = 1;
   }
-  if (lonejson_writer_key(&state->writer, key, strlen(key), state->error) !=
-      LONEJSON_STATUS_OK) {
+  parent_count = path->segment_count - 1u;
+  common = common_open_prefix(state, path, parent_count);
+  if (close_open_objects(state, common) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
+  for (i = common; i < parent_count; ++i) {
+    const char *segment;
+    segment = path->segments[i];
+    if (lonejson_writer_key(&state->writer, segment, strlen(segment),
+                            state->error) != LONEJSON_STATUS_OK ||
+        lonejson_writer_begin_object(&state->writer, state->error) !=
+            LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    state->open_path = path;
+    ++state->open_count;
+  }
+  if (lonejson_writer_key(&state->writer, path->segments[parent_count],
+                          strlen(path->segments[parent_count]),
+                          state->error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  state->open_path = parent_count == 0u ? NULL : path;
   state->found = 1;
   return LONEJSON_STATUS_OK;
 }
@@ -214,12 +385,12 @@ static lonejson_status on_object_begin(void *user,
                                        const lonejson_value_path *path,
                                        lonejson_error *error) {
   projection_state *state;
-  const char *field;
+  const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
-  field = selected_field(state->projection, path);
-  if (field != NULL && !state->capturing) {
-    if (projection_key(state, field) != LONEJSON_STATUS_OK ||
+  projected_path = selected_path(state->projection, path);
+  if (projected_path != NULL && !state->capturing) {
+    if (projection_key(state, projected_path) != LONEJSON_STATUS_OK ||
         lonejson_writer_begin_object(&state->writer, state->error) !=
             LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -259,12 +430,12 @@ static lonejson_status on_array_begin(void *user,
                                       const lonejson_value_path *path,
                                       lonejson_error *error) {
   projection_state *state;
-  const char *field;
+  const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
-  field = selected_field(state->projection, path);
-  if (field != NULL && !state->capturing) {
-    if (projection_key(state, field) != LONEJSON_STATUS_OK ||
+  projected_path = selected_path(state->projection, path);
+  if (projected_path != NULL && !state->capturing) {
+    if (projection_key(state, projected_path) != LONEJSON_STATUS_OK ||
         lonejson_writer_begin_array(&state->writer, state->error) !=
             LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -344,12 +515,12 @@ static lonejson_status on_string_begin(void *user,
                                        const lonejson_value_path *path,
                                        lonejson_error *error) {
   projection_state *state;
-  const char *field;
+  const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
-  field = selected_field(state->projection, path);
-  if (field != NULL && !state->capturing) {
-    if (projection_key(state, field) != LONEJSON_STATUS_OK ||
+  projected_path = selected_path(state->projection, path);
+  if (projected_path != NULL && !state->capturing) {
+    if (projection_key(state, projected_path) != LONEJSON_STATUS_OK ||
         lonejson_writer_string_begin(&state->writer, state->error) !=
             LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -407,7 +578,7 @@ static lonejson_status on_number_begin(void *user,
   state->num_buf = NULL;
   state->num_len = 0u;
   state->in_number =
-      state->capturing || selected_field(state->projection, path) != NULL;
+      state->capturing || selected_path(state->projection, path) != NULL;
   return LONEJSON_STATUS_OK;
 }
 
@@ -430,12 +601,12 @@ static lonejson_status on_number_end(void *user,
                                      const lonejson_value_path *path,
                                      lonejson_error *error) {
   projection_state *state;
-  const char *field;
+  const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
-  field = selected_field(state->projection, path);
-  if (field != NULL && !state->capturing &&
-      projection_key(state, field) != LONEJSON_STATUS_OK) {
+  projected_path = selected_path(state->projection, path);
+  if (projected_path != NULL && !state->capturing &&
+      projection_key(state, projected_path) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   if (state->in_number &&
@@ -451,15 +622,15 @@ static lonejson_status on_number_end(void *user,
 static lonejson_status on_boolean(void *user, const lonejson_value_path *path,
                                   int value, lonejson_error *error) {
   projection_state *state;
-  const char *field;
+  const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
-  field = selected_field(state->projection, path);
-  if (field != NULL && !state->capturing &&
-      projection_key(state, field) != LONEJSON_STATUS_OK) {
+  projected_path = selected_path(state->projection, path);
+  if (projected_path != NULL && !state->capturing &&
+      projection_key(state, projected_path) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
-  if ((state->capturing || field != NULL) &&
+  if ((state->capturing || projected_path != NULL) &&
       lonejson_writer_bool(&state->writer, value, state->error) !=
           LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -470,15 +641,15 @@ static lonejson_status on_boolean(void *user, const lonejson_value_path *path,
 static lonejson_status on_null(void *user, const lonejson_value_path *path,
                                lonejson_error *error) {
   projection_state *state;
-  const char *field;
+  const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
-  field = selected_field(state->projection, path);
-  if (field != NULL && !state->capturing &&
-      projection_key(state, field) != LONEJSON_STATUS_OK) {
+  projected_path = selected_path(state->projection, path);
+  if (projected_path != NULL && !state->capturing &&
+      projection_key(state, projected_path) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
-  if ((state->capturing || field != NULL) &&
+  if ((state->capturing || projected_path != NULL) &&
       lonejson_writer_null(&state->writer, state->error) !=
           LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -508,6 +679,7 @@ static void init_projection_visitor(lonejson_path_value_visitor *visitor) {
 lql_status lql_projection_parse(const char *const *fields, size_t field_count,
                                 lql_projection **out, lql_error *error) {
   lql_projection *projection;
+  projection_path path;
   size_t i;
   if (out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -524,14 +696,21 @@ lql_status lql_projection_parse(const char *const *fields, size_t field_count,
     return LQL_STATUS_NO_MEMORY;
   }
   for (i = 0u; i < field_count; ++i) {
-    if (!add_field(projection, fields[i])) {
+    if (!parse_projection_path(fields[i], &path)) {
       lql_projection_free(projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "invalid or unsupported projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
+    if (!add_path(projection, &path)) {
+      projection_path_cleanup(&path);
+      lql_projection_free(projection);
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "conflicting projection field path");
+      return LQL_STATUS_PARSE_ERROR;
+    }
   }
-  if (projection->field_count == 0u) {
+  if (projection->path_count == 0u) {
     lql_projection_free(projection);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "projection fields required");
     return LQL_STATUS_PARSE_ERROR;
@@ -545,10 +724,10 @@ void lql_projection_free(lql_projection *projection) {
   if (projection == NULL) {
     return;
   }
-  for (i = 0u; i < projection->field_count; ++i) {
-    free(projection->fields[i]);
+  for (i = 0u; i < projection->path_count; ++i) {
+    projection_path_cleanup(&projection->paths[i]);
   }
-  free(projection->fields);
+  free(projection->paths);
   free(projection);
 }
 
@@ -594,6 +773,9 @@ lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
   }
   st = lonejson_visit_path_value_reader(runtime, limited_read, &reader,
                                         &visitor, &state, &lj_error);
+  if (st == LONEJSON_STATUS_OK && state.object_started) {
+    st = close_open_objects(&state, 0u);
+  }
   if (st == LONEJSON_STATUS_OK && state.object_started) {
     st = lonejson_writer_end_object(&state.writer, &lj_error);
   }

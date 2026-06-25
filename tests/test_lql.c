@@ -303,9 +303,12 @@ static void expect_projection_api(void) {
   static const char first[] =
       "{\"id\":\"a\",\"count\":1,\"nested\":{\"x\":true}}";
   static const char second[] = "{\"id\":\"b\"}";
-  const char *fields[2];
+  const char *fields[3];
   const char *missing[1];
   const char *invalid[1];
+  const char *root[1];
+  const char *index[1];
+  const char *conflict[2];
   FILE *source;
   FILE *out;
   lql_projection *projection;
@@ -339,10 +342,11 @@ static void expect_projection_api(void) {
   }
 
   fields[0] = "/id";
-  fields[1] = "/nested";
+  fields[1] = "/nested/x";
+  fields[2] = "/nested/x";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(fields, 2u, &projection, &error);
+  st = lql_projection_parse(fields, 3u, &projection, &error);
   if (st != LQL_STATUS_OK) {
     printf("projection parse failed: %s\n", error.message);
     fclose(source);
@@ -394,12 +398,37 @@ static void expect_projection_api(void) {
   lql_projection_free(projection);
   fclose(out);
 
-  invalid[0] = "/nested/id";
+  invalid[0] = "/items/1/sku";
   projection = NULL;
   lql_error_init(&error);
   st = lql_projection_parse(invalid, 1u, &projection, &error);
   if (st == LQL_STATUS_OK) {
-    printf("invalid projection path parsed\n");
+    printf("array projection path parsed\n");
+    lql_projection_free(projection);
+    ++failures;
+  }
+  root[0] = "/";
+  projection = NULL;
+  st = lql_projection_parse(root, 1u, &projection, &error);
+  if (st == LQL_STATUS_OK) {
+    printf("root projection path parsed\n");
+    lql_projection_free(projection);
+    ++failures;
+  }
+  index[0] = "/0/id";
+  projection = NULL;
+  st = lql_projection_parse(index, 1u, &projection, &error);
+  if (st == LQL_STATUS_OK) {
+    printf("leading index projection path parsed\n");
+    lql_projection_free(projection);
+    ++failures;
+  }
+  conflict[0] = "/nested";
+  conflict[1] = "/nested/x";
+  projection = NULL;
+  st = lql_projection_parse(conflict, 2u, &projection, &error);
+  if (st == LQL_STATUS_OK) {
+    printf("conflicting projection paths parsed\n");
     lql_projection_free(projection);
     ++failures;
   }
