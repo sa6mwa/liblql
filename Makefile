@@ -43,11 +43,12 @@ asan: deps-debug
 	@ctest --preset asan
 
 bench benchmarks: build-debug
-	@./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json
+	@./scripts/check_parity_benchmark_schema.sh
 
 bench-check: build-debug
 	@./scripts/run_parity_benchmarks.sh --impl go,c --format json --check --require go,c
 	@./scripts/check_parity_benchmark_failures.sh
+	@./scripts/check_parity_benchmark_schema.sh
 
 benchmarks-go:
 	@./scripts/run_parity_benchmarks.sh --impl go --format json

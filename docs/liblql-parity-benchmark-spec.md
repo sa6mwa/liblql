@@ -50,10 +50,12 @@ Current implementation status:
 
 - `scripts/run_parity_benchmarks.sh` is the benchmark entry point.
 - `make bench` and `make benchmarks` run a small deterministic development
-  matrix and emit JSON Lines.
+  matrix, emit JSON Lines, and validate every result record against the
+  benchmark schema.
 - `make bench-check` runs the current deterministic Go/C smoke gate and fails
   if candidate or match counts diverge. It also runs deterministic negative
-  checks proving candidate-count and match-count mismatch failures are detected.
+  checks proving candidate-count and match-count mismatch failures are detected
+  and validates benchmark JSON Lines records.
 - `make benchmarks-c` exercises the C CLI over a shared generated fixture.
 - `make benchmarks-go` exercises `parity/cmd/lqlbench`, which uses the pinned
   Go module and emits stable JSON Lines without scraping `go test` output.
