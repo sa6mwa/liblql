@@ -537,6 +537,16 @@ Current implementation is an early slice:
   to C unit functions;
 - Go-backed parity tests exist for the current CLI surface and remain a
   transitional oracle for deriving exhaustive C-only SDK tests;
+- Go-backed SDK parity tests now exist for public `liblql` selector
+  parse/evaluate behavior through the C API, comparing `lql_selector_parse()`,
+  `lql_selector_parse_or()`, and `lql_matches_json()` against the pinned Go
+  library's selector parser and matcher over the current selector corpus; this
+  is behavioral lib-to-lib parity, not a requirement that the C API mirror Go
+  API shape;
+- the Go-backed SDK parity suite is intentionally excluded from sanitizer CTest
+  presets because the cgo test process cannot reliably load an
+  ASan-instrumented shared liblql with the ASan runtime first; project-owned C
+  unit tests remain the sanitizer authority for SDK behavior;
 - the Lua tree includes an initial CLI-backed facade over public `clql`, with
   deterministic smoke tests for selector decisions, selection output,
   file and buffered-JSON projection, file and buffered-JSON mutation, and

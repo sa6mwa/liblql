@@ -139,6 +139,22 @@ if(LQL_BUILD_TESTS)
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/parity)
     set_tests_properties(lql.parity PROPERTIES LABELS "parity;local" TIMEOUT 60)
   endif()
+  set(LQL_SANITIZER_BUILD OFF)
+  if(CMAKE_C_FLAGS MATCHES "-fsanitize")
+    set(LQL_SANITIZER_BUILD ON)
+  endif()
+  if(GO_EXECUTABLE AND LQL_BUILD_SHARED AND NOT LQL_SANITIZER_BUILD)
+    add_test(NAME lql.sdk-parity
+      COMMAND ${CMAKE_COMMAND} -E env
+        CGO_ENABLED=1
+        "CGO_CFLAGS=-I${CMAKE_CURRENT_SOURCE_DIR}/include -I${CMAKE_CURRENT_BINARY_DIR}/generated/include"
+        "CGO_LDFLAGS=-L$<TARGET_FILE_DIR:lql_shared> -L${LQL_EXTERNAL_ROOT}/lib -llql -llonejson"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:lql_shared>:${LQL_EXTERNAL_ROOT}/lib"
+        "DYLD_LIBRARY_PATH=$<TARGET_FILE_DIR:lql_shared>:${LQL_EXTERNAL_ROOT}/lib"
+        ${GO_EXECUTABLE} test -tags liblql_sdk_parity ./...
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/parity)
+    set_tests_properties(lql.sdk-parity PROPERTIES LABELS "parity;api;local" TIMEOUT 60)
+  endif()
 endif()
 
 if(LQL_INSTALL)
