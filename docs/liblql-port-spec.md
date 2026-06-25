@@ -426,6 +426,9 @@ Current implementation is an early slice:
   wildcard, file-backed, and non-seekable mutation behavior unsupported;
 - `clql -m -M/--matches-only` emits only matched seekable file candidates after
   applying supported concrete-path mutations;
+- `clql -m -i/--inline` and `clql -m -w/--write` rewrite a single seekable
+  input file through a sibling temp file and rename only after successful
+  mutation; stdin and non-mutation inline use are rejected;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;

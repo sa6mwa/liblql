@@ -13,9 +13,10 @@ Object and array-index projection are also exposed through the initial
 explicitly buffered JSON values. Mutation parse/plan validation is exposed
 through `lql_mutation_plan`, and supported concrete-path mutations including
 Go-compatible numeric child handling under arrays and time normalization can be
-applied to seekable file ranges without full-document materialization. Wildcard
-mutation execution, file-backed mutation values, payload handles, and full
-`clql` parity are still active porting work.
+applied to seekable file ranges without full-document materialization. `clql`
+also supports seekable-file inline/write mutation through a temp-file rename.
+Wildcard mutation execution, file-backed mutation values, payload handles, and
+full `clql` parity are still active porting work.
 
 ```sh
 make deps-debug

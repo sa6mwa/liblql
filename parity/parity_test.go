@@ -774,6 +774,80 @@ func TestCLQLMutationMatchesOnlyParity(t *testing.T) {
 	}
 }
 
+func TestCLQLInlineMutationParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	for _, flag := range []string{"-i", "-w"} {
+		flag := flag
+		t.Run(flag, func(t *testing.T) {
+			body := `{"id":"a","status":"open"}
+{"id":"b","status":"open"}`
+			tmp, err := os.CreateTemp(t.TempDir(), "clql-inline-*.json")
+			if err != nil {
+				t.Fatalf("create temp: %v", err)
+			}
+			if _, err := tmp.WriteString(body); err != nil {
+				t.Fatalf("write temp: %v", err)
+			}
+			if err := tmp.Close(); err != nil {
+				t.Fatalf("close temp: %v", err)
+			}
+			cmd := exec.Command(
+				clql,
+				"-c",
+				flag,
+				"-m", "/status=done",
+				`/id="b"`,
+				tmp.Name(),
+			)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("clql inline mutation failed: %v out=%q", err, string(out))
+			}
+			if len(out) != 0 {
+				t.Fatalf("inline mutation wrote stdout: %q", string(out))
+			}
+			gotBytes, err := os.ReadFile(tmp.Name())
+			if err != nil {
+				t.Fatalf("read inline file: %v", err)
+			}
+			got, err := decodeJSONValues(gotBytes)
+			if err != nil {
+				t.Fatalf("decode inline file: %v payload=%q", err, string(gotBytes))
+			}
+			want, err := decodeJSONValues([]byte(`{"id":"a","status":"open"}
+{"id":"b","status":"done"}`))
+			if err != nil {
+				t.Fatalf("decode expected inline output: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("inline mutation mismatch: got=%#v want=%#v payload=%q", got, want, string(gotBytes))
+			}
+		})
+	}
+}
+
+func TestCLQLInlineMutationRejectsStdin(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cmd := exec.Command(clql, "-i", "-m", "/status=done", `contains{f=/}`)
+	cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("inline mutation on stdin unexpectedly succeeded: out=%q", string(out))
+	}
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
+		t.Fatalf("inline stdin exit mismatch: err=%v out=%q", err, string(out))
+	}
+	if !bytes.Contains(out, []byte("inline mode requires a single JSON file")) {
+		t.Fatalf("inline stdin error mismatch: out=%q", string(out))
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

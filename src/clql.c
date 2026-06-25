@@ -1,6 +1,9 @@
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200112L
 #endif
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 600
+#endif
 #ifndef _FILE_OFFSET_BITS
 #define _FILE_OFFSET_BITS 64
 #endif
@@ -10,7 +13,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 typedef struct projection_args {
   char **items;
@@ -201,8 +206,42 @@ static void close_input_path(FILE *file) {
   }
 }
 
+static int create_inline_temp(const char *path, char **out_path,
+                              FILE **out_file) {
+  char *template_path;
+  size_t len;
+  int fd;
+  FILE *file;
+  struct stat st;
+  len = strlen(path);
+  template_path = (char *)malloc(len + strlen(".lql-XXXXXX") + 1u);
+  if (template_path == NULL) {
+    return 0;
+  }
+  memcpy(template_path, path, len);
+  memcpy(template_path + len, ".lql-XXXXXX", strlen(".lql-XXXXXX") + 1u);
+  fd = mkstemp(template_path);
+  if (fd < 0) {
+    free(template_path);
+    return 0;
+  }
+  if (stat(path, &st) == 0) {
+    (void)fchmod(fd, st.st_mode);
+  }
+  file = fdopen(fd, "wb");
+  if (file == NULL) {
+    close(fd);
+    unlink(template_path);
+    free(template_path);
+    return 0;
+  }
+  *out_path = template_path;
+  *out_file = file;
+  return 1;
+}
+
 static void usage(FILE *out) {
-  fprintf(out, "usage: clql [--or|-O] [-c] [-f field] [-m expr] "
+  fprintf(out, "usage: clql [--or|-O] [-c] [-i|-w] [-f field] [-m expr] "
                "[--matches-only|-M] selector [data.json]\n");
   fprintf(out, "       clql [--or|-O] [-c] [--matches-only|-M] selector < "
                "data.json\n");
@@ -222,6 +261,7 @@ int main(int argc, char **argv) {
   int matches_only;
   int or_mode;
   int compact;
+  int inline_mode;
   int i;
   projection_args fields;
   projection_args mutations;
@@ -231,6 +271,8 @@ int main(int argc, char **argv) {
   match_count count;
   output_ranges ranges;
   lql_query_result result;
+  char *inline_tmp_path;
+  FILE *inline_out;
 
   memset(&fields, 0, sizeof(fields));
   memset(&mutations, 0, sizeof(mutations));
@@ -239,6 +281,9 @@ int main(int argc, char **argv) {
   or_mode = 0;
   matches_only = 0;
   compact = 0;
+  inline_mode = 0;
+  inline_tmp_path = NULL;
+  inline_out = NULL;
   selector_expr = NULL;
   input_path = NULL;
   for (i = 1; i < argc; ++i) {
@@ -262,6 +307,9 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--compact") == 0 ||
                strcmp(argv[i], "-c") == 0) {
       compact = 1;
+    } else if (strcmp(argv[i], "--inline") == 0 || strcmp(argv[i], "-i") == 0 ||
+               strcmp(argv[i], "--write") == 0 || strcmp(argv[i], "-w") == 0) {
+      inline_mode = 1;
     } else if (strcmp(argv[i], "--mutate") == 0 || strcmp(argv[i], "-m") == 0) {
       if (i + 1 >= argc || !add_projection_arg(&mutations, argv[++i])) {
         fprintf(stderr, "clql: failed to record mutation expression\n");
@@ -355,6 +403,24 @@ int main(int argc, char **argv) {
     free_projection_args(&mutations);
     return 2;
   }
+  if (inline_mode && mutation_plan == NULL) {
+    fprintf(stderr, "clql: inline mode requires mutation expressions\n");
+    lql_selector_free(selector);
+    lql_mutation_plan_free(mutation_plan);
+    lql_projection_free(projection);
+    free_projection_args(&fields);
+    free_projection_args(&mutations);
+    return 2;
+  }
+  if (inline_mode && (input_path == NULL || strcmp(input_path, "-") == 0)) {
+    fprintf(stderr, "clql: inline mode requires a single JSON file\n");
+    lql_selector_free(selector);
+    lql_mutation_plan_free(mutation_plan);
+    lql_projection_free(projection);
+    free_projection_args(&fields);
+    free_projection_args(&mutations);
+    return 2;
+  }
   if (matches_only && mutation_plan == NULL) {
     count.matched = 0u;
     memset(&result, 0, sizeof(result));
@@ -398,8 +464,20 @@ int main(int argc, char **argv) {
     }
     memset(&ranges, 0, sizeof(ranges));
     memset(&result, 0, sizeof(result));
+    if (inline_mode &&
+        !create_inline_temp(input_path, &inline_tmp_path, &inline_out)) {
+      fprintf(stderr, "clql: failed to create inline temp file\n");
+      close_input_path(input);
+      close_input_path(range_source);
+      lql_selector_free(selector);
+      lql_mutation_plan_free(mutation_plan);
+      lql_projection_free(projection);
+      free_projection_args(&fields);
+      free_projection_args(&mutations);
+      return 1;
+    }
     ranges.source = range_source;
-    ranges.out = stdout;
+    ranges.out = inline_mode ? inline_out : stdout;
     ranges.projection = projection;
     ranges.mutation_plan = mutation_plan;
     ranges.compact = compact;
@@ -408,6 +486,29 @@ int main(int argc, char **argv) {
                                   &result, &error);
     close_input_path(input);
     close_input_path(range_source);
+    if (inline_mode) {
+      if (fclose(inline_out) != 0 && st == LQL_STATUS_OK) {
+        st = LQL_STATUS_JSON_ERROR;
+        error.code = LQL_STATUS_JSON_ERROR;
+        strcpy(error.message, "failed to close inline temp file");
+      }
+      inline_out = NULL;
+      if (st == LQL_STATUS_OK && result.candidates_seen == 0u) {
+        st = LQL_STATUS_JSON_ERROR;
+        error.code = LQL_STATUS_JSON_ERROR;
+        strcpy(error.message, "no JSON input");
+      }
+      if (st == LQL_STATUS_OK && rename(inline_tmp_path, input_path) != 0) {
+        st = LQL_STATUS_JSON_ERROR;
+        error.code = LQL_STATUS_JSON_ERROR;
+        strcpy(error.message, "failed to replace inline input file");
+      }
+      if (st != LQL_STATUS_OK) {
+        unlink(inline_tmp_path);
+      }
+      free(inline_tmp_path);
+      inline_tmp_path = NULL;
+    }
     lql_selector_free(selector);
     lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
