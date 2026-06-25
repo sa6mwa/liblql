@@ -399,6 +399,10 @@ Current implementation is an early slice:
   candidate count, bytes read, and callback-requested graceful stop;
 - `clql -M/--matches-only` uses the decision-only streaming path over stdin
   and does not materialize candidate payloads or write matched JSON;
+- default `clql selector < data.json` output streams non-seekable stdin
+  through lonejson candidate parsing with callback-scoped spooled candidate
+  payloads, so it no longer reads the complete stdin stream into memory before
+  deciding matches;
 - `clql` accepts an empty selector for match-all file selection, including the
   Go-compatible shorthand where a single existing file path is the input rather
   than selector text;
@@ -457,10 +461,10 @@ Current implementation is an early slice:
   `date.since` macros are implemented;
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, and invalid selector invariants;
-- `clql` exists as a minimal selector smoke CLI; default matched-JSON output
-  from stdin still uses buffered input until non-seekable plus-value payload
-  handles are implemented, and projection path behavior is still being expanded
-  toward full parity;
+- `clql` exists as a minimal selector smoke CLI; projection path behavior is
+  still being expanded toward full parity, and projection/mutation over
+  non-seekable stdin remain unsupported until their streaming composition is
+  implemented without hidden full-candidate materialization;
 - Go parity tests exist for the initial selector subset;
 - package archive production is scaffolded, not complete.
 

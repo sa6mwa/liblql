@@ -252,6 +252,61 @@ func TestCLQLMatchesOnlyStreamingParity(t *testing.T) {
 	}
 }
 
+func TestCLQLStdinOutputStreamingParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []struct {
+		name string
+		expr string
+		body string
+	}{
+		{
+			name: "ndjson match",
+			expr: `/status="open"`,
+			body: "{\"status\":\"closed\",\"id\":\"a\"}\n { \"status\" : \"open\" , \"id\" : \"b\" }\n",
+		},
+		{
+			name: "array match",
+			expr: `/status="open"`,
+			body: `[{"status":"closed","id":"a"}, {"status":"open","id":"b"}]`,
+		},
+		{
+			name: "no match",
+			expr: `/status="open"`,
+			body: "{\"status\":\"closed\",\"id\":\"a\"}\n{\"status\":\"done\",\"id\":\"b\"}\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sel, err := lql.ParseSelectorString(tc.expr)
+			if err != nil {
+				t.Fatalf("go parse: %v", err)
+			}
+			want, err := goMatchedValues(tc.body, sel)
+			if err != nil {
+				t.Fatalf("go matched values: %v", err)
+			}
+			cmd := exec.Command(clql, tc.expr)
+			cmd.Stdin = bytes.NewBufferString(tc.body)
+			out, err := cmd.CombinedOutput()
+			gotMatch := err == nil
+			wantMatch := len(want) != 0
+			if gotMatch != wantMatch {
+				t.Fatalf("clql stdin match mismatch: got=%v want=%v err=%v out=%q", gotMatch, wantMatch, err, string(out))
+			}
+			got, err := decodeJSONValues(out)
+			if err != nil {
+				t.Fatalf("decode clql stdin output: %v output=%q", err, string(out))
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("clql stdin output mismatch: got=%#v want=%#v output=%q", got, want, string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLSeekableFileOutputParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

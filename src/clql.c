@@ -8,7 +8,7 @@
 #define _FILE_OFFSET_BITS 64
 #endif
 
-#include "lql/lql.h"
+#include "lql_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -156,45 +156,6 @@ static lql_status output_match_range(void *user,
   return LQL_STATUS_OK;
 }
 
-static int read_stdin(char **out, size_t *out_len) {
-  char *buf;
-  size_t cap;
-  size_t len;
-  size_t n;
-  char tmp[4096];
-  buf = NULL;
-  cap = 0u;
-  len = 0u;
-  while ((n = fread(tmp, 1u, sizeof(tmp), stdin)) > 0u) {
-    if (len + n + 1u > cap) {
-      size_t next_cap = cap == 0u ? 8192u : cap * 2u;
-      char *next;
-      while (next_cap < len + n + 1u) {
-        next_cap *= 2u;
-      }
-      next = (char *)realloc(buf, next_cap);
-      if (next == NULL) {
-        free(buf);
-        return 0;
-      }
-      buf = next;
-      cap = next_cap;
-    }
-    memcpy(buf + len, tmp, n);
-    len += n;
-  }
-  if (buf == NULL) {
-    buf = (char *)malloc(1u);
-    if (buf == NULL) {
-      return 0;
-    }
-  }
-  buf[len] = '\0';
-  *out = buf;
-  *out_len = len;
-  return 1;
-}
-
 static FILE *open_input_path(const char *path) {
   if (path == NULL || strcmp(path, "-") == 0) {
     return stdin;
@@ -264,13 +225,10 @@ static void usage(FILE *out) {
 int main(int argc, char **argv) {
   lql_selector *selector;
   lql_error error;
-  char *json;
   const char *selector_expr;
   const char *input_path;
   FILE *input;
   FILE *range_source;
-  size_t json_len;
-  int matched;
   int matches_only;
   int or_mode;
   int compact;
@@ -589,19 +547,9 @@ int main(int argc, char **argv) {
     }
     return ranges.matched == 0u ? 1 : 0;
   }
-  if (!read_stdin(&json, &json_len)) {
-    fprintf(stderr, "clql: failed to read stdin\n");
-    lql_selector_free(selector);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    return 1;
-  }
   if (mutation_plan != NULL) {
     fprintf(stderr,
             "clql: mutation execution requires a seekable input file\n");
-    free(json);
     lql_selector_free(selector);
     lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
@@ -611,7 +559,6 @@ int main(int argc, char **argv) {
   }
   if (fields.count != 0u) {
     fprintf(stderr, "clql: field projection requires a seekable input file\n");
-    free(json);
     lql_selector_free(selector);
     lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
@@ -619,43 +566,18 @@ int main(int argc, char **argv) {
     free_projection_args(&mutations);
     return 2;
   }
-  st = lql_matches_json(selector, json, json_len, &matched, &error);
-  if (st != LQL_STATUS_OK) {
-    fprintf(stderr, "clql: %s\n", error.message);
-    free(json);
-    lql_selector_free(selector);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    return 1;
-  }
-  if (matched) {
-    if (compact) {
-      st = lql_compact_json(json, json_len, stdout, &error);
-      if (st != LQL_STATUS_OK) {
-        fprintf(stderr, "clql: %s\n", error.message);
-        free(json);
-        lql_selector_free(selector);
-        lql_mutation_plan_free(mutation_plan);
-        lql_projection_free(projection);
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        return 1;
-      }
-      fputc('\n', stdout);
-    } else {
-      fwrite(json, 1u, json_len, stdout);
-      if (json_len == 0u || json[json_len - 1u] != '\n') {
-        fputc('\n', stdout);
-      }
-    }
-  }
-  free(json);
+  memset(&result, 0, sizeof(result));
+  st = lql_eval_query_file_spooled_matches(selector, stdin, stdout, &result,
+                                           &error);
   lql_selector_free(selector);
   lql_mutation_plan_free(mutation_plan);
   lql_projection_free(projection);
   free_projection_args(&fields);
   free_projection_args(&mutations);
-  return matched ? 0 : 1;
+  if (st != LQL_STATUS_OK) {
+    fprintf(stderr, "clql: %s\n", error.message);
+    return 1;
+  }
+  (void)compact;
+  return result.candidates_matched == 0u ? 1 : 0;
 }

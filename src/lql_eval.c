@@ -585,6 +585,13 @@ typedef struct query_stream_state {
   eval_doc doc;
 } query_stream_state;
 
+typedef struct spooled_match_state {
+  const lql_selector *selector;
+  FILE *out;
+  lql_query_result result;
+  eval_doc doc;
+} spooled_match_state;
+
 static int query_limit_enabled(lql_uint64 limit) { return limit != 0u; }
 
 static void query_stop(query_stream_state *state,
@@ -649,6 +656,53 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
     query_stop(state, LQL_QUERY_STOP_BYTE_LIMIT);
     return LONEJSON_CANDIDATE_STOP;
   }
+  return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static lonejson_status file_sink(void *user, const void *data, size_t len,
+                                 lonejson_error *error) {
+  FILE *out;
+  (void)error;
+  out = (FILE *)user;
+  if (len != 0u && fwrite(data, 1u, len, out) != len) {
+    return LONEJSON_STATUS_IO_ERROR;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_candidate_callback_result
+on_spooled_candidate_begin(void *user, const lonejson_candidate_info *candidate,
+                           lonejson_error *error) {
+  spooled_match_state *state = (spooled_match_state *)user;
+  (void)candidate;
+  (void)error;
+  reset_doc(&state->doc);
+  return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static lonejson_candidate_callback_result
+on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
+                         lonejson_error *error) {
+  spooled_match_state *state = (spooled_match_state *)user;
+  int matched;
+  matched = state->selector == NULL ||
+            state->selector->root.kind == LQL_NODE_ALL ||
+            eval_node(&state->selector->root, &state->doc);
+  if (matched) {
+    if (candidate->payload_spool == NULL ||
+        lonejson_spooled_write_to_sink(candidate->payload_spool, file_sink,
+                                       state->out,
+                                       error) != LONEJSON_STATUS_OK ||
+        fputc('\n', state->out) == EOF) {
+      reset_doc(&state->doc);
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+    state->result.candidates_matched++;
+  }
+  state->result.candidates_seen++;
+  state->result.bytes_read =
+      (lql_uint64)(candidate->stream_offset + candidate->byte_size);
+  reset_doc(&state->doc);
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
@@ -737,6 +791,55 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
   }
   free_doc(&state.doc);
   lonejson_free(runtime);
+  if (out_result != NULL) {
+    *out_result = state.result;
+  }
+  return LQL_STATUS_OK;
+}
+
+lql_status lql_eval_query_file_spooled_matches(const lql_selector *selector,
+                                               FILE *file, FILE *out,
+                                               lql_query_result *out_result,
+                                               lql_error *error) {
+  lonejson *runtime;
+  lonejson_error lj_error;
+  lonejson_path_value_visitor visitor;
+  lonejson_candidate_stream_options options;
+  lonejson_status st;
+  spooled_match_state state;
+
+  if (file == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "input and output files are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  memset(&state, 0, sizeof(state));
+  state.selector = selector;
+  state.out = out;
+  if (!init_doc(&state.doc, selector)) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  runtime = lonejson_new(NULL, &lj_error);
+  if (runtime == NULL) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    free_doc(&state.doc);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  init_eval_visitor(&visitor);
+  options = lonejson_default_candidate_stream_options();
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
+  options.path_visitor = &visitor;
+  options.visitor_user = &state.doc;
+  options.candidate_begin = on_spooled_candidate_begin;
+  options.candidate_end = on_spooled_candidate_end;
+  options.candidate_user = &state;
+  st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
+  free_doc(&state.doc);
+  lonejson_free(runtime);
+  if (st != LONEJSON_STATUS_OK) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
   if (out_result != NULL) {
     *out_result = state.result;
   }
