@@ -54,6 +54,10 @@ clql="${CLQL_PATH:-$root/build/debug/clql}"
 go_bin="${GO:-go}"
 mkdir -p "$fixture_dir"
 fixture="$fixture_dir/large_ndjson.jsonl"
+go_candidates=""
+go_matches=""
+c_candidates=""
+c_matches=""
 
 json_string() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -97,6 +101,12 @@ emit_unsupported_impl() {
   reason=$2
   emit_record "$impl" "large_ndjson" "eq_status_open" "/status=\"open\"" \
     "decision_only_selector" "steady_state" 0 0 0 0 0 null true "$reason"
+}
+
+json_number_field() {
+  field=$1
+  record=$2
+  printf '%s\n' "$record" | sed -n "s/.*\"$field\":\\([0-9][0-9]*\\).*/\\1/p"
 }
 
 is_selected() {
@@ -150,23 +160,50 @@ run_c() {
       "$expr" "$matches" "$expected" "$fixture" >&2
     return 1
   fi
+  c_candidates=$count
+  c_matches=$matches
   emit_record "c" "large_ndjson" "eq_status_open" "$expr" \
     "decision_only_selector" "steady_state" "$bytes" "$count" "$matches" 0 0 null false ""
 }
 
 run_go() {
   expr='/status="open"'
+  record=
   if ! command -v "$go_bin" >/dev/null 2>&1; then
     emit_unsupported_impl "go" "go executable not found"
     return 1
   fi
-  (cd "$root/parity" && "$go_bin" run ./cmd/lqlbench \
+  record=$(cd "$root/parity" && "$go_bin" run ./cmd/lqlbench \
     --fixture "$fixture" \
     --dataset large_ndjson \
     --selector-name eq_status_open \
     --expr "$expr" \
     --mode decision_only_selector \
     --submode steady_state)
+  printf '%s\n' "$record"
+  go_candidates=$(json_number_field candidates "$record")
+  go_matches=$(json_number_field matches "$record")
+  if [ -z "$go_candidates" ] || [ -z "$go_matches" ]; then
+    printf 'Go benchmark emitted an invalid record: %s\n' "$record" >&2
+    return 1
+  fi
+}
+
+compare_go_c() {
+  if [ -z "$go_candidates" ] || [ -z "$c_candidates" ]; then
+    return 0
+  fi
+  if [ "$go_candidates" != "$c_candidates" ]; then
+    printf 'benchmark candidate-count mismatch: go=%s c=%s dataset=large_ndjson selector=eq_status_open\n' \
+      "$go_candidates" "$c_candidates" >&2
+    return 1
+  fi
+  if [ "$go_matches" != "$c_matches" ]; then
+    printf 'benchmark match-count mismatch: go=%s c=%s dataset=large_ndjson selector=eq_status_open\n' \
+      "$go_matches" "$c_matches" >&2
+    return 1
+  fi
+  return 0
 }
 
 exit_status=0
@@ -194,6 +231,8 @@ fi
 if [ "$check" -eq 1 ] && [ "$exit_status" -eq 0 ]; then
   if [ ! -s "$fixture" ]; then
     printf 'benchmark check failed: fixture was not generated\n' >&2
+    exit_status=1
+  elif ! compare_go_c; then
     exit_status=1
   fi
 fi
