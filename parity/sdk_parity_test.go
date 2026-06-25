@@ -536,6 +536,31 @@ func sdkMutationCases() []struct {
 	}
 }
 
+func TestSDKMutationExecutionErrorParity(t *testing.T) {
+	mutations := []string{"/status=done", "/count++"}
+	cases := []struct {
+		name string
+		doc  string
+	}{
+		{name: "truncated object", doc: `{"status":"open","count":`},
+		{name: "trailing comma", doc: `{"status":"open","count":1,}`},
+		{name: "invalid literal", doc: `{"status":tru,"count":1}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := goMutateJSON(mutations, tc.doc); err == nil {
+				t.Fatalf("go mutation unexpectedly accepted malformed JSON: %q", tc.doc)
+			}
+			if _, err := cMutateJSON(mutations, tc.doc); err == nil {
+				t.Fatalf("liblql buffered mutation unexpectedly accepted malformed JSON: %q", tc.doc)
+			}
+			if _, err := cMutateFileRange(mutations, `{"outside":`, tc.doc, `}`); err == nil {
+				t.Fatalf("liblql file-range mutation unexpectedly accepted malformed JSON: %q", tc.doc)
+			}
+		})
+	}
+}
+
 func TestSDKCompactParity(t *testing.T) {
 	cases := []struct {
 		name string

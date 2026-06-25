@@ -1592,6 +1592,7 @@ static void expect_mutation_plan_api(void) {
 }
 
 static void expect_mutation_error_api(void) {
+  static const char malformed[] = "{\"status\":\"open\",\"count\":";
   FILE *source;
   FILE *out;
   lql_mutation_plan *plan;
@@ -1701,6 +1702,38 @@ static void expect_mutation_error_api(void) {
         strcmp(error.message, "plan, json, and out are required") != 0) {
       printf("json mutation NULL out mismatch: %s\n", error.message);
       ++failures;
+    }
+
+    lql_error_init(&error);
+    st = lql_mutate_json(plan, malformed, strlen(malformed), out, &error);
+    if (st != LQL_STATUS_JSON_ERROR) {
+      printf("json mutation malformed input status mismatch: %s\n",
+             error.message);
+      ++failures;
+    }
+
+    if (fseek(source, 0L, SEEK_SET) != 0 ||
+        fwrite(malformed, 1u, strlen(malformed), source) != strlen(malformed) ||
+        fflush(source) != 0 || fseek(source, 0L, SEEK_SET) != 0) {
+      printf("mutation malformed file setup failed\n");
+      ++failures;
+    } else {
+      lql_error_init(&error);
+      st = lql_mutate_file_range_paths(
+          plan, source, 0u, (lql_uint64)strlen(malformed), out, &error);
+      if (st != LQL_STATUS_JSON_ERROR) {
+        printf("path mutation malformed input status mismatch: %s\n",
+               error.message);
+        ++failures;
+      }
+      lql_error_init(&error);
+      st = lql_mutate_file_range_root_fields(
+          plan, source, 0u, (lql_uint64)strlen(malformed), out, &error);
+      if (st != LQL_STATUS_JSON_ERROR) {
+        printf("root mutation malformed input status mismatch: %s\n",
+               error.message);
+        ++failures;
+      }
     }
   }
   lql_mutation_plan_free(plan);
