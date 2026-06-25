@@ -55,11 +55,12 @@ Current implementation status:
 - `make bench-check` runs the current deterministic Go/C/Lua smoke gate and
   fails if candidate, match, payload-count, or payload-byte counts diverge. It
   also runs deterministic negative checks proving candidate-count, match-count,
-  payload-count, and payload-byte mismatch failures are detected and validates
-  benchmark JSON Lines records. It verifies deterministic fixture regeneration,
-  every result record includes a SHA-256 digest for its generated fixture, and
-  every implementation/dataset/selector/mode tuple emits both
-  `warmup_included` and `steady_state` records.
+  payload-count, payload-byte, and missing-required-implementation failures are
+  detected and validates benchmark JSON Lines records. It verifies
+  deterministic fixture regeneration, every result record includes a SHA-256
+  digest for its generated fixture, and every
+  implementation/dataset/selector/mode tuple emits both `warmup_included` and
+  `steady_state` records.
 - `make benchmarks-c` exercises the C CLI for decision-only output and the
   public liblql API for matched-only seekable plus-value payload access over a
   shared generated fixture.

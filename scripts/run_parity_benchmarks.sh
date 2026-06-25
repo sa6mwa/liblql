@@ -189,6 +189,33 @@ is_selected() {
   esac
 }
 
+validate_required_impls() {
+  if [ -z "$required" ]; then
+    return 0
+  fi
+  old_ifs=$IFS
+  IFS=,
+  set -- $required
+  IFS=$old_ifs
+  for impl do
+    case "$impl" in
+      go|c|lua) ;;
+      "")
+        continue
+        ;;
+      *)
+        printf 'benchmark required implementation is unknown: %s\n' "$impl" >&2
+        return 2
+        ;;
+    esac
+    if ! is_selected "$impl"; then
+      printf 'benchmark missing required implementation: %s\n' "$impl" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
 fault_count() {
   value=$1
   enabled=$2
@@ -599,21 +626,24 @@ compare_go_impl() {
 }
 
 exit_status=0
+if ! validate_required_impls; then
+  exit_status=1
+fi
 generate_fixture
 
-if is_selected go; then
+if [ "$exit_status" -eq 0 ] && is_selected go; then
   if ! run_matrix_for_impl go; then
     exit_status=1
   fi
 fi
 
-if is_selected c; then
+if [ "$exit_status" -eq 0 ] && is_selected c; then
   if ! run_matrix_for_impl c; then
     exit_status=1
   fi
 fi
 
-if is_selected lua; then
+if [ "$exit_status" -eq 0 ] && is_selected lua; then
   if ! run_matrix_for_impl lua; then
     exit_status=1
   fi
