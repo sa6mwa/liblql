@@ -18,7 +18,8 @@ explicitly buffered JSON values. The SDK installs generated version metadata in
 `lql_mutation_plan`, and supported concrete-path mutations
 including Go-compatible numeric child handling under arrays and time
 normalization can be applied to seekable file ranges without full-document
-materialization. `clql` also supports seekable-file inline/write mutation
+materialization, or to explicitly caller-buffered JSON values through
+`lql_mutate_json()`. `clql` also supports seekable-file inline/write mutation
 through a temp-file rename.
 The same supported streaming mutation subset can run over non-seekable stdin
 through callback-scoped spooled candidate payloads.

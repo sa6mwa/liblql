@@ -451,7 +451,8 @@ Current implementation is an early slice:
   replacing the array value with an object keyed by the requested numeric
   segments; supported set values include `time:` normalization to UTC
   RFC3339Nano strings and `file:/textfile:/base64file:` source-backed file
-  values; public C execution is currently seekable-file-range only;
+  values; public C execution is currently available for seekable file ranges
+  and explicitly caller-buffered JSON values through `lql_mutate_json()`;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path, existing-position wildcard, and
   existing-position recursive mutations to matched candidates;

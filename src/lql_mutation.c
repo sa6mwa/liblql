@@ -52,6 +52,12 @@ typedef struct limited_file_reader {
   lql_uint64 remaining;
 } limited_file_reader;
 
+typedef struct buffer_reader {
+  const unsigned char *data;
+  size_t len;
+  size_t offset;
+} buffer_reader;
+
 typedef struct mutation_path_frame {
   unsigned char *array_segments;
   size_t segment_count;
@@ -367,6 +373,32 @@ static lonejson_read_result limited_read(void *user, unsigned char *buffer,
     result.error_code = 1;
   }
   if (reader->remaining == 0u) {
+    result.eof = 1;
+  }
+  return result;
+}
+
+static lonejson_read_result buffer_read(void *user, unsigned char *buffer,
+                                        size_t capacity) {
+  buffer_reader *reader;
+  lonejson_read_result result;
+  size_t remaining;
+  size_t want;
+
+  result = lonejson_default_read_result();
+  reader = (buffer_reader *)user;
+  if (reader->offset >= reader->len) {
+    result.eof = 1;
+    return result;
+  }
+  remaining = reader->len - reader->offset;
+  want = remaining > capacity ? capacity : remaining;
+  if (want != 0u) {
+    memcpy(buffer, reader->data + reader->offset, want);
+    reader->offset += want;
+  }
+  result.bytes_read = want;
+  if (reader->offset >= reader->len) {
     result.eof = 1;
   }
   return result;
@@ -2369,6 +2401,27 @@ lql_status lql_mutate_file_range_paths(const lql_mutation_plan *plan,
   }
   return mutate_file_range_with_supported_plan(plan, file, offset, size, out,
                                                error);
+}
+
+lql_status lql_mutate_json(const lql_mutation_plan *plan, const char *json,
+                           size_t json_len, FILE *out, lql_error *error) {
+  buffer_reader reader;
+
+  if (plan == NULL || json == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "plan, json, and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (!mutation_plan_supports_stream_paths(plan)) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "mutation plan requires unsupported path behavior");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  reader.data = (const unsigned char *)json;
+  reader.len = json_len;
+  reader.offset = 0u;
+  return mutate_reader_with_supported_plan(plan, buffer_read, &reader, out,
+                                           error);
 }
 
 lql_status lql_mutate_spooled_paths(const lql_mutation_plan *plan,

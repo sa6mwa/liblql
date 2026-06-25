@@ -24,7 +24,7 @@ static void expect_version_api(void) {
       !caps.seekable_range_payloads || !caps.projection_file_range ||
       !caps.compact_file_range || !caps.compact_buffered_json ||
       !caps.mutation_parse || !caps.mutation_file_range ||
-      !caps.mutation_file_values) {
+      !caps.mutation_buffered_json || !caps.mutation_file_values) {
     printf("capability query omitted an implemented public surface\n");
     ++failures;
   }
@@ -1044,6 +1044,49 @@ static void expect_path_mutation_api(void) {
   fclose(out);
 }
 
+static void expect_buffered_mutation_api(void) {
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_mutation_plan *plan;
+  const char *exprs[3];
+  char buf[256];
+  size_t len;
+  static const char doc[] =
+      "{\"state\":{\"status\":\"open\",\"count\":1,\"old\":true},\"id\":\"a\"}";
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("buffered mutation tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  exprs[0] = "/state/status=done";
+  exprs[1] = "/state/count++";
+  exprs[2] = "rm:/state/old";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(exprs, 3u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("buffered mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    st = lql_mutate_json(plan, doc, strlen(doc), out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("buffered mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf,
+                      "{\"state\":{\"status\":\"done\",\"count\":2},\"id\":"
+                      "\"a\"}") != 0) {
+      printf("buffered mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  lql_mutation_plan_free(plan);
+  fclose(out);
+}
+
 static void expect_array_element_mutation_api(void) {
   FILE *source;
   FILE *out;
@@ -1479,6 +1522,7 @@ int main(void) {
   expect_mutation_plan_api();
   expect_root_field_mutation_api();
   expect_path_mutation_api();
+  expect_buffered_mutation_api();
   expect_array_element_mutation_api();
   expect_wildcard_mutation_api();
   expect_recursive_mutation_api();

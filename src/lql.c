@@ -127,6 +127,7 @@ void lql_capabilities_get(lql_capabilities *out) {
   out->compact_buffered_json = 1;
   out->mutation_parse = 1;
   out->mutation_file_range = 1;
+  out->mutation_buffered_json = 1;
   out->mutation_file_values = 1;
 }
 
