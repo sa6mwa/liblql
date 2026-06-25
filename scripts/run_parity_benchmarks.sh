@@ -55,8 +55,8 @@ go_bin="${GO:-go}"
 mkdir -p "$fixture_dir"
 ndjson_fixture="$fixture_dir/large_ndjson.jsonl"
 array_fixture="$fixture_dir/large_array.json"
-dataset_matrix="$fixture_dir/datasets.tsv"
-selector_matrix="$fixture_dir/selectors.tsv"
+single_fixture="$fixture_dir/large_single_json.json"
+case_matrix="$fixture_dir/cases.tsv"
 go_counts_file="$fixture_dir/go-counts.txt"
 c_counts_file="$fixture_dir/c-counts.txt"
 
@@ -100,13 +100,12 @@ emit_record() {
 emit_unsupported_impl() {
   impl=$1
   reason=$2
-  while read dataset_name fixture_path; do
+  while read dataset_name fixture_path candidates selector_name expr; do
     : "$fixture_path"
-    while read selector_name expr; do
-      emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
-        "decision_only_selector" "steady_state" 0 0 0 0 0 null true "$reason"
-    done < "$selector_matrix"
-  done < "$dataset_matrix"
+    : "$candidates"
+    emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "decision_only_selector" "steady_state" 0 0 0 0 0 null true "$reason"
+  done < "$case_matrix"
 }
 
 json_number_field() {
@@ -150,6 +149,7 @@ generate_fixtures() {
   i=0
   : > "$ndjson_fixture"
   : > "$array_fixture"
+  : > "$single_fixture"
   while [ "$i" -lt "$count" ]; do
     record_json "$i" >> "$ndjson_fixture"
     printf '\n' >> "$ndjson_fixture"
@@ -165,31 +165,55 @@ generate_fixtures() {
     i=$((i + 1))
   done
   printf ']\n' >> "$array_fixture"
+  printf '{"records":[' > "$single_fixture"
+  i=0
+  while [ "$i" -lt "$count" ]; do
+    if [ "$i" -ne 0 ]; then
+      printf ',' >> "$single_fixture"
+    fi
+    record_json "$i" >> "$single_fixture"
+    i=$((i + 1))
+  done
+  printf ']}\n' >> "$single_fixture"
 }
 
 generate_fixture() {
   : > "$go_counts_file"
   : > "$c_counts_file"
   generate_fixtures
+  : > "$case_matrix"
+  add_dataset_selector_cases "large_ndjson" "$ndjson_fixture" "$count"
+  add_dataset_selector_cases "large_array" "$array_fixture" "$count"
+  printf '%s %s %s %s %s\n' "large_single_json" "$single_fixture" 1 \
+    "records_status_open" '/records[]/status="open"' >> "$case_matrix"
+}
+
+add_dataset_selector_cases() {
+  dataset_name=$1
+  fixture_path=$2
+  candidates=$3
   {
-    printf '%s %s\n' "large_ndjson" "$ndjson_fixture"
-    printf '%s %s\n' "large_array" "$array_fixture"
-  } > "$dataset_matrix"
-  {
-    printf '%s %s\n' "eq_status_open" '/status="open"'
-    printf '%s %s\n' "contains_blob" 'contains{field=/blob,value=xxxx}'
-    printf '%s %s\n' "icontains_blob" 'icontains{field=/blob,value=XXXX}'
-    printf '%s %s\n' "timestamp_gte" '/timestamp>=2026-03-05T10:28:21Z'
-    printf '%s %s\n' "date_window" 'date{field=/timestamp,after=2026-03-05T10:28:21Z,before=2026-03-05T10:29:50Z}'
-    printf '%s %s\n' "range_qps" 'range{field=/metrics/qps,gte=100,lte=130}'
-  } > "$selector_matrix"
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "eq_status_open" '/status="open"'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "contains_blob" 'contains{field=/blob,value=xxxx}'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "icontains_blob" 'icontains{field=/blob,value=XXXX}'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "timestamp_gte" '/timestamp>=2026-03-05T10:28:21Z'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "date_window" 'date{field=/timestamp,after=2026-03-05T10:28:21Z,before=2026-03-05T10:29:50Z}'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "range_qps" 'range{field=/metrics/qps,gte=100,lte=130}'
+  } >> "$case_matrix"
 }
 
 run_c() {
   dataset_name=$1
   fixture_path=$2
-  selector_name=$3
-  expr=$4
+  candidates=$3
+  selector_name=$4
+  expr=$5
   out="$fixture_dir/c-$dataset_name-$selector_name.out"
   bytes=$(wc -c < "$fixture_path" | tr -d ' ')
   if [ ! -x "$clql" ]; then
@@ -198,16 +222,18 @@ run_c() {
   fi
   "$clql" "$expr" "$fixture_path" > "$out"
   matches=$(wc -l < "$out" | tr -d ' ')
-  printf '%s %s %s %s\n' "$dataset_name" "$selector_name" "$count" "$matches" >> "$c_counts_file"
+  printf '%s %s %s %s\n' "$dataset_name" "$selector_name" "$candidates" "$matches" >> "$c_counts_file"
   emit_record "c" "$dataset_name" "$selector_name" "$expr" \
-    "decision_only_selector" "steady_state" "$bytes" "$count" "$matches" 0 0 null false ""
+    "decision_only_selector" "steady_state" "$bytes" "$candidates" "$matches" 0 0 null false ""
 }
 
 run_go() {
   dataset_name=$1
   fixture_path=$2
-  selector_name=$3
-  expr=$4
+  candidates=$3
+  selector_name=$4
+  expr=$5
+  : "$candidates"
   record=
   if ! command -v "$go_bin" >/dev/null 2>&1; then
     emit_unsupported_impl "go" "go executable not found"
@@ -232,23 +258,21 @@ run_go() {
 
 run_matrix_for_impl() {
   impl=$1
-  while read dataset_name fixture_path; do
-    while read selector_name expr; do
-      case "$impl" in
-        go)
-          run_go "$dataset_name" "$fixture_path" "$selector_name" "$expr" ||
-            return 1
-          ;;
-        c)
-          run_c "$dataset_name" "$fixture_path" "$selector_name" "$expr" ||
-            return 1
-          ;;
-        *)
-          return 2
-          ;;
-      esac
-    done < "$selector_matrix"
-  done < "$dataset_matrix"
+  while read dataset_name fixture_path candidates selector_name expr; do
+    case "$impl" in
+      go)
+        run_go "$dataset_name" "$fixture_path" "$candidates" "$selector_name" \
+          "$expr" || return 1
+        ;;
+      c)
+        run_c "$dataset_name" "$fixture_path" "$candidates" "$selector_name" \
+          "$expr" || return 1
+        ;;
+      *)
+        return 2
+        ;;
+    esac
+  done < "$case_matrix"
 }
 
 compare_go_c() {
@@ -301,7 +325,8 @@ if is_selected lua; then
 fi
 
 if [ "$check" -eq 1 ] && [ "$exit_status" -eq 0 ]; then
-  if [ ! -s "$ndjson_fixture" ] || [ ! -s "$array_fixture" ]; then
+  if [ ! -s "$ndjson_fixture" ] || [ ! -s "$array_fixture" ] ||
+    [ ! -s "$single_fixture" ]; then
     printf 'benchmark check failed: fixture was not generated\n' >&2
     exit_status=1
   elif ! compare_go_c; then
