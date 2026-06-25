@@ -52,9 +52,9 @@ Current implementation status:
 - `make bench` and `make benchmarks` run a small deterministic development
   matrix, emit JSON Lines, and validate every result record against the
   benchmark schema.
-- `make bench-check` runs the current deterministic Go/C smoke gate and fails
-  if candidate, match, payload-count, or payload-byte counts diverge. It also
-  runs deterministic negative checks proving candidate-count, match-count,
+- `make bench-check` runs the current deterministic Go/C/Lua smoke gate and
+  fails if candidate, match, payload-count, or payload-byte counts diverge. It
+  also runs deterministic negative checks proving candidate-count, match-count,
   payload-count, and payload-byte mismatch failures are detected and validates
   benchmark JSON Lines records. It verifies deterministic fixture regeneration
   and every result record includes a SHA-256 digest for its generated fixture.
@@ -65,7 +65,7 @@ Current implementation status:
   Go module and emits stable JSON Lines without scraping `go test` output.
 - the current executable dataset matrix covers NDJSON, top-level array, and
   single-root JSON object fixture shapes for both library-style and CLI-style
-  record forms, with all generated once and shared by Go and C.
+  record forms, with all generated once and shared by Go, C, and Lua.
 - the current executable selector matrix covers equality, contains,
   `contains.any`, case-insensitive contains, timestamp comparison, date
   window, and numeric range terms over record-stream fixtures, plus nested
@@ -80,10 +80,12 @@ Current implementation status:
   equality/range, service contains, service case-insensitive contains, service
   `contains.any`, service `icontains.any`, and nested `/records[]/...`
   equivalents over the CLI-style single-root JSON fixture.
-- `make benchmarks-lua` emits an explicit unsupported record until the Lua
-  facade benchmark runner exists.
+- `make benchmarks-lua` exercises the initial Lua benchmark facade, which
+  orchestrates the public `clql` executable over the shared fixtures and emits
+  stable JSON Lines records. This is a CLI-backed Lua parity runner, not yet
+  the final Lua C module or direct public Lua API.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
-  and therefore fails while the Lua benchmark runner is still missing.
+  and fails on missing runners or counter divergence.
 
 ## Source Benchmark To Mirror
 
@@ -342,7 +344,9 @@ the contract for tools and regression gates.
 
 The Lua implementation lives in this repository and must be benchmarked through
 the repository's Lua facade, not by shelling out to Go or by calling C private
-test helpers directly.
+test helpers directly. The initial Lua benchmark facade shells out to the
+public `clql` executable as an intentionally narrow bridge until the direct Lua
+C module exists.
 
 Lua benchmark entry points should support:
 

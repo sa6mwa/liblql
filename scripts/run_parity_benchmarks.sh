@@ -53,6 +53,7 @@ count="${LQL_BENCH_NDJSON_COUNT:-128}"
 clql="${CLQL_PATH:-$root/build/debug/clql}"
 payload_bench="${LQL_PAYLOAD_BENCH_PATH:-$root/build/debug/lql_payload_bench}"
 go_bin="${GO:-go}"
+lua_bin="${LUA:-lua}"
 mkdir -p "$fixture_dir"
 ndjson_fixture="$fixture_dir/large_ndjson.jsonl"
 array_fixture="$fixture_dir/large_array.json"
@@ -63,6 +64,7 @@ cli_single_fixture="$fixture_dir/selection_single_json.json"
 case_matrix="$fixture_dir/cases.tsv"
 go_counts_file="$fixture_dir/go-counts.txt"
 c_counts_file="$fixture_dir/c-counts.txt"
+lua_counts_file="$fixture_dir/lua-counts.txt"
 inject_candidate_mismatch="${LQL_BENCH_INJECT_CANDIDATE_MISMATCH:-0}"
 inject_match_mismatch="${LQL_BENCH_INJECT_MATCH_MISMATCH:-0}"
 inject_payload_mismatch="${LQL_BENCH_INJECT_PAYLOAD_MISMATCH:-0}"
@@ -150,13 +152,6 @@ kv_field() {
 
 is_selected() {
   case ",$impls," in
-    *",$1,"*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-is_required() {
-  case ",$required," in
     *",$1,"*) return 0 ;;
     *) return 1 ;;
   esac
@@ -261,6 +256,7 @@ generate_fixtures() {
 generate_fixture() {
   : > "$go_counts_file"
   : > "$c_counts_file"
+  : > "$lua_counts_file"
   generate_fixtures
   : > "$case_matrix"
   add_dataset_selector_cases "large_ndjson" "$ndjson_fixture" "$count"
@@ -422,6 +418,47 @@ run_go_mode() {
     "$go_payload_bytes" >> "$go_counts_file"
 }
 
+run_lua_mode() {
+  mode=$1
+  dataset_name=$2
+  fixture_path=$3
+  candidates=$4
+  selector_name=$5
+  expr=$6
+  bytes=$(wc -c < "$fixture_path" | tr -d ' ')
+  fixture_sha=$(file_sha256 "$fixture_path")
+  if ! command -v "$lua_bin" >/dev/null 2>&1; then
+    emit_unsupported_impl "lua" "lua executable not found"
+    return 1
+  fi
+  if [ ! -x "$clql" ]; then
+    emit_unsupported_impl "lua" "clql binary not found; run make build-debug or set CLQL_PATH"
+    return 1
+  fi
+  record=$("$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
+    "$fixture_path" "$candidates" "$clql")
+  lua_candidates=$(kv_field candidates "$record")
+  lua_matches=$(kv_field matches "$record")
+  lua_payloads=$(kv_field payloads "$record")
+  lua_payload_bytes=$(kv_field payload_bytes "$record")
+  if [ -z "$lua_candidates" ] || [ -z "$lua_matches" ] ||
+    [ -z "$lua_payloads" ] || [ -z "$lua_payload_bytes" ]; then
+    printf 'Lua benchmark emitted an invalid record: %s\n' "$record" >&2
+    return 1
+  fi
+  printf '%s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+    "$mode" "$lua_candidates" "$lua_matches" "$lua_payloads" \
+    "$lua_payload_bytes" >> "$lua_counts_file"
+  payload_source_type=none
+  case "$mode" in
+    plus_value_*) payload_source_type=clql_output ;;
+  esac
+  emit_record "lua" "$dataset_name" "$selector_name" "$expr" \
+    "$mode" "steady_state" "$bytes" "$lua_candidates" "$lua_matches" \
+    "$lua_payloads" "$lua_payload_bytes" "$payload_source_type" null false \
+    "" "$fixture_sha"
+}
+
 run_matrix_for_impl() {
   impl=$1
   while read dataset_name fixture_path candidates selector_name expr; do
@@ -446,6 +483,16 @@ run_matrix_for_impl() {
         run_c_native_mode plus_value_plan "$dataset_name" "$fixture_path" \
           "$candidates" "$selector_name" "$expr" || return 1
         ;;
+      lua)
+        run_lua_mode decision_only_selector "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_lua_mode decision_only_plan "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_lua_mode plus_value_selector "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        run_lua_mode plus_value_plan "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+        ;;
       *)
         return 2
         ;;
@@ -453,39 +500,42 @@ run_matrix_for_impl() {
   done < "$case_matrix"
 }
 
-compare_go_c() {
-  if [ ! -s "$go_counts_file" ] || [ ! -s "$c_counts_file" ]; then
+compare_go_impl() {
+  impl=$1
+  impl_counts_file=$2
+  if [ ! -s "$go_counts_file" ] || [ ! -s "$impl_counts_file" ]; then
     return 0
   fi
   while read dataset_name selector_name mode go_candidates go_matches go_payloads go_payload_bytes; do
-    c_line=$(sed -n "s/^$dataset_name $selector_name $mode //p" "$c_counts_file")
-    if [ -z "$c_line" ]; then
-      printf 'benchmark missing C count record: dataset=%s selector=%s mode=%s\n' "$dataset_name" "$selector_name" "$mode" >&2
+    impl_line=$(sed -n "s/^$dataset_name $selector_name $mode //p" "$impl_counts_file")
+    if [ -z "$impl_line" ]; then
+      printf 'benchmark missing %s count record: dataset=%s selector=%s mode=%s\n' \
+        "$impl" "$dataset_name" "$selector_name" "$mode" >&2
       return 1
     fi
-    set -- $c_line
-    c_candidates=$1
-    c_matches=$2
-    c_payloads=$3
-    c_payload_bytes=$4
-    if [ "$go_candidates" != "$c_candidates" ]; then
-      printf 'benchmark candidate-count mismatch: go=%s c=%s dataset=%s selector=%s mode=%s\n' \
-        "$go_candidates" "$c_candidates" "$dataset_name" "$selector_name" "$mode" >&2
+    set -- $impl_line
+    impl_candidates=$1
+    impl_matches=$2
+    impl_payloads=$3
+    impl_payload_bytes=$4
+    if [ "$go_candidates" != "$impl_candidates" ]; then
+      printf 'benchmark candidate-count mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s\n' \
+        "$go_candidates" "$impl" "$impl_candidates" "$dataset_name" "$selector_name" "$mode" >&2
       return 1
     fi
-    if [ "$go_matches" != "$c_matches" ]; then
-      printf 'benchmark match-count mismatch: go=%s c=%s dataset=%s selector=%s mode=%s\n' \
-        "$go_matches" "$c_matches" "$dataset_name" "$selector_name" "$mode" >&2
+    if [ "$go_matches" != "$impl_matches" ]; then
+      printf 'benchmark match-count mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s\n' \
+        "$go_matches" "$impl" "$impl_matches" "$dataset_name" "$selector_name" "$mode" >&2
       return 1
     fi
-    if [ "$go_payloads" != "$c_payloads" ]; then
-      printf 'benchmark payload-count mismatch: go=%s c=%s dataset=%s selector=%s mode=%s\n' \
-        "$go_payloads" "$c_payloads" "$dataset_name" "$selector_name" "$mode" >&2
+    if [ "$go_payloads" != "$impl_payloads" ]; then
+      printf 'benchmark payload-count mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s\n' \
+        "$go_payloads" "$impl" "$impl_payloads" "$dataset_name" "$selector_name" "$mode" >&2
       return 1
     fi
-    if [ "$go_payload_bytes" != "$c_payload_bytes" ]; then
-      printf 'benchmark payload-byte mismatch: go=%s c=%s dataset=%s selector=%s mode=%s\n' \
-        "$go_payload_bytes" "$c_payload_bytes" "$dataset_name" "$selector_name" "$mode" >&2
+    if [ "$go_payload_bytes" != "$impl_payload_bytes" ]; then
+      printf 'benchmark payload-byte mismatch: go=%s %s=%s dataset=%s selector=%s mode=%s\n' \
+        "$go_payload_bytes" "$impl" "$impl_payload_bytes" "$dataset_name" "$selector_name" "$mode" >&2
       return 1
     fi
   done < "$go_counts_file"
@@ -508,8 +558,7 @@ if is_selected c; then
 fi
 
 if is_selected lua; then
-  emit_unsupported_impl "lua" "Lua facade benchmark runner is not implemented yet"
-  if is_required lua; then
+  if ! run_matrix_for_impl lua; then
     exit_status=1
   fi
 fi
@@ -520,8 +569,12 @@ if [ "$check" -eq 1 ] && [ "$exit_status" -eq 0 ]; then
     [ ! -s "$cli_array_fixture" ] || [ ! -s "$cli_single_fixture" ]; then
     printf 'benchmark check failed: fixture was not generated\n' >&2
     exit_status=1
-  elif ! compare_go_c; then
-    exit_status=1
+  else
+    if ! compare_go_impl c "$c_counts_file"; then
+      exit_status=1
+    elif ! compare_go_impl lua "$lua_counts_file"; then
+      exit_status=1
+    fi
   fi
 fi
 

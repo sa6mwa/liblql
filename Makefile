@@ -46,7 +46,7 @@ bench benchmarks: build-debug
 	@./scripts/check_parity_benchmark_schema.sh
 
 bench-check: build-debug
-	@./scripts/run_parity_benchmarks.sh --impl go,c --format json --check --require go,c
+	@./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --check --require go,c,lua
 	@./scripts/check_parity_benchmark_failures.sh
 	@./scripts/check_parity_benchmark_fixtures.sh
 	@./scripts/check_parity_benchmark_schema.sh
