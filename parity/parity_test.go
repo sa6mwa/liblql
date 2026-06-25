@@ -117,6 +117,20 @@ func TestCLQLSelectorParity(t *testing.T) {
 	}
 }
 
+func TestCLQLVersionSmoke(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	out, err := exec.Command(clql, "--version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql --version failed: %v out=%q", err, string(out))
+	}
+	if !bytes.HasPrefix(out, []byte("clql ")) || !bytes.HasSuffix(out, []byte("\n")) {
+		t.Fatalf("clql --version output mismatch: %q", string(out))
+	}
+}
+
 func TestCLQLSelectorSinceMacroParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

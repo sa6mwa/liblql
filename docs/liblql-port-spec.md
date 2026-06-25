@@ -487,6 +487,8 @@ Current implementation is an early slice:
   pkg-config consumer smokes;
 - source archive production exists with injected `VERSION`, `RELEASE_MANIFEST`,
   exact manifest verification, and extracted-tree configure/build/test smoke;
+- host `clql` archive production carries required lonejson runtime libraries
+  and verifies extracted `clql --version` through a relocatable runpath;
   full cross-target release-matrix packaging remains pending.
 
 The repository must not claim full LQL parity until the verification gates prove

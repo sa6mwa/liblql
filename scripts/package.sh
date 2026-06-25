@@ -47,6 +47,7 @@ package_one() {
   install_root="$work_dir/install"
   lib_root="$work_dir/${PROJECT}-${version_value}-${target_id}"
   cli_root="$work_dir/${CLI_PROJECT}-${version_value}-${target_id}"
+  dep_root="$ROOT_DIR/.cache/deps/$target_id/lonejson"
 
   (cd "$ROOT_DIR" && cmake --preset "$preset")
   (cd "$ROOT_DIR" && cmake --build --preset "$preset")
@@ -57,10 +58,20 @@ package_one() {
   cp -R "$install_root" "$lib_root"
   rm -rf "$lib_root/bin"
 
-  mkdir -p "$cli_root/bin" "$cli_root/share/doc/$CLI_PROJECT"
+  mkdir -p "$cli_root/bin" "$cli_root/lib" "$cli_root/share/doc/$CLI_PROJECT" \
+    "$cli_root/share/doc/lonejson"
   cp "$install_root/bin/clql" "$cli_root/bin/clql"
+  if ls "$dep_root"/lib/liblonejson.so* >/dev/null 2>&1; then
+    cp -P "$dep_root"/lib/liblonejson.so* "$cli_root/lib/"
+  fi
+  if ls "$dep_root"/lib/liblonejson*.dylib* >/dev/null 2>&1; then
+    cp -P "$dep_root"/lib/liblonejson*.dylib* "$cli_root/lib/"
+  fi
   cp "$ROOT_DIR/LICENSE" "$cli_root/share/doc/$CLI_PROJECT/LICENSE"
   cp "$ROOT_DIR/README.md" "$cli_root/share/doc/$CLI_PROJECT/README.md"
+  if [ -f "$dep_root/share/doc/liblonejson/LICENSE" ]; then
+    cp "$dep_root/share/doc/liblonejson/LICENSE" "$cli_root/share/doc/lonejson/LICENSE"
+  fi
 
   make_tar_gz "$lib_root" "$DIST_DIR/${PROJECT}-${version_value}-${target_id}.tar.gz"
   make_tar_gz "$cli_root" "$DIST_DIR/${CLI_PROJECT}-${version_value}-${target_id}.tar.gz"
@@ -349,10 +360,14 @@ verify_one_archive() {
       ;;
     ${CLI_PROJECT}-${version_value}-*)
       test -x "$root/bin/clql"
+      test -d "$root/lib"
       test -f "$root/share/doc/clql/LICENSE"
       test -f "$root/share/doc/clql/README.md"
-      if [ -e "$root/include" ] || [ -e "$root/lib" ]; then
-        printf 'package-verify: clql archive must not contain SDK include/lib trees\n' >&2
+      if is_host_smoke_target "${expected#${CLI_PROJECT}-${version_value}-}"; then
+        "$root/bin/clql" --version | grep -qx "clql $version_value"
+      fi
+      if [ -e "$root/include" ] || find "$root/lib" -name 'liblql*' | grep . >/dev/null; then
+        printf 'package-verify: clql archive must not contain SDK headers or liblql libraries\n' >&2
         exit 1
       fi
       ;;
