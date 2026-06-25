@@ -390,6 +390,8 @@ Current implementation is an early slice:
   `contains.any`, `icontains.any`, `in.any`, wildcard selector paths, and
   bracket-sugar array paths, string-term `ignoreCase`/`ic` flags, and
   multi-bound numeric ranges;
+- selector parse-error parity tests cover supported-term key validation and
+  invalid selector invariants;
 - `clql` exists as a minimal selector smoke CLI;
 - Go parity tests exist for the initial selector subset;
 - package archive production is scaffolded, not complete.

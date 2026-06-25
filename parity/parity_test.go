@@ -70,3 +70,37 @@ func TestCLQLSelectorParity(t *testing.T) {
 		})
 	}
 }
+
+func TestCLQLSelectorParseErrorParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []string{
+		`contains{field=/message,value=timeout,any=error}`,
+		`contains{field=/message,value=timeout,ignoreCase=maybe}`,
+		`eq{field=/status,value=open,foo=bar}`,
+		`eq{field=/status,value=open,ignoreCase=true}`,
+		`range{field=/progress,gte=10,foo=bar}`,
+		`prefix{field=/service,any=auth|edge}`,
+		`in{field=/env}`,
+		`in{field=/env,any=prod|stage,foo=bar}`,
+		`range{field=/progress}`,
+	}
+	for _, expr := range cases {
+		t.Run(expr, func(t *testing.T) {
+			if _, err := lql.ParseSelectorString(expr); err == nil {
+				t.Fatalf("go parse unexpectedly succeeded")
+			}
+			cmd := exec.Command(clql, expr)
+			cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("clql parse unexpectedly succeeded: out=%q", string(out))
+			}
+			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
+				t.Fatalf("clql parse error exit mismatch: err=%v out=%q", err, string(out))
+			}
+		})
+	}
+}

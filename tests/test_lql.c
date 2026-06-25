@@ -229,8 +229,12 @@ int main(void) {
                "{\"status\":\"open\",\"progress\":4}", 0);
   expect_parse_error("contains{field=/message,value=timeout,any=error}");
   expect_parse_error("contains{field=/message,value=timeout,ignoreCase=maybe}");
+  expect_parse_error("eq{field=/status,value=open,foo=bar}");
+  expect_parse_error("eq{field=/status,value=open,ignoreCase=true}");
+  expect_parse_error("range{field=/progress,gte=10,foo=bar}");
   expect_parse_error("prefix{field=/service,any=auth|edge}");
   expect_parse_error("in{field=/env}");
+  expect_parse_error("in{field=/env,any=prod|stage,foo=bar}");
   expect_parse_error("range{field=/progress}");
   expect_stream_file();
   expect_stream_array_items();

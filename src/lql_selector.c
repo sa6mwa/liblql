@@ -255,6 +255,50 @@ static int parse_bool_value(const char *value, int *out) {
   return 0;
 }
 
+static int key_is_field(const char *key) {
+  return strcmp(key, "field") == 0 || strcmp(key, "f") == 0;
+}
+
+static int key_is_value(const char *key) {
+  return strcmp(key, "value") == 0 || strcmp(key, "v") == 0;
+}
+
+static int key_is_any(const char *key) {
+  return strcmp(key, "any") == 0 || strcmp(key, "a") == 0;
+}
+
+static int key_is_ignore_case(const char *key) {
+  return strcmp(key, "ignoreCase") == 0 || strcmp(key, "ignorecase") == 0 ||
+         strcmp(key, "ic") == 0;
+}
+
+static int key_is_range_bound(const char *key) {
+  return strcmp(key, "gt") == 0 || strcmp(key, "gte") == 0 ||
+         strcmp(key, "lt") == 0 || strcmp(key, "lte") == 0;
+}
+
+static int key_allowed_for_kind(lql_node_kind kind, const char *key) {
+  if (key_is_field(key)) {
+    return 1;
+  }
+  switch (kind) {
+  case LQL_NODE_EQ:
+    return key_is_value(key);
+  case LQL_NODE_CONTAINS:
+  case LQL_NODE_ICONTAINS:
+    return key_is_value(key) || key_is_any(key) || key_is_ignore_case(key);
+  case LQL_NODE_PREFIX:
+  case LQL_NODE_IPREFIX:
+    return key_is_value(key) || key_is_ignore_case(key);
+  case LQL_NODE_RANGE:
+    return key_is_range_bound(key);
+  case LQL_NODE_IN:
+    return key_is_any(key);
+  default:
+    return 0;
+  }
+}
+
 static lql_node_kind kind_from_name(const char *name) {
   if (strcmp(name, "eq") == 0) {
     return LQL_NODE_EQ;
@@ -349,12 +393,18 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     while (isspace((unsigned char)*val)) {
       ++val;
     }
+    if (!key_allowed_for_kind(kind, key)) {
+      token_list_cleanup(&parts);
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "selector operator does not support key");
+      return 0;
+    }
     decoded = unquote(val);
     if (decoded == NULL) {
       token_list_cleanup(&parts);
       return 0;
     }
-    if (strcmp(key, "field") == 0 || strcmp(key, "f") == 0) {
+    if (key_is_field(key)) {
       normalized = normalize_field_path(decoded);
       free(decoded);
       if (normalized == NULL) {
@@ -363,18 +413,18 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       }
       free(term->field);
       term->field = normalized;
-    } else if (strcmp(key, "value") == 0 || strcmp(key, "v") == 0) {
+    } else if (key_is_value(key)) {
       free(term->value);
       term->value = decoded;
       term->value_set = 1;
-    } else if (strcmp(key, "any") == 0 || strcmp(key, "a") == 0) {
+    } else if (key_is_any(key)) {
       if (!parse_any_values(decoded, term, error)) {
         free(decoded);
         token_list_cleanup(&parts);
         return 0;
       }
       free(decoded);
-    } else if (strcmp(key, "ignoreCase") == 0 || strcmp(key, "ic") == 0) {
+    } else if (key_is_ignore_case(key)) {
       if (!parse_bool_value(decoded, &term->ignore_case)) {
         free(decoded);
         token_list_cleanup(&parts);
@@ -398,8 +448,6 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     } else if (strcmp(key, "lte") == 0) {
       term->range_lte = strtod(decoded, NULL);
       term->has_range_lte = 1;
-      free(decoded);
-    } else {
       free(decoded);
     }
   }
