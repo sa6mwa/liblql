@@ -31,10 +31,12 @@ typedef struct lql_node {
   lql_term term;
   struct lql_node *children;
   size_t child_count;
+  size_t hit_index;
 } lql_node;
 
 struct lql_selector {
   lql_node root;
+  size_t hit_count;
 };
 
 void lql_set_error(lql_error *error, lql_status status, const char *message);

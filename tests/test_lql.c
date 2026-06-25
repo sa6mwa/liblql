@@ -176,6 +176,9 @@ int main(void) {
   expect_match("prefix{field=/service,value=auth}",
                "{\"service\":\"auth-api\"}", 1);
   expect_match("exists{/metadata/etag}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
+  expect_match("exists{/metadata}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
+  expect_match("/metadata=\"\"", "{\"metadata\":{\"etag\":\"x\"}}", 0);
+  expect_match("/items/0/sku=\"a\"", "{\"items\":[{\"sku\":\"a\"}]}", 1);
   expect_match("/status=\"open\",/progress>=50",
                "{\"status\":\"open\",\"progress\":72}", 1);
   expect_match("/status=\"open\",/progress>=50",

@@ -6,41 +6,38 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct scalar {
-  char *path;
-  char *value;
-  int is_number;
-  double number;
-} scalar;
-
 typedef struct eval_doc {
-  scalar *items;
-  size_t count;
-  char **path;
-  size_t depth;
-  char *key_buf;
-  size_t key_len;
+  const lql_selector *selector;
+  unsigned char *hits;
   char *val_buf;
   size_t val_len;
-  int collecting_key;
-  int collecting_string;
-  int collecting_number;
 } eval_doc;
 
 static void free_doc(eval_doc *doc) {
-  size_t i;
-  for (i = 0u; i < doc->count; ++i) {
-    free(doc->items[i].path);
-    free(doc->items[i].value);
-  }
-  free(doc->items);
-  for (i = 0u; i < doc->depth; ++i) {
-    free(doc->path[i]);
-  }
-  free(doc->path);
-  free(doc->key_buf);
+  free(doc->hits);
   free(doc->val_buf);
   memset(doc, 0, sizeof(*doc));
+}
+
+static int init_doc(eval_doc *doc, const lql_selector *selector) {
+  memset(doc, 0, sizeof(*doc));
+  doc->selector = selector;
+  if (selector != NULL && selector->hit_count != 0u) {
+    doc->hits = (unsigned char *)calloc(selector->hit_count, 1u);
+    if (doc->hits == NULL) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static void reset_doc(eval_doc *doc) {
+  if (doc->selector != NULL && doc->selector->hit_count != 0u) {
+    memset(doc->hits, 0, doc->selector->hit_count);
+  }
+  free(doc->val_buf);
+  doc->val_buf = NULL;
+  doc->val_len = 0u;
 }
 
 static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
@@ -54,197 +51,6 @@ static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
   *len += n;
   (*buf)[*len] = '\0';
   return 1;
-}
-
-static int push_path(eval_doc *doc, const char *seg) {
-  char **next;
-  next = (char **)realloc(doc->path, sizeof(char *) * (doc->depth + 1u));
-  if (next == NULL) {
-    return 0;
-  }
-  doc->path = next;
-  doc->path[doc->depth] = lql_strdup(seg);
-  if (doc->path[doc->depth] == NULL) {
-    return 0;
-  }
-  ++doc->depth;
-  return 1;
-}
-
-static void pop_path(eval_doc *doc) {
-  if (doc->depth > 0u) {
-    --doc->depth;
-    free(doc->path[doc->depth]);
-    doc->path[doc->depth] = NULL;
-  }
-}
-
-static char *current_pointer(eval_doc *doc) {
-  size_t len;
-  size_t i;
-  char *out;
-  char *p;
-  len = 1u;
-  for (i = 0u; i < doc->depth; ++i) {
-    len += strlen(doc->path[i]) + 1u;
-  }
-  out = (char *)malloc(len + 1u);
-  if (out == NULL) {
-    return NULL;
-  }
-  p = out;
-  *p++ = '/';
-  if (doc->depth == 0u) {
-    *p = '\0';
-    return out;
-  }
-  for (i = 0u; i < doc->depth; ++i) {
-    size_t n;
-    if (i != 0u) {
-      *p++ = '/';
-    }
-    n = strlen(doc->path[i]);
-    memcpy(p, doc->path[i], n);
-    p += n;
-  }
-  *p = '\0';
-  return out;
-}
-
-static lonejson_status add_scalar(eval_doc *doc, const char *value,
-                                  int is_number, lonejson_error *error) {
-  scalar *next;
-  char *path;
-  char *copy;
-  (void)error;
-  path = current_pointer(doc);
-  copy = lql_strdup(value);
-  if (path == NULL || copy == NULL) {
-    free(path);
-    free(copy);
-    return LONEJSON_STATUS_ALLOCATION_FAILED;
-  }
-  next = (scalar *)realloc(doc->items, sizeof(scalar) * (doc->count + 1u));
-  if (next == NULL) {
-    free(path);
-    free(copy);
-    return LONEJSON_STATUS_ALLOCATION_FAILED;
-  }
-  doc->items = next;
-  doc->items[doc->count].path = path;
-  doc->items[doc->count].value = copy;
-  doc->items[doc->count].is_number = is_number;
-  doc->items[doc->count].number = is_number ? strtod(value, NULL) : 0.0;
-  ++doc->count;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status on_key_begin(void *user, lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  (void)error;
-  free(doc->key_buf);
-  doc->key_buf = NULL;
-  doc->key_len = 0u;
-  doc->collecting_key = 1;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status on_key_chunk(void *user, const char *data, size_t len,
-                                    lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  (void)error;
-  return append_buf(&doc->key_buf, &doc->key_len, data, len)
-             ? LONEJSON_STATUS_OK
-             : LONEJSON_STATUS_ALLOCATION_FAILED;
-}
-
-static lonejson_status on_key_end(void *user, lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  (void)error;
-  doc->collecting_key = 0;
-  return push_path(doc, doc->key_buf == NULL ? "" : doc->key_buf)
-             ? LONEJSON_STATUS_OK
-             : LONEJSON_STATUS_ALLOCATION_FAILED;
-}
-
-static lonejson_status on_object_end(void *user, lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  (void)error;
-  pop_path(doc);
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status on_string_begin(void *user, lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  (void)error;
-  free(doc->val_buf);
-  doc->val_buf = NULL;
-  doc->val_len = 0u;
-  doc->collecting_string = 1;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status on_string_chunk(void *user, const char *data, size_t len,
-                                       lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  (void)error;
-  return append_buf(&doc->val_buf, &doc->val_len, data, len)
-             ? LONEJSON_STATUS_OK
-             : LONEJSON_STATUS_ALLOCATION_FAILED;
-}
-
-static lonejson_status on_string_end(void *user, lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  lonejson_status st;
-  doc->collecting_string = 0;
-  st = add_scalar(doc, doc->val_buf == NULL ? "" : doc->val_buf, 0, error);
-  pop_path(doc);
-  return st;
-}
-
-static lonejson_status on_number_begin(void *user, lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  (void)error;
-  free(doc->val_buf);
-  doc->val_buf = NULL;
-  doc->val_len = 0u;
-  doc->collecting_number = 1;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status on_number_chunk(void *user, const char *data, size_t len,
-                                       lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  (void)error;
-  return append_buf(&doc->val_buf, &doc->val_len, data, len)
-             ? LONEJSON_STATUS_OK
-             : LONEJSON_STATUS_ALLOCATION_FAILED;
-}
-
-static lonejson_status on_number_end(void *user, lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  lonejson_status st;
-  doc->collecting_number = 0;
-  st = add_scalar(doc, doc->val_buf == NULL ? "" : doc->val_buf, 1, error);
-  pop_path(doc);
-  return st;
-}
-
-static lonejson_status on_boolean(void *user, int value,
-                                  lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  lonejson_status st;
-  st = add_scalar(doc, value ? "true" : "false", 0, error);
-  pop_path(doc);
-  return st;
-}
-
-static lonejson_status on_null(void *user, lonejson_error *error) {
-  eval_doc *doc = (eval_doc *)user;
-  lonejson_status st;
-  st = add_scalar(doc, "", 0, error);
-  pop_path(doc);
-  return st;
 }
 
 static int ascii_case_equal_prefix(const char *a, const char *b, size_t n) {
@@ -279,14 +85,169 @@ static int contains_case(const char *haystack, const char *needle,
   return 0;
 }
 
-static int path_matches(const char *pattern, const char *path) {
-  return pattern != NULL && strcmp(pattern, path) == 0;
+static int path_segment_matches(const char *start, size_t len,
+                                const lonejson_path_segment *segment) {
+  size_t i;
+  size_t j;
+  char ch;
+  i = 0u;
+  j = 0u;
+  while (i < len && j < segment->len) {
+    ch = start[i++];
+    if (ch == '~' && i < len) {
+      if (start[i] == '0') {
+        ch = '~';
+        ++i;
+      } else if (start[i] == '1') {
+        ch = '/';
+        ++i;
+      }
+    }
+    if (ch != segment->data[j++]) {
+      return 0;
+    }
+  }
+  return i == len && j == segment->len;
+}
+
+static int path_matches(const char *pattern, const lonejson_value_path *path) {
+  const char *seg;
+  const char *slash;
+  size_t idx;
+  if (pattern == NULL || path == NULL || pattern[0] != '/') {
+    return 0;
+  }
+  if (pattern[1] == '\0') {
+    return path->segment_count == 0u;
+  }
+  seg = pattern + 1;
+  idx = 0u;
+  while (*seg != '\0') {
+    slash = strchr(seg, '/');
+    if (idx >= path->segment_count) {
+      return 0;
+    }
+    if (slash == NULL) {
+      if (!path_segment_matches(seg, strlen(seg), &path->segments[idx])) {
+        return 0;
+      }
+      ++idx;
+      return idx == path->segment_count;
+    }
+    if (!path_segment_matches(seg, (size_t)(slash - seg),
+                              &path->segments[idx])) {
+      return 0;
+    }
+    ++idx;
+    seg = slash + 1;
+  }
+  return idx == path->segment_count;
+}
+
+static int node_is_term(const lql_node *node) {
+  switch (node->kind) {
+  case LQL_NODE_EQ:
+  case LQL_NODE_NE:
+  case LQL_NODE_CONTAINS:
+  case LQL_NODE_ICONTAINS:
+  case LQL_NODE_PREFIX:
+  case LQL_NODE_IPREFIX:
+  case LQL_NODE_RANGE:
+  case LQL_NODE_EXISTS:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+static void observe_node(eval_doc *doc, const lql_node *node,
+                         const lonejson_value_path *path, const char *value,
+                         int is_number, int is_container) {
+  size_t i;
+  size_t n;
+  double number;
+  if (node == NULL) {
+    return;
+  }
+  if (!node_is_term(node)) {
+    for (i = 0u; i < node->child_count; ++i) {
+      observe_node(doc, &node->children[i], path, value, is_number,
+                   is_container);
+    }
+    return;
+  }
+  if (doc->hits == NULL || !path_matches(node->term.field, path)) {
+    return;
+  }
+  switch (node->kind) {
+  case LQL_NODE_EQ:
+    if (is_container) {
+      break;
+    }
+    if (strcmp(value, node->term.value == NULL ? "" : node->term.value) == 0) {
+      doc->hits[node->hit_index] = 1u;
+    }
+    break;
+  case LQL_NODE_NE:
+    if (is_container) {
+      break;
+    }
+    if (strcmp(value, node->term.value == NULL ? "" : node->term.value) != 0) {
+      doc->hits[node->hit_index] = 1u;
+    }
+    break;
+  case LQL_NODE_CONTAINS:
+  case LQL_NODE_ICONTAINS:
+    if (is_container) {
+      break;
+    }
+    if (contains_case(value, node->term.value == NULL ? "" : node->term.value,
+                      node->kind == LQL_NODE_ICONTAINS)) {
+      doc->hits[node->hit_index] = 1u;
+    }
+    break;
+  case LQL_NODE_PREFIX:
+  case LQL_NODE_IPREFIX:
+    if (is_container) {
+      break;
+    }
+    n = strlen(node->term.value == NULL ? "" : node->term.value);
+    if (strlen(value) >= n &&
+        (node->kind == LQL_NODE_IPREFIX
+             ? ascii_case_equal_prefix(value, node->term.value, n)
+             : memcmp(value, node->term.value, n) == 0)) {
+      doc->hits[node->hit_index] = 1u;
+    }
+    break;
+  case LQL_NODE_RANGE:
+    if (!is_container && is_number && node->term.has_number) {
+      number = strtod(value, NULL);
+      if ((node->term.range_op == '>' && number > node->term.number) ||
+          (node->term.range_op == 'G' && number >= node->term.number) ||
+          (node->term.range_op == '<' && number < node->term.number) ||
+          (node->term.range_op == 'L' && number <= node->term.number)) {
+        doc->hits[node->hit_index] = 1u;
+      }
+    }
+    break;
+  case LQL_NODE_EXISTS:
+    doc->hits[node->hit_index] = 1u;
+    break;
+  default:
+    break;
+  }
+}
+
+static void observe_value(eval_doc *doc, const lonejson_value_path *path,
+                          const char *value, int is_number, int is_container) {
+  if (doc->selector == NULL || doc->selector->root.kind == LQL_NODE_ALL) {
+    return;
+  }
+  observe_node(doc, &doc->selector->root, path, value, is_number, is_container);
 }
 
 static int eval_node(const lql_node *node, const eval_doc *doc) {
   size_t i;
-  int found;
-  const scalar *s;
   switch (node->kind) {
   case LQL_NODE_ALL:
     return 1;
@@ -307,72 +268,97 @@ static int eval_node(const lql_node *node, const eval_doc *doc) {
   case LQL_NODE_NOT:
     return node->child_count == 0u ? 1 : !eval_node(&node->children[0], doc);
   default:
-    break;
+    return doc->hits != NULL && doc->hits[node->hit_index] != 0u;
   }
-  found = 0;
-  for (i = 0u; i < doc->count; ++i) {
-    s = &doc->items[i];
-    if (!path_matches(node->term.field, s->path)) {
-      continue;
-    }
-    found = 1;
-    switch (node->kind) {
-    case LQL_NODE_EQ:
-      if (strcmp(s->value, node->term.value == NULL ? "" : node->term.value) ==
-          0) {
-        return 1;
-      }
-      break;
-    case LQL_NODE_NE:
-      if (strcmp(s->value, node->term.value == NULL ? "" : node->term.value) !=
-          0) {
-        return 1;
-      }
-      break;
-    case LQL_NODE_CONTAINS:
-    case LQL_NODE_ICONTAINS:
-      if (contains_case(s->value,
-                        node->term.value == NULL ? "" : node->term.value,
-                        node->kind == LQL_NODE_ICONTAINS)) {
-        return 1;
-      }
-      break;
-    case LQL_NODE_PREFIX:
-    case LQL_NODE_IPREFIX: {
-      size_t n = strlen(node->term.value == NULL ? "" : node->term.value);
-      if (strlen(s->value) >= n &&
-          (node->kind == LQL_NODE_IPREFIX
-               ? ascii_case_equal_prefix(s->value, node->term.value, n)
-               : memcmp(s->value, node->term.value, n) == 0)) {
-        return 1;
-      }
-      break;
-    }
-    case LQL_NODE_RANGE:
-      if (s->is_number && node->term.has_number) {
-        if ((node->term.range_op == '>' && s->number > node->term.number) ||
-            (node->term.range_op == 'G' && s->number >= node->term.number) ||
-            (node->term.range_op == '<' && s->number < node->term.number) ||
-            (node->term.range_op == 'L' && s->number <= node->term.number)) {
-          return 1;
-        }
-      }
-      break;
-    case LQL_NODE_EXISTS:
-      return 1;
-    default:
-      break;
-    }
-  }
-  return node->kind == LQL_NODE_EXISTS ? found : 0;
 }
 
-static void init_eval_visitor(lonejson_value_visitor *visitor) {
-  *visitor = lonejson_default_value_visitor();
-  visitor->object_key_begin = on_key_begin;
-  visitor->object_key_chunk = on_key_chunk;
-  visitor->object_key_end = on_key_end;
-  visitor->object_end = on_object_end;
+static lonejson_status on_container(void *user, const lonejson_value_path *path,
+                                    lonejson_error *error) {
+  eval_doc *doc = (eval_doc *)user;
+  (void)error;
+  observe_value(doc, path, "", 0, 1);
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status on_string_begin(void *user,
+                                       const lonejson_value_path *path,
+                                       lonejson_error *error) {
+  eval_doc *doc = (eval_doc *)user;
+  (void)path;
+  (void)error;
+  free(doc->val_buf);
+  doc->val_buf = NULL;
+  doc->val_len = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status on_string_chunk(void *user,
+                                       const lonejson_value_path *path,
+                                       const char *data, size_t len,
+                                       lonejson_error *error) {
+  eval_doc *doc = (eval_doc *)user;
+  (void)path;
+  (void)error;
+  return append_buf(&doc->val_buf, &doc->val_len, data, len)
+             ? LONEJSON_STATUS_OK
+             : LONEJSON_STATUS_ALLOCATION_FAILED;
+}
+
+static lonejson_status on_string_end(void *user,
+                                     const lonejson_value_path *path,
+                                     lonejson_error *error) {
+  eval_doc *doc = (eval_doc *)user;
+  (void)error;
+  observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 0, 0);
+  free(doc->val_buf);
+  doc->val_buf = NULL;
+  doc->val_len = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status on_number_begin(void *user,
+                                       const lonejson_value_path *path,
+                                       lonejson_error *error) {
+  return on_string_begin(user, path, error);
+}
+
+static lonejson_status on_number_chunk(void *user,
+                                       const lonejson_value_path *path,
+                                       const char *data, size_t len,
+                                       lonejson_error *error) {
+  return on_string_chunk(user, path, data, len, error);
+}
+
+static lonejson_status on_number_end(void *user,
+                                     const lonejson_value_path *path,
+                                     lonejson_error *error) {
+  eval_doc *doc = (eval_doc *)user;
+  (void)error;
+  observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 1, 0);
+  free(doc->val_buf);
+  doc->val_buf = NULL;
+  doc->val_len = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status on_boolean(void *user, const lonejson_value_path *path,
+                                  int value, lonejson_error *error) {
+  (void)error;
+  observe_value((eval_doc *)user, path, value ? "true" : "false", 0, 0);
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status on_null(void *user, const lonejson_value_path *path,
+                               lonejson_error *error) {
+  (void)error;
+  observe_value((eval_doc *)user, path, "", 0, 0);
+  return LONEJSON_STATUS_OK;
+}
+
+static void init_eval_visitor(lonejson_path_value_visitor *visitor) {
+  *visitor = lonejson_default_path_value_visitor();
+  visitor->object_begin = on_container;
+  visitor->array_begin = on_container;
   visitor->string_begin = on_string_begin;
   visitor->string_chunk = on_string_chunk;
   visitor->string_end = on_string_end;
@@ -398,7 +384,7 @@ on_candidate_begin(void *user, const lonejson_candidate_info *candidate,
   query_stream_state *state = (query_stream_state *)user;
   (void)candidate;
   (void)error;
-  free_doc(&state->doc);
+  reset_doc(&state->doc);
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
@@ -424,7 +410,7 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
   decision.offset = (lql_uint64)candidate->stream_offset;
   decision.size = (lql_uint64)candidate->byte_size;
   st = state->on_decision(state->user, &decision);
-  free_doc(&state->doc);
+  reset_doc(&state->doc);
   if (st != LQL_STATUS_OK) {
     state->callback_status = st;
     return LONEJSON_CANDIDATE_ERROR;
@@ -437,26 +423,30 @@ lql_status lql_eval_selector(const lql_selector *selector, const char *json,
                              lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
-  lonejson_value_visitor visitor;
+  lonejson_path_value_visitor visitor;
   lonejson_status st;
   eval_doc doc;
 
-  memset(&doc, 0, sizeof(doc));
+  if (!init_doc(&doc, selector)) {
+    return LQL_STATUS_NO_MEMORY;
+  }
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    free_doc(&doc);
     return LQL_STATUS_JSON_ERROR;
   }
   init_eval_visitor(&visitor);
-  st = lonejson_visit_value_buffer(runtime, json, json_len, &visitor, &doc,
-                                   &lj_error);
+  st = lonejson_visit_path_value_buffer(runtime, json, json_len, &visitor, &doc,
+                                        &lj_error);
   if (st != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     free_doc(&doc);
     lonejson_free(runtime);
     return LQL_STATUS_JSON_ERROR;
   }
-  *out_matched = eval_node(&selector->root, &doc);
+  *out_matched = selector == NULL || selector->root.kind == LQL_NODE_ALL ||
+                 eval_node(&selector->root, &doc);
   free_doc(&doc);
   lonejson_free(runtime);
   return LQL_STATUS_OK;
@@ -468,7 +458,7 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
                               lql_query_result *out_result, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
-  lonejson_value_visitor visitor;
+  lonejson_path_value_visitor visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   query_stream_state state;
@@ -478,15 +468,19 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
   state.on_decision = on_decision;
   state.user = user;
   state.callback_status = LQL_STATUS_OK;
+  if (!init_doc(&state.doc, selector)) {
+    return LQL_STATUS_NO_MEMORY;
+  }
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    free_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
   init_eval_visitor(&visitor);
   options = lonejson_default_candidate_stream_options();
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  options.visitor = &visitor;
+  options.path_visitor = &visitor;
   options.visitor_user = &state.doc;
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;

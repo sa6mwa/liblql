@@ -334,7 +334,8 @@ The port should progress in falsifiable slices:
 3. lonejson upgrade integration
    - consume candidate stream with 64-bit ranges;
    - consume path-aware visitor and JSON Pointer helpers;
-   - remove liblql-owned path reconstruction where possible.
+   - remove liblql-owned path reconstruction and scalar-list materialization
+     where possible.
 
 4. Streaming query foundation
    - decision-only candidate stream over `FILE *`;
@@ -382,6 +383,9 @@ Current implementation is an early slice:
   exists;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
+- current selector subset evaluation uses lonejson path-aware visitor callbacks
+  and marks selector term hits as values stream through, rather than building a
+  per-candidate scalar document list;
 - first C selector parse/evaluate subset exists;
 - `clql` exists as a minimal selector smoke CLI;
 - Go parity tests exist for the initial selector subset;

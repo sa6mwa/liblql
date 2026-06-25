@@ -371,6 +371,37 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
   return LQL_STATUS_PARSE_ERROR;
 }
 
+static int node_is_term(const lql_node *node) {
+  switch (node->kind) {
+  case LQL_NODE_EQ:
+  case LQL_NODE_NE:
+  case LQL_NODE_CONTAINS:
+  case LQL_NODE_ICONTAINS:
+  case LQL_NODE_PREFIX:
+  case LQL_NODE_IPREFIX:
+  case LQL_NODE_RANGE:
+  case LQL_NODE_EXISTS:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+static void assign_hit_indexes(lql_node *node, size_t *next) {
+  size_t i;
+  if (node == NULL) {
+    return;
+  }
+  if (node_is_term(node)) {
+    node->hit_index = *next;
+    ++*next;
+    return;
+  }
+  for (i = 0u; i < node->child_count; ++i) {
+    assign_hit_indexes(&node->children[i], next);
+  }
+}
+
 lql_status lql_parse_selector_internal(const char *expr, int or_mode,
                                        lql_selector **out, lql_error *error) {
   lql_token_list tokens;
@@ -423,6 +454,8 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
     lql_selector_free(selector);
     return st;
   }
+  selector->hit_count = 0u;
+  assign_hit_indexes(&selector->root, &selector->hit_count);
   *out = selector;
   return LQL_STATUS_OK;
 }
