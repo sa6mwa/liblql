@@ -853,6 +853,68 @@ func TestCLQLMatchAllFileSelectionParity(t *testing.T) {
 	}
 }
 
+func TestCLQLMalformedJSONExecutionErrors(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"status":`
+	selector, err := lql.ParseSelectorString(`/status="open"`)
+	if err != nil {
+		t.Fatalf("go parse selector: %v", err)
+	}
+	if _, err := lql.QueryStreamWithResult(lql.QueryStreamRequest{
+		Reader:   bytes.NewBufferString(body),
+		Selector: selector,
+		Mode:     lql.QueryDecisionOnly,
+		OnDecision: func(lql.QueryStreamDecision) error {
+			return nil
+		},
+	}); err == nil {
+		t.Fatalf("go stream unexpectedly accepted malformed JSON")
+	}
+
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "malformed.json")
+	if err := os.WriteFile(inputPath, []byte(body), 0600); err != nil {
+		t.Fatalf("write malformed input: %v", err)
+	}
+	cases := []struct {
+		name  string
+		args  []string
+		stdin bool
+	}{
+		{"stdin selection", []string{`/status="open"`}, true},
+		{"stdin matches-only", []string{"-M", `/status="open"`}, true},
+		{"stdin compact", []string{"-c", `/status="open"`}, true},
+		{"stdin projection", []string{"-f", "/id", `/status="open"`}, true},
+		{"stdin mutation", []string{"-m", "/status=done", `/status="open"`}, true},
+		{"file selection", []string{`/status="open"`, inputPath}, false},
+		{"file matches-only", []string{"-M", `/status="open"`, inputPath}, false},
+		{"file compact", []string{"-c", `/status="open"`, inputPath}, false},
+		{"file projection", []string{"-f", "/id", `/status="open"`, inputPath}, false},
+		{"file mutation", []string{"-m", "/status=done", `/status="open"`, inputPath}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(clql, tc.args...)
+			if tc.stdin {
+				cmd.Stdin = bytes.NewBufferString(body)
+			}
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("clql unexpectedly accepted malformed JSON: out=%q", string(out))
+			}
+			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+				t.Fatalf("clql malformed JSON exit mismatch: err=%v out=%q", err, string(out))
+			}
+			if !bytes.Contains(out, []byte("clql: ")) {
+				t.Fatalf("clql malformed JSON diagnostic missing prefix: out=%q", string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLMutationParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

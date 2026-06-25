@@ -549,6 +549,9 @@ Current implementation is an early slice:
   transitional oracle for deriving exhaustive C-only SDK tests; they run under
   the explicit `make parity-test` target and broader gates, not the fast
   `make test` target;
+- CLI malformed JSON execution is covered by Go-backed parity tests over stdin
+  and seekable file inputs for selection, matches-only selection, compact
+  output, projection, and mutation, with exit-code and diagnostic assertions;
 - Go-backed SDK parity tests now exist for public `liblql` selector
   parse/evaluate behavior, projection parser failures, buffered and seekable
   file-range JSON projection including malformed JSON execution errors,

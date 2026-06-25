@@ -31,6 +31,7 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"streaming", "compact matched stdin output", []string{"TestCLQLStdinCompactOutputParity"}},
 	{"streaming", "compact matched seekable file output", []string{"TestCLQLCompactSelectionParity"}},
 	{"streaming", "match-all seekable file selection", []string{"TestCLQLMatchAllFileSelectionParity"}},
+	{"streaming", "malformed JSON execution errors over stdin and seekable files", []string{"TestCLQLMalformedJSONExecutionErrors"}},
 	{"projection", "stdin projection, missing fields, duplicate fields, and escaped pointers", []string{"TestCLQLStdinProjectionParity"}},
 	{"projection", "seekable file projection, missing fields, duplicate fields, and escaped pointers", []string{"TestCLQLSeekableFileProjectionParity"}},
 	{"projection", "path conflict errors match Go planning", []string{"TestCLQLProjectionPathConflictParity"}},
