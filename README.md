@@ -15,9 +15,9 @@ through `lql_mutation_plan`, and supported concrete-path mutations including
 Go-compatible numeric child handling under arrays and time normalization can be
 applied to seekable file ranges without full-document materialization. `clql`
 also supports seekable-file inline/write mutation through a temp-file rename.
-File-backed mutation values can be parsed only through the explicit opt-in
-parse options and `clql -F`; streaming execution for those values is still
-unsupported. Wildcard mutation execution, file-backed mutation execution,
+Explicit `textfile:` and `base64file:` mutation values can be parsed through
+the opt-in parse options and `clql -F`, and execute through source-backed
+lonejson writers. Wildcard mutation execution, `file:` auto-detection,
 payload handles, and full `clql` parity are still active porting work.
 
 ```sh

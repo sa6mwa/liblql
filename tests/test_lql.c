@@ -601,6 +601,7 @@ static void expect_mutation_plan_api(void) {
   const char *valid[6];
   const char *invalid[6];
   const char *file_backed;
+  const char *file_auto;
   size_t i;
 
   valid[0] = "/state/progress=ready";
@@ -664,10 +665,21 @@ static void expect_mutation_plan_api(void) {
     printf("enabled file-backed mutation count mismatch: %lu\n",
            (unsigned long)lql_mutation_plan_count(plan));
     ++failures;
+  }
+  lql_mutation_plan_free(plan);
+
+  file_auto = "file:/payload=/dev/null";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse_with_options(&file_auto, 1u, &options, &plan,
+                                            &error);
+  if (st != LQL_STATUS_OK) {
+    printf("auto file-backed mutation parse failed: %s\n", error.message);
+    ++failures;
   } else {
     st = lql_mutate_file_range_paths(plan, stdin, 0u, 0u, stdout, &error);
     if (st != LQL_STATUS_UNSUPPORTED) {
-      printf("file-backed mutation execution unexpectedly supported\n");
+      printf("auto file-backed mutation unexpectedly supported\n");
       ++failures;
     }
   }
@@ -677,10 +689,13 @@ static void expect_mutation_plan_api(void) {
 static void expect_root_field_mutation_api(void) {
   FILE *source;
   FILE *out;
+  FILE *payload;
   lql_error error;
   lql_status st;
   lql_mutation_plan *plan;
   const char *exprs[4];
+  const char *file_exprs[2];
+  lql_mutation_parse_options options;
   char buf[256];
   size_t len;
   static const char doc[] = "{\"status\":\"open\",\"count\":1,\"old\":true}";
@@ -732,6 +747,51 @@ static void expect_root_field_mutation_api(void) {
   }
   lql_mutation_plan_free(plan);
   fclose(out);
+
+  payload = fopen("lql-test-payload.txt", "wb");
+  if (payload == NULL) {
+    printf("file-backed mutation payload write failed\n");
+    fclose(source);
+    ++failures;
+    return;
+  }
+  if (fwrite("hi", 1u, 2u, payload) != 2u || fclose(payload) != 0) {
+    printf("file-backed mutation payload write failed\n");
+    fclose(source);
+    ++failures;
+    return;
+  }
+  out = tmpfile();
+  file_exprs[0] = "textfile:/text_payload=lql-test-payload.txt";
+  file_exprs[1] = "base64file:/bin_payload=lql-test-payload.txt";
+  memset(&options, 0, sizeof(options));
+  options.enable_file_values = 1;
+  options.file_value_base_dir = ".";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse_with_options(file_exprs, 2u, &options, &plan,
+                                            &error);
+  if (st != LQL_STATUS_OK) {
+    printf("file-backed root mutation parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    st = lql_mutate_file_range_root_fields(
+        plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("file-backed root mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf,
+                      "{\"status\":\"open\",\"count\":1,\"old\":true,"
+                      "\"text_payload\":\"hi\",\"bin_payload\":\"aGk=\"}") !=
+                   0) {
+      printf("file-backed root mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  lql_mutation_plan_free(plan);
+  fclose(out);
+  remove("lql-test-payload.txt");
 
   out = tmpfile();
   exprs[0] = "/nested/status=done";

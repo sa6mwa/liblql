@@ -424,17 +424,19 @@ Current implementation is an early slice:
   array indexes over seekable file ranges; immediate concrete child mutations
   under arrays follow Go stream behavior by replacing the array value with an
   object keyed by the requested numeric segments; supported set values include
-  `time:` normalization to UTC RFC3339Nano strings; wildcards, recursive paths,
-  file-backed value execution, and non-seekable execution still return
+  `time:` normalization to UTC RFC3339Nano strings and explicit
+  `textfile:/base64file:` source-backed file values; wildcards, recursive
+  paths, `file:` auto-detection, and non-seekable execution still return
   unsupported;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path mutations to matched candidates, and leaves
-  wildcard, file-backed, and non-seekable mutation behavior unsupported;
+  wildcard, `file:` auto-detected, and non-seekable mutation behavior
+  unsupported;
 - `clql -m/--mutate` accepts a single file argument with no selector as
   match-all mutation input and rejects multiple file inputs explicitly;
-- `clql -F/--enable-file-mutations` opts into parsing
-  `file:/textfile:/base64file:` mutation values, while execution still returns
-  unsupported until the streaming file-backed value emitter is implemented;
+- `clql -F/--enable-file-mutations` opts into parsing file-backed mutation
+  values and supports explicit `textfile:` and `base64file:` streaming
+  execution; `file:` auto-detection still returns unsupported;
 - `clql -m -M/--matches-only` emits only matched seekable file candidates after
   applying supported concrete-path mutations;
 - `clql -m -i/--inline` and `clql -m -w/--write` rewrite a single seekable

@@ -1012,7 +1012,7 @@ void lql_mutation_plan_free(lql_mutation_plan *plan) {
 }
 
 static int mutation_is_root_field_supported(const mutation_item *item) {
-  if (item->file_mode != MUTATION_FILE_NONE) {
+  if (item->file_mode == MUTATION_FILE_AUTO) {
     return 0;
   }
   return item->path.segment_count == 1u && item->path.segments[0][0] != '\0' &&
@@ -1045,7 +1045,7 @@ static int mutation_plan_supports_root_fields(const lql_mutation_plan *plan) {
 
 static int mutation_is_concrete_path_supported(const mutation_item *item) {
   size_t i;
-  if (item->file_mode != MUTATION_FILE_NONE) {
+  if (item->file_mode == MUTATION_FILE_AUTO) {
     return 0;
   }
   if (item->path.segment_count == 0u) {
@@ -1182,6 +1182,22 @@ static lonejson_status write_mutation_set_value(lonejson_writer *writer,
   size_t len;
   double number;
   char number_buf[64];
+  lonejson_source source;
+  lonejson_status st;
+  if (item->file_mode == MUTATION_FILE_TEXT ||
+      item->file_mode == MUTATION_FILE_BASE64) {
+    lonejson_source_init(&source);
+    st = lonejson_source_set_path(&source, item->file_path, error);
+    if (st == LONEJSON_STATUS_OK) {
+      if (item->file_mode == MUTATION_FILE_TEXT) {
+        st = lonejson_writer_source_text(writer, &source, error);
+      } else {
+        st = lonejson_writer_source_base64(writer, &source, error);
+      }
+    }
+    lonejson_source_cleanup(&source);
+    return st;
+  }
   value = item->value == NULL ? "" : item->value;
   text = unquoted_value(value, &len);
   if (ascii_equal_ignore_case_n(text, len, "true")) {

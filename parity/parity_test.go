@@ -537,18 +537,22 @@ func TestCLQLMutationParseErrorParity(t *testing.T) {
 	}
 }
 
-func TestCLQLEnableFileMutationsParsesFileBackedValues(t *testing.T) {
+func TestCLQLEnableFileMutationsStreamsExplicitFileBackedValues(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
 		t.Skip("CLQL_PATH not set")
 	}
 	dir := t.TempDir()
-	blobPath := filepath.Join(dir, "blob.txt")
-	if err := os.WriteFile(blobPath, []byte("hello"), 0600); err != nil {
-		t.Fatalf("write blob: %v", err)
+	textPath := filepath.Join(dir, "blob.txt")
+	binPath := filepath.Join(dir, "blob.bin")
+	if err := os.WriteFile(textPath, []byte("hello\n\"quoted\""), 0600); err != nil {
+		t.Fatalf("write text blob: %v", err)
+	}
+	if err := os.WriteFile(binPath, []byte{0x00, 0x01, 0x02, 'a'}, 0600); err != nil {
+		t.Fatalf("write binary blob: %v", err)
 	}
 	if _, err := lql.ParseMutationsWithOptions(
-		[]string{`textfile:/payload=` + blobPath},
+		[]string{`textfile:/payload=` + textPath, `base64file:/encoded=` + binPath},
 		time.Unix(1700000000, 0),
 		lql.ParseMutationsOptions{EnableFileValues: true},
 	); err != nil {
@@ -562,22 +566,25 @@ func TestCLQLEnableFileMutationsParsesFileBackedValues(t *testing.T) {
 		clql,
 		"-F",
 		"-c",
-		"-m", `textfile:/payload=`+blobPath,
+		"-m", `textfile:/payload=`+textPath,
+		"-m", `base64file:/encoded=`+binPath,
 		`contains{f=/}`,
 		inputPath,
 	)
 	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("file-backed mutation execution unexpectedly succeeded: out=%q", string(out))
+	if err != nil {
+		t.Fatalf("file-backed mutation execution failed: %v out=%q", err, string(out))
 	}
-	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
-		t.Fatalf("file-backed mutation execution exit mismatch: err=%v out=%q", err, string(out))
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode file-backed mutation output: %v out=%q", err, string(out))
 	}
-	if bytes.Contains(out, []byte("file-backed mutations are disabled")) {
-		t.Fatalf("-F did not enable file-backed mutation parsing: out=%q", string(out))
+	want, err := decodeJSONValues([]byte(`{"payload":"hello\n\"quoted\"","encoded":"AAECYQ=="}`))
+	if err != nil {
+		t.Fatalf("decode expected file-backed mutation output: %v", err)
 	}
-	if !bytes.Contains(out, []byte("mutation plan requires unsupported path behavior")) {
-		t.Fatalf("file-backed mutation unsupported error mismatch: out=%q", string(out))
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("file-backed mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
 	}
 }
 
