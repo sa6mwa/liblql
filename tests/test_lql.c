@@ -2281,6 +2281,7 @@ typedef struct sdk_parity_requirement {
 } sdk_parity_requirement;
 
 static void expect_selector_match_api(void);
+static void expect_selector_or_api(void);
 static void expect_selector_parse_error_api(void);
 
 static void expect_sdk_parity_manifest(void) {
@@ -2294,7 +2295,7 @@ static void expect_sdk_parity_manifest(void) {
        "scalar, string, numeric, temporal, path, wildcard, "
        "existence, and logical matching",
        expect_selector_match_api},
-      {"selector", "OR parse/evaluation public API", expect_selector_match_api},
+      {"selector", "OR parse/evaluation public API", expect_selector_or_api},
       {"selector", "parse-error invariants", expect_selector_parse_error_api},
       {"streaming", "seekable FILE decision streams", expect_stream_file},
       {"streaming", "callback-source decision streams", expect_source_stream},
@@ -2470,6 +2471,25 @@ static void expect_selector_match_api(void) {
                "{\"status\":\"open\",\"progress\":72}", 1);
   expect_match("/status=\"open\",/progress>=50",
                "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match(
+      "and.eq{field=/status,value=open},and.range{field=/progress,gte=50}",
+      "{\"status\":\"open\",\"progress\":72}", 1);
+  expect_match(
+      "and.eq{field=/status,value=open},and.range{field=/progress,gte=50}",
+      "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match(
+      "and.0.eq{field=/status,value=open},and.0.range{field=/progress,gte=50}",
+      "{\"status\":\"open\",\"progress\":72}", 1);
+  expect_match(
+      "and.0.eq{field=/status,value=open},and.0.range{field=/progress,gte=50}",
+      "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"open\"}",
+               1);
+  expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"closed\"}",
+               0);
+}
+
+static void expect_selector_or_api(void) {
   expect_match_or("/status=\"open\",/progress>=50",
                   "{\"status\":\"closed\",\"progress\":72}", 1);
   expect_match_or("/status=\"open\",/progress>=50",
@@ -2496,10 +2516,6 @@ static void expect_selector_match_api(void) {
   expect_match(
       "or.0.eq{field=/status,value=open},or.0.range{field=/progress,gte=50}",
       "{\"status\":\"closed\",\"progress\":72}", 0);
-  expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"open\"}",
-               1);
-  expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"closed\"}",
-               0);
 }
 
 static void expect_selector_parse_error_api(void) {
@@ -2538,6 +2554,7 @@ int main(void) {
   expect_sdk_parity_manifest();
   expect_public_utility_api();
   expect_selector_match_api();
+  expect_selector_or_api();
   expect_selector_parse_error_api();
   expect_version_api();
   expect_stream_file();

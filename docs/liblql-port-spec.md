@@ -576,6 +576,10 @@ Current implementation is an early slice:
   errors. Full non-stopped streams report consumed input bytes, including
   trailing delimiters, while early-stop streams retain candidate-end accounting
   for stop decisions;
+- native C SDK unit coverage is manifest-checked: every `expect_* (void)` SDK
+  unit group in `tests/test_lql.c` must have exactly one manifest entry and
+  exactly one `main()` call, so C-only regressions cannot be added without
+  executable coverage accounting;
 - the Go-backed SDK parity suite is intentionally excluded from sanitizer CTest
   presets because the cgo test process cannot reliably load an
   ASan-instrumented shared liblql with the ASan runtime first; project-owned C
