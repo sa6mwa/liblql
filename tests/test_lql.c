@@ -182,6 +182,8 @@ static void expect_stream_array_items(void) {
 int main(void) {
   expect_match("/status=\"open\"", "{\"status\":\"open\"}", 1);
   expect_match("/status=\"closed\"", "{\"status\":\"open\"}", 0);
+  expect_match("eq{field=/status,field=/status,value=open,value=open}",
+               "{\"status\":\"open\"}", 1);
   expect_match("/progress>=50", "{\"progress\":72}", 1);
   expect_match("/progress<50", "{\"progress\":72}", 0);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":11}", 1);
@@ -228,12 +230,16 @@ int main(void) {
   expect_match("/status=\"open\",/progress>=50",
                "{\"status\":\"open\",\"progress\":4}", 0);
   expect_parse_error("contains{field=/message,value=timeout,any=error}");
+  expect_parse_error("contains{field=/message,value=timeout,value=error}");
   expect_parse_error("contains{field=/message,value=timeout,ignoreCase=maybe}");
+  expect_parse_error("eq{field=/status,f=/other,value=open}");
   expect_parse_error("eq{field=/status,value=open,foo=bar}");
   expect_parse_error("eq{field=/status,value=open,ignoreCase=true}");
+  expect_parse_error("range{field=/progress,gte=10,gte=20}");
   expect_parse_error("range{field=/progress,gte=10,foo=bar}");
   expect_parse_error("prefix{field=/service,any=auth|edge}");
   expect_parse_error("in{field=/env}");
+  expect_parse_error("in{field=/env,any=prod|stage,a=dev}");
   expect_parse_error("in{field=/env,any=prod|stage,foo=bar}");
   expect_parse_error("range{field=/progress}");
   expect_stream_file();

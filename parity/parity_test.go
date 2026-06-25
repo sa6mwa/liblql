@@ -21,6 +21,7 @@ func TestCLQLSelectorParity(t *testing.T) {
 	}{
 		{`/status="open"`, `{"status":"open"}`},
 		{`/status="closed"`, `{"status":"open"}`},
+		{`eq{field=/status,field=/status,value=open,value=open}`, `{"status":"open"}`},
 		{`/progress>=50`, `{"progress":72}`},
 		{`/progress<50`, `{"progress":72}`},
 		{`range{field=/progress,gt=10,lte=20}`, `{"progress":11}`},
@@ -78,12 +79,16 @@ func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	}
 	cases := []string{
 		`contains{field=/message,value=timeout,any=error}`,
+		`contains{field=/message,value=timeout,value=error}`,
 		`contains{field=/message,value=timeout,ignoreCase=maybe}`,
+		`eq{field=/status,f=/other,value=open}`,
 		`eq{field=/status,value=open,foo=bar}`,
 		`eq{field=/status,value=open,ignoreCase=true}`,
+		`range{field=/progress,gte=10,gte=20}`,
 		`range{field=/progress,gte=10,foo=bar}`,
 		`prefix{field=/service,any=auth|edge}`,
 		`in{field=/env}`,
+		`in{field=/env,any=prod|stage,a=dev}`,
 		`in{field=/env,any=prod|stage,foo=bar}`,
 		`range{field=/progress}`,
 	}

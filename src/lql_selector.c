@@ -299,6 +299,40 @@ static int key_allowed_for_kind(lql_node_kind kind, const char *key) {
   }
 }
 
+static void free_seen_key_values(char *field, char *value, char *any,
+                                 char *ignore_case, char *gt, char *gte,
+                                 char *lt, char *lte) {
+  free(field);
+  free(value);
+  free(any);
+  free(ignore_case);
+  free(gt);
+  free(gte);
+  free(lt);
+  free(lte);
+}
+
+static int remember_key_value(char **slot, char **raw_value, int *skip,
+                              lql_error *error) {
+  *skip = 0;
+  if (*slot == NULL) {
+    *slot = *raw_value;
+    *raw_value = NULL;
+    return 1;
+  }
+  if (strcmp(*slot, *raw_value) == 0) {
+    free(*raw_value);
+    *raw_value = NULL;
+    *skip = 1;
+    return 1;
+  }
+  free(*raw_value);
+  *raw_value = NULL;
+  lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                "selector expression has duplicate key");
+  return 0;
+}
+
 static lql_node_kind kind_from_name(const char *name) {
   if (strcmp(name, "eq") == 0) {
     return LQL_NODE_EQ;
@@ -370,8 +404,28 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
   char *val;
   char *decoded;
   char *normalized;
+  char *raw_value;
+  char *key_end;
+  char *seen_field;
+  char *seen_value;
+  char *seen_any;
+  char *seen_ignore_case;
+  char *seen_gt;
+  char *seen_gte;
+  char *seen_lt;
+  char *seen_lte;
+  char **seen_slot;
+  int skip_duplicate;
 
   memset(term, 0, sizeof(*term));
+  seen_field = NULL;
+  seen_value = NULL;
+  seen_any = NULL;
+  seen_ignore_case = NULL;
+  seen_gt = NULL;
+  seen_gte = NULL;
+  seen_lt = NULL;
+  seen_lte = NULL;
   st = split_top(body, &parts, error);
   if (st != LQL_STATUS_OK) {
     return 0;
@@ -390,26 +444,62 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     while (isspace((unsigned char)*key)) {
       ++key;
     }
+    key_end = key + strlen(key);
+    while (key_end > key && isspace((unsigned char)key_end[-1])) {
+      --key_end;
+      *key_end = '\0';
+    }
     while (isspace((unsigned char)*val)) {
       ++val;
     }
     if (!key_allowed_for_kind(kind, key)) {
-      token_list_cleanup(&parts);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector operator does not support key");
-      return 0;
+      goto fail;
     }
-    decoded = unquote(val);
+    raw_value = trim_dup(val, strlen(val));
+    if (raw_value == NULL) {
+      goto fail;
+    }
+    seen_slot = NULL;
+    if (key_is_field(key)) {
+      seen_slot = &seen_field;
+    } else if (key_is_value(key)) {
+      seen_slot = &seen_value;
+    } else if (key_is_any(key)) {
+      seen_slot = &seen_any;
+    } else if (key_is_ignore_case(key)) {
+      seen_slot = &seen_ignore_case;
+    } else if (strcmp(key, "gt") == 0) {
+      seen_slot = &seen_gt;
+    } else if (strcmp(key, "gte") == 0) {
+      seen_slot = &seen_gte;
+    } else if (strcmp(key, "lt") == 0) {
+      seen_slot = &seen_lt;
+    } else if (strcmp(key, "lte") == 0) {
+      seen_slot = &seen_lte;
+    }
+    if (seen_slot == NULL) {
+      free(raw_value);
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "selector operator does not support key");
+      goto fail;
+    }
+    if (!remember_key_value(seen_slot, &raw_value, &skip_duplicate, error)) {
+      goto fail;
+    }
+    if (skip_duplicate) {
+      continue;
+    }
+    decoded = unquote(*seen_slot);
     if (decoded == NULL) {
-      token_list_cleanup(&parts);
-      return 0;
+      goto fail;
     }
     if (key_is_field(key)) {
       normalized = normalize_field_path(decoded);
       free(decoded);
       if (normalized == NULL) {
-        token_list_cleanup(&parts);
-        return 0;
+        goto fail;
       }
       free(term->field);
       term->field = normalized;
@@ -420,17 +510,15 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     } else if (key_is_any(key)) {
       if (!parse_any_values(decoded, term, error)) {
         free(decoded);
-        token_list_cleanup(&parts);
-        return 0;
+        goto fail;
       }
       free(decoded);
     } else if (key_is_ignore_case(key)) {
       if (!parse_bool_value(decoded, &term->ignore_case)) {
         free(decoded);
-        token_list_cleanup(&parts);
         lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                       "selector ignoreCase must be true/false/t/f");
-        return 0;
+        goto fail;
       }
       free(decoded);
     } else if (strcmp(key, "gt") == 0) {
@@ -452,6 +540,8 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     }
   }
   token_list_cleanup(&parts);
+  free_seen_key_values(seen_field, seen_value, seen_any, seen_ignore_case,
+                       seen_gt, seen_gte, seen_lt, seen_lte);
   if (term->field == NULL) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "selector field required");
     return 0;
@@ -481,6 +571,12 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     return 0;
   }
   return 1;
+
+fail:
+  token_list_cleanup(&parts);
+  free_seen_key_values(seen_field, seen_value, seen_any, seen_ignore_case,
+                       seen_gt, seen_gte, seen_lt, seen_lte);
+  return 0;
 }
 
 static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
