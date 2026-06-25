@@ -595,10 +595,12 @@ static void expect_compact_api(void) {
 
 static void expect_mutation_plan_api(void) {
   lql_mutation_plan *plan;
+  lql_mutation_parse_options options;
   lql_error error;
   lql_status st;
   const char *valid[6];
   const char *invalid[6];
+  const char *file_backed;
   size_t i;
 
   valid[0] = "/state/progress=ready";
@@ -636,6 +638,40 @@ static void expect_mutation_plan_api(void) {
     }
     lql_mutation_plan_free(plan);
   }
+
+  file_backed = "textfile:/payload=blob.txt";
+  memset(&options, 0, sizeof(options));
+  options.enable_file_values = 1;
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse_with_options(&file_backed, 1u, &options, &plan,
+                                            &error);
+  if (st == LQL_STATUS_OK) {
+    printf("relative file-backed mutation parsed without base dir\n");
+    ++failures;
+  }
+  lql_mutation_plan_free(plan);
+
+  options.file_value_base_dir = "/tmp";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse_with_options(&file_backed, 1u, &options, &plan,
+                                            &error);
+  if (st != LQL_STATUS_OK) {
+    printf("enabled file-backed mutation parse failed: %s\n", error.message);
+    ++failures;
+  } else if (lql_mutation_plan_count(plan) != 1u) {
+    printf("enabled file-backed mutation count mismatch: %lu\n",
+           (unsigned long)lql_mutation_plan_count(plan));
+    ++failures;
+  } else {
+    st = lql_mutate_file_range_paths(plan, stdin, 0u, 0u, stdout, &error);
+    if (st != LQL_STATUS_UNSUPPORTED) {
+      printf("file-backed mutation execution unexpectedly supported\n");
+      ++failures;
+    }
+  }
+  lql_mutation_plan_free(plan);
 }
 
 static void expect_root_field_mutation_api(void) {

@@ -34,6 +34,7 @@ typedef struct output_ranges {
   int compact;
   int matches_only;
   lql_uint64 matched;
+  lql_error callback_error;
 } output_ranges;
 
 static lql_status count_match(void *user, const lql_query_decision *decision) {
@@ -110,7 +111,8 @@ static lql_status output_match_range(void *user,
     if (decision->matched) {
       if (lql_mutate_file_range_paths(ranges->mutation_plan, ranges->source,
                                       decision->offset, decision->size,
-                                      ranges->out, NULL) != LQL_STATUS_OK) {
+                                      ranges->out, &ranges->callback_error) !=
+          LQL_STATUS_OK) {
         return LQL_STATUS_UNSUPPORTED;
       }
     } else if (ranges->compact) {
@@ -252,7 +254,7 @@ static int create_inline_temp(const char *path, char **out_path,
 }
 
 static void usage(FILE *out) {
-  fprintf(out, "usage: clql [--or|-O] [-c] [-i|-w] [-f field] [-m expr] "
+  fprintf(out, "usage: clql [--or|-O] [-c] [-i|-w] [-F] [-f field] [-m expr] "
                "[--matches-only|-M] selector [data.json]\n");
   fprintf(out, "       clql [--or|-O] [-c] [--matches-only|-M] selector < "
                "data.json\n");
@@ -273,11 +275,13 @@ int main(int argc, char **argv) {
   int or_mode;
   int compact;
   int inline_mode;
+  int enable_file_mutations;
   int i;
   projection_args fields;
   projection_args mutations;
   lql_projection *projection;
   lql_mutation_plan *mutation_plan;
+  lql_mutation_parse_options mutation_options;
   lql_status st;
   match_count count;
   output_ranges ranges;
@@ -293,6 +297,7 @@ int main(int argc, char **argv) {
   matches_only = 0;
   compact = 0;
   inline_mode = 0;
+  enable_file_mutations = 0;
   inline_tmp_path = NULL;
   inline_out = NULL;
   selector_expr = NULL;
@@ -321,6 +326,9 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--inline") == 0 || strcmp(argv[i], "-i") == 0 ||
                strcmp(argv[i], "--write") == 0 || strcmp(argv[i], "-w") == 0) {
       inline_mode = 1;
+    } else if (strcmp(argv[i], "--enable-file-mutations") == 0 ||
+               strcmp(argv[i], "-F") == 0) {
+      enable_file_mutations = 1;
     } else if (strcmp(argv[i], "--mutate") == 0 || strcmp(argv[i], "-m") == 0) {
       if (i + 1 >= argc || !add_projection_arg(&mutations, argv[++i])) {
         fprintf(stderr, "clql: failed to record mutation expression\n");
@@ -415,8 +423,12 @@ int main(int argc, char **argv) {
     }
   }
   if (mutations.count != 0u) {
-    st = lql_mutation_plan_parse((const char *const *)mutations.items,
-                                 mutations.count, &mutation_plan, &error);
+    memset(&mutation_options, 0, sizeof(mutation_options));
+    mutation_options.enable_file_values = enable_file_mutations;
+    mutation_options.file_value_base_dir = ".";
+    st = lql_mutation_plan_parse_with_options(
+        (const char *const *)mutations.items, mutations.count,
+        &mutation_options, &mutation_plan, &error);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
       lql_projection_free(projection);
@@ -524,8 +536,12 @@ int main(int argc, char **argv) {
     ranges.mutation_plan = mutation_plan;
     ranges.compact = compact;
     ranges.matches_only = matches_only;
+    lql_error_init(&ranges.callback_error);
     st = lql_query_file_decisions(selector, input, output_match_range, &ranges,
                                   &result, &error);
+    if (st != LQL_STATUS_OK && ranges.callback_error.code != LQL_STATUS_OK) {
+      error = ranges.callback_error;
+    }
     close_input_path(input);
     close_input_path(range_source);
     if (inline_mode) {

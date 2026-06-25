@@ -56,6 +56,11 @@ typedef struct lql_query_options {
   lql_uint64 max_bytes_read;
 } lql_query_options;
 
+typedef struct lql_mutation_parse_options {
+  int enable_file_values;
+  const char *file_value_base_dir;
+} lql_mutation_parse_options;
+
 typedef struct lql_query_result {
   lql_uint64 candidates_seen;
   lql_uint64 candidates_matched;
@@ -112,6 +117,14 @@ lql_status lql_compact_json(const char *json, size_t json_len, FILE *out,
    This validates the mutation language only; execution is a separate API. */
 lql_status lql_mutation_plan_parse(const char *const *exprs, size_t expr_count,
                                    lql_mutation_plan **out, lql_error *error);
+/* Parses mutation expressions with explicit opt-in behavior for local
+   file-backed mutation values. Relative file-backed value paths require
+   file_value_base_dir when enable_file_values is non-zero. */
+lql_status
+lql_mutation_plan_parse_with_options(const char *const *exprs,
+                                     size_t expr_count,
+                                     const lql_mutation_parse_options *options,
+                                     lql_mutation_plan **out, lql_error *error);
 /* Returns the number of parsed mutation operations in a plan. */
 size_t lql_mutation_plan_count(const lql_mutation_plan *plan);
 /* Frees a mutation plan. NULL is accepted. */
@@ -126,7 +139,7 @@ lql_status lql_mutate_file_range_root_fields(const lql_mutation_plan *plan,
 /* Applies supported concrete-path mutations to one seekable file range.
    This streams the source through lonejson and never materializes the document.
    Supported paths are concrete object/member paths with optional concrete array
-   indexes. Wildcards, recursive paths, time values, and file-backed values
+   indexes. Wildcards, recursive paths, and file-backed values
    return LQL_STATUS_UNSUPPORTED. */
 lql_status lql_mutate_file_range_paths(const lql_mutation_plan *plan,
                                        FILE *file, lql_uint64 offset,

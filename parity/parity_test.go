@@ -537,6 +537,50 @@ func TestCLQLMutationParseErrorParity(t *testing.T) {
 	}
 }
 
+func TestCLQLEnableFileMutationsParsesFileBackedValues(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	dir := t.TempDir()
+	blobPath := filepath.Join(dir, "blob.txt")
+	if err := os.WriteFile(blobPath, []byte("hello"), 0600); err != nil {
+		t.Fatalf("write blob: %v", err)
+	}
+	if _, err := lql.ParseMutationsWithOptions(
+		[]string{`textfile:/payload=` + blobPath},
+		time.Unix(1700000000, 0),
+		lql.ParseMutationsOptions{EnableFileValues: true},
+	); err != nil {
+		t.Fatalf("go parse enabled file-backed mutation: %v", err)
+	}
+	inputPath := filepath.Join(dir, "input.json")
+	if err := os.WriteFile(inputPath, []byte(`{}`), 0600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	cmd := exec.Command(
+		clql,
+		"-F",
+		"-c",
+		"-m", `textfile:/payload=`+blobPath,
+		`contains{f=/}`,
+		inputPath,
+	)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("file-backed mutation execution unexpectedly succeeded: out=%q", string(out))
+	}
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+		t.Fatalf("file-backed mutation execution exit mismatch: err=%v out=%q", err, string(out))
+	}
+	if bytes.Contains(out, []byte("file-backed mutations are disabled")) {
+		t.Fatalf("-F did not enable file-backed mutation parsing: out=%q", string(out))
+	}
+	if !bytes.Contains(out, []byte("mutation plan requires unsupported path behavior")) {
+		t.Fatalf("file-backed mutation unsupported error mismatch: out=%q", string(out))
+	}
+}
+
 func TestCLQLMatchAllMutationFileParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

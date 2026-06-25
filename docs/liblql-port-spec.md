@@ -413,8 +413,10 @@ Current implementation is an early slice:
 - the initial C compact API exposes `lql_compact_file_range()` for streaming
   seekable ranges and `lql_compact_json()` for explicitly buffered JSON values;
 - the initial C mutation API exposes `lql_mutation_plan_parse()`,
-  `lql_mutation_plan_count()`, and `lql_mutation_plan_free()` for CLI-style
-  mutation parse/plan validation;
+  `lql_mutation_plan_parse_with_options()`, `lql_mutation_plan_count()`, and
+  `lql_mutation_plan_free()` for CLI-style mutation parse/plan validation;
+  file-backed mutation values remain disabled by default and require explicit
+  parse options;
 - mutation execution APIs expose
   `lql_mutate_file_range_root_fields()` for bounded source-backed rewrites of
   root object fields and `lql_mutate_file_range_paths()` for bounded
@@ -423,12 +425,16 @@ Current implementation is an early slice:
   under arrays follow Go stream behavior by replacing the array value with an
   object keyed by the requested numeric segments; supported set values include
   `time:` normalization to UTC RFC3339Nano strings; wildcards, recursive paths,
-  file-backed values, and non-seekable execution still return unsupported;
+  file-backed value execution, and non-seekable execution still return
+  unsupported;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path mutations to matched candidates, and leaves
   wildcard, file-backed, and non-seekable mutation behavior unsupported;
 - `clql -m/--mutate` accepts a single file argument with no selector as
   match-all mutation input and rejects multiple file inputs explicitly;
+- `clql -F/--enable-file-mutations` opts into parsing
+  `file:/textfile:/base64file:` mutation values, while execution still returns
+  unsupported until the streaming file-backed value emitter is implemented;
 - `clql -m -M/--matches-only` emits only matched seekable file candidates after
   applying supported concrete-path mutations;
 - `clql -m -i/--inline` and `clql -m -w/--write` rewrite a single seekable

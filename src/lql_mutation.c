@@ -20,6 +20,13 @@ typedef enum mutation_kind {
   MUTATION_REMOVE
 } mutation_kind;
 
+typedef enum mutation_file_mode {
+  MUTATION_FILE_NONE = 0,
+  MUTATION_FILE_AUTO,
+  MUTATION_FILE_TEXT,
+  MUTATION_FILE_BASE64
+} mutation_file_mode;
+
 typedef struct mutation_path {
   char **segments;
   size_t segment_count;
@@ -31,6 +38,8 @@ typedef struct mutation_item {
   char *value;
   double delta;
   int time_value;
+  mutation_file_mode file_mode;
+  char *file_path;
 } mutation_item;
 
 struct lql_mutation_plan {
@@ -86,6 +95,7 @@ static void mutation_item_cleanup(mutation_item *item) {
   }
   mutation_path_cleanup(&item->path);
   free(item->value);
+  free(item->file_path);
   memset(item, 0, sizeof(*item));
 }
 
@@ -161,6 +171,109 @@ static int has_suffix(const char *s, const char *suffix) {
   slen = strlen(s);
   plen = strlen(suffix);
   return slen >= plen && strcmp(s + slen - plen, suffix) == 0;
+}
+
+static char *mutation_unquote(char *value) {
+  size_t len;
+  char *out;
+  char *r;
+  char *w;
+  len = strlen(value);
+  if (len >= 2u && ((value[0] == '"' && value[len - 1u] == '"') ||
+                    (value[0] == '\'' && value[len - 1u] == '\''))) {
+    out = (char *)malloc(len - 1u);
+    if (out == NULL) {
+      return NULL;
+    }
+    r = value + 1;
+    w = out;
+    while (r < value + len - 1u) {
+      if (*r == '\\' && r + 1 < value + len - 1u) {
+        ++r;
+      }
+      *w++ = *r++;
+    }
+    *w = '\0';
+    free(value);
+    return out;
+  }
+  return value;
+}
+
+static int path_is_absolute(const char *path) {
+  return path != NULL && path[0] == '/';
+}
+
+static char *join_paths(const char *base, const char *path) {
+  size_t base_len;
+  size_t path_len;
+  char *out;
+  int need_sep;
+  base_len = strlen(base);
+  path_len = strlen(path);
+  need_sep = base_len != 0u && base[base_len - 1u] != '/';
+  out = (char *)malloc(base_len + (need_sep ? 1u : 0u) + path_len + 1u);
+  if (out == NULL) {
+    return NULL;
+  }
+  memcpy(out, base, base_len);
+  if (need_sep) {
+    out[base_len++] = '/';
+  }
+  memcpy(out + base_len, path, path_len + 1u);
+  return out;
+}
+
+static char *resolve_file_value_path(const char *raw,
+                                     const lql_mutation_parse_options *options,
+                                     lql_error *error) {
+  char *path;
+  const char *home;
+  char *expanded;
+  path = trimmed_dup_range(raw, strlen(raw));
+  if (path == NULL) {
+    return NULL;
+  }
+  path = mutation_unquote(path);
+  if (path == NULL) {
+    return NULL;
+  }
+  if (path[0] == '\0') {
+    free(path);
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "file-backed mutation missing file path");
+    return NULL;
+  }
+  if (strcmp(path, "~") == 0 || has_prefix(path, "~/")) {
+    home = getenv("HOME");
+    if (home == NULL || home[0] == '\0') {
+      free(path);
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "failed to resolve home for file-backed mutation");
+      return NULL;
+    }
+    if (strcmp(path, "~") == 0) {
+      expanded = lql_strdup(home);
+    } else {
+      expanded = join_paths(home, path + 2u);
+    }
+    free(path);
+    return expanded;
+  }
+  if (path_is_absolute(path)) {
+    return path;
+  }
+  if (options == NULL || options->file_value_base_dir == NULL ||
+      options->file_value_base_dir[0] == '\0') {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "relative file-backed mutation path requires file value base "
+                  "dir");
+    free(path);
+    return NULL;
+  }
+  expanded = join_paths(options->file_value_base_dir, path);
+  free(path);
+  return expanded;
 }
 
 static int ascii_equal_ignore_case(const char *a, const char *b) {
@@ -533,9 +646,11 @@ static int parse_number(const char *s, double *out) {
 static const char *unquoted_value(const char *value, size_t *out_len);
 
 static int parse_mutation_expr(const char *expr, lql_mutation_plan *plan,
+                               const lql_mutation_parse_options *options,
                                lql_error *error);
 
 static int parse_brace_mutation(const char *expr, lql_mutation_plan *plan,
+                                const lql_mutation_parse_options *options,
                                 lql_error *error) {
   const char *open;
   size_t len;
@@ -586,7 +701,7 @@ static int parse_brace_mutation(const char *expr, lql_mutation_plan *plan,
   }
   memset(&nested, 0, sizeof(nested));
   for (i = 0u; i < parts.count; ++i) {
-    if (!parse_mutation_expr(parts.items[i], &nested, error)) {
+    if (!parse_mutation_expr(parts.items[i], &nested, options, error)) {
       mutation_plan_cleanup_items(&nested);
       string_list_cleanup(&parts);
       mutation_path_cleanup(&prefix);
@@ -654,6 +769,7 @@ static int parse_set_value(char *value, int time_mode, mutation_item *item,
 }
 
 static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
+                               const lql_mutation_parse_options *options,
                                lql_error *error) {
   char *expr;
   char *eq;
@@ -661,7 +777,7 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
   char *value;
   mutation_item item;
   int remove_mode;
-  int file_mode;
+  mutation_file_mode file_mode;
   int time_mode;
   int brace_result;
   double delta;
@@ -672,16 +788,16 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     return 0;
   }
   remove_mode = 0;
-  file_mode = 0;
+  file_mode = MUTATION_FILE_NONE;
   time_mode = 0;
   if (has_prefix(expr, "file:")) {
-    file_mode = 1;
+    file_mode = MUTATION_FILE_AUTO;
     memmove(expr, expr + 5, strlen(expr + 5) + 1u);
   } else if (has_prefix(expr, "textfile:")) {
-    file_mode = 1;
+    file_mode = MUTATION_FILE_TEXT;
     memmove(expr, expr + 9, strlen(expr + 9) + 1u);
   } else if (has_prefix(expr, "base64file:")) {
-    file_mode = 1;
+    file_mode = MUTATION_FILE_BASE64;
     memmove(expr, expr + 11, strlen(expr + 11) + 1u);
   }
   if (has_prefix(expr, "rm:")) {
@@ -698,7 +814,7 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     memmove(expr, expr + 4, strlen(expr + 4) + 1u);
   }
   if (has_prefix(expr, "time:")) {
-    if (file_mode || remove_mode) {
+    if (file_mode != MUTATION_FILE_NONE || remove_mode) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "time-prefixed mutation has invalid prefix combination");
       free(expr);
@@ -707,14 +823,14 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     time_mode = 1;
     memmove(expr, expr + 5, strlen(expr + 5) + 1u);
   }
-  if (file_mode) {
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
-                  "file-backed mutations are disabled");
-    free(expr);
-    return 0;
-  }
   memset(&item, 0, sizeof(item));
   if (remove_mode) {
+    if (file_mode != MUTATION_FILE_NONE) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "file-backed mutation has invalid prefix combination");
+      free(expr);
+      return 0;
+    }
     item.kind = MUTATION_REMOVE;
     if (!split_path(expr, &item.path, error) || !append_item(plan, &item)) {
       mutation_item_cleanup(&item);
@@ -725,6 +841,12 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     return 1;
   }
   if (has_suffix(expr, "++") || has_suffix(expr, "--")) {
+    if (file_mode != MUTATION_FILE_NONE) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "file-backed mutation does not support increment");
+      free(expr);
+      return 0;
+    }
     if (time_mode) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "time-prefixed mutation does not support increment");
@@ -744,7 +866,7 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     free(expr);
     return 1;
   }
-  brace_result = parse_brace_mutation(expr, plan, error);
+  brace_result = parse_brace_mutation(expr, plan, options, error);
   if (brace_result != 0) {
     free(expr);
     return brace_result > 0;
@@ -764,6 +886,30 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     return 0;
   }
   item.kind = MUTATION_SET;
+  if (file_mode != MUTATION_FILE_NONE) {
+    if (options == NULL || !options->enable_file_values) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "file-backed mutations are disabled");
+      free(value);
+      free(expr);
+      return 0;
+    }
+    item.file_mode = file_mode;
+    item.file_path = resolve_file_value_path(value, options, error);
+    free(value);
+    if (item.file_path == NULL) {
+      free(expr);
+      return 0;
+    }
+    if (!split_path(path_text, &item.path, error) ||
+        !append_item(plan, &item)) {
+      mutation_item_cleanup(&item);
+      free(expr);
+      return 0;
+    }
+    free(expr);
+    return 1;
+  }
   if (!time_mode && (value[0] == '+' || value[0] == '-') &&
       parse_number(value, &delta)) {
     if (delta == 0.0) {
@@ -790,8 +936,10 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
   return 1;
 }
 
-lql_status lql_mutation_plan_parse(const char *const *exprs, size_t expr_count,
-                                   lql_mutation_plan **out, lql_error *error) {
+lql_status lql_mutation_plan_parse_with_options(
+    const char *const *exprs, size_t expr_count,
+    const lql_mutation_parse_options *options, lql_mutation_plan **out,
+    lql_error *error) {
   lql_mutation_plan *plan;
   string_list parts;
   size_t i;
@@ -821,7 +969,7 @@ lql_status lql_mutation_plan_parse(const char *const *exprs, size_t expr_count,
                  : LQL_STATUS_NO_MEMORY;
     }
     for (j = 0u; j < parts.count; ++j) {
-      if (!parse_mutation_expr(parts.items[j], plan, error)) {
+      if (!parse_mutation_expr(parts.items[j], plan, options, error)) {
         string_list_cleanup(&parts);
         lql_mutation_plan_free(plan);
         return error != NULL && error->code != LQL_STATUS_OK
@@ -841,6 +989,12 @@ lql_status lql_mutation_plan_parse(const char *const *exprs, size_t expr_count,
   return LQL_STATUS_OK;
 }
 
+lql_status lql_mutation_plan_parse(const char *const *exprs, size_t expr_count,
+                                   lql_mutation_plan **out, lql_error *error) {
+  return lql_mutation_plan_parse_with_options(exprs, expr_count, NULL, out,
+                                              error);
+}
+
 size_t lql_mutation_plan_count(const lql_mutation_plan *plan) {
   return plan == NULL ? 0u : plan->count;
 }
@@ -858,6 +1012,9 @@ void lql_mutation_plan_free(lql_mutation_plan *plan) {
 }
 
 static int mutation_is_root_field_supported(const mutation_item *item) {
+  if (item->file_mode != MUTATION_FILE_NONE) {
+    return 0;
+  }
   return item->path.segment_count == 1u && item->path.segments[0][0] != '\0' &&
          strcmp(item->path.segments[0], "*") != 0 &&
          strcmp(item->path.segments[0], "[]") != 0 &&
@@ -888,6 +1045,9 @@ static int mutation_plan_supports_root_fields(const lql_mutation_plan *plan) {
 
 static int mutation_is_concrete_path_supported(const mutation_item *item) {
   size_t i;
+  if (item->file_mode != MUTATION_FILE_NONE) {
+    return 0;
+  }
   if (item->path.segment_count == 0u) {
     return 0;
   }
