@@ -385,6 +385,8 @@ Current implementation is an early slice:
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - `clql -M/--matches-only` uses the decision-only streaming path over stdin
   and does not materialize candidate payloads or write matched JSON;
+- `clql selector data.json` uses seekable candidate offset/size ranges to
+  reread and write matched payloads without full-input materialization;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list;
@@ -397,7 +399,8 @@ Current implementation is an early slice:
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, and invalid selector invariants;
 - `clql` exists as a minimal selector smoke CLI; default matched-JSON output
-  still uses buffered stdin until plus-value payload handles are implemented;
+  from stdin still uses buffered input until non-seekable plus-value payload
+  handles are implemented;
 - Go parity tests exist for the initial selector subset;
 - package archive production is scaffolded, not complete.
 

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"reflect"
 	"testing"
 	"time"
 
@@ -249,6 +251,70 @@ func TestCLQLMatchesOnlyStreamingParity(t *testing.T) {
 	}
 }
 
+func TestCLQLSeekableFileOutputParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []struct {
+		name string
+		expr string
+		body string
+	}{
+		{
+			name: "ndjson match",
+			expr: `/status="open"`,
+			body: "{\"status\":\"closed\",\"id\":\"a\"}\n {\"status\":\"open\",\"id\":\"b\"}\n",
+		},
+		{
+			name: "array match",
+			expr: `/status="open"`,
+			body: `[{"status":"closed","id":"a"}, {"status":"open","id":"b"}]`,
+		},
+		{
+			name: "no match",
+			expr: `/status="open"`,
+			body: "{\"status\":\"closed\",\"id\":\"a\"}\n{\"status\":\"done\",\"id\":\"b\"}\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sel, err := lql.ParseSelectorString(tc.expr)
+			if err != nil {
+				t.Fatalf("go parse: %v", err)
+			}
+			want, err := goMatchedValues(tc.body, sel)
+			if err != nil {
+				t.Fatalf("go matched values: %v", err)
+			}
+			tmp, err := os.CreateTemp(t.TempDir(), "clql-input-*.json")
+			if err != nil {
+				t.Fatalf("create temp: %v", err)
+			}
+			if _, err := tmp.WriteString(tc.body); err != nil {
+				t.Fatalf("write temp: %v", err)
+			}
+			if err := tmp.Close(); err != nil {
+				t.Fatalf("close temp: %v", err)
+			}
+			cmd := exec.Command(clql, tc.expr, tmp.Name())
+			out, err := cmd.CombinedOutput()
+			gotMatch := err == nil
+			wantMatch := len(want) != 0
+			if gotMatch != wantMatch {
+				t.Fatalf("clql file match mismatch: got=%v want=%v err=%v out=%q", gotMatch, wantMatch, err, string(out))
+			}
+			got, err := decodeJSONValues(out)
+			if err != nil {
+				t.Fatalf("decode clql output: %v output=%q", err, string(out))
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("clql file output mismatch: got=%#v want=%#v output=%q", got, want, string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
@@ -298,5 +364,51 @@ func TestCLQLSelectorParseErrorParity(t *testing.T) {
 				t.Fatalf("clql parse error exit mismatch: err=%v out=%q", err, string(out))
 			}
 		})
+	}
+}
+
+func goMatchedValues(body string, selector lql.Selector) ([]any, error) {
+	var values []any
+	_, err := lql.QueryStreamWithResult(lql.QueryStreamRequest{
+		Reader:      bytes.NewBufferString(body),
+		Selector:    selector,
+		IncludeJSON: true,
+		MatchedOnly: true,
+		OnValue: func(value lql.QueryStreamValue) error {
+			payload := value.JSON
+			if payload == nil && value.OpenJSON != nil {
+				rc, err := value.OpenJSON()
+				if err != nil {
+					return err
+				}
+				defer rc.Close()
+				payload, err = io.ReadAll(rc)
+				if err != nil {
+					return err
+				}
+			}
+			decoded, err := decodeJSONValues(payload)
+			if err != nil {
+				return err
+			}
+			values = append(values, decoded...)
+			return nil
+		},
+	})
+	return values, err
+}
+
+func decodeJSONValues(payload []byte) ([]any, error) {
+	var values []any
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	for {
+		var value any
+		if err := dec.Decode(&value); err != nil {
+			if err == io.EOF {
+				return values, nil
+			}
+			return nil, err
+		}
+		values = append(values, value)
 	}
 }
