@@ -513,8 +513,10 @@ Current implementation is an early slice:
 - escaped JSON Pointer mutation paths are covered by C-only SDK tests and
   Go-backed CLI parity tests for set, delete, and nested path expansion
   behavior;
-- quoted numeric mutation values follow Go typing behavior and are emitted as
-  JSON numbers rather than strings;
+- quoted mutation values are covered by C-only SDK tests and Go-backed CLI
+  parity tests; JSON-looking quoted values follow Go typing behavior, so quoted
+  numeric, boolean, and null literals are emitted as JSON values rather than
+  strings while ordinary escaped text remains a JSON string;
 - `clql -m/--mutate selector < data.json` applies the same supported streaming
   mutation subset to matched non-seekable stdin candidates through
   callback-scoped spooled payloads, preserves unmatched candidates by default,

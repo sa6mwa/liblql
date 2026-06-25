@@ -2018,6 +2018,50 @@ static void expect_buffered_mutation_api(void) {
   fclose(out);
 }
 
+static void expect_mutation_quoted_value_api(void) {
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_mutation_plan *plan;
+  const char *exprs[4];
+  char buf[512];
+  size_t len;
+  static const char doc[] = "{\"state\":{\"status\":\"open\"}}";
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("quoted mutation tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  exprs[0] = "/state/text=\"a\\\"b\\\\c\"";
+  exprs[1] = "/state/truth=\"true\"";
+  exprs[2] = "/state/nothing=\"null\"";
+  exprs[3] = "/state/number=\"2\"";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(exprs, 4u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("quoted mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    st = lql_mutate_json(plan, doc, strlen(doc), out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("quoted mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf,
+                      "{\"state\":{\"status\":\"open\",\"text\":\"a\\\\\\\"b"
+                      "\\\\\\\\c\",\"truth\":true,\"nothing\":null,"
+                      "\"number\":2}}") != 0) {
+      printf("quoted mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  lql_mutation_plan_free(plan);
+  fclose(out);
+}
+
 static void expect_mutation_shorthand_api(void) {
   FILE *out;
   lql_error error;
@@ -2407,6 +2451,8 @@ static void expect_sdk_parity_manifest(void) {
        expect_path_mutation_api},
       {"mutation", "caller-buffered JSON mutation",
        expect_buffered_mutation_api},
+      {"mutation", "quoted mutation value typing",
+       expect_mutation_quoted_value_api},
       {"mutation", "brace shorthand and escaped JSON Pointer mutation",
        expect_mutation_shorthand_api},
       {"mutation", "concrete array element mutation",
@@ -2658,6 +2704,7 @@ int main(void) {
   expect_root_field_mutation_api();
   expect_path_mutation_api();
   expect_buffered_mutation_api();
+  expect_mutation_quoted_value_api();
   expect_mutation_shorthand_api();
   expect_array_element_mutation_api();
   expect_wildcard_mutation_api();
