@@ -1058,6 +1058,123 @@ static void expect_buffered_projection_api(void) {
   }
 }
 
+static void expect_projection_compact_error_api(void) {
+  const char *field;
+  FILE *out;
+  FILE *source;
+  lql_projection *projection;
+  lql_error error;
+  lql_status st;
+  int found;
+
+  out = tmpfile();
+  source = tmpfile();
+  if (out == NULL || source == NULL) {
+    printf("projection/compact error tmpfile failed\n");
+    if (out != NULL) {
+      fclose(out);
+    }
+    if (source != NULL) {
+      fclose(source);
+    }
+    ++failures;
+    return;
+  }
+
+  projection = (lql_projection *)1;
+  lql_error_init(&error);
+  st = lql_projection_parse(NULL, 0u, &projection, &error);
+  if (st != LQL_STATUS_PARSE_ERROR || projection != NULL ||
+      strcmp(error.message, "projection fields required") != 0) {
+    printf("projection parse empty-field error mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  field = "/id";
+  lql_error_init(&error);
+  st = lql_projection_parse(&field, 1u, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "out projection required") != 0) {
+    printf("projection parse NULL out error mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(&field, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("projection/compact error projection setup failed: %s\n",
+           error.message);
+    ++failures;
+  } else {
+    found = 1;
+    lql_error_init(&error);
+    st = lql_project_json(projection, NULL, 0u, out, &found, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
+        strcmp(error.message, "json is required") != 0) {
+      printf("project_json NULL json error mismatch: %s\n", error.message);
+      ++failures;
+    }
+
+    found = 1;
+    lql_error_init(&error);
+    st = lql_project_json(NULL, "{}", strlen("{}"), out, &found, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
+        strcmp(error.message,
+               "projection, reader, out, and out_found are required") != 0) {
+      printf("project_json NULL projection error mismatch: %s\n",
+             error.message);
+      ++failures;
+    }
+
+    found = 1;
+    lql_error_init(&error);
+    st = lql_project_file_range(projection, NULL, 0u, 2u, out, &found, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
+        strcmp(error.message, "projection file is required") != 0) {
+      printf("project_file_range NULL file error mismatch: %s\n",
+             error.message);
+      ++failures;
+    }
+  }
+  lql_projection_free(projection);
+
+  lql_error_init(&error);
+  st = lql_compact_file_range(NULL, 0u, 0u, out, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "file and out are required") != 0) {
+    printf("compact_file_range NULL file error mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_compact_file_range(source, 0u, 0u, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "file and out are required") != 0) {
+    printf("compact_file_range NULL out error mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_compact_json(NULL, 0u, out, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "json and out are required") != 0) {
+    printf("compact_json NULL json error mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_compact_json("{}", strlen("{}"), NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "json and out are required") != 0) {
+    printf("compact_json NULL out error mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  fclose(out);
+  fclose(source);
+}
+
 static void expect_compact_api(void) {
   FILE *source;
   FILE *out;
@@ -1742,6 +1859,8 @@ static void expect_sdk_parity_manifest(void) {
       {"projection", "seekable file-range projection", expect_projection_api},
       {"projection", "caller-buffered JSON projection",
        expect_buffered_projection_api},
+      {"projection", "projection and compact public API error contracts",
+       expect_projection_compact_error_api},
       {"compact", "seekable and buffered JSON compaction", expect_compact_api},
       {"mutation", "mutation parse/plan public API", expect_mutation_plan_api},
       {"mutation", "root field mutation over seekable ranges",
@@ -1975,6 +2094,7 @@ int main(void) {
   expect_seekable_payload_api();
   expect_projection_api();
   expect_buffered_projection_api();
+  expect_projection_compact_error_api();
   expect_compact_api();
   expect_mutation_plan_api();
   expect_root_field_mutation_api();
