@@ -287,6 +287,31 @@ func TestSDKProjectionParseErrorParity(t *testing.T) {
 	}
 }
 
+func TestSDKProjectionExecutionErrorParity(t *testing.T) {
+	fields := []string{"/id"}
+	cases := []struct {
+		name string
+		doc  string
+	}{
+		{name: "truncated object", doc: `{"id":`},
+		{name: "trailing comma", doc: `{"id":"a",}`},
+		{name: "invalid literal", doc: `{"id": tru}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := goProjectJSON(fields, tc.doc); err == nil {
+				t.Fatalf("go projection unexpectedly accepted malformed JSON: %q", tc.doc)
+			}
+			if _, _, err := cProjectJSON(fields, tc.doc); err == nil {
+				t.Fatalf("liblql buffered projection unexpectedly accepted malformed JSON: %q", tc.doc)
+			}
+			if _, _, err := cProjectFileRange(fields, `{"outside":`, tc.doc, `}`); err == nil {
+				t.Fatalf("liblql file-range projection unexpectedly accepted malformed JSON: %q", tc.doc)
+			}
+		})
+	}
+}
+
 func TestSDKMutationJSONParity(t *testing.T) {
 	for _, tc := range sdkMutationCases() {
 		t.Run(tc.name, func(t *testing.T) {

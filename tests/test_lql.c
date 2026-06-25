@@ -1272,6 +1272,7 @@ static void expect_buffered_projection_api(void) {
 }
 
 static void expect_projection_compact_error_api(void) {
+  static const char malformed[] = "{\"id\":";
   const char *field;
   FILE *out;
   FILE *source;
@@ -1348,6 +1349,33 @@ static void expect_projection_compact_error_api(void) {
       printf("project_file_range NULL file error mismatch: %s\n",
              error.message);
       ++failures;
+    }
+
+    found = 1;
+    lql_error_init(&error);
+    st = lql_project_json(projection, malformed, strlen(malformed), out, &found,
+                          &error);
+    if (st != LQL_STATUS_JSON_ERROR || found) {
+      printf("project_json malformed input status mismatch: %s\n",
+             error.message);
+      ++failures;
+    }
+
+    if (fwrite(malformed, 1u, strlen(malformed), source) != strlen(malformed) ||
+        fflush(source) != 0 || fseek(source, 0L, SEEK_SET) != 0) {
+      printf("projection malformed file setup failed\n");
+      ++failures;
+    } else {
+      found = 1;
+      lql_error_init(&error);
+      st = lql_project_file_range(projection, source, 0u,
+                                  (lql_uint64)strlen(malformed), out, &found,
+                                  &error);
+      if (st != LQL_STATUS_JSON_ERROR || found) {
+        printf("project_file_range malformed input status mismatch: %s\n",
+               error.message);
+        ++failures;
+      }
     }
   }
   lql_projection_free(projection);
