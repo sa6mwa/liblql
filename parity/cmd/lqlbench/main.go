@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"pkt.systems/lql"
@@ -24,6 +27,7 @@ type record struct {
 	Payloads          int64  `json:"payloads"`
 	PayloadBytes      int64  `json:"payload_bytes"`
 	PayloadSourceType string `json:"payload_source_type"`
+	FixtureSHA256     string `json:"fixture_sha256"`
 	NsPerOp           *int64 `json:"ns_per_op"`
 	AllocsPerOp       *int64 `json:"allocs_per_op"`
 	Unsupported       bool   `json:"unsupported"`
@@ -70,6 +74,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "lqlbench: stat fixture: %v\n", err)
 		os.Exit(1)
 	}
+	fixtureSHA256, err := sha256File(file)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "lqlbench: hash fixture: %v\n", err)
+		os.Exit(1)
+	}
 	result, err := lql.QueryStreamWithResult(lql.QueryStreamRequest{
 		Ctx:      context.Background(),
 		Reader:   file,
@@ -98,6 +107,7 @@ func main() {
 		Payloads:          0,
 		PayloadBytes:      0,
 		PayloadSourceType: "none",
+		FixtureSHA256:     fixtureSHA256,
 		Unsupported:       false,
 		UnsupportedReason: "",
 	}
@@ -106,4 +116,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "lqlbench: encode record: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func sha256File(file *os.File) (string, error) {
+	hash := sha256.New()
+	if _, err := file.Seek(0, 0); err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }

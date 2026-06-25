@@ -22,6 +22,7 @@ type record struct {
 	Payloads          int64  `json:"payloads"`
 	PayloadBytes      int64  `json:"payload_bytes"`
 	PayloadSourceType string `json:"payload_source_type"`
+	FixtureSHA256     string `json:"fixture_sha256"`
 	NsPerOp           *int64 `json:"ns_per_op"`
 	AllocsPerOp       *int64 `json:"allocs_per_op"`
 	Unsupported       bool   `json:"unsupported"`
@@ -86,6 +87,7 @@ func requireKeys(line int, raw map[string]json.RawMessage) error {
 		"payloads",
 		"payload_bytes",
 		"payload_source_type",
+		"fixture_sha256",
 		"ns_per_op",
 		"allocs_per_op",
 		"unsupported",
@@ -127,6 +129,9 @@ func validateRecord(line int, rec record) error {
 	if rec.PayloadSourceType == "" {
 		return fmt.Errorf("line %d: payload_source_type is required", line)
 	}
+	if !isSHA256Hex(rec.FixtureSHA256) {
+		return fmt.Errorf("line %d: fixture_sha256 must be 64 hex characters", line)
+	}
 	if rec.NsPerOp != nil && *rec.NsPerOp < 0 {
 		return fmt.Errorf("line %d: ns_per_op must be non-negative or null", line)
 	}
@@ -143,4 +148,16 @@ func validateRecord(line int, rec record) error {
 		return fmt.Errorf("line %d: supported record has unsupported_reason", line)
 	}
 	return nil
+}
+
+func isSHA256Hex(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, ch := range value {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
 }

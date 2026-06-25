@@ -69,6 +69,14 @@ json_string() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
+file_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
 emit_record() {
   impl=$1
   dataset=$2
@@ -84,7 +92,8 @@ emit_record() {
   ns_per_op=${12}
   unsupported=${13}
   reason=${14}
-  printf '{"schema":"liblql.parity_benchmark.v1","impl":"%s","dataset":"%s","selector":"%s","expr":"%s","mode":"%s","submode":"%s","bytes_per_iter":%s,"candidates":%s,"matches":%s,"payloads":%s,"payload_bytes":%s,"payload_source_type":"%s","ns_per_op":%s,"allocs_per_op":null,"unsupported":%s,"unsupported_reason":"%s"}\n' \
+  fixture_sha256=${15}
+  printf '{"schema":"liblql.parity_benchmark.v1","impl":"%s","dataset":"%s","selector":"%s","expr":"%s","mode":"%s","submode":"%s","bytes_per_iter":%s,"candidates":%s,"matches":%s,"payloads":%s,"payload_bytes":%s,"payload_source_type":"%s","fixture_sha256":"%s","ns_per_op":%s,"allocs_per_op":null,"unsupported":%s,"unsupported_reason":"%s"}\n' \
     "$(json_string "$impl")" \
     "$(json_string "$dataset")" \
     "$(json_string "$selector")" \
@@ -97,6 +106,7 @@ emit_record() {
     "$payloads" \
     "$payload_bytes" \
     "none" \
+    "$(json_string "$fixture_sha256")" \
     "$ns_per_op" \
     "$unsupported" \
     "$(json_string "$reason")"
@@ -106,10 +116,10 @@ emit_unsupported_impl() {
   impl=$1
   reason=$2
   while read dataset_name fixture_path candidates selector_name expr; do
-    : "$fixture_path"
     : "$candidates"
     emit_record "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "decision_only_selector" "steady_state" 0 0 0 0 0 null true "$reason"
+      "decision_only_selector" "steady_state" 0 0 0 0 0 null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
   done < "$case_matrix"
 }
 
@@ -297,6 +307,7 @@ run_c() {
     emit_unsupported_impl "c" "clql binary not found; run make build-debug or set CLQL_PATH"
     return 1
   fi
+  fixture_sha=$(file_sha256 "$fixture_path")
   "$clql" "$expr" "$fixture_path" > "$out"
   matches=$(wc -l < "$out" | tr -d ' ')
   if [ "$dataset_name" = "large_ndjson" ] &&
@@ -306,7 +317,7 @@ run_c() {
   fi
   printf '%s %s %s %s\n' "$dataset_name" "$selector_name" "$candidates" "$matches" >> "$c_counts_file"
   emit_record "c" "$dataset_name" "$selector_name" "$expr" \
-    "decision_only_selector" "steady_state" "$bytes" "$candidates" "$matches" 0 0 null false ""
+    "decision_only_selector" "steady_state" "$bytes" "$candidates" "$matches" 0 0 null false "" "$fixture_sha"
 }
 
 run_go() {

@@ -55,7 +55,9 @@ Current implementation status:
 - `make bench-check` runs the current deterministic Go/C smoke gate and fails
   if candidate or match counts diverge. It also runs deterministic negative
   checks proving candidate-count and match-count mismatch failures are detected
-  and validates benchmark JSON Lines records.
+  and validates benchmark JSON Lines records. It verifies deterministic fixture
+  regeneration and every result record includes a SHA-256 digest for its
+  generated fixture.
 - `make benchmarks-c` exercises the C CLI over a shared generated fixture.
 - `make benchmarks-go` exercises `parity/cmd/lqlbench`, which uses the pinned
   Go module and emits stable JSON Lines without scraping `go test` output.
