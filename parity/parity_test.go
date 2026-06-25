@@ -377,6 +377,12 @@ func TestCLQLStdinProjectionParity(t *testing.T) {
 			fields: []string{"/missing"},
 			body:   "{\"status\":\"open\",\"id\":\"a\"}\n",
 		},
+		{
+			name:   "escaped pointer fields",
+			expr:   `/status="open"`,
+			fields: []string{"/a~1b/~0key"},
+			body:   "{\"status\":\"open\",\"a/b\":{\"~key\":7},\"id\":\"a\"}\n",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1306,6 +1312,54 @@ func TestCLQLEscapedMutationPathParity(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("escaped mutation parity mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
+func TestCLQLStdinEscapedMutationPathParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"a/b":{"~key":"old","remove":true},"plain":"keep"}`
+	mutations := []string{
+		`/a~1b/~0key=ready`,
+		`rm:/a~1b/remove`,
+		`/a~1b/created=1`,
+	}
+	args := []string{"-c"}
+	for _, mutation := range mutations {
+		args = append(args, "-m", mutation)
+	}
+	args = append(args, `contains{f=/}`)
+	cmd := exec.Command(clql, args...)
+	cmd.Stdin = bytes.NewBufferString(body)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql stdin escaped mutation failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql stdin escaped mutation: %v out=%q", err, string(out))
+	}
+
+	muts, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatalf("go parse stdin escaped mutations: %v", err)
+	}
+	var wantOut bytes.Buffer
+	if err := lql.MutateStream(lql.MutateStreamRequest{
+		Reader:    bytes.NewBufferString(body),
+		Writer:    &wantOut,
+		Mutations: muts,
+	}); err != nil {
+		t.Fatalf("go stream stdin escaped mutations: %v", err)
+	}
+	want, err := decodeJSONValues(wantOut.Bytes())
+	if err != nil {
+		t.Fatalf("decode go stdin escaped mutation result: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("stdin escaped mutation parity mismatch: got=%#v want=%#v out=%q", got, want, string(out))
 	}
 }
 
