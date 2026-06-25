@@ -490,8 +490,9 @@ Current implementation is an early slice:
 - Go parity tests exist for the initial selector subset;
 - the Lua tree includes an initial CLI-backed facade over public `clql`, with
   deterministic smoke tests for selector decisions, selection output,
-  projection, mutation, and structured errors; this is not yet the final Lua C
-  module or Lua release artifact surface;
+  file and buffered-JSON projection, file and buffered-JSON mutation, and
+  structured errors; this is not yet the final Lua C module or Lua release
+  artifact surface;
 - the parity benchmark surface now has Go, C, and Lua runners over the shared
   generated fixture matrix; the Lua runner currently loads `lua/lql.lua`, which
   uses the same CLI-backed facade approach over public `clql`;

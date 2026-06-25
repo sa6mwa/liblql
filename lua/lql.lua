@@ -84,6 +84,20 @@ local function run_capture(clql, args, input)
   return nil, {status = status_code(status), stdout = stdout, stderr = stderr}
 end
 
+local function add_projection_args(args, fields)
+  for i = 1, #fields do
+    args[#args + 1] = "-f"
+    args[#args + 1] = fields[i]
+  end
+end
+
+local function add_mutation_args(args, mutations)
+  for i = 1, #mutations do
+    args[#args + 1] = "-m"
+    args[#args + 1] = mutations[i]
+  end
+end
+
 function lql.new(options)
   options = options or {}
   return setmetatable({clql = options.clql or os.getenv("CLQL_PATH") or "clql"},
@@ -128,24 +142,27 @@ function client:project_file(selector, path, fields, options)
   if options.compact then
     args[#args + 1] = "-c"
   end
-  for i = 1, #fields do
-    args[#args + 1] = "-f"
-    args[#args + 1] = fields[i]
-  end
+  add_projection_args(args, fields)
   args[#args + 1] = selector
   args[#args + 1] = path
   return run_capture(self.clql, args)
 end
 
+function client:project_json(selector, json, fields, options)
+  options = options or {}
+  local args = {}
+  if options.compact then
+    args[#args + 1] = "-c"
+  end
+  add_projection_args(args, fields)
+  args[#args + 1] = selector
+  return run_capture(self.clql, args, json)
+end
+
 function client:mutate_file(selector, path, mutations, options)
   options = options or {}
-  local args = {"-m"}
-  for i = 1, #mutations do
-    if i > 1 then
-      args[#args + 1] = "-m"
-    end
-    args[#args + 1] = mutations[i]
-  end
+  local args = {}
+  add_mutation_args(args, mutations)
   if options.matches_only then
     args[#args + 1] = "-M"
   end
@@ -155,6 +172,20 @@ function client:mutate_file(selector, path, mutations, options)
   args[#args + 1] = selector
   args[#args + 1] = path
   return run_capture(self.clql, args)
+end
+
+function client:mutate_json(selector, json, mutations, options)
+  options = options or {}
+  local args = {}
+  add_mutation_args(args, mutations)
+  if options.matches_only then
+    args[#args + 1] = "-M"
+  end
+  if options.enable_file_mutations then
+    args[#args + 1] = "-F"
+  end
+  args[#args + 1] = selector
+  return run_capture(self.clql, args, json)
 end
 
 return lql

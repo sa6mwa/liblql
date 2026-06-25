@@ -58,6 +58,12 @@ projected, err = client:project_file('/status="open"', input_path,
 projected = assert_no_error(projected, err, "project_file")
 assert_equal(projected, '{"id":"b","count":2}\n', "project_file output")
 
+projected, err = client:project_json('/status="open"',
+                                    '{"status":"open","id":"c","count":3}',
+                                    {"/id", "/count"})
+projected = assert_no_error(projected, err, "project_json")
+assert_equal(projected, '{"id":"c","count":3}\n', "project_json output")
+
 local mutated
 mutated, err = client:mutate_file('/status="open"', input_path,
                                  {"/state/status=running", "rm:/state/old"},
@@ -66,6 +72,14 @@ mutated = assert_no_error(mutated, err, "mutate_file")
 assert_equal(mutated,
              '{"status":"open","id":"b","count":2,"state":{"status":"running"}}\n',
              "mutate_file output")
+
+mutated, err = client:mutate_json('/status="open"',
+                                 '{"status":"open","state":{"old":true}}',
+                                 {"/state/status=running", "rm:/state/old"},
+                                 {matches_only = true})
+mutated = assert_no_error(mutated, err, "mutate_json")
+assert_equal(mutated, '{"status":"open","state":{"status":"running"}}\n',
+             "mutate_json output")
 
 local _
 _, err = client:select_file('bad{', input_path)
