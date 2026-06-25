@@ -74,6 +74,7 @@ typedef struct mutation_stream_state {
   int skipping;
   size_t skip_depth;
   int active_increment;
+  int active_keyed;
   size_t active_index;
   mutation_path_frame *path_frames;
   size_t path_frame_count;
@@ -1209,6 +1210,83 @@ static int mutation_item_matches_virtual_key(const mutation_item *item,
                                    0u);
 }
 
+static int value_path_segment_is_array(const mutation_stream_state *state,
+                                       const lonejson_value_path *path,
+                                       size_t index) {
+  const mutation_path_frame *frame;
+  if (state == NULL || path == NULL || index >= path->segment_count ||
+      state->path_frame_count == 0u) {
+    return 0;
+  }
+  frame = &state->path_frames[state->path_frame_count - 1u];
+  if (frame->segment_count == path->segment_count) {
+    return frame->array_segments[index] ? 1 : 0;
+  }
+  if (frame->segment_count + 1u == path->segment_count) {
+    if (index < frame->segment_count) {
+      return frame->array_segments[index] ? 1 : 0;
+    }
+    return frame->container == 'a';
+  }
+  return 0;
+}
+
+static int value_path_is_array_element(const mutation_stream_state *state,
+                                       const lonejson_value_path *path) {
+  if (path == NULL || path->segment_count == 0u) {
+    return 0;
+  }
+  return value_path_segment_is_array(state, path, path->segment_count - 1u);
+}
+
+static int value_path_item_matches_from(const mutation_stream_state *state,
+                                        const mutation_path *item_path,
+                                        size_t item_index,
+                                        const lonejson_value_path *path,
+                                        size_t path_index) {
+  size_t i;
+  if (item_index == item_path->segment_count) {
+    return path_index == path->segment_count;
+  }
+  if (strcmp(item_path->segments[item_index], "...") == 0) {
+    if (item_index + 1u == item_path->segment_count) {
+      return 1;
+    }
+    for (i = path_index; i <= path->segment_count; ++i) {
+      if (value_path_item_matches_from(state, item_path, item_index + 1u, path,
+                                       i)) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+  if (path_index >= path->segment_count ||
+      !stream_path_segment_matches(
+          item_path->segments[item_index], &path->segments[path_index],
+          value_path_segment_is_array(state, path, path_index))) {
+    return 0;
+  }
+  return value_path_item_matches_from(state, item_path, item_index + 1u, path,
+                                      path_index + 1u);
+}
+
+static int mutation_value_index(const mutation_stream_state *state,
+                                const lonejson_value_path *path, size_t *out) {
+  size_t i;
+  if (!value_path_is_array_element(state, path)) {
+    return 0;
+  }
+  for (i = 0u; i < state->plan->count; ++i) {
+    if (mutation_path_has_wildcard(&state->plan->items[i].path) &&
+        value_path_item_matches_from(state, &state->plan->items[i].path, 0u,
+                                     path, 0u)) {
+      *out = i;
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static const mutation_path_frame *
 current_path_frame(const mutation_stream_state *state,
                    const lonejson_value_path *path) {
@@ -1510,11 +1588,17 @@ static void mutation_cleanup_path_frames(mutation_stream_state *state) {
   }
 }
 
+static lonejson_status
+begin_array_value_mutation(mutation_stream_state *state,
+                           const lonejson_value_path *path,
+                           lonejson_error *error, int *matched);
+
 static lonejson_status mutation_object_begin(void *user,
                                              const lonejson_value_path *path,
                                              lonejson_error *error) {
   mutation_stream_state *state;
   lonejson_status frame_status;
+  int matched_value;
   state = (mutation_stream_state *)user;
   if (state->active_increment) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -1528,6 +1612,22 @@ static lonejson_status mutation_object_begin(void *user,
     state->root_is_object = 1;
     ++state->source_depth;
     return lonejson_writer_begin_object(&state->writer, error);
+  }
+  if (begin_array_value_mutation(state, path, error, &matched_value) !=
+      LONEJSON_STATUS_OK) {
+    mutation_pop_path_frame(state);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (matched_value) {
+    if (state->active_increment) {
+      mutation_pop_path_frame(state);
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (state->skipping) {
+      state->skip_depth = 1u;
+    }
+    ++state->source_depth;
+    return LONEJSON_STATUS_OK;
   }
   if (state->skipping) {
     ++state->skip_depth;
@@ -1569,6 +1669,46 @@ static lonejson_status write_synthetic_leaf_value(mutation_stream_state *state,
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   state->applied[index] = 1;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+begin_array_value_mutation(mutation_stream_state *state,
+                           const lonejson_value_path *path,
+                           lonejson_error *error, int *matched) {
+  const mutation_item *item;
+  size_t index;
+  *matched = 0;
+  if (!mutation_value_index(state, path, &index)) {
+    return LONEJSON_STATUS_OK;
+  }
+  *matched = 1;
+  item = &state->plan->items[index];
+  if (item->kind == MUTATION_REMOVE) {
+    if (lonejson_writer_null(&state->writer, error) != LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    state->applied[index] = 1;
+    state->skipping = 1;
+    state->skip_depth = 0u;
+    return LONEJSON_STATUS_OK;
+  }
+  if (item->kind == MUTATION_SET) {
+    if (write_mutation_set_value(&state->writer, item, error) !=
+        LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    state->applied[index] = 1;
+    state->skipping = 1;
+    state->skip_depth = 0u;
+    return LONEJSON_STATUS_OK;
+  }
+  state->active_increment = 1;
+  state->active_keyed = 0;
+  state->active_index = index;
+  free(state->num_buf);
+  state->num_buf = NULL;
+  state->num_len = 0u;
   return LONEJSON_STATUS_OK;
 }
 
@@ -1716,6 +1856,7 @@ static lonejson_status mutation_array_begin(void *user,
                                             lonejson_error *error) {
   mutation_stream_state *state;
   lonejson_status frame_status;
+  int matched_value;
   state = (mutation_stream_state *)user;
   if (state->active_increment) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -1727,6 +1868,23 @@ static lonejson_status mutation_array_begin(void *user,
   if (state->source_depth == 0u) {
     state->root_seen = 1;
     state->root_is_object = 0;
+  }
+  if (state->source_depth != 0u &&
+      begin_array_value_mutation(state, path, error, &matched_value) !=
+          LONEJSON_STATUS_OK) {
+    mutation_pop_path_frame(state);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (state->source_depth != 0u && matched_value) {
+    if (state->active_increment) {
+      mutation_pop_path_frame(state);
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (state->skipping) {
+      state->skip_depth = 1u;
+    }
+    ++state->source_depth;
+    return LONEJSON_STATUS_OK;
   }
   if (state->skipping) {
     ++state->skip_depth;
@@ -1846,6 +2004,7 @@ static lonejson_status mutation_key_end(void *user,
       return LONEJSON_STATUS_OK;
     }
     state->active_increment = 1;
+    state->active_keyed = 1;
     state->active_index = index;
     free(state->num_buf);
     state->num_buf = NULL;
@@ -1860,7 +2019,7 @@ static lonejson_status mutation_string_begin(void *user,
                                              const lonejson_value_path *path,
                                              lonejson_error *error) {
   mutation_stream_state *state;
-  (void)path;
+  int matched_value;
   state = (mutation_stream_state *)user;
   if (state->active_increment) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -1870,6 +2029,16 @@ static lonejson_status mutation_string_begin(void *user,
     state->root_is_object = 0;
   }
   if (state->skipping) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (begin_array_value_mutation(state, path, error, &matched_value) !=
+      LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (matched_value) {
+    if (state->active_increment) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
     return LONEJSON_STATUS_OK;
   }
   return lonejson_writer_string_begin(&state->writer, error);
@@ -1904,8 +2073,7 @@ static lonejson_status mutation_number_begin(void *user,
                                              const lonejson_value_path *path,
                                              lonejson_error *error) {
   mutation_stream_state *state;
-  (void)path;
-  (void)error;
+  int matched_value;
   state = (mutation_stream_state *)user;
   if (state->source_depth == 0u) {
     state->root_seen = 1;
@@ -1915,6 +2083,13 @@ static lonejson_status mutation_number_begin(void *user,
     free(state->num_buf);
     state->num_buf = NULL;
     state->num_len = 0u;
+    return LONEJSON_STATUS_OK;
+  }
+  if (begin_array_value_mutation(state, path, error, &matched_value) !=
+      LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (matched_value) {
     return LONEJSON_STATUS_OK;
   }
   free(state->num_buf);
@@ -1962,9 +2137,11 @@ static lonejson_status mutation_number_end(void *user,
   item = &state->plan->items[state->active_index];
   next_value = existing + item->delta;
   sprintf(number_buf, "%.17g", next_value);
-  if (lonejson_writer_key(&state->writer, state->key_buf, state->key_len,
-                          error) != LONEJSON_STATUS_OK) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
+  if (state->active_keyed) {
+    if (lonejson_writer_key(&state->writer, state->key_buf, state->key_len,
+                            error) != LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
   }
   if (lonejson_writer_number_text(&state->writer, number_buf,
                                   strlen(number_buf),
@@ -1973,6 +2150,7 @@ static lonejson_status mutation_number_end(void *user,
   }
   state->applied[state->active_index] = 1;
   state->active_increment = 0;
+  state->active_keyed = 0;
   return LONEJSON_STATUS_OK;
 }
 
@@ -1980,7 +2158,7 @@ static lonejson_status mutation_boolean(void *user,
                                         const lonejson_value_path *path,
                                         int value, lonejson_error *error) {
   mutation_stream_state *state;
-  (void)path;
+  int matched_value;
   state = (mutation_stream_state *)user;
   if (state->source_depth == 0u) {
     state->root_seen = 1;
@@ -1992,6 +2170,16 @@ static lonejson_status mutation_boolean(void *user,
   if (state->skipping) {
     return finish_skip_value(state);
   }
+  if (begin_array_value_mutation(state, path, error, &matched_value) !=
+      LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (matched_value) {
+    if (state->active_increment) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    return finish_skip_value(state);
+  }
   return lonejson_writer_bool(&state->writer, value, error);
 }
 
@@ -1999,7 +2187,7 @@ static lonejson_status mutation_null(void *user,
                                      const lonejson_value_path *path,
                                      lonejson_error *error) {
   mutation_stream_state *state;
-  (void)path;
+  int matched_value;
   state = (mutation_stream_state *)user;
   if (state->source_depth == 0u) {
     state->root_seen = 1;
@@ -2009,6 +2197,16 @@ static lonejson_status mutation_null(void *user,
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   if (state->skipping) {
+    return finish_skip_value(state);
+  }
+  if (begin_array_value_mutation(state, path, error, &matched_value) !=
+      LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (matched_value) {
+    if (state->active_increment) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
     return finish_skip_value(state);
   }
   return lonejson_writer_null(&state->writer, error);

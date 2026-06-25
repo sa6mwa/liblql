@@ -988,6 +988,65 @@ func TestCLQLRecursiveMutationParity(t *testing.T) {
 	}
 }
 
+func TestCLQLArrayWildcardValueMutationParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"nums":[1,2],"words":["a","b"],"drops":[true,false],"objects":[{"a":1}],"groups":[{"items":[{"count":1}]}]}`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-array-wildcard-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	mutations := []string{
+		"/nums[]=+2",
+		"/words[]=ready",
+		"rm:/drops[]",
+		"/objects[]=done",
+		"/groups/.../count=+2",
+	}
+	args := []string{"-c"}
+	for _, mutation := range mutations {
+		args = append(args, "-m", mutation)
+	}
+	args = append(args, `contains{f=/}`, tmp.Name())
+	cmd := exec.Command(clql, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql array wildcard value mutation failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql array wildcard value mutation: %v out=%q", err, string(out))
+	}
+
+	muts, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatalf("go parse array wildcard value mutations: %v", err)
+	}
+	var wantOut bytes.Buffer
+	if err := lql.MutateStream(lql.MutateStreamRequest{
+		Reader:    bytes.NewBufferString(body),
+		Writer:    &wantOut,
+		Mutations: muts,
+	}); err != nil {
+		t.Fatalf("go stream array wildcard value mutations: %v", err)
+	}
+	want, err := decodeJSONValues(wantOut.Bytes())
+	if err != nil {
+		t.Fatalf("decode go array wildcard value mutation result: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("array wildcard value mutation parity mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
 func TestCLQLMutationPreservesUnmatchedCandidatesParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
