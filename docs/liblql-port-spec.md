@@ -306,6 +306,14 @@ Required gates:
 - source archive smoke tests;
 - Go/C/Lua parity benchmarks.
 
+Fast test command contract:
+
+- `make test` runs the fast C/API test surface and excludes parity-labeled
+  transitional Go checks;
+- `make parity-test` runs the Go-backed CLI and SDK parity suites explicitly;
+- `make test-all` includes both the fast C/API tests and parity tests before
+  sanitizer and Lua checks.
+
 Parity benchmark spec:
 
 - `docs/liblql-parity-benchmark-spec.md`
@@ -538,7 +546,9 @@ Current implementation is an early slice:
   an SDK coverage manifest now ties claimed SDK parity surfaces to C unit
   functions;
 - Go-backed parity tests exist for the current CLI surface and remain a
-  transitional oracle for deriving exhaustive C-only SDK tests;
+  transitional oracle for deriving exhaustive C-only SDK tests; they run under
+  the explicit `make parity-test` target and broader gates, not the fast
+  `make test` target;
 - Go-backed SDK parity tests now exist for public `liblql` selector
   parse/evaluate behavior, buffered and seekable file-range JSON projection,
   mutation plan parsing and parse failures, buffered and seekable file-range

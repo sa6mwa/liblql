@@ -1,10 +1,11 @@
-.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug test-all asan lua-test bench benchmarks bench-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan lua-test bench benchmarks bench-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
 
 help:
 	@printf '%s\n' \
 	  'make deps-debug              fetch host lonejson SDK' \
 	  'make build                   configure and build debug preset' \
-	  'make test                    run debug tests' \
+	  'make test                    run fast C/API tests' \
+	  'make parity-test             run Go-backed parity tests' \
 	  'make test-all                run tests, sanitizers, and Lua smoke tests' \
 	  'make asan                    run ASan/UBSan tests' \
 	  'make lua-test                run Lua facade smoke tests' \
@@ -35,14 +36,17 @@ build-release: deps-release
 	@cmake --build --preset x86_64-linux-gnu-release
 
 test test-debug: build-debug
-	@ctest --preset debug
+	@ctest --preset debug -LE parity
 
-test-all: test asan lua-test
+parity-test: build-debug
+	@ctest --preset debug -L parity
+
+test-all: test parity-test asan lua-test
 
 asan: deps-debug
 	@cmake --preset asan
 	@cmake --build --preset asan
-	@ctest --preset asan
+	@ctest --preset asan -LE parity
 
 lua-test: build-debug
 	@./scripts/run_lua_tests.sh

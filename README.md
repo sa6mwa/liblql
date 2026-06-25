@@ -47,3 +47,6 @@ make deps-debug
 make build
 make test
 ```
+
+`make test` is the fast C/API contract. Go-backed parity remains available
+through `make parity-test` and is included in `make test-all`.
