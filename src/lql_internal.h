@@ -89,6 +89,7 @@ lql_status lql_eval_selector(const lql_selector *selector, const char *json,
                              lql_error *error);
 lql_status
 lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
+                              const lql_query_options *options,
                               lql_query_decision_fn on_decision, void *user,
                               lql_query_result *out_result, lql_error *error);
 int lql_parse_temporal_literal(const char *raw, lql_temporal *out);

@@ -580,12 +580,21 @@ static void init_eval_visitor(lonejson_path_value_visitor *visitor) {
 
 typedef struct query_stream_state {
   const lql_selector *selector;
+  lql_query_options options;
   lql_query_decision_fn on_decision;
   void *user;
   lql_query_result result;
   lql_status callback_status;
   eval_doc doc;
 } query_stream_state;
+
+static int query_limit_enabled(lql_uint64 limit) { return limit != 0u; }
+
+static void query_stop(query_stream_state *state,
+                       lql_query_stop_reason reason) {
+  state->result.stopped_early = 1;
+  state->result.stop_reason = reason;
+}
 
 static lonejson_candidate_callback_result
 on_candidate_begin(void *user, const lonejson_candidate_info *candidate,
@@ -620,9 +629,28 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
   decision.size = (lql_uint64)candidate->byte_size;
   st = state->on_decision(state->user, &decision);
   reset_doc(&state->doc);
+  if (st == LQL_STATUS_STOP) {
+    query_stop(state, LQL_QUERY_STOP_CALLBACK);
+    return LONEJSON_CANDIDATE_STOP;
+  }
   if (st != LQL_STATUS_OK) {
     state->callback_status = st;
     return LONEJSON_CANDIDATE_ERROR;
+  }
+  if (query_limit_enabled(state->options.max_matches) &&
+      state->result.candidates_matched >= state->options.max_matches) {
+    query_stop(state, LQL_QUERY_STOP_MATCH_LIMIT);
+    return LONEJSON_CANDIDATE_STOP;
+  }
+  if (query_limit_enabled(state->options.max_candidates) &&
+      state->result.candidates_seen >= state->options.max_candidates) {
+    query_stop(state, LQL_QUERY_STOP_CANDIDATE_LIMIT);
+    return LONEJSON_CANDIDATE_STOP;
+  }
+  if (query_limit_enabled(state->options.max_bytes_read) &&
+      state->result.bytes_read >= state->options.max_bytes_read) {
+    query_stop(state, LQL_QUERY_STOP_BYTE_LIMIT);
+    return LONEJSON_CANDIDATE_STOP;
   }
   return LONEJSON_CANDIDATE_CONTINUE;
 }
@@ -663,6 +691,7 @@ lql_status lql_eval_selector(const lql_selector *selector, const char *json,
 
 lql_status
 lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
+                              const lql_query_options *query_options,
                               lql_query_decision_fn on_decision, void *user,
                               lql_query_result *out_result, lql_error *error) {
   lonejson *runtime;
@@ -677,6 +706,9 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
   state.on_decision = on_decision;
   state.user = user;
   state.callback_status = LQL_STATUS_OK;
+  if (query_options != NULL) {
+    state.options = *query_options;
+  }
   if (!init_doc(&state.doc, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }

@@ -383,6 +383,8 @@ Current implementation is an early slice:
   exists;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
+- decision-only `FILE *` query streams expose stop controls for match count,
+  candidate count, bytes read, and callback-requested graceful stop;
 - `clql -M/--matches-only` uses the decision-only streaming path over stdin
   and does not materialize candidate payloads or write matched JSON;
 - `clql selector data.json` uses seekable candidate offset/size ranges to

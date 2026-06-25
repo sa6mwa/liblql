@@ -10,6 +10,7 @@ typedef struct stream_seen {
   int matched;
   lql_uint64 offsets[4];
   lql_uint64 sizes[4];
+  int stop_after_first;
 } stream_seen;
 
 static lql_status record_decision(void *user,
@@ -23,6 +24,9 @@ static lql_status record_decision(void *user,
     ++seen->matched;
   }
   ++seen->calls;
+  if (seen->stop_after_first) {
+    return LQL_STATUS_STOP;
+  }
   return LQL_STATUS_OK;
 }
 
@@ -203,6 +207,76 @@ static void expect_stream_array_items(void) {
   }
 }
 
+static void expect_stream_stop_controls(void) {
+  static const char input[] =
+      "{\"status\":\"open\"}\n{\"status\":\"open\"}\n{\"status\":\"closed\"}\n";
+  FILE *fp;
+  lql_selector *selector;
+  lql_query_options options;
+  lql_query_result result;
+  stream_seen seen;
+  lql_error error;
+  lql_status st;
+
+  lql_error_init(&error);
+  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("stop controls parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+
+#define RUN_STOP_CASE(label, setup_options, setup_seen, want_calls, want_matched, want_reason) \
+  do {                                                                       \
+    fp = tmpfile();                                                          \
+    if (fp == NULL) {                                                        \
+      printf(label " tmpfile failed\n");                                     \
+      ++failures;                                                            \
+      break;                                                                 \
+    }                                                                        \
+    if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||             \
+        fseek(fp, 0L, SEEK_SET) != 0) {                                      \
+      printf(label " tmpfile write/seek failed\n");                         \
+      fclose(fp);                                                            \
+      ++failures;                                                            \
+      break;                                                                 \
+    }                                                                        \
+    memset(&options, 0, sizeof(options));                                    \
+    memset(&seen, 0, sizeof(seen));                                          \
+    memset(&result, 0, sizeof(result));                                      \
+    setup_options;                                                           \
+    setup_seen;                                                              \
+    st = lql_query_file_decisions_with_options(                              \
+        selector, fp, &options, record_decision, &seen, &result, &error);    \
+    fclose(fp);                                                              \
+    if (st != LQL_STATUS_OK) {                                               \
+      printf(label " query failed: %s\n", error.message);                   \
+      ++failures;                                                            \
+      break;                                                                 \
+    }                                                                        \
+    if (seen.calls != (want_calls) || seen.matched != (want_matched) ||      \
+        !result.stopped_early || result.stop_reason != (want_reason)) {      \
+      printf(label " stop mismatch calls=%d matched=%d stopped=%d reason=%d\n", \
+             seen.calls, seen.matched, result.stopped_early,                \
+             (int)result.stop_reason);                                       \
+      ++failures;                                                            \
+    }                                                                        \
+  } while (0)
+
+  RUN_STOP_CASE("max matches", options.max_matches = 1u, (void)0, 1, 1,
+                LQL_QUERY_STOP_MATCH_LIMIT);
+  RUN_STOP_CASE("max candidates", options.max_candidates = 2u, (void)0, 2, 2,
+                LQL_QUERY_STOP_CANDIDATE_LIMIT);
+  RUN_STOP_CASE("max bytes", options.max_bytes_read = 17u, (void)0, 1, 1,
+                LQL_QUERY_STOP_BYTE_LIMIT);
+  RUN_STOP_CASE("callback stop", (void)0, seen.stop_after_first = 1, 1, 1,
+                LQL_QUERY_STOP_CALLBACK);
+
+#undef RUN_STOP_CASE
+
+  lql_selector_free(selector);
+}
+
 int main(void) {
   expect_match("/status=\"open\"", "{\"status\":\"open\"}", 1);
   expect_match("/status=\"closed\"", "{\"status\":\"open\"}", 0);
@@ -366,5 +440,6 @@ int main(void) {
   expect_parse_error("range{field=/progress}");
   expect_stream_file();
   expect_stream_array_items();
+  expect_stream_stop_controls();
   return failures == 0 ? 0 : 1;
 }

@@ -22,7 +22,8 @@ typedef enum lql_status {
   LQL_STATUS_NO_MEMORY = 2,
   LQL_STATUS_PARSE_ERROR = 3,
   LQL_STATUS_JSON_ERROR = 4,
-  LQL_STATUS_UNSUPPORTED = 5
+  LQL_STATUS_UNSUPPORTED = 5,
+  LQL_STATUS_STOP = 6
 } lql_status;
 
 typedef struct lql_error {
@@ -39,10 +40,26 @@ typedef struct lql_query_decision {
   lql_uint64 size;
 } lql_query_decision;
 
+typedef enum lql_query_stop_reason {
+  LQL_QUERY_STOP_NONE = 0,
+  LQL_QUERY_STOP_MATCH_LIMIT = 1,
+  LQL_QUERY_STOP_CANDIDATE_LIMIT = 2,
+  LQL_QUERY_STOP_BYTE_LIMIT = 3,
+  LQL_QUERY_STOP_CALLBACK = 4
+} lql_query_stop_reason;
+
+typedef struct lql_query_options {
+  lql_uint64 max_matches;
+  lql_uint64 max_candidates;
+  lql_uint64 max_bytes_read;
+} lql_query_options;
+
 typedef struct lql_query_result {
   lql_uint64 candidates_seen;
   lql_uint64 candidates_matched;
   lql_uint64 bytes_read;
+  int stopped_early;
+  lql_query_stop_reason stop_reason;
 } lql_query_result;
 
 typedef lql_status (*lql_query_decision_fn)(void *user,
@@ -65,6 +82,10 @@ lql_status lql_query_file_decisions(const lql_selector *selector, FILE *file,
                                     lql_query_decision_fn on_decision,
                                     void *user, lql_query_result *out_result,
                                     lql_error *error);
+lql_status lql_query_file_decisions_with_options(
+    const lql_selector *selector, FILE *file,
+    const lql_query_options *options, lql_query_decision_fn on_decision,
+    void *user, lql_query_result *out_result, lql_error *error);
 
 char *lql_strdup(const char *text);
 void lql_free(void *ptr);
