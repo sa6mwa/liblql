@@ -553,7 +553,8 @@ Current implementation is an early slice:
   parse/evaluate behavior, buffered and seekable file-range JSON projection,
   mutation plan parsing and parse failures, buffered and seekable file-range
   JSON mutation including file-backed mutation values, compact serialization,
-  and current streaming query behavior through the C API, comparing
+  compact error behavior, and current streaming query behavior through the C
+  API, comparing
   `lql_selector_parse()`, `lql_selector_parse_or()`, `lql_matches_json()`,
   `lql_project_json()`, `lql_project_file_range()`,
   `lql_mutation_plan_parse()`,
@@ -565,8 +566,8 @@ Current implementation is an early slice:
   `lql_query_file_matches()`, and
   `lql_query_source_spooled_matches()` against the pinned Go library or
   standard compact JSON behavior over the current selector, projection,
-  mutation, compact, and stream corpora; this is behavioral lib-to-lib parity,
-  not a requirement that the C API mirror Go API shape;
+  mutation, compact success/error, and stream corpora; this is behavioral
+  lib-to-lib parity, not a requirement that the C API mirror Go API shape;
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
   payload kinds, and decoded matched payload JSON. Full non-stopped streams

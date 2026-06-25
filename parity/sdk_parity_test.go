@@ -542,6 +542,31 @@ func TestSDKCompactParity(t *testing.T) {
 	}
 }
 
+func TestSDKCompactErrorParity(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  string
+	}{
+		{name: "truncated object", doc: `{"id":`},
+		{name: "trailing comma", doc: `[1,]`},
+		{name: "invalid literal", doc: `{"ok":tru}`},
+		{name: "trailing token", doc: `{"ok":true} false`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := goCompactJSON(tc.doc); err == nil {
+				t.Fatalf("go compact unexpectedly accepted invalid JSON: %q", tc.doc)
+			}
+			if _, err := cCompactJSON(tc.doc); err == nil {
+				t.Fatalf("liblql buffered compact unexpectedly accepted invalid JSON: %q", tc.doc)
+			}
+			if _, err := cCompactFileRange(`{"outside":`, tc.doc, `}`); err == nil {
+				t.Fatalf("liblql file-range compact unexpectedly accepted invalid JSON: %q", tc.doc)
+			}
+		})
+	}
+}
+
 func TestSDKStreamingDecisionParity(t *testing.T) {
 	cases := []struct {
 		name string

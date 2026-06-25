@@ -31,6 +31,7 @@ var sdkParityCoverageManifest = []sdkParityCoverageRequirement{
 	{"mutation", "public liblql mutation plan parsing and expansion count match Go mutation parsing for current valid corpus", []string{"TestSDKMutationPlanParseParity"}},
 	{"mutation", "public liblql mutation parse failures match Go mutation parse failures for current invalid corpus", []string{"TestSDKMutationParseErrorParity"}},
 	{"compact", "public liblql buffered and seekable file-range compaction match standard compact JSON behavior for current compact corpus", []string{"TestSDKCompactParity"}},
+	{"compact", "public liblql buffered and seekable file-range compaction errors match standard compact JSON errors for current invalid corpus", []string{"TestSDKCompactErrorParity"}},
 	{"streaming", "public liblql file and callback-source decision stream summaries match Go query stream summaries for current stream corpus", []string{"TestSDKStreamingDecisionParity"}},
 	{"streaming", "public liblql seekable and spooled payload streams match Go query stream payload behavior for current stream corpus", []string{"TestSDKStreamingPayloadParity"}},
 	{"streaming", "public liblql stream stop controls match Go query stream stop behavior for current stop corpus", []string{"TestSDKStreamingStopParity"}},
