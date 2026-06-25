@@ -22,7 +22,9 @@ through callback-scoped spooled candidate payloads.
 `file:`, `textfile:`, and `base64file:` mutation values can be parsed through
 the opt-in parse options and `clql -F`, and execute through source-backed
 lonejson writers on both seekable file input and the supported spooled stdin
-mutation path. Lua parity and full `clql` parity are still active porting work.
+mutation path. Host `liblql` and `clql` package archives are produced and
+verified locally; source archives, the full cross-target release matrix, Lua
+parity, and full `clql` parity are still active porting work.
 
 ```sh
 make deps-debug

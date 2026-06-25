@@ -478,7 +478,10 @@ Current implementation is an early slice:
 - `clql` exists as a selector/projection/mutation smoke CLI; projection and
   mutation path behavior are still being expanded toward full parity;
 - Go parity tests exist for the initial selector subset;
-- package archive production is scaffolded, not complete.
+- host `liblql` and `clql` package archive production exists through
+  `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
+  verification; source archives and full cross-target release-matrix packaging
+  remain pending.
 
 The repository must not claim full LQL parity until the verification gates prove
 it.
