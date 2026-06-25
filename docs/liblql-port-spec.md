@@ -609,6 +609,9 @@ Current implementation is an early slice:
 - native C SDK projection tests assert duplicate projection paths are
   idempotent and parent/child projection path conflicts are rejected through
   the public projection API;
+- native C SDK projection tests assert the current projection parser failure
+  corpus, including empty, blank, root, missing-leading-slash, leading-index,
+  and oversized-index field sets;
 - native C SDK compact tests assert the current malformed JSON corpus through
   both buffered and seekable file-range public compaction APIs;
 - native C SDK streaming tests assert the current malformed JSON corpus across

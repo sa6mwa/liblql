@@ -1462,6 +1462,58 @@ static void expect_projection_path_invariant_api(void) {
   }
 }
 
+static void expect_projection_parse_error_corpus_api(void) {
+  static const char *blank_fields[] = {"  ", "\t"};
+  const char *field;
+  lql_projection *projection;
+  lql_error error;
+  lql_status st;
+
+  projection = (lql_projection *)1;
+  lql_error_init(&error);
+  st = lql_projection_parse(NULL, 0u, &projection, &error);
+  if (st != LQL_STATUS_PARSE_ERROR || projection != NULL) {
+    printf("projection parse corpus empty field-set mismatch: status=%s "
+           "error=%s\n",
+           lql_status_string(st), error.message);
+    ++failures;
+  }
+
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(blank_fields, 2u, &projection, &error);
+  if (st != LQL_STATUS_PARSE_ERROR || projection != NULL) {
+    printf("projection parse corpus blank field-set mismatch: status=%s "
+           "error=%s\n",
+           lql_status_string(st), error.message);
+    ++failures;
+    lql_projection_free(projection);
+  }
+
+#define EXPECT_PROJECTION_PARSE_ERROR(label, value)                            \
+  do {                                                                         \
+    field = (value);                                                           \
+    projection = NULL;                                                         \
+    lql_error_init(&error);                                                    \
+    st = lql_projection_parse(&field, 1u, &projection, &error);                \
+    if (st != LQL_STATUS_PARSE_ERROR || projection != NULL) {                  \
+      printf("projection parse corpus mismatch: " label                        \
+             " status=%s error=%s\n",                                          \
+             lql_status_string(st), error.message);                            \
+      ++failures;                                                              \
+      lql_projection_free(projection);                                         \
+    }                                                                          \
+  } while (0)
+
+  EXPECT_PROJECTION_PARSE_ERROR("root path", "/");
+  EXPECT_PROJECTION_PARSE_ERROR("missing leading slash", "id");
+  EXPECT_PROJECTION_PARSE_ERROR("leading array index", "/0/id");
+  EXPECT_PROJECTION_PARSE_ERROR("oversized array index",
+                                "/items/999999999999999999999999/sku");
+
+#undef EXPECT_PROJECTION_PARSE_ERROR
+}
+
 static void expect_projection_compact_error_api(void) {
   static const char malformed[] = "{\"id\":";
   const char *field;
@@ -2807,6 +2859,8 @@ static void expect_sdk_parity_manifest(void) {
        expect_buffered_projection_api},
       {"projection", "duplicate and conflicting projection path invariants",
        expect_projection_path_invariant_api},
+      {"projection", "projection parser failure corpus",
+       expect_projection_parse_error_corpus_api},
       {"projection", "projection and compact public API error contracts",
        expect_projection_compact_error_api},
       {"compact", "seekable and buffered JSON compaction", expect_compact_api},
@@ -3072,6 +3126,7 @@ int main(void) {
   expect_projection_api();
   expect_buffered_projection_api();
   expect_projection_path_invariant_api();
+  expect_projection_parse_error_corpus_api();
   expect_projection_compact_error_api();
   expect_compact_api();
   expect_compact_error_corpus_api();
