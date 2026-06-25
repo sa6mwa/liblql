@@ -112,6 +112,24 @@ const char *lql_status_string(lql_status status) {
 
 const char *lql_version(void) { return LQL_VERSION; }
 
+void lql_capabilities_get(lql_capabilities *out) {
+  if (out == NULL) {
+    return;
+  }
+  memset(out, 0, sizeof(*out));
+  out->selector_parse = 1;
+  out->matches_json = 1;
+  out->file_decision_stream = 1;
+  out->file_match_stream = 1;
+  out->seekable_range_payloads = 1;
+  out->projection_file_range = 1;
+  out->compact_file_range = 1;
+  out->compact_buffered_json = 1;
+  out->mutation_parse = 1;
+  out->mutation_file_range = 1;
+  out->mutation_file_values = 1;
+}
+
 char *lql_strdup(const char *text) {
   size_t len;
   char *out;

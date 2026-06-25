@@ -13,8 +13,9 @@ place.
 Object and array-index projection are also exposed through the initial
 `lql_projection` C API, and compact range helpers are exposed for seekable and
 explicitly buffered JSON values. The SDK installs generated version metadata in
-`lql/version.h` and exposes `lql_version()`. Mutation parse/plan validation is
-exposed through `lql_mutation_plan`, and supported concrete-path mutations
+`lql/version.h` and exposes `lql_version()` plus
+`lql_capabilities_get()`. Mutation parse/plan validation is exposed through
+`lql_mutation_plan`, and supported concrete-path mutations
 including Go-compatible numeric child handling under arrays and time
 normalization can be applied to seekable file ranges without full-document
 materialization. `clql` also supports seekable-file inline/write mutation

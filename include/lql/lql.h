@@ -87,6 +87,31 @@ typedef struct lql_query_result {
   lql_query_stop_reason stop_reason;
 } lql_query_result;
 
+typedef struct lql_capabilities {
+  /* Selector parser entry points are available. */
+  int selector_parse;
+  /* In-memory whole-value match helper is available. */
+  int matches_json;
+  /* FILE * candidate decision streaming is available. */
+  int file_decision_stream;
+  /* FILE * matched-candidate payload streaming is available. */
+  int file_match_stream;
+  /* Match payloads can identify callback-scoped seekable source ranges. */
+  int seekable_range_payloads;
+  /* Projection from one seekable file range is available. */
+  int projection_file_range;
+  /* Compact serialization from one seekable file range is available. */
+  int compact_file_range;
+  /* Compact serialization from caller-buffered JSON is available. */
+  int compact_buffered_json;
+  /* Mutation expression parse and plan validation are available. */
+  int mutation_parse;
+  /* Mutation execution against one seekable file range is available. */
+  int mutation_file_range;
+  /* Explicit opt-in file-backed mutation values are available. */
+  int mutation_file_values;
+} lql_capabilities;
+
 typedef lql_status (*lql_query_decision_fn)(void *user,
                                             const lql_query_decision *decision);
 typedef lql_status (*lql_query_match_fn)(void *user,
@@ -96,6 +121,8 @@ void lql_error_init(lql_error *error);
 const char *lql_status_string(lql_status status);
 /* Returns the resolved liblql semantic version string. */
 const char *lql_version(void);
+/* Writes the supported public API capability set to out. NULL is accepted. */
+void lql_capabilities_get(lql_capabilities *out);
 
 lql_status lql_selector_parse(const char *expr, lql_selector **out,
                               lql_error *error);

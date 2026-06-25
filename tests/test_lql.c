@@ -7,6 +7,8 @@
 static int failures = 0;
 
 static void expect_version_api(void) {
+  lql_capabilities caps;
+
   if (strcmp(lql_version(), LQL_VERSION) != 0) {
     printf("version API mismatch: %s != %s\n", lql_version(), LQL_VERSION);
     ++failures;
@@ -15,6 +17,18 @@ static void expect_version_api(void) {
     printf("version macro is not dotted semver: %s\n", LQL_VERSION);
     ++failures;
   }
+  memset(&caps, 0, sizeof(caps));
+  lql_capabilities_get(&caps);
+  if (!caps.selector_parse || !caps.matches_json ||
+      !caps.file_decision_stream || !caps.file_match_stream ||
+      !caps.seekable_range_payloads || !caps.projection_file_range ||
+      !caps.compact_file_range || !caps.compact_buffered_json ||
+      !caps.mutation_parse || !caps.mutation_file_range ||
+      !caps.mutation_file_values) {
+    printf("capability query omitted an implemented public surface\n");
+    ++failures;
+  }
+  lql_capabilities_get(NULL);
 }
 
 typedef struct stream_seen {

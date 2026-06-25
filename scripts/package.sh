@@ -207,6 +207,14 @@ int main(void) {
     fprintf(stderr, "version mismatch: %s != %s\n", lql_version(), LQL_VERSION);
     return 1;
   }
+  {
+    lql_capabilities caps;
+    lql_capabilities_get(&caps);
+    if (!caps.selector_parse || !caps.mutation_file_range) {
+      fprintf(stderr, "capability query mismatch\n");
+      return 1;
+    }
+  }
   lql_selector_free(selector);
   return 0;
 }
