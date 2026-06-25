@@ -28,7 +28,7 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"selector", "top-level OR flag composition", []string{"TestCLQLOrFlagParity"}},
 	{"selector", "multiple selector argument composition", []string{"TestCLQLMultipleSelectorArgumentParity"}},
 	{"selector", "parse-error invariants", []string{"TestCLQLSelectorParseErrorParity"}},
-	{"streaming", "matches-only decision path over stdin streams", []string{"TestCLQLMatchesOnlyStreamingParity"}},
+	{"streaming", "matches-only selection output over stdin streams", []string{"TestCLQLMatchesOnlyStreamingParity"}},
 	{"streaming", "matched stdin output for NDJSON and top-level arrays", []string{"TestCLQLStdinOutputStreamingParity"}},
 	{"streaming", "matched seekable file output for NDJSON and top-level arrays", []string{"TestCLQLSeekableFileOutputParity"}},
 	{"streaming", "compact matched stdin output", []string{"TestCLQLStdinCompactOutputParity"}},

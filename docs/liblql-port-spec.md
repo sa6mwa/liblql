@@ -447,8 +447,10 @@ Current implementation is an early slice:
   `lql_payload_write_json()` preserving the parser source position while it
   rereads the matched candidate range; this path still uses candidate
   `CAPTURE_NONE` and does not retain candidate JSON;
-- `clql -M/--matches-only` uses the decision-only streaming path over stdin
-  and does not materialize candidate payloads or write matched JSON;
+- selection-mode `clql -M/--matches-only` matches Go CLI behavior by writing
+  matched JSON candidates and returning success even when no candidates match;
+  mutation-mode `-M` remains the Go-compatible output filter for matched
+  candidates only;
 - default `clql selector < data.json` output streams non-seekable stdin
   through lonejson candidate parsing with callback-scoped spooled candidate
   payloads, so it no longer reads the complete stdin stream into memory before

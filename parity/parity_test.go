@@ -109,9 +109,18 @@ func TestCLQLSelectorParity(t *testing.T) {
 			cmd := exec.Command(clql, tc.expr)
 			cmd.Stdin = bytes.NewBufferString(tc.doc)
 			out, err := cmd.CombinedOutput()
-			got := err == nil
-			if got != want {
-				t.Fatalf("clql parity mismatch: got match=%v want=%v err=%v out=%q", got, want, err, string(out))
+			if err != nil {
+				t.Fatalf("clql selector failed: %v out=%q", err, string(out))
+			}
+			gotValues, err := decodeJSONValues(out)
+			if err != nil {
+				t.Fatalf("decode clql selector output: %v out=%q", err, string(out))
+			}
+			if want && len(gotValues) != 1 {
+				t.Fatalf("clql selector output mismatch: got=%#v want one value out=%q", gotValues, string(out))
+			}
+			if !want && len(gotValues) != 0 {
+				t.Fatalf("clql selector output mismatch: got=%#v want no values out=%q", gotValues, string(out))
 			}
 		})
 	}
@@ -191,9 +200,18 @@ func TestCLQLSelectorSinceMacroParity(t *testing.T) {
 			cmd := exec.Command(clql, tc.expr)
 			cmd.Stdin = bytes.NewBufferString(tc.doc)
 			out, err := cmd.CombinedOutput()
-			got := err == nil
-			if got != want {
-				t.Fatalf("clql since macro parity mismatch: got match=%v want=%v err=%v out=%q", got, want, err, string(out))
+			if err != nil {
+				t.Fatalf("clql since macro failed: %v out=%q", err, string(out))
+			}
+			gotValues, err := decodeJSONValues(out)
+			if err != nil {
+				t.Fatalf("decode clql since macro output: %v out=%q", err, string(out))
+			}
+			if want && len(gotValues) != 1 {
+				t.Fatalf("clql since macro output mismatch: got=%#v want one value out=%q", gotValues, string(out))
+			}
+			if !want && len(gotValues) != 0 {
+				t.Fatalf("clql since macro output mismatch: got=%#v want no values out=%q", gotValues, string(out))
 			}
 		})
 	}
@@ -227,9 +245,18 @@ func TestCLQLOrFlagParity(t *testing.T) {
 			cmd := exec.Command(clql, args...)
 			cmd.Stdin = bytes.NewBufferString(tc.doc)
 			out, err := cmd.CombinedOutput()
-			got := err == nil
-			if got != want {
-				t.Fatalf("clql --or parity mismatch: got match=%v want=%v err=%v out=%q", got, want, err, string(out))
+			if err != nil {
+				t.Fatalf("clql --or failed: %v out=%q", err, string(out))
+			}
+			gotValues, err := decodeJSONValues(out)
+			if err != nil {
+				t.Fatalf("decode clql --or output: %v out=%q", err, string(out))
+			}
+			if want && len(gotValues) != 1 {
+				t.Fatalf("clql --or output mismatch: got=%#v want one value out=%q", gotValues, string(out))
+			}
+			if !want && len(gotValues) != 0 {
+				t.Fatalf("clql --or output mismatch: got=%#v want no values out=%q", gotValues, string(out))
 			}
 		})
 	}
@@ -270,24 +297,32 @@ func TestCLQLMatchesOnlyStreamingParity(t *testing.T) {
 			result, err := lql.QueryStreamWithResult(lql.QueryStreamRequest{
 				Reader:   bytes.NewBufferString(tc.body),
 				Selector: sel,
-				Mode:     lql.QueryDecisionOnly,
-				OnDecision: func(lql.QueryStreamDecision) error {
+				OnValue: func(lql.QueryStreamValue) error {
 					return nil
 				},
 			})
 			if err != nil {
 				t.Fatalf("go query stream: %v", err)
 			}
+			want, err := goMatchedValues(tc.body, sel)
+			if err != nil {
+				t.Fatalf("go matched values: %v", err)
+			}
 			cmd := exec.Command(clql, "--matches-only", tc.expr)
 			cmd.Stdin = bytes.NewBufferString(tc.body)
 			out, err := cmd.CombinedOutput()
-			got := err == nil
-			want := result.CandidatesMatched > 0
-			if got != want {
-				t.Fatalf("clql -M parity mismatch: got match=%v want=%v err=%v out=%q", got, want, err, string(out))
+			if err != nil {
+				t.Fatalf("clql -M failed: %v out=%q", err, string(out))
 			}
-			if len(out) != 0 {
-				t.Fatalf("clql -M wrote output: %q", string(out))
+			if result.CandidatesMatched != int64(len(want)) {
+				t.Fatalf("go stream count mismatch: result=%d values=%d", result.CandidatesMatched, len(want))
+			}
+			got, err := decodeJSONValues(out)
+			if err != nil {
+				t.Fatalf("decode clql -M output: %v out=%q", err, string(out))
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("clql -M output mismatch: got=%#v want=%#v out=%q", got, want, string(out))
 			}
 		})
 	}
@@ -332,10 +367,8 @@ func TestCLQLStdinOutputStreamingParity(t *testing.T) {
 			cmd := exec.Command(clql, tc.expr)
 			cmd.Stdin = bytes.NewBufferString(tc.body)
 			out, err := cmd.CombinedOutput()
-			gotMatch := err == nil
-			wantMatch := len(want) != 0
-			if gotMatch != wantMatch {
-				t.Fatalf("clql stdin match mismatch: got=%v want=%v err=%v out=%q", gotMatch, wantMatch, err, string(out))
+			if err != nil {
+				t.Fatalf("clql stdin selection failed: %v out=%q", err, string(out))
 			}
 			got, err := decodeJSONValues(out)
 			if err != nil {
@@ -435,10 +468,8 @@ func TestCLQLStdinProjectionParity(t *testing.T) {
 			cmd := exec.Command(clql, args...)
 			cmd.Stdin = bytes.NewBufferString(tc.body)
 			out, err := cmd.CombinedOutput()
-			gotMatch := err == nil
-			wantMatch := len(want) != 0
-			if gotMatch != wantMatch {
-				t.Fatalf("clql stdin projection match mismatch: got=%v want=%v err=%v out=%q", gotMatch, wantMatch, err, string(out))
+			if err != nil {
+				t.Fatalf("clql stdin projection failed: %v out=%q", err, string(out))
 			}
 			got, err := decodeJSONValues(out)
 			if err != nil {
@@ -499,10 +530,8 @@ func TestCLQLSeekableFileOutputParity(t *testing.T) {
 			}
 			cmd := exec.Command(clql, tc.expr, tmp.Name())
 			out, err := cmd.CombinedOutput()
-			gotMatch := err == nil
-			wantMatch := len(want) != 0
-			if gotMatch != wantMatch {
-				t.Fatalf("clql file match mismatch: got=%v want=%v err=%v out=%q", gotMatch, wantMatch, err, string(out))
+			if err != nil {
+				t.Fatalf("clql file selection failed: %v out=%q", err, string(out))
 			}
 			got, err := decodeJSONValues(out)
 			if err != nil {
@@ -566,10 +595,8 @@ func TestCLQLMultipleSelectorArgumentParity(t *testing.T) {
 			}
 			cmd := exec.Command(clql, tc.args...)
 			out, err := cmd.CombinedOutput()
-			gotMatch := err == nil
-			wantMatch := len(want) != 0
-			if gotMatch != wantMatch {
-				t.Fatalf("clql multi-selector match mismatch: got=%v want=%v err=%v out=%q", gotMatch, wantMatch, err, string(out))
+			if err != nil {
+				t.Fatalf("clql multi-selector failed: %v out=%q", err, string(out))
 			}
 			got, err := decodeJSONValues(out)
 			if err != nil {
@@ -657,10 +684,8 @@ func TestCLQLSeekableFileProjectionParity(t *testing.T) {
 			args = append(args, tc.expr, tmp.Name())
 			cmd := exec.Command(clql, args...)
 			out, err := cmd.CombinedOutput()
-			gotMatch := err == nil
-			wantMatch := len(want) != 0
-			if gotMatch != wantMatch {
-				t.Fatalf("clql projection match mismatch: got=%v want=%v err=%v out=%q", gotMatch, wantMatch, err, string(out))
+			if err != nil {
+				t.Fatalf("clql projection failed: %v out=%q", err, string(out))
 			}
 			got, err := decodeJSONValues(out)
 			if err != nil {
@@ -841,8 +866,8 @@ func TestCLQLBooleanFlagValueCompatibility(t *testing.T) {
 		if err != nil {
 			t.Fatalf("clql --matches-only=true failed: %v out=%q", err, string(out))
 		}
-		if len(out) != 0 {
-			t.Fatalf("clql --matches-only=true wrote output: %q", string(out))
+		if !bytes.Contains(out, []byte(`"status"`)) {
+			t.Fatalf("clql --matches-only=true did not write matched JSON: %q", string(out))
 		}
 	})
 	t.Run("matches only false", func(t *testing.T) {
@@ -871,11 +896,8 @@ func TestCLQLBooleanFlagValueCompatibility(t *testing.T) {
 		cmd := exec.Command(clql, "--or=false", "-c", `/status="open",/progress>=50`)
 		cmd.Stdin = bytes.NewBufferString(`{"status":"closed","progress":72}`)
 		out, err := cmd.CombinedOutput()
-		if err == nil {
-			t.Fatalf("clql --or=false unexpectedly matched: out=%q", string(out))
-		}
-		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
-			t.Fatalf("clql --or=false exit mismatch: err=%v out=%q", err, string(out))
+		if err != nil {
+			t.Fatalf("clql --or=false failed: %v out=%q", err, string(out))
 		}
 		if len(out) != 0 {
 			t.Fatalf("clql --or=false wrote output: %q", string(out))
@@ -955,11 +977,8 @@ func TestCLQLShortOptionClusterCompatibility(t *testing.T) {
 		cmd := exec.Command(clql, "-cO=false", `/status="open",/progress>=50`)
 		cmd.Stdin = bytes.NewBufferString(`{"status":"closed","progress":72}`)
 		out, err := cmd.CombinedOutput()
-		if err == nil {
-			t.Fatalf("clql -cO=false unexpectedly matched: out=%q", string(out))
-		}
-		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
-			t.Fatalf("clql -cO=false exit mismatch: err=%v out=%q", err, string(out))
+		if err != nil {
+			t.Fatalf("clql -cO=false failed: %v out=%q", err, string(out))
 		}
 		if len(out) != 0 {
 			t.Fatalf("clql -cO=false wrote output: %q", string(out))

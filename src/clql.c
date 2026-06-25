@@ -22,10 +22,6 @@ typedef struct projection_args {
   size_t count;
 } projection_args;
 
-typedef struct match_count {
-  lql_uint64 matched;
-} match_count;
-
 typedef struct output_ranges {
   FILE *source;
   FILE *out;
@@ -38,15 +34,6 @@ typedef struct output_ranges {
 } output_ranges;
 
 static int is_regular_file_path(const char *path);
-
-static lql_status count_match(void *user, const lql_query_decision *decision) {
-  match_count *count;
-  count = (match_count *)user;
-  if (decision->matched) {
-    ++count->matched;
-  }
-  return LQL_STATUS_OK;
-}
 
 static int seek_u64(FILE *file, lql_uint64 offset) {
   off_t seek_offset;
@@ -551,13 +538,6 @@ static lql_status output_match_range(void *user,
   return LQL_STATUS_OK;
 }
 
-static FILE *open_input_path(const char *path) {
-  if (path == NULL || strcmp(path, "-") == 0) {
-    return stdin;
-  }
-  return fopen(path, "rb");
-}
-
 static void close_input_path(FILE *file) {
   if (file != NULL && file != stdin) {
     fclose(file);
@@ -646,7 +626,6 @@ int main(int argc, char **argv) {
   lql_mutation_plan *mutation_plan;
   lql_mutation_parse_options mutation_options;
   lql_status st;
-  match_count count;
   output_ranges ranges;
   lql_query_result result;
   char *inline_tmp_path;
@@ -991,40 +970,7 @@ int main(int argc, char **argv) {
     free_projection_args(&input_paths);
     return 2;
   }
-  if (matches_only && mutation_plan == NULL) {
-    count.matched = 0u;
-    memset(&result, 0, sizeof(result));
-    input = open_input_path(input_path);
-    if (input == NULL) {
-      fprintf(stderr, "clql: failed to open input %s\n", input_path);
-      free(selector_expr_owned);
-      lql_selector_free(selector);
-      lql_mutation_plan_free(mutation_plan);
-      lql_projection_free(projection);
-      free_projection_args(&fields);
-      free_projection_args(&mutations);
-      free_projection_args(&input_paths);
-      return 1;
-    }
-    st = lql_query_file_decisions(selector, input, count_match, &count, &result,
-                                  &error);
-    close_input_path(input);
-    free(selector_expr_owned);
-    lql_selector_free(selector);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    free_projection_args(&input_paths);
-    if (st != LQL_STATUS_OK) {
-      fprintf(stderr, "clql: %s\n", error.message);
-      return 1;
-    }
-    return count.matched == 0u ? 1 : 0;
-  }
   if (mutation_plan != NULL && !inline_mode && input_paths.count > 1u) {
-    lql_uint64 total_matched;
-    total_matched = 0u;
     for (i = 0; i < (int)input_paths.count; ++i) {
       if (strcmp(input_paths.items[i], "-") == 0) {
         memset(&result, 0, sizeof(result));
@@ -1042,7 +988,6 @@ int main(int argc, char **argv) {
           free_projection_args(&input_paths);
           return 1;
         }
-        total_matched += result.candidates_matched;
         continue;
       }
       input = fopen(input_paths.items[i], "rb");
@@ -1088,7 +1033,6 @@ int main(int argc, char **argv) {
         free_projection_args(&input_paths);
         return 1;
       }
-      total_matched += ranges.matched;
     }
     free(selector_expr_owned);
     lql_selector_free(selector);
@@ -1097,7 +1041,7 @@ int main(int argc, char **argv) {
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
-    return total_matched == 0u ? 1 : 0;
+    return 0;
   }
   if (input_path != NULL && strcmp(input_path, "-") != 0) {
     input = fopen(input_path, "rb");
@@ -1179,7 +1123,7 @@ int main(int argc, char **argv) {
       fprintf(stderr, "clql: %s\n", error.message);
       return 1;
     }
-    return ranges.matched == 0u ? 1 : 0;
+    return 0;
   }
   memset(&result, 0, sizeof(result));
   st = lql_eval_query_file_spooled_matches(selector, stdin, stdout, compact,
@@ -1196,5 +1140,5 @@ int main(int argc, char **argv) {
     fprintf(stderr, "clql: %s\n", error.message);
     return 1;
   }
-  return result.candidates_matched == 0u ? 1 : 0;
+  return 0;
 }
