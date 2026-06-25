@@ -893,6 +893,53 @@ func TestCLQLStdinFileBackedMutationParity(t *testing.T) {
 	}
 }
 
+func TestCLQLFileBackedMutationExpandsHomeParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	if err := os.WriteFile(filepath.Join(homeDir, "blob.txt"), []byte("hello from home"), 0600); err != nil {
+		t.Fatalf("write home blob: %v", err)
+	}
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.json")
+	if err := os.WriteFile(inputPath, []byte(`{"id":"a"}`), 0600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	if _, err := lql.ParseMutationsWithOptions(
+		[]string{`textfile:/payload=~/blob.txt`},
+		time.Unix(1700000000, 0),
+		lql.ParseMutationsOptions{EnableFileValues: true},
+	); err != nil {
+		t.Fatalf("go parse home-expanded file-backed mutation: %v", err)
+	}
+
+	cmd := exec.Command(
+		clql,
+		"-F",
+		"-c",
+		"-m", `textfile:/payload=~/blob.txt`,
+		inputPath,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("home-expanded file-backed mutation failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode home-expanded mutation output: %v out=%q", err, string(out))
+	}
+	want, err := decodeJSONValues([]byte(`{"id":"a","payload":"hello from home"}`))
+	if err != nil {
+		t.Fatalf("decode expected home-expanded mutation output: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("home-expanded file-backed mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
 func TestCLQLMatchAllMutationFileParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

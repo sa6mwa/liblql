@@ -480,7 +480,8 @@ Current implementation is an early slice:
   match-all mutation input and rejects multiple file inputs explicitly;
 - `clql -F/--enable-file-mutations` opts into parsing file-backed mutation
   values and supports `file:`, `textfile:`, and `base64file:` streaming
-  execution over seekable file input and supported spooled stdin mutation;
+  execution over seekable file input and supported spooled stdin mutation,
+  including `~/` home-directory expansion for file-backed value paths;
 - `clql -m -M/--matches-only` emits only matched seekable file candidates after
   applying supported concrete-path mutations;
 - `clql -m -i/--inline` and `clql -m -w/--write` rewrite a single seekable
