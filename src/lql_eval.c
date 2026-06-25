@@ -326,12 +326,12 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     }
     break;
   case LQL_NODE_RANGE:
-    if (!is_container && is_number && node->term.has_number) {
+    if (!is_container && is_number) {
       number = strtod(value, NULL);
-      if ((node->term.range_op == '>' && number > node->term.number) ||
-          (node->term.range_op == 'G' && number >= node->term.number) ||
-          (node->term.range_op == '<' && number < node->term.number) ||
-          (node->term.range_op == 'L' && number <= node->term.number)) {
+      if ((!node->term.has_range_gt || number > node->term.range_gt) &&
+          (!node->term.has_range_gte || number >= node->term.range_gte) &&
+          (!node->term.has_range_lt || number < node->term.range_lt) &&
+          (!node->term.has_range_lte || number <= node->term.range_lte)) {
         doc->hits[node->hit_index] = 1u;
       }
     }

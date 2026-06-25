@@ -384,24 +384,20 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       }
       free(decoded);
     } else if (strcmp(key, "gt") == 0) {
-      term->range_op = '>';
-      term->number = strtod(decoded, NULL);
-      term->has_number = 1;
+      term->range_gt = strtod(decoded, NULL);
+      term->has_range_gt = 1;
       free(decoded);
     } else if (strcmp(key, "gte") == 0) {
-      term->range_op = 'G';
-      term->number = strtod(decoded, NULL);
-      term->has_number = 1;
+      term->range_gte = strtod(decoded, NULL);
+      term->has_range_gte = 1;
       free(decoded);
     } else if (strcmp(key, "lt") == 0) {
-      term->range_op = '<';
-      term->number = strtod(decoded, NULL);
-      term->has_number = 1;
+      term->range_lt = strtod(decoded, NULL);
+      term->has_range_lt = 1;
       free(decoded);
     } else if (strcmp(key, "lte") == 0) {
-      term->range_op = 'L';
-      term->number = strtod(decoded, NULL);
-      term->has_number = 1;
+      term->range_lte = strtod(decoded, NULL);
+      term->has_range_lte = 1;
       free(decoded);
     } else {
       free(decoded);
@@ -428,6 +424,12 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
   if (kind == LQL_NODE_IN && term->any_count == 0u) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "in selector requires any values");
+    return 0;
+  }
+  if (kind == LQL_NODE_RANGE && !term->has_range_gt && !term->has_range_gte &&
+      !term->has_range_lt && !term->has_range_lte) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "range selector requires at least one bound");
     return 0;
   }
   return 1;
@@ -514,16 +516,27 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       out->kind = LQL_NODE_NE;
     } else if (strchr("><", op0) != NULL || op2) {
       if (op0 == '>') {
-        out->term.range_op = op2 ? 'G' : '>';
+        if (op2) {
+          out->term.range_gte = strtod(out->term.value, NULL);
+          out->term.has_range_gte = 1;
+        } else {
+          out->term.range_gt = strtod(out->term.value, NULL);
+          out->term.has_range_gt = 1;
+        }
       } else if (op0 == '<') {
-        out->term.range_op = op2 ? 'L' : '<';
+        if (op2) {
+          out->term.range_lte = strtod(out->term.value, NULL);
+          out->term.has_range_lte = 1;
+        } else {
+          out->term.range_lt = strtod(out->term.value, NULL);
+          out->term.has_range_lt = 1;
+        }
       } else {
-        out->term.range_op = 0;
+        out->term.has_range_gt = 0;
       }
-      if (out->term.range_op != 0) {
+      if (out->term.has_range_gt || out->term.has_range_gte ||
+          out->term.has_range_lt || out->term.has_range_lte) {
         out->kind = LQL_NODE_RANGE;
-        out->term.number = strtod(out->term.value, NULL);
-        out->term.has_number = 1;
       } else {
         out->kind = LQL_NODE_EQ;
       }

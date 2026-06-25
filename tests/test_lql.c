@@ -184,6 +184,10 @@ int main(void) {
   expect_match("/status=\"closed\"", "{\"status\":\"open\"}", 0);
   expect_match("/progress>=50", "{\"progress\":72}", 1);
   expect_match("/progress<50", "{\"progress\":72}", 0);
+  expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":11}", 1);
+  expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":10}", 0);
+  expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":20}", 1);
+  expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":21}", 0);
   expect_match("contains{field=/message,value=timeout}",
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("contains{field=/message,value=TIMEOUT,ignoreCase=true}",
@@ -227,6 +231,7 @@ int main(void) {
   expect_parse_error("contains{field=/message,value=timeout,ignoreCase=maybe}");
   expect_parse_error("prefix{field=/service,any=auth|edge}");
   expect_parse_error("in{field=/env}");
+  expect_parse_error("range{field=/progress}");
   expect_stream_file();
   expect_stream_array_items();
   return failures == 0 ? 0 : 1;

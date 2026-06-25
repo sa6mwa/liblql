@@ -26,9 +26,14 @@ typedef struct lql_term {
   int ignore_case;
   char **any;
   size_t any_count;
-  double number;
-  int has_number;
-  int range_op;
+  double range_gt;
+  double range_gte;
+  double range_lt;
+  double range_lte;
+  int has_range_gt;
+  int has_range_gte;
+  int has_range_lt;
+  int has_range_lte;
 } lql_term;
 
 typedef struct lql_node {
