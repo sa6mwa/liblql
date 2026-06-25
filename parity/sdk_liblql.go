@@ -300,18 +300,29 @@ static int liblql_project_file_range_value(const char *const *fields,
 
 static int liblql_mutate_json_value(const char *const *exprs,
                                     size_t expr_count, const char *json,
+                                    int enable_file_values,
+                                    const char *file_value_base_dir,
                                     char **out_json, size_t *out_len,
                                     char *errbuf, size_t errbuf_len) {
 	lql_error error;
 	lql_mutation_plan *plan;
+	lql_mutation_parse_options options;
 	lql_status status;
 	FILE *tmp;
 
 	lql_error_init(&error);
+	memset(&options, 0, sizeof(options));
 	plan = NULL;
 	*out_json = NULL;
 	*out_len = 0u;
-	status = lql_mutation_plan_parse(exprs, expr_count, &plan, &error);
+	if (enable_file_values) {
+		options.enable_file_values = 1;
+		options.file_value_base_dir = file_value_base_dir;
+		status = lql_mutation_plan_parse_with_options(exprs, expr_count, &options,
+		                                              &plan, &error);
+	} else {
+		status = lql_mutation_plan_parse(exprs, expr_count, &plan, &error);
+	}
 	if (status != LQL_STATUS_OK) {
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, error.message, errbuf_len - 1u);
@@ -349,11 +360,14 @@ static int liblql_mutate_json_value(const char *const *exprs,
 static int liblql_mutate_file_range_value(const char *const *exprs,
                                           size_t expr_count,
                                           const char *prefix, const char *json,
-                                          const char *suffix, char **out_json,
-                                          size_t *out_len, char *errbuf,
-                                          size_t errbuf_len) {
+                                          const char *suffix,
+                                          int enable_file_values,
+                                          const char *file_value_base_dir,
+                                          char **out_json, size_t *out_len,
+                                          char *errbuf, size_t errbuf_len) {
 	lql_error error;
 	lql_mutation_plan *plan;
+	lql_mutation_parse_options options;
 	lql_status status;
 	FILE *input;
 	FILE *tmp;
@@ -361,11 +375,19 @@ static int liblql_mutate_file_range_value(const char *const *exprs,
 	unsigned long long size;
 
 	lql_error_init(&error);
+	memset(&options, 0, sizeof(options));
 	plan = NULL;
 	input = NULL;
 	*out_json = NULL;
 	*out_len = 0u;
-	status = lql_mutation_plan_parse(exprs, expr_count, &plan, &error);
+	if (enable_file_values) {
+		options.enable_file_values = 1;
+		options.file_value_base_dir = file_value_base_dir;
+		status = lql_mutation_plan_parse_with_options(exprs, expr_count, &options,
+		                                              &plan, &error);
+	} else {
+		status = lql_mutation_plan_parse(exprs, expr_count, &plan, &error);
+	}
 	if (status != LQL_STATUS_OK) {
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, error.message, errbuf_len - 1u);
@@ -837,17 +859,27 @@ func cProjectFileRange(fields []string, prefix, doc, suffix string) ([]byte, boo
 }
 
 func cMutateJSON(mutations []string, doc string) ([]byte, error) {
+	return cMutateJSONWithOptions(mutations, doc, false, "")
+}
+
+func cMutateJSONWithOptions(mutations []string, doc string, enableFileValues bool, fileValueBaseDir string) ([]byte, error) {
 	cExprs, freeExprs := cStringArray(mutations)
 	defer freeExprs()
 
 	cDoc := C.CString(doc)
 	defer C.free(unsafe.Pointer(cDoc))
+	var cBaseDir *C.char
+	if fileValueBaseDir != "" {
+		cBaseDir = C.CString(fileValueBaseDir)
+		defer C.free(unsafe.Pointer(cBaseDir))
+	}
 
 	var out *C.char
 	var outLen C.size_t
 	var errbuf [256]C.char
 	status := C.liblql_mutate_json_value(cExprs, C.size_t(len(mutations)), cDoc,
-		&out, &outLen, &errbuf[0], C.size_t(len(errbuf)))
+		cBool(enableFileValues), cBaseDir, &out, &outLen, &errbuf[0],
+		C.size_t(len(errbuf)))
 	if status != 0 {
 		return nil, sdkParityError(C.GoString(&errbuf[0]))
 	}
@@ -856,6 +888,10 @@ func cMutateJSON(mutations []string, doc string) ([]byte, error) {
 }
 
 func cMutateFileRange(mutations []string, prefix, doc, suffix string) ([]byte, error) {
+	return cMutateFileRangeWithOptions(mutations, prefix, doc, suffix, false, "")
+}
+
+func cMutateFileRangeWithOptions(mutations []string, prefix, doc, suffix string, enableFileValues bool, fileValueBaseDir string) ([]byte, error) {
 	cExprs, freeExprs := cStringArray(mutations)
 	defer freeExprs()
 
@@ -865,13 +901,18 @@ func cMutateFileRange(mutations []string, prefix, doc, suffix string) ([]byte, e
 	defer C.free(unsafe.Pointer(cPrefix))
 	defer C.free(unsafe.Pointer(cDoc))
 	defer C.free(unsafe.Pointer(cSuffix))
+	var cBaseDir *C.char
+	if fileValueBaseDir != "" {
+		cBaseDir = C.CString(fileValueBaseDir)
+		defer C.free(unsafe.Pointer(cBaseDir))
+	}
 
 	var out *C.char
 	var outLen C.size_t
 	var errbuf [256]C.char
 	status := C.liblql_mutate_file_range_value(cExprs, C.size_t(len(mutations)),
-		cPrefix, cDoc, cSuffix, &out, &outLen, &errbuf[0],
-		C.size_t(len(errbuf)))
+		cPrefix, cDoc, cSuffix, cBool(enableFileValues), cBaseDir, &out,
+		&outLen, &errbuf[0], C.size_t(len(errbuf)))
 	if status != 0 {
 		return nil, sdkParityError(C.GoString(&errbuf[0]))
 	}

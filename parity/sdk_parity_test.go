@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -288,6 +290,42 @@ func TestSDKMutationFileRangeParity(t *testing.T) {
 			assertDecodedJSONValuesParity(t, gotJSON, wantJSON, "mutation")
 		})
 	}
+}
+
+func TestSDKMutationFileBackedValueParity(t *testing.T) {
+	dir := t.TempDir()
+	textPath := filepath.Join(dir, "blob.txt")
+	binPath := filepath.Join(dir, "blob.bin")
+	if err := os.WriteFile(textPath, []byte("hello\n\"quoted\""), 0600); err != nil {
+		t.Fatalf("write text payload: %v", err)
+	}
+	if err := os.WriteFile(binPath, []byte{0x00, 0x01, 0x02, 'a'}, 0600); err != nil {
+		t.Fatalf("write binary payload: %v", err)
+	}
+	mutations := []string{
+		`textfile:/payload=blob.txt`,
+		`base64file:/encoded=blob.bin`,
+		`file:/auto_text=blob.txt`,
+		`file:/auto_bin=blob.bin`,
+	}
+	opts := lql.ParseMutationsOptions{
+		EnableFileValues: true,
+		FileValueBaseDir: dir,
+	}
+	wantJSON, err := goMutateJSONWithOptions(mutations, `{}`, opts)
+	if err != nil {
+		t.Fatalf("go mutate file-backed values: %v", err)
+	}
+	gotBuffered, err := cMutateJSONWithOptions(mutations, `{}`, true, dir)
+	if err != nil {
+		t.Fatalf("liblql buffered file-backed mutate: %v", err)
+	}
+	gotRange, err := cMutateFileRangeWithOptions(mutations, `{"outside":`, `{}`, `}`, true, dir)
+	if err != nil {
+		t.Fatalf("liblql file-range file-backed mutate: %v", err)
+	}
+	assertDecodedJSONValuesParity(t, gotBuffered, wantJSON, "buffered file-backed mutation")
+	assertDecodedJSONValuesParity(t, gotRange, wantJSON, "file-range file-backed mutation")
 }
 
 func TestSDKMutationPlanParseParity(t *testing.T) {
@@ -611,7 +649,11 @@ func goProjectJSON(fields []string, doc string) ([]byte, bool, error) {
 }
 
 func goMutateJSON(mutations []string, doc string) ([]byte, error) {
-	parsed, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	return goMutateJSONWithOptions(mutations, doc, lql.ParseMutationsOptions{})
+}
+
+func goMutateJSONWithOptions(mutations []string, doc string, opts lql.ParseMutationsOptions) ([]byte, error) {
+	parsed, err := lql.ParseMutationsWithOptions(mutations, time.Unix(1700000000, 0), opts)
 	if err != nil {
 		return nil, err
 	}
