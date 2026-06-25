@@ -424,6 +424,9 @@ Current implementation is an early slice:
 - `clql` accepts an empty selector for match-all file selection, including the
   Go-compatible shorthand where a single existing file path is the input rather
   than selector text;
+- `clql` accepts multiple selector arguments, combines them with default AND
+  semantics, and honors `--or` / `-O` for OR composition before the final file
+  or `-` input argument;
 - `clql selector data.json` uses seekable candidate offset/size ranges to
   reread and write matched payloads without full-input materialization;
 - `clql -c/--compact selector data.json` compacts matched seekable file ranges

@@ -476,6 +476,73 @@ func TestCLQLSeekableFileOutputParity(t *testing.T) {
 	}
 }
 
+func TestCLQLMultipleSelectorArgumentParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `{"id":"a","status":"open","progress":72}
+{"id":"b","status":"open","progress":4}
+{"id":"c","status":"closed","progress":80}`
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-multi-selector-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+
+	statusOpen, err := lql.ParseSelectorString(`/status="open"`)
+	if err != nil {
+		t.Fatalf("go parse status selector: %v", err)
+	}
+	progressHigh, err := lql.ParseSelectorString(`/progress>=50`)
+	if err != nil {
+		t.Fatalf("go parse progress selector: %v", err)
+	}
+	cases := []struct {
+		name string
+		args []string
+		sel  lql.Selector
+	}{
+		{
+			name: "and",
+			args: []string{`/status="open"`, `/progress>=50`, tmp.Name()},
+			sel:  lql.Selector{And: []lql.Selector{statusOpen, progressHigh}},
+		},
+		{
+			name: "or",
+			args: []string{"--or", `/status="open"`, `/progress>=50`, tmp.Name()},
+			sel:  lql.Selector{Or: []lql.Selector{statusOpen, progressHigh}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := goMatchedValues(body, tc.sel)
+			if err != nil {
+				t.Fatalf("go matched values: %v", err)
+			}
+			cmd := exec.Command(clql, tc.args...)
+			out, err := cmd.CombinedOutput()
+			gotMatch := err == nil
+			wantMatch := len(want) != 0
+			if gotMatch != wantMatch {
+				t.Fatalf("clql multi-selector match mismatch: got=%v want=%v err=%v out=%q", gotMatch, wantMatch, err, string(out))
+			}
+			got, err := decodeJSONValues(out)
+			if err != nil {
+				t.Fatalf("decode clql multi-selector output: %v output=%q", err, string(out))
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("clql multi-selector mismatch: got=%#v want=%#v output=%q", got, want, string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLSeekableFileProjectionParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

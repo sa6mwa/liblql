@@ -158,6 +158,52 @@ static int add_projection_arg(projection_args *args, const char *path) {
   return 1;
 }
 
+static char *join_selector_args(const projection_args *args, size_t skip_index,
+                                int has_skip) {
+  size_t i;
+  size_t count;
+  size_t total;
+  char *out;
+  char *cursor;
+
+  count = 0u;
+  total = 1u;
+  for (i = 0u; i < args->count; ++i) {
+    if (has_skip && i == skip_index) {
+      continue;
+    }
+    total += strlen(args->items[i]);
+    if (count != 0u) {
+      ++total;
+    }
+    ++count;
+  }
+  if (count == 0u) {
+    return lql_strdup("");
+  }
+  out = (char *)malloc(total);
+  if (out == NULL) {
+    return NULL;
+  }
+  cursor = out;
+  count = 0u;
+  for (i = 0u; i < args->count; ++i) {
+    size_t len;
+    if (has_skip && i == skip_index) {
+      continue;
+    }
+    if (count != 0u) {
+      *cursor++ = ',';
+    }
+    len = strlen(args->items[i]);
+    memcpy(cursor, args->items[i], len);
+    cursor += len;
+    ++count;
+  }
+  *cursor = '\0';
+  return out;
+}
+
 static lql_status output_match_range(void *user,
                                      const lql_query_decision *decision) {
   output_ranges *ranges;
@@ -299,6 +345,7 @@ int main(int argc, char **argv) {
   lql_error error;
   const char *selector_expr;
   const char *input_path;
+  char *selector_expr_owned;
   FILE *input;
   FILE *range_source;
   int matches_only;
@@ -309,6 +356,7 @@ int main(int argc, char **argv) {
   int i;
   projection_args fields;
   projection_args mutations;
+  projection_args positionals;
   lql_projection *projection;
   lql_mutation_plan *mutation_plan;
   lql_mutation_parse_options mutation_options;
@@ -321,6 +369,7 @@ int main(int argc, char **argv) {
 
   memset(&fields, 0, sizeof(fields));
   memset(&mutations, 0, sizeof(mutations));
+  memset(&positionals, 0, sizeof(positionals));
   projection = NULL;
   mutation_plan = NULL;
   or_mode = 0;
@@ -331,18 +380,21 @@ int main(int argc, char **argv) {
   inline_tmp_path = NULL;
   inline_out = NULL;
   selector_expr = NULL;
+  selector_expr_owned = NULL;
   input_path = NULL;
   for (i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
       printf("clql %s\n", lql_version());
       free_projection_args(&fields);
       free_projection_args(&mutations);
+      free_projection_args(&positionals);
       return 0;
     }
     if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
       usage(stdout);
       free_projection_args(&fields);
       free_projection_args(&mutations);
+      free_projection_args(&positionals);
       return 0;
     }
     if (strcmp(argv[i], "--or") == 0 || strcmp(argv[i], "-O") == 0) {
@@ -364,6 +416,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "clql: theme option requires an argument\n");
         free_projection_args(&fields);
         free_projection_args(&mutations);
+        free_projection_args(&positionals);
         return 2;
       }
       ++i;
@@ -375,6 +428,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "clql: failed to record mutation expression\n");
         free_projection_args(&fields);
         free_projection_args(&mutations);
+        free_projection_args(&positionals);
         return 2;
       }
     } else if (strncmp(argv[i], "--mutate=", 9u) == 0) {
@@ -382,6 +436,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "clql: failed to record mutation expression\n");
         free_projection_args(&fields);
         free_projection_args(&mutations);
+        free_projection_args(&positionals);
         return 2;
       }
     } else if (strcmp(argv[i], "--field") == 0 || strcmp(argv[i], "-f") == 0) {
@@ -389,6 +444,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "clql: failed to record field path\n");
         free_projection_args(&fields);
         free_projection_args(&mutations);
+        free_projection_args(&positionals);
         return 2;
       }
     } else if (strncmp(argv[i], "--field=", 8u) == 0) {
@@ -396,17 +452,15 @@ int main(int argc, char **argv) {
         fprintf(stderr, "clql: failed to record field path\n");
         free_projection_args(&fields);
         free_projection_args(&mutations);
+        free_projection_args(&positionals);
         return 2;
       }
     } else if (strcmp(argv[i], "-") == 0) {
-      if (selector_expr == NULL) {
-        selector_expr = argv[i];
-      } else if (input_path == NULL) {
-        input_path = argv[i];
-      } else {
-        usage(stderr);
+      if (!add_projection_arg(&positionals, argv[i])) {
+        fprintf(stderr, "clql: failed to record positional argument\n");
         free_projection_args(&fields);
         free_projection_args(&mutations);
+        free_projection_args(&positionals);
         return 2;
       }
     } else if (argv[i][0] == '-') {
@@ -414,50 +468,80 @@ int main(int argc, char **argv) {
       usage(stderr);
       free_projection_args(&fields);
       free_projection_args(&mutations);
+      free_projection_args(&positionals);
       return 2;
-    } else if (selector_expr == NULL) {
-      selector_expr = argv[i];
-    } else if (input_path == NULL) {
-      input_path = argv[i];
     } else {
-      usage(stderr);
-      free_projection_args(&fields);
-      free_projection_args(&mutations);
-      return 2;
+      if (!add_projection_arg(&positionals, argv[i])) {
+        fprintf(stderr, "clql: failed to record positional argument\n");
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        free_projection_args(&positionals);
+        return 2;
+      }
     }
   }
-  if (mutations.count != 0u && selector_expr != NULL && input_path != NULL &&
-      is_regular_file_path(selector_expr)) {
-    fprintf(stderr, "clql: mutation input accepts a single JSON file\n");
+  if (mutations.count != 0u) {
+    size_t input_index;
+    int has_input;
+    has_input = 0;
+    input_index = positionals.count;
+    for (i = 0; i < (int)positionals.count; ++i) {
+      if (strcmp(positionals.items[i], "-") == 0 ||
+          is_regular_file_path(positionals.items[i])) {
+        if (has_input) {
+          fprintf(stderr, "clql: mutation input accepts a single JSON file\n");
+          free_projection_args(&fields);
+          free_projection_args(&mutations);
+          free_projection_args(&positionals);
+          return 2;
+        }
+        input_path = positionals.items[i];
+        input_index = (size_t)i;
+        has_input = 1;
+      }
+    }
+    selector_expr_owned =
+        join_selector_args(&positionals, input_index, has_input);
+  } else {
+    size_t input_index;
+    int has_input;
+    has_input = 0;
+    input_index = positionals.count;
+    if (positionals.count != 0u) {
+      input_index = positionals.count - 1u;
+      if (strcmp(positionals.items[input_index], "-") == 0 ||
+          is_regular_file_path(positionals.items[input_index])) {
+        input_path = positionals.items[input_index];
+        has_input = 1;
+      }
+    }
+    selector_expr_owned =
+        join_selector_args(&positionals, input_index, has_input);
+  }
+  if (selector_expr_owned == NULL) {
+    fprintf(stderr, "clql: failed to build selector expression\n");
     free_projection_args(&fields);
     free_projection_args(&mutations);
+    free_projection_args(&positionals);
     return 2;
   }
-  if (selector_expr != NULL && input_path == NULL &&
-      strcmp(selector_expr, "-") == 0) {
-    input_path = selector_expr;
-    selector_expr = "";
-  }
-  if (selector_expr != NULL && input_path == NULL &&
-      is_regular_file_path(selector_expr)) {
-    input_path = selector_expr;
-    selector_expr = "";
-  }
-  if (selector_expr == NULL) {
-    selector_expr = "";
-  }
+  selector_expr = selector_expr_owned;
   if (argc == 1) {
     usage(stderr);
+    free(selector_expr_owned);
     free_projection_args(&fields);
     free_projection_args(&mutations);
+    free_projection_args(&positionals);
     return 2;
   }
+  free_projection_args(&positionals);
   lql_error_init(&error);
   if (fields.count != 0u) {
     st = lql_projection_parse((const char *const *)fields.items, fields.count,
                               &projection, &error);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
+      free(selector_expr_owned);
       free_projection_args(&fields);
       free_projection_args(&mutations);
       return 2;
@@ -472,6 +556,7 @@ int main(int argc, char **argv) {
         &mutation_options, &mutation_plan, &error);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
+      free(selector_expr_owned);
       lql_projection_free(projection);
       free_projection_args(&fields);
       free_projection_args(&mutations);
@@ -482,6 +567,7 @@ int main(int argc, char **argv) {
                : lql_selector_parse(selector_expr, &selector, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
+    free(selector_expr_owned);
     lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
     free_projection_args(&fields);
@@ -490,6 +576,7 @@ int main(int argc, char **argv) {
   }
   if (inline_mode && mutation_plan == NULL) {
     fprintf(stderr, "clql: inline mode requires mutation expressions\n");
+    free(selector_expr_owned);
     lql_selector_free(selector);
     lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
@@ -499,6 +586,7 @@ int main(int argc, char **argv) {
   }
   if (inline_mode && (input_path == NULL || strcmp(input_path, "-") == 0)) {
     fprintf(stderr, "clql: inline mode requires a single JSON file\n");
+    free(selector_expr_owned);
     lql_selector_free(selector);
     lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
@@ -512,6 +600,7 @@ int main(int argc, char **argv) {
     input = open_input_path(input_path);
     if (input == NULL) {
       fprintf(stderr, "clql: failed to open input %s\n", input_path);
+      free(selector_expr_owned);
       lql_selector_free(selector);
       lql_mutation_plan_free(mutation_plan);
       lql_projection_free(projection);
@@ -522,6 +611,7 @@ int main(int argc, char **argv) {
     st = lql_query_file_decisions(selector, input, count_match, &count, &result,
                                   &error);
     close_input_path(input);
+    free(selector_expr_owned);
     lql_selector_free(selector);
     lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
@@ -538,6 +628,7 @@ int main(int argc, char **argv) {
     range_source = fopen(input_path, "rb");
     if (input == NULL || range_source == NULL) {
       fprintf(stderr, "clql: failed to open input %s\n", input_path);
+      free(selector_expr_owned);
       close_input_path(input);
       close_input_path(range_source);
       lql_selector_free(selector);
@@ -552,6 +643,7 @@ int main(int argc, char **argv) {
     if (inline_mode &&
         !create_inline_temp(input_path, &inline_tmp_path, &inline_out)) {
       fprintf(stderr, "clql: failed to create inline temp file\n");
+      free(selector_expr_owned);
       close_input_path(input);
       close_input_path(range_source);
       lql_selector_free(selector);
@@ -598,6 +690,7 @@ int main(int argc, char **argv) {
       free(inline_tmp_path);
       inline_tmp_path = NULL;
     }
+    free(selector_expr_owned);
     lql_selector_free(selector);
     lql_mutation_plan_free(mutation_plan);
     lql_projection_free(projection);
@@ -614,6 +707,7 @@ int main(int argc, char **argv) {
                                            projection, mutation_plan,
                                            matches_only, &result, &error);
   lql_selector_free(selector);
+  free(selector_expr_owned);
   lql_mutation_plan_free(mutation_plan);
   lql_projection_free(projection);
   free_projection_args(&fields);
