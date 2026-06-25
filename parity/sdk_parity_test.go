@@ -714,6 +714,37 @@ func TestSDKStreamingStopParity(t *testing.T) {
 	}
 }
 
+func TestSDKStreamingErrorParity(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  string
+	}{
+		{name: "truncated object candidate", doc: `{"status":"open"}` + "\n" + `{"status":`},
+		{name: "truncated array stream", doc: `[{"status":"open"},{"status":`},
+		{name: "invalid literal", doc: `{"status": tru}`},
+	}
+	for _, tc := range cases {
+		for _, mode := range []struct {
+			name string
+			id   int
+		}{
+			{name: "file decisions", id: 0},
+			{name: "file payloads", id: 1},
+			{name: "source spooled payloads", id: 2},
+			{name: "source decisions", id: 3},
+		} {
+			t.Run(tc.name+"/"+mode.name, func(t *testing.T) {
+				if _, err := goStreamQuery(`/status="open"`, tc.doc, mode.id, 0, 0, 0, false); err == nil {
+					t.Fatalf("go stream unexpectedly accepted malformed JSON: %q", tc.doc)
+				}
+				if _, err := cStreamQuery(`/status="open"`, tc.doc, mode.id, 0, 0, 0, false); err == nil {
+					t.Fatalf("liblql stream unexpectedly accepted malformed JSON: %q", tc.doc)
+				}
+			})
+		}
+	}
+}
+
 func goProjectJSON(fields []string, doc string) ([]byte, bool, error) {
 	paths, err := lql.ParseProjectionPaths(fields)
 	if err != nil {

@@ -36,6 +36,7 @@ var sdkParityCoverageManifest = []sdkParityCoverageRequirement{
 	{"streaming", "public liblql file and callback-source decision stream summaries match Go query stream summaries for current stream corpus", []string{"TestSDKStreamingDecisionParity"}},
 	{"streaming", "public liblql seekable and spooled payload streams match Go query stream payload behavior for current stream corpus", []string{"TestSDKStreamingPayloadParity"}},
 	{"streaming", "public liblql stream stop controls match Go query stream stop behavior for current stop corpus", []string{"TestSDKStreamingStopParity"}},
+	{"streaming", "public liblql stream JSON errors match Go query stream errors for current malformed corpus", []string{"TestSDKStreamingErrorParity"}},
 }
 
 func TestSDKParityCoverageManifest(t *testing.T) {

@@ -633,12 +633,18 @@ static void expect_stream_stop_controls(void) {
 }
 
 static void expect_stream_error_api(void) {
+  static const char malformed[] = "{\"status\":\"open\"}\n{\"status\":";
   FILE *source;
   FILE *out;
+  lql_selector *selector;
   lql_payload payload;
+  stream_seen seen;
+  payload_seen payload_seen_value;
+  chunk_reader reader;
   lql_error error;
   lql_status st;
 
+  selector = NULL;
   source = tmpfile();
   out = tmpfile();
   if (source == NULL || out == NULL) {
@@ -652,6 +658,77 @@ static void expect_stream_error_api(void) {
     ++failures;
     return;
   }
+
+  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("stream error selector parse failed: %s\n", error.message);
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  if (fwrite(malformed, 1u, strlen(malformed), source) != strlen(malformed) ||
+      fseek(source, 0L, SEEK_SET) != 0) {
+    printf("stream error malformed source setup failed\n");
+    lql_selector_free(selector);
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  memset(&seen, 0, sizeof(seen));
+  lql_error_init(&error);
+  st = lql_query_file_decisions(selector, source, record_decision, &seen, NULL,
+                                &error);
+  if (st != LQL_STATUS_JSON_ERROR) {
+    printf("malformed file decision stream status mismatch: %s\n",
+           error.message);
+    ++failures;
+  }
+  if (fseek(source, 0L, SEEK_SET) != 0) {
+    printf("stream error malformed source rewind failed\n");
+    ++failures;
+  } else {
+    memset(&payload_seen_value, 0, sizeof(payload_seen_value));
+    payload_seen_value.out = out;
+    lql_error_init(&error);
+    st = lql_query_file_matches(selector, source, record_payload,
+                                &payload_seen_value, NULL, &error);
+    if (st != LQL_STATUS_JSON_ERROR) {
+      printf("malformed file match stream status mismatch: %s\n",
+             error.message);
+      ++failures;
+    }
+  }
+  memset(&seen, 0, sizeof(seen));
+  memset(&reader, 0, sizeof(reader));
+  reader.data = malformed;
+  reader.len = strlen(malformed);
+  reader.chunk_size = 5u;
+  lql_error_init(&error);
+  st = lql_query_source_decisions(selector, read_chunk, &reader,
+                                  record_decision, &seen, NULL, &error);
+  if (st != LQL_STATUS_JSON_ERROR) {
+    printf("malformed source decision stream status mismatch: %s\n",
+           error.message);
+    ++failures;
+  }
+  memset(&payload_seen_value, 0, sizeof(payload_seen_value));
+  memset(&reader, 0, sizeof(reader));
+  reader.data = malformed;
+  reader.len = strlen(malformed);
+  reader.chunk_size = 5u;
+  payload_seen_value.out = out;
+  lql_error_init(&error);
+  st = lql_query_source_spooled_matches(selector, read_chunk, &reader,
+                                        record_spooled_payload,
+                                        &payload_seen_value, NULL, &error);
+  if (st != LQL_STATUS_JSON_ERROR) {
+    printf("malformed source spooled stream status mismatch: %s\n",
+           error.message);
+    ++failures;
+  }
+  lql_selector_free(selector);
 
   lql_error_init(&error);
   st =

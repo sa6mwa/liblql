@@ -570,9 +570,10 @@ Current implementation is an early slice:
   lib-to-lib parity, not a requirement that the C API mirror Go API shape;
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
-  payload kinds, and decoded matched payload JSON. Full non-stopped streams
-  report consumed input bytes, including trailing delimiters, while early-stop
-  streams retain candidate-end accounting for stop decisions;
+  payload kinds, decoded matched payload JSON, and malformed JSON stream
+  errors. Full non-stopped streams report consumed input bytes, including
+  trailing delimiters, while early-stop streams retain candidate-end accounting
+  for stop decisions;
 - the Go-backed SDK parity suite is intentionally excluded from sanitizer CTest
   presets because the cgo test process cannot reliably load an
   ASan-instrumented shared liblql with the ASan runtime first; project-owned C
