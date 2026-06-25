@@ -38,7 +38,12 @@ static lql_status count_match(void *user, const lql_query_decision *decision) {
 }
 
 static int seek_u64(FILE *file, lql_uint64 offset) {
-  return fseeko(file, (off_t)offset, SEEK_SET) == 0;
+  off_t seek_offset;
+  seek_offset = (off_t)offset;
+  if (seek_offset < (off_t)0 || (lql_uint64)seek_offset != offset) {
+    return 0;
+  }
+  return fseeko(file, seek_offset, SEEK_SET) == 0;
 }
 
 static int copy_range(FILE *in, FILE *out, lql_uint64 size) {
@@ -93,9 +98,8 @@ static lql_status output_match_range(void *user,
   if (ranges->projection != NULL) {
     int projected;
     if (lql_project_file_range(ranges->projection, ranges->source,
-                               decision->offset, decision->size,
-                               ranges->out, &projected,
-                               NULL) != LQL_STATUS_OK) {
+                               decision->offset, decision->size, ranges->out,
+                               &projected, NULL) != LQL_STATUS_OK) {
       return LQL_STATUS_JSON_ERROR;
     }
     if (!projected) {
@@ -167,8 +171,10 @@ static void close_input_path(FILE *file) {
 }
 
 static void usage(FILE *out) {
-  fprintf(out, "usage: clql [--or|-O] [-f field] [--matches-only|-M] selector [data.json]\n");
-  fprintf(out, "       clql [--or|-O] [--matches-only|-M] selector < data.json\n");
+  fprintf(out, "usage: clql [--or|-O] [-f field] [--matches-only|-M] selector "
+               "[data.json]\n");
+  fprintf(out,
+          "       clql [--or|-O] [--matches-only|-M] selector < data.json\n");
   fprintf(out, "       clql --version\n");
 }
 

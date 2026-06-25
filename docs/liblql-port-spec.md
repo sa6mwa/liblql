@@ -43,7 +43,9 @@ Target matrix follows the pkt.systems lifecycle:
 
 ## Dependency Boundary
 
-`lonejson v0.35.0` or newer is the JSON substrate.
+`lonejson v0.35.0` or newer is the JSON substrate. liblql obtains lonejson
+from the official GitHub release SDK archives for each target and verifies the
+archive SHA-256 before installing it into the local dependency cache.
 
 liblql must not implement bespoke JSON parsing, tokenization, escaping,
 serialization, stream framing, compacting, or payload spooling when lonejson can
@@ -226,16 +228,21 @@ source is seekable or rewindable, liblql must prefer offset/size based reread
 over candidate capture. Capture is only justified when the source cannot be
 revisited or when the caller explicitly selects a capture mode.
 
-As of lonejson `v0.35.0`, `lonejson_candidate_info` exposes candidate index,
-stream offset, byte size, and payload size as 64-bit range values. liblql should
-therefore treat CR 3 plus CR 6 as sufficient for decision-only candidate
-streaming and seekable-source payload reconstruction. The remaining work is
-liblql source policy, not JSON parser work:
+As of lonejson `v0.35.0`, the installed public header confirms that
+`lonejson_candidate_info` exposes candidate index, stream offset, byte size, and
+payload size as `lonejson_uint64` range values. liblql should therefore treat
+CR 3 plus CR 6 as sufficient for decision-only candidate streaming and
+seekable-source payload reconstruction. The remaining work is liblql source
+policy, not JSON parser work:
 
 - classify public input sources as seekable/rewindable or non-seekable;
 - expose seekable source ranges as callback-scoped payload handles;
 - use lonejson `CAPTURE_NONE` for decision-only and seekable plus-value paths;
 - use caller sinks or spooled handles only for non-seekable plus-value paths.
+
+Seekable range APIs use 64-bit liblql offsets and sizes. When a platform
+`FILE *` seek cannot represent a 64-bit range offset, liblql must fail the
+operation rather than truncating or wrapping the requested offset.
 
 ## CLI Scope
 
@@ -383,6 +390,9 @@ Current implementation is an early slice:
   exists;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
+- seekable `FILE *` range rereads reject offsets that cannot round-trip through
+  the platform `off_t`, so large-range failures are explicit instead of
+  truncated;
 - decision-only `FILE *` query streams expose stop controls for match count,
   candidate count, bytes read, and callback-requested graceful stop;
 - `clql -M/--matches-only` uses the decision-only streaming path over stdin

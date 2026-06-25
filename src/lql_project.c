@@ -52,7 +52,12 @@ struct lql_projection {
 };
 
 static int seek_u64(FILE *file, lql_uint64 offset) {
-  return fseeko(file, (off_t)offset, SEEK_SET) == 0;
+  off_t seek_offset;
+  seek_offset = (off_t)offset;
+  if (seek_offset < (off_t)0 || (lql_uint64)seek_offset != offset) {
+    return 0;
+  }
+  return fseeko(file, seek_offset, SEEK_SET) == 0;
 }
 
 static lonejson_status file_sink(void *user, const void *data, size_t len,
@@ -125,9 +130,8 @@ static char path_container_kind(const projection_path *path, size_t index) {
 
 static int add_segment(projection_path *path, char *segment) {
   char **next;
-  next = (char **)realloc(path->segments,
-                          sizeof(path->segments[0]) *
-                              (path->segment_count + 1u));
+  next = (char **)realloc(path->segments, sizeof(path->segments[0]) *
+                                              (path->segment_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -193,9 +197,8 @@ static int parse_projection_path(const char *raw, projection_path *out) {
     ++start;
   }
   end = start + strlen(start);
-  while (end > start &&
-         (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' ||
-          end[-1] == '\n')) {
+  while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' ||
+                         end[-1] == '\n')) {
     --end;
   }
   if (end == start) {
@@ -304,14 +307,13 @@ static int add_path(lql_projection *projection, projection_path *path) {
         projection_path_is_prefix(path, &projection->paths[i])) {
       return 0;
     }
-    if (projection_paths_have_container_conflict(&projection->paths[i],
-                                                 path)) {
+    if (projection_paths_have_container_conflict(&projection->paths[i], path)) {
       return 0;
     }
   }
-  next = (projection_path *)realloc(
-      projection->paths, sizeof(projection->paths[0]) *
-                             (projection->path_count + 1u));
+  next = (projection_path *)realloc(projection->paths,
+                                    sizeof(projection->paths[0]) *
+                                        (projection->path_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -419,9 +421,9 @@ static int ensure_open_capacity(projection_state *state, size_t need) {
     return 0;
   }
   state->open_kind = next_kind;
-  next_array_next = (size_t *)realloc(
-      state->open_array_next,
-      sizeof(state->open_array_next[0]) * next_capacity);
+  next_array_next =
+      (size_t *)realloc(state->open_array_next,
+                        sizeof(state->open_array_next[0]) * next_capacity);
   if (next_array_next == NULL) {
     return 0;
   }
@@ -634,9 +636,10 @@ static lonejson_status on_object_key_begin(void *user,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status on_object_key_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
+static lonejson_status on_object_key_chunk(void *user,
+                                           const lonejson_value_path *path,
+                                           const char *data, size_t len,
+                                           lonejson_error *error) {
   projection_state *state;
   (void)path;
   (void)error;
@@ -655,8 +658,8 @@ static lonejson_status on_object_key_end(void *user,
   state = (projection_state *)user;
   if (state->capturing &&
       lonejson_writer_key(&state->writer, state->key_buf,
-                          strlen(state->key_buf), state->error) !=
-          LONEJSON_STATUS_OK) {
+                          strlen(state->key_buf),
+                          state->error) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   return LONEJSON_STATUS_OK;
@@ -772,10 +775,9 @@ static lonejson_status on_number_end(void *user,
       projection_key(state, projected_path) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
-  if (state->in_number &&
-      lonejson_writer_number_text(&state->writer, state->num_buf,
-                                  state->num_len, state->error) !=
-          LONEJSON_STATUS_OK) {
+  if (state->in_number && lonejson_writer_number_text(
+                              &state->writer, state->num_buf, state->num_len,
+                              state->error) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   state->in_number = 0;
@@ -899,9 +901,8 @@ void lql_projection_free(lql_projection *projection) {
 }
 
 lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
-                                  lql_uint64 offset, lql_uint64 size,
-                                  FILE *out, int *out_found,
-                                  lql_error *error) {
+                                  lql_uint64 offset, lql_uint64 size, FILE *out,
+                                  int *out_found, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;

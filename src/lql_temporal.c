@@ -25,8 +25,7 @@ static int is_leap(int y) {
 }
 
 static int valid_ymd(int y, int m, int d) {
-  static const int days[] = {31, 28, 31, 30, 31, 30,
-                             31, 31, 30, 31, 30, 31};
+  static const int days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
   int max_day;
   if (m < 1 || m > 12 || d < 1) {
     return 0;
@@ -123,9 +122,8 @@ int lql_parse_temporal_literal(const char *raw, lql_temporal *out) {
     ++raw;
   }
   p = raw;
-  if (!parse_ndigits(&p, 4, &y) || *p++ != '-' ||
-      !parse_ndigits(&p, 2, &mo) || *p++ != '-' ||
-      !parse_ndigits(&p, 2, &d) || !valid_ymd(y, mo, d)) {
+  if (!parse_ndigits(&p, 4, &y) || *p++ != '-' || !parse_ndigits(&p, 2, &mo) ||
+      *p++ != '-' || !parse_ndigits(&p, 2, &d) || !valid_ymd(y, mo, d)) {
     return 0;
   }
   out->year = y;
@@ -146,9 +144,8 @@ int lql_parse_temporal_literal(const char *raw, lql_temporal *out) {
     return 0;
   }
   ++p;
-  if (!parse_ndigits(&p, 2, &h) || *p++ != ':' ||
-      !parse_ndigits(&p, 2, &mi) || *p++ != ':' ||
-      !parse_ndigits(&p, 2, &s) || h > 23 || mi > 59 || s > 60) {
+  if (!parse_ndigits(&p, 2, &h) || *p++ != ':' || !parse_ndigits(&p, 2, &mi) ||
+      *p++ != ':' || !parse_ndigits(&p, 2, &s) || h > 23 || mi > 59 || s > 60) {
     return 0;
   }
   if (*p == '.') {
@@ -193,8 +190,7 @@ int lql_parse_temporal_literal(const char *raw, lql_temporal *out) {
   return 1;
 }
 
-int lql_temporal_compare(const lql_temporal *left,
-                         const lql_temporal *right) {
+int lql_temporal_compare(const lql_temporal *left, const lql_temporal *right) {
   if (left->seconds < right->seconds) {
     return -1;
   }

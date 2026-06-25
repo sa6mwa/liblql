@@ -314,8 +314,8 @@ static int key_allowed_for_kind(lql_node_kind kind, const char *key) {
 
 static void free_seen_key_values(char *field, char *value, char *any,
                                  char *ignore_case, char *gt, char *gte,
-                                 char *lt, char *lte, char *after,
-                                 char *before, char *since) {
+                                 char *lt, char *lte, char *after, char *before,
+                                 char *since) {
   free(field);
   free(value);
   free(any);
@@ -442,8 +442,8 @@ static int ascii_equal_ignore_case(const char *a, const char *b) {
   return *a == '\0' && *b == '\0';
 }
 
-static int set_range_bound(lql_term *term, const char *key,
-                           const char *decoded, lql_error *error) {
+static int set_range_bound(lql_term *term, const char *key, const char *decoded,
+                           lql_error *error) {
   lql_temporal temporal;
   double number;
   int is_temporal;
@@ -487,8 +487,8 @@ static int set_range_bound(lql_term *term, const char *key,
   return 1;
 }
 
-static int set_date_bound(lql_term *term, const char *slot,
-                          const char *decoded, lql_error *error) {
+static int set_date_bound(lql_term *term, const char *slot, const char *decoded,
+                          lql_error *error) {
   lql_temporal temporal;
   if (strcmp(slot, "since") == 0) {
     if (ascii_equal_ignore_case(decoded, "now")) {
@@ -505,8 +505,7 @@ static int set_date_bound(lql_term *term, const char *slot,
     }
   }
   if (!lql_parse_temporal_literal(decoded, &temporal)) {
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
-                  "date selector bound invalid");
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR, "date selector bound invalid");
     return 0;
   }
   if (strcmp(slot, "value") == 0) {
@@ -670,9 +669,10 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       term->value = decoded;
       term->value_set = 1;
     } else if (kind == LQL_NODE_DATE &&
-               (key_is_after(key) || key_is_before(key) ||
-                key_is_since(key))) {
-      date_slot = key_is_after(key) ? "gt" : key_is_before(key) ? "lt" : "since";
+               (key_is_after(key) || key_is_before(key) || key_is_since(key))) {
+      date_slot = key_is_after(key)    ? "gt"
+                  : key_is_before(key) ? "lt"
+                                       : "since";
       if (!set_date_bound(term, date_slot, decoded, error)) {
         free(decoded);
         goto fail;
@@ -747,9 +747,9 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     goto fail_after_tokens;
   }
   if (kind == LQL_NODE_RANGE && !term->has_range_gt && !term->has_range_gte &&
-      !term->has_range_lt && !term->has_range_lte &&
-      !term->has_temporal_gt && !term->has_temporal_gte &&
-      !term->has_temporal_lt && !term->has_temporal_lte) {
+      !term->has_range_lt && !term->has_range_lte && !term->has_temporal_gt &&
+      !term->has_temporal_gte && !term->has_temporal_lt &&
+      !term->has_temporal_lte) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "range selector requires at least one bound");
     goto fail_after_tokens;
@@ -795,9 +795,9 @@ static int string_term_is_match_all_alias(lql_node_kind kind,
   if (term->field == NULL || term->any_count != 0u) {
     return 0;
   }
-  empty_value = (!term->value_set && term->value == NULL) ||
-                (term->value_set && term->value != NULL &&
-                 term->value[0] == '\0');
+  empty_value =
+      (!term->value_set && term->value == NULL) ||
+      (term->value_set && term->value != NULL && term->value[0] == '\0');
   if (!empty_value) {
     return 0;
   }
@@ -1194,8 +1194,7 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
       memset(&node, 0, sizeof(node));
       index = NULL;
       rest = NULL;
-      switch (parse_indexed_wrapper(tokens.items[i], &wrapper, &index,
-                                    &rest)) {
+      switch (parse_indexed_wrapper(tokens.items[i], &wrapper, &index, &rest)) {
       case -1:
         st = LQL_STATUS_NO_MEMORY;
         break;

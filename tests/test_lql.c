@@ -226,41 +226,43 @@ static void expect_stream_stop_controls(void) {
     return;
   }
 
-#define RUN_STOP_CASE(label, setup_options, setup_seen, want_calls, want_matched, want_reason) \
-  do {                                                                       \
-    fp = tmpfile();                                                          \
-    if (fp == NULL) {                                                        \
-      printf(label " tmpfile failed\n");                                     \
-      ++failures;                                                            \
-      break;                                                                 \
-    }                                                                        \
-    if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||             \
-        fseek(fp, 0L, SEEK_SET) != 0) {                                      \
-      printf(label " tmpfile write/seek failed\n");                         \
-      fclose(fp);                                                            \
-      ++failures;                                                            \
-      break;                                                                 \
-    }                                                                        \
-    memset(&options, 0, sizeof(options));                                    \
-    memset(&seen, 0, sizeof(seen));                                          \
-    memset(&result, 0, sizeof(result));                                      \
-    setup_options;                                                           \
-    setup_seen;                                                              \
-    st = lql_query_file_decisions_with_options(                              \
-        selector, fp, &options, record_decision, &seen, &result, &error);    \
-    fclose(fp);                                                              \
-    if (st != LQL_STATUS_OK) {                                               \
-      printf(label " query failed: %s\n", error.message);                   \
-      ++failures;                                                            \
-      break;                                                                 \
-    }                                                                        \
-    if (seen.calls != (want_calls) || seen.matched != (want_matched) ||      \
-        !result.stopped_early || result.stop_reason != (want_reason)) {      \
-      printf(label " stop mismatch calls=%d matched=%d stopped=%d reason=%d\n", \
-             seen.calls, seen.matched, result.stopped_early,                \
-             (int)result.stop_reason);                                       \
-      ++failures;                                                            \
-    }                                                                        \
+#define RUN_STOP_CASE(label, setup_options, setup_seen, want_calls,            \
+                      want_matched, want_reason)                               \
+  do {                                                                         \
+    fp = tmpfile();                                                            \
+    if (fp == NULL) {                                                          \
+      printf(label " tmpfile failed\n");                                       \
+      ++failures;                                                              \
+      break;                                                                   \
+    }                                                                          \
+    if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||               \
+        fseek(fp, 0L, SEEK_SET) != 0) {                                        \
+      printf(label " tmpfile write/seek failed\n");                            \
+      fclose(fp);                                                              \
+      ++failures;                                                              \
+      break;                                                                   \
+    }                                                                          \
+    memset(&options, 0, sizeof(options));                                      \
+    memset(&seen, 0, sizeof(seen));                                            \
+    memset(&result, 0, sizeof(result));                                        \
+    setup_options;                                                             \
+    setup_seen;                                                                \
+    st = lql_query_file_decisions_with_options(                                \
+        selector, fp, &options, record_decision, &seen, &result, &error);      \
+    fclose(fp);                                                                \
+    if (st != LQL_STATUS_OK) {                                                 \
+      printf(label " query failed: %s\n", error.message);                      \
+      ++failures;                                                              \
+      break;                                                                   \
+    }                                                                          \
+    if (seen.calls != (want_calls) || seen.matched != (want_matched) ||        \
+        !result.stopped_early || result.stop_reason != (want_reason)) {        \
+      printf(label                                                             \
+             " stop mismatch calls=%d matched=%d stopped=%d reason=%d\n",      \
+             seen.calls, seen.matched, result.stopped_early,                   \
+             (int)result.stop_reason);                                         \
+      ++failures;                                                              \
+    }                                                                          \
   } while (0)
 
   RUN_STOP_CASE("max matches", options.max_matches = 1u, (void)0, 1, 1,
@@ -301,7 +303,8 @@ static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len) {
 
 static void expect_projection_api(void) {
   static const char first[] =
-      "{\"id\":\"a\",\"count\":1,\"nested\":{\"x\":true},\"items\":[{\"sku\":\"A\"},{\"sku\":\"B\"}]}";
+      "{\"id\":\"a\",\"count\":1,\"nested\":{\"x\":true},\"items\":[{\"sku\":"
+      "\"A\"},{\"sku\":\"B\"}]}";
   static const char second[] = "{\"id\":\"b\"}";
   const char *fields[4];
   const char *missing[1];
@@ -357,8 +360,8 @@ static void expect_projection_api(void) {
     return;
   }
   found = 0;
-  st = lql_project_file_range(projection, source, 0u,
-                              (lql_uint64)strlen(first), out, &found, &error);
+  st = lql_project_file_range(projection, source, 0u, (lql_uint64)strlen(first),
+                              out, &found, &error);
   if (st != LQL_STATUS_OK) {
     printf("projection range failed: %s\n", error.message);
     ++failures;
@@ -366,7 +369,8 @@ static void expect_projection_api(void) {
     printf("projection expected found\n");
     ++failures;
   } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
-             strcmp(buf, "{\"id\":\"a\",\"nested\":{\"x\":true},\"items\":[null,{\"sku\":\"B\"}]}") != 0) {
+             strcmp(buf, "{\"id\":\"a\",\"nested\":{\"x\":true},\"items\":["
+                         "null,{\"sku\":\"B\"}]}") != 0) {
     printf("projection output mismatch: %s\n", buf);
     ++failures;
   }
@@ -383,10 +387,9 @@ static void expect_projection_api(void) {
     ++failures;
   } else {
     found = 0;
-    st = lql_project_file_range(projection, source,
-                                (lql_uint64)(strlen(first) + 1u),
-                                (lql_uint64)strlen(second), out, &found,
-                                &error);
+    st = lql_project_file_range(
+        projection, source, (lql_uint64)(strlen(first) + 1u),
+        (lql_uint64)strlen(second), out, &found, &error);
     if (st != LQL_STATUS_OK) {
       printf("second object projection failed: %s\n", error.message);
       ++failures;
@@ -406,8 +409,7 @@ static void expect_projection_api(void) {
   } else {
     found = 1;
     st = lql_project_file_range(projection, source, 0u,
-                                (lql_uint64)strlen(first), out, &found,
-                                &error);
+                                (lql_uint64)strlen(first), out, &found, &error);
     if (st != LQL_STATUS_OK) {
       printf("missing projection range failed: %s\n", error.message);
       ++failures;
@@ -456,6 +458,28 @@ static void expect_projection_api(void) {
     lql_projection_free(projection);
     ++failures;
   }
+
+  out = tmpfile();
+  root_field[0] = "/id";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse(root_field, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK || out == NULL) {
+    printf("large-offset projection setup failed\n");
+    ++failures;
+  } else {
+    found = 1;
+    st = lql_project_file_range(projection, source, ~(lql_uint64)0,
+                                (lql_uint64)strlen(first), out, &found, &error);
+    if (st != LQL_STATUS_JSON_ERROR || found) {
+      printf("large-offset projection unexpectedly succeeded\n");
+      ++failures;
+    }
+  }
+  lql_projection_free(projection);
+  if (out != NULL) {
+    fclose(out);
+  }
   fclose(source);
 
   source = tmpfile();
@@ -487,8 +511,8 @@ static void expect_projection_api(void) {
     ++failures;
   } else {
     found = 0;
-    st = lql_project_file_range(projection, source, 0u, 1u, out, &found,
-                                &error);
+    st =
+        lql_project_file_range(projection, source, 0u, 1u, out, &found, &error);
     if (st == LQL_STATUS_OK) {
       printf("scalar projection unexpectedly succeeded\n");
       ++failures;
@@ -523,9 +547,11 @@ int main(void) {
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":10}", 0);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":20}", 1);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":21}", 0);
-  expect_match("range{field=/timestamp,gte=2026-03-05T10:28:21Z,lt=2026-03-05T10:30:00Z}",
+  expect_match("range{field=/"
+               "timestamp,gte=2026-03-05T10:28:21Z,lt=2026-03-05T10:30:00Z}",
                "{\"timestamp\":\"2026-03-05T10:29:00Z\"}", 1);
-  expect_match("range{field=/timestamp,gte=2026-03-05T10:28:21Z,lt=2026-03-05T10:30:00Z}",
+  expect_match("range{field=/"
+               "timestamp,gte=2026-03-05T10:28:21Z,lt=2026-03-05T10:30:00Z}",
                "{\"timestamp\":\"2026-03-05T10:30:00Z\"}", 0);
   expect_match("date{field=/timestamp,after=2025-01-01,before=2025-01-03}",
                "{\"timestamp\":\"2025-01-02T06:00:00Z\"}", 1);
@@ -547,9 +573,13 @@ int main(void) {
                "{\"timestamp\":\"2099-01-01T00:00:00Z\"}", 1);
   expect_match("date{field=/timestamp,since=yesterday}",
                "{\"timestamp\":\"1970-01-01T00:00:00Z\"}", 0);
-  expect_match("date{f=/timestamp,after=2026-03-05T10:28:21.123,before=2026-03-05T10:28:21.123456790}",
+  expect_match("date{f=/"
+               "timestamp,after=2026-03-05T10:28:21.123,before=2026-03-05T10:"
+               "28:21.123456790}",
                "{\"timestamp\":\"2026-03-05T10:28:21.123456789Z\"}", 1);
-  expect_match("date{f=/timestamp,after=2026-03-05T10:28:21.123,before=2026-03-05T10:28:21.123456790}",
+  expect_match("date{f=/"
+               "timestamp,after=2026-03-05T10:28:21.123,before=2026-03-05T10:"
+               "28:21.123456790}",
                "{\"timestamp\":\"2026-03-05T10:28:21.123+01:00\"}", 0);
   expect_match("contains{field=/message,value=timeout}",
                "{\"message\":\"upstream timeout\"}", 1);
@@ -580,8 +610,7 @@ int main(void) {
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("prefix{field=/service,value=auth}",
                "{\"service\":\"auth-api\"}", 1);
-  expect_match("prefix{field=/metadata}", "{\"metadata\":{\"etag\":\"x\"}}",
-               1);
+  expect_match("prefix{field=/metadata}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
   expect_match("iprefix{field=/metadata}", "{\"metadata\":{\"etag\":\"x\"}}",
                1);
   expect_match("prefix{field=/metadata,value=\"\"}",
@@ -592,13 +621,10 @@ int main(void) {
   expect_match("in{field=/env,any=prod|stage}", "{\"env\":\"dev\"}", 0);
   expect_match("contains{f=/hello/*}", "{\"hello\":{\"name\":\"alice\"}}", 1);
   expect_match("contains{f=/hello/[]}", "{\"hello\":{\"0\":\"alice\"}}", 0);
-  expect_match("contains{f=/arrays/[]/id}", "{\"arrays\":[{\"id\":1}]}",
-               1);
+  expect_match("contains{f=/arrays/[]/id}", "{\"arrays\":[{\"id\":1}]}", 1);
   expect_match("contains{f=/arrays/*/id}", "{\"arrays\":[{\"id\":1}]}", 0);
-  expect_match("contains{f=/items[]/sku}", "{\"items\":[{\"sku\":\"a\"}]}",
-               1);
-  expect_match("contains{f=/items/**/sku}", "{\"items\":[{\"sku\":\"a\"}]}",
-               1);
+  expect_match("contains{f=/items[]/sku}", "{\"items\":[{\"sku\":\"a\"}]}", 1);
+  expect_match("contains{f=/items/**/sku}", "{\"items\":[{\"sku\":\"a\"}]}", 1);
   expect_match("contains{f=/groups/.../sku}",
                "{\"groups\":[{\"items\":[{\"sku\":\"b\"}]}]}", 1);
   expect_match("exists{/metadata/etag}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
@@ -617,22 +643,28 @@ int main(void) {
                "{\"msg\":\"timeout\"}", 1);
   expect_match("or.eq{field=/msg,value=warn},or.eq{field=/msg,value=timeout}",
                "{\"msg\":\"ok\"}", 0);
-  expect_match("and.eq{field=/status,value=open},and.range{field=/progress,gte=50}",
-               "{\"status\":\"open\",\"progress\":72}", 1);
-  expect_match("and.eq{field=/status,value=open},and.range{field=/progress,gte=50}",
-               "{\"status\":\"open\",\"progress\":4}", 0);
-  expect_match("and.0.eq{field=/status,value=open},and.0.range{field=/progress,gte=50}",
-               "{\"status\":\"open\",\"progress\":72}", 1);
-  expect_match("and.0.eq{field=/status,value=open},and.0.range{field=/progress,gte=50}",
-               "{\"status\":\"open\",\"progress\":4}", 0);
-  expect_match("or.0.eq{field=/status,value=open},or.0.range{field=/progress,gte=50}",
-               "{\"status\":\"open\",\"progress\":72}", 1);
-  expect_match("or.0.eq{field=/status,value=open},or.0.range{field=/progress,gte=50}",
-               "{\"status\":\"closed\",\"progress\":72}", 0);
+  expect_match(
+      "and.eq{field=/status,value=open},and.range{field=/progress,gte=50}",
+      "{\"status\":\"open\",\"progress\":72}", 1);
+  expect_match(
+      "and.eq{field=/status,value=open},and.range{field=/progress,gte=50}",
+      "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match(
+      "and.0.eq{field=/status,value=open},and.0.range{field=/progress,gte=50}",
+      "{\"status\":\"open\",\"progress\":72}", 1);
+  expect_match(
+      "and.0.eq{field=/status,value=open},and.0.range{field=/progress,gte=50}",
+      "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match(
+      "or.0.eq{field=/status,value=open},or.0.range{field=/progress,gte=50}",
+      "{\"status\":\"open\",\"progress\":72}", 1);
+  expect_match(
+      "or.0.eq{field=/status,value=open},or.0.range{field=/progress,gte=50}",
+      "{\"status\":\"closed\",\"progress\":72}", 0);
   expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"open\"}",
                1);
-  expect_match("not.eq{field=/status,value=closed}",
-               "{\"status\":\"closed\"}", 0);
+  expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"closed\"}",
+               0);
   expect_parse_error("contains{field=/message,value=timeout,any=error}");
   expect_parse_error("contains{field=/message,any=}");
   expect_parse_error("contains{field=/message,any=||}");
@@ -641,8 +673,10 @@ int main(void) {
   expect_parse_error("eq{field=/status,f=/other,value=open}");
   expect_parse_error("eq{field=/status,value=open,foo=bar}");
   expect_parse_error("eq{field=/status,value=open,ignoreCase=true}");
-  expect_parse_error("or.0.eq{field=/status,value=open},or.0.eq{field=/status,value=closed}");
-  expect_parse_error("and.0.eq{field=/status,value=open},and.0.eq{field=/status,value=closed}");
+  expect_parse_error(
+      "or.0.eq{field=/status,value=open},or.0.eq{field=/status,value=closed}");
+  expect_parse_error("and.0.eq{field=/status,value=open},and.0.eq{field=/"
+                     "status,value=closed}");
   expect_parse_error("range{field=/progress,gte=10,gte=20}");
   expect_parse_error("range{field=/progress,gte=10,foo=bar}");
   expect_parse_error("range{field=/progress,gte=10,lt=2025-01-01}");

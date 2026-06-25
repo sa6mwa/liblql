@@ -60,9 +60,8 @@ static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
   return 1;
 }
 
-static lonejson_status push_container(eval_doc *doc,
-                                      const lonejson_value_path *path,
-                                      int type) {
+static lonejson_status
+push_container(eval_doc *doc, const lonejson_value_path *path, int type) {
   int *next_types;
   size_t *next_depths;
   size_t next_cap;
@@ -91,8 +90,7 @@ static void pop_container(eval_doc *doc, const lonejson_value_path *path) {
   if (doc->container_count == 0u) {
     return;
   }
-  if (doc->container_depths[doc->container_count - 1u] ==
-      path->segment_count) {
+  if (doc->container_depths[doc->container_count - 1u] == path->segment_count) {
     --doc->container_count;
   }
 }
@@ -171,8 +169,7 @@ static int pattern_segment_is(const char *start, size_t len, const char *lit) {
 }
 
 static int pattern_segment_matches(const eval_doc *doc, const char *start,
-                                   size_t len,
-                                   const lonejson_value_path *path,
+                                   size_t len, const lonejson_value_path *path,
                                    size_t path_idx) {
   int parent_type;
   if (path_idx >= path->segment_count ||
@@ -192,8 +189,7 @@ static int pattern_segment_matches(const eval_doc *doc, const char *start,
 }
 
 static int path_matches_from(const eval_doc *doc, const char *seg,
-                             const lonejson_value_path *path,
-                             size_t path_idx) {
+                             const lonejson_value_path *path, size_t path_idx) {
   const char *slash;
   size_t len;
   size_t i;
@@ -464,7 +460,8 @@ static lonejson_status on_object_begin(void *user,
   return push_container(doc, path, '{');
 }
 
-static lonejson_status on_object_end(void *user, const lonejson_value_path *path,
+static lonejson_status on_object_end(void *user,
+                                     const lonejson_value_path *path,
                                      lonejson_error *error) {
   (void)error;
   pop_container((eval_doc *)user, path);

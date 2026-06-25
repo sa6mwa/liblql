@@ -202,6 +202,8 @@ Mirror Go `BenchmarkQueryStreamSynthetic` modes:
      the mode promises payload access;
    - for seekable fixture files, verify payload access can be satisfied by
      candidate offset and byte size without candidate capture;
+   - record candidate offsets and byte sizes as 64-bit values and fail the C
+     benchmark if the range cannot be represented by the public liblql API;
    - do not copy or retain full candidate payloads in the benchmark harness.
 
 4. `plus_value_plan`
