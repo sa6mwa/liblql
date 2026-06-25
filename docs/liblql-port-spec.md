@@ -565,6 +565,9 @@ Current implementation is an early slice:
   boolean flags that affect observable behavior, including
   `--compact=true`, `--matches-only=true|false`, `--or=true|false`, and
   `--enable-file-mutations=true|false`;
+- CLI pflag-compatible short option clusters are covered for supported
+  shorthand flags, including boolean clusters, short boolean `=true|false`
+  values, and clustered `-f`, `-m`, and `-t` value forms;
 - CLI pflag-compatible `--` end-of-options handling is covered so
   dash-prefixed positional input paths can be selected after the terminator;
 - CLI non-inline mutation supports multiple seekable input files and mixed

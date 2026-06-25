@@ -21,6 +21,7 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"cli", "help output", []string{"TestCLQLHelpSmoke"}},
 	{"cli", "prettyx theme compatibility no-op", []string{"TestCLQLThemeFlagCompatibility"}},
 	{"cli", "long boolean option value compatibility", []string{"TestCLQLBooleanFlagValueCompatibility"}},
+	{"cli", "short option cluster compatibility", []string{"TestCLQLShortOptionClusterCompatibility"}},
 	{"cli", "end-of-options positional compatibility", []string{"TestCLQLEndOfOptionsCompatibility"}},
 	{"selector", "scalar, string, numeric, temporal, path, wildcard, existence, and logical matching", []string{"TestCLQLSelectorParity"}},
 	{"selector", "relative date.since macros", []string{"TestCLQLSelectorSinceMacroParity"}},

@@ -216,6 +216,140 @@ static int parse_long_bool_option(const char *arg, const char *name,
   return parse_bool_text(arg + len + 1u, target);
 }
 
+static int parse_short_bool_value(const char *arg, size_t pos, int *target,
+                                  const char **error_message) {
+  if (arg[pos + 1u] != '=') {
+    return 0;
+  }
+  if (!parse_bool_text(arg + pos + 2u, target)) {
+    *error_message = "invalid boolean value for short option";
+    return -1;
+  }
+  return 1;
+}
+
+static int
+parse_short_option_cluster(char **argv, int argc, int *index, int *or_mode,
+                           int *matches_only, int *compact, int *inline_mode,
+                           int *enable_file_mutations, projection_args *fields,
+                           projection_args *mutations, int *show_help,
+                           int *show_version, const char **error_message) {
+  const char *arg;
+  size_t pos;
+  int bool_status;
+
+  arg = argv[*index];
+  if (arg == NULL || arg[0] != '-' || arg[1] == '-' || arg[1] == '\0' ||
+      arg[2] == '\0') {
+    return 0;
+  }
+  pos = 1u;
+  while (arg[pos] != '\0') {
+    switch (arg[pos]) {
+    case 'O':
+      bool_status = parse_short_bool_value(arg, pos, or_mode, error_message);
+      if (bool_status != 0) {
+        return bool_status > 0 ? 1 : -1;
+      }
+      *or_mode = 1;
+      ++pos;
+      break;
+    case 'M':
+      bool_status =
+          parse_short_bool_value(arg, pos, matches_only, error_message);
+      if (bool_status != 0) {
+        return bool_status > 0 ? 1 : -1;
+      }
+      *matches_only = 1;
+      ++pos;
+      break;
+    case 'c':
+      bool_status = parse_short_bool_value(arg, pos, compact, error_message);
+      if (bool_status != 0) {
+        return bool_status > 0 ? 1 : -1;
+      }
+      *compact = 1;
+      ++pos;
+      break;
+    case 'i':
+    case 'w':
+      bool_status =
+          parse_short_bool_value(arg, pos, inline_mode, error_message);
+      if (bool_status != 0) {
+        return bool_status > 0 ? 1 : -1;
+      }
+      *inline_mode = 1;
+      ++pos;
+      break;
+    case 'F':
+      bool_status = parse_short_bool_value(arg, pos, enable_file_mutations,
+                                           error_message);
+      if (bool_status != 0) {
+        return bool_status > 0 ? 1 : -1;
+      }
+      *enable_file_mutations = 1;
+      ++pos;
+      break;
+    case 'h':
+      *show_help = 1;
+      ++pos;
+      break;
+    case 'v':
+      *show_version = 1;
+      ++pos;
+      break;
+    case 'f': {
+      const char *value;
+      if (arg[pos + 1u] == '=') {
+        value = arg + pos + 2u;
+      } else if (arg[pos + 1u] != '\0') {
+        value = arg + pos + 1u;
+      } else if (*index + 1 >= argc) {
+        *error_message = "field option requires an argument";
+        return -1;
+      } else {
+        value = argv[++(*index)];
+      }
+      if (!add_projection_arg(fields, value)) {
+        *error_message = "failed to record field path";
+        return -1;
+      }
+      return 1;
+    }
+    case 'm': {
+      const char *value;
+      if (arg[pos + 1u] == '=') {
+        value = arg + pos + 2u;
+      } else if (arg[pos + 1u] != '\0') {
+        value = arg + pos + 1u;
+      } else if (*index + 1 >= argc) {
+        *error_message = "mutation option requires an argument";
+        return -1;
+      } else {
+        value = argv[++(*index)];
+      }
+      if (!add_projection_arg(mutations, value)) {
+        *error_message = "failed to record mutation expression";
+        return -1;
+      }
+      return 1;
+    }
+    case 't':
+      if (arg[pos + 1u] == '\0') {
+        if (*index + 1 >= argc) {
+          *error_message = "theme option requires an argument";
+          return -1;
+        }
+        ++(*index);
+      }
+      return 1;
+    default:
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static char *join_selector_args(const projection_args *args, size_t skip_index,
                                 int has_skip) {
   size_t i;
@@ -501,6 +635,8 @@ int main(int argc, char **argv) {
   int inline_mode;
   int enable_file_mutations;
   int end_options;
+  int show_help;
+  int show_version;
   int i;
   projection_args fields;
   projection_args mutations;
@@ -528,6 +664,8 @@ int main(int argc, char **argv) {
   inline_mode = 0;
   enable_file_mutations = 0;
   end_options = 0;
+  show_help = 0;
+  show_version = 0;
   inline_tmp_path = NULL;
   inline_out = NULL;
   selector_expr = NULL;
@@ -561,6 +699,39 @@ int main(int argc, char **argv) {
       free_projection_args(&mutations);
       free_projection_args(&positionals);
       return 0;
+    }
+    {
+      const char *cluster_error;
+      int cluster_status;
+      cluster_error = NULL;
+      cluster_status = parse_short_option_cluster(
+          argv, argc, &i, &or_mode, &matches_only, &compact, &inline_mode,
+          &enable_file_mutations, &fields, &mutations, &show_help,
+          &show_version, &cluster_error);
+      if (cluster_status < 0) {
+        fprintf(stderr, "clql: %s\n", cluster_error);
+        free_projection_args(&fields);
+        free_projection_args(&mutations);
+        free_projection_args(&positionals);
+        return 2;
+      }
+      if (cluster_status > 0) {
+        if (show_help) {
+          usage(stdout);
+          free_projection_args(&fields);
+          free_projection_args(&mutations);
+          free_projection_args(&positionals);
+          return 0;
+        }
+        if (show_version) {
+          printf("clql %s\n", lql_version());
+          free_projection_args(&fields);
+          free_projection_args(&mutations);
+          free_projection_args(&positionals);
+          return 0;
+        }
+        continue;
+      }
     }
     if (strcmp(argv[i], "--or") == 0 || strcmp(argv[i], "-O") == 0) {
       or_mode = 1;

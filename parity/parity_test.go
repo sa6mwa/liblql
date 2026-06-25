@@ -935,6 +935,71 @@ func TestCLQLBooleanFlagValueCompatibility(t *testing.T) {
 	})
 }
 
+func TestCLQLShortOptionClusterCompatibility(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	t.Run("boolean cluster", func(t *testing.T) {
+		cmd := exec.Command(clql, "-cO", `/status="open",/progress>=50`)
+		cmd.Stdin = bytes.NewBufferString(`{"status":"closed","progress":72}`)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql -cO failed: %v out=%q", err, string(out))
+		}
+		if string(out) != "{\"status\":\"closed\",\"progress\":72}\n" {
+			t.Fatalf("clql -cO output mismatch: %q", string(out))
+		}
+	})
+	t.Run("short boolean false value", func(t *testing.T) {
+		cmd := exec.Command(clql, "-cO=false", `/status="open",/progress>=50`)
+		cmd.Stdin = bytes.NewBufferString(`{"status":"closed","progress":72}`)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("clql -cO=false unexpectedly matched: out=%q", string(out))
+		}
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("clql -cO=false exit mismatch: err=%v out=%q", err, string(out))
+		}
+		if len(out) != 0 {
+			t.Fatalf("clql -cO=false wrote output: %q", string(out))
+		}
+	})
+	t.Run("clustered field value", func(t *testing.T) {
+		cmd := exec.Command(clql, "-cf/status", `/status="open"`)
+		cmd.Stdin = bytes.NewBufferString(`{"status":"open","id":"a"}`)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql -cf/status failed: %v out=%q", err, string(out))
+		}
+		if string(out) != "{\"status\":\"open\"}\n" {
+			t.Fatalf("clql -cf/status output mismatch: %q", string(out))
+		}
+	})
+	t.Run("clustered mutation value", func(t *testing.T) {
+		cmd := exec.Command(clql, "-cm/status=done", `/status="open"`)
+		cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql -cm/status=done failed: %v out=%q", err, string(out))
+		}
+		if string(out) != "{\"status\":\"done\"}\n" {
+			t.Fatalf("clql -cm/status=done output mismatch: %q", string(out))
+		}
+	})
+	t.Run("clustered or and matches only", func(t *testing.T) {
+		cmd := exec.Command(clql, "-cMm/status=done", `/status="open"`)
+		cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql -cMm/status=done failed: %v out=%q", err, string(out))
+		}
+		if string(out) != "{\"status\":\"done\"}\n" {
+			t.Fatalf("clql -cMm/status=done output mismatch: %q", string(out))
+		}
+	})
+}
+
 func TestCLQLEndOfOptionsCompatibility(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
