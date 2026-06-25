@@ -964,10 +964,26 @@ static void assign_hit_indexes(lql_node *node, size_t *next) {
   }
 }
 
+static int append_node(lql_node *parent, lql_node *child) {
+  lql_node *next;
+  next = (lql_node *)realloc(parent->children,
+                             sizeof(lql_node) * (parent->child_count + 1u));
+  if (next == NULL) {
+    return 0;
+  }
+  parent->children = next;
+  parent->children[parent->child_count] = *child;
+  ++parent->child_count;
+  memset(child, 0, sizeof(*child));
+  return 1;
+}
+
 lql_status lql_parse_selector_internal(const char *expr, int or_mode,
                                        lql_selector **out, lql_error *error) {
   lql_token_list tokens;
   lql_selector *selector;
+  lql_node node;
+  lql_node or_group;
   size_t i;
   lql_status st;
 
@@ -999,16 +1015,36 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
   } else if (tokens.count == 1u) {
     st = parse_one(tokens.items[0], &selector->root, error);
   } else {
+    memset(&or_group, 0, sizeof(or_group));
+    or_group.kind = LQL_NODE_OR;
     selector->root.kind = or_mode ? LQL_NODE_OR : LQL_NODE_AND;
-    selector->root.children =
-        (lql_node *)calloc(tokens.count, sizeof(lql_node));
-    if (selector->root.children == NULL) {
-      st = LQL_STATUS_NO_MEMORY;
-    } else {
-      selector->root.child_count = tokens.count;
-      for (i = 0u; i < tokens.count && st == LQL_STATUS_OK; ++i) {
-        st = parse_one(tokens.items[i], &selector->root.children[i], error);
+    for (i = 0u; i < tokens.count && st == LQL_STATUS_OK; ++i) {
+      memset(&node, 0, sizeof(node));
+      st = parse_one(tokens.items[i], &node, error);
+      if (st != LQL_STATUS_OK) {
+        break;
       }
+      if (!or_mode && node.kind == LQL_NODE_OR && node.child_count == 1u) {
+        if (!append_node(&or_group, &node.children[0])) {
+          lql_node_cleanup(&node);
+          st = LQL_STATUS_NO_MEMORY;
+          break;
+        }
+        free(node.children);
+        node.children = NULL;
+        node.child_count = 0u;
+      } else if (!append_node(&selector->root, &node)) {
+        lql_node_cleanup(&node);
+        st = LQL_STATUS_NO_MEMORY;
+        break;
+      }
+    }
+    if (st == LQL_STATUS_OK && !or_mode && or_group.child_count != 0u &&
+        !append_node(&selector->root, &or_group)) {
+      st = LQL_STATUS_NO_MEMORY;
+    }
+    if (or_group.child_count != 0u) {
+      lql_node_cleanup(&or_group);
     }
   }
   token_list_cleanup(&tokens);

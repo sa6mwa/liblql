@@ -67,6 +67,12 @@ func TestCLQLSelectorParity(t *testing.T) {
 		{`exists{/metadata/etag}`, `{"metadata":{"etag":"x"}}`},
 		{`/status="open",/progress>=50`, `{"status":"open","progress":72}`},
 		{`/status="open",/progress>=50`, `{"status":"open","progress":4}`},
+		{`or.eq{field=/msg,value=warn},or.eq{field=/msg,value=timeout}`, `{"msg":"timeout"}`},
+		{`or.eq{field=/msg,value=warn},or.eq{field=/msg,value=timeout}`, `{"msg":"ok"}`},
+		{`and.eq{field=/status,value=open},and.range{field=/progress,gte=50}`, `{"status":"open","progress":72}`},
+		{`and.eq{field=/status,value=open},and.range{field=/progress,gte=50}`, `{"status":"open","progress":4}`},
+		{`not.eq{field=/status,value=closed}`, `{"status":"open"}`},
+		{`not.eq{field=/status,value=closed}`, `{"status":"closed"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.expr+"/"+tc.doc, func(t *testing.T) {

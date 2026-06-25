@@ -269,6 +269,18 @@ int main(void) {
                "{\"status\":\"open\",\"progress\":72}", 1);
   expect_match("/status=\"open\",/progress>=50",
                "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match("or.eq{field=/msg,value=warn},or.eq{field=/msg,value=timeout}",
+               "{\"msg\":\"timeout\"}", 1);
+  expect_match("or.eq{field=/msg,value=warn},or.eq{field=/msg,value=timeout}",
+               "{\"msg\":\"ok\"}", 0);
+  expect_match("and.eq{field=/status,value=open},and.range{field=/progress,gte=50}",
+               "{\"status\":\"open\",\"progress\":72}", 1);
+  expect_match("and.eq{field=/status,value=open},and.range{field=/progress,gte=50}",
+               "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"open\"}",
+               1);
+  expect_match("not.eq{field=/status,value=closed}",
+               "{\"status\":\"closed\"}", 0);
   expect_parse_error("contains{field=/message,value=timeout,any=error}");
   expect_parse_error("contains{field=/message,value=timeout,value=error}");
   expect_parse_error("contains{field=/message,value=timeout,ignoreCase=maybe}");
