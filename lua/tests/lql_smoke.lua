@@ -307,6 +307,35 @@ assert_equal(result.candidates_seen, 2, "query_source candidates")
 assert_equal(result.candidates_matched, 1, "query_source matches")
 assert_equal(source_decisions[2].matched, true, "query_source second match")
 
+source_chunks = {'[{"id":"a"},[{"id":"b"}],{"id":"c"}]'}
+source_index = 1
+source_decisions = {}
+result, err = client:query_source('/id="b"', function(capacity)
+  local chunk = source_chunks[source_index]
+  if not chunk then
+    return nil
+  end
+  if #chunk > capacity then
+    source_chunks[source_index] = string.sub(chunk, capacity + 1)
+    return string.sub(chunk, 1, capacity)
+  end
+  source_index = source_index + 1
+  return chunk
+end, function(decision)
+  source_decisions[#source_decisions + 1] = decision
+end)
+result = assert_no_error(result, err, "query_source nested array")
+assert_equal(result.candidates_seen, 3,
+             "query_source nested array candidates")
+assert_equal(result.candidates_matched, 1,
+             "query_source nested array matches")
+assert_equal(source_decisions[1].matched, false,
+             "query_source nested array first miss")
+assert_equal(source_decisions[2].matched, true,
+             "query_source nested array second match")
+assert_equal(source_decisions[3].matched, false,
+             "query_source nested array third miss")
+
 source_chunks = {
   '{"status":"closed","id":"ss1"}\n',
   '{"status":"open","id":"ss2","count":6}\n'
