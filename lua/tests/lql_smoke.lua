@@ -100,12 +100,18 @@ if callback_error_result ~= nil or not callback_error or
 end
 
 local payloads = {}
+local streamed_payloads = {}
 local retained_payload
 result, err = client:each_match_file('/status="open"', input_path,
                                     function(match)
+  local chunks = {}
   retained_payload = match
+  assert_no_error(match.write_json(function(chunk)
+    chunks[#chunks + 1] = chunk
+  end), nil, "each_match_file write_json")
   payloads[#payloads + 1] = assert_no_error(match.json(), nil,
                                             "each_match_file payload")
+  streamed_payloads[#streamed_payloads + 1] = table.concat(chunks)
 end)
 result = assert_no_error(result, err, "each_match_file")
 assert_equal(result.candidates_seen, 2, "each_match_file candidates")
@@ -113,9 +119,32 @@ assert_equal(result.candidates_matched, 1, "each_match_file matches")
 assert_equal(payloads[1],
              '{"status":"open","id":"b","count":2,"state":{"old":true}}',
              "each_match_file payload")
+assert_equal(streamed_payloads[1], payloads[1],
+             "each_match_file streamed payload")
 local late_payload, late_err = retained_payload.json()
 if late_payload ~= nil or not late_err or late_err.stderr == "" then
   fail("expected expired payload handle error")
+end
+local late_stream, late_stream_err = retained_payload.write_json(function(_) end)
+if late_stream ~= nil or not late_stream_err or late_stream_err.stderr == "" then
+  fail("expected expired payload stream handle error")
+end
+
+local stream_callback_result, stream_callback_error
+stream_callback_result, stream_callback_error =
+  client:each_match_file('/status="open"', input_path, function(match)
+    local ok, stream_err = match.write_json(function(_)
+      error("payload stream failed")
+    end)
+    if ok ~= nil or not stream_err then
+      error("expected payload stream callback error")
+    end
+    error(stream_err.stderr or "missing stream callback error")
+  end)
+if stream_callback_result ~= nil or not stream_callback_error or
+    not string.find(stream_callback_error.stderr or "", "payload stream failed",
+                    1, true) then
+  fail("expected structured payload write_json callback error")
 end
 
 local match_limited_count = 0

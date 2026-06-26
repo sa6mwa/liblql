@@ -810,15 +810,18 @@ Current implementation is an early slice:
   `lql.new()` returns a C-owned client userdata backed by a public `lql *`
   receiver, with deterministic smoke tests for selector decisions, selection
   output, callback decision streams, callback-scoped seekable payload handles,
-  file and buffered-JSON projection, file and buffered-JSON mutation, query
-  stop reasons, candidate/match limit options, expired payload handles,
-  callback error propagation, and structured errors;
+  callback-scoped payload streaming through `match.write_json(callback)`, file
+  and buffered-JSON projection, file and buffered-JSON mutation, query stop
+  reasons, candidate/match limit options, expired payload handles, callback
+  error propagation, and structured errors;
 - the parity benchmark surface now has Go, C, and Lua runners over the shared
   generated fixture matrix; the Lua runner loads `lua/lql.lua` and uses the
   direct `lql.core` module rather than shelling out to `clql`; Go helper
   records, C native helper records, and Lua facade runner records now report
-  `ns_per_op`, while Go and C helper records also report OS `getrusage` peak
-  RSS as `peak_rss_bytes` for the benchmark schema;
+  `ns_per_op`, Lua plus-value benchmark modes count bytes through
+  `match.write_json(callback)` instead of `match.json()` materialization, while
+  Go and C helper records also report OS `getrusage` peak RSS as
+  `peak_rss_bytes` for the benchmark schema;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and

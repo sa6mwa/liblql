@@ -115,7 +115,9 @@ Current implementation status:
 - `make benchmarks-lua` loads `lua/lql.lua`, which uses the direct Lua 5.5
   `lql.core` C module over public liblql APIs, creates a receiver-backed
   client with `lql.new()`, performs an untimed warmup pass for `steady_state`,
-  and emits timed stable JSON Lines records.
+  counts plus-value payload bytes through `match.write_json(callback)` rather
+  than `match.json()` materialization, and emits timed stable JSON Lines
+  records.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
   and fails on missing runners or counter divergence.
 
@@ -397,7 +399,9 @@ Lua benchmark entry points should support:
 - optional reusable compiled selector/plan if the Lua API exposes one;
 - streaming candidates from a dataset file;
 - returning candidate and match counts;
-- callback-scoped payload/open-read modes when Lua exposes payload handles.
+- callback-scoped payload/open-read modes when Lua exposes payload handles;
+- callback-scoped payload write callbacks that avoid materializing the whole
+  payload as a Lua string.
 
 Lua unsupported modes must be explicit result records. Silent absence is a
 benchmark failure.

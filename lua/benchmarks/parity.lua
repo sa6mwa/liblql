@@ -35,12 +35,13 @@ local function run_once()
       mode == "plus_value_openjson_selector" or
       mode == "plus_value_openjson_plan" then
     result, err = client:each_match_file(expr, fixture, function(match)
-      local payload, payload_err = match.json()
+      local ok, payload_err = match.write_json(function(chunk)
+        payload_bytes = payload_bytes + #chunk
+      end)
       if payload_err then
         die(payload_err.stderr or "payload read failed")
       end
       payloads = payloads + 1
-      payload_bytes = payload_bytes + #payload
     end)
   elseif mode ~= "decision_only_selector" and mode ~= "decision_only_plan" then
     die("unsupported mode: " .. mode)

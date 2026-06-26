@@ -32,6 +32,8 @@ typedef struct lua_lql_file_state {
   const lql_projection *projection;
   const lql_mutation_plan *mutation_plan;
   lql_error *error;
+  int callback_failed;
+  char callback_message[256];
 } lua_lql_file_state;
 
 typedef struct lua_lql_payload_handle {
@@ -39,6 +41,14 @@ typedef struct lua_lql_payload_handle {
   int active;
   lql_payload payload;
 } lua_lql_payload_handle;
+
+typedef struct lua_lql_payload_sink {
+  lua_State *lua;
+  int callback_ref;
+  lql_error *error;
+  int callback_failed;
+  char callback_message[256];
+} lua_lql_payload_sink;
 
 #define LUA_LQL_CLIENT "lql.client"
 
@@ -111,6 +121,20 @@ static int lua_lql_fail(lua_State *L, const lql_error *error) {
   lua_pushnil(L);
   lua_lql_push_error(L, error);
   return 2;
+}
+
+static void lua_lql_record_callback_error(lua_State *L,
+                                          lua_lql_file_state *state) {
+  const char *message;
+
+  message = lua_tostring(L, -1);
+  state->callback_failed = 1;
+  strncpy(state->callback_message,
+          message != NULL ? message : "callback failed",
+          sizeof(state->callback_message) - 1u);
+  state->callback_message[sizeof(state->callback_message) - 1u] = '\0';
+  lua_lql_set_error(state->error, LQL_STATUS_INVALID_ARGUMENT,
+                    state->callback_message);
 }
 
 static lql_status lua_lql_write_buffer(void *user, const void *data,
@@ -310,6 +334,68 @@ static int lua_lql_payload_json(lua_State *L) {
   return 1;
 }
 
+static lql_status lua_lql_payload_write_chunk(void *user, const void *data,
+                                              size_t len) {
+  lua_lql_payload_sink *sink;
+  lua_State *L;
+  const char *message;
+  int ok;
+
+  sink = (lua_lql_payload_sink *)user;
+  L = sink->lua;
+  lua_rawgeti(L, LUA_REGISTRYINDEX, sink->callback_ref);
+  lua_pushlstring(L, (const char *)data, len);
+  ok = lua_pcall(L, 1, 0, 0);
+  if (ok != LUA_OK) {
+    message = lua_tostring(L, -1);
+    sink->callback_failed = 1;
+    strncpy(sink->callback_message,
+            message != NULL ? message : "payload write callback failed",
+            sizeof(sink->callback_message) - 1u);
+    sink->callback_message[sizeof(sink->callback_message) - 1u] = '\0';
+    lua_lql_set_error(sink->error, LQL_STATUS_INVALID_ARGUMENT,
+                      sink->callback_message);
+    lua_pop(L, 1);
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return LQL_STATUS_OK;
+}
+
+static int lua_lql_payload_write_json(lua_State *L) {
+  lua_lql_payload_handle *handle;
+  lua_lql_payload_sink sink;
+  lql_error error;
+  lql_status st;
+
+  handle = (lua_lql_payload_handle *)lua_touserdata(L, lua_upvalueindex(1));
+  if (handle == NULL || !handle->active) {
+    lql_error_init(&error);
+    lua_lql_set_error(&error, LQL_STATUS_INVALID_ARGUMENT,
+                      "payload handle is no longer active");
+    return lua_lql_fail(L, &error);
+  }
+  luaL_checktype(L, 1, LUA_TFUNCTION);
+  lql_error_init(&error);
+  memset(&sink, 0, sizeof(sink));
+  sink.lua = L;
+  sink.error = &error;
+  lua_pushvalue(L, 1);
+  sink.callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+  st = handle->ctx->payload_write_json_sink(handle->ctx, &handle->payload,
+                                            lua_lql_payload_write_chunk, &sink,
+                                            &error);
+  luaL_unref(L, LUA_REGISTRYINDEX, sink.callback_ref);
+  if (sink.callback_failed) {
+    lua_lql_set_error(&error, LQL_STATUS_INVALID_ARGUMENT,
+                      sink.callback_message);
+  }
+  if (st != LQL_STATUS_OK) {
+    return lua_lql_fail(L, &error);
+  }
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
 static lql_status lua_lql_call_decision(lua_lql_file_state *state,
                                         const lql_query_decision *decision) {
   lua_State *L;
@@ -321,8 +407,7 @@ static lql_status lua_lql_call_decision(lua_lql_file_state *state,
   lua_lql_push_decision(L, decision);
   ok = lua_pcall(L, 1, 1, 0);
   if (ok != LUA_OK) {
-    lua_lql_set_error(state->error, LQL_STATUS_INVALID_ARGUMENT,
-                      lua_tostring(L, -1));
+    lua_lql_record_callback_error(L, state);
     lua_pop(L, 1);
     return LQL_STATUS_INVALID_ARGUMENT;
   }
@@ -353,13 +438,15 @@ static lql_status lua_lql_on_each_match_file(void *user,
   handle->active = 1;
   handle->ctx = state->ctx;
   handle->payload = match->payload;
+  lua_pushvalue(L, -1);
   lua_pushcclosure(L, lua_lql_payload_json, 1);
-  lua_setfield(L, -2, "json");
+  lua_setfield(L, -3, "json");
+  lua_pushcclosure(L, lua_lql_payload_write_json, 1);
+  lua_setfield(L, -2, "write_json");
   ok = lua_pcall(L, 1, 1, 0);
   handle->active = 0;
   if (ok != LUA_OK) {
-    lua_lql_set_error(state->error, LQL_STATUS_INVALID_ARGUMENT,
-                      lua_tostring(L, -1));
+    lua_lql_record_callback_error(L, state);
     lua_pop(L, 1);
     return LQL_STATUS_INVALID_ARGUMENT;
   }
@@ -807,6 +894,10 @@ static int lua_lql_query_file(lua_State *L) {
         &state, &result, &error);
     luaL_unref(L, LUA_REGISTRYINDEX, state.callback_ref);
   }
+  if (state.callback_failed) {
+    lua_lql_set_error(&error, LQL_STATUS_INVALID_ARGUMENT,
+                      state.callback_message);
+  }
   if (input != NULL) {
     fclose(input);
   }
@@ -860,6 +951,10 @@ static int lua_lql_each_match_file(lua_State *L) {
         client->ctx, selector, input, &options, lua_lql_on_each_match_file,
         &state, &result, &error);
     luaL_unref(L, LUA_REGISTRYINDEX, state.callback_ref);
+  }
+  if (state.callback_failed) {
+    lua_lql_set_error(&error, LQL_STATUS_INVALID_ARGUMENT,
+                      state.callback_message);
   }
   if (input != NULL) {
     fclose(input);
