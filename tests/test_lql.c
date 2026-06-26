@@ -4433,6 +4433,95 @@ static void expect_buffered_mutation_api(void) {
   fclose(out);
 }
 
+static void expect_buffered_wildcard_mutation_api(void) {
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_mutation_plan *plan;
+  const char *exprs[5];
+  char buf[1024];
+  size_t len;
+  static const char recursive_doc[] =
+      "{\"items\":[{\"status\":\"old\"}],\"boxes\":{\"a\":{\"status\":\"old\"}}"
+      ","
+      "\"groups\":[{\"items\":[{\"sku\":\"A\",\"count\":1,\"drop\":true}]}]}";
+  static const char array_doc[] =
+      "{\"nums\":[1,2],\"words\":[\"a\",\"b\"],\"drops\":[true,false],"
+      "\"objects\":[{\"a\":1}],\"groups\":[{\"items\":[{\"count\":1}]}]}";
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("buffered recursive wildcard mutation tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  exprs[0] = "/items/**/status=ready";
+  exprs[1] = "/boxes/**/status=ready";
+  exprs[2] = "/groups/.../sku=Z";
+  exprs[3] = "/groups/.../count=+2";
+  plan = NULL;
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 4u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("buffered recursive wildcard mutation plan parse failed: %s\n",
+           error.message);
+    ++failures;
+  } else {
+    st = test_ctx->mutate_json(test_ctx, plan, recursive_doc,
+                               strlen(recursive_doc), out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("buffered recursive wildcard mutation failed: %s\n",
+             error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf,
+                      "{\"items\":[{\"status\":\"ready\"}],\"boxes\":{\"a\":{"
+                      "\"status\":\"ready\"}},\"groups\":[{\"items\":[{"
+                      "\"sku\":\"Z\",\"count\":3,\"drop\":true}]}]}") != 0) {
+      printf("buffered recursive wildcard mutation output mismatch: %s\n",
+             buf);
+      ++failures;
+    }
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  fclose(out);
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("buffered array wildcard mutation tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  exprs[0] = "/nums[]=+2";
+  exprs[1] = "/words[]=ready";
+  exprs[2] = "rm:/drops[]";
+  exprs[3] = "/objects[]=done";
+  exprs[4] = "/groups/.../count=+2";
+  plan = NULL;
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 5u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("buffered array wildcard mutation plan parse failed: %s\n",
+           error.message);
+    ++failures;
+  } else {
+    st = test_ctx->mutate_json(test_ctx, plan, array_doc, strlen(array_doc),
+                               out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("buffered array wildcard mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf, "{\"nums\":[3,4],\"words\":[\"ready\",\"ready\"],"
+                           "\"drops\":[null,null],\"objects\":[\"done\"],"
+                           "\"groups\":[{\"items\":[{\"count\":3}]}]}") != 0) {
+      printf("buffered array wildcard mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  fclose(out);
+}
+
 static void expect_source_mutation_api(void) {
   FILE *out;
   lql_error error;
@@ -5910,6 +5999,8 @@ static void expect_sdk_contract_manifest(void) {
        expect_path_mutation_api},
       {"mutation", "caller-buffered JSON mutation",
        expect_buffered_mutation_api},
+      {"mutation", "caller-buffered wildcard JSON mutation",
+       expect_buffered_wildcard_mutation_api},
       {"mutation", "caller-provided source mutation",
        expect_source_mutation_api},
       {"mutation", "seekable candidate stream mutation",
@@ -5941,7 +6032,7 @@ static void expect_sdk_contract_manifest(void) {
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
       {"version", 1},      {"selector", 7}, {"streaming", 11},
-      {"projection", 7},   {"compact", 2},  {"mutation", 19},
+      {"projection", 7},   {"compact", 2},  {"mutation", 20},
   };
   size_t i;
   size_t j;
@@ -6654,6 +6745,7 @@ int main(void) {
   expect_root_field_mutation_api();
   expect_path_mutation_api();
   expect_buffered_mutation_api();
+  expect_buffered_wildcard_mutation_api();
   expect_source_mutation_api();
   expect_file_range_candidate_mutation_api();
   expect_source_candidate_mutation_api();

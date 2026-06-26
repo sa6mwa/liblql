@@ -1013,7 +1013,9 @@ Current implementation status:
 - C SDK mutation tests assert ordered wildcard error precedence: an earlier
   wildcard increment that matches a non-numeric descendant is still evaluated
   and reported when a later parent replacement would otherwise skip the
-  original subtree;
+  original subtree; C SDK tests also assert recursive wildcard and array
+  wildcard mutation behavior through the caller-buffered `ctx->mutate_json()`
+  surface, not only through seekable file-range mutation;
 - C SDK selector tests assert omitted-value string selectors
   (`contains`/`icontains`/`prefix`/`iprefix`) act as path-existence assertions
   across object, array, and null values, including wildcard path variants, while
