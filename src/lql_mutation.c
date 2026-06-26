@@ -1362,8 +1362,7 @@ static int mutation_value_index(const mutation_stream_state *state,
     return 0;
   }
   for (i = 0u; i < state->plan->count; ++i) {
-    if (mutation_path_has_wildcard(&state->plan->items[i].path) &&
-        value_path_item_matches_from(state, &state->plan->items[i].path, 0u,
+    if (value_path_item_matches_from(state, &state->plan->items[i].path, 0u,
                                      path, 0u)) {
       *out = i;
       return 1;
@@ -1677,10 +1676,6 @@ static lonejson_status
 begin_array_value_mutation(mutation_stream_state *state,
                            const lonejson_value_path *path,
                            lonejson_error *error, int *matched);
-static lonejson_status
-write_array_replacement_object(mutation_stream_state *state,
-                               const lonejson_value_path *path,
-                               lonejson_error *error);
 
 static lonejson_status mutation_object_begin(void *user,
                                              const lonejson_value_path *path,
@@ -1722,18 +1717,6 @@ static lonejson_status mutation_object_begin(void *user,
     ++state->skip_depth;
     ++state->source_depth;
     return LONEJSON_STATUS_OK;
-  }
-  if (value_path_is_array_element(state, path)) {
-    if (write_array_replacement_object(state, path, error) !=
-        LONEJSON_STATUS_OK) {
-      mutation_pop_path_frame(state);
-      return LONEJSON_STATUS_CALLBACK_FAILED;
-    }
-    if (state->skipping) {
-      ++state->skip_depth;
-      ++state->source_depth;
-      return LONEJSON_STATUS_OK;
-    }
   }
   ++state->source_depth;
   return lonejson_writer_begin_object(&state->writer, error);
@@ -1878,52 +1861,6 @@ write_missing_object_mutations(mutation_stream_state *state,
   return LONEJSON_STATUS_OK;
 }
 
-static int
-immediate_array_object_mutation_index(const mutation_stream_state *state,
-                                      const lonejson_value_path *path,
-                                      size_t *out_index) {
-  size_t i;
-  const mutation_item *item;
-  const mutation_path_frame *frame;
-  if (path == NULL) {
-    return 0;
-  }
-  frame = current_path_frame(state, path);
-  for (i = 0u; i < state->plan->count; ++i) {
-    item = &state->plan->items[i];
-    if (state->applied[i] || item->kind == MUTATION_REMOVE ||
-        mutation_path_has_wildcard(&item->path) ||
-        item->path.segment_count <= path->segment_count ||
-        !stream_path_prefix_matches(&item->path, path, frame)) {
-      continue;
-    }
-    *out_index = i;
-    return 1;
-  }
-  return 0;
-}
-
-static lonejson_status
-write_array_replacement_object(mutation_stream_state *state,
-                               const lonejson_value_path *path,
-                               lonejson_error *error) {
-  size_t index;
-  if (!immediate_array_object_mutation_index(state, path, &index)) {
-    return LONEJSON_STATUS_OK;
-  }
-  if (lonejson_writer_begin_object(&state->writer, error) !=
-          LONEJSON_STATUS_OK ||
-      write_synthetic_subtree(state, &state->plan->items[index],
-                              path->segment_count,
-                              error) != LONEJSON_STATUS_OK ||
-      lonejson_writer_end_object(&state->writer, error) != LONEJSON_STATUS_OK) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
-  }
-  state->skipping = 1;
-  state->skip_depth = 0u;
-  return LONEJSON_STATUS_OK;
-}
-
 static lonejson_status mutation_object_end(void *user,
                                            const lonejson_value_path *path,
                                            lonejson_error *error) {
@@ -1986,16 +1923,6 @@ static lonejson_status mutation_array_begin(void *user,
     }
     ++state->source_depth;
     return LONEJSON_STATUS_OK;
-  }
-  if (state->skipping) {
-    ++state->skip_depth;
-    ++state->source_depth;
-    return LONEJSON_STATUS_OK;
-  }
-  if (write_array_replacement_object(state, path, error) !=
-      LONEJSON_STATUS_OK) {
-    mutation_pop_path_frame(state);
-    return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   if (state->skipping) {
     ++state->skip_depth;

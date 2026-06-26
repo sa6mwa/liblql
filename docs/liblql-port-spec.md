@@ -629,12 +629,11 @@ Current implementation is an early slice:
   array indexes and existing-position `*` object-child or `[]` array-element
   wildcards over seekable file ranges; existing object-member and array-element
   mutation positions also support `**` one-child and `...` recursive path
-  segments;
-  immediate concrete child mutations under arrays follow Go stream behavior by
-  replacing the array value with an object keyed by the requested numeric
-  segments; supported set values include `time:` normalization to UTC
-  RFC3339Nano strings and `file:/textfile:/base64file:` source-backed file
-  values; public C execution is currently available for seekable file ranges,
+  segments; concrete array element mutation preserves array shape and mutates
+  the matched element value in place for set, increment, and remove semantics;
+  supported set values include `time:` normalization to UTC RFC3339Nano strings
+  and `file:/textfile:/base64file:` source-backed file values; public C
+  execution is currently available for seekable file ranges,
   seekable candidate streams through `ctx->mutate_file_range_candidates()`,
   caller-provided read callbacks through `ctx->mutate_source_paths()`,
   callback-source candidate streams through

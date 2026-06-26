@@ -3826,8 +3826,8 @@ static void expect_array_element_mutation_api(void) {
       ++failures;
     } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                strcmp(buf,
-                      "{\"items\":{\"0\":\"ready\",\"1\":1},\"other\":{\"0\":"
-                      "\"done\"}}") != 0) {
+                      "{\"items\":[\"ready\",3,null],\"other\":[\"done\"]}") !=
+                   0) {
       printf("array mutation output mismatch: %s\n", buf);
       ++failures;
     }
