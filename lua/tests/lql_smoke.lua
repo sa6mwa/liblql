@@ -36,14 +36,20 @@ if not tmp_dir then
 end
 local text_payload_name = tmp_name .. ".txt"
 local bin_payload_name = tmp_name .. ".bin"
+local invalid_utf8_payload_name = tmp_name .. ".invalid-utf8.txt"
+local nul_payload_name = tmp_name .. ".nul.txt"
 local text_payload_path = tmp_dir .. "/" .. text_payload_name
 local bin_payload_path = tmp_dir .. "/" .. bin_payload_name
+local invalid_utf8_payload_path = tmp_dir .. "/" .. invalid_utf8_payload_name
+local nul_payload_path = tmp_dir .. "/" .. nul_payload_name
 
 write_file(input_path,
            '{"status":"closed","id":"a","count":1}\n' ..
              '{"status":"open","id":"b","count":2,"state":{"old":true}}\n')
 write_file(text_payload_path, 'lua\n"payload"')
 write_file(bin_payload_path, string.char(0, 1, 2, 97))
+write_file(invalid_utf8_payload_path, "lua" .. string.char(255))
+write_file(nul_payload_path, "lua" .. string.char(0) .. "payload")
 
 if os.getenv("LQL_REQUIRE_CORE") == "1" and not lql.has_core() then
   fail("direct lql.core module was not loaded")
@@ -650,6 +656,32 @@ assert_equal(mutated,
              '{"status":"open","id":"mf2","payload":"lua\\n\\"payload\\""}\n',
              "mutate_source file values output")
 
+local invalid_text_result, invalid_text_error =
+  client:mutate_json('/status="open"', '{"status":"open"}',
+                     {"textfile:/payload=" .. invalid_utf8_payload_name},
+                     {
+                       matches_only = true,
+                       enable_file_mutations = true,
+                       file_value_base_dir = tmp_dir
+                     })
+if invalid_text_result ~= nil or not invalid_text_error or
+    not string.find(invalid_text_error.stderr or "", "UTF", 1, true) then
+  fail("expected structured Lua invalid UTF-8 textfile mutation error")
+end
+
+local nul_text_result, nul_text_error =
+  client:mutate_json('/status="open"', '{"status":"open"}',
+                     {"textfile:/payload=" .. nul_payload_name},
+                     {
+                       matches_only = true,
+                       enable_file_mutations = true,
+                       file_value_base_dir = tmp_dir
+                     })
+if nul_text_result ~= nil or not nul_text_error or
+    not string.find(nul_text_error.stderr or "", "NUL", 1, true) then
+  fail("expected structured Lua NUL textfile mutation error")
+end
+
 local _
 _, err = client:select_file('bad{', input_path)
 if not err or err.stderr == "" then
@@ -659,3 +691,5 @@ end
 os.remove(input_path)
 os.remove(text_payload_path)
 os.remove(bin_payload_path)
+os.remove(invalid_utf8_payload_path)
+os.remove(nul_payload_path)

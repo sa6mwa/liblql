@@ -1008,8 +1008,9 @@ Current implementation status:
   callback-scoped payload streaming through `match.write_json(callback)`, file,
   buffered-JSON, and Lua callback-source projection, file, buffered-JSON, and
   Lua callback-source mutation, relative file-backed mutation values through
-  explicit `enable_file_mutations` and `file_value_base_dir` options, query
-  stop reasons, candidate/match limit options, expired payload handles,
+  explicit `enable_file_mutations` and `file_value_base_dir` options, invalid
+  UTF-8 and NUL rejection for explicit `textfile:` mutation values, query stop
+  reasons, candidate/match limit options, expired payload handles,
   oversized Lua source-read chunk rejection across query, selection,
   match-payload, projection, and mutation source facades, source-read error
   propagation for query, selection, projection, and mutation, callback error
