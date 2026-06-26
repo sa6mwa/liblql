@@ -4093,6 +4093,36 @@ static void expect_mutation_error_api(void) {
         ++failures;
       }
     }
+
+    {
+      static const char array_root[] = "[{\"id\":\"a\"}]";
+      if (fseek(source, 0L, SEEK_SET) != 0 ||
+          fwrite(array_root, 1u, strlen(array_root), source) !=
+              strlen(array_root) ||
+          fflush(source) != 0 || fseek(source, 0L, SEEK_SET) != 0) {
+        printf("mutation non-object file setup failed\n");
+        ++failures;
+      } else {
+        lql_error_init(&error);
+        st = test_ctx->mutate_file_range_paths(
+            test_ctx, plan, source, 0u, (lql_uint64)strlen(array_root), out,
+            &error);
+        if (st != LQL_STATUS_JSON_ERROR) {
+          printf("path mutation accepted non-object root with status %s\n",
+                 lql_status_string(st));
+          ++failures;
+        }
+        lql_error_init(&error);
+        st = test_ctx->mutate_file_range_root_fields(
+            test_ctx, plan, source, 0u, (lql_uint64)strlen(array_root), out,
+            &error);
+        if (st != LQL_STATUS_JSON_ERROR) {
+          printf("root mutation accepted non-object root with status %s\n",
+                 lql_status_string(st));
+          ++failures;
+        }
+      }
+    }
   }
   test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(source);
