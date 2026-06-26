@@ -706,9 +706,11 @@ Current implementation is an early slice:
   compacting, and mutation over fragmented caller reads, source callback read
   failures, mutation parse-error invariants, parser failure output-handle
   clearing, projection invalid-argument `out_found` state, and query callback
-  failure status propagation. Decision and match callback failures now also
-  assert actionable diagnostics and partial result-counter propagation for
-  seekable and callback-source query paths; callback-source decision and
+  failure status propagation. Query invalid-argument failures now also assert a
+  safe zeroed `lql_query_result` output state. Decision and match callback
+  failures now assert actionable diagnostics and partial result-counter
+  propagation for seekable and callback-source query paths; callback-source
+  decision and
   spooled match queries preserve partial result counters when a reader fails
   after an emitted candidate, matching the callback-source candidate mutation
   contract. This coverage is still too shallow for the final goal: the next C

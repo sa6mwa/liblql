@@ -213,6 +213,12 @@ static lql_status on_match_decision(void *user,
   return adapter->on_match(adapter->user, &match);
 }
 
+static void clear_query_result(lql_query_result *out_result) {
+  if (out_result != NULL) {
+    memset(out_result, 0, sizeof(*out_result));
+  }
+}
+
 lql_status lql_new(lql **out, lql_error *error) {
   lql *ctx;
 
@@ -721,6 +727,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_file_decisions_with_options_impl(
     lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
     lql_error *error) {
   if (file == NULL || on_decision == NULL) {
+    clear_query_result(out_result);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "file and on_decision are required");
     return LQL_STATUS_INVALID_ARGUMENT;
@@ -742,6 +749,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_source_decisions_with_options_impl(
     const lql_query_options *options, lql_query_decision_fn on_decision,
     void *user, lql_query_result *out_result, lql_error *error) {
   if (read == NULL || on_decision == NULL) {
+    clear_query_result(out_result);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "read and on_decision are required");
     return LQL_STATUS_INVALID_ARGUMENT;
@@ -764,6 +772,7 @@ lql_query_source_spooled_matches_with_options_impl(
     const lql_query_options *options, lql_query_match_fn on_match, void *user,
     lql_query_result *out_result, lql_error *error) {
   if (read == NULL || on_match == NULL) {
+    clear_query_result(out_result);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "read and on_match are required");
     return LQL_STATUS_INVALID_ARGUMENT;
@@ -786,6 +795,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_file_matches_with_options_impl(
   lql_match_adapter adapter;
   lql_status st;
   if (file == NULL || on_match == NULL) {
+    clear_query_result(out_result);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "file and on_match are required");
     return LQL_STATUS_INVALID_ARGUMENT;

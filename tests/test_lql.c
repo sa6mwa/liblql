@@ -255,6 +255,12 @@ typedef struct fail_after_reader {
   int calls;
 } fail_after_reader;
 
+static int query_result_is_zero(const lql_query_result *result) {
+  return result != NULL && result->candidates_seen == 0u &&
+         result->candidates_matched == 0u && result->bytes_read == 0u &&
+         !result->stopped_early && result->stop_reason == LQL_QUERY_STOP_NONE;
+}
+
 static lql_read_result read_chunk(void *user, unsigned char *buffer,
                                   size_t capacity) {
   chunk_reader *reader;
@@ -1125,6 +1131,7 @@ static void expect_stream_error_api(void) {
   payload_seen payload_seen_value;
   chunk_reader reader;
   lql_error error;
+  lql_query_result result;
   lql_status st;
 
   selector = NULL;
@@ -1215,76 +1222,107 @@ static void expect_stream_error_api(void) {
   }
   test_ctx->selector_free(test_ctx, selector);
 
+  memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
   st = test_ctx->query_file_decisions(test_ctx, NULL, NULL, record_decision,
-                                      NULL, NULL, &error);
+                                      NULL, &result, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
-      strcmp(error.message, "file and on_decision are required") != 0) {
-    printf("file decisions NULL file mismatch: %s\n", error.message);
+      strcmp(error.message, "file and on_decision are required") != 0 ||
+      !query_result_is_zero(&result)) {
+    printf("file decisions NULL file mismatch: %s seen=%lu matched=%lu\n",
+           error.message, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched);
     ++failures;
   }
 
+  memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
-  st = test_ctx->query_file_decisions(test_ctx, NULL, source, NULL, NULL, NULL,
-                                      &error);
+  st = test_ctx->query_file_decisions(test_ctx, NULL, source, NULL, NULL,
+                                      &result, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
-      strcmp(error.message, "file and on_decision are required") != 0) {
-    printf("file decisions NULL callback mismatch: %s\n", error.message);
+      strcmp(error.message, "file and on_decision are required") != 0 ||
+      !query_result_is_zero(&result)) {
+    printf("file decisions NULL callback mismatch: %s seen=%lu matched=%lu\n",
+           error.message, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched);
     ++failures;
   }
 
+  memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
   st = test_ctx->query_source_decisions(test_ctx, NULL, NULL, NULL,
-                                        record_decision, NULL, NULL, &error);
+                                        record_decision, NULL, &result, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
-      strcmp(error.message, "read and on_decision are required") != 0) {
-    printf("source decisions NULL read mismatch: %s\n", error.message);
+      strcmp(error.message, "read and on_decision are required") != 0 ||
+      !query_result_is_zero(&result)) {
+    printf("source decisions NULL read mismatch: %s seen=%lu matched=%lu\n",
+           error.message, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched);
     ++failures;
   }
 
+  memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
   st = test_ctx->query_source_decisions(test_ctx, NULL, read_chunk, NULL, NULL,
-                                        NULL, NULL, &error);
+                                        NULL, &result, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
-      strcmp(error.message, "read and on_decision are required") != 0) {
-    printf("source decisions NULL callback mismatch: %s\n", error.message);
+      strcmp(error.message, "read and on_decision are required") != 0 ||
+      !query_result_is_zero(&result)) {
+    printf("source decisions NULL callback mismatch: %s seen=%lu matched=%lu\n",
+           error.message, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched);
     ++failures;
   }
 
+  memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
   st = test_ctx->query_source_spooled_matches(
-      test_ctx, NULL, NULL, NULL, record_payload, NULL, NULL, &error);
+      test_ctx, NULL, NULL, NULL, record_payload, NULL, &result, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
-      strcmp(error.message, "read and on_match are required") != 0) {
-    printf("source spooled matches NULL read mismatch: %s\n", error.message);
+      strcmp(error.message, "read and on_match are required") != 0 ||
+      !query_result_is_zero(&result)) {
+    printf("source spooled matches NULL read mismatch: %s seen=%lu "
+           "matched=%lu\n",
+           error.message, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched);
     ++failures;
   }
 
+  memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
   st = test_ctx->query_source_spooled_matches(test_ctx, NULL, read_chunk, NULL,
-                                              NULL, NULL, NULL, &error);
+                                              NULL, NULL, &result, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
-      strcmp(error.message, "read and on_match are required") != 0) {
+      strcmp(error.message, "read and on_match are required") != 0 ||
+      !query_result_is_zero(&result)) {
     printf("source spooled matches NULL callback mismatch: %s\n",
            error.message);
     ++failures;
   }
 
+  memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
   st = test_ctx->query_file_matches(test_ctx, NULL, NULL, record_payload, NULL,
-                                    NULL, &error);
+                                    &result, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
-      strcmp(error.message, "file and on_match are required") != 0) {
-    printf("file matches NULL file mismatch: %s\n", error.message);
+      strcmp(error.message, "file and on_match are required") != 0 ||
+      !query_result_is_zero(&result)) {
+    printf("file matches NULL file mismatch: %s seen=%lu matched=%lu\n",
+           error.message, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched);
     ++failures;
   }
 
+  memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
-  st = test_ctx->query_file_matches(test_ctx, NULL, source, NULL, NULL, NULL,
-                                    &error);
+  st = test_ctx->query_file_matches(test_ctx, NULL, source, NULL, NULL,
+                                    &result, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
-      strcmp(error.message, "file and on_match are required") != 0) {
-    printf("file matches NULL callback mismatch: %s\n", error.message);
+      strcmp(error.message, "file and on_match are required") != 0 ||
+      !query_result_is_zero(&result)) {
+    printf("file matches NULL callback mismatch: %s seen=%lu matched=%lu\n",
+           error.message, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched);
     ++failures;
   }
 
