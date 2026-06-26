@@ -909,6 +909,65 @@ static void expect_stream_file(void) {
   }
 }
 
+static void expect_stream_mixed_scalar_candidates(void) {
+  static const char input[] = "\"x\"\n{\"id\":\"x\"}\n123\n";
+  FILE *fp;
+  lql_selector *selector;
+  lql_query_result result;
+  stream_seen seen;
+  lql_error error;
+  lql_status st;
+
+  memset(&seen, 0, sizeof(seen));
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, "/id=\"x\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("mixed scalar stream parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  fp = tmpfile();
+  if (fp == NULL) {
+    printf("mixed scalar stream tmpfile failed\n");
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||
+      fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("mixed scalar stream write/seek failed\n");
+    fclose(fp);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  memset(&result, 0, sizeof(result));
+  st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
+                                      &seen, &result, &error);
+  fclose(fp);
+  test_ctx->selector_destroy(test_ctx, selector);
+  if (st != LQL_STATUS_OK) {
+    printf("mixed scalar stream query failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  if (seen.calls != 3 || seen.matched != 1 ||
+      result.candidates_seen != (lql_uint64)3 ||
+      result.candidates_matched != (lql_uint64)1 ||
+      result.bytes_read != (lql_uint64)19) {
+    printf("mixed scalar stream counts mismatch calls=%d matched=%d "
+           "bytes=%lu\n",
+           seen.calls, seen.matched, (unsigned long)result.bytes_read);
+    ++failures;
+  }
+  if (seen.offsets[0] != (lql_uint64)0 || seen.sizes[0] != (lql_uint64)3 ||
+      seen.offsets[1] != (lql_uint64)4 || seen.sizes[1] != (lql_uint64)10 ||
+      seen.offsets[2] != (lql_uint64)15 || seen.sizes[2] != (lql_uint64)3) {
+    printf("mixed scalar stream ranges mismatch\n");
+    ++failures;
+  }
+}
+
 static void expect_source_stream(void) {
   static const char input[] =
       "{\"status\":\"closed\"}\n{\"status\":\"open\"}\n{\"status\":\"done\"}\n";
@@ -4551,6 +4610,8 @@ static void expect_sdk_contract_manifest(void) {
       {"selector", "OR parse/evaluation public API", expect_selector_or_api},
       {"selector", "parse-error invariants", expect_selector_parse_error_api},
       {"streaming", "seekable FILE decision streams", expect_stream_file},
+      {"streaming", "mixed scalar and object candidate decision streams",
+       expect_stream_mixed_scalar_candidates},
       {"streaming", "callback-source decision streams", expect_source_stream},
       {"streaming", "callback-source spooled matched payloads",
        expect_source_spooled_payload_api},
@@ -4950,6 +5011,7 @@ int main(void) {
   expect_selector_parse_error_api();
   expect_version_api();
   expect_stream_file();
+  expect_stream_mixed_scalar_candidates();
   expect_source_stream();
   expect_source_spooled_payload_api();
   expect_stream_array_items();

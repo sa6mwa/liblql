@@ -885,6 +885,11 @@ func TestSDKStreamingDecisionParity(t *testing.T) {
 			expr: `/status="open"`,
 			doc:  `[{"status":"open","id":1},{"status":"closed","id":2},{"status":"open","id":3}]`,
 		},
+		{
+			name: "mixed scalar and object candidates",
+			expr: `/id="x"`,
+			doc:  "\"x\"\n{\"id\":\"x\"}\n123\n",
+		},
 	}
 	for _, tc := range cases {
 		for _, mode := range []struct {
