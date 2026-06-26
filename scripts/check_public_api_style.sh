@@ -247,6 +247,20 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  cleanup_default_allocator_hits=$(
+    grep -En 'allocator[[:space:]]*=[[:space:]]*lql_allocator_default[[:space:]]*\(' \
+      "$source_root/src/lql.c" \
+      "$source_root/src/lql_selector.c" \
+      "$source_root/src/lql_project.c" \
+      "$source_root/src/lql_eval.c" \
+      "$source_root/src/lql_mutation.c" 2>/dev/null || true
+  )
+  if [ -n "$cleanup_default_allocator_hits" ]; then
+    printf 'public API style: cleanup paths must use explicit receiver/handle allocators\n' >&2
+    printf '%s\n' "$cleanup_default_allocator_hits" >&2
+    failed=1
+  fi
+
   cli_receiver_bypass_hits=$(
     grep -En \
       'lql_eval_query_|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \

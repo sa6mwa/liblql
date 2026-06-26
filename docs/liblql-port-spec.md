@@ -612,6 +612,10 @@ Current implementation is an early slice:
   across private helper boundaries; core source files are style-gated against
   `lql_allocator_from_receiver(NULL)` so library behavior cannot silently fall
   back to default allocator ownership when a receiver is available;
+- selector node cleanup requires its caller to provide the owning allocator;
+  core cleanup paths are style-gated against reintroducing
+  `allocator = lql_allocator_default()` fallback branches, so cleanup ownership
+  remains explicit instead of silently crossing allocator domains;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through

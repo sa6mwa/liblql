@@ -110,6 +110,12 @@ EOF
 run_expect_fail "library null receiver allocator fallback"
 rm -f "$tmp/src/lql_eval.c"
 
+cat >"$tmp/src/lql.c" <<'EOF'
+void bad_cleanup_default_allocator(void) { allocator = lql_allocator_default(); }
+EOF
+run_expect_fail "cleanup default allocator fallback"
+rm -f "$tmp/src/lql.c"
+
 printf '%s\n' 'stale cleanup surface is `lql_dealloc()`' >"$tmp/README.md"
 run_expect_fail "README allocator wrapper documentation"
 printf '%s\n' '# fixture' >"$tmp/README.md"

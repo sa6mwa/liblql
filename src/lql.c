@@ -353,9 +353,6 @@ LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_allocator *allocator,
   if (node == NULL) {
     return;
   }
-  if (allocator == NULL) {
-    allocator = lql_allocator_default();
-  }
   allocator->destroy(allocator, node->term.field);
   allocator->destroy(allocator, node->term.value);
   for (i = 0u; i < node->term.any_count; ++i) {
