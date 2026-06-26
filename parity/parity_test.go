@@ -94,6 +94,10 @@ func TestCLQLSelectorParity(t *testing.T) {
 		{`or.0.eq{field=/status,value=open},or.0.range{field=/progress,gte=50}`, `{"status":"closed","progress":72}`},
 		{`not.eq{field=/status,value=closed}`, `{"status":"open"}`},
 		{`not.eq{field=/status,value=closed}`, `{"status":"closed"}`},
+		{`and.0.or.0.and.0.eq{field=/status,value=open},and.0.or.0.and.0.range{field=/progress,gte=10}`, `{"status":"open","progress":12}`},
+		{`and.0.or.0.and.0.eq{field=/status,value=open},and.0.or.0.and.0.range{field=/progress,gte=10}`, `{"status":"open","progress":4}`},
+		{`or.0.and.0.or.0.eq{field=/status,value=open},or.0.and.0.or.0.range{field=/progress,gte=10}`, `{"status":"open","progress":12}`},
+		{`or.0.and.0.or.0.eq{field=/status,value=open},or.0.and.0.or.0.range{field=/progress,gte=10}`, `{"status":"closed","progress":12}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.expr+"/"+tc.doc, func(t *testing.T) {
