@@ -83,17 +83,21 @@ The API should be handle-oriented and explicit about ownership:
   must not imply retained candidate copies;
 - error messages are actionable and available through explicit error objects.
 
-All liblql-owned allocation must pass through the active receiver's central
-allocator. Production code must not use direct `malloc`, `calloc`, `realloc`,
-or `free` outside the allocator implementation, and it must not recreate
-`lql_alloc`/`lql_dealloc` style free wrapper functions or `LQL_ALLOCATOR_*`
-macro wrappers around the allocator. Project-owned glue such as `clql` must
-allocate scratch memory through private receiver allocator helpers after
-`lql_new()` succeeds, without touching raw allocator accessors or default
-allocator globals. Public APIs must not expose generic allocation/free receiver
-methods; any future API that returns liblql-owned heap memory must have an
-ownership-specific cleanup method, so downstream users do not cross allocator
-boundaries or depend on allocator wrapper functions.
+All liblql-owned allocation must pass through the active receiver instance's
+allocator. The allocator is receiver-owned state, not a process-global central
+allocator: a `lql *` is not internally synchronized and is supported in one
+active thread at a time unless the caller serializes access externally.
+Separate receivers are independent except for allocator state that a caller
+deliberately shares. Production code must not use direct `malloc`, `calloc`,
+`realloc`, or `free` outside the allocator implementation, and it must not
+recreate `lql_alloc`/`lql_dealloc` style free wrapper functions or
+`LQL_ALLOCATOR_*` macro wrappers around the allocator. Project-owned glue such
+as `clql` must allocate scratch memory through private receiver allocator
+helpers after `lql_new()` succeeds, without touching raw allocator accessors or
+default allocator globals. Public APIs must not expose generic allocation/free
+receiver methods; any future API that returns liblql-owned heap memory must
+have an ownership-specific cleanup method, so downstream users do not cross
+allocator boundaries or depend on allocator wrapper functions.
 
 The API should eventually expose these surfaces:
 
@@ -600,7 +604,7 @@ Current implementation status:
   input preparation. `lql.public-api-style-fixtures` includes a negative
   parity helper that omits the receiver argument and proves the style gate fails
   closed;
-- project-owned allocations have an internal central liblql allocator receiver
+- project-owned allocations have an internal per-receiver liblql allocator
   surface for receiver-owned glue buffers, but no public generic
   allocation/free receiver methods;
   the old `lql_alloc`/`lql_calloc`/`lql_realloc`/`lql_dealloc`/`lql_strdup`
@@ -632,7 +636,7 @@ Current implementation status:
   handles self-owning. Projection and mutation handle cleanup helpers are also
   style-gated to take the owning `lql *self` rather than an allocator-first
   parameter, so nested handle cleanup cannot accidentally detach from receiver
-  ownership while still using the same central allocator implementation.
+  ownership while still using the same per-receiver allocator implementation.
   Projection parser boundary helpers are likewise style-gated to derive
   allocation from `lql *self`, and mutation expression parser helpers are
   style-gated to receive a `mutation_parse_context` built by the receiver

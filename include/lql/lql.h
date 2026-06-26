@@ -204,7 +204,9 @@ typedef lql_read_result (*lql_read_fn)(void *user, unsigned char *buffer,
 typedef lql_status (*lql_write_fn)(void *user, const void *data, size_t len);
 
 /* Instantiatable liblql receiver shell. Fields are initialized by lql_new().
-   Mutable implementation state, if any, is kept behind impl. Use
+   Mutable implementation state, including allocator ownership, is kept behind
+   impl. A receiver is not internally synchronized; use one lql instance from
+   one active thread at a time, or serialize access externally. Use
    ctx->method(ctx, ...) for all handle operations and cleanup. Standalone
    public functions are limited to construction and diagnostics. */
 struct lql {
