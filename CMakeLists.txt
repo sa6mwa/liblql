@@ -222,6 +222,13 @@ if(LQL_BUILD_TESTS)
     set_tests_properties(lql.example-match PROPERTIES
       LABELS "example-smoke;api" TIMEOUT 5)
   endif()
+  if(TARGET clql)
+    add_test(NAME lql.cli-smoke
+      COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_clql_smoke.sh
+        $<TARGET_FILE:clql> ${LQL_RESOLVED_VERSION})
+    set_tests_properties(lql.cli-smoke PROPERTIES
+      LABELS "smoke;api" TIMEOUT 5)
+  endif()
 endif()
 
 if(LQL_INSTALL)

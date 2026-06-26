@@ -707,6 +707,8 @@ Current implementation is an early slice:
 - `clql` exists as a selector/projection/mutation compatibility CLI;
   projection and mutation path behavior are still being expanded toward full
   CLI parity;
+- fast CTest now includes `lql.cli-smoke`, which asserts the stable
+  `clql --version` format and the documented `clql --help` option surface;
 - C SDK contract tests cover the currently implemented public liblql selector,
   streaming, projection, compacting, mutation, version, and capability
   surfaces, including mutation plan parse success, expansion counts, default
