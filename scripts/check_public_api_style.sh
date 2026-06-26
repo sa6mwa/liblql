@@ -233,6 +233,17 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  cli_receiver_bypass_hits=$(
+    grep -En \
+      'lql_eval_query_|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \
+      "$source_root/src/clql.c" 2>/dev/null || true
+  )
+  if [ -n "$cli_receiver_bypass_hits" ]; then
+    printf 'public API style: clql must route execution through receiver methods\n' >&2
+    printf '%s\n' "$cli_receiver_bypass_hits" >&2
+    failed=1
+  fi
+
   lua_private_hits=$(
     grep -REn \
       'lql_internal\.h|LQL_INTERNAL_SYMBOL|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \

@@ -719,6 +719,11 @@ Current implementation is an early slice:
   mutation subset to matched non-seekable stdin candidates through
   callback-scoped spooled payloads, preserves unmatched candidates by default,
   and honors `-M/--matches-only` without materializing the full input stream;
+- `clql` execution paths now dispatch through the public `lql *` receiver
+  methods instead of calling private `lql_eval_query_*` execution helpers or
+  private `_impl` receiver entry points directly; `lql.public-api-style`
+  rejects those private execution shortcuts in `src/clql.c` so CLI behavior
+  remains aligned with the library surface rather than an internal-only path;
 - `clql -m/--mutate -f/--field` follows Go CLI order for seekable file input
   and non-seekable stdin: project each output candidate first, then mutate the
   projected value only for matched candidates; this path uses callback-scoped

@@ -115,4 +115,10 @@ EOF
 run_expect_fail "Lua private API use"
 rm -f "$tmp/lua/private.c"
 
+cat >"$tmp/src/clql.c" <<'EOF'
+void cli_private_exec(void) { (void)lql_eval_query_file_spooled_matches; }
+EOF
+run_expect_fail "clql private evaluator use"
+rm -f "$tmp/src/clql.c"
+
 run_expect_ok
