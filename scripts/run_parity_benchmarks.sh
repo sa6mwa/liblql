@@ -59,6 +59,9 @@ go_bin="${GO:-go}"
 go_bench="${LQL_GO_BENCH_PATH:-$root/build/bench-tools/lqlbench}"
 go_bench_ready=0
 lua_bin="${LUA:-lua}"
+lua_module_dir="${LQL_LUA_MODULE_DIR:-$root/build/debug}"
+bench_library_dir="${LQL_BENCH_LIBRARY_DIR:-$root/build/debug}"
+bench_dep_library_dir="${LQL_BENCH_DEP_LIBRARY_DIR:-$root/.cache/deps/x86_64-linux-gnu/install/lib}"
 time_bin="${LQL_BENCH_TIME:-/usr/bin/time}"
 require_lua_rss="${LQL_BENCH_REQUIRE_LUA_RSS:-0}"
 mkdir -p "$fixture_dir"
@@ -959,7 +962,7 @@ run_lua_mode() {
     emit_unsupported_impl "lua" "lua executable not found"
     return 1
   fi
-  if [ ! -f "$root/build/debug/lql/core.so" ]; then
+  if [ ! -f "$lua_module_dir/lql/core.so" ]; then
     emit_unsupported_impl "lua" "lql.core module not found; run make build-debug"
     return 1
   fi
@@ -983,9 +986,9 @@ run_lua_mode() {
       if ! "$time_bin" -f 'peak_rss_kb=%M' -o "$lua_time" \
         env \
         LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
-        LUA_CPATH="$root/build/debug/?.so;$root/build/debug/?/core.so;;" \
-        LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
-        DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+        LUA_CPATH="$lua_module_dir/?.so;$lua_module_dir/?/core.so;;" \
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$bench_library_dir:$bench_dep_library_dir" \
+        DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$bench_library_dir:$bench_dep_library_dir" \
         "$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
         "$fixture_path" "$candidates" "$submode" > "$lua_out"; then
         cat "$lua_out" >&2
@@ -997,9 +1000,9 @@ run_lua_mode() {
       if ! "$time_bin" -l \
         env \
         LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
-        LUA_CPATH="$root/build/debug/?.so;$root/build/debug/?/core.so;;" \
-        LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
-        DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+        LUA_CPATH="$lua_module_dir/?.so;$lua_module_dir/?/core.so;;" \
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$bench_library_dir:$bench_dep_library_dir" \
+        DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$bench_library_dir:$bench_dep_library_dir" \
         "$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
         "$fixture_path" "$candidates" "$submode" > "$lua_out" 2> "$lua_time"; then
         cat "$lua_out" >&2
@@ -1010,9 +1013,9 @@ run_lua_mode() {
     else
       if ! env \
         LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
-        LUA_CPATH="$root/build/debug/?.so;$root/build/debug/?/core.so;;" \
-        LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
-        DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+        LUA_CPATH="$lua_module_dir/?.so;$lua_module_dir/?/core.so;;" \
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$bench_library_dir:$bench_dep_library_dir" \
+        DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$bench_library_dir:$bench_dep_library_dir" \
         "$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
         "$fixture_path" "$candidates" "$submode" > "$lua_out"; then
         cat "$lua_out" >&2
