@@ -131,6 +131,43 @@ mutated, err = client:mutate_json('/status="open"',
 mutated = assert_no_error(mutated, err, "core mutate_json miss")
 assert_equal(mutated, "", "core mutate_json miss output")
 
+mutated, err = client:mutate_json('',
+                                 '{"items":[{"status":"old"}],' ..
+                                   '"boxes":{"a":{"status":"old"}},' ..
+                                   '"groups":[{"items":[{"sku":"A",' ..
+                                   '"count":1,"drop":true}]}]}',
+                                 {"/items/**/status=ready",
+                                  "/boxes/**/status=ready",
+                                  "/groups/.../sku=Z",
+                                  "/groups/.../count=+2"},
+                                 {matches_only = true})
+mutated = assert_no_error(mutated, err,
+                          "core recursive wildcard mutate_json")
+assert_equal(mutated,
+             '{"items":[{"status":"ready"}],"boxes":{"a":' ..
+               '{"status":"ready"}},"groups":[{"items":[{"sku":"Z",' ..
+               '"count":3,"drop":true}]}]}\n',
+             "core recursive wildcard mutate_json output")
+
+mutated, err = client:mutate_json('',
+                                 '{"nums":[1,2],"words":["a","b"],' ..
+                                   '"drops":[true,false],' ..
+                                   '"objects":[{"a":1}],' ..
+                                   '"groups":[{"items":[{"count":1}]}]}',
+                                 {"/nums[]=+2",
+                                  "/words[]=ready",
+                                  "rm:/drops[]",
+                                  "/objects[]=done",
+                                  "/groups/.../count=+2"},
+                                 {matches_only = true})
+mutated = assert_no_error(mutated, err,
+                          "core array wildcard value mutate_json")
+assert_equal(mutated,
+             '{"nums":[3,4],"words":["ready","ready"],' ..
+               '"drops":[null,null],"objects":["done"],' ..
+               '"groups":[{"items":[{"count":3}]}]}\n',
+             "core array wildcard value mutate_json output")
+
 local _
 _, err = client:matches_json('bad{', '{"status":"open"}')
 if not err or err.stderr == "" or not err.status then
