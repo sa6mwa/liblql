@@ -630,6 +630,26 @@ assert_equal(mutated,
              '{"status":"open","id":"b","count":2,"state":{"old":true},"payload":"lua\\n\\"payload\\""}\n',
              "mutate_file file values output")
 
+source_chunks = {
+  '{"status":"closed","id":"mf1"}\n',
+  '{"status":"open","id":"mf2"}\n'
+}
+source_index = 1
+mutated, err = client:mutate_source('/status="open"', function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end, {"textfile:/payload=" .. text_payload_name},
+  {
+    matches_only = true,
+    enable_file_mutations = true,
+    file_value_base_dir = tmp_dir
+  })
+mutated = assert_no_error(mutated, err, "mutate_source file values")
+assert_equal(mutated,
+             '{"status":"open","id":"mf2","payload":"lua\\n\\"payload\\""}\n',
+             "mutate_source file values output")
+
 local _
 _, err = client:select_file('bad{', input_path)
 if not err or err.stderr == "" then
