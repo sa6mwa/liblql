@@ -625,7 +625,11 @@ Current implementation status:
   `src/lql_project.c`, `src/lql_eval.c`, and `src/lql_mutation.c`, and also
   rejects allocator fields inside receiver-owned child handle structs, so
   library core code cannot bypass receiver allocator ownership by making child
-  handles self-owning. `lql.handle-allocator` constructs real receivers with a
+  handles self-owning. Projection and mutation handle cleanup helpers are also
+  style-gated to take the owning `lql *self` rather than an allocator-first
+  parameter, so nested handle cleanup cannot accidentally detach from receiver
+  ownership while still using the same central allocator implementation.
+  `lql.handle-allocator` constructs real receivers with a
   counting internal allocator rather than fabricating private `lql` state,
   exercises successful and failed selector, projection, and mutation parses
   plus selector eval, projection runtime, and mutation runtime through receiver

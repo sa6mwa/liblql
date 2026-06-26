@@ -338,6 +338,18 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  receiver_cleanup_allocator_hits=$(
+    grep -REn \
+      '^[[:space:]]*static[[:space:]]+void[[:space:]]+(projection_path_cleanup|mutation_(path|item|plan)_cleanup|mutation_plan_cleanup_items)[[:space:]]*\([[:space:]]*lql_allocator[[:space:]]+\*' \
+      "$source_root/src/lql_project.c" \
+      "$source_root/src/lql_mutation.c" 2>/dev/null || true
+  )
+  if [ -n "$receiver_cleanup_allocator_hits" ]; then
+    printf 'public API style: receiver-owned cleanup helpers must take lql *self, not lql_allocator *\n' >&2
+    printf '%s\n' "$receiver_cleanup_allocator_hits" >&2
+    failed=1
+  fi
+
   lonejson_default_allocator_hits=$(
     grep -En 'lonejson_new[[:space:]]*\([[:space:]]*NULL[[:space:]]*,' \
       "$source_root/src/lql_selector.c" \

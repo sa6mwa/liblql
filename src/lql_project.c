@@ -235,10 +235,14 @@ static char *decode_path_segment(lql_allocator *allocator, const char *src,
   return out;
 }
 
-static void projection_path_cleanup(lql_allocator *allocator,
-                                    projection_path *path) {
+static void projection_path_cleanup(lql *self, projection_path *path) {
+  lql_allocator *allocator;
   size_t i;
   if (path == NULL) {
+    return;
+  }
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
     return;
   }
   for (i = 0u; i < path->segment_count; ++i) {
@@ -249,8 +253,8 @@ static void projection_path_cleanup(lql_allocator *allocator,
   path->segment_count = 0u;
 }
 
-static int parse_projection_path(lql_allocator *allocator, const char *raw,
-                                 projection_path *out) {
+static int parse_projection_path(lql *self, lql_allocator *allocator,
+                                 const char *raw, projection_path *out) {
   const char *start;
   const char *end;
   const char *seg;
@@ -285,25 +289,25 @@ static int parse_projection_path(lql_allocator *allocator, const char *raw,
     len = (size_t)(slash - seg);
     decoded = decode_path_segment(allocator, seg, len);
     if (decoded == NULL) {
-      projection_path_cleanup(allocator, out);
+      projection_path_cleanup(self, out);
       return 0;
     }
     if (out->segment_count == 0u && segment_is_array_index(decoded)) {
       allocator->destroy(allocator, decoded);
-      projection_path_cleanup(allocator, out);
+      projection_path_cleanup(self, out);
       return 0;
     }
     if (segment_is_array_index(decoded)) {
       size_t index;
       if (!parse_array_index(decoded, &index)) {
         allocator->destroy(allocator, decoded);
-        projection_path_cleanup(allocator, out);
+        projection_path_cleanup(self, out);
         return 0;
       }
     }
     if (!add_segment(allocator, out, decoded)) {
       allocator->destroy(allocator, decoded);
-      projection_path_cleanup(allocator, out);
+      projection_path_cleanup(self, out);
       return 0;
     }
     if (slash == end) {
@@ -360,8 +364,8 @@ static int projection_paths_have_container_conflict(const projection_path *a,
   return 0;
 }
 
-static int add_path(lql_allocator *allocator, lql_projection *projection,
-                    projection_path *path) {
+static int add_path(lql *self, lql_allocator *allocator,
+                    lql_projection *projection, projection_path *path) {
   projection_path *next;
   size_t i;
   if (path->segment_count == 0u) {
@@ -369,7 +373,7 @@ static int add_path(lql_allocator *allocator, lql_projection *projection,
   }
   for (i = 0u; i < projection->path_count; ++i) {
     if (projection_paths_equal(&projection->paths[i], path)) {
-      projection_path_cleanup(allocator, path);
+      projection_path_cleanup(self, path);
       return 1;
     }
     if (projection_path_is_prefix(&projection->paths[i], path) ||
@@ -955,14 +959,14 @@ static lql_status projection_parse_method(
     return LQL_STATUS_NO_MEMORY;
   }
   for (i = 0u; i < field_count; ++i) {
-    if (!parse_projection_path(allocator, fields[i], &path)) {
+    if (!parse_projection_path(self, allocator, fields[i], &path)) {
       self->projection_destroy(self, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "invalid or unsupported projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
-    if (!add_path(allocator, projection, &path)) {
-      projection_path_cleanup(allocator, &path);
+    if (!add_path(self, allocator, projection, &path)) {
+      projection_path_cleanup(self, &path);
       self->projection_destroy(self, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "conflicting projection field path");
@@ -990,7 +994,7 @@ projection_destroy_method(lql *self, lql_projection *projection) {
     return;
   }
   for (i = 0u; i < projection->path_count; ++i) {
-    projection_path_cleanup(allocator, &projection->paths[i]);
+    projection_path_cleanup(self, &projection->paths[i]);
   }
   allocator->destroy(allocator, projection->paths);
   allocator->destroy(allocator, projection);
