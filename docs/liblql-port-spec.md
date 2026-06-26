@@ -588,6 +588,11 @@ Current implementation is an early slice:
   `LQL_PAYLOAD_SPOOLED` payload handles and receiver payload writer support for
   non-seekable plus-value access without retaining payloads after the match
   callback returns;
+- C SDK source-reader contract tests reject callbacks that report
+  `bytes_read > capacity` across query decision streams, spooled match streams,
+  projection, compaction, direct source mutation, source candidate mutation, and
+  projected source candidate mutation, proving liblql validates caller callback
+  behavior instead of trusting invalid producer lengths;
 - matched-candidate `FILE *` query streams expose callback-scoped
   `LQL_PAYLOAD_SEEKABLE_RANGE` payload handles, with
   `ctx->payload_write_json()` and `ctx->payload_write_json_sink()` preserving the

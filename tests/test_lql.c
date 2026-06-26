@@ -335,6 +335,19 @@ static lql_read_result read_fail_once(void *user, unsigned char *buffer,
   return result;
 }
 
+static lql_read_result read_over_capacity(void *user, unsigned char *buffer,
+                                          size_t capacity) {
+  lql_read_result result;
+
+  (void)user;
+  if (capacity != 0u) {
+    buffer[0] = '{';
+  }
+  memset(&result, 0, sizeof(result));
+  result.bytes_read = capacity == (size_t)-1 ? capacity : capacity + 1u;
+  return result;
+}
+
 static lql_status write_memory_sink(void *user, const void *data, size_t len) {
   memory_sink *sink;
 
@@ -574,6 +587,24 @@ static void expect_output_state_contract_api(void) {
     ++failures;
   }
 
+  memset(&seen, 0, sizeof(seen));
+  memset(&result, 0x5a, sizeof(result));
+  lql_error_init(&error);
+  st = test_ctx->query_source_decisions(test_ctx, selector, read_over_capacity,
+                                        NULL, record_decision, &seen, &result,
+                                        &error);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message, "query source reader failed") != 0 ||
+      seen.calls != 0 || !query_result_is_zero(&result)) {
+    printf("source decision over-capacity read mismatch: status=%s calls=%d "
+           "seen=%lu matched=%lu bytes=%lu error=%s\n",
+           lql_status_string(st), seen.calls,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched,
+           (unsigned long)result.bytes_read, error.message);
+    ++failures;
+  }
+
   memset(&fail_reader, 0, sizeof(fail_reader));
   memset(&payload_seen_value, 0, sizeof(payload_seen_value));
   memset(&result, 0, sizeof(result));
@@ -597,6 +628,31 @@ static void expect_output_state_contract_api(void) {
         result.bytes_read != (lql_uint64)strlen(stream)) {
       printf("source spooled reader failure partial result mismatch: status=%s "
              "calls=%d seen=%lu matched=%lu bytes=%lu error=%s\n",
+             lql_status_string(st), payload_seen_value.calls,
+             (unsigned long)result.candidates_seen,
+             (unsigned long)result.candidates_matched,
+             (unsigned long)result.bytes_read, error.message);
+      ++failures;
+    }
+    fclose(payload_seen_value.out);
+  }
+
+  memset(&payload_seen_value, 0, sizeof(payload_seen_value));
+  memset(&result, 0x5a, sizeof(result));
+  payload_seen_value.out = tmpfile();
+  if (payload_seen_value.out == NULL) {
+    printf("source spooled over-capacity tmpfile failed\n");
+    ++failures;
+  } else {
+    lql_error_init(&error);
+    st = test_ctx->query_source_spooled_matches(
+        test_ctx, selector, read_over_capacity, NULL, record_spooled_payload,
+        &payload_seen_value, &result, &error);
+    if (st != LQL_STATUS_JSON_ERROR ||
+        strcmp(error.message, "query source reader failed") != 0 ||
+        payload_seen_value.calls != 0 || !query_result_is_zero(&result)) {
+      printf("source spooled over-capacity read mismatch: status=%s calls=%d "
+             "seen=%lu matched=%lu bytes=%lu error=%s\n",
              lql_status_string(st), payload_seen_value.calls,
              (unsigned long)result.candidates_seen,
              (unsigned long)result.candidates_matched,
@@ -2555,6 +2611,28 @@ static void expect_source_projection_api(void) {
     ++failures;
   }
 
+  fclose(out);
+  out = tmpfile();
+  if (out == NULL) {
+    printf("source projection over-capacity tmpfile failed\n");
+    test_ctx->projection_destroy(test_ctx, projection);
+    ++failures;
+    return;
+  }
+  found = 1;
+  lql_error_init(&error);
+  st = test_ctx->project_source(test_ctx, projection, read_over_capacity, NULL,
+                                out, &found, &error);
+  if (st != LQL_STATUS_JSON_ERROR || found ||
+      strcmp(error.message, "projection source read failed") != 0) {
+    printf("source projection over-capacity mismatch: found=%d error=%s\n",
+           found, error.message);
+    ++failures;
+  } else if (!read_tmpfile(out, buf, sizeof(buf), &len) || len != 0u) {
+    printf("source projection over-capacity wrote output: %s\n", buf);
+    ++failures;
+  }
+
   test_ctx->projection_destroy(test_ctx, projection);
   fclose(out);
 }
@@ -2851,6 +2929,26 @@ static void expect_projection_compact_error_api(void) {
       printf("compact_source read error wrote output: %s\n", buf);
       ++failures;
     }
+  }
+
+  fclose(out);
+  out = tmpfile();
+  if (out == NULL) {
+    printf("compact_source over-capacity tmpfile failed\n");
+    fclose(source);
+    ++failures;
+    return;
+  }
+  lql_error_init(&error);
+  st =
+      test_ctx->compact_source(test_ctx, read_over_capacity, NULL, out, &error);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message, "compact source read failed") != 0) {
+    printf("compact_source over-capacity mismatch: %s\n", error.message);
+    ++failures;
+  } else if (!read_tmpfile(out, buf, sizeof(buf), &len) || len != 0u) {
+    printf("compact_source over-capacity wrote output: %s\n", buf);
+    ++failures;
   }
 
   lql_error_init(&error);
@@ -3788,6 +3886,26 @@ static void expect_source_mutation_api(void) {
       printf("source mutation read error wrote output: %s\n", buf);
       ++failures;
     }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source mutation over-capacity tmpfile failed\n");
+      ++failures;
+      test_ctx->mutation_plan_destroy(test_ctx, plan);
+      return;
+    }
+    lql_error_init(&error);
+    st = test_ctx->mutate_source_paths(test_ctx, plan, read_over_capacity, NULL,
+                                       out, &error);
+    if (st != LQL_STATUS_JSON_ERROR ||
+        strcmp(error.message, "mutation source read failed") != 0) {
+      printf("source mutation over-capacity mismatch: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) || len != 0u) {
+      printf("source mutation over-capacity wrote output: %s\n", buf);
+      ++failures;
+    }
   }
   test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(out);
@@ -4035,6 +4153,33 @@ static void expect_source_candidate_mutation_api(void) {
     fclose(out);
     out = tmpfile();
     if (out == NULL) {
+      printf("source candidate mutation over-capacity tmpfile failed\n");
+      ++failures;
+    } else {
+      memset(&result, 0x5a, sizeof(result));
+      lql_error_init(&error);
+      st = test_ctx->mutate_source_candidates(test_ctx, selector, plan,
+                                              read_over_capacity, NULL, out, 1,
+                                              0, &result, &error);
+      if (st != LQL_STATUS_JSON_ERROR ||
+          strcmp(error.message, "source read failed") != 0 ||
+          !query_result_is_zero(&result)) {
+        printf("source candidate mutation over-capacity mismatch: status=%s "
+               "seen=%lu matched=%lu bytes=%lu error=%s\n",
+               lql_status_string(st), (unsigned long)result.candidates_seen,
+               (unsigned long)result.candidates_matched,
+               (unsigned long)result.bytes_read, error.message);
+        ++failures;
+      } else if (!read_tmpfile(out, buf, sizeof(buf), &len) || len != 0u) {
+        printf("source candidate mutation over-capacity wrote output: %s\n",
+               buf);
+        ++failures;
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
       printf("source candidate mutation partial-fail tmpfile failed\n");
       ++failures;
     } else {
@@ -4201,6 +4346,33 @@ static void expect_projected_candidate_mutation_api(void) {
       } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                  strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") != 0) {
         printf("source projected candidate output mismatch: %s\n", buf);
+        ++failures;
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source projected candidate over-capacity tmpfile failed\n");
+      ++failures;
+    } else {
+      memset(&result, 0x5a, sizeof(result));
+      lql_error_init(&error);
+      st = test_ctx->mutate_source_projected_candidates(
+          test_ctx, selector, projection, plan, read_over_capacity, NULL, out,
+          1, 0, &result, &error);
+      if (st != LQL_STATUS_JSON_ERROR ||
+          strcmp(error.message, "source read failed") != 0 ||
+          !query_result_is_zero(&result)) {
+        printf("source projected candidate over-capacity mismatch: status=%s "
+               "seen=%lu matched=%lu bytes=%lu error=%s\n",
+               lql_status_string(st), (unsigned long)result.candidates_seen,
+               (unsigned long)result.candidates_matched,
+               (unsigned long)result.bytes_read, error.message);
+        ++failures;
+      } else if (!read_tmpfile(out, buf, sizeof(buf), &len) || len != 0u) {
+        printf("source projected candidate over-capacity wrote output: %s\n",
+               buf);
         ++failures;
       }
     }
