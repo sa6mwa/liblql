@@ -7,13 +7,15 @@ Port `pkt.systems/lql v0.17.1` from Go to C89 in this repository as
 
 The C port must be suitable for lockd-style local JSON search and mutation
 workloads. It must preserve observable LQL behavior from the Go implementation
-where claimed, prove parity through executable tests and benchmarks, and use
-`lonejson` for JSON parsing, serialization, validation, stream framing,
-escaping, payload capture, and rewrite support.
+where claimed, prove the C product contract through native C tests, use Go as
+the semantic oracle for convergence, and use `lonejson` for JSON parsing,
+serialization, validation, stream framing, escaping, payload capture, and
+rewrite support.
 
 The implementation must not reference the adjacent Go source checkout from
-repository files. Go parity must go through the `parity/` Go module, which pins
-`pkt.systems/lql v0.17.1`.
+repository files. Go oracle checks must go through the `parity/` Go module,
+which pins `pkt.systems/lql v0.17.1`. Repository files must not derive
+behavior from, or reference, an adjacent Go source checkout.
 
 ## Release Artifacts
 
@@ -287,6 +289,20 @@ needed for DX.
 
 Verification is the primary quality gate.
 
+The verification strategy has three distinct layers:
+
+- C-native product tests define what `liblql` and `clql` promise to downstream
+  C, CLI, and Lua users. These tests assert public API ownership, callback
+  lifetimes, out-parameter state, partial I/O, cleanup, diagnostics,
+  bounded-memory semantics, and observable selector/projection/mutation
+  behavior.
+- Go oracle tests compare claimed LQL language and transformation behavior
+  against `pkt.systems/lql v0.17.1` while the port is converging. They are
+  convergence checks, not C unit tests.
+- Benchmarks verify behavioral counters across implementations and, for mature
+  public `liblql` paths, enforce C-native performance and memory expectations.
+  Go timing is context, not the desired C performance level.
+
 Required gates:
 
 - C SDK contract tests for every public liblql behavior, with observable
@@ -307,7 +323,8 @@ Required gates:
 - sanitizer tests;
 - package verification and privacy/relocatability gates;
 - source archive smoke tests;
-- Go/C/Lua parity benchmarks.
+- Go/C/Lua behavioral benchmark records plus C-native performance and memory
+  gates for mature public `liblql` paths.
 
 Fast test command contract:
 
@@ -377,7 +394,9 @@ Development should proceed in larger outcome slices:
 Do not spend implementation cycles mining Go parity cases solely to duplicate
 them in C tests. When Go parity exposes a divergence, fix the C behavior, then
 add C tests only for the C API invariant or product behavior that should have
-prevented the bug.
+prevented the bug. Exhaustive C coverage means the C product contract is
+covered surface by surface; it does not mean every Go oracle row has a
+mechanical C twin.
 
 ## Performance Strategy
 
@@ -397,10 +416,11 @@ Performance gates must therefore validate two things separately:
   documented headroom over Go once the relevant feature is mature.
 
 Initial benchmark gates may be behavioral while surfaces are incomplete. Once a
-surface is claimed, the benchmark should move from "not slower than Go" to a
-documented C-native threshold or baseline. CLI-mediated and Lua facade
-benchmarks may remain report-only where process startup or the temporary
-facade dominates the measurement, but public liblql benchmark paths should not.
+surface is claimed, the benchmark should move to a documented C-native
+threshold, baseline, or speedup floor for that specific public path.
+CLI-mediated and Lua facade benchmarks may remain report-only where process
+startup or the temporary facade dominates the measurement, but public liblql
+benchmark paths should not.
 
 ## Packaging Requirements
 
@@ -475,7 +495,10 @@ The port should progress in falsifiable slices:
    - clql archives;
    - release matrix verification.
 
-Each slice must add or update parity tests before claiming support.
+Each slice must add or update C-native product tests before claiming support.
+Go oracle coverage must also be updated when the slice changes claimed LQL
+language, transformation, or CLI compatibility behavior. A slice is not
+complete merely because Go parity passes.
 
 ## Current Repository Status
 

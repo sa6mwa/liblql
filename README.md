@@ -53,14 +53,16 @@ make build
 make test
 ```
 
-`make test` is the fast C/API contract test surface. These tests should prove
-the public C API's native behavior: ownership, callbacks, streaming,
+`make test` is the fast C/API contract test surface. These tests are the
+authority for public C behavior: ownership, callbacks, streaming,
 bounded-memory semantics, error handling, and observable results. Go-backed
 parity remains available through `make parity-test` and is included in
 `make test-all`; it is an oracle for semantic convergence with
-`pkt.systems/lql`, not a substitute for C API contract tests.
+`pkt.systems/lql`, not a substitute for C API contract tests and not a source
+for mechanically duplicated C unit rows.
 
 Benchmarks use Go as the behavioral reference, not the C performance target.
 Mature public liblql paths are expected to be C-native: bounded-memory by
 design and substantially faster than Go except where measurements are dominated
-by documented external costs such as process startup or disk I/O.
+by documented external costs such as process startup or disk I/O. Behavioral
+benchmark parity and C performance acceptance are separate gates.
