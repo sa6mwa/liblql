@@ -103,6 +103,10 @@ func TestSDKSelectorMatchesJSONParity(t *testing.T) {
 		{`and.0.eq{field=/status,value=open},and.1.or.0.in{field=/env,any=prod|stage},and.1.or.1.exists{/meta/etag}`, `{"status":"open","env":"dev","meta":{}}`},
 		{`or.0.eq{field=/status,value=open},or.1.and.0.range{field=/progress,gte=10},or.1.and.0.exists{/meta/etag}`, `{"status":"closed","progress":11,"meta":{"etag":"x"}}`},
 		{`or.0.eq{field=/status,value=open},or.1.and.0.range{field=/progress,gte=10},or.1.and.0.exists{/meta/etag}`, `{"status":"closed","progress":11,"meta":{}}`},
+		{`and.or.0.eq{field=/status,value=open}`, `{"status":"open"}`},
+		{`and.or.0.eq{field=/status,value=open}`, `{"status":"closed"}`},
+		{`or.and.0.eq{field=/status,value=open}`, `{"status":"open"}`},
+		{`or.and.0.eq{field=/status,value=open}`, `{"status":"closed"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.expr+"/"+tc.doc, func(t *testing.T) {

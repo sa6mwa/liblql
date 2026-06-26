@@ -1152,6 +1152,9 @@ static void indexed_groups_cleanup(indexed_group *groups, size_t count) {
   lql_dealloc(groups);
 }
 
+static lql_status finalize_indexed_group(indexed_group *group,
+                                         int root_or_mode);
+
 static int parse_indexed_wrapper(const char *token, lql_node_kind *wrapper,
                                  char **out_index, const char **out_rest) {
   const char *p;
@@ -1196,6 +1199,26 @@ static indexed_group *find_indexed_group(indexed_group *groups, size_t count,
     }
   }
   return NULL;
+}
+
+static int parse_simple_wrapper(const char *token, lql_node_kind *wrapper,
+                                const char **out_rest) {
+  if (strncmp(token, "and.", 4u) == 0) {
+    *wrapper = LQL_NODE_AND;
+    *out_rest = token + 4;
+    return 1;
+  }
+  if (strncmp(token, "or.", 3u) == 0) {
+    *wrapper = LQL_NODE_OR;
+    *out_rest = token + 3;
+    return 1;
+  }
+  if (strncmp(token, "not.", 4u) == 0) {
+    *wrapper = LQL_NODE_NOT;
+    *out_rest = token + 4;
+    return 1;
+  }
+  return 0;
 }
 
 static int node_conflicts_with_child(const lql_node *node,
@@ -1293,6 +1316,22 @@ static lql_status append_token_to_group(indexed_group *group, const char *token,
     }
     return append_token_to_group(child_group, rest, error);
   }
+  if (parse_simple_wrapper(token, &wrapper, &rest)) {
+    indexed_group wrapped;
+    memset(&wrapped, 0, sizeof(wrapped));
+    wrapped.node.kind = wrapper;
+    st = append_token_to_group(&wrapped, rest, error);
+    if (st == LQL_STATUS_OK) {
+      st = finalize_indexed_group(&wrapped, wrapper == LQL_NODE_OR);
+    }
+    if (st == LQL_STATUS_OK) {
+      st = append_plain_group_node(group, &wrapped.node, error);
+    }
+    lql_node_cleanup(&wrapped.node);
+    lql_node_cleanup(&wrapped.or_group);
+    indexed_groups_cleanup(wrapped.groups, wrapped.group_count);
+    return st;
+  }
 
   memset(&child, 0, sizeof(child));
   st = parse_one(token, &child, error);
@@ -1384,7 +1423,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
         parse_indexed_wrapper(tokens.items[0], &wrapper, &index, &rest);
     if (wrapper_status < 0) {
       st = LQL_STATUS_NO_MEMORY;
-    } else if (wrapper_status == 0) {
+    } else if (wrapper_status == 0 && !parse_simple_wrapper(tokens.items[0],
+                                                            &wrapper, &rest)) {
       st = parse_one(tokens.items[0], &selector->root, error);
     } else {
       memset(&root_group, 0, sizeof(root_group));

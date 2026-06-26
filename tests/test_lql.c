@@ -4013,6 +4013,14 @@ static void expect_selector_or_api(void) {
   expect_match("or.0.eq{field=/status,value=open},or.1.and.0.range{field=/"
                "progress,gte=10},or.1.and.0.exists{/meta/etag}",
                "{\"status\":\"closed\",\"progress\":11,\"meta\":{}}", 0);
+  expect_match("and.or.0.eq{field=/status,value=open}",
+               "{\"status\":\"open\"}", 1);
+  expect_match("and.or.0.eq{field=/status,value=open}",
+               "{\"status\":\"closed\"}", 0);
+  expect_match("or.and.0.eq{field=/status,value=open}",
+               "{\"status\":\"open\"}", 1);
+  expect_match("or.and.0.eq{field=/status,value=open}",
+               "{\"status\":\"closed\"}", 0);
 }
 
 static void expect_selector_parse_error_api(void) {
