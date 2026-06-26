@@ -910,7 +910,9 @@ Current implementation status:
 - C SDK unit coverage is manifest-checked: every `expect_* (void)` SDK
   unit group in `tests/test_lql.c` must have exactly one manifest entry and
   exactly one `main()` call, so C-only regressions cannot be added without
-  executable coverage accounting;
+  executable coverage accounting; `lql.sdk-manifest-fixtures` proves missing
+  receiver method coverage, unmanifested SDK units, duplicate manifest entries,
+  and duplicate main calls are rejected;
 - bounded fuzz smoke coverage exists through `lql.fuzz-smoke` and
   `make fuzz-smoke`, exercising public selector parse/evaluate, projection,
   compaction, mutation, callback-source decision streams, and callback-source

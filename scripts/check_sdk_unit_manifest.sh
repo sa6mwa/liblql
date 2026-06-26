@@ -95,6 +95,60 @@ EOF
     exit 1
   fi
 
+  cat >"$fixture_test" <<'EOF'
+static void expect_alpha_api(void) {
+}
+static void expect_destroy_api(void) {
+}
+static void expect_sdk_contract_manifest(void) {
+  static const int manifest[] = {
+      (int)(long)expect_alpha_api,
+      (int)(long)expect_alpha_api,
+      (int)(long)expect_destroy_api,
+  };
+  (void)manifest;
+}
+int main(void) {
+  lql *ctx = 0;
+  ctx->alpha(ctx);
+  ctx->destroy(ctx);
+  expect_alpha_api();
+  expect_destroy_api();
+  return 0;
+}
+EOF
+  if sh "$0" "$fixture_test" "$fixture_header" >/dev/null 2>&1; then
+    printf 'SDK unit manifest fixture: expected duplicate manifest entry to fail\n' >&2
+    exit 1
+  fi
+
+  cat >"$fixture_test" <<'EOF'
+static void expect_alpha_api(void) {
+}
+static void expect_destroy_api(void) {
+}
+static void expect_sdk_contract_manifest(void) {
+  static const int manifest[] = {
+      (int)(long)expect_alpha_api,
+      (int)(long)expect_destroy_api,
+  };
+  (void)manifest;
+}
+int main(void) {
+  lql *ctx = 0;
+  ctx->alpha(ctx);
+  ctx->destroy(ctx);
+  expect_alpha_api();
+  expect_alpha_api();
+  expect_destroy_api();
+  return 0;
+}
+EOF
+  if sh "$0" "$fixture_test" "$fixture_header" >/dev/null 2>&1; then
+    printf 'SDK unit manifest fixture: expected duplicate main call to fail\n' >&2
+    exit 1
+  fi
+
   exit 0
 fi
 
