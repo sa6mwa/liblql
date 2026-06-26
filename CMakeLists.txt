@@ -147,13 +147,13 @@ if(LQL_BUILD_TESTS)
   add_test(NAME lql.unit COMMAND test_lql)
   set_tests_properties(lql.unit PROPERTIES LABELS "unit;local" TIMEOUT 2)
 
-  add_executable(lql_selector_allocator_test tests/selector_allocator_test.c)
-  target_include_directories(lql_selector_allocator_test
+  add_executable(lql_handle_allocator_test tests/selector_allocator_test.c)
+  target_include_directories(lql_handle_allocator_test
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-  target_link_libraries(lql_selector_allocator_test PRIVATE lql_common)
-  lql_apply_project_warnings(lql_selector_allocator_test)
-  add_test(NAME lql.selector-allocator COMMAND lql_selector_allocator_test)
-  set_tests_properties(lql.selector-allocator PROPERTIES LABELS "unit;api"
+  target_link_libraries(lql_handle_allocator_test PRIVATE lql_common)
+  lql_apply_project_warnings(lql_handle_allocator_test)
+  add_test(NAME lql.handle-allocator COMMAND lql_handle_allocator_test)
+  set_tests_properties(lql.handle-allocator PROPERTIES LABELS "unit;api"
     TIMEOUT 2)
 
   add_executable(lql_fuzz_smoke tests/fuzz_smoke.c)

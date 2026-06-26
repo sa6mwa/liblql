@@ -230,6 +230,16 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  projection_default_allocator_hits=$(
+    grep -En 'lql_allocator_default[[:space:]]*\(' \
+      "$source_root/src/lql_project.c" 2>/dev/null || true
+  )
+  if [ -n "$projection_default_allocator_hits" ]; then
+    printf 'public API style: projection code must use the receiver/projection allocator\n' >&2
+    printf '%s\n' "$projection_default_allocator_hits" >&2
+    failed=1
+  fi
+
   lua_private_hits=$(
     grep -REn \
       'lql_internal\.h|LQL_INTERNAL_SYMBOL|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \

@@ -36,6 +36,7 @@ typedef struct projection_path {
 } projection_path;
 
 typedef struct projection_state {
+  lql_allocator *allocator;
   const lql_projection *projection;
   lonejson_writer writer;
   lonejson_error *error;
@@ -59,9 +60,17 @@ typedef struct projection_state {
 } projection_state;
 
 struct lql_projection {
+  lql_allocator *allocator;
   projection_path *paths;
   size_t path_count;
 };
+
+static lql_allocator *projection_allocator(const lql_projection *projection) {
+  if (projection == NULL || projection->allocator == NULL) {
+    return lql_allocator_from_receiver(NULL);
+  }
+  return projection->allocator;
+}
 
 static int seek_u64(FILE *file, lql_uint64 offset) {
   off_t seek_offset;
@@ -195,11 +204,12 @@ static char path_container_kind(const projection_path *path, size_t index) {
   return 'o';
 }
 
-static int add_segment(projection_path *path, char *segment) {
+static int add_segment(lql_allocator *allocator, projection_path *path,
+                       char *segment) {
   char **next;
-  next = (char **)lql_allocator_default()->realloc(
-      lql_allocator_default(), path->segments,
-      sizeof(path->segments[0]) * (path->segment_count + 1u));
+  next = (char **)allocator->realloc(allocator, path->segments,
+                                     sizeof(path->segments[0]) *
+                                         (path->segment_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -208,12 +218,12 @@ static int add_segment(projection_path *path, char *segment) {
   return 1;
 }
 
-static char *decode_path_segment(const char *src, size_t len) {
+static char *decode_path_segment(lql_allocator *allocator, const char *src,
+                                 size_t len) {
   char *out;
   size_t i;
   size_t j;
-  out =
-      (char *)lql_allocator_default()->alloc(lql_allocator_default(), len + 1u);
+  out = (char *)allocator->alloc(allocator, len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -238,21 +248,22 @@ static char *decode_path_segment(const char *src, size_t len) {
   return out;
 }
 
-static void projection_path_cleanup(projection_path *path) {
+static void projection_path_cleanup(lql_allocator *allocator,
+                                    projection_path *path) {
   size_t i;
   if (path == NULL) {
     return;
   }
   for (i = 0u; i < path->segment_count; ++i) {
-    lql_allocator_default()->destroy(lql_allocator_default(),
-                                     path->segments[i]);
+    allocator->destroy(allocator, path->segments[i]);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), path->segments);
+  allocator->destroy(allocator, path->segments);
   path->segments = NULL;
   path->segment_count = 0u;
 }
 
-static int parse_projection_path(const char *raw, projection_path *out) {
+static int parse_projection_path(lql_allocator *allocator, const char *raw,
+                                 projection_path *out) {
   const char *start;
   const char *end;
   const char *seg;
@@ -285,27 +296,27 @@ static int parse_projection_path(const char *raw, projection_path *out) {
       ++slash;
     }
     len = (size_t)(slash - seg);
-    decoded = decode_path_segment(seg, len);
+    decoded = decode_path_segment(allocator, seg, len);
     if (decoded == NULL) {
-      projection_path_cleanup(out);
+      projection_path_cleanup(allocator, out);
       return 0;
     }
     if (out->segment_count == 0u && segment_is_array_index(decoded)) {
-      lql_allocator_default()->destroy(lql_allocator_default(), decoded);
-      projection_path_cleanup(out);
+      allocator->destroy(allocator, decoded);
+      projection_path_cleanup(allocator, out);
       return 0;
     }
     if (segment_is_array_index(decoded)) {
       size_t index;
       if (!parse_array_index(decoded, &index)) {
-        lql_allocator_default()->destroy(lql_allocator_default(), decoded);
-        projection_path_cleanup(out);
+        allocator->destroy(allocator, decoded);
+        projection_path_cleanup(allocator, out);
         return 0;
       }
     }
-    if (!add_segment(out, decoded)) {
-      lql_allocator_default()->destroy(lql_allocator_default(), decoded);
-      projection_path_cleanup(out);
+    if (!add_segment(allocator, out, decoded)) {
+      allocator->destroy(allocator, decoded);
+      projection_path_cleanup(allocator, out);
       return 0;
     }
     if (slash == end) {
@@ -364,13 +375,15 @@ static int projection_paths_have_container_conflict(const projection_path *a,
 
 static int add_path(lql_projection *projection, projection_path *path) {
   projection_path *next;
+  lql_allocator *allocator;
   size_t i;
+  allocator = projection_allocator(projection);
   if (path->segment_count == 0u) {
     return 1;
   }
   for (i = 0u; i < projection->path_count; ++i) {
     if (projection_paths_equal(&projection->paths[i], path)) {
-      projection_path_cleanup(path);
+      projection_path_cleanup(allocator, path);
       return 1;
     }
     if (projection_path_is_prefix(&projection->paths[i], path) ||
@@ -381,8 +394,8 @@ static int add_path(lql_projection *projection, projection_path *path) {
       return 0;
     }
   }
-  next = (projection_path *)lql_allocator_default()->realloc(
-      lql_allocator_default(), projection->paths,
+  next = (projection_path *)allocator->realloc(
+      allocator, projection->paths,
       sizeof(projection->paths[0]) * (projection->path_count + 1u));
   if (next == NULL) {
     return 0;
@@ -425,10 +438,10 @@ static const projection_path *selected_path(const lql_projection *projection,
   return NULL;
 }
 
-static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
+static int append_buf(lql_allocator *allocator, char **buf, size_t *len,
+                      const char *data, size_t n) {
   char *next;
-  next = (char *)lql_allocator_default()->realloc(lql_allocator_default(), *buf,
-                                                  *len + n + 1u);
+  next = (char *)allocator->realloc(allocator, *buf, *len + n + 1u);
   if (next == NULL) {
     return 0;
   }
@@ -486,15 +499,15 @@ static int ensure_open_capacity(projection_state *state, size_t need) {
   while (next_capacity < need) {
     next_capacity *= 2u;
   }
-  next_kind = (char *)lql_allocator_default()->realloc(
-      lql_allocator_default(), state->open_kind,
+  next_kind = (char *)state->allocator->realloc(
+      state->allocator, state->open_kind,
       sizeof(state->open_kind[0]) * next_capacity);
   if (next_kind == NULL) {
     return 0;
   }
   state->open_kind = next_kind;
-  next_array_next = (size_t *)lql_allocator_default()->realloc(
-      lql_allocator_default(), state->open_array_next,
+  next_array_next = (size_t *)state->allocator->realloc(
+      state->allocator, state->open_array_next,
       sizeof(state->open_array_next[0]) * next_capacity);
   if (next_array_next == NULL) {
     return 0;
@@ -702,7 +715,7 @@ static lonejson_status on_object_key_begin(void *user,
   (void)path;
   (void)error;
   state = (projection_state *)user;
-  lql_allocator_default()->destroy(lql_allocator_default(), state->key_buf);
+  state->allocator->destroy(state->allocator, state->key_buf);
   state->key_buf = NULL;
   state->key_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -716,7 +729,8 @@ static lonejson_status on_object_key_chunk(void *user,
   (void)path;
   (void)error;
   state = (projection_state *)user;
-  return append_buf(&state->key_buf, &state->key_len, data, len)
+  return append_buf(state->allocator, &state->key_buf, &state->key_len, data,
+                    len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
 }
@@ -808,7 +822,7 @@ static lonejson_status on_number_begin(void *user,
     state->root_seen = 1;
     state->root_is_object = 0;
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), state->num_buf);
+  state->allocator->destroy(state->allocator, state->num_buf);
   state->num_buf = NULL;
   state->num_len = 0u;
   state->in_number =
@@ -824,8 +838,8 @@ static lonejson_status on_number_chunk(void *user,
   (void)path;
   (void)error;
   state = (projection_state *)user;
-  if (state->in_number &&
-      !append_buf(&state->num_buf, &state->num_len, data, len)) {
+  if (state->in_number && !append_buf(state->allocator, &state->num_buf,
+                                      &state->num_len, data, len)) {
     return LONEJSON_STATUS_ALLOCATION_FAILED;
   }
   return LONEJSON_STATUS_OK;
@@ -917,13 +931,27 @@ static void init_projection_visitor(lonejson_path_value_visitor *visitor) {
   visitor->null_value = on_null;
 }
 
+static void projection_state_cleanup(projection_state *state) {
+  if (state == NULL || state->allocator == NULL) {
+    return;
+  }
+  state->allocator->destroy(state->allocator, state->key_buf);
+  state->allocator->destroy(state->allocator, state->num_buf);
+  state->allocator->destroy(state->allocator, state->open_kind);
+  state->allocator->destroy(state->allocator, state->open_array_next);
+  state->key_buf = NULL;
+  state->num_buf = NULL;
+  state->open_kind = NULL;
+  state->open_array_next = NULL;
+}
+
 LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
     lql *self, const char *const *fields, size_t field_count,
     lql_projection **out, lql_error *error) {
+  lql_allocator *allocator;
   lql_projection *projection;
   projection_path path;
   size_t i;
-  (void)self;
   if (out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "out projection required");
@@ -934,20 +962,22 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "projection fields required");
     return LQL_STATUS_PARSE_ERROR;
   }
-  projection = (lql_projection *)lql_allocator_default()->calloc(
-      lql_allocator_default(), 1u, sizeof(*projection));
+  allocator = lql_allocator_from_receiver(self);
+  projection =
+      (lql_projection *)allocator->calloc(allocator, 1u, sizeof(*projection));
   if (projection == NULL) {
     return LQL_STATUS_NO_MEMORY;
   }
+  projection->allocator = allocator;
   for (i = 0u; i < field_count; ++i) {
-    if (!parse_projection_path(fields[i], &path)) {
+    if (!parse_projection_path(allocator, fields[i], &path)) {
       lql_projection_destroy_impl(NULL, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "invalid or unsupported projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
     if (!add_path(projection, &path)) {
-      projection_path_cleanup(&path);
+      projection_path_cleanup(allocator, &path);
       lql_projection_destroy_impl(NULL, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "conflicting projection field path");
@@ -965,16 +995,18 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
 
 LQL_INTERNAL_SYMBOL void
 lql_projection_destroy_impl(lql *self, lql_projection *projection) {
+  lql_allocator *allocator;
   size_t i;
-  (void)self;
   if (projection == NULL) {
     return;
   }
+  allocator = projection->allocator != NULL ? projection->allocator
+                                            : lql_allocator_from_receiver(self);
   for (i = 0u; i < projection->path_count; ++i) {
-    projection_path_cleanup(&projection->paths[i]);
+    projection_path_cleanup(allocator, &projection->paths[i]);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), projection->paths);
-  lql_allocator_default()->destroy(lql_allocator_default(), projection);
+  allocator->destroy(allocator, projection->paths);
+  allocator->destroy(allocator, projection);
 }
 
 static lql_status lql_project_reader(const lql_projection *projection,
@@ -999,6 +1031,7 @@ static lql_status lql_project_reader(const lql_projection *projection,
     return LQL_STATUS_JSON_ERROR;
   }
   memset(&state, 0, sizeof(state));
+  state.allocator = projection_allocator(projection);
   state.projection = projection;
   state.error = &lj_error;
   init_projection_visitor(&visitor);
@@ -1006,8 +1039,7 @@ static lql_status lql_project_reader(const lql_projection *projection,
                                 &lj_error) != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     lonejson_free(runtime);
-    lql_allocator_default()->destroy(lql_allocator_default(), state.key_buf);
-    lql_allocator_default()->destroy(lql_allocator_default(), state.num_buf);
+    projection_state_cleanup(&state);
     return LQL_STATUS_JSON_ERROR;
   }
   st = lonejson_visit_path_value_reader(runtime, reader_fn, reader_user,
@@ -1017,11 +1049,7 @@ static lql_status lql_project_reader(const lql_projection *projection,
                   "projection source must be a JSON object");
     lonejson_writer_cleanup(&state.writer);
     lonejson_free(runtime);
-    lql_allocator_default()->destroy(lql_allocator_default(), state.key_buf);
-    lql_allocator_default()->destroy(lql_allocator_default(), state.num_buf);
-    lql_allocator_default()->destroy(lql_allocator_default(), state.open_kind);
-    lql_allocator_default()->destroy(lql_allocator_default(),
-                                     state.open_array_next);
+    projection_state_cleanup(&state);
     return LQL_STATUS_JSON_ERROR;
   }
   if (st == LONEJSON_STATUS_OK && state.object_started) {
@@ -1036,11 +1064,7 @@ static lql_status lql_project_reader(const lql_projection *projection,
   *out_found = state.found;
   lonejson_writer_cleanup(&state.writer);
   lonejson_free(runtime);
-  lql_allocator_default()->destroy(lql_allocator_default(), state.key_buf);
-  lql_allocator_default()->destroy(lql_allocator_default(), state.num_buf);
-  lql_allocator_default()->destroy(lql_allocator_default(), state.open_kind);
-  lql_allocator_default()->destroy(lql_allocator_default(),
-                                   state.open_array_next);
+  projection_state_cleanup(&state);
   if (st != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;

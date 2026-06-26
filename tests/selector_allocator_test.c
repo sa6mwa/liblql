@@ -148,11 +148,117 @@ static int expect_selector_parse_failure_cleans_allocator(void) {
   return 0;
 }
 
+static int expect_projection_success_uses_allocator(void) {
+  counting_allocator counter;
+  lql_impl impl;
+  lql receiver;
+  lql_projection *projection;
+  const char *fields[2];
+  lql_error error;
+  lql_status st;
+  int found;
+  size_t outstanding_after_parse;
+  FILE *out;
+
+  counting_allocator_init(&counter);
+  memset(&impl, 0, sizeof(impl));
+  memset(&receiver, 0, sizeof(receiver));
+  impl.allocator = &counter.api;
+  receiver.impl = &impl;
+  fields[0] = "/title";
+  fields[1] = "/items/0/name";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse_impl(&receiver, fields, 2u, &projection, &error);
+  if (st != LQL_STATUS_OK || projection == NULL) {
+    printf("projection allocator parse failed: %s\n", error.message);
+    return 1;
+  }
+  if (counter.alloc_count == 0u) {
+    printf("projection allocator was not used\n");
+    lql_projection_destroy_impl(NULL, projection);
+    return 1;
+  }
+  outstanding_after_parse = counter.outstanding;
+  out = tmpfile();
+  if (out == NULL) {
+    printf("projection allocator tmpfile failed\n");
+    lql_projection_destroy_impl(NULL, projection);
+    return 1;
+  }
+  found = 0;
+  lql_error_init(&error);
+  st = lql_project_json_impl(
+      &receiver, projection,
+      "{\"title\":\"T\",\"items\":[{\"name\":\"N\"}],\"ignored\":1}",
+      strlen("{\"title\":\"T\",\"items\":[{\"name\":\"N\"}],\"ignored\":1}"),
+      out, &found, &error);
+  fclose(out);
+  if (st != LQL_STATUS_OK || !found) {
+    printf("projection allocator project failed: %s\n", error.message);
+    lql_projection_destroy_impl(NULL, projection);
+    return 1;
+  }
+  if (counter.outstanding != outstanding_after_parse) {
+    printf("projection runtime allocator cleanup imbalance: before=%lu "
+           "after=%lu\n",
+           (unsigned long)outstanding_after_parse,
+           (unsigned long)counter.outstanding);
+    lql_projection_destroy_impl(NULL, projection);
+    return 1;
+  }
+  lql_projection_destroy_impl(NULL, projection);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("projection allocator cleanup imbalance: outstanding=%lu "
+           "destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
+static int expect_projection_parse_failure_cleans_allocator(void) {
+  counting_allocator counter;
+  lql_impl impl;
+  lql receiver;
+  lql_projection *projection;
+  const char *fields[2];
+  lql_error error;
+  lql_status st;
+
+  counting_allocator_init(&counter);
+  memset(&impl, 0, sizeof(impl));
+  memset(&receiver, 0, sizeof(receiver));
+  impl.allocator = &counter.api;
+  receiver.impl = &impl;
+  fields[0] = "/items";
+  fields[1] = "/items/0/name";
+  projection = NULL;
+  lql_error_init(&error);
+  st = lql_projection_parse_impl(&receiver, fields, 2u, &projection, &error);
+  if (st == LQL_STATUS_OK || projection != NULL) {
+    printf("projection allocator parse failure unexpectedly succeeded\n");
+    lql_projection_destroy_impl(NULL, projection);
+    return 1;
+  }
+  if (counter.alloc_count == 0u || counter.outstanding != 0u) {
+    printf("projection allocator failure cleanup imbalance: allocs=%lu "
+           "outstanding=%lu\n",
+           (unsigned long)counter.alloc_count,
+           (unsigned long)counter.outstanding);
+    return 1;
+  }
+  return 0;
+}
+
 int main(void) {
   int failures;
 
   failures = 0;
   failures += expect_selector_success_uses_allocator();
   failures += expect_selector_parse_failure_cleans_allocator();
+  failures += expect_projection_success_uses_allocator();
+  failures += expect_projection_parse_failure_cleans_allocator();
   return failures == 0 ? 0 : 1;
 }
