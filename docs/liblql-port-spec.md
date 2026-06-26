@@ -1043,6 +1043,16 @@ Current implementation status:
   payload writes, and caller reset/reuse of the same sink state across payload
   streams. Go's reusable sink factory pooling and spill-file path lifecycle are
   implementation details unless liblql adds a factory API;
+- reusable mutation payload sink behavior from Go is API-shape-specific.
+  liblql's C mutation APIs do not expose a mutation `OnValue` callback,
+  `DisableInternalSpool`, or a mutation payload-sink factory; they stream
+  mutated bytes to caller-owned `FILE *` outputs. C tests cover the public
+  behavior at that boundary: direct writer success, callback-source candidate
+  mutation, matches-only output, stop limits, empty failed-output state for
+  early source failures, partial output after a late read failure, and
+  file-backed mutation values. Go callback-sink cleanup and reusable spill-file
+  lifecycle are not mirrored unless liblql deliberately adds a mutation
+  callback/factory surface;
 - lonejson `v0.35.0` exposes candidate `stream_offset`, `byte_size`, and
   `payload_size` plus callback-scoped `lonejson_spooled` handles with
   per-handle size/spilled inspection. It does not expose aggregate query-level
