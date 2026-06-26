@@ -783,9 +783,9 @@ Current implementation is an early slice:
 - C SDK streaming tests assert the current malformed JSON corpus across
   seekable file decision streams, seekable file payload streams,
   callback-source decision streams, and callback-source spooled payload streams;
-- C SDK payload tests assert callback-scoped seekable and spooled payloads can
-  be written through caller-managed sink callbacks, including sink failure
-  propagation;
+- C SDK payload tests assert callback-scoped seekable and callback-source
+  spooled payloads can be written through caller-managed sink callbacks,
+  including sink failure propagation and partial result accounting;
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
   payload kinds, decoded matched payload JSON collected through the public

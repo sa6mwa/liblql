@@ -236,6 +236,7 @@ typedef struct memory_sink {
   size_t len;
   int calls;
   int fail_after_first;
+  lql_status fail_status;
 } memory_sink;
 
 typedef struct chunk_reader {
@@ -349,7 +350,8 @@ static lql_status write_memory_sink(void *user, const void *data, size_t len) {
   sink = (memory_sink *)user;
   ++sink->calls;
   if (sink->fail_after_first && sink->calls == 1) {
-    return LQL_STATUS_STOP;
+    return sink->fail_status == LQL_STATUS_OK ? LQL_STATUS_STOP
+                                              : sink->fail_status;
   }
   if (sink->len + len >= sizeof(sink->data)) {
     return LQL_STATUS_NO_MEMORY;
@@ -983,6 +985,42 @@ static void expect_source_spooled_payload_api(void) {
     ++failures;
   } else if (strcmp(sink.data, "{\"status\":\"open\",\"id\":\"b\"}") != 0) {
     printf("source spooled payload sink output mismatch: %s\n", sink.data);
+    ++failures;
+  }
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&reader, 0, sizeof(reader));
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 7u;
+  sink.fail_after_first = 1;
+  sink.fail_status = LQL_STATUS_INVALID_ARGUMENT;
+  lql_error_init(&error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source spooled payload sink failure parse failed: %s\n",
+           error.message);
+    ++failures;
+    return;
+  }
+  st = test_ctx->query_source_spooled_matches_with_options(
+      test_ctx, selector, read_chunk, &reader, &options,
+      record_spooled_payload_sink, &sink, &result, &error);
+  test_ctx->selector_destroy(test_ctx, selector);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "query match callback failed") != 0 ||
+      sink.calls != 1 || result.candidates_seen != (lql_uint64)2 ||
+      result.candidates_matched != (lql_uint64)0 ||
+      result.bytes_read != (lql_uint64)56) {
+    printf("source spooled payload sink failure mismatch: status=%s "
+           "error=%s calls=%d seen=%lu matched=%lu bytes=%lu\n",
+           lql_status_string(st), error.message, sink.calls,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched,
+           (unsigned long)result.bytes_read);
     ++failures;
   }
 }
@@ -2211,7 +2249,7 @@ static void expect_projection_parse_error_corpus_api(void) {
              " status=%s error=%s\n",                                          \
              lql_status_string(st), error.message);                            \
       ++failures;                                                              \
-      test_ctx->projection_destroy(test_ctx, projection);                         \
+      test_ctx->projection_destroy(test_ctx, projection);                      \
     }                                                                          \
   } while (0)
 
