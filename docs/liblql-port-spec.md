@@ -540,6 +540,9 @@ Current implementation is an early slice:
   repository files reference the adjacent Go source checkout through
   `../lql`-style paths or workstation-local checkout paths; parity remains
   routed through the pinned `parity/` Go module;
+- fast CTest compiles installed public headers as both C90 and C++98 with
+  warnings treated as errors, proving the declared C API remains usable from C
+  and C++ consumers;
 - the public C API exposes an instantiatable receiver shell through `lql_new()`
   and method-pointer dispatch; selector/query/projection/mutation operations
   are implemented by receiver-compatible private functions and are not exported

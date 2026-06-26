@@ -210,6 +210,14 @@ if(LQL_BUILD_TESTS)
     -c ${CMAKE_CURRENT_SOURCE_DIR}/tests/header_smoke.c -o ${CMAKE_CURRENT_BINARY_DIR}/header_smoke.o)
   set_tests_properties(lql.header PROPERTIES LABELS "unit;api" TIMEOUT 5)
 
+  add_test(NAME lql.header-cxx
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_cpp_header_smoke.sh
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/header_smoke.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${CMAKE_CURRENT_BINARY_DIR}/generated/include
+      ${CMAKE_CURRENT_BINARY_DIR}/header_smoke_cpp.o)
+  set_tests_properties(lql.header-cxx PROPERTIES LABELS "unit;api" TIMEOUT 5)
+
   find_program(GO_EXECUTABLE go)
   if(GO_EXECUTABLE AND LQL_BUILD_BINARY)
     add_test(NAME lql.parity
