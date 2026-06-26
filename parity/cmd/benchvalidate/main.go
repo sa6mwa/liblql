@@ -169,6 +169,9 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 	if rec.PayloadSourceType == "" {
 		return fmt.Errorf("line %d: payload_source_type is required", line)
 	}
+	if !isPayloadSourceType(rec.PayloadSourceType) {
+		return fmt.Errorf("line %d: unsupported payload_source_type %q", line, rec.PayloadSourceType)
+	}
 	if !isSHA256Hex(rec.FixtureSHA256) {
 		return fmt.Errorf("line %d: fixture_sha256 must be 64 hex characters", line)
 	}
@@ -261,6 +264,16 @@ func isPlusValueMode(mode string) bool {
 func isSourceMode(mode string) bool {
 	return mode == "decision_only_source_selector" ||
 		mode == "plus_value_source_selector"
+}
+
+func isPayloadSourceType(value string) bool {
+	switch value {
+	case "none", "seekable_range", "spooled", "callback_payload",
+		"lua_liblql":
+		return true
+	default:
+		return false
+	}
 }
 
 func requiresTiming(rec record) bool {

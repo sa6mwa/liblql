@@ -58,8 +58,12 @@ expect_validator_failure "matches-exceed-candidates" "matches must not exceed ca
 {"schema":"liblql.parity_benchmark.v1","impl":"c","dataset":"large_ndjson","selector":"eq_status_open","expr":"/status=\"open\"","mode":"decision_only_selector","submode":"warmup_included","bytes_per_iter":1,"candidates":1,"matches":2,"payloads":0,"payload_bytes":0,"payload_source_type":"none","fixture_sha256":"0000000000000000000000000000000000000000000000000000000000000000","ns_per_op":1,"peak_rss_bytes":1,"allocs_per_op":null,"unsupported":false,"unsupported_reason":""}
 JSONL
 
+expect_validator_failure "unsupported-payload-source" "unsupported payload_source_type" <<'JSONL'
+{"schema":"liblql.parity_benchmark.v1","impl":"lua","dataset":"large_ndjson","selector":"eq_status_open","expr":"/status=\"open\"","mode":"plus_value_selector","submode":"warmup_included","bytes_per_iter":1,"candidates":1,"matches":1,"payloads":1,"payload_bytes":1,"payload_source_type":"materialized_buffer","fixture_sha256":"0000000000000000000000000000000000000000000000000000000000000000","ns_per_op":1,"peak_rss_bytes":1,"allocs_per_op":null,"unsupported":false,"unsupported_reason":""}
+JSONL
+
 expect_validator_failure "c-plus-value-spool" "must use seekable_range payloads" <<'JSONL'
-{"schema":"liblql.parity_benchmark.v1","impl":"c","dataset":"large_ndjson","selector":"eq_status_open","expr":"/status=\"open\"","mode":"plus_value_openjson_selector","submode":"warmup_included","bytes_per_iter":1,"candidates":1,"matches":1,"payloads":1,"payload_bytes":1,"payload_source_type":"spool","fixture_sha256":"0000000000000000000000000000000000000000000000000000000000000000","ns_per_op":1,"peak_rss_bytes":1,"allocs_per_op":null,"unsupported":false,"unsupported_reason":""}
+{"schema":"liblql.parity_benchmark.v1","impl":"c","dataset":"large_ndjson","selector":"eq_status_open","expr":"/status=\"open\"","mode":"plus_value_openjson_selector","submode":"warmup_included","bytes_per_iter":1,"candidates":1,"matches":1,"payloads":1,"payload_bytes":1,"payload_source_type":"spooled","fixture_sha256":"0000000000000000000000000000000000000000000000000000000000000000","ns_per_op":1,"peak_rss_bytes":1,"allocs_per_op":null,"unsupported":false,"unsupported_reason":""}
 JSONL
 
 expect_validator_failure "c-source-plus-value-seekable" "must use spooled payloads" <<'JSONL'

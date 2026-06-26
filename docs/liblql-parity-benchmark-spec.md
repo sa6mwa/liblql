@@ -80,8 +80,11 @@ Current implementation status:
   digest for its generated fixture, rejects impossible counter records such as
   `matches > candidates`, and verifies every
   implementation/dataset/selector/mode tuple emits both `warmup_included` and
-  `steady_state` records. The smoke gate also validates supported C records
-  against `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`, defaulting to 128 MiB. It includes
+  `steady_state` records. It also rejects unknown payload source type spellings
+  so materialized, buffered, seekable, spooled, and Lua facade payload behavior
+  cannot be blurred in benchmark output. The smoke gate also validates
+  supported C records against `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`, defaulting to
+  128 MiB. It includes
   direct callback-source decision and plus-value selector modes so Go, C, and
   Lua exercise non-seekable source readers and callback-scoped spooled payload
   access through their public SDK surfaces. This proves
@@ -440,6 +443,11 @@ Each record should be self-contained. Example shape:
 
 The comparison script may also print a human summary table, but JSON Lines is
 the contract for tools and regression gates.
+
+Known `payload_source_type` spellings are `none`, `seekable_range`, `spooled`,
+`callback_payload`, and `lua_liblql`. New spellings require a validator update
+and fixture coverage so buffered/materialized behavior cannot be hidden behind
+ad hoc labels.
 
 ## Lua Requirements
 
