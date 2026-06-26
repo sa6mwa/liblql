@@ -1579,7 +1579,8 @@ lql_parse_selector_internal(lql_allocator *allocator, const char *expr,
   }
   token_list_cleanup(ctx, &tokens);
   if (st != LQL_STATUS_OK) {
-    lql_selector_destroy_impl(NULL, selector);
+    lql_node_cleanup(ctx->allocator, &selector->root);
+    ctx->allocator->destroy(ctx->allocator, selector);
     return st;
   }
   selector->hit_count = 0u;

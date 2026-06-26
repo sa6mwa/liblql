@@ -265,6 +265,20 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  null_private_receiver_hits=$(
+    grep -REn 'lql_[A-Za-z0-9_]+_impl[[:space:]]*\([[:space:]]*NULL[[:space:]]*,' \
+      "$source_root/src/lql.c" \
+      "$source_root/src/lql_selector.c" \
+      "$source_root/src/lql_project.c" \
+      "$source_root/src/lql_eval.c" \
+      "$source_root/src/lql_mutation.c" 2>/dev/null || true
+  )
+  if [ -n "$null_private_receiver_hits" ]; then
+    printf 'public API style: private receiver implementations must not be called with NULL receivers\n' >&2
+    printf '%s\n' "$null_private_receiver_hits" >&2
+    failed=1
+  fi
+
   cli_receiver_bypass_hits=$(
     grep -En \
       'lql_eval_query_|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \

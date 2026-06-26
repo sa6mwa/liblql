@@ -535,7 +535,7 @@ complete merely because Go parity passes.
 
 ## Current Repository Status
 
-Current implementation is an early slice:
+Current implementation status:
 
 - lifecycle scaffold exists;
 - lonejson `v0.35.0` binary archive acquisition from GitHub release assets
@@ -604,6 +604,10 @@ Current implementation is an early slice:
   operation calls from tests, examples, and benchmarks, so executable examples
   and C-side product tests exercise liblql through the receiver surface instead
   of preserving private operation bypasses;
+- core code is style-gated against calling private receiver implementation
+  functions with a `NULL` receiver; parse-failure cleanup paths must use the
+  explicit owning allocator or handle cleanup surface instead of routing
+  through operation-shaped null-receiver calls;
 - query evaluator entry points carry the active `lql *` receiver through their
   private implementation boundary, so selectorless/match-all query scratch
   state and nested projected mutation execution use the same receiver context
@@ -746,9 +750,10 @@ Current implementation is an early slice:
   remains aligned with the library surface rather than an internal-only path;
 - `clql` process-glue allocations for parsed argv lists, joined selector text,
   and inline temp path ownership use one CLI glue allocator independent of
-  `clql_ctx`; the style gate rejects receiver-derived `clql_ctx` glue
-  allocation so argv-derived buffers cannot be allocated before `lql_new()` and
-  later freed through a different receiver-owned allocator;
+  `clql_ctx`; the style gate rejects both receiver-derived `clql_ctx` glue
+  allocation and null-receiver allocator fallback in project runtime code, so
+  argv-derived buffers cannot be allocated before `lql_new()` and later freed
+  through a different receiver-owned allocator;
 - `clql -m/--mutate -f/--field` follows Go CLI order for seekable file input
   and non-seekable stdin: project each output candidate first, then mutate the
   projected value only for matched candidates; this path uses callback-scoped

@@ -122,6 +122,12 @@ EOF
 run_expect_fail "cleanup default allocator fallback"
 rm -f "$tmp/src/lql.c"
 
+cat >"$tmp/src/lql_selector.c" <<'EOF'
+void bad_null_private_receiver(void) { lql_selector_destroy_impl(NULL, selector); }
+EOF
+run_expect_fail "private receiver implementation called with NULL receiver"
+rm -f "$tmp/src/lql_selector.c"
+
 printf '%s\n' 'stale cleanup surface is `lql_dealloc()`' >"$tmp/README.md"
 run_expect_fail "README allocator wrapper documentation"
 printf '%s\n' '# fixture' >"$tmp/README.md"
