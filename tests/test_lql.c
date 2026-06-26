@@ -4051,6 +4051,22 @@ static void expect_mutation_error_api(void) {
              error.message);
       ++failures;
     }
+    {
+      static const char *const non_object_roots[] = {"", "7", "null", "\"x\"",
+                                                     "[{\"id\":\"a\"}]"};
+      size_t i;
+      for (i = 0u; i < sizeof(non_object_roots) / sizeof(non_object_roots[0]);
+           ++i) {
+        lql_error_init(&error);
+        st = test_ctx->mutate_json(test_ctx, plan, non_object_roots[i],
+                                   strlen(non_object_roots[i]), out, &error);
+        if (st != LQL_STATUS_JSON_ERROR) {
+          printf("json mutation accepted non-object root %s with status %s\n",
+                 non_object_roots[i], lql_status_string(st));
+          ++failures;
+        }
+      }
+    }
 
     if (fseek(source, 0L, SEEK_SET) != 0 ||
         fwrite(malformed, 1u, strlen(malformed), source) != strlen(malformed) ||
