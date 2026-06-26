@@ -4586,6 +4586,20 @@ static void expect_source_mutation_api(void) {
       printf("source mutation NULL out mismatch: %s\n", error.message);
       ++failures;
     }
+
+    memset(&reader, 0, sizeof(reader));
+    reader.data = "[{\"id\":\"a\"}]";
+    reader.len = strlen(reader.data);
+    reader.chunk_size = 2u;
+    lql_error_init(&error);
+    st = test_ctx->mutate_source_paths(test_ctx, plan, read_chunk, &reader, out,
+                                       &error);
+    if (st != LQL_STATUS_JSON_ERROR) {
+      printf("source mutation accepted non-object root with status %s\n",
+             lql_status_string(st));
+      ++failures;
+    }
+
     fclose(out);
     out = tmpfile();
     if (out == NULL) {
