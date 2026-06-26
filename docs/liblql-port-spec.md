@@ -953,6 +953,10 @@ Current implementation status:
   mechanical duplication of Go rows into C tests. Their coverage manifests
   reject missing tests, duplicate test-function entries, and duplicate
   `surface/requirement` keys;
+- CLI selector parity includes scalar, string, numeric, temporal, contains,
+  prefix, existence, wildcard, recursive, numeric object/array segment,
+  nested logical, and newline-separated selector cases from the Go oracle
+  corpus;
 - CLI malformed JSON execution is covered by Go-backed parity tests over stdin
   and seekable file inputs for selection, matches-only selection, compact
   output, projection, and mutation, with exit-code and diagnostic assertions;
