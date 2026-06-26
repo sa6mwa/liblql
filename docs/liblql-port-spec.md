@@ -604,6 +604,10 @@ Current implementation is an early slice:
   operation calls from tests, examples, and benchmarks, so executable examples
   and C-side product tests exercise liblql through the receiver surface instead
   of preserving private operation bypasses;
+- query evaluator entry points carry the active `lql *` receiver through their
+  private implementation boundary, so selectorless/match-all query scratch
+  state and nested projected mutation execution use the same receiver context
+  instead of a null-receiver default allocator fallback;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through
