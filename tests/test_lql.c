@@ -1205,11 +1205,16 @@ static void expect_stream_stop_controls(void) {
       break;                                                                   \
     }                                                                          \
     if (seen.calls != (want_calls) || seen.matched != (want_matched) ||        \
+        result.candidates_seen != (lql_uint64)(want_calls) ||                  \
+        result.candidates_matched != (lql_uint64)(want_matched) ||             \
         !result.stopped_early || result.stop_reason != (want_reason)) {        \
       printf(label                                                             \
-             " stop mismatch calls=%d matched=%d stopped=%d reason=%d\n",      \
-             seen.calls, seen.matched, result.stopped_early,                   \
-             (int)result.stop_reason);                                         \
+             " stop mismatch calls=%d matched=%d result_seen=%lu "             \
+             "result_matched=%lu stopped=%d reason=%d\n",                     \
+             seen.calls, seen.matched,                                         \
+             (unsigned long)result.candidates_seen,                            \
+             (unsigned long)result.candidates_matched,                         \
+             result.stopped_early, (int)result.stop_reason);                   \
       ++failures;                                                              \
     }                                                                          \
   } while (0)
@@ -1222,6 +1227,17 @@ static void expect_stream_stop_controls(void) {
                 LQL_QUERY_STOP_BYTE_LIMIT);
   RUN_STOP_CASE("callback stop", (void)0, seen.stop_after_first = 1, 1, 1,
                 LQL_QUERY_STOP_CALLBACK);
+  RUN_STOP_CASE("callback stop precedence",
+                options.max_matches = 1u; options.max_candidates = 1u;
+                options.max_bytes_read = 1u,
+                seen.stop_after_first = 1, 1, 1, LQL_QUERY_STOP_CALLBACK);
+  RUN_STOP_CASE("max matches precedence",
+                options.max_matches = 1u; options.max_candidates = 1u;
+                options.max_bytes_read = 1u,
+                (void)0, 1, 1, LQL_QUERY_STOP_MATCH_LIMIT);
+  RUN_STOP_CASE("max candidates precedence",
+                options.max_candidates = 1u; options.max_bytes_read = 1u,
+                (void)0, 1, 1, LQL_QUERY_STOP_CANDIDATE_LIMIT);
 
 #undef RUN_STOP_CASE
 
