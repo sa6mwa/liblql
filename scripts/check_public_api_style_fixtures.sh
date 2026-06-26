@@ -125,6 +125,7 @@ EOF
 
 cat >"$tmp/tests/private_operation.c" <<'EOF'
 void test_private_operation(void) { (void)lql_mutate_json_impl(0, 0, 0, 0, 0, 0); }
+void test_private_spooled_operation(void) { (void)lql_project_spooled(0, 0, 0, 0, 0, 0); }
 EOF
 
 out="$tmp/batched-negative.out"

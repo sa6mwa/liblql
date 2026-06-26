@@ -30,9 +30,6 @@ static void selector_capabilities_get_method(
 static void selector_execution_traits_get_method(
     const lql *self, const lql_selector *selector,
     lql_selector_execution_traits *out);
-static lql_status matches_json_method(lql *self, const lql_selector *selector,
-                                      const char *json, size_t json_len,
-                                      int *out_matched, lql_error *error);
 static void selector_capabilities_visit(lql_selector_capabilities *out,
                                         const lql_node *node);
 static void selector_path_capabilities_visit(lql_selector_capabilities *out,
@@ -80,7 +77,6 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
   ctx->selector_is_empty = selector_is_empty_method;
   ctx->selector_capabilities_get = selector_capabilities_get_method;
   ctx->selector_execution_traits_get = selector_execution_traits_get_method;
-  ctx->matches_json = matches_json_method;
   lql_eval_methods_install(ctx);
   lql_project_methods_install(ctx);
   lql_mutation_methods_install(ctx);
@@ -364,19 +360,4 @@ static void selector_execution_traits_get_method(
   out->early_non_match_likely =
       out->requires_object_root && !out->uses_contains_like &&
       !out->uses_recursive_path;
-}
-
-static lql_status
-matches_json_method(lql *self, const lql_selector *selector, const char *json,
-                      size_t json_len, int *out_matched, lql_error *error) {
-  if (out_matched == NULL || json == NULL) {
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "json and out_matched are required");
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
-  if (selector == NULL || selector->root.kind == LQL_NODE_ALL) {
-    *out_matched = 1;
-    return LQL_STATUS_OK;
-  }
-  return lql_eval_selector(self, selector, json, json_len, out_matched, error);
 }

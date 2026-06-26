@@ -610,10 +610,13 @@ Current implementation status:
   method dispatch, and proves handle allocations, runtime scratch buffers, and
   receiver-owned allocations return to zero outstanding allocations on cleanup;
 - the public API style gate rejects selector/query/payload/projection/compact/
-  mutation `_impl`, `lql_eval_query_*`, and `lql_parse_selector_internal()`
-  operation calls from tests, examples, and benchmarks, so executable examples
-  and C-side product tests exercise liblql through the receiver surface instead
-  of preserving private operation bypasses;
+  mutation `_impl`, `lql_eval_selector`, `lql_eval_query_*`,
+  `lql_project_spooled`, `lql_mutate_spooled_paths`, and
+  `lql_parse_selector_internal()` operation calls from tests, examples, and
+  benchmarks, so executable examples and C-side product tests exercise liblql
+  through the receiver surface instead of preserving private operation
+  bypasses; core implementation files are also style-gated against restoring
+  shared hidden `lql_*` operation entry points for receiver-owned behavior;
 - the SDK contract manifest gate parses the installed receiver method table and
   fails if any public receiver method lacks C-side method-call coverage in
   `tests/test_lql.c`, so method-table growth cannot silently outrun native SDK
@@ -624,10 +627,14 @@ Current implementation status:
   functions with a `NULL` receiver; parse-failure cleanup paths must use the
   explicit owning allocator or handle cleanup surface instead of routing
   through operation-shaped null-receiver calls;
-- query evaluator entry points carry the active `lql *` receiver through their
-  private implementation boundary, so selectorless/match-all query scratch
-  state and nested projected mutation execution use the same receiver context
-  instead of a null-receiver default allocator fallback;
+- query evaluator receiver methods carry the active `lql *` receiver through
+  file-local execution helpers, so selectorless/match-all query scratch state
+  and nested projected mutation execution use the same receiver context instead
+  of a null-receiver default allocator fallback; projection and mutation of
+  callback-scoped spooled payloads re-enter `project_source` and
+  `mutate_source_paths` through bounded source callbacks rather than sharing
+  separate `lql_project_spooled` or `lql_mutate_spooled_paths` operation
+  entry points;
 - projection, compact, and mutation runtime helpers also carry receiver context
   across private helper boundaries; core source files are style-gated against
   `lql_allocator_from_receiver(NULL)` so library behavior cannot silently fall
@@ -778,10 +785,11 @@ Current implementation status:
   callback-scoped spooled payloads, preserves unmatched candidates by default,
   and honors `-M/--matches-only` without materializing the full input stream;
 - `clql` execution paths now dispatch through the public `lql *` receiver
-  methods instead of calling private `lql_eval_query_*` execution helpers or
-  private `_impl` receiver entry points directly; `lql.public-api-style`
-  rejects those private execution shortcuts in `src/clql.c` so CLI behavior
-  remains aligned with the library surface rather than an internal-only path;
+  methods instead of calling private `lql_eval_selector`, `lql_eval_query_*`,
+  `lql_project_spooled`, `lql_mutate_spooled_paths`, or private `_impl`
+  receiver entry points directly; `lql.public-api-style` rejects those private
+  execution shortcuts in `src/clql.c` so CLI behavior remains aligned with the
+  library surface rather than an internal-only path;
 - `clql` process-glue allocations for parsed argv lists, joined selector text,
   and inline temp path ownership use one CLI glue allocator independent of
   `clql_ctx`; the style gate rejects both receiver-derived `clql_ctx` glue

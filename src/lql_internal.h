@@ -122,42 +122,6 @@ LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql *self, lql_node *node);
 LQL_INTERNAL_SYMBOL lql_status
 lql_parse_selector_internal(lql *self, const char *expr, int or_mode,
                             lql_selector **out, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status
-lql_eval_selector(lql *self, const lql_selector *selector, const char *json,
-                  size_t json_len, int *out_matched, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
-    lql *self, const lql_selector *selector, FILE *file,
-    const lql_query_options *options, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_decisions(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    const lql_query_options *options, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_matches(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    const lql_query_options *options, lql_query_match_fn on_match, void *user,
-    lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_range_spooled_matches(
-    lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, int compact, const lql_projection *projection,
-    const lql_mutation_plan *mutation_plan, int matches_only,
-    lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_spooled_matches(
-    lql *self, const lql_selector *selector, FILE *file, FILE *out, int compact,
-    const lql_projection *projection, const lql_mutation_plan *mutation_plan,
-    int matches_only, lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    FILE *out, int compact, const lql_projection *projection,
-    const lql_mutation_plan *mutation_plan, int matches_only,
-    lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status
-lql_project_spooled(lql *self, const lql_projection *projection,
-                    const lonejson_spooled *spooled, FILE *out, int *out_found,
-                    lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_spooled_paths(
-    lql *self, const lql_mutation_plan *plan, const lonejson_spooled *spooled,
-    FILE *out, lql_error *error);
 LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
                                                    lql_temporal *out);
 LQL_INTERNAL_SYMBOL int lql_temporal_compare(const lql_temporal *left,

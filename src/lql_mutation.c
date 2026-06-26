@@ -447,11 +447,6 @@ mutation_source_read(void *user, unsigned char *buffer, size_t capacity) {
   return result;
 }
 
-static lonejson_read_result spooled_read(void *user, unsigned char *buffer,
-                                         size_t capacity) {
-  return lonejson_spooled_read((lonejson_spooled *)user, buffer, capacity);
-}
-
 static int append_buf(lql_allocator *allocator, char **buf, size_t *len,
                       const char *data, size_t n) {
   char *next;
@@ -2543,12 +2538,6 @@ static lql_status mutate_file_range_with_supported_plan(
                                            out, error);
 }
 
-static void clear_query_result(lql_query_result *out_result) {
-  if (out_result != NULL) {
-    memset(out_result, 0, sizeof(*out_result));
-  }
-}
-
 static lql_status mutate_file_range_root_fields_method(
     lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, lql_error *error) {
@@ -2632,88 +2621,6 @@ mutate_json_method(lql *self, const lql_mutation_plan *plan, const char *json,
                                            out, error);
 }
 
-static lql_status mutate_file_range_candidates_method(
-    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
-    FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
-    int matches_only, lql_query_result *out_result, lql_error *error) {
-  if (plan == NULL || file == NULL || out == NULL) {
-    clear_query_result(out_result);
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "plan, file, and out are required");
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
-  return lql_eval_query_file_range_spooled_matches(
-      self, selector, file, offset, size, out, compact, NULL, plan,
-      matches_only, out_result, error);
-}
-
-static lql_status mutate_file_range_projected_candidates_method(
-    lql *self, const lql_selector *selector, const lql_projection *projection,
-    const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, int compact, int matches_only,
-    lql_query_result *out_result, lql_error *error) {
-  if (projection == NULL || plan == NULL || file == NULL || out == NULL) {
-    clear_query_result(out_result);
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "projection, plan, file, and out are required");
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
-  return lql_eval_query_file_range_spooled_matches(
-      self, selector, file, offset, size, out, compact, projection, plan,
-      matches_only, out_result, error);
-}
-
-static lql_status mutate_source_candidates_method(
-    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
-    lql_read_fn read, void *read_user, FILE *out, int compact, int matches_only,
-    lql_query_result *out_result, lql_error *error) {
-  if (plan == NULL || read == NULL || out == NULL) {
-    clear_query_result(out_result);
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "plan, read, and out are required");
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
-  return lql_eval_query_source_spooled_rewrite(self, selector, read, read_user,
-                                               out, compact, NULL, plan,
-                                               matches_only, out_result, error);
-}
-
-static lql_status mutate_source_projected_candidates_method(
-    lql *self, const lql_selector *selector, const lql_projection *projection,
-    const lql_mutation_plan *plan, lql_read_fn read, void *read_user, FILE *out,
-    int compact, int matches_only, lql_query_result *out_result,
-    lql_error *error) {
-  if (projection == NULL || plan == NULL || read == NULL || out == NULL) {
-    clear_query_result(out_result);
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "projection, plan, read, and out are required");
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
-  return lql_eval_query_source_spooled_rewrite(self, selector, read, read_user,
-                                               out, compact, projection, plan,
-                                               matches_only, out_result, error);
-}
-
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_spooled_paths(
-    lql *self, const lql_mutation_plan *plan, const lonejson_spooled *spooled,
-    FILE *out, lql_error *error) {
-  lonejson_spooled cursor;
-  if (plan == NULL || spooled == NULL || out == NULL) {
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "plan, spooled payload, and out are required");
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
-  if (!mutation_plan_supports_stream_paths(plan)) {
-    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                  "mutation plan requires unsupported path behavior");
-    return LQL_STATUS_UNSUPPORTED;
-  }
-  cursor = *spooled;
-  cursor.read_offset = 0u;
-  return mutate_reader_with_supported_plan(self, plan, spooled_read, &cursor,
-                                           out, error);
-}
-
 LQL_INTERNAL_SYMBOL void lql_mutation_methods_install(lql *ctx) {
   ctx->mutation_plan_parse = mutation_plan_parse_method;
   ctx->mutation_plan_parse_with_options = mutation_plan_parse_with_options_method;
@@ -2721,12 +2628,6 @@ LQL_INTERNAL_SYMBOL void lql_mutation_methods_install(lql *ctx) {
   ctx->mutation_plan_destroy = mutation_plan_destroy_method;
   ctx->mutate_file_range_root_fields = mutate_file_range_root_fields_method;
   ctx->mutate_file_range_paths = mutate_file_range_paths_method;
-  ctx->mutate_file_range_candidates = mutate_file_range_candidates_method;
-  ctx->mutate_file_range_projected_candidates =
-      mutate_file_range_projected_candidates_method;
   ctx->mutate_source_paths = mutate_source_paths_method;
-  ctx->mutate_source_candidates = mutate_source_candidates_method;
-  ctx->mutate_source_projected_candidates =
-      mutate_source_projected_candidates_method;
   ctx->mutate_json = mutate_json_method;
 }

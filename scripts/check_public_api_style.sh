@@ -351,9 +351,25 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  receiver_operation_symbol_hits=$(
+    grep -REn \
+      'lql_(eval_selector|eval_query_[A-Za-z0-9_]+|project_spooled|mutate_spooled_paths)[[:space:]]*\(' \
+      "$source_root/src/lql.c" \
+      "$source_root/src/lql_selector.c" \
+      "$source_root/src/lql_project.c" \
+      "$source_root/src/lql_eval.c" \
+      "$source_root/src/lql_mutation.c" \
+      "$source_root/src/lql_internal.h" 2>/dev/null || true
+  )
+  if [ -n "$receiver_operation_symbol_hits" ]; then
+    printf 'public API style: receiver operation internals must not be shared lql_* free-function entry points\n' >&2
+    printf '%s\n' "$receiver_operation_symbol_hits" >&2
+    failed=1
+  fi
+
   cli_receiver_bypass_hits=$(
     grep -En \
-      'lql_eval_query_|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \
+      'lql_(eval_selector|eval_query_[A-Za-z0-9_]+|project_spooled|mutate_spooled_paths)|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \
       "$source_root/src/clql.c" 2>/dev/null || true
   )
   if [ -n "$cli_receiver_bypass_hits" ]; then
@@ -391,7 +407,7 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
 
   test_receiver_bypass_hits=$(
     grep -REn \
-      'lql_parse_selector_internal[[:space:]]*\(|lql_eval_query_|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \
+      'lql_parse_selector_internal[[:space:]]*\(|lql_(eval_selector|eval_query_[A-Za-z0-9_]+|project_spooled|mutate_spooled_paths)|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \
       "$source_root/tests" "$source_root/examples" "$source_root/bench" \
       2>/dev/null || true
   )
@@ -403,7 +419,7 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
 
   lua_private_hits=$(
     grep -REn \
-      'lql_internal\.h|LQL_INTERNAL_SYMBOL|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \
+      'lql_internal\.h|LQL_INTERNAL_SYMBOL|lql_(eval_selector|eval_query_[A-Za-z0-9_]+|project_spooled|mutate_spooled_paths)|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \
       "$source_root/lua" 2>/dev/null || true
   )
   if [ -n "$lua_private_hits" ]; then

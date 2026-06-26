@@ -157,11 +157,6 @@ projection_source_read(void *user, unsigned char *buffer, size_t capacity) {
   return result;
 }
 
-static lonejson_read_result spooled_read(void *user, unsigned char *buffer,
-                                         size_t capacity) {
-  return lonejson_spooled_read((lonejson_spooled *)user, buffer, capacity);
-}
-
 static int segment_is_array_index(const char *field) {
   size_t i;
   if (field == NULL || field[0] == '\0') {
@@ -1139,22 +1134,6 @@ static lql_status project_json_method(
   reader.len = json_len;
   reader.offset = 0u;
   return lql_project_reader(self, projection, buffer_read, &reader, out,
-                            out_found, error);
-}
-
-LQL_INTERNAL_SYMBOL lql_status
-lql_project_spooled(lql *self, const lql_projection *projection,
-                    const lonejson_spooled *spooled, FILE *out, int *out_found,
-                    lql_error *error) {
-  lonejson_spooled cursor;
-  if (spooled == NULL) {
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "projection spooled payload is required");
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
-  cursor = *spooled;
-  cursor.read_offset = 0u;
-  return lql_project_reader(self, projection, spooled_read, &cursor, out,
                             out_found, error);
 }
 
