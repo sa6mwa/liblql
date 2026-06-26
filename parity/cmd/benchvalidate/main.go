@@ -152,6 +152,7 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 		"plus_value_source_selector", "plus_value_openjson_selector",
 		"plus_value_openjson_plan", "mutate_file_selector",
 		"mutate_file_plan", "mutate_source_selector",
+		"mutate_file_backed_text", "mutate_file_backed_base64",
 		"project_file_selector", "project_source_selector":
 	default:
 		return fmt.Errorf("line %d: unsupported mode %q", line, rec.Mode)
@@ -285,7 +286,9 @@ func isPlusValueMode(mode string) bool {
 func isMutationMode(mode string) bool {
 	return mode == "mutate_file_selector" ||
 		mode == "mutate_file_plan" ||
-		mode == "mutate_source_selector"
+		mode == "mutate_source_selector" ||
+		mode == "mutate_file_backed_text" ||
+		mode == "mutate_file_backed_base64"
 }
 
 func isProjectionMode(mode string) bool {

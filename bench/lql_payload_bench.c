@@ -74,10 +74,9 @@ static const char *const *mutation_exprs_for_selector(const char *selector_name,
   if (expr != NULL && strstr(expr, "/voucher/lines/10/") != NULL) {
     return numeric_mutation_exprs;
   }
-  if (expr != NULL &&
-      (strstr(expr, "/event=\"session_sync\"") != NULL ||
-       strstr(expr, "/event=\"tabs_update\"") != NULL ||
-       strstr(expr, "/lockd/key") != NULL)) {
+  if (expr != NULL && (strstr(expr, "/event=\"session_sync\"") != NULL ||
+                       strstr(expr, "/event=\"tabs_update\"") != NULL ||
+                       strstr(expr, "/lockd/key") != NULL)) {
     return lockd_mutation_exprs;
   }
   return default_mutation_exprs;
@@ -151,6 +150,46 @@ static lql_uint64 peak_rss_bytes(void) {
 #else
   return (lql_uint64)usage.ru_maxrss * 1024u;
 #endif
+}
+
+static int append_text(char *buf, size_t capacity, size_t *pos,
+                       const char *text) {
+  size_t len;
+
+  if (buf == NULL || pos == NULL || text == NULL) {
+    return 0;
+  }
+  len = strlen(text);
+  if (*pos > capacity || len >= capacity - *pos) {
+    return 0;
+  }
+  memcpy(buf + *pos, text, len);
+  *pos += len;
+  buf[*pos] = '\0';
+  return 1;
+}
+
+static int make_file_backed_mutation_expr(const char *mode,
+                                          const char *fixture_path, char *buf,
+                                          size_t capacity) {
+  size_t pos;
+  const char *prefix;
+
+  if (mode == NULL || fixture_path == NULL || buf == NULL || capacity == 0u) {
+    return 0;
+  }
+  if (strcmp(mode, "mutate_file_backed_text") == 0) {
+    prefix = "textfile:/payload=";
+  } else if (strcmp(mode, "mutate_file_backed_base64") == 0) {
+    prefix = "base64file:/payload=";
+  } else {
+    return 0;
+  }
+  pos = 0u;
+  buf[0] = '\0';
+  return append_text(buf, capacity, &pos, prefix) &&
+         append_text(buf, capacity, &pos, fixture_path) &&
+         append_text(buf, capacity, &pos, ".payload");
 }
 
 static lql_status seek_end_size(FILE *file, lql_uint64 *out_size) {
@@ -270,7 +309,10 @@ int main(int argc, char **argv) {
   bench_source source;
   lql_uint64 fixture_size;
   const char *const *mutation_exprs;
+  const char *file_backed_mutation_exprs[1];
+  lql_mutation_parse_options mutation_options;
   lql_uint64 mutation_expr_count;
+  char file_backed_mutation_expr[4096];
   clock_t start;
   clock_t end;
 
@@ -286,6 +328,19 @@ int main(int argc, char **argv) {
   mutation_expr_count = 1u;
   mutation_exprs =
       mutation_exprs_for_selector(selector_name, expr, &mutation_expr_count);
+  if (strcmp(mode, "mutate_file_backed_text") == 0 ||
+      strcmp(mode, "mutate_file_backed_base64") == 0) {
+    if (!make_file_backed_mutation_expr(mode, fixture_path,
+                                        file_backed_mutation_expr,
+                                        sizeof(file_backed_mutation_expr))) {
+      fprintf(stderr,
+              "lql_payload_bench: failed to build file-backed mutation expr\n");
+      return 1;
+    }
+    file_backed_mutation_exprs[0] = file_backed_mutation_expr;
+    mutation_exprs = file_backed_mutation_exprs;
+    mutation_expr_count = 1u;
+  }
 
   lql_error_init(&error);
   ctx = NULL;
@@ -408,8 +463,9 @@ int main(int argc, char **argv) {
       return 1;
     }
     counts.sink = sink;
-    st = ctx->query_file_matches(ctx, selector, fixture, count_projected_payload,
-                                 &counts, &result, &error);
+    st =
+        ctx->query_file_matches(ctx, selector, fixture, count_projected_payload,
+                                &counts, &result, &error);
     fclose(sink);
   } else if (strcmp(mode, "project_source_selector") == 0) {
     sink = tmpfile();
@@ -440,8 +496,8 @@ int main(int argc, char **argv) {
                                   &mutation_plan, &error);
     if (st == LQL_STATUS_OK) {
       st = ctx->mutate_file_range_candidates(ctx, selector, mutation_plan,
-                                             fixture, 0u, fixture_size, sink,
-                                             1, 1, &result, &error);
+                                             fixture, 0u, fixture_size, sink, 1,
+                                             1, &result, &error);
     }
     fclose(sink);
   } else if (strcmp(mode, "mutate_source_selector") == 0) {
@@ -459,6 +515,27 @@ int main(int argc, char **argv) {
       st = ctx->mutate_source_candidates(ctx, selector, mutation_plan,
                                          read_bench_source, &source, sink, 1, 1,
                                          &result, &error);
+    }
+    fclose(sink);
+  } else if (strcmp(mode, "mutate_file_backed_text") == 0 ||
+             strcmp(mode, "mutate_file_backed_base64") == 0) {
+    sink = fopen("/dev/null", "wb");
+    if (sink == NULL) {
+      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
+      fclose(fixture);
+      ctx->selector_destroy(ctx, selector);
+      ctx->destroy(ctx);
+      return 1;
+    }
+    memset(&mutation_options, 0, sizeof(mutation_options));
+    mutation_options.enable_file_values = 1;
+    st = ctx->mutation_plan_parse_with_options(
+        ctx, mutation_exprs, mutation_expr_count, &mutation_options,
+        &mutation_plan, &error);
+    if (st == LQL_STATUS_OK) {
+      st = ctx->mutate_file_range_candidates(ctx, selector, mutation_plan,
+                                             fixture, 0u, fixture_size, sink, 1,
+                                             0, &result, &error);
     }
     fclose(sink);
   } else {

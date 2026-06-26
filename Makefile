@@ -1,4 +1,4 @@
-.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-lockd-perf-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -14,6 +14,7 @@ help:
 	  'make lua-test                run Lua facade smoke tests' \
 	  'make benchmarks             run local parity benchmark smoke' \
 	  'make bench-check            run deterministic benchmark smoke gate' \
+	  'make bench-lockd-perf-check run lockd-specific C performance gates' \
 	  'make bench-memory-check     run scalable streaming and C mutation memory gates' \
 	  'make bench-1g-check         run 1 GiB/128 MiB streaming memory gate' \
 	  'make benchmarks-parity      require Go/C/Lua benchmark implementations' \
@@ -76,10 +77,14 @@ bench benchmarks: build-debug
 bench-check: build-debug
 	@mkdir -p build
 	@LQL_BENCH_SUITE=smoke ./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --check --require go,c,lua > build/bench-check.jsonl
+	@./scripts/check_lockd_perf_benchmark.sh
 	@./scripts/check_parity_benchmark_failures.sh
 	@./scripts/check_parity_benchmark_fixtures.sh
 	@./scripts/check_parity_benchmark_memory.sh build/bench-check.jsonl
 	@./scripts/check_parity_benchmark_schema.sh
+
+bench-lockd-perf-check: build-debug
+	@./scripts/check_lockd_perf_benchmark.sh
 
 bench-memory-check: build-debug
 	@./scripts/check_parity_benchmark_large_memory.sh

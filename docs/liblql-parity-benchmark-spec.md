@@ -98,6 +98,15 @@ Current implementation status:
   smoke matrix; it is not the final large-fixture memory proof. The smoke gate
   is explicit and is not part of `make test-all`; `make prerelease` runs it
   after the normal test gate.
+- `make bench-lockd-perf-check` runs lockd-specific Go/C performance guard
+  cases that are too narrow for the general smoke matrix. It generates the
+  contains.any synthetic guard corpus and text/base64 file-backed mutation
+  payloads, runs Go and C over the same fixtures, validates counter parity and
+  benchmark schema, gates C steady-state file-backed mutation throughput with
+  `LQL_BENCH_LOCKD_FILE_MAX_NS_PER_BYTE`, and gates C contains.any against
+  explicit OR with `LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_RATIO`. These are
+  C-native guardrails; they do not define Go throughput as the C target.
+  `make bench-check` invokes this target.
 - `make bench-memory-check` runs a separate scalable Go/C/Lua streaming memory
   profile over a generated NDJSON fixture. By default it generates at least
   16 MiB of input using bounded per-record padding, runs
@@ -172,7 +181,9 @@ Current implementation status:
   `plus_value_source_selector`, `plus_value_openjson_selector`,
   `plus_value_openjson_plan`, `mutate_file_selector`, `mutate_file_plan`, and
   `mutate_source_selector`; the scalable memory gate additionally covers
-  `project_file_selector` and `project_source_selector`.
+  `project_file_selector` and `project_source_selector`, and the lockd
+  performance gate covers `mutate_file_backed_text` and
+  `mutate_file_backed_base64`.
   Plus-value records assert equivalent payload counts and payload byte totals,
   while C exposes `seekable_range` payloads for seekable fixture files,
   including current open-read benchmark modes, without retaining candidate JSON
@@ -190,6 +201,10 @@ Current implementation status:
   output as a Lua string through its public facade, so Lua mutation is included
   in the smoke parity matrix but not in the scalable memory profile until the
   Lua facade exposes a streaming mutation output sink.
+  Lockd file-backed mutation perf modes parse explicit `textfile:` and
+  `base64file:` mutation values with file-value options enabled, stream the
+  generated input through public mutation APIs, and count bytes per iteration
+  as input JSON plus file-backed payload bytes.
   The current C plan benchmark reuses the parsed public `lql_selector` handle;
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
   The C native helper and Lua facade runner report `ns_per_op`; the schema
@@ -600,6 +615,13 @@ Suggested staged gates:
 - C library plus-value/open-read modes must prove callback-scoped payload
   access without candidate retention and must have a documented C-native
   baseline distinct from CLI-mediated `clql` timing;
+- C lockd file-backed mutation modes are gated through
+  `make bench-lockd-perf-check`, with text and base64 payload throughput
+  thresholds expressed in C `ns_per_op/bytes_per_iter`;
+- C contains.any specialization is gated against the corresponding explicit OR
+  selector through `LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_RATIO`; this is a
+  C-native regression guard for the selector engine and is separate from Go
+  timing;
 - Lua memory is gated for the current direct-module seekable-file and
   callback-source benchmark workflows. Lua-supported modes must keep bounded
   memory and must not materialize complete candidates or result sets to satisfy

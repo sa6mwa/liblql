@@ -44,6 +44,30 @@ type readerOnly struct {
 	reader io.Reader
 }
 
+type staticReadCloser struct {
+	reader *bytes.Reader
+}
+
+func newStaticReadCloser(payload []byte) *staticReadCloser {
+	return &staticReadCloser{reader: bytes.NewReader(payload)}
+}
+
+func (r *staticReadCloser) Read(p []byte) (int, error) {
+	return r.reader.Read(p)
+}
+
+func (r *staticReadCloser) Close() error {
+	return nil
+}
+
+type benchmarkFileResolver struct {
+	payload []byte
+}
+
+func (r benchmarkFileResolver) Open(string) (io.ReadCloser, error) {
+	return newStaticReadCloser(r.payload), nil
+}
+
 func (r readerOnly) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
@@ -131,6 +155,12 @@ func main() {
 	} else if isProjectionMode(mode) {
 		payloadSourceType = "projection"
 	}
+	bytesPerIter := info.Size()
+	if mode == "mutate_file_backed_text" {
+		bytesPerIter += int64(len(bytes.Repeat([]byte("hello world\n"), 512)))
+	} else if mode == "mutate_file_backed_base64" {
+		bytesPerIter += int64(len(bytes.Repeat([]byte{0x00, 0x01, 0x02, 0x03}, 2048)))
+	}
 	if submode == "steady_state" {
 		if _, _, _, err := runBenchmark(file, sel, selectorName, expr, mode); err != nil {
 			fmt.Fprintf(os.Stderr, "lqlbench: warmup stream: %v\n", err)
@@ -153,7 +183,7 @@ func main() {
 		Expr:              expr,
 		Mode:              mode,
 		Submode:           submode,
-		BytesPerIter:      info.Size(),
+		BytesPerIter:      bytesPerIter,
 		Candidates:        result.CandidatesSeen,
 		Matches:           result.CandidatesMatched,
 		Payloads:          payloads,
@@ -201,6 +231,9 @@ func runMutation(file *os.File, sel lql.Selector, selectorName string, expr stri
 	if _, err := file.Seek(0, 0); err != nil {
 		return lql.QueryStreamResult{}, 0, 0, err
 	}
+	if mode == "mutate_file_backed_text" || mode == "mutate_file_backed_base64" {
+		return runFileBackedMutation(file, sel, mode)
+	}
 	parsed, err := lql.ParseMutations(benchmarkMutationsForSelector(selectorName, expr), time.Unix(1700000000, 0))
 	if err != nil {
 		return lql.QueryStreamResult{}, 0, 0, err
@@ -233,6 +266,35 @@ func runMutation(file *os.File, sel lql.Selector, selectorName string, expr stri
 		request.MutatePlan = mutatePlan
 	}
 	result, err := lql.QueryMutateStreamWithResult(request)
+	if err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	return result.Query, 0, 0, nil
+}
+
+func runFileBackedMutation(file *os.File, sel lql.Selector, mode string) (lql.QueryStreamResult, int64, int64, error) {
+	payload := bytes.Repeat([]byte("hello world\n"), 512)
+	expr := "textfile:/payload=/virtual/blob.txt"
+	if mode == "mutate_file_backed_base64" {
+		payload = bytes.Repeat([]byte{0x00, 0x01, 0x02, 0x03}, 2048)
+		expr = "base64file:/payload=/virtual/blob.bin"
+	}
+	parsed, err := lql.ParseMutationsWithOptions([]string{expr}, time.Unix(1700000000, 0), lql.ParseMutationsOptions{
+		EnableFileValues:  true,
+		FileValueBaseDir:  "/virtual",
+		FileValueResolver: benchmarkFileResolver{payload: payload},
+	})
+	if err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	result, err := lql.QueryMutateStreamWithResult(lql.QueryMutateStreamRequest{
+		Ctx:        context.Background(),
+		Reader:     file,
+		Writer:     io.Discard,
+		Selector:   sel,
+		Mutations:  parsed,
+		MutateMode: lql.MutateModeAuto,
+	})
 	if err != nil {
 		return lql.QueryStreamResult{}, 0, 0, err
 	}
@@ -374,6 +436,8 @@ func isSupportedMode(mode string) bool {
 		mode == "mutate_file_selector" ||
 		mode == "mutate_file_plan" ||
 		mode == "mutate_source_selector" ||
+		mode == "mutate_file_backed_text" ||
+		mode == "mutate_file_backed_base64" ||
 		mode == "project_file_selector" ||
 		mode == "project_source_selector"
 }
@@ -386,7 +450,9 @@ func isPlanMode(mode string) bool {
 func isMutationMode(mode string) bool {
 	return mode == "mutate_file_selector" ||
 		mode == "mutate_file_plan" ||
-		mode == "mutate_source_selector"
+		mode == "mutate_source_selector" ||
+		mode == "mutate_file_backed_text" ||
+		mode == "mutate_file_backed_base64"
 }
 
 func isProjectionMode(mode string) bool {

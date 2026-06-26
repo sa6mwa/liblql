@@ -72,6 +72,9 @@ lockd_ndjson_fixture="$fixture_dir/lockd_ndjson.jsonl"
 mixed_root_ndjson_fixture="$fixture_dir/mixed_root_ndjson.jsonl"
 realworld_compact_fixture="$fixture_dir/realworld_compact_ndjson.jsonl"
 realworld_pretty_nested_fixture="$fixture_dir/realworld_pretty_nested.jsonl"
+lockd_perf_contains_fixture="$fixture_dir/lockd_perf_contains.jsonl"
+lockd_file_backed_text_fixture="$fixture_dir/lockd_file_backed_text.jsonl"
+lockd_file_backed_base64_fixture="$fixture_dir/lockd_file_backed_base64.jsonl"
 case_matrix="$fixture_dir/cases.tsv"
 go_counts_file="$fixture_dir/go-counts.txt"
 c_counts_file="$fixture_dir/c-counts.txt"
@@ -316,6 +319,12 @@ generate_blob() {
   awk -v n="$record_blob_size" 'BEGIN { for (i = 0; i < n; ++i) printf "x" }'
 }
 
+generate_repeat() {
+  text=$1
+  count=$2
+  awk -v text="$text" -v n="$count" 'BEGIN { for (i = 0; i < n; ++i) printf "%s", text }'
+}
+
 record_json() {
   i=$1
   numeric_amount=$((i % 200))
@@ -535,6 +544,33 @@ mixed_root_record_json() {
   esac
 }
 
+lockd_perf_contains_record_json() {
+  i=$1
+  msg=$(generate_repeat "x" 640)
+  printf '{"msg":"%s","idx":%d}' "$msg" "$i"
+}
+
+generate_lockd_perf_fixtures() {
+  i=0
+  : > "$lockd_perf_contains_fixture"
+  : > "$lockd_file_backed_text_fixture"
+  : > "$lockd_file_backed_base64_fixture"
+  while [ "$i" -lt "$count" ]; do
+    lockd_perf_contains_record_json "$i" >> "$lockd_perf_contains_fixture"
+    printf '\n' >> "$lockd_perf_contains_fixture"
+    i=$((i + 1))
+  done
+  printf '{"payload":"old"}\n' > "$lockd_file_backed_text_fixture"
+  printf '{"payload":"old"}\n' > "$lockd_file_backed_base64_fixture"
+  generate_repeat "hello world\n" 512 > "$lockd_file_backed_text_fixture.payload"
+  i=0
+  : > "$lockd_file_backed_base64_fixture.payload"
+  while [ "$i" -lt 2048 ]; do
+    printf '\000\001\002\003' >> "$lockd_file_backed_base64_fixture.payload"
+    i=$((i + 1))
+  done
+}
+
 generate_fixtures() {
   i=0
   : > "$ndjson_fixture"
@@ -621,6 +657,23 @@ generate_fixture() {
       "date_selector_after_before" 'date{field=/timestamp,after=2026-03-05T10:28:21Z,before=2026-03-05T10:30:00Z}' >> "$case_matrix"
     printf '%s %s %s %s %s\n' "large_ndjson" "$ndjson_fixture" "$count" \
       "date_selector_since_macro" 'date{f=/timestamp,since=yesterday}' >> "$case_matrix"
+    return 0
+  fi
+  if [ "$suite" = "lockd-perf" ]; then
+    generate_lockd_perf_fixtures
+    : > "$case_matrix"
+    printf '%s %s %s %s %s\n' "lockd_perf_contains" \
+      "$lockd_perf_contains_fixture" "$count" "contains_any_msg" \
+      'icontains{field=/msg,any=alpha|beta|gamma}' >> "$case_matrix"
+    printf '%s %s %s %s %s\n' "lockd_perf_contains" \
+      "$lockd_perf_contains_fixture" "$count" "explicit_or_msg" \
+      'or.icontains{field=/msg,value=alpha},or.icontains{field=/msg,value=beta},or.icontains{field=/msg,value=gamma}' >> "$case_matrix"
+    printf '%s %s %s %s %s\n' "lockd_file_backed_text" \
+      "$lockd_file_backed_text_fixture" 1 "file_backed_text" \
+      'contains{field=/}' >> "$case_matrix"
+    printf '%s %s %s %s %s\n' "lockd_file_backed_base64" \
+      "$lockd_file_backed_base64_fixture" 1 "file_backed_base64" \
+      'contains{field=/}' >> "$case_matrix"
     return 0
   fi
   generate_fixtures
@@ -801,6 +854,14 @@ run_c_native_mode() {
   selector_name=$5
   expr=$6
   bytes=$(wc -c < "$fixture_path" | tr -d ' ')
+  case "$mode" in
+    mutate_file_backed_text|mutate_file_backed_base64)
+      if [ -f "$fixture_path.payload" ]; then
+        payload_bytes_for_mode=$(wc -c < "$fixture_path.payload" | tr -d ' ')
+        bytes=$((bytes + payload_bytes_for_mode))
+      fi
+      ;;
+  esac
   if [ ! -x "$payload_bench" ]; then
     emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
       "$mode" 0 0 0 0 0 "none" null null true \
@@ -1023,11 +1084,41 @@ selected_modes() {
         project_file_selector \
         project_source_selector
       ;;
+    lockd-perf)
+      printf '%s\n' \
+        decision_only_plan \
+        mutate_file_backed_text \
+        mutate_file_backed_base64
+      ;;
     *)
       printf 'unsupported benchmark mode profile: %s\n' "$mode_profile" >&2
       return 2
       ;;
   esac
+}
+
+mode_applies_to_case() {
+  mode=$1
+  selector_name=$2
+  case "$mode_profile" in
+    lockd-perf)
+      case "$selector_name:$mode" in
+        contains_any_msg:decision_only_plan|explicit_or_msg:decision_only_plan)
+          return 0
+          ;;
+        file_backed_text:mutate_file_backed_text)
+          return 0
+          ;;
+        file_backed_base64:mutate_file_backed_base64)
+          return 0
+          ;;
+        *)
+          return 1
+          ;;
+      esac
+      ;;
+  esac
+  return 0
 }
 
 run_matrix_for_impl() {
@@ -1036,18 +1127,21 @@ run_matrix_for_impl() {
     case "$impl" in
       go)
         for mode in $(selected_modes); do
+          mode_applies_to_case "$mode" "$selector_name" || continue
           run_go_mode "$mode" "$dataset_name" "$fixture_path" "$candidates" \
             "$selector_name" "$expr" || return 1
         done
         ;;
       c)
         for mode in $(selected_modes); do
+          mode_applies_to_case "$mode" "$selector_name" || continue
           run_c_native_mode "$mode" "$dataset_name" "$fixture_path" \
             "$candidates" "$selector_name" "$expr" || return 1
         done
         ;;
       lua)
         for mode in $(selected_modes); do
+          mode_applies_to_case "$mode" "$selector_name" || continue
           run_lua_mode "$mode" "$dataset_name" "$fixture_path" "$candidates" \
             "$selector_name" "$expr" || return 1
         done
@@ -1129,6 +1223,13 @@ if [ "$check" -eq 1 ] && [ "$exit_status" -eq 0 ]; then
   if [ "$suite" = "memory" ]; then
     fixtures_ready=1
     [ -s "$ndjson_fixture" ] || fixtures_ready=0
+  elif [ "$suite" = "lockd-perf" ]; then
+    fixtures_ready=1
+    [ -s "$lockd_perf_contains_fixture" ] || fixtures_ready=0
+    [ -s "$lockd_file_backed_text_fixture" ] || fixtures_ready=0
+    [ -s "$lockd_file_backed_base64_fixture" ] || fixtures_ready=0
+    [ -s "$lockd_file_backed_text_fixture.payload" ] || fixtures_ready=0
+    [ -s "$lockd_file_backed_base64_fixture.payload" ] || fixtures_ready=0
   else
     fixtures_ready=1
     [ -s "$ndjson_fixture" ] || fixtures_ready=0
