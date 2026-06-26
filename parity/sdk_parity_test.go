@@ -750,6 +750,23 @@ func sdkMutationCases() []struct {
 			},
 		},
 		{
+			name: "numeric object path segment",
+			doc:  `{"voucher":{"lines":{"10":{"amount":5,"status":"open","code":"before"}}}}`,
+			mutations: []string{
+				`/voucher/lines/10/amount=+2`,
+				`/voucher/lines/10/status=patched`,
+				`/voucher/.../10/code=patched`,
+			},
+		},
+		{
+			name: "numeric path segment creates object key",
+			doc:  `{"voucher":{"lines":{}}}`,
+			mutations: []string{
+				`/voucher/lines/10/status=created`,
+				`/voucher/lines/10/amount=+3`,
+			},
+		},
+		{
 			name: "quoted numeric typing follows Go",
 			doc:  `{"value":"old"}`,
 			mutations: []string{

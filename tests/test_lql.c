@@ -3382,7 +3382,7 @@ static void expect_buffered_mutation_api(void) {
   lql_status st;
   lql_mutation_plan *plan;
   const char *exprs[3];
-  char buf[256];
+  char buf[512];
   size_t len;
   static const char doc[] =
       "{\"state\":{\"status\":\"open\",\"count\":1,\"old\":true},\"id\":\"a\"}";
@@ -3412,6 +3412,76 @@ static void expect_buffered_mutation_api(void) {
                       "{\"state\":{\"status\":\"done\",\"count\":2},\"id\":"
                       "\"a\"}") != 0) {
       printf("buffered mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  fclose(out);
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("buffered numeric mutation tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  exprs[0] = "/voucher/lines/10/amount=+2";
+  exprs[1] = "/voucher/lines/10/status=patched";
+  exprs[2] = "/voucher/.../10/code=patched";
+  plan = NULL;
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 3u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("buffered numeric mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    st = test_ctx->mutate_json(
+        test_ctx, plan,
+        "{\"voucher\":{\"lines\":{\"10\":{\"amount\":5,\"status\":\"open\","
+        "\"code\":\"before\"}}}}",
+        strlen("{\"voucher\":{\"lines\":{\"10\":{\"amount\":5,\"status\":"
+               "\"open\",\"code\":\"before\"}}}}"),
+        out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("buffered numeric mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf,
+                      "{\"voucher\":{\"lines\":{\"10\":{\"amount\":7,"
+                      "\"status\":\"patched\",\"code\":\"patched\"}}}}") != 0) {
+      printf("buffered numeric mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  fclose(out);
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("buffered numeric create mutation tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  exprs[0] = "/voucher/lines/10/status=created";
+  exprs[1] = "/voucher/lines/10/amount=+3";
+  plan = NULL;
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 2u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("buffered numeric create mutation plan parse failed: %s\n",
+           error.message);
+    ++failures;
+  } else {
+    st = test_ctx->mutate_json(test_ctx, plan, "{\"voucher\":{\"lines\":{}}}",
+                               strlen("{\"voucher\":{\"lines\":{}}}"), out,
+                               &error);
+    if (st != LQL_STATUS_OK) {
+      printf("buffered numeric create mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf,
+                      "{\"voucher\":{\"lines\":{\"10\":{\"status\":\"created\","
+                      "\"amount\":3}}}}") != 0) {
+      printf("buffered numeric create mutation output mismatch: %s\n", buf);
       ++failures;
     }
   }
