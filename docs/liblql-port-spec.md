@@ -968,8 +968,9 @@ Current implementation status:
   spooled payloads can be written through caller-managed sink callbacks,
   including sink failure propagation, source position restoration after
   successful seekable payload writes and failed seekable payload writes,
-  unrepresentable seekable payload offset failure, and partial result
-  accounting;
+  unrepresentable seekable payload offset failure, seekable plus-value stream
+  stop limits for max matches, max candidates, and max bytes, and partial
+  result accounting;
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
   payload kinds, decoded matched payload JSON collected through the public

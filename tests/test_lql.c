@@ -2407,6 +2407,92 @@ static void expect_seekable_payload_api(void) {
     }
   }
 
+  if (fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("payload max-match rewind failed\n");
+    ++failures;
+  } else {
+    memset(&seen, 0, sizeof(seen));
+    memset(&options, 0, sizeof(options));
+    memset(&result, 0, sizeof(result));
+    seen.out = out;
+    options.max_matches = 1u;
+    lql_error_init(&error);
+    st = test_ctx->query_file_matches_with_options(
+        test_ctx, selector, fp, &options, record_payload, &seen, &result,
+        &error);
+    if (st != LQL_STATUS_OK || seen.calls != 1 ||
+        result.candidates_seen != (lql_uint64)1 ||
+        result.candidates_matched != (lql_uint64)1 ||
+        !result.stopped_early ||
+        result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT) {
+      printf("payload max-match stop mismatch: status=%s calls=%d seen=%lu "
+             "matched=%lu stopped=%d reason=%d error=%s\n",
+             lql_status_string(st), seen.calls,
+             (unsigned long)result.candidates_seen,
+             (unsigned long)result.candidates_matched, result.stopped_early,
+             (int)result.stop_reason, error.message);
+      ++failures;
+    }
+  }
+
+  if (fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("payload max-candidate rewind failed\n");
+    ++failures;
+  } else {
+    memset(&seen, 0, sizeof(seen));
+    memset(&options, 0, sizeof(options));
+    memset(&result, 0, sizeof(result));
+    seen.out = out;
+    options.max_candidates = 2u;
+    lql_error_init(&error);
+    st = test_ctx->query_file_matches_with_options(
+        test_ctx, selector, fp, &options, record_payload, &seen, &result,
+        &error);
+    if (st != LQL_STATUS_OK || seen.calls != 1 ||
+        result.candidates_seen != (lql_uint64)2 ||
+        result.candidates_matched != (lql_uint64)1 ||
+        !result.stopped_early ||
+        result.stop_reason != LQL_QUERY_STOP_CANDIDATE_LIMIT) {
+      printf("payload max-candidate stop mismatch: status=%s calls=%d "
+             "seen=%lu matched=%lu stopped=%d reason=%d error=%s\n",
+             lql_status_string(st), seen.calls,
+             (unsigned long)result.candidates_seen,
+             (unsigned long)result.candidates_matched, result.stopped_early,
+             (int)result.stop_reason, error.message);
+      ++failures;
+    }
+  }
+
+  if (fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("payload max-byte rewind failed\n");
+    ++failures;
+  } else {
+    memset(&seen, 0, sizeof(seen));
+    memset(&options, 0, sizeof(options));
+    memset(&result, 0, sizeof(result));
+    seen.out = out;
+    options.max_bytes_read = 1u;
+    lql_error_init(&error);
+    st = test_ctx->query_file_matches_with_options(
+        test_ctx, selector, fp, &options, record_payload, &seen, &result,
+        &error);
+    if (st != LQL_STATUS_OK || seen.calls != 1 ||
+        result.candidates_seen != (lql_uint64)1 ||
+        result.candidates_matched != (lql_uint64)1 ||
+        !result.stopped_early ||
+        result.stop_reason != LQL_QUERY_STOP_BYTE_LIMIT ||
+        result.bytes_read < (lql_uint64)24) {
+      printf("payload max-byte stop mismatch: status=%s calls=%d seen=%lu "
+             "matched=%lu bytes=%lu stopped=%d reason=%d error=%s\n",
+             lql_status_string(st), seen.calls,
+             (unsigned long)result.candidates_seen,
+             (unsigned long)result.candidates_matched,
+             (unsigned long)result.bytes_read, result.stopped_early,
+             (int)result.stop_reason, error.message);
+      ++failures;
+    }
+  }
+
   memset(&payload, 0, sizeof(payload));
   memset(&sink, 0, sizeof(sink));
   sink.fail_after_first = 1;
