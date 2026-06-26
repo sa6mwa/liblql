@@ -64,6 +64,28 @@ if grep -Eq "^[[:space:]]*void[[:space:]]+\\(\\*[A-Za-z0-9_]+_free\\)[[:space:]]
   failed=1
 fi
 
+receiver_doc_hits=$(
+  awk '
+    /^struct lql[[:space:]]*\{/ { in_receiver = 1; prev = ""; next }
+    in_receiver && /^};/ { in_receiver = 0; next }
+    in_receiver {
+      if ($0 ~ /^[[:space:]]*$/) {
+        next
+      }
+      if ($0 ~ /^[[:space:]]*(void[[:space:]]+\*impl;|[A-Za-z_][A-Za-z0-9_[:space:]*]*\(\*[A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*\()/ &&
+          prev !~ /^[[:space:]]*\/\*/) {
+        print FILENAME ":" FNR ":" $0
+      }
+      prev = $0
+    }
+  ' "$header"
+)
+if [ -n "$receiver_doc_hits" ]; then
+  printf 'public API style: undocumented receiver field in %s\n' "$header" >&2
+  printf '%s\n' "$receiver_doc_hits" >&2
+  failed=1
+fi
+
 if [ -n "$shared" ] && [ -f "$shared" ]; then
   if command -v nm >/dev/null 2>&1; then
     symbols=$(nm -D --defined-only "$shared" 2>/dev/null | awk '{print $3}' || true)

@@ -537,7 +537,8 @@ Current implementation is an early slice:
 - the public C API exposes an instantiatable receiver shell through `lql_new()`
   and method-pointer dispatch; selector/query/projection/mutation operations
   are implemented by receiver-compatible private functions and are not exported
-  as free-function wrappers;
+  as free-function wrappers; every installed receiver data or method field has
+  an ownership/error-behavior comment in `include/lql/lql.h`;
 - `make test` includes `lql.public-api-style`, which fails if removed
   selector/query/payload/projection/compact/mutation free-operation prototypes
   reappear in the installed header or, when a shared library is built, as
@@ -548,7 +549,8 @@ Current implementation is an early slice:
   cleanup fields named `*_free`, project-owned cleanup helpers named
   `free_*`/`*_free`, and public allocator wrapper prototypes are also rejected
   so cleanup stays on the `*_destroy` receiver surface and the allocator
-  boundary stays internal;
+  boundary stays internal; the same style gate rejects undocumented public
+  receiver fields so the installed SDK surface remains self-describing;
 - project-owned allocations have an internal central liblql allocator surface,
   and
   direct C runtime allocation calls are limited to the allocator
