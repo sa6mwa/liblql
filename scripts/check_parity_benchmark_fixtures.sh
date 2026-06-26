@@ -11,6 +11,13 @@ trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$tmp/one" "$tmp/two"
 
+if ! grep -F 'mode == "decision_only_plan"' "$root/lua/benchmarks/parity.lua" >/dev/null ||
+    ! grep -F 'mode == "plus_value_plan"' "$root/lua/benchmarks/parity.lua" >/dev/null ||
+    ! grep -F 'client:each_match_file(selector_arg' "$root/lua/benchmarks/parity.lua" >/dev/null; then
+  printf 'Lua benchmark plan modes must reuse parsed selector userdata through the public facade\n' >&2
+  exit 1
+fi
+
 generate() {
   dir=$1
   log=$2

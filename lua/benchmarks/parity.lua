@@ -41,7 +41,7 @@ local function run_once(client, selector_arg)
   if mode == "plus_value_selector" or mode == "plus_value_plan" or
       mode == "plus_value_openjson_selector" or
       mode == "plus_value_openjson_plan" then
-    result, err = client:each_match_file(expr, fixture, function(match)
+    result, err = client:each_match_file(selector_arg, fixture, function(match)
       local ok, payload_err = match.write_json(function(chunk)
         payload_bytes = payload_bytes + #chunk
       end)
@@ -113,7 +113,8 @@ local ok, message = pcall(function()
   local payload_bytes
   local start
   local elapsed_ns
-  if mode == "reuse_selector" then
+  if mode == "reuse_selector" or mode == "decision_only_plan" or
+      mode == "plus_value_plan" or mode == "plus_value_openjson_plan" then
     local selector, selector_err = client:selector_parse(expr)
     if selector_err then
       die(selector_err.stderr or "selector parse failed")

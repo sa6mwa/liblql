@@ -1116,9 +1116,12 @@ Current implementation status:
   direct `lql.core` module rather than shelling out to `clql`; Go helper
   records, C native helper records, and Lua facade runner records now report
   `ns_per_op`, Lua plus-value benchmark modes count bytes through
-  `match.write_json(callback)` instead of `match.json()` materialization, while
-  selector parse-cost modes distinguish parsed selector reuse from reparsing
-  expression strings on every timed run across Go, C, and Lua, and while
+  `match.write_json(callback)` instead of `match.json()` materialization, Lua
+  plan and reuse benchmark modes pass parsed selector userdata through the
+  public facade rather than reparsing expression strings inside the timed
+  operation, while selector parse-cost modes distinguish parsed selector reuse
+  from reparsing expression strings on every timed run across Go, C, and Lua,
+  and while
   Go and C helper records also report OS `getrusage` peak RSS as
   `peak_rss_bytes` for the benchmark schema and Lua records report process peak
   RSS when host `time` support is available; `make bench-check` enforces a
