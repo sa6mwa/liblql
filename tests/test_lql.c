@@ -5968,6 +5968,7 @@ typedef struct sdk_contract_surface_count {
 static void expect_selector_match_api(void);
 static void expect_selector_omitted_string_path_api(void);
 static void expect_selector_parse_equivalence_api(void);
+static void expect_selector_quoted_parse_api(void);
 static void expect_selector_any_or_equivalence_api(void);
 static void expect_selector_or_api(void);
 static void expect_selector_parse_error_api(void);
@@ -5998,6 +5999,8 @@ static void expect_sdk_contract_manifest(void) {
        expect_selector_omitted_string_path_api},
       {"selector", "parse-equivalence invariants",
        expect_selector_parse_equivalence_api},
+      {"selector", "quoted selector value and pointer parsing",
+       expect_selector_quoted_parse_api},
       {"selector", "contains-any and explicit OR evaluation equivalence",
        expect_selector_any_or_equivalence_api},
       {"selector", "OR parse/evaluation public API", expect_selector_or_api},
@@ -6083,7 +6086,7 @@ static void expect_sdk_contract_manifest(void) {
   };
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 7}, {"streaming", 11},
+      {"version", 1},      {"selector", 8}, {"streaming", 11},
       {"projection", 7},   {"compact", 2},  {"mutation", 20},
   };
   size_t i;
@@ -6457,6 +6460,25 @@ static void expect_selector_parse_equivalence_api(void) {
   }
 }
 
+static void expect_selector_quoted_parse_api(void) {
+  expect_match("eq{field=/status,value='open,closed'}",
+               "{\"status\":\"open,closed\"}", 1);
+  expect_match("eq{field=/status,value='open,closed'}",
+               "{\"status\":\"open\"}", 0);
+  expect_match("and.eq{field=/message,value=\"hi, world\"},and.eq{field=/"
+               "status,value=\"okili dokili\"}",
+               "{\"message\":\"hi, world\",\"status\":\"okili dokili\"}", 1);
+  expect_match("and.eq{field=/message,value=\"hi, world\"},and.eq{field=/"
+               "status,value=\"okili dokili\"}",
+               "{\"message\":\"hi\",\"status\":\"okili dokili\"}", 0);
+  expect_match("contains{field=/msg,value='hello world'}",
+               "{\"msg\":\"well hello world\"}", 1);
+  expect_match("contains{field=/msg,value='hello world'}",
+               "{\"msg\":\"hello\"}", 0);
+  expect_match("exists{'/meta,etag'}", "{\"meta,etag\":\"x\"}", 1);
+  expect_match("exists{'/meta,etag'}", "{\"meta\":{\"etag\":\"x\"}}", 0);
+}
+
 static void expect_selector_any_or_equivalence_api(void) {
   static const char contains_any[] = "contains{f=/msg,a=warn|timeout}";
   static const char contains_or[] =
@@ -6767,6 +6789,7 @@ int main(void) {
   expect_selector_match_api();
   expect_selector_omitted_string_path_api();
   expect_selector_parse_equivalence_api();
+  expect_selector_quoted_parse_api();
   expect_selector_any_or_equivalence_api();
   expect_selector_or_api();
   expect_selector_inspection_api();

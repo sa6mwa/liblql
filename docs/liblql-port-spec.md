@@ -707,6 +707,10 @@ Current implementation status:
   materializing JSON, and C contract tests cover feature-family flags,
   wildcard/recursive path flags, empty/match-all simplification, null
   out-parameter tolerance, and early-non-match trait behavior;
+- C SDK selector tests include quoted selector literals as native product
+  behavior: comma-containing equality values, space-containing contains values,
+  quoted JSON Pointer text, and multi-clause quoted values must parse and match
+  without relying on Go parity as the only guard;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through

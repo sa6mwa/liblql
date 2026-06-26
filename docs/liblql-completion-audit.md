@@ -54,7 +54,7 @@ archive test suite. The 1 GiB benchmark gate wrote
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
 | C89 public SDK with receiver API | `make test-all`, header C90/C++ tests, public API style gate, SDK manifest gate | Proven locally |
-| Central allocator boundary | public API style gate, handle allocator tests, ASan/UBSan in `make test-all` | Proven locally |
+| Per-instance allocator boundary | public API style gate, handle allocator tests, ASan/UBSan in `make test-all` | Proven locally |
 | No adjacent Go source references in repository files | repository-boundary CTest in `make test-all` | Proven locally |
 | lonejson from GitHub release SDK archives | dependency acquisition in clean `make release`; package dependency manifests verified | Proven locally |
 | Selector behavior for claimed scope | C SDK tests with unique manifest requirement keys plus Go-backed `make parity-test` inside `make test-all`; CLI and SDK parity manifests reject duplicate requirement keys | Proven locally for claimed scope |
