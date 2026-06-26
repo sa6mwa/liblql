@@ -568,6 +568,33 @@ EOF
   fi
 }
 
+write_current_source_manifest() {
+  output=$1
+  if [ ! -d "$ROOT_DIR/.git" ]; then
+    return 1
+  fi
+  {
+    (cd "$ROOT_DIR" && git ls-files)
+    printf '%s\n' VERSION RELEASE_MANIFEST
+  } | LC_ALL=C sort >"$output"
+}
+
+verify_source_manifest_matches_current() {
+  manifest=$1
+  artifact=$2
+  expected=$3
+
+  if [ ! -d "$ROOT_DIR/.git" ]; then
+    return 0
+  fi
+  write_current_source_manifest "$expected"
+  if ! cmp -s "$expected" "$manifest"; then
+    printf 'package-verify: source archive manifest does not match current tracked repository files: %s\n' "$artifact" >&2
+    diff -u "$expected" "$manifest" >&2 || true
+    exit 1
+  fi
+}
+
 verify_source_archive() {
   artifact=$1
   version_value=$(version)
@@ -594,6 +621,8 @@ verify_source_archive() {
     diff -u "$root/RELEASE_MANIFEST" "$tmp_dir/payload-files.txt" >&2 || true
     exit 1
   fi
+  verify_source_manifest_matches_current "$root/RELEASE_MANIFEST" "$artifact" \
+    "$tmp_dir/current-source-files.txt"
   if find "$root" \( -name .git -o -name build -o -name dist -o -name .cache \) | grep . >/dev/null; then
     printf 'package-verify: source archive contains generated or VCS state\n' >&2
     exit 1
@@ -997,6 +1026,31 @@ EOF
   fi
 }
 
+check_source_manifest_fixtures() {
+  tmp_dir="$ROOT_DIR/build/package-source-manifest-fixtures"
+  manifest="$tmp_dir/manifest"
+  expected="$tmp_dir/expected"
+  bad="$tmp_dir/bad"
+
+  if [ ! -d "$ROOT_DIR/.git" ]; then
+    printf 'package source manifest fixture: skipping current-tree check outside git worktree\n'
+    return
+  fi
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+  write_current_source_manifest "$manifest"
+  if ! verify_source_manifest_matches_current "$manifest" fixture "$expected"; then
+    printf 'package source manifest fixture unexpectedly rejected current manifest\n' >&2
+    exit 1
+  fi
+  sed '1d' "$manifest" >"$bad"
+  if (verify_source_manifest_matches_current "$bad" fixture "$expected") \
+    >/dev/null 2>&1; then
+    printf 'package source manifest fixture unexpectedly accepted stale manifest\n' >&2
+    exit 1
+  fi
+}
+
 case "$TARGET" in
   package)
     package_all
@@ -1031,6 +1085,9 @@ case "$TARGET" in
     ;;
   package-lua-contract-fixtures)
     check_lua_package_contract_fixtures
+    ;;
+  package-source-manifest-fixtures)
+    check_source_manifest_fixtures
     ;;
   release-matrix)
     MATRIX_MODE=1

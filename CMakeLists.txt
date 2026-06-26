@@ -238,6 +238,11 @@ if(LQL_BUILD_TESTS)
       package-lua-contract-fixtures)
   set_tests_properties(lql.package-lua-contract-fixtures PROPERTIES
     LABELS "unit;packaging;lua" TIMEOUT 5)
+  add_test(NAME lql.package-source-manifest-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package.sh
+      package-source-manifest-fixtures)
+  set_tests_properties(lql.package-source-manifest-fixtures PROPERTIES
+    LABELS "unit;packaging" TIMEOUT 5)
 
   set(LQL_HEADER_SMOKE_WARNINGS)
   if(LQL_PROJECT_WARNINGS)

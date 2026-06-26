@@ -1000,7 +1000,10 @@ Current implementation status:
   compile-time Lua 5.5 guard, with negative fixture coverage in
   `lql.package-lua-contract-fixtures`;
 - source archive production exists with injected `VERSION`, `RELEASE_MANIFEST`,
-  exact manifest verification, and extracted-tree configure/build/test smoke;
+  exact payload manifest verification, current git tracked-file manifest
+  verification when package verification runs in a git worktree, and
+  extracted-tree configure/build/test smoke; `lql.package-source-manifest-fixtures`
+  proves stale source archive manifests are rejected;
 - host `clql` archive production carries required lonejson runtime libraries
   and verifies extracted `clql --version` through a relocatable runpath; `clql`
   dependency provenance marks lonejson as bundled runtime and package
