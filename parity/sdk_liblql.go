@@ -481,20 +481,32 @@ static int liblql_project_source_value(const char *const *fields,
 
 static int liblql_mutate_source_value(const char *const *exprs,
                                       size_t expr_count, const char *json,
-                                      size_t chunk_size, char **out_json,
+                                      size_t chunk_size,
+                                      int enable_file_values,
+                                      const char *file_value_base_dir,
+                                      char **out_json,
                                       size_t *out_len, char *errbuf,
                                       size_t errbuf_len) {
 	lql_error error;
 	lql_mutation_plan *plan;
+	lql_mutation_parse_options options;
 	lql_status status;
 	liblql_source_reader reader;
 	FILE *tmp;
 
 	lql_error_init(&error);
+	memset(&options, 0, sizeof(options));
 	plan = NULL;
 	*out_json = NULL;
 	*out_len = 0u;
-	status = liblql_receiver()->mutation_plan_parse(liblql_receiver(), exprs, expr_count, &plan, &error);
+	if (enable_file_values) {
+		options.enable_file_values = 1;
+		options.file_value_base_dir = file_value_base_dir;
+		status = liblql_receiver()->mutation_plan_parse_with_options(liblql_receiver(), exprs, expr_count, &options,
+		                                              &plan, &error);
+	} else {
+		status = liblql_receiver()->mutation_plan_parse(liblql_receiver(), exprs, expr_count, &plan, &error);
+	}
 	if (status != LQL_STATUS_OK) {
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, error.message, errbuf_len - 1u);
@@ -1489,17 +1501,27 @@ func cMutateJSONWithOptions(mutations []string, doc string, enableFileValues boo
 }
 
 func cMutateSource(mutations []string, doc string) ([]byte, error) {
+	return cMutateSourceWithOptions(mutations, doc, false, "")
+}
+
+func cMutateSourceWithOptions(mutations []string, doc string, enableFileValues bool, fileValueBaseDir string) ([]byte, error) {
 	cExprs, freeExprs := cStringArray(mutations)
 	defer freeExprs()
 
 	cDoc := C.CString(doc)
 	defer C.free(unsafe.Pointer(cDoc))
+	var cBaseDir *C.char
+	if fileValueBaseDir != "" {
+		cBaseDir = C.CString(fileValueBaseDir)
+		defer C.free(unsafe.Pointer(cBaseDir))
+	}
 
 	var out *C.char
 	var outLen C.size_t
 	var errbuf [256]C.char
 	status := C.liblql_mutate_source_value(cExprs, C.size_t(len(mutations)),
-		cDoc, C.size_t(3), &out, &outLen, &errbuf[0], C.size_t(len(errbuf)))
+		cDoc, C.size_t(3), cBool(enableFileValues), cBaseDir, &out, &outLen,
+		&errbuf[0], C.size_t(len(errbuf)))
 	if status != 0 {
 		return nil, sdkParityError(C.GoString(&errbuf[0]))
 	}

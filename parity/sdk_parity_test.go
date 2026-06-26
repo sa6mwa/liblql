@@ -599,11 +599,16 @@ func TestSDKMutationFileBackedValueParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("liblql buffered file-backed mutate: %v", err)
 	}
+	gotSource, err := cMutateSourceWithOptions(mutations, `{}`, true, dir)
+	if err != nil {
+		t.Fatalf("liblql source file-backed mutate: %v", err)
+	}
 	gotRange, err := cMutateFileRangeWithOptions(mutations, `{"outside":`, `{}`, `}`, true, dir)
 	if err != nil {
 		t.Fatalf("liblql file-range file-backed mutate: %v", err)
 	}
 	assertDecodedJSONValuesParity(t, gotBuffered, wantJSON, "buffered file-backed mutation")
+	assertDecodedJSONValuesParity(t, gotSource, wantJSON, "source file-backed mutation")
 	assertDecodedJSONValuesParity(t, gotRange, wantJSON, "file-range file-backed mutation")
 }
 
