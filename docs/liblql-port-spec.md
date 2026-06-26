@@ -1323,16 +1323,19 @@ Current implementation status:
   can be scaled with `LQL_BENCH_MEMORY_COUNT` and
   `LQL_BENCH_MEMORY_BLOB_BYTES`; `make bench-1g-check` is the explicit
   1 GiB/128 MiB profile over the same runner and validator, defaults to at
-  least 1 GiB of generated NDJSON, and is included in
-  `make prerelease-hardening` rather than normal `make release` because it is
-  intentionally expensive;
+  least 1 GiB of generated NDJSON, and is part of the final `make release`
+  gate because bounded-memory streaming is a product contract rather than an
+  optional hardening check;
 - current local lifecycle confidence has passed `make test-all`,
-  `make bench-check`, `make bench-memory-check`, `make package-verify`, and
-  `make release-matrix` on the available host/toolchain set. The release matrix
-  builds and verifies all Linux GNU/musl targets in the configured matrix.
+  `make bench-check`, `make bench-memory-check`, `make bench-1g-check`,
+  `make package-verify`, `make release-matrix`, and clean `make release` on
+  the available host/toolchain set. The release matrix builds and verifies all
+  Linux GNU/musl targets in the configured matrix.
   `LQL_PACKAGE_TARGETS=arm64-apple-darwin make release-matrix` also builds and
   verifies the Darwin arm64 `liblql` and `clql` artifacts when the osxcross
-  compiler, linker, strip, and otool are available.
+  compiler, linker, strip, and otool are available. lonejson `v0.35.0` does
+  not publish an x86_64 Darwin SDK archive, so x86_64 Darwin is not a current
+  liblql package target under the GitHub-release dependency boundary.
   These gates are strong evidence for the current implementation state, but
   they are not a substitute for a requirement-by-requirement completion audit
   before claiming full LQL parity or final release readiness;
