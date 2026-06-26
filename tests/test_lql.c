@@ -222,6 +222,15 @@ typedef struct chunk_reader {
   int calls;
 } chunk_reader;
 
+typedef struct fail_after_reader {
+  const char *data;
+  size_t len;
+  size_t offset;
+  size_t chunk_size;
+  size_t fail_offset;
+  int calls;
+} fail_after_reader;
+
 static lql_read_result read_chunk(void *user, unsigned char *buffer,
                                   size_t capacity) {
   chunk_reader *reader;
@@ -238,6 +247,45 @@ static lql_read_result read_chunk(void *user, unsigned char *buffer,
   }
   remaining = reader->len - reader->offset;
   want = remaining;
+  if (want > reader->chunk_size) {
+    want = reader->chunk_size;
+  }
+  if (want > capacity) {
+    want = capacity;
+  }
+  memcpy(buffer, reader->data + reader->offset, want);
+  reader->offset += want;
+  result.bytes_read = want;
+  if (reader->offset >= reader->len) {
+    result.eof = 1;
+  }
+  return result;
+}
+
+static lql_read_result read_until_offset_then_fail(void *user,
+                                                   unsigned char *buffer,
+                                                   size_t capacity) {
+  fail_after_reader *reader;
+  lql_read_result result;
+  size_t remaining;
+  size_t want;
+
+  reader = (fail_after_reader *)user;
+  memset(&result, 0, sizeof(result));
+  ++reader->calls;
+  if (reader->offset >= reader->fail_offset) {
+    result.error_code = 9;
+    return result;
+  }
+  if (reader->offset >= reader->len) {
+    result.eof = 1;
+    return result;
+  }
+  remaining = reader->len - reader->offset;
+  want = remaining;
+  if (reader->offset + want > reader->fail_offset) {
+    want = reader->fail_offset - reader->offset;
+  }
   if (want > reader->chunk_size) {
     want = reader->chunk_size;
   }
@@ -311,6 +359,18 @@ static lql_status fail_decision_callback(void *user,
   return LQL_STATUS_UNSUPPORTED;
 }
 
+static lql_status fail_match_callback(void *user, const lql_query_match *match) {
+  payload_seen *seen = (payload_seen *)user;
+  if (seen != NULL) {
+    if (seen->calls < 4) {
+      seen->offsets[seen->calls] = match->payload.offset;
+      seen->sizes[seen->calls] = match->payload.size;
+    }
+    ++seen->calls;
+  }
+  return LQL_STATUS_UNSUPPORTED;
+}
+
 static void expect_output_state_contract_api(void) {
   static const char stream[] = "{\"status\":\"open\"}\n";
   const char *bad_projection[1];
@@ -322,6 +382,8 @@ static void expect_output_state_contract_api(void) {
   lql_error error;
   lql_status st;
   stream_seen seen;
+  payload_seen payload_seen_value;
+  chunk_reader reader;
   lql_query_result result;
   int found;
 
@@ -399,10 +461,64 @@ static void expect_output_state_contract_api(void) {
                                       &error);
   if (st != LQL_STATUS_UNSUPPORTED ||
       strcmp(error.message, "query decision callback failed") != 0 ||
-      seen.calls != 1 || seen.matched != 1) {
+      seen.calls != 1 || seen.matched != 1 ||
+      result.candidates_seen != 1u || result.candidates_matched != 1u) {
     printf("decision callback failure propagation mismatch: status=%s calls=%d "
-           "matched=%d error=%s\n",
-           lql_status_string(st), seen.calls, seen.matched, error.message);
+           "matched=%d seen=%lu result_matched=%lu error=%s\n",
+           lql_status_string(st), seen.calls, seen.matched,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched, error.message);
+    ++failures;
+  }
+
+  if (fseek(source, 0L, SEEK_SET) != 0) {
+    printf("match callback failure source rewind failed\n");
+    ++failures;
+  } else {
+    memset(&payload_seen_value, 0, sizeof(payload_seen_value));
+    memset(&result, 0, sizeof(result));
+    lql_error_init(&error);
+    st = test_ctx->query_file_matches(test_ctx, selector, source,
+                                      fail_match_callback, &payload_seen_value,
+                                      &result, &error);
+    if (st != LQL_STATUS_UNSUPPORTED ||
+        strcmp(error.message, "query match callback failed") != 0 ||
+        payload_seen_value.calls != 1 ||
+        payload_seen_value.offsets[0] != 0u ||
+        payload_seen_value.sizes[0] != (lql_uint64)strlen(stream) - 1u ||
+        result.candidates_seen != 1u || result.candidates_matched != 1u) {
+      printf("seekable match callback failure mismatch: status=%s calls=%d "
+             "seen=%lu matched=%lu error=%s\n",
+             lql_status_string(st), payload_seen_value.calls,
+             (unsigned long)result.candidates_seen,
+             (unsigned long)result.candidates_matched, error.message);
+      ++failures;
+    }
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  memset(&payload_seen_value, 0, sizeof(payload_seen_value));
+  memset(&result, 0, sizeof(result));
+  reader.data = stream;
+  reader.len = strlen(stream);
+  reader.chunk_size = 3u;
+  lql_error_init(&error);
+  st = test_ctx->query_source_spooled_matches(
+      test_ctx, selector, read_chunk, &reader, fail_match_callback,
+      &payload_seen_value, &result, &error);
+  if (st != LQL_STATUS_UNSUPPORTED ||
+      strcmp(error.message, "query match callback failed") != 0 ||
+      payload_seen_value.calls != 1 ||
+      payload_seen_value.offsets[0] != 0u ||
+      payload_seen_value.sizes[0] != (lql_uint64)strlen(stream) - 1u ||
+      result.candidates_seen != 1u || result.candidates_matched != 0u ||
+      reader.calls <= 1) {
+    printf("spooled match callback failure mismatch: status=%s calls=%d "
+           "seen=%lu matched=%lu reads=%d error=%s\n",
+           lql_status_string(st), payload_seen_value.calls,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched, reader.calls,
+           error.message);
     ++failures;
   }
   fclose(source);
@@ -3102,6 +3218,7 @@ static void expect_source_candidate_mutation_api(void) {
   lql_mutation_plan *plan;
   lql_query_result result;
   chunk_reader reader;
+  fail_after_reader fail_reader;
   const char *expr;
   const char *mutation;
   char buf[512];
@@ -3208,6 +3325,39 @@ static void expect_source_candidate_mutation_api(void) {
       if (st != LQL_STATUS_JSON_ERROR ||
           strcmp(error.message, "source read failed") != 0) {
         printf("source candidate mutation read error mismatch: %s\n",
+               error.message);
+        ++failures;
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source candidate mutation partial-fail tmpfile failed\n");
+      ++failures;
+    } else {
+      memset(&fail_reader, 0, sizeof(fail_reader));
+      memset(&result, 0, sizeof(result));
+      fail_reader.data = doc;
+      fail_reader.len = strlen(doc);
+      fail_reader.chunk_size = 6u;
+      fail_reader.fail_offset =
+          strlen("{\"id\":\"a\",\"status\":\"open\"},");
+      lql_error_init(&error);
+      st = test_ctx->mutate_source_candidates(
+          test_ctx, selector, plan, read_until_offset_then_fail, &fail_reader,
+          out, 1, 0, &result, &error);
+      if (st != LQL_STATUS_JSON_ERROR ||
+          strcmp(error.message, "source read failed") != 0 ||
+          result.candidates_seen != 1u || result.candidates_matched != 1u ||
+          result.bytes_read !=
+              (lql_uint64)strlen("{\"id\":\"a\",\"status\":\"open\"},") ||
+          fail_reader.calls <= 1) {
+        printf("source candidate mutation partial read error mismatch: "
+               "status=%s seen=%lu matched=%lu bytes=%lu reads=%d error=%s\n",
+               lql_status_string(st), (unsigned long)result.candidates_seen,
+               (unsigned long)result.candidates_matched,
+               (unsigned long)result.bytes_read, fail_reader.calls,
                error.message);
         ++failures;
       }
@@ -3735,7 +3885,9 @@ static void expect_sdk_contract_manifest(void) {
        "status, error, ownership, selector emptiness, and invalid "
        "argument helpers",
        expect_public_utility_api},
-      {"api-contract", "failure output state and callback status propagation",
+      {"api-contract",
+       "failure output state, callback diagnostics, and partial result "
+       "propagation",
        expect_output_state_contract_api},
       {"version", "version and capability public API", expect_version_api},
       {"selector",

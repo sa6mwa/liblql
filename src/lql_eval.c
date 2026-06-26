@@ -1276,6 +1276,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
     free_doc(&state.doc);
     lonejson_free(runtime);
     if (state.callback_status != LQL_STATUS_OK) {
+      if (out_result != NULL) {
+        *out_result = state.result;
+      }
       lql_set_error(error, state.callback_status,
                     "query decision callback failed");
       return state.callback_status;
@@ -1339,6 +1342,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_decisions(
     free_doc(&state.doc);
     lonejson_free(runtime);
     if (state.callback_status != LQL_STATUS_OK) {
+      if (out_result != NULL) {
+        *out_result = state.result;
+      }
       lql_set_error(error, state.callback_status,
                     "query decision callback failed");
       return state.callback_status;
@@ -1406,6 +1412,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_matches(
     free_doc(&state.doc);
     lonejson_free(runtime);
     if (state.callback_status != LQL_STATUS_OK) {
+      if (out_result != NULL) {
+        *out_result = state.result;
+      }
       lql_set_error(error, state.callback_status,
                     "query match callback failed");
       return state.callback_status;

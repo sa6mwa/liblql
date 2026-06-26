@@ -784,6 +784,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_file_matches_with_options_impl(
     lql_query_match_fn on_match, void *user, lql_query_result *out_result,
     lql_error *error) {
   lql_match_adapter adapter;
+  lql_status st;
   if (file == NULL || on_match == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "file and on_match are required");
@@ -792,8 +793,13 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_file_matches_with_options_impl(
   adapter.file = file;
   adapter.on_match = on_match;
   adapter.user = user;
-  return lql_query_file_decisions_with_options_impl(
+  st = lql_query_file_decisions_with_options_impl(
       selector, file, options, on_match_decision, &adapter, out_result, error);
+  if (st != LQL_STATUS_OK && error != NULL &&
+      strcmp(error->message, "query decision callback failed") == 0) {
+    lql_set_error(error, st, "query match callback failed");
+  }
+  return st;
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_impl(

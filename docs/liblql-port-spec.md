@@ -702,11 +702,14 @@ Current implementation is an early slice:
   compacting, and mutation over fragmented caller reads, source callback read
   failures, mutation parse-error invariants, parser failure output-handle
   clearing, projection invalid-argument `out_found` state, and query callback
-  failure status propagation. This coverage is still too shallow for the final
-  goal: the next C test work should continue expanding the surface-by-surface
-  API contract matrix covering ownership, out-parameter state, callback error
-  propagation, partial I/O, cleanup after failures, and bounded-memory
-  behavior;
+  failure status propagation. Decision and match callback failures now also
+  assert actionable diagnostics and partial result-counter propagation for
+  seekable and callback-source query paths, and callback-source candidate
+  mutation asserts partial result counters when a reader fails after an emitted
+  candidate. This coverage is still too shallow for the final goal: the next C
+  test work should continue expanding the surface-by-surface API contract
+  matrix covering ownership, out-parameter state, callback error propagation,
+  partial I/O, cleanup after failures, and bounded-memory behavior;
   an SDK coverage manifest now ties claimed C contract surfaces to C unit
   functions;
 - Go-backed parity tests exist for the current CLI surface and remain a
