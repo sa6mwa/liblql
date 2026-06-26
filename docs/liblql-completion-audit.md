@@ -92,10 +92,12 @@ as out of scope by the engineer:
 3. Full LQL parity is not claimed by the repository.
    The spec still says full `clql` parity is active porting work and warns not
    to claim full LQL parity until verification proves it. Current parity
-   manifests are broad and green, but a final completion claim requires a
-   requirement-by-requirement comparison of the Go `pkt.systems/lql v0.17.1`
-   behavior against the C SDK, CLI, and Lua facade surfaces, not just passing
-   the existing manifests.
+   manifests are broad and green, and the executable
+   `parity/oracle_inventory.tsv` now classifies every test, benchmark, and
+   example-bearing file in the pinned Go `pkt.systems/lql v0.17.1` module. A
+   final completion claim still requires driving the inventory's `partial` and
+   `gap` rows to `covered` or a deliberately justified `not-applicable` status,
+   with C SDK, CLI, Lua, benchmark, or release-gate evidence as appropriate.
 
 4. Release publication is not done.
    No release branch squash, tag push, or GitHub release creation has been
@@ -108,8 +110,8 @@ The next non-cosmetic work should be one of:
 
 - provision or point the repository at a working `arm64-apple-darwin` toolchain
   and run `make release-matrix` plus `make release`;
-- perform the full requirement-by-requirement parity audit against
-  `pkt.systems/lql v0.17.1`, converting any missing behavior into C-native
-  implementation and product tests;
+- burn down `parity/oracle_inventory.tsv` rows marked `partial` or `gap`,
+  converting missing behavior into C-native implementation and product tests or
+  documenting intentional non-applicability for Go-only API shape;
 - start the formal release flow with release authority, version selection, and
   tagged clean `make release`.

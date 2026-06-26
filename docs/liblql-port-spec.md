@@ -428,6 +428,16 @@ Go parity example. Manifest gates must reject duplicate test-function entries
 and duplicate `surface/requirement` keys so coverage cannot be overstated by
 double-counting either a test or a claimed requirement.
 
+The full parity audit is tracked by `parity/oracle_inventory.tsv` and enforced
+by `TestOracleInventory` in the parity module. That inventory is file-level
+rather than workstation-path based: it records every test, benchmark, and
+example-bearing file in the pinned `pkt.systems/lql v0.17.1` module, the
+current coverage status, evidence, and the next action. The gate fails when the
+pinned Go oracle changes without inventory updates. `covered` rows can support
+a final parity claim only together with the cited C/CLI/SDK/Lua tests; `partial`
+and `gap` rows are explicit remaining work, and `not-applicable` rows must state
+why the Go API shape is not part of the C/Lua product.
+
 ## C-Native Strategy
 
 The port must be a C implementation, not a Go implementation transliterated
@@ -965,6 +975,10 @@ Current implementation status:
   mechanical duplication of Go rows into C tests. Their coverage manifests
   reject missing tests, duplicate test-function entries, and duplicate
   `surface/requirement` keys;
+- the pinned Go oracle inventory is executable through
+  `parity/oracle_inventory.tsv` and `TestOracleInventory`; it currently records
+  all `pkt.systems/lql v0.17.1` test, benchmark, and example-bearing files and
+  classifies them as `covered`, `partial`, `gap`, or `not-applicable`;
 - CLI selector parity includes scalar, string, numeric, temporal, contains,
   prefix, existence, wildcard, recursive, numeric object/array segment,
   nested logical, and newline-separated selector cases from the Go oracle
