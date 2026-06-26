@@ -19,6 +19,7 @@ typedef struct eval_doc {
   unsigned char *hits;
   char *val_buf;
   size_t val_len;
+  int scalar_interested;
   int *container_types;
   size_t *container_depths;
   size_t container_count;
@@ -53,6 +54,7 @@ static void reset_doc(eval_doc *doc) {
   LQL_ALLOCATOR_DESTROY(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
+  doc->scalar_interested = 0;
   doc->container_count = 0u;
   doc->root_kind = '\0';
 }
@@ -434,6 +436,32 @@ static void observe_node(eval_doc *doc, const lql_node *node,
   }
 }
 
+static int selector_path_interested(const eval_doc *doc, const lql_node *node,
+                                    const lonejson_value_path *path) {
+  size_t i;
+
+  if (node == NULL) {
+    return 0;
+  }
+  if (!node_is_term(node)) {
+    for (i = 0u; i < node->child_count; ++i) {
+      if (selector_path_interested(doc, &node->children[i], path)) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+  return path_matches(doc, node->term.field, path);
+}
+
+static int scalar_path_interested(const eval_doc *doc,
+                                  const lonejson_value_path *path) {
+  if (doc->selector == NULL || doc->selector->root.kind == LQL_NODE_ALL) {
+    return 0;
+  }
+  return selector_path_interested(doc, &doc->selector->root, path);
+}
+
 static void observe_value(eval_doc *doc, const lonejson_value_path *path,
                           const char *value, int is_number, int is_container,
                           int is_null) {
@@ -513,11 +541,11 @@ static lonejson_status on_string_begin(void *user,
                                        const lonejson_value_path *path,
                                        lonejson_error *error) {
   eval_doc *doc = (eval_doc *)user;
-  (void)path;
   (void)error;
   LQL_ALLOCATOR_DESTROY(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
+  doc->scalar_interested = scalar_path_interested(doc, path);
   return LONEJSON_STATUS_OK;
 }
 
@@ -528,6 +556,9 @@ static lonejson_status on_string_chunk(void *user,
   eval_doc *doc = (eval_doc *)user;
   (void)path;
   (void)error;
+  if (!doc->scalar_interested) {
+    return LONEJSON_STATUS_OK;
+  }
   return append_buf(&doc->val_buf, &doc->val_len, data, len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
@@ -541,10 +572,13 @@ static lonejson_status on_string_end(void *user,
   if (path->segment_count == 0u) {
     doc->root_kind = 's';
   }
-  observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 0, 0, 0);
+  if (doc->scalar_interested) {
+    observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 0, 0, 0);
+  }
   LQL_ALLOCATOR_DESTROY(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
+  doc->scalar_interested = 0;
   return LONEJSON_STATUS_OK;
 }
 
@@ -569,10 +603,13 @@ static lonejson_status on_number_end(void *user,
   if (path->segment_count == 0u) {
     doc->root_kind = 'n';
   }
-  observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 1, 0, 0);
+  if (doc->scalar_interested) {
+    observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 1, 0, 0);
+  }
   LQL_ALLOCATOR_DESTROY(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
+  doc->scalar_interested = 0;
   return LONEJSON_STATUS_OK;
 }
 

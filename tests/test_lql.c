@@ -1088,6 +1088,85 @@ static void expect_source_stream(void) {
   }
 }
 
+static void expect_stream_large_irrelevant_scalar_api(void) {
+  static const char prefix[] = "{\"blob\":\"";
+  static const char chunk[] =
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+  static const char suffix[] = "\",\"status\":\"open\"}\n";
+  enum { repeat_count = 4096 };
+  FILE *fp;
+  lql_selector *selector;
+  lql_query_result result;
+  stream_seen seen;
+  lql_error error;
+  lql_status st;
+  lql_uint64 expected_bytes;
+  int i;
+
+  fp = tmpfile();
+  if (fp == NULL) {
+    printf("large irrelevant scalar tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  if (fwrite(prefix, 1u, strlen(prefix), fp) != strlen(prefix)) {
+    printf("large irrelevant scalar prefix write failed\n");
+    fclose(fp);
+    ++failures;
+    return;
+  }
+  for (i = 0; i < repeat_count; ++i) {
+    if (fwrite(chunk, 1u, strlen(chunk), fp) != strlen(chunk)) {
+      printf("large irrelevant scalar chunk write failed\n");
+      fclose(fp);
+      ++failures;
+      return;
+    }
+  }
+  if (fwrite(suffix, 1u, strlen(suffix), fp) != strlen(suffix) ||
+      fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("large irrelevant scalar suffix write/seek failed\n");
+    fclose(fp);
+    ++failures;
+    return;
+  }
+
+  selector = NULL;
+  lql_error_init(&error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("large irrelevant scalar selector parse failed: %s\n",
+           error.message);
+    fclose(fp);
+    ++failures;
+    return;
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
+                                      &seen, &result, &error);
+  fclose(fp);
+  test_ctx->selector_destroy(test_ctx, selector);
+  expected_bytes = (lql_uint64)strlen(prefix) +
+                   (lql_uint64)strlen(chunk) * (lql_uint64)repeat_count +
+                   (lql_uint64)strlen(suffix);
+  if (st != LQL_STATUS_OK || seen.calls != 1 || seen.matched != 1 ||
+      result.candidates_seen != (lql_uint64)1 ||
+      result.candidates_matched != (lql_uint64)1 ||
+      result.bytes_read != expected_bytes ||
+      seen.sizes[0] != expected_bytes - (lql_uint64)1) {
+    printf("large irrelevant scalar stream mismatch: status=%s calls=%d "
+           "matched=%d bytes=%lu size=%lu expected=%lu error=%s\n",
+           lql_status_string(st), seen.calls, seen.matched,
+           (unsigned long)result.bytes_read, (unsigned long)seen.sizes[0],
+           (unsigned long)expected_bytes, error.message);
+    ++failures;
+  }
+}
+
 static void expect_source_spooled_payload_api(void) {
   static const char input[] =
       "{\"status\":\"closed\",\"id\":\"a\"}\n{\"status\":\"open\",\"id\":\"b\"}"
@@ -4678,6 +4757,10 @@ static void expect_sdk_contract_manifest(void) {
       {"streaming", "mixed scalar and object candidate decision streams",
        expect_stream_mixed_scalar_candidates},
       {"streaming", "callback-source decision streams", expect_source_stream},
+      {"streaming",
+       "large irrelevant scalar fields do not affect streaming "
+       "selector results",
+       expect_stream_large_irrelevant_scalar_api},
       {"streaming", "callback-source spooled matched payloads",
        expect_source_spooled_payload_api},
       {"streaming", "top-level array candidate streams",
@@ -5078,6 +5161,7 @@ int main(void) {
   expect_stream_file();
   expect_stream_mixed_scalar_candidates();
   expect_source_stream();
+  expect_stream_large_irrelevant_scalar_api();
   expect_source_spooled_payload_api();
   expect_stream_array_items();
   expect_stream_stop_controls();

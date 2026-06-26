@@ -700,7 +700,9 @@ Current implementation is an early slice:
   mutation; stdin and non-mutation inline use are rejected;
 - current selector subset evaluation uses lonejson path-aware visitor callbacks
   and marks selector term hits as values stream through, rather than building a
-  per-candidate scalar document list;
+  per-candidate scalar document list; scalar chunk buffering is gated by
+  selector-relevant paths, so unrelated large string and number values are not
+  accumulated merely because they appear in a candidate;
 - first C selector parse/evaluate subset exists, including
   `contains.any`, `icontains.any`, `in.any`, wildcard selector paths, and
   bracket-sugar array paths, string-term `ignoreCase`/`ic` flags, and
