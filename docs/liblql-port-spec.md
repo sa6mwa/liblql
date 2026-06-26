@@ -842,8 +842,10 @@ Current implementation status:
   selector-relevant paths, so unrelated large string and number values are not
   accumulated merely because they appear in a candidate;
 - first C selector parse/evaluate subset exists, including
-  `contains.any`, `icontains.any`, `in.any`, wildcard selector paths, and
-  bracket-sugar array paths, string-term `ignoreCase`/`ic` flags, and
+  `contains.any`, `icontains.any`, `in.any`, wildcard selector paths,
+  single-quoted selector values containing spaces or commas, quoted JSON
+  Pointer text for `exists`, bracket-sugar array paths, string-term
+  `ignoreCase`/`ic` flags, and
   multi-bound numeric ranges, with omitted string-term values treated as path
   assertions that include JSON `null`, while explicit `exists`, `eq`, `in`, and
   valued string terms do not treat JSON `null` as an empty string or non-null
