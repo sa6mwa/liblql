@@ -843,8 +843,8 @@ static lql_status eval_project_then_maybe_mutate_spooled(
                   "failed to create projection temp file");
     return LQL_STATUS_JSON_ERROR;
   }
-  st = lql_project_spooled(projection, spooled, projected_file, out_projected,
-                           error);
+  st = lql_project_spooled(self, projection, spooled, projected_file,
+                           out_projected, error);
   if (st == LQL_STATUS_OK && out_projected != NULL && *out_projected) {
     if (!eval_file_size_u64(projected_file, &projected_size)) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR,
@@ -1192,7 +1192,8 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
           }
           wrote_output = 1;
         } else if (lql_mutate_spooled_paths(
-                       state->mutation_plan, candidate->payload_spool,
+                       state->receiver, state->mutation_plan,
+                       candidate->payload_spool,
                        state->out, &state->mutation_error) != LQL_STATUS_OK) {
           error->code = LONEJSON_STATUS_CALLBACK_FAILED;
           strncpy(error->message, state->mutation_error.message,
@@ -1215,8 +1216,8 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
         wrote_output = 1;
       }
     } else if (state->projection != NULL) {
-      if (lql_project_spooled(state->projection, candidate->payload_spool,
-                              state->out, &projected,
+      if (lql_project_spooled(state->receiver, state->projection,
+                              candidate->payload_spool, state->out, &projected,
                               &state->projection_error) != LQL_STATUS_OK) {
         error->code = LONEJSON_STATUS_CALLBACK_FAILED;
         strncpy(error->message, state->projection_error.message,

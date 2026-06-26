@@ -617,7 +617,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_payload_project_json_impl(
                                        out_found, error);
   }
   if (payload->kind == LQL_PAYLOAD_SPOOLED && payload->spooled != NULL) {
-    return lql_project_spooled(projection,
+    return lql_project_spooled(self, projection,
                                (const lonejson_spooled *)payload->spooled, out,
                                out_found, error);
   }

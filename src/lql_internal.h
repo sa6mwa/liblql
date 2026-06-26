@@ -221,8 +221,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_project_json_impl(
     lql *self, const lql_projection *projection, const char *json,
     size_t json_len, FILE *out, int *out_found, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_project_spooled(
-    const lql_projection *projection, const lonejson_spooled *spooled,
-    FILE *out, int *out_found, lql_error *error);
+    lql *self, const lql_projection *projection,
+    const lonejson_spooled *spooled, FILE *out, int *out_found,
+    lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status
 lql_compact_file_range_impl(lql *self, FILE *file, lql_uint64 offset,
                             lql_uint64 size, FILE *out, lql_error *error);
@@ -274,8 +275,8 @@ LQL_INTERNAL_SYMBOL lql_status
 lql_mutate_json_impl(lql *self, const lql_mutation_plan *plan, const char *json,
                      size_t json_len, FILE *out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_spooled_paths(
-    const lql_mutation_plan *plan, const lonejson_spooled *spooled, FILE *out,
-    lql_error *error);
+    lql *self, const lql_mutation_plan *plan,
+    const lonejson_spooled *spooled, FILE *out, lql_error *error);
 LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
                                                    lql_temporal *out);
 LQL_INTERNAL_SYMBOL int lql_temporal_compare(const lql_temporal *left,

@@ -104,6 +104,12 @@ EOF
 run_expect_fail "liblql allocator macro wrapper call"
 rm -f "$tmp/src/alloc_macro_wrapper.c"
 
+cat >"$tmp/src/lql_eval.c" <<'EOF'
+void *bad_null_receiver_allocator(void) { return lql_allocator_from_receiver(NULL); }
+EOF
+run_expect_fail "library null receiver allocator fallback"
+rm -f "$tmp/src/lql_eval.c"
+
 printf '%s\n' 'stale cleanup surface is `lql_dealloc()`' >"$tmp/README.md"
 run_expect_fail "README allocator wrapper documentation"
 printf '%s\n' '# fixture' >"$tmp/README.md"

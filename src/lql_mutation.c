@@ -100,9 +100,6 @@ typedef struct string_list {
 } string_list;
 
 static lql_allocator *mutation_plan_allocator(const lql_mutation_plan *plan) {
-  if (plan == NULL || plan->allocator == NULL) {
-    return lql_allocator_from_receiver(NULL);
-  }
   return plan->allocator;
 }
 
@@ -1091,7 +1088,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
       continue;
     }
     if (!split_expressions(allocator, exprs[i], &parts, error)) {
-      lql_mutation_plan_destroy_impl(NULL, plan);
+      lql_mutation_plan_destroy_impl(self, plan);
       return error != NULL && error->code != LQL_STATUS_OK
                  ? error->code
                  : LQL_STATUS_NO_MEMORY;
@@ -1100,7 +1097,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
       if (!parse_mutation_expr(allocator, parts.items[j], plan, options,
                                error)) {
         string_list_cleanup(allocator, &parts);
-        lql_mutation_plan_destroy_impl(NULL, plan);
+        lql_mutation_plan_destroy_impl(self, plan);
         return error != NULL && error->code != LQL_STATUS_OK
                    ? error->code
                    : LQL_STATUS_NO_MEMORY;
@@ -1109,7 +1106,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
     string_list_cleanup(allocator, &parts);
   }
   if (plan->count == 0u) {
-    lql_mutation_plan_destroy_impl(NULL, plan);
+    lql_mutation_plan_destroy_impl(self, plan);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "no valid field mutations parsed");
     return LQL_STATUS_PARSE_ERROR;
@@ -2439,7 +2436,7 @@ static void init_mutation_visitor(lonejson_path_value_visitor *visitor) {
 }
 
 static lql_status mutate_reader_with_supported_plan(
-    const lql_mutation_plan *plan, lonejson_reader_fn reader_fn,
+    lql *self, const lql_mutation_plan *plan, lonejson_reader_fn reader_fn,
     void *reader_user, FILE *out, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
@@ -2459,7 +2456,8 @@ static lql_status mutate_reader_with_supported_plan(
     return LQL_STATUS_JSON_ERROR;
   }
   memset(&state, 0, sizeof(state));
-  state.allocator = mutation_plan_allocator(plan);
+  state.allocator = plan->allocator != NULL ? plan->allocator
+                                            : lql_allocator_from_receiver(self);
   state.plan = plan;
   state.error = &lj_error;
   state.applied = (int *)state.allocator->calloc(state.allocator, plan->count,
@@ -2519,9 +2517,11 @@ static lql_status mutate_reader_with_supported_plan(
 }
 
 static lql_status
-mutate_file_range_with_supported_plan(const lql_mutation_plan *plan, FILE *file,
-                                      lql_uint64 offset, lql_uint64 size,
-                                      FILE *out, lql_error *error) {
+mutate_file_range_with_supported_plan(lql *self,
+                                      const lql_mutation_plan *plan,
+                                      FILE *file, lql_uint64 offset,
+                                      lql_uint64 size, FILE *out,
+                                      lql_error *error) {
   limited_file_reader reader;
   if (file == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -2535,14 +2535,13 @@ mutate_file_range_with_supported_plan(const lql_mutation_plan *plan, FILE *file,
   }
   reader.file = file;
   reader.remaining = size;
-  return mutate_reader_with_supported_plan(plan, limited_read, &reader, out,
-                                           error);
+  return mutate_reader_with_supported_plan(self, plan, limited_read, &reader,
+                                           out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_root_fields_impl(
     lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, lql_error *error) {
-  (void)self;
   if (plan == NULL || file == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "plan, file, and out are required");
@@ -2553,14 +2552,13 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_root_fields_impl(
                   "mutation plan requires unsupported non-root behavior");
     return LQL_STATUS_UNSUPPORTED;
   }
-  return mutate_file_range_with_supported_plan(plan, file, offset, size, out,
-                                               error);
+  return mutate_file_range_with_supported_plan(self, plan, file, offset, size,
+                                               out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_paths_impl(
     lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, lql_error *error) {
-  (void)self;
   if (plan == NULL || file == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "plan, file, and out are required");
@@ -2571,8 +2569,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_paths_impl(
                   "mutation plan requires unsupported path behavior");
     return LQL_STATUS_UNSUPPORTED;
   }
-  return mutate_file_range_with_supported_plan(plan, file, offset, size, out,
-                                               error);
+  return mutate_file_range_with_supported_plan(self, plan, file, offset, size,
+                                               out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_paths_impl(
@@ -2580,7 +2578,6 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_paths_impl(
     FILE *out, lql_error *error) {
   mutation_source_reader reader;
   lql_status st;
-  (void)self;
 
   if (plan == NULL || read == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -2595,8 +2592,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_paths_impl(
   memset(&reader, 0, sizeof(reader));
   reader.read = read;
   reader.user = read_user;
-  st = mutate_reader_with_supported_plan(plan, mutation_source_read, &reader,
-                                         out, error);
+  st = mutate_reader_with_supported_plan(self, plan, mutation_source_read,
+                                         &reader, out, error);
   if (st == LQL_STATUS_JSON_ERROR && reader.error_code != 0) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, "mutation source read failed");
   }
@@ -2607,7 +2604,6 @@ LQL_INTERNAL_SYMBOL lql_status
 lql_mutate_json_impl(lql *self, const lql_mutation_plan *plan, const char *json,
                      size_t json_len, FILE *out, lql_error *error) {
   buffer_reader reader;
-  (void)self;
 
   if (plan == NULL || json == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -2622,13 +2618,13 @@ lql_mutate_json_impl(lql *self, const lql_mutation_plan *plan, const char *json,
   reader.data = (const unsigned char *)json;
   reader.len = json_len;
   reader.offset = 0u;
-  return mutate_reader_with_supported_plan(plan, buffer_read, &reader, out,
-                                           error);
+  return mutate_reader_with_supported_plan(self, plan, buffer_read, &reader,
+                                           out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_spooled_paths(
-    const lql_mutation_plan *plan, const lonejson_spooled *spooled, FILE *out,
-    lql_error *error) {
+    lql *self, const lql_mutation_plan *plan,
+    const lonejson_spooled *spooled, FILE *out, lql_error *error) {
   lonejson_spooled cursor;
   if (plan == NULL || spooled == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -2642,6 +2638,6 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_spooled_paths(
   }
   cursor = *spooled;
   cursor.read_offset = 0u;
-  return mutate_reader_with_supported_plan(plan, spooled_read, &cursor, out,
-                                           error);
+  return mutate_reader_with_supported_plan(self, plan, spooled_read, &cursor,
+                                           out, error);
 }

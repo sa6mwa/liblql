@@ -608,6 +608,10 @@ Current implementation is an early slice:
   private implementation boundary, so selectorless/match-all query scratch
   state and nested projected mutation execution use the same receiver context
   instead of a null-receiver default allocator fallback;
+- projection, compact, and mutation runtime helpers also carry receiver context
+  across private helper boundaries; core source files are style-gated against
+  `lql_allocator_from_receiver(NULL)` so library behavior cannot silently fall
+  back to default allocator ownership when a receiver is available;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through
