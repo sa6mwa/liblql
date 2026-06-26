@@ -1805,11 +1805,20 @@ static void expect_stream_error_api(void) {
     return;
   }
   memset(&seen, 0, sizeof(seen));
+  memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
   st = test_ctx->query_file_decisions(test_ctx, selector, source,
-                                      record_decision, &seen, NULL, &error);
-  if (st != LQL_STATUS_JSON_ERROR) {
-    printf("malformed file decision stream status mismatch: %s\n",
+                                      record_decision, &seen, &result, &error);
+  if (st != LQL_STATUS_JSON_ERROR || seen.calls != 1 || seen.matched != 1 ||
+      result.candidates_seen != 1u || result.candidates_matched != 1u ||
+      result.bytes_read == 0u || result.stopped_early) {
+    printf("malformed file decision stream mismatch: status=%s calls=%d "
+           "matched=%d seen=%lu result_matched=%lu bytes=%lu stopped=%d "
+           "error=%s\n",
+           lql_status_string(st), seen.calls, seen.matched,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched,
+           (unsigned long)result.bytes_read, result.stopped_early,
            error.message);
     ++failures;
   }
@@ -1819,12 +1828,20 @@ static void expect_stream_error_api(void) {
   } else {
     memset(&payload_seen_value, 0, sizeof(payload_seen_value));
     payload_seen_value.out = out;
+    memset(&result, 0x5a, sizeof(result));
     lql_error_init(&error);
     st =
         test_ctx->query_file_matches(test_ctx, selector, source, record_payload,
-                                     &payload_seen_value, NULL, &error);
-    if (st != LQL_STATUS_JSON_ERROR) {
-      printf("malformed file match stream status mismatch: %s\n",
+                                     &payload_seen_value, &result, &error);
+    if (st != LQL_STATUS_JSON_ERROR || payload_seen_value.calls != 1 ||
+        result.candidates_seen != 1u || result.candidates_matched != 1u ||
+        result.bytes_read == 0u || result.stopped_early) {
+      printf("malformed file match stream mismatch: status=%s calls=%d "
+             "seen=%lu matched=%lu bytes=%lu stopped=%d error=%s\n",
+             lql_status_string(st), payload_seen_value.calls,
+             (unsigned long)result.candidates_seen,
+             (unsigned long)result.candidates_matched,
+             (unsigned long)result.bytes_read, result.stopped_early,
              error.message);
       ++failures;
     }
@@ -1834,11 +1851,21 @@ static void expect_stream_error_api(void) {
   reader.data = malformed;
   reader.len = strlen(malformed);
   reader.chunk_size = 5u;
+  memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
   st = test_ctx->query_source_decisions(test_ctx, selector, read_chunk, &reader,
-                                        record_decision, &seen, NULL, &error);
-  if (st != LQL_STATUS_JSON_ERROR) {
-    printf("malformed source decision stream status mismatch: %s\n",
+                                        record_decision, &seen, &result,
+                                        &error);
+  if (st != LQL_STATUS_JSON_ERROR || seen.calls != 1 || seen.matched != 1 ||
+      result.candidates_seen != 1u || result.candidates_matched != 1u ||
+      result.bytes_read == 0u || result.stopped_early) {
+    printf("malformed source decision stream mismatch: status=%s calls=%d "
+           "matched=%d seen=%lu result_matched=%lu bytes=%lu stopped=%d "
+           "error=%s\n",
+           lql_status_string(st), seen.calls, seen.matched,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched,
+           (unsigned long)result.bytes_read, result.stopped_early,
            error.message);
     ++failures;
   }
@@ -1848,12 +1875,20 @@ static void expect_stream_error_api(void) {
   reader.len = strlen(malformed);
   reader.chunk_size = 5u;
   payload_seen_value.out = out;
+  memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
   st = test_ctx->query_source_spooled_matches(
       test_ctx, selector, read_chunk, &reader, record_spooled_payload,
-      &payload_seen_value, NULL, &error);
-  if (st != LQL_STATUS_JSON_ERROR) {
-    printf("malformed source spooled stream status mismatch: %s\n",
+      &payload_seen_value, &result, &error);
+  if (st != LQL_STATUS_JSON_ERROR || payload_seen_value.calls != 1 ||
+      result.candidates_seen != 1u || result.candidates_matched != 1u ||
+      result.bytes_read == 0u || result.stopped_early) {
+    printf("malformed source spooled stream mismatch: status=%s calls=%d "
+           "seen=%lu matched=%lu bytes=%lu stopped=%d error=%s\n",
+           lql_status_string(st), payload_seen_value.calls,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched,
+           (unsigned long)result.bytes_read, result.stopped_early,
            error.message);
     ++failures;
   }

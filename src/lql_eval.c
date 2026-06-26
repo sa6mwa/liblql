@@ -1621,10 +1621,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
     lonejson_free(runtime);
+    if (out_result != NULL) {
+      *out_result = state.result;
+    }
     if (state.callback_status != LQL_STATUS_OK) {
-      if (out_result != NULL) {
-        *out_result = state.result;
-      }
       lql_set_error(error, state.callback_status,
                     "query decision callback failed");
       return state.callback_status;
@@ -1687,18 +1687,15 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_decisions(
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
     lonejson_free(runtime);
+    if (out_result != NULL) {
+      *out_result = state.result;
+    }
     if (state.callback_status != LQL_STATUS_OK) {
-      if (out_result != NULL) {
-        *out_result = state.result;
-      }
       lql_set_error(error, state.callback_status,
                     "query decision callback failed");
       return state.callback_status;
     }
     if (adapter.error_code != 0) {
-      if (out_result != NULL) {
-        *out_result = state.result;
-      }
       lql_set_error(error, LQL_STATUS_JSON_ERROR, "query source reader failed");
       return LQL_STATUS_JSON_ERROR;
     }
@@ -1760,18 +1757,15 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_matches(
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
     lonejson_free(runtime);
+    if (out_result != NULL) {
+      *out_result = state.result;
+    }
     if (state.callback_status != LQL_STATUS_OK) {
-      if (out_result != NULL) {
-        *out_result = state.result;
-      }
       lql_set_error(error, state.callback_status,
                     "query match callback failed");
       return state.callback_status;
     }
     if (adapter.error_code != 0) {
-      if (out_result != NULL) {
-        *out_result = state.result;
-      }
       lql_set_error(error, LQL_STATUS_JSON_ERROR, "query source reader failed");
       return LQL_STATUS_JSON_ERROR;
     }
@@ -1855,6 +1849,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_range_spooled_matches(
   destroy_doc(&state.doc);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
+    if (out_result != NULL) {
+      *out_result = state.result;
+    }
     if (state.mutation_error.code != LQL_STATUS_OK) {
       lql_set_error(error, state.mutation_error.code,
                     state.mutation_error.message);
@@ -1934,6 +1931,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_spooled_matches(
   destroy_doc(&state.doc);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
+    if (out_result != NULL) {
+      *out_result = state.result;
+    }
     if (state.mutation_error.code != LQL_STATUS_OK) {
       lql_set_error(error, state.mutation_error.code,
                     state.mutation_error.message);
