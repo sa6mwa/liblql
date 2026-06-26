@@ -1057,6 +1057,15 @@ Current implementation status:
   file-backed mutation values. Go callback-sink cleanup and reusable spill-file
   lifecycle are not mirrored unless liblql deliberately adds a mutation
   callback/factory surface;
+- mutation stream result coverage follows the same public-boundary rule. C
+  result tests cover seekable and callback-source candidate mutation counts,
+  consumed bytes, writer output equivalence, match-limit stops, matches-only
+  output, projected mutation results, malformed/read-failure partial counters,
+  and invalid-argument zeroing through the public `lql_query_result` fields.
+  Go's mutation callback stop/error tests and `BytesCaptured`/`SpillCount`/
+  `SpillBytes` counters belong to Go's callback request shape and are not
+  mirrored unless liblql grows an equivalent mutation callback/factory or
+  aggregate accounting API;
 - lonejson `v0.35.0` exposes candidate `stream_offset`, `byte_size`, and
   `payload_size` plus callback-scoped `lonejson_spooled` handles with
   per-handle size/spilled inspection. It does not expose aggregate query-level
