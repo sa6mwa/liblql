@@ -66,7 +66,7 @@ archive test suite. The 1 GiB benchmark gate wrote
 | Streaming decision and plus-value behavior | C SDK streaming tests, benchmark memory gates, 1 GiB memory gate | Proven locally for claimed scope |
 | Lua facade is direct liblql binding, not `clql` backed | Lua C module tests, Lua runtime fixtures, Lua release artifact verification | Proven locally |
 | Lua 5.5 only | C compile-time guard, Lua runtime fixtures, Lua package contract fixtures | Proven locally |
-| Go/C/Lua benchmark parity and memory gates | `make bench-check`, `make bench-memory-check`, `make bench-1g-check` | Proven locally |
+| Go/C/Lua benchmark parity and memory gates | `make bench-check`, `make bench-memory-check`, `make bench-1g-check`, clean `make release` | Proven locally |
 | Linux GNU/musl release artifacts | `make release-matrix`, `make release`, checksum manifest | Proven locally |
 | Darwin arm64 release artifacts | `LQL_PACKAGE_TARGETS=arm64-apple-darwin make release-matrix`, checksum manifest | Proven locally with available osxcross toolchain |
 | Source and Lua release artifacts | `make package-verify`, `make release`, checksum manifest | Proven locally |

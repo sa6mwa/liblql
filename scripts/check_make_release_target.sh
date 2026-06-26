@@ -43,7 +43,7 @@ check_release_surface() {
   fi
 
   for required in 'scripts/clean.sh' 'test-all' 'bench-check' \
-    'bench-memory-check' 'release-matrix'; do
+    'bench-memory-check' 'bench-1g-check' 'release-matrix'; do
     if ! grep -F "$required" "$release_script" >/dev/null; then
       printf 'release surface: release gate is missing %s\n' "$required" >&2
       exit 1
@@ -106,6 +106,7 @@ scripts/clean.sh
 make test-all
 make bench-check
 make bench-memory-check
+make bench-1g-check
 make release-matrix
 EOF
   cat >"$cmakelists" <<'EOF'
