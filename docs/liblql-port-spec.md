@@ -1380,7 +1380,9 @@ Current implementation status:
   instead of host tools;
   checksum manifest fixture coverage proves release-looking tarball, rockspec,
   and source-rock artifacts under `dist/` cannot be left out of the upload
-  manifest;
+  manifest, and `scripts/package.sh print-release-assets` derives the exact
+  publish asset path list from the checksum manifest plus the manifest itself
+  rather than from a `dist/` glob;
 - standalone Lua source package production now writes
   `dist/liblql-lua-<version>.tar.gz` with `VERSION`, exact
   `RELEASE_MANIFEST`, Lua sources, tests, benchmark runner, rockspec template,

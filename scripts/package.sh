@@ -11,6 +11,10 @@ MATRIX_TARGETS="x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-lin
 MATRIX_MODE=0
 
 version() {
+  if [ "${LQL_VERSION_OVERRIDE:-}" ]; then
+    printf '%s\n' "$LQL_VERSION_OVERRIDE"
+    return
+  fi
   (cd "$ROOT_DIR" && ./scripts/release_version.sh)
 }
 
@@ -995,6 +999,26 @@ verify_release_artifacts_listed() {
   done <"$actual"
 }
 
+print_release_assets() {
+  manifest=$(manifest_path)
+  if [ ! -f "$manifest" ]; then
+    printf 'package: checksum manifest missing for release assets: %s\n' \
+      "$manifest" >&2
+    exit 1
+  fi
+  verify_release_artifacts_listed "$manifest"
+  printf '%s\n' "$manifest"
+  while read -r _hash artifact_name; do
+    [ -n "$artifact_name" ] || continue
+    if [ ! -f "$DIST_DIR/$artifact_name" ]; then
+      printf 'package: checksum-listed release asset missing: %s\n' \
+        "$DIST_DIR/$artifact_name" >&2
+      exit 1
+    fi
+    printf '%s/%s\n' "$DIST_DIR" "$artifact_name"
+  done <"$manifest"
+}
+
 expect_privacy_failure() {
   name=$1
   needle=$2
@@ -1172,6 +1196,7 @@ check_package_manifest_fixtures() {
   tmp_dir="$ROOT_DIR/build/package-manifest-fixtures"
   old_dist=$DIST_DIR
   old_root=$ROOT_DIR
+  assets_out="$tmp_dir/assets.out"
 
   rm -rf "$tmp_dir"
   mkdir -p "$tmp_dir/dist" "$tmp_dir/build"
@@ -1183,6 +1208,12 @@ check_package_manifest_fixtures() {
     cd "$DIST_DIR"
     sha256sum "${PROJECT}-0.0.0.tar.gz" >"${PROJECT}-0.0.0-CHECKSUMS"
   )
+  if (LQL_VERSION_OVERRIDE=0.0.0 print_release_assets) >"$assets_out" 2>&1; then
+    printf 'package manifest fixture unexpectedly printed assets with unlisted artifact\n' >&2
+    ROOT_DIR=$old_root
+    DIST_DIR=$old_dist
+    exit 1
+  fi
   if (verify_release_artifacts_listed "$DIST_DIR/${PROJECT}-0.0.0-CHECKSUMS") \
     >"$tmp_dir/out" 2>&1; then
     printf 'package manifest fixture unexpectedly accepted unlisted artifact\n' >&2
@@ -1193,6 +1224,17 @@ check_package_manifest_fixtures() {
   if ! grep -F 'release artifact missing from checksum manifest' "$tmp_dir/out" >/dev/null; then
     printf 'package manifest fixture did not report unlisted artifact\n' >&2
     cat "$tmp_dir/out" >&2
+    ROOT_DIR=$old_root
+    DIST_DIR=$old_dist
+    exit 1
+  fi
+  rm -f "$DIST_DIR/${CLI_PROJECT}-0.0.0-x86_64-linux-gnu.tar.gz"
+  LQL_VERSION_OVERRIDE=0.0.0 print_release_assets >"$assets_out"
+  if [ "$(sed -n '1p' "$assets_out")" != "$DIST_DIR/${PROJECT}-0.0.0-CHECKSUMS" ] ||
+     [ "$(sed -n '2p' "$assets_out")" != "$DIST_DIR/${PROJECT}-0.0.0.tar.gz" ] ||
+     [ "$(wc -l <"$assets_out" | tr -d ' ')" != "2" ]; then
+    printf 'package manifest fixture produced wrong release asset list\n' >&2
+    cat "$assets_out" >&2
     ROOT_DIR=$old_root
     DIST_DIR=$old_dist
     exit 1
@@ -1440,6 +1482,9 @@ case "$TARGET" in
     ;;
   print-manifest)
     manifest_path
+    ;;
+  print-release-assets)
+    print_release_assets
     ;;
   *)
     printf 'unknown package target: %s\n' "$TARGET" >&2
