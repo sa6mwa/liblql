@@ -1036,9 +1036,9 @@ on_source_spooled_candidate_end(void *user,
     match.payload.offset = match.decision.offset;
     match.payload.size = match.decision.size;
     match.payload.spooled = candidate->payload_spool;
+    state->result.candidates_matched++;
     st = state->on_match(state->user, &match);
     if (st == LQL_STATUS_STOP) {
-      state->result.candidates_matched++;
       state->result.stopped_early = 1;
       state->result.stop_reason = LQL_QUERY_STOP_CALLBACK;
       reset_doc(&state->doc);
@@ -1049,7 +1049,6 @@ on_source_spooled_candidate_end(void *user,
       reset_doc(&state->doc);
       return LONEJSON_CANDIDATE_ERROR;
     }
-    state->result.candidates_matched++;
   }
   reset_doc(&state->doc);
   if (query_limit_enabled(state->options.max_matches) &&

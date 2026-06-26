@@ -533,7 +533,7 @@ static void expect_output_state_contract_api(void) {
       strcmp(error.message, "query match callback failed") != 0 ||
       payload_seen_value.calls != 1 || payload_seen_value.offsets[0] != 0u ||
       payload_seen_value.sizes[0] != (lql_uint64)strlen(stream) - 1u ||
-      result.candidates_seen != 1u || result.candidates_matched != 0u ||
+      result.candidates_seen != 1u || result.candidates_matched != 1u ||
       reader.calls <= 1) {
     printf("spooled match callback failure mismatch: status=%s calls=%d "
            "seen=%lu matched=%lu reads=%d error=%s\n",
@@ -1083,7 +1083,7 @@ static void expect_source_spooled_payload_api(void) {
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "query match callback failed") != 0 ||
       sink.calls != 1 || result.candidates_seen != (lql_uint64)2 ||
-      result.candidates_matched != (lql_uint64)0 ||
+      result.candidates_matched != (lql_uint64)1 ||
       result.bytes_read != (lql_uint64)56) {
     printf("source spooled payload sink failure mismatch: status=%s "
            "error=%s calls=%d seen=%lu matched=%lu bytes=%lu\n",
