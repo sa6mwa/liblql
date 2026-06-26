@@ -57,6 +57,10 @@ for symbol in $forbidden; do
     printf 'public API style: forbidden free-operation/cleanup prototype in %s: %s\n' "$header" "$symbol" >&2
     failed=1
   fi
+  if grep -Eq "^[[:space:]]*#define[[:space:]]+${symbol}[[:space:]]*\\(" "$header"; then
+    printf 'public API style: forbidden public free-operation/cleanup macro wrapper in %s: %s\n' "$header" "$symbol" >&2
+    failed=1
+  fi
 done
 
 if grep -Eq "^[[:space:]]*void[[:space:]]+\\(\\*[A-Za-z0-9_]+_free\\)[[:space:]]*\\(" "$header"; then

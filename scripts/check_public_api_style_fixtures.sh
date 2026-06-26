@@ -46,6 +46,14 @@ run_expect_fail "public free cleanup wrapper"
 sed '$d' "$header" >"$tmp/header.clean"
 mv "$tmp/header.clean" "$header"
 
+cat >>"$header" <<'EOF'
+#define lql_matches_json(self, selector, json, json_len, out, error) \
+  (self)->matches_json((self), (selector), (json), (json_len), (out), (error))
+EOF
+run_expect_fail "public free-operation macro wrapper"
+sed '$d' "$header" | sed '$d' >"$tmp/header.clean"
+mv "$tmp/header.clean" "$header"
+
 sed '/void (\*destroy)/i\
   /* Forbidden cleanup spelling. */\
   void (*selector_free)(void *selector);' "$header" >"$tmp/header.bad"
