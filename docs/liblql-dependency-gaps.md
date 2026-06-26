@@ -1,27 +1,10 @@
-# lonejson CR: Streaming Array-Then-Values Candidate Framing
+# liblql Dependency Gaps
 
-## Intent
+## Mixed Array-Then-Values Candidate Framing
 
-liblql needs a public lonejson candidate-stream mode that can parse a
-non-seekable source containing a top-level array followed by additional
-top-level JSON values, while still emitting each array item and each following
-top-level value incrementally as one candidate stream.
-
-The feature is about framing, not capture. It must not require lonejson or a
-consumer to materialize the root array, the whole input, or all candidates in
-memory before callbacks run.
-
-## Why liblql Needs This
-
-The Go `pkt.systems/lql` stream implementation accepts this input shape:
-
-```text
-[{"id":1},{"id":2}]
-{"id":3}
-{"id":4}
-```
-
-as a candidate stream equivalent to:
+The current liblql v0 callback-source contract intentionally does not claim the
+Go implementation's mixed framing case where a non-seekable source contains a
+top-level array followed by additional top-level JSON values:
 
 ```text
 {"id":1}
@@ -30,10 +13,16 @@ as a candidate stream equivalent to:
 {"id":4}
 ```
 
-For liblql, this matters only on non-seekable callback sources. Seekable file
-inputs can reconstruct payloads by offset and byte size. Callback sources
-cannot rewind, so liblql must rely on lonejson to expose the correct candidate
-boundaries as bytes pass through the parser.
+That input shape would be equivalent to a candidate stream containing four
+objects. It matters only for non-seekable callback sources: seekable file inputs
+can reconstruct payloads from offset and byte size, while callback sources
+cannot rewind after a root array closes.
+
+The missing capability is dependency-owned framing, not capture. liblql must
+not emulate this by materializing the root array, spooling the whole input, or
+retaining all candidates. Until the dependency exposes a no-materialization
+framing mode for this shape, the shape remains outside the current liblql v0
+callback-source contract.
 
 lonejson `v0.35.0` exposes useful pieces:
 
@@ -45,9 +34,9 @@ lonejson `v0.35.0` exposes useful pieces:
 What is missing is the composition of `ARRAY_ITEMS` followed by continued
 top-level value framing in a single streaming parse.
 
-## Required Behavior
+## Required Dependency Behavior
 
-Add a public candidate-framing option with these semantics:
+A future dependency capability would need these semantics:
 
 - If the next top-level value is an array, emit each item in that array as a
   candidate as soon as the item's value is complete.
@@ -57,7 +46,8 @@ Add a public candidate-framing option with these semantics:
   rule to that array.
 - Nested arrays that are themselves candidate values should keep the existing
   candidate-recursion behavior controlled by the current candidate stream API;
-  this CR is specifically about continuing after a top-level array closes.
+  this dependency gap is specifically about continuing after a top-level array
+  closes.
 - Preserve existing candidate metadata contracts: candidate index, stream
   offset, byte size, payload size, and callback ordering must describe the
   emitted candidate value, not the enclosing array.
@@ -77,10 +67,12 @@ Add a public candidate-framing option with these semantics:
 - Do not require temp files as a hidden substitute for streaming.
 - Do not change existing `AUTO`, `NDJSON`, `SINGLE_VALUE`, or `ARRAY_ITEMS`
   semantics.
+- Do not treat this dependency gap as remaining liblql implementation work
+  unless the public liblql callback-source contract is deliberately expanded.
 
 ## Validation Needed
 
-The lonejson test suite should prove at least:
+If the dependency grows this capability, its test suite should prove at least:
 
 - one array followed by one object emits each array item and the object;
 - multiple top-level arrays followed by scalars/objects emit all values in
@@ -93,6 +85,6 @@ The lonejson test suite should prove at least:
 - malformed JSON after complete candidates reports an error while preserving
   already-emitted callbacks.
 
-Once lonejson exposes this framing mode, liblql can wire it into
-callback-source decision, plus-value, and candidate mutation streams without
-changing the public liblql API.
+Once the dependency exposes this framing mode, liblql can decide whether to
+expand callback-source decision, plus-value, and candidate mutation streams to
+claim this additional Go-compatible input shape.

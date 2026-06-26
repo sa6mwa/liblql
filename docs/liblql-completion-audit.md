@@ -73,10 +73,11 @@ archive test suite. The 1 GiB benchmark gate wrote
 | Privacy and relocatability verification | `make package-verify`, `make release`, package privacy fixtures | Proven locally |
 | Warning-clean release build with `-Werror` | release-surface CTest in `make test-all` and source archive verification | Proven locally |
 
-## Remaining Unproven Scope
+## Remaining Release Work
 
-The goal is not complete until these items are resolved or explicitly accepted
-as out of scope by the engineer:
+The implementation scope is locally proven for the current public C/Lua/CLI
+contract. Release execution remains unproven until these items are performed
+under release authority:
 
 1. Final tagged release artifacts are unproven.
    The current worktree is untagged, so generated artifacts intentionally use
@@ -84,28 +85,26 @@ as out of scope by the engineer:
    selection, a lightweight `vX.Y.Z` tag on `HEAD`, clean tagged `make release`,
    and checksum-listed upload selection from the tagged artifact set.
 
-2. Full LQL parity is claimed only for the current public C/Lua/CLI contract.
-   The executable `parity/oracle_inventory.tsv` classifies every test,
-   benchmark, and example-bearing file in the pinned Go `pkt.systems/lql
-   v0.17.1` module. Rows are either covered by C SDK, CLI, Lua, benchmark, or
-   release-gate evidence, or deliberately marked not-applicable for Go-only API
-   shapes. The one known unsupported Go behavior that would require new parser
-   support is documented as `docs/lonejson-cr-stream-framing.md`: a
-   non-seekable source containing root-array items followed by additional
-   top-level values in the same stream. liblql must not emulate that by
-   materializing the root array or source.
-
-3. Release publication is not done.
+2. Release publication is not done.
    No release branch squash, tag push, or GitHub release creation has been
    performed. That is intentionally outside an implementation verification pass
    unless the engineer starts the release flow.
 
+## Contract Boundary
+
+Full LQL parity is claimed only for the current public C/Lua/CLI contract. The
+executable `parity/oracle_inventory.tsv` classifies every test, benchmark, and
+example-bearing file in the pinned Go `pkt.systems/lql v0.17.1` module. Rows
+are either covered by C SDK, CLI, Lua, benchmark, or release-gate evidence, or
+deliberately marked not-applicable for Go-only API shapes.
+
+The one known Go behavior excluded from the current callback-source contract is
+documented as `docs/liblql-dependency-gaps.md`: a non-seekable source
+containing root-array items followed by additional top-level values in the same
+stream. liblql must not emulate that by materializing the root array or source.
+
 ## Next Completion Work
 
-The next non-cosmetic work should be one of:
-
-- implement the future lonejson streaming framing CR if that input shape is
-  accepted into the dependency, then wire it into liblql callback-source
-  streams with C-native tests;
-- start the formal release flow with release authority, version selection, and
-  tagged clean `make release`.
+The next non-cosmetic liblql work is the formal release flow: release authority,
+version selection, a lightweight `vX.Y.Z` tag on `HEAD`, tagged clean
+`make release`, and checksum-listed upload selection.
