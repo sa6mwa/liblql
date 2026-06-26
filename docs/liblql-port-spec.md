@@ -866,8 +866,10 @@ Current implementation status:
   `ctx->mutation_plan_parse_with_options()`, `ctx->mutation_plan_count()`,
   `ctx->mutate_json()`, `ctx->mutate_file_range_root_fields()`,
   `ctx->mutate_file_range_paths()`,
-  `ctx->mutate_file_range_candidates()`, `ctx->mutate_source_paths()`,
-  `ctx->mutate_source_candidates()`, `ctx->compact_json()`,
+  `ctx->mutate_file_range_candidates()`,
+  `ctx->mutate_file_range_projected_candidates()`,
+  `ctx->mutate_source_paths()`, `ctx->mutate_source_candidates()`,
+  `ctx->mutate_source_projected_candidates()`, `ctx->compact_json()`,
   `ctx->compact_source()`,
   `ctx->compact_file_range()`, `ctx->query_file_decisions()`,
   `ctx->query_source_decisions()`, `ctx->query_file_matches()`, and
