@@ -433,10 +433,11 @@ static const projection_path *selected_path(const lql_projection *projection,
   return NULL;
 }
 
-static int append_buf(lql_allocator *allocator, char **buf, size_t *len,
+static int append_buf(projection_state *state, char **buf, size_t *len,
                       const char *data, size_t n) {
   char *next;
-  next = (char *)allocator->realloc(allocator, *buf, *len + n + 1u);
+  next = (char *)state->allocator->realloc(state->allocator, *buf,
+                                           *len + n + 1u);
   if (next == NULL) {
     return 0;
   }
@@ -724,8 +725,7 @@ static lonejson_status on_object_key_chunk(void *user,
   (void)path;
   (void)error;
   state = (projection_state *)user;
-  return append_buf(state->allocator, &state->key_buf, &state->key_len, data,
-                    len)
+  return append_buf(state, &state->key_buf, &state->key_len, data, len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
 }
@@ -833,8 +833,8 @@ static lonejson_status on_number_chunk(void *user,
   (void)path;
   (void)error;
   state = (projection_state *)user;
-  if (state->in_number && !append_buf(state->allocator, &state->num_buf,
-                                      &state->num_len, data, len)) {
+  if (state->in_number &&
+      !append_buf(state, &state->num_buf, &state->num_len, data, len)) {
     return LONEJSON_STATUS_ALLOCATION_FAILED;
   }
   return LONEJSON_STATUS_OK;

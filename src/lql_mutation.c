@@ -189,8 +189,8 @@ static size_t trimmed_len(const char *start) {
   return (size_t)(end - start);
 }
 
-static char *trimmed_dup_range_alloc(lql_allocator *allocator,
-                                     const char *start, size_t len) {
+static char *trimmed_dup_range(mutation_parse_context *ctx, const char *start,
+                               size_t len) {
   const char *end;
   char *out;
   start = skip_space(start);
@@ -200,7 +200,7 @@ static char *trimmed_dup_range_alloc(lql_allocator *allocator,
     --end;
   }
   len = (size_t)(end - start);
-  out = (char *)allocator->alloc(allocator, len + 1u);
+  out = (char *)ctx->allocator->alloc(ctx->allocator, len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -209,9 +209,24 @@ static char *trimmed_dup_range_alloc(lql_allocator *allocator,
   return out;
 }
 
-static char *trimmed_dup_range(mutation_parse_context *ctx, const char *start,
-                               size_t len) {
-  return trimmed_dup_range_alloc(ctx->allocator, start, len);
+static char *trimmed_dup_runtime_range(mutation_stream_state *state,
+                                       const char *start, size_t len) {
+  const char *end;
+  char *out;
+  start = skip_space(start);
+  end = start + len;
+  while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' ||
+                         end[-1] == '\n')) {
+    --end;
+  }
+  len = (size_t)(end - start);
+  out = (char *)state->allocator->alloc(state->allocator, len + 1u);
+  if (out == NULL) {
+    return NULL;
+  }
+  memcpy(out, start, len);
+  out[len] = '\0';
+  return out;
 }
 
 static int has_prefix(const char *s, const char *prefix) {
@@ -467,10 +482,11 @@ mutation_source_read(void *user, unsigned char *buffer, size_t capacity) {
   return result;
 }
 
-static int append_buf(lql_allocator *allocator, char **buf, size_t *len,
+static int append_buf(mutation_stream_state *state, char **buf, size_t *len,
                       const char *data, size_t n) {
   char *next;
-  next = (char *)allocator->realloc(allocator, *buf, *len + n + 1u);
+  next = (char *)state->allocator->realloc(state->allocator, *buf,
+                                           *len + n + 1u);
   if (next == NULL) {
     return 0;
   }
@@ -759,16 +775,16 @@ static int parse_number(const char *s, double *out) {
   return 1;
 }
 
-static int parse_number_slice(lql_allocator *allocator, const char *s,
+static int parse_number_slice(mutation_stream_state *state, const char *s,
                               size_t len, double *out) {
   char *copy;
   int ok;
-  copy = trimmed_dup_range_alloc(allocator, s, len);
+  copy = trimmed_dup_runtime_range(state, s, len);
   if (copy == NULL) {
     return 0;
   }
   ok = parse_number(copy, out);
-  allocator->destroy(allocator, copy);
+  state->allocator->destroy(state->allocator, copy);
   return ok;
 }
 
@@ -1612,8 +1628,7 @@ static int inspect_file_textlike(const char *path, lonejson_error *error,
   return expected == 0u ? 1 : 0;
 }
 
-static lonejson_status write_mutation_set_value(lql_allocator *allocator,
-                                                lonejson_writer *writer,
+static lonejson_status write_mutation_set_value(mutation_stream_state *state,
                                                 const mutation_item *item,
                                                 lonejson_error *error) {
   const char *value;
@@ -1646,9 +1661,9 @@ static lonejson_status write_mutation_set_value(lql_allocator *allocator,
     st = lonejson_source_set_path(&source, item->file_path, error);
     if (st == LONEJSON_STATUS_OK) {
       if (file_mode == MUTATION_FILE_TEXT) {
-        st = lonejson_writer_source_text(writer, &source, error);
+        st = lonejson_writer_source_text(&state->writer, &source, error);
       } else {
-        st = lonejson_writer_source_base64(writer, &source, error);
+        st = lonejson_writer_source_base64(&state->writer, &source, error);
       }
     }
     lonejson_source_cleanup(&source);
@@ -1657,24 +1672,24 @@ static lonejson_status write_mutation_set_value(lql_allocator *allocator,
   value = item->value == NULL ? "" : item->value;
   text = unquoted_value(value, &len);
   if (ascii_equal_ignore_case_n(text, len, "true")) {
-    return lonejson_writer_bool(writer, 1, error);
+    return lonejson_writer_bool(&state->writer, 1, error);
   }
   if (ascii_equal_ignore_case_n(text, len, "false")) {
-    return lonejson_writer_bool(writer, 0, error);
+    return lonejson_writer_bool(&state->writer, 0, error);
   }
   if (ascii_equal_ignore_case_n(text, len, "null")) {
-    return lonejson_writer_null(writer, error);
+    return lonejson_writer_null(&state->writer, error);
   }
-  if (parse_number_slice(allocator, text, len, &number)) {
+  if (parse_number_slice(state, text, len, &number)) {
     (void)number;
-    return lonejson_writer_number_text(writer, text, len, error);
+    return lonejson_writer_number_text(&state->writer, text, len, error);
   }
   if (item->kind == MUTATION_INCREMENT) {
     sprintf(number_buf, "%.17g", item->delta);
-    return lonejson_writer_number_text(writer, number_buf, strlen(number_buf),
-                                       error);
+    return lonejson_writer_number_text(&state->writer, number_buf,
+                                       strlen(number_buf), error);
   }
-  return lonejson_writer_string(writer, text, len, error);
+  return lonejson_writer_string(&state->writer, text, len, error);
 }
 
 static lonejson_status finish_skip_value(mutation_stream_state *state) {
@@ -2007,8 +2022,8 @@ static lonejson_status write_synthetic_leaf_value(mutation_stream_state *state,
                                     error) != LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
-  } else if (write_mutation_set_value(state->allocator, &state->writer, item,
-                                      error) != LONEJSON_STATUS_OK) {
+  } else if (write_mutation_set_value(state, item, error) !=
+             LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   state->applied[index] = 1;
@@ -2036,8 +2051,7 @@ begin_array_value_mutation(mutation_stream_state *state,
     return LONEJSON_STATUS_OK;
   }
   if (item->kind == MUTATION_SET) {
-    if (write_mutation_set_value(state->allocator, &state->writer, item,
-                                 error) != LONEJSON_STATUS_OK) {
+    if (write_mutation_set_value(state, item, error) != LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
     state->applied[index] = 1;
@@ -2250,8 +2264,7 @@ static lonejson_status mutation_key_chunk(void *user,
   (void)path;
   (void)error;
   state = (mutation_stream_state *)user;
-  return append_buf(state->allocator, &state->key_buf, &state->key_len, data,
-                    len)
+  return append_buf(state, &state->key_buf, &state->key_len, data, len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
 }
@@ -2304,8 +2317,8 @@ static lonejson_status mutation_key_end(void *user,
     if (item->kind == MUTATION_SET) {
       if (lonejson_writer_key(&state->writer, state->key_buf, state->key_len,
                               error) != LONEJSON_STATUS_OK ||
-          write_mutation_set_value(state->allocator, &state->writer, item,
-                                   error) != LONEJSON_STATUS_OK) {
+          write_mutation_set_value(state, item, error) !=
+              LONEJSON_STATUS_OK) {
         return LONEJSON_STATUS_CALLBACK_FAILED;
       }
       state->applied[index] = 1;
@@ -2426,14 +2439,12 @@ static lonejson_status mutation_number_chunk(void *user,
   state = (mutation_stream_state *)user;
   if (state->skipping) {
     if (state->active_increment &&
-        !append_buf(state->allocator, &state->num_buf, &state->num_len, data,
-                    len)) {
+        !append_buf(state, &state->num_buf, &state->num_len, data, len)) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
     return LONEJSON_STATUS_OK;
   }
-  return append_buf(state->allocator, &state->num_buf, &state->num_len, data,
-                    len)
+  return append_buf(state, &state->num_buf, &state->num_len, data, len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
 }

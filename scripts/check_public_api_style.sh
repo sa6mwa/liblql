@@ -362,6 +362,19 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  receiver_runtime_allocator_hits=$(
+    grep -REn \
+      '^[[:space:]]*static[[:space:]][^(;]*[[:space:]*](append_buf|parse_number_slice|write_mutation_set_value)[[:space:]]*\([^)]*lql_allocator[[:space:]]+\*' \
+      "$source_root/src/lql_project.c" \
+      "$source_root/src/lql_eval.c" \
+      "$source_root/src/lql_mutation.c" 2>/dev/null || true
+  )
+  if [ -n "$receiver_runtime_allocator_hits" ]; then
+    printf 'public API style: receiver-owned runtime helpers must take receiver runtime context, not lql_allocator *\n' >&2
+    printf '%s\n' "$receiver_runtime_allocator_hits" >&2
+    failed=1
+  fi
+
   lonejson_default_allocator_hits=$(
     grep -En 'lonejson_new[[:space:]]*\([[:space:]]*NULL[[:space:]]*,' \
       "$source_root/src/lql_selector.c" \

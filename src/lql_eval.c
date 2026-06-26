@@ -189,10 +189,11 @@ static void reset_doc(eval_doc *doc) {
   doc->root_kind = '\0';
 }
 
-static int append_buf(lql_allocator *allocator, char **buf, size_t *len,
+static int append_buf(eval_doc *doc, char **buf, size_t *len,
                       const char *data, size_t n) {
   char *next;
-  next = (char *)allocator->realloc(allocator, *buf, *len + n + 1u);
+  next =
+      (char *)doc->allocator->realloc(doc->allocator, *buf, *len + n + 1u);
   if (next == NULL) {
     return 0;
   }
@@ -690,7 +691,7 @@ static lonejson_status on_string_chunk(void *user,
   if (!doc->scalar_interested) {
     return LONEJSON_STATUS_OK;
   }
-  return append_buf(doc->allocator, &doc->val_buf, &doc->val_len, data, len)
+  return append_buf(doc, &doc->val_buf, &doc->val_len, data, len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
 }

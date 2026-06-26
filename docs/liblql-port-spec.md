@@ -633,7 +633,11 @@ Current implementation status:
   allocation from `lql *self`, and mutation expression parser helpers are
   style-gated to receive a `mutation_parse_context` built by the receiver
   method, so method-level parser control flow does not preserve
-  allocator-passed mini-entry-points alongside the receiver API.
+  allocator-passed mini-entry-points alongside the receiver API. Runtime
+  scratch helpers for projection, selector eval, and mutation streaming are
+  also style-gated to receive the owning runtime context rather than a detached
+  `lql_allocator *`, so streaming callbacks keep allocator use attached to the
+  receiver-owned execution state.
   `lql.handle-allocator` constructs real receivers with a
   counting internal allocator rather than fabricating private `lql` state,
   exercises successful and failed selector, projection, and mutation parses
