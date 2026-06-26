@@ -4573,6 +4573,8 @@ static void expect_selector_match_api(void) {
   expect_match("eq{field=/status,field=/status,value=open,value=open}",
                "{\"status\":\"open\"}", 1);
   expect_match("eq{field=/status value=open}", "{\"status\":\"open\"}", 1);
+  expect_match("eq{field=/status,value='open,closed'}",
+               "{\"status\":\"open,closed\"}", 1);
   expect_match("and.eq{\nfield=/message\nvalue=\"hi, world\"},and.eq{field=/"
                "status value=\"okili dokili\"}",
                "{\"message\":\"hi, world\",\"status\":\"okili dokili\"}", 1);
@@ -4670,6 +4672,8 @@ static void expect_selector_match_api(void) {
                "{\"message\":\"upstream timeout\"}", 0);
   expect_match("contains{field=/message,any=hello world|degraded}",
                "{\"message\":\"hello world\"}", 1);
+  expect_match("contains{field=/message,value='hello world'}",
+               "{\"message\":\"hello world\"}", 1);
   expect_match("icontains{field=/message,value=TIMEOUT}",
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("icontains{f=/message,a=TIMEOUT|DEGRADED}",
@@ -4685,6 +4689,8 @@ static void expect_selector_match_api(void) {
                "{\"service\":\"auth-api\"}", 1);
   expect_match("in{field=/env,any=prod|stage}", "{\"env\":\"prod\"}", 1);
   expect_match("in{field=/env,any=prod|stage}", "{\"env\":\"dev\"}", 0);
+  expect_match("in{field=/greeting,any=\"hello world|goodbye jupiter\"}",
+               "{\"greeting\":\"goodbye jupiter\"}", 1);
   expect_match("contains{f=/hello/*}", "{\"hello\":{\"name\":\"alice\"}}", 1);
   expect_match("contains{f=/hello/[]}", "{\"hello\":{\"0\":\"alice\"}}", 0);
   expect_match("contains{f=/arrays/[]/id}", "{\"arrays\":[{\"id\":1}]}", 1);
@@ -4709,6 +4715,7 @@ static void expect_selector_match_api(void) {
   expect_match("/items[]/sku=\"B\"", "{\"items\":{\"sku\":\"B\"}}", 0);
   expect_match("/arrEmpty[]/sku=\"A\"", "{\"arrEmpty\":[]}", 0);
   expect_match("exists{/metadata/etag}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
+  expect_match("exists{'/meta,etag'}", "{\"meta,etag\":\"x\"}", 1);
   expect_match("exists{/metadata}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
   expect_match("exists{/items/.../sku}", "{\"items\":[{\"sku\":\"A\"}]}", 1);
   expect_match("/metadata=\"\"", "{\"metadata\":{\"etag\":\"x\"}}", 0);
