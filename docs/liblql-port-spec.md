@@ -1010,6 +1010,11 @@ Current implementation status:
   whitespace, deep indexed merge behavior, and deep conflict rejection. Go's
   `url.Values` and slice-based selector parse entry points are not C public API
   unless a future C builder/config surface is deliberately added;
+- C temporal selector coverage is based on observable parse/evaluation
+  behavior rather than Go's internal temporal cache helpers. The C tests cover
+  date-only equality, naive UTC datetimes, nanosecond precision, timezone
+  offset normalization, temporal ranges, and stable current-date macro
+  behavior through public selector matching;
 - CLI malformed JSON execution is covered by Go-backed parity tests over stdin
   and seekable file inputs for selection, matches-only selection, compact
   output, projection, and mutation, with exit-code and diagnostic assertions;

@@ -6849,6 +6849,18 @@ static void expect_selector_match_api(void) {
                "{\"timestamp\":\"2026-03-05T11:28:21+01:00\"}", 1);
   expect_match("/timestamp>=2026-03-05T10:28:21",
                "{\"timestamp\":\"2026-03-05T10:28:20Z\"}", 0);
+  expect_match("/timestamp=\"2026-03-11T01:11:28\"",
+               "{\"timestamp\":\"2026-03-11T01:11:28Z\"}", 1);
+  expect_match("/timestamp=\"2026-03-11T01:11:28\"",
+               "{\"timestamp\":\"2026-03-11T01:11:28+01:00\"}", 0);
+  expect_match("/timestamp=\"2026-03-11T01:11:28.123456789\"",
+               "{\"timestamp\":\"2026-03-11T01:11:28.123456789Z\"}", 1);
+  expect_match("/timestamp=\"2026-03-11T01:11:28.123456789\"",
+               "{\"timestamp\":\"2026-03-11T01:11:28.123456788Z\"}", 0);
+  expect_match("/timestamp=\"2026-03-11T01:11:28.123+01:00\"",
+               "{\"timestamp\":\"2026-03-11T00:11:28.123Z\"}", 1);
+  expect_match("/timestamp=\"2026-03-11T01:11:28.123+01:00\"",
+               "{\"timestamp\":\"2026-03-11T01:11:28.123Z\"}", 0);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":11}", 1);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":10}", 0);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":20}", 1);
