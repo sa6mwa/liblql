@@ -868,6 +868,9 @@ Current implementation status:
   alias spellings, assignment ordering, quoted `in.any` values, whitespace and
   multiline separators, shorthand comparison spacing, and nested wrapper
   aliases by evaluating each accepted form against matching and rejecting JSON;
+- C-native selector evaluator contract tests now assert that `contains.any` and
+  `icontains.any` behave like the corresponding explicit OR expressions across
+  first-value matches, later-value matches, and no-match documents;
 - `clql` exists as a selector/projection/mutation compatibility CLI with
   manifest-checked Go-backed parity coverage for selector composition,
   streaming selection, projection, mutation, inline/write modes, option

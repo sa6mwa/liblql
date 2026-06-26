@@ -976,6 +976,60 @@ static void expect_selector_equivalent_forms(const char *name,
   }
 }
 
+static void expect_selector_equivalent_match_result(const char *name,
+                                                    const char *left_expr,
+                                                    const char *right_expr,
+                                                    const char *json) {
+  lql_selector *left;
+  lql_selector *right;
+  lql_error error;
+  lql_status st;
+  int left_matched;
+  int right_matched;
+
+  left = NULL;
+  right = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, left_expr, &left, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("parse failed for %s left expr %s: %s\n", name, left_expr,
+           error.message);
+    ++failures;
+    return;
+  }
+  st = test_ctx->selector_parse(test_ctx, right_expr, &right, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("parse failed for %s right expr %s: %s\n", name, right_expr,
+           error.message);
+    test_ctx->selector_destroy(test_ctx, left);
+    ++failures;
+    return;
+  }
+  left_matched = 0;
+  right_matched = 0;
+  st = test_ctx->matches_json(test_ctx, left, json, strlen(json), &left_matched,
+                              &error);
+  if (st != LQL_STATUS_OK) {
+    printf("eval failed for %s left expr %s: %s\n", name, left_expr,
+           error.message);
+    ++failures;
+  }
+  st = test_ctx->matches_json(test_ctx, right, json, strlen(json),
+                              &right_matched, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("eval failed for %s right expr %s: %s\n", name, right_expr,
+           error.message);
+    ++failures;
+  }
+  if (left_matched != right_matched) {
+    printf("selector equivalence mismatch for %s: left=%d right=%d json=%s\n",
+           name, left_matched, right_matched, json);
+    ++failures;
+  }
+  test_ctx->selector_destroy(test_ctx, right);
+  test_ctx->selector_destroy(test_ctx, left);
+}
+
 static void expect_stream_file(void) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n";
@@ -5639,6 +5693,7 @@ typedef struct sdk_contract_surface_count {
 
 static void expect_selector_match_api(void);
 static void expect_selector_parse_equivalence_api(void);
+static void expect_selector_any_or_equivalence_api(void);
 static void expect_selector_or_api(void);
 static void expect_selector_parse_error_api(void);
 static void expect_selector_inspection_api(void);
@@ -5665,6 +5720,8 @@ static void expect_sdk_contract_manifest(void) {
        expect_selector_match_api},
       {"selector", "parse-equivalence invariants",
        expect_selector_parse_equivalence_api},
+      {"selector", "contains-any and explicit OR evaluation equivalence",
+       expect_selector_any_or_equivalence_api},
       {"selector", "OR parse/evaluation public API", expect_selector_or_api},
       {"selector", "selector capability and execution-trait inspection",
        expect_selector_inspection_api},
@@ -5742,7 +5799,7 @@ static void expect_sdk_contract_manifest(void) {
   };
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 5}, {"streaming", 11},
+      {"version", 1},      {"selector", 6}, {"streaming", 11},
       {"projection", 6},   {"compact", 2},  {"mutation", 18},
   };
   size_t i;
@@ -6076,6 +6133,34 @@ static void expect_selector_parse_equivalence_api(void) {
   }
 }
 
+static void expect_selector_any_or_equivalence_api(void) {
+  static const char contains_any[] = "contains{f=/msg,a=warn|timeout}";
+  static const char contains_or[] =
+      "or.contains{f=/msg,v=warn},or.contains{f=/msg,v=timeout}";
+  static const char icontains_any[] = "icontains{f=/msg,a=warn|timeout}";
+  static const char icontains_or[] =
+      "or.icontains{f=/msg,v=warn},or.icontains{f=/msg,v=timeout}";
+
+  expect_selector_equivalent_match_result(
+      "contains any first value", contains_any, contains_or,
+      "{\"msg\":\"warn: cache miss\"}");
+  expect_selector_equivalent_match_result(
+      "contains any second value", contains_any, contains_or,
+      "{\"msg\":\"timeout waiting for reply\"}");
+  expect_selector_equivalent_match_result("contains any no match", contains_any,
+                                          contains_or,
+                                          "{\"msg\":\"all good\"}");
+  expect_selector_equivalent_match_result(
+      "icontains any first value", icontains_any, icontains_or,
+      "{\"msg\":\"WARN: cache miss\"}");
+  expect_selector_equivalent_match_result(
+      "icontains any second value", icontains_any, icontains_or,
+      "{\"msg\":\"TIMEOUT waiting for reply\"}");
+  expect_selector_equivalent_match_result("icontains any no match",
+                                          icontains_any, icontains_or,
+                                          "{\"msg\":\"all good\"}");
+}
+
 static void expect_selector_or_api(void) {
   expect_match_or("/status=\"open\",/progress>=50",
                   "{\"status\":\"closed\",\"progress\":72}", 1);
@@ -6357,6 +6442,7 @@ int main(void) {
   expect_handle_ownership_contract_api();
   expect_selector_match_api();
   expect_selector_parse_equivalence_api();
+  expect_selector_any_or_equivalence_api();
   expect_selector_or_api();
   expect_selector_inspection_api();
   expect_selector_parse_error_api();
