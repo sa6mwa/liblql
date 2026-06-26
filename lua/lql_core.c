@@ -37,6 +37,14 @@ typedef struct lua_lql_file_state {
   char callback_message[256];
 } lua_lql_file_state;
 
+typedef struct lua_lql_source_state {
+  lua_State *lua;
+  int read_ref;
+  lql_error *error;
+  int read_failed;
+  char read_message[256];
+} lua_lql_source_state;
+
 typedef struct lua_lql_payload_handle {
   lql *ctx;
   int active;
@@ -460,6 +468,68 @@ static lql_status lua_lql_call_decision(lua_lql_file_state *state,
 static lql_status
 lua_lql_on_query_file_decision(void *user, const lql_query_decision *decision) {
   return lua_lql_call_decision((lua_lql_file_state *)user, decision);
+}
+
+static lql_read_result
+lua_lql_read_source_chunk(void *user, unsigned char *buffer, size_t capacity) {
+  lua_lql_source_state *state;
+  lql_read_result result;
+  lua_State *L;
+  const char *chunk;
+  size_t chunk_len;
+  int ok;
+
+  state = (lua_lql_source_state *)user;
+  memset(&result, 0, sizeof(result));
+  if (state == NULL || state->read_failed) {
+    result.eof = 1;
+    result.error_code = 1;
+    return result;
+  }
+  L = state->lua;
+  lua_rawgeti(L, LUA_REGISTRYINDEX, state->read_ref);
+  lua_pushinteger(L, (lua_Integer)capacity);
+  ok = lua_pcall(L, 1, 1, 0);
+  if (ok != LUA_OK) {
+    chunk = lua_tostring(L, -1);
+    state->read_failed = 1;
+    strncpy(state->read_message,
+            chunk != NULL ? chunk : "source read callback failed",
+            sizeof(state->read_message) - 1u);
+    state->read_message[sizeof(state->read_message) - 1u] = '\0';
+    lua_lql_set_error(state->error, LQL_STATUS_JSON_ERROR, state->read_message);
+    lua_pop(L, 1);
+    result.eof = 1;
+    result.error_code = 1;
+    return result;
+  }
+  if (lua_isnoneornil(L, -1) || lua_isboolean(L, -1)) {
+    result.eof = 1;
+    lua_pop(L, 1);
+    return result;
+  }
+  chunk = luaL_checklstring(L, -1, &chunk_len);
+  if (chunk_len == 0u) {
+    result.eof = 1;
+    lua_pop(L, 1);
+    return result;
+  }
+  if (chunk_len > capacity) {
+    state->read_failed = 1;
+    strncpy(state->read_message,
+            "source read callback returned chunk larger than capacity",
+            sizeof(state->read_message) - 1u);
+    state->read_message[sizeof(state->read_message) - 1u] = '\0';
+    lua_lql_set_error(state->error, LQL_STATUS_JSON_ERROR, state->read_message);
+    lua_pop(L, 1);
+    result.eof = 1;
+    result.error_code = 1;
+    return result;
+  }
+  memcpy(buffer, chunk, chunk_len);
+  result.bytes_read = chunk_len;
+  lua_pop(L, 1);
+  return result;
 }
 
 static lql_status lua_lql_on_each_match_file(void *user,
@@ -957,6 +1027,61 @@ static int lua_lql_query_file(lua_State *L) {
   return 1;
 }
 
+static int lua_lql_query_source(lua_State *L) {
+  lua_lql_client *client;
+  const char *selector_expr;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  lql_query_options options;
+  lql_query_result result;
+  lua_lql_file_state callback_state;
+  lua_lql_source_state source_state;
+
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  luaL_checktype(L, 3, LUA_TFUNCTION);
+  luaL_checktype(L, 4, LUA_TFUNCTION);
+  selector = NULL;
+  memset(&callback_state, 0, sizeof(callback_state));
+  memset(&source_state, 0, sizeof(source_state));
+  memset(&result, 0, sizeof(result));
+  lua_lql_options_query(L, 5, &options);
+  lql_error_init(&error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
+  if (st == LQL_STATUS_OK) {
+    lua_pushvalue(L, 3);
+    source_state.read_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    source_state.lua = L;
+    source_state.error = &error;
+    lua_pushvalue(L, 4);
+    callback_state.callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    callback_state.ctx = client->ctx;
+    callback_state.lua = L;
+    callback_state.error = &error;
+    st = client->ctx->query_source_decisions_with_options(
+        client->ctx, selector, lua_lql_read_source_chunk, &source_state,
+        &options, lua_lql_on_query_file_decision, &callback_state, &result,
+        &error);
+    luaL_unref(L, LUA_REGISTRYINDEX, callback_state.callback_ref);
+    luaL_unref(L, LUA_REGISTRYINDEX, source_state.read_ref);
+  }
+  if (source_state.read_failed) {
+    lua_lql_set_error(&error, LQL_STATUS_JSON_ERROR, source_state.read_message);
+  }
+  if (callback_state.callback_failed) {
+    lua_lql_set_error(&error, LQL_STATUS_INVALID_ARGUMENT,
+                      callback_state.callback_message);
+  }
+  client->ctx->selector_destroy(client->ctx, selector);
+  if (st != LQL_STATUS_OK && st != LQL_STATUS_STOP) {
+    return lua_lql_fail(L, &error);
+  }
+  lua_lql_push_query_result(L, &result);
+  return 1;
+}
+
 static int lua_lql_each_match_file(lua_State *L) {
   lua_lql_client *client;
   const char *selector_expr;
@@ -1006,6 +1131,60 @@ static int lua_lql_each_match_file(lua_State *L) {
   }
   if (input != NULL) {
     fclose(input);
+  }
+  client->ctx->selector_destroy(client->ctx, selector);
+  if (st != LQL_STATUS_OK && st != LQL_STATUS_STOP) {
+    return lua_lql_fail(L, &error);
+  }
+  lua_lql_push_query_result(L, &result);
+  return 1;
+}
+
+static int lua_lql_each_match_source(lua_State *L) {
+  lua_lql_client *client;
+  const char *selector_expr;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  lql_query_options options;
+  lql_query_result result;
+  lua_lql_file_state callback_state;
+  lua_lql_source_state source_state;
+
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  luaL_checktype(L, 3, LUA_TFUNCTION);
+  luaL_checktype(L, 4, LUA_TFUNCTION);
+  selector = NULL;
+  memset(&callback_state, 0, sizeof(callback_state));
+  memset(&source_state, 0, sizeof(source_state));
+  memset(&result, 0, sizeof(result));
+  lua_lql_options_query(L, 5, &options);
+  lql_error_init(&error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
+  if (st == LQL_STATUS_OK) {
+    lua_pushvalue(L, 3);
+    source_state.read_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    source_state.lua = L;
+    source_state.error = &error;
+    lua_pushvalue(L, 4);
+    callback_state.callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    callback_state.ctx = client->ctx;
+    callback_state.lua = L;
+    callback_state.error = &error;
+    st = client->ctx->query_source_spooled_matches_with_options(
+        client->ctx, selector, lua_lql_read_source_chunk, &source_state,
+        &options, lua_lql_on_each_match_file, &callback_state, &result, &error);
+    luaL_unref(L, LUA_REGISTRYINDEX, callback_state.callback_ref);
+    luaL_unref(L, LUA_REGISTRYINDEX, source_state.read_ref);
+  }
+  if (source_state.read_failed) {
+    lua_lql_set_error(&error, LQL_STATUS_JSON_ERROR, source_state.read_message);
+  }
+  if (callback_state.callback_failed) {
+    lua_lql_set_error(&error, LQL_STATUS_INVALID_ARGUMENT,
+                      callback_state.callback_message);
   }
   client->ctx->selector_destroy(client->ctx, selector);
   if (st != LQL_STATUS_OK && st != LQL_STATUS_STOP) {
@@ -1183,7 +1362,9 @@ static const luaL_Reg lua_lql_client_methods[] = {
     {"select_json", lua_lql_select_json},
     {"select_file", lua_lql_select_file},
     {"query_file", lua_lql_query_file},
+    {"query_source", lua_lql_query_source},
     {"each_match_file", lua_lql_each_match_file},
+    {"each_match_source", lua_lql_each_match_source},
     {"project_json", lua_lql_project_json},
     {"project_file", lua_lql_project_file},
     {"mutate_json", lua_lql_mutate_json},

@@ -110,6 +110,33 @@ if callback_error_result ~= nil or not callback_error or
   fail("expected structured query_file callback error")
 end
 
+local source_chunks = {
+  '{"status":"closed","id":"s1"}\n{"status":',
+  '"open","id":"s2","count":4}\n'
+}
+local source_index = 1
+local source_decisions = {}
+result, err = client:query_source('/status="open"', function(capacity)
+  local chunk = source_chunks[source_index]
+  if not chunk then
+    return nil
+  end
+  if #chunk > capacity then
+    chunk = string.sub(chunk, 1, capacity)
+    source_chunks[source_index] = string.sub(source_chunks[source_index],
+                                             capacity + 1)
+  else
+    source_index = source_index + 1
+  end
+  return chunk
+end, function(decision)
+  source_decisions[#source_decisions + 1] = decision
+end)
+result = assert_no_error(result, err, "query_source")
+assert_equal(result.candidates_seen, 2, "query_source candidates")
+assert_equal(result.candidates_matched, 1, "query_source matches")
+assert_equal(source_decisions[2].matched, true, "query_source second match")
+
 local payloads = {}
 local streamed_payloads = {}
 local retained_payload
@@ -180,6 +207,46 @@ if match_callback_result ~= nil or not match_callback_error or
     not string.find(match_callback_error.stderr or "", "match callback failed",
                     1, true) then
   fail("expected structured each_match_file callback error")
+end
+
+source_chunks = {
+  '{"status":"closed","id":"p1"}\n',
+  '{"status":"open","id":"p2","count":5}\n'
+}
+source_index = 1
+local source_payload
+local retained_source_payload
+result, err = client:each_match_source('/status="open"', function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end, function(match)
+  local chunks = {}
+  retained_source_payload = match
+  assert_no_error(match.write_json(function(chunk)
+    chunks[#chunks + 1] = chunk
+  end), nil, "each_match_source write_json")
+  source_payload = table.concat(chunks)
+end)
+result = assert_no_error(result, err, "each_match_source")
+assert_equal(result.candidates_seen, 2, "each_match_source candidates")
+assert_equal(result.candidates_matched, 1, "each_match_source matches")
+assert_equal(source_payload, '{"status":"open","id":"p2","count":5}',
+             "each_match_source payload")
+local late_source_payload, late_source_err = retained_source_payload.json()
+if late_source_payload ~= nil or not late_source_err or
+    late_source_err.stderr == "" then
+  fail("expected expired source payload handle error")
+end
+
+local bad_source_result, bad_source_error =
+  client:query_source('/status="open"', function(_)
+    return string.rep("x", 9000)
+  end, function(_) end)
+if bad_source_result ~= nil or not bad_source_error or
+    not string.find(bad_source_error.stderr or "", "larger than capacity", 1,
+                    true) then
+  fail("expected oversized query_source chunk error")
 end
 
 local projected
