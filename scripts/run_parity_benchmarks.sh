@@ -1073,6 +1073,11 @@ selected_modes() {
         plus_value_source_selector \
         plus_value_openjson_selector
       ;;
+    one-gig)
+      printf '%s\n' \
+        decision_only_selector \
+        plus_value_source_selector
+      ;;
     mutation-memory)
       printf '%s\n' \
         mutate_file_selector \
@@ -1101,6 +1106,16 @@ mode_applies_to_case() {
   mode=$1
   selector_name=$2
   case "$mode_profile" in
+    one-gig)
+      case "$selector_name:$mode" in
+        eq_status_open:decision_only_selector|eq_status_open:plus_value_source_selector)
+          return 0
+          ;;
+        *)
+          return 1
+          ;;
+      esac
+      ;;
     lockd-perf)
       case "$selector_name:$mode" in
         contains_any_msg:decision_only_plan|explicit_or_msg:decision_only_plan)

@@ -49,8 +49,9 @@ The clean release rehearsal produced and verified:
   - `arm64-apple-darwin`
 
 The release rehearsal verified the checksum manifest and expanded source
-archive test suite. The 1 GiB benchmark gate wrote
-`build/bench-1g-check.jsonl` and passed the 128 MiB streaming memory profile.
+archive test suite. The focused C/Lua 1 GiB benchmark gate writes
+`build/bench-1g-check.jsonl`, checks exact generated counts for the selected
+streaming modes, and applies the 128 MiB memory profile.
 
 ## Requirement Evidence Map
 
@@ -66,7 +67,7 @@ archive test suite. The 1 GiB benchmark gate wrote
 | Streaming decision and plus-value behavior | C SDK streaming tests, benchmark memory gates, 1 GiB memory gate | Proven locally for claimed scope |
 | Lua facade is direct liblql binding, not `clql` backed | Lua C module tests, Lua runtime fixtures, Lua release artifact verification | Proven locally |
 | Lua 5.5 only | C compile-time guard, Lua runtime fixtures, Lua package contract fixtures | Proven locally |
-| Go/C/Lua benchmark parity and memory gates | `make bench-check`, `make bench-memory-check`, `make bench-1g-check`, clean `make release` | Proven locally |
+| Go/C/Lua benchmark parity and memory gates | `make bench-check` and `make bench-memory-check` for Go-backed parity; `make bench-1g-check` for focused C/Lua 1 GiB bounded-memory invariants; clean `make release` | Proven locally |
 | Linux GNU/musl release artifacts | `make release-matrix`, `make release`, checksum manifest | Proven locally |
 | Darwin arm64 release artifacts | `LQL_PACKAGE_TARGETS=arm64-apple-darwin make release-matrix`, checksum manifest | Proven locally with available osxcross toolchain |
 | Source and Lua release artifacts | `make package-verify`, `make release`, checksum manifest | Proven locally |

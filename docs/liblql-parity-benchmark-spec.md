@@ -136,14 +136,17 @@ Current implementation status:
   `/id` from matched candidates while large `/blob` fields remain unselected.
   That profile gates seekable and callback-source payload projection RSS/time
   without materializing whole candidates.
-- `make bench-1g-check` is the explicit 1 GiB/128 MiB profile. It reuses the
-  same Go/C/Lua large-memory runner and RSS validator as
-  `make bench-memory-check`, but defaults to at least 1 GiB of generated NDJSON
-  input and writes `build/bench-1g-check.jsonl`. It is configurable with
-  `LQL_BENCH_1G_COUNT`, `LQL_BENCH_1G_BLOB_BYTES`, `LQL_BENCH_1G_MIN_BYTES`,
-  and `LQL_BENCH_1G_LOG` for local reproduction or reduced-size wiring checks.
-  Because this is intentionally expensive, it is part of
-  `make prerelease-hardening` rather than the normal `make release` gate.
+- `make bench-1g-check` is the explicit 1 GiB/128 MiB profile. It uses the
+  generated large NDJSON fixture and a focused C/Lua streaming profile covering
+  decision-only file-backed selection and callback-source plus-value selection.
+  The gate validates exact generated candidate/match/payload counts without
+  asking Go to rescan the 1 GiB corpus, then applies the common RSS/time
+  validator. Go remains the oracle for the broader medium-size parity benchmark
+  gates where exhaustive mode coverage is practical. The 1 GiB gate writes
+  `build/bench-1g-check.jsonl` and is configurable with `LQL_BENCH_1G_COUNT`,
+  `LQL_BENCH_1G_BLOB_BYTES`, `LQL_BENCH_1G_MIN_BYTES`, and
+  `LQL_BENCH_1G_LOG` for local reproduction or reduced-size wiring checks.
+  It is part of `make prerelease-hardening` and the normal `make release` gate.
 - `make benchmarks-c` exercises the public liblql API for decision-only output
   and matched-only seekable plus-value payload access over a shared generated
   fixture.
