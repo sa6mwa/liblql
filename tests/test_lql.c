@@ -5142,6 +5142,42 @@ static void expect_wildcard_mutation_api(void) {
   fclose(out);
 }
 
+static void expect_wildcard_mutation_error_precedence_api(void) {
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_mutation_plan *plan;
+  const char *exprs[2];
+  static const char doc[] = "{\"a\":{\"b\":\"x\"}}";
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("wildcard mutation error tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  exprs[0] = "/a/*=+1";
+  exprs[1] = "/a=2";
+  plan = NULL;
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 2u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("wildcard mutation error plan parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    st = test_ctx->mutate_json(test_ctx, plan, doc, strlen(doc), out, &error);
+    if (st == LQL_STATUS_OK) {
+      printf("wildcard mutation error was masked by later direct set\n");
+      ++failures;
+    } else if (strstr(error.message, "not numeric") == NULL) {
+      printf("wildcard mutation error mismatch: %s\n", error.message);
+      ++failures;
+    }
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  fclose(out);
+}
+
 static void expect_recursive_mutation_api(void) {
   FILE *source;
   FILE *out;
@@ -5374,6 +5410,8 @@ static void expect_sdk_contract_manifest(void) {
       {"mutation", "concrete array element mutation",
        expect_array_element_mutation_api},
       {"mutation", "wildcard path mutation", expect_wildcard_mutation_api},
+      {"mutation", "wildcard mutation error precedence",
+       expect_wildcard_mutation_error_precedence_api},
       {"mutation", "one-child and recursive path mutation",
        expect_recursive_mutation_api},
       {"mutation", "array wildcard value mutation",
@@ -5382,7 +5420,7 @@ static void expect_sdk_contract_manifest(void) {
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
       {"version", 1},      {"selector", 4}, {"streaming", 11},
-      {"projection", 6},   {"compact", 2},  {"mutation", 16},
+      {"projection", 6},   {"compact", 2},  {"mutation", 17},
   };
   size_t i;
   size_t j;
@@ -5946,6 +5984,7 @@ int main(void) {
   expect_mutation_shorthand_api();
   expect_array_element_mutation_api();
   expect_wildcard_mutation_api();
+  expect_wildcard_mutation_error_precedence_api();
   expect_recursive_mutation_api();
   expect_array_wildcard_value_mutation_api();
   test_ctx->destroy(test_ctx);

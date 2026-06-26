@@ -87,6 +87,8 @@ typedef struct mutation_stream_state {
   int root_is_object;
   int skipping;
   size_t skip_depth;
+  int skip_has_mask;
+  size_t skip_mask_index;
   int active_increment;
   int active_keyed;
   size_t active_index;
@@ -1638,8 +1640,63 @@ static lonejson_status write_mutation_set_value(lql_allocator *allocator,
 static lonejson_status finish_skip_value(mutation_stream_state *state) {
   if (state->skip_depth == 0u) {
     state->skipping = 0;
+    state->skip_has_mask = 0;
+    state->skip_mask_index = 0u;
   }
   return LONEJSON_STATUS_OK;
+}
+
+static void begin_masked_skip(mutation_stream_state *state, size_t index) {
+  state->skipping = 1;
+  state->skip_depth = 0u;
+  state->skip_has_mask = 1;
+  state->skip_mask_index = index;
+}
+
+static lonejson_status mutation_increment_not_numeric(lonejson_error *error) {
+  set_lonejson_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                     "mutation increment target not numeric");
+  return LONEJSON_STATUS_CALLBACK_FAILED;
+}
+
+static int skipped_earlier_increment_index(const mutation_stream_state *state,
+                                           const lonejson_value_path *path,
+                                           size_t *out) {
+  size_t i;
+  const mutation_item *item;
+  if (state == NULL || path == NULL || !state->skipping ||
+      !state->skip_has_mask) {
+    return 0;
+  }
+  for (i = 0u; i < state->skip_mask_index; ++i) {
+    item = &state->plan->items[i];
+    if (item->kind == MUTATION_INCREMENT &&
+        value_path_item_matches_from(state, &item->path, 0u, path, 0u)) {
+      *out = i;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int skipped_earlier_increment_key_index(
+    const mutation_stream_state *state, const lonejson_value_path *parent,
+    const mutation_path_frame *frame, const char *key, size_t key_len,
+    size_t *out) {
+  size_t i;
+  const mutation_item *item;
+  if (state == NULL || !state->skipping || !state->skip_has_mask) {
+    return 0;
+  }
+  for (i = 0u; i < state->skip_mask_index; ++i) {
+    item = &state->plan->items[i];
+    if (item->kind == MUTATION_INCREMENT &&
+        mutation_key_matches_path(item, parent, frame, key, key_len)) {
+      *out = i;
+      return 1;
+    }
+  }
+  return 0;
 }
 
 static const mutation_path_frame *
@@ -1844,7 +1901,7 @@ static lonejson_status mutation_object_begin(void *user,
   int matched_value;
   state = (mutation_stream_state *)user;
   if (state->active_increment) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
+    return mutation_increment_not_numeric(error);
   }
   frame_status = mutation_push_path_frame(state, path, 'o', error);
   if (frame_status != LONEJSON_STATUS_OK) {
@@ -1857,6 +1914,9 @@ static lonejson_status mutation_object_begin(void *user,
     return lonejson_writer_begin_object(&state->writer, error);
   }
   if (state->skipping) {
+    if (skipped_earlier_increment_index(state, path, &state->active_index)) {
+      return mutation_increment_not_numeric(error);
+    }
     ++state->skip_depth;
     ++state->source_depth;
     return LONEJSON_STATUS_OK;
@@ -1932,8 +1992,7 @@ begin_array_value_mutation(mutation_stream_state *state,
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
     state->applied[index] = 1;
-    state->skipping = 1;
-    state->skip_depth = 0u;
+    begin_masked_skip(state, index);
     return LONEJSON_STATUS_OK;
   }
   if (item->kind == MUTATION_SET) {
@@ -1942,8 +2001,7 @@ begin_array_value_mutation(mutation_stream_state *state,
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
     state->applied[index] = 1;
-    state->skipping = 1;
-    state->skip_depth = 0u;
+    begin_masked_skip(state, index);
     return LONEJSON_STATUS_OK;
   }
   state->active_increment = 1;
@@ -2056,7 +2114,7 @@ static lonejson_status mutation_array_begin(void *user,
   int matched_value;
   state = (mutation_stream_state *)user;
   if (state->active_increment) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
+    return mutation_increment_not_numeric(error);
   }
   frame_status = mutation_push_path_frame(state, path, 'a', error);
   if (frame_status != LONEJSON_STATUS_OK) {
@@ -2067,6 +2125,9 @@ static lonejson_status mutation_array_begin(void *user,
     state->root_is_object = 0;
   }
   if (state->source_depth != 0u && state->skipping) {
+    if (skipped_earlier_increment_index(state, path, &state->active_index)) {
+      return mutation_increment_not_numeric(error);
+    }
     ++state->skip_depth;
     ++state->source_depth;
     return LONEJSON_STATUS_OK;
@@ -2165,6 +2226,16 @@ static lonejson_status mutation_key_end(void *user,
   size_t i;
   state = (mutation_stream_state *)user;
   if (state->skipping) {
+    frame = current_path_frame(state, path);
+    if (skipped_earlier_increment_key_index(
+            state, path, frame, state->key_buf, state->key_len, &index)) {
+      state->active_increment = 1;
+      state->active_keyed = 1;
+      state->active_index = index;
+      state->allocator->destroy(state->allocator, state->num_buf);
+      state->num_buf = NULL;
+      state->num_len = 0u;
+    }
     return LONEJSON_STATUS_OK;
   }
   frame = current_path_frame(state, path);
@@ -2187,8 +2258,7 @@ static lonejson_status mutation_key_end(void *user,
     item = &state->plan->items[index];
     if (item->kind == MUTATION_REMOVE) {
       state->applied[index] = 1;
-      state->skipping = 1;
-      state->skip_depth = 0u;
+      begin_masked_skip(state, index);
       return LONEJSON_STATUS_OK;
     }
     if (item->kind == MUTATION_SET) {
@@ -2199,8 +2269,7 @@ static lonejson_status mutation_key_end(void *user,
         return LONEJSON_STATUS_CALLBACK_FAILED;
       }
       state->applied[index] = 1;
-      state->skipping = 1;
-      state->skip_depth = 0u;
+      begin_masked_skip(state, index);
       return LONEJSON_STATUS_OK;
     }
     state->active_increment = 1;
@@ -2222,7 +2291,7 @@ static lonejson_status mutation_string_begin(void *user,
   int matched_value;
   state = (mutation_stream_state *)user;
   if (state->active_increment) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
+    return mutation_increment_not_numeric(error);
   }
   if (state->source_depth == 0u) {
     state->root_seen = 1;
@@ -2280,6 +2349,15 @@ static lonejson_status mutation_number_begin(void *user,
     state->root_is_object = 0;
   }
   if (state->skipping) {
+    if (state->active_increment ||
+        skipped_earlier_increment_index(state, path, &state->active_index)) {
+      state->active_increment = 1;
+      state->active_keyed = 0;
+      state->allocator->destroy(state->allocator, state->num_buf);
+      state->num_buf = NULL;
+      state->num_len = 0u;
+      return LONEJSON_STATUS_OK;
+    }
     state->allocator->destroy(state->allocator, state->num_buf);
     state->num_buf = NULL;
     state->num_len = 0u;
@@ -2307,6 +2385,11 @@ static lonejson_status mutation_number_chunk(void *user,
   (void)error;
   state = (mutation_stream_state *)user;
   if (state->skipping) {
+    if (state->active_increment &&
+        !append_buf(state->allocator, &state->num_buf, &state->num_len, data,
+                    len)) {
+      return LONEJSON_STATUS_ALLOCATION_FAILED;
+    }
     return LONEJSON_STATUS_OK;
   }
   return append_buf(state->allocator, &state->num_buf, &state->num_len, data,
@@ -2326,6 +2409,14 @@ static lonejson_status mutation_number_end(void *user,
   (void)path;
   state = (mutation_stream_state *)user;
   if (state->skipping) {
+    if (state->active_increment) {
+      if (!parse_number(state->num_buf, &existing)) {
+        return mutation_increment_not_numeric(error);
+      }
+      state->applied[state->active_index] = 1;
+      state->active_increment = 0;
+      state->active_keyed = 0;
+    }
     return finish_skip_value(state);
   }
   if (!state->active_increment) {
@@ -2366,9 +2457,12 @@ static lonejson_status mutation_boolean(void *user,
     state->root_is_object = 0;
   }
   if (state->active_increment) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
+    return mutation_increment_not_numeric(error);
   }
   if (state->skipping) {
+    if (skipped_earlier_increment_index(state, path, &state->active_index)) {
+      return mutation_increment_not_numeric(error);
+    }
     return finish_skip_value(state);
   }
   if (begin_array_value_mutation(state, path, error, &matched_value) !=
@@ -2395,9 +2489,12 @@ static lonejson_status mutation_null(void *user,
     state->root_is_object = 0;
   }
   if (state->active_increment) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
+    return mutation_increment_not_numeric(error);
   }
   if (state->skipping) {
+    if (skipped_earlier_increment_index(state, path, &state->active_index)) {
+      return mutation_increment_not_numeric(error);
+    }
     return finish_skip_value(state);
   }
   if (begin_array_value_mutation(state, path, error, &matched_value) !=

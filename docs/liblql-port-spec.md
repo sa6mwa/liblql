@@ -916,9 +916,11 @@ Current implementation status:
   seekable file-range JSON mutation including file-backed mutation values,
   escaped JSON Pointer mutation paths, numeric object/array segment behavior
   for selector evaluation and mutation, wildcard and recursive mutation paths,
-  array wildcard value mutation, and malformed JSON execution errors, compact
-  serialization, compact error behavior, and current streaming query behavior
-  through the receiver C API, comparing
+  array wildcard value mutation, mutation execution errors where a later parent
+  replacement must not mask an earlier wildcard increment type error, and
+  malformed JSON execution errors, compact serialization, compact error
+  behavior, and current streaming query behavior through the receiver C API,
+  comparing
   `ctx->selector_parse()`, `ctx->selector_parse_or()`,
   `ctx->matches_json()`, `ctx->project_json()`, `ctx->project_source()`,
   `ctx->project_file_range()`, `ctx->mutation_plan_parse()`,
@@ -967,6 +969,10 @@ Current implementation status:
   executable coverage accounting; `lql.sdk-manifest-fixtures` proves missing
   receiver method coverage, unmanifested SDK units, duplicate manifest entries,
   and duplicate main calls are rejected;
+- C SDK mutation tests assert ordered wildcard error precedence: an earlier
+  wildcard increment that matches a non-numeric descendant is still evaluated
+  and reported when a later parent replacement would otherwise skip the
+  original subtree;
 - bounded fuzz smoke coverage exists through `lql.fuzz-smoke` and
   `make fuzz-smoke`, exercising public selector parse/evaluate, projection,
   compaction, mutation, callback-source decision streams, and callback-source

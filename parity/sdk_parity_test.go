@@ -895,27 +895,28 @@ func sdkMutationCases() []struct {
 }
 
 func TestSDKMutationExecutionErrorParity(t *testing.T) {
-	mutations := []string{"/status=done", "/count++"}
 	cases := []struct {
-		name string
-		doc  string
+		name      string
+		mutations []string
+		doc       string
 	}{
-		{name: "truncated object", doc: `{"status":"open","count":`},
-		{name: "trailing comma", doc: `{"status":"open","count":1,}`},
-		{name: "invalid literal", doc: `{"status":tru,"count":1}`},
+		{name: "truncated object", mutations: []string{"/status=done", "/count++"}, doc: `{"status":"open","count":`},
+		{name: "trailing comma", mutations: []string{"/status=done", "/count++"}, doc: `{"status":"open","count":1,}`},
+		{name: "invalid literal", mutations: []string{"/status=done", "/count++"}, doc: `{"status":tru,"count":1}`},
+		{name: "later parent set does not mask earlier wildcard increment error", mutations: []string{`/a/*=+1`, `/a=2`}, doc: `{"a":{"b":"x"}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := goMutateJSON(mutations, tc.doc); err == nil {
+			if _, err := goMutateJSON(tc.mutations, tc.doc); err == nil {
 				t.Fatalf("go mutation unexpectedly accepted malformed JSON: %q", tc.doc)
 			}
-			if _, err := cMutateJSON(mutations, tc.doc); err == nil {
+			if _, err := cMutateJSON(tc.mutations, tc.doc); err == nil {
 				t.Fatalf("liblql buffered mutation unexpectedly accepted malformed JSON: %q", tc.doc)
 			}
-			if _, err := cMutateSource(mutations, tc.doc); err == nil {
+			if _, err := cMutateSource(tc.mutations, tc.doc); err == nil {
 				t.Fatalf("liblql source mutation unexpectedly accepted malformed JSON: %q", tc.doc)
 			}
-			if _, err := cMutateFileRange(mutations, `{"outside":`, tc.doc, `}`); err == nil {
+			if _, err := cMutateFileRange(tc.mutations, `{"outside":`, tc.doc, `}`); err == nil {
 				t.Fatalf("liblql file-range mutation unexpectedly accepted malformed JSON: %q", tc.doc)
 			}
 		})
