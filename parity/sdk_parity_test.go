@@ -258,6 +258,7 @@ func TestSDKSelectorInspectionParity(t *testing.T) {
 		name  string
 		expr  string
 		empty bool
+		or    bool
 	}{
 		{name: "empty", empty: true},
 		{name: "families", expr: `and.eq{field=/status,value=open},and.range{field=/progress,gte=5},or.in{field=/env,any=prod|stage},not.eq{field=/state,value=disabled},exists{/meta/etag},icontains{field=/msg,value=timeout},iprefix{field=/service,value=auth}`},
@@ -265,20 +266,25 @@ func TestSDKSelectorInspectionParity(t *testing.T) {
 		{name: "traits-recursive", expr: `and.eq{field=/status,value=open},icontains{field=/msg,value=timeout},exists{/meta/**/etag}`},
 		{name: "match-all-string", expr: `icontains{f=/,v=""}`},
 		{name: "simple", expr: `/status="open"`},
+		{name: "top-level-or", expr: `/status="open",/progress>=50`, or: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var sel lql.Selector
 			var err error
 			if !tc.empty {
-				sel, err = lql.ParseSelectorString(tc.expr)
+				if tc.or {
+					sel, err = lql.ParseSelectorStringOr(tc.expr)
+				} else {
+					sel, err = lql.ParseSelectorString(tc.expr)
+				}
 				if err != nil {
 					t.Fatalf("Go parse: %v", err)
 				}
 			}
 			wantCaps := fromGoSelectorCapabilities(lql.InspectSelectorCapabilities(sel))
 			wantTraits := fromGoSelectorExecutionTraits(lql.InspectSelectorExecutionTraits(sel))
-			got, err := cInspectSelector(tc.expr, tc.empty)
+			got, err := cInspectSelector(tc.expr, tc.empty, tc.or)
 			if err != nil {
 				t.Fatalf("C inspect: %v", err)
 			}

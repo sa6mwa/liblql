@@ -92,7 +92,7 @@ typedef struct liblql_selector_inspection {
 } liblql_selector_inspection;
 
 static int liblql_inspect_selector(lql *ctx, const char *expr, int empty_selector,
-                                   liblql_selector_inspection *out,
+                                   int or_mode, liblql_selector_inspection *out,
                                    char *errbuf, size_t errbuf_len) {
 	lql_error error;
 	lql_selector *selector;
@@ -107,7 +107,11 @@ static int liblql_inspect_selector(lql *ctx, const char *expr, int empty_selecto
 	selector = NULL;
 	if (!empty_selector) {
 		lql_error_init(&error);
-		status = ctx->selector_parse(ctx, expr, &selector, &error);
+		if (or_mode) {
+			status = ctx->selector_parse_or(ctx, expr, &selector, &error);
+		} else {
+			status = ctx->selector_parse(ctx, expr, &selector, &error);
+		}
 		if (status != LQL_STATUS_OK) {
 			if (errbuf != NULL && errbuf_len > 0u) {
 				strncpy(errbuf, error.message, errbuf_len - 1u);
@@ -1479,7 +1483,7 @@ func cParseSelector(expr string, orMode bool) (int, string) {
 	return int(status), C.GoString(&errbuf[0])
 }
 
-func cInspectSelector(expr string, emptySelector bool) (cSelectorInspection, error) {
+func cInspectSelector(expr string, emptySelector bool, orMode bool) (cSelectorInspection, error) {
 	var cExpr *C.char
 	var raw C.liblql_selector_inspection
 	var errbuf [256]C.char
@@ -1489,8 +1493,8 @@ func cInspectSelector(expr string, emptySelector bool) (cSelectorInspection, err
 		cExpr = C.CString(expr)
 		defer C.free(unsafe.Pointer(cExpr))
 	}
-	status := C.liblql_inspect_selector(C.liblql_receiver(), cExpr, cBool(emptySelector), &raw,
-		&errbuf[0], C.size_t(len(errbuf)))
+	status := C.liblql_inspect_selector(C.liblql_receiver(), cExpr, cBool(emptySelector),
+		cBool(orMode), &raw, &errbuf[0], C.size_t(len(errbuf)))
 	if status != 0 {
 		return out, sdkParityError(C.GoString(&errbuf[0]))
 	}

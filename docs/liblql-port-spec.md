@@ -989,7 +989,8 @@ Current implementation status:
   mask an earlier wildcard increment type error, and malformed JSON execution
   errors, compact serialization, compact error behavior, and current streaming
   query behavior through the receiver C API, comparing
-  `ctx->selector_parse()`, `ctx->selector_parse_or()`,
+  `ctx->selector_parse()`, `ctx->selector_parse_or()`, selector
+  capability/trait inspection after both AND and OR parser entry points,
   `ctx->matches_json()`, `ctx->project_json()`, `ctx->project_source()`,
   `ctx->project_file_range()`, `ctx->mutation_plan_parse()`,
   `ctx->mutation_plan_parse_with_options()`, `ctx->mutation_plan_count()`,
