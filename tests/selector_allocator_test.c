@@ -96,6 +96,7 @@ static int expect_selector_success_uses_allocator(void) {
   lql_status st;
   int matched;
   size_t outstanding_after_parse;
+  size_t alloc_count_after_parse;
 
   counting_allocator_init(&counter);
   ctx = NULL;
@@ -120,12 +121,19 @@ static int expect_selector_success_uses_allocator(void) {
     return 1;
   }
   outstanding_after_parse = counter.outstanding;
+  alloc_count_after_parse = counter.alloc_count;
   matched = 0;
   lql_error_init(&error);
   st = ctx->matches_json(ctx, selector, "{\"status\":\"open\"}",
                          strlen("{\"status\":\"open\"}"), &matched, &error);
   if (st != LQL_STATUS_OK || !matched) {
     printf("selector allocator eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.alloc_count == alloc_count_after_parse) {
+    printf("selector eval did not use receiver allocator for JSON runtime\n");
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;

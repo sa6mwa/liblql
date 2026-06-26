@@ -2450,7 +2450,7 @@ static lql_status mutate_reader_with_supported_plan(
                   "plan, reader, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;

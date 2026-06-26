@@ -265,6 +265,19 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  lonejson_default_allocator_hits=$(
+    grep -En 'lonejson_new[[:space:]]*\([[:space:]]*NULL[[:space:]]*,' \
+      "$source_root/src/lql_selector.c" \
+      "$source_root/src/lql_project.c" \
+      "$source_root/src/lql_eval.c" \
+      "$source_root/src/lql_mutation.c" 2>/dev/null || true
+  )
+  if [ -n "$lonejson_default_allocator_hits" ]; then
+    printf 'public API style: lonejson runtimes must use receiver allocator bridge\n' >&2
+    printf '%s\n' "$lonejson_default_allocator_hits" >&2
+    failed=1
+  fi
+
   null_private_receiver_hits=$(
     grep -REn 'lql_[A-Za-z0-9_]+_impl[[:space:]]*\([[:space:]]*NULL[[:space:]]*,' \
       "$source_root/src/lql.c" \

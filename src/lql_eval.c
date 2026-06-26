@@ -1074,7 +1074,7 @@ static lonejson_status write_spooled_array_candidates(
   spooled_match_state state;
   lonejson_status st;
 
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     *error = lj_error;
     return LONEJSON_STATUS_INTERNAL_ERROR;
@@ -1355,7 +1355,7 @@ lql_eval_selector(lql *self, const lql_selector *selector, const char *json,
   if (!init_doc(&doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&doc);
@@ -1607,7 +1607,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -1668,7 +1668,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_decisions(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -1741,7 +1741,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_matches(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -1827,14 +1827,14 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_range_spooled_matches(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
   if (compact) {
-    state.compact_runtime = lonejson_new(NULL, &lj_error);
+    state.compact_runtime = lql_lonejson_new(self, &lj_error);
     if (state.compact_runtime == NULL) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
       lonejson_free(runtime);
@@ -1909,14 +1909,14 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_spooled_matches(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
   if (compact) {
-    state.compact_runtime = lonejson_new(NULL, &lj_error);
+    state.compact_runtime = lql_lonejson_new(self, &lj_error);
     if (state.compact_runtime == NULL) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
       lonejson_free(runtime);
@@ -1993,14 +1993,14 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
   if (compact) {
-    state.compact_runtime = lonejson_new(NULL, &lj_error);
+    state.compact_runtime = lql_lonejson_new(self, &lj_error);
     if (state.compact_runtime == NULL) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
       lonejson_free(runtime);

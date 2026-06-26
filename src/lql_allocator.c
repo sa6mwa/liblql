@@ -55,3 +55,47 @@ lql_allocator_from_receiver(const lql *self) {
   impl = (const lql_impl *)self->impl;
   return impl->allocator;
 }
+
+static void *lonejson_lql_malloc(void *ctx, size_t size) {
+  lql_allocator *allocator;
+  allocator = (lql_allocator *)ctx;
+  return allocator->alloc(allocator, size);
+}
+
+static void *lonejson_lql_realloc(void *ctx, void *ptr, size_t size) {
+  lql_allocator *allocator;
+  allocator = (lql_allocator *)ctx;
+  return allocator->realloc(allocator, ptr, size);
+}
+
+static void lonejson_lql_release(void *ctx, void *ptr) {
+  lql_allocator *allocator;
+  allocator = (lql_allocator *)ctx;
+  allocator->destroy(allocator, ptr);
+}
+
+LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
+                                               lonejson_error *error) {
+  lonejson_config config;
+  lonejson_allocator allocator;
+  lql_allocator *lql_alloc;
+
+  lql_alloc = lql_allocator_from_receiver(self);
+  if (lql_alloc == NULL) {
+    if (error != NULL) {
+      error->code = LONEJSON_STATUS_INVALID_ARGUMENT;
+      strcpy(error->message, "lql receiver allocator required");
+    }
+    return NULL;
+  }
+
+  config = lonejson_default_config();
+  allocator = lonejson_default_allocator();
+  allocator.malloc_fn = lonejson_lql_malloc;
+  allocator.realloc_fn = lonejson_lql_realloc;
+  allocator.free_fn = lonejson_lql_release;
+  allocator.ctx = lql_alloc;
+  allocator.stats = NULL;
+  config.allocator = &allocator;
+  return lonejson_new(&config, error);
+}

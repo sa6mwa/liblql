@@ -583,6 +583,14 @@ Current implementation status:
   allocator wrapper calls, allocator macro wrapper calls, or direct
   `malloc`/`calloc`/`realloc`/`free`/`strdup` calls in project-owned C sources
   outside `src/lql_allocator.c`;
+- lonejson parser/serializer runtimes created by liblql core are constructed
+  through a private receiver allocator bridge, not `lonejson_new(NULL, ...)`.
+  This keeps lonejson-owned transient parse, visitor, writer, stream, spool, and
+  output buffers under the active `lql *` allocator policy; the public API style
+  fixture suite rejects direct default-allocator lonejson runtime construction
+  in core sources, and `lql.handle-allocator` asserts that receiver-backed JSON
+  evaluation performs its transient runtime allocations through the counting
+  receiver allocator and returns to the prior outstanding allocation count;
 - selector, projection, and mutation plan ownership is allocator-consistent:
   receiver parse methods pass the receiver allocator into handle parsers,
   produced `lql_selector`, `lql_projection`, and `lql_mutation_plan` handles

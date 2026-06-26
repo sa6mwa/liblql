@@ -122,6 +122,12 @@ EOF
 run_expect_fail "cleanup default allocator fallback"
 rm -f "$tmp/src/lql.c"
 
+cat >"$tmp/src/lql_eval.c" <<'EOF'
+void bad_lonejson_default_allocator(void) { runtime = lonejson_new(NULL, error); }
+EOF
+run_expect_fail "lonejson default allocator runtime"
+rm -f "$tmp/src/lql_eval.c"
+
 cat >"$tmp/src/lql_selector.c" <<'EOF'
 void bad_null_private_receiver(void) { lql_selector_destroy_impl(NULL, selector); }
 EOF

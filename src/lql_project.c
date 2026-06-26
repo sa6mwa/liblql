@@ -1027,7 +1027,7 @@ static lql_status lql_project_reader(lql *self,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   *out_found = 0;
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
@@ -1158,14 +1158,15 @@ lql_project_spooled(lql *self, const lql_projection *projection,
                             out_found, error);
 }
 
-static lql_status compact_reader(lonejson_reader_fn read, void *read_user,
-                                 FILE *out, lql_error *error) {
+static lql_status compact_reader(lql *self, lonejson_reader_fn read,
+                                 void *read_user, FILE *out,
+                                 lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_writer writer;
   lonejson_status st;
 
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
@@ -1193,7 +1194,6 @@ LQL_INTERNAL_SYMBOL lql_status
 lql_compact_file_range_impl(lql *self, FILE *file, lql_uint64 offset,
                             lql_uint64 size, FILE *out, lql_error *error) {
   limited_file_reader reader;
-  (void)self;
 
   if (file == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -1207,14 +1207,13 @@ lql_compact_file_range_impl(lql *self, FILE *file, lql_uint64 offset,
   }
   reader.file = file;
   reader.remaining = size;
-  return compact_reader(limited_read, &reader, out, error);
+  return compact_reader(self, limited_read, &reader, out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_compact_source_impl(
     lql *self, lql_read_fn read, void *read_user, FILE *out, lql_error *error) {
   projection_source_reader reader;
   lql_status st;
-  (void)self;
 
   if (read == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -1224,7 +1223,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_compact_source_impl(
   memset(&reader, 0, sizeof(reader));
   reader.read = read;
   reader.user = read_user;
-  st = compact_reader(projection_source_read, &reader, out, error);
+  st = compact_reader(self, projection_source_read, &reader, out, error);
   if (st == LQL_STATUS_JSON_ERROR && reader.error_code != 0) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, "compact source read failed");
   }
@@ -1239,14 +1238,13 @@ LQL_INTERNAL_SYMBOL lql_status lql_compact_json_impl(lql *self,
   lonejson_error lj_error;
   lonejson_writer writer;
   lonejson_status st;
-  (void)self;
 
   if (json == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "json and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  runtime = lonejson_new(NULL, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
