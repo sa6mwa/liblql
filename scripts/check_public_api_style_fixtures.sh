@@ -110,6 +110,12 @@ EOF
 run_expect_fail "library null receiver allocator fallback"
 rm -f "$tmp/src/lql_eval.c"
 
+cat >"$tmp/src/clql.c" <<'EOF'
+void *bad_cli_null_receiver_allocator(void) { return lql_allocator_from_receiver(NULL); }
+EOF
+run_expect_fail "clql null receiver allocator fallback"
+rm -f "$tmp/src/clql.c"
+
 cat >"$tmp/src/lql.c" <<'EOF'
 void bad_cleanup_default_allocator(void) { allocator = lql_allocator_default(); }
 EOF
