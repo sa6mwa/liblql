@@ -2937,6 +2937,69 @@ static void expect_projection_api(void) {
   fclose(out);
 }
 
+static void expect_projection_parse_normalization_api(void) {
+  static const char doc[] =
+      "{\"id\":\"a\",\"meta\":{\"trace\":9,\"ignore\":1},\"payload\":\"x\"}";
+  const char *fields[4];
+  const char *blank_fields[2];
+  FILE *out;
+  lql_projection *projection;
+  lql_error error;
+  lql_status st;
+  int found;
+  char buf[128];
+  size_t len;
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("projection normalization tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  fields[0] = " /id ";
+  fields[1] = "";
+  fields[2] = "/meta/trace";
+  fields[3] = "/id";
+  projection = NULL;
+  lql_error_init(&error);
+  st = test_ctx->projection_parse(test_ctx, fields, 4u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("projection normalization parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    found = 0;
+    st = test_ctx->project_json(test_ctx, projection, doc, strlen(doc), out,
+                                &found, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("projection normalization execution failed: %s\n", error.message);
+      ++failures;
+    } else if (!found) {
+      printf("projection normalization expected found\n");
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf, "{\"id\":\"a\",\"meta\":{\"trace\":9}}") != 0) {
+      printf("projection normalization output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  test_ctx->projection_destroy(test_ctx, projection);
+  fclose(out);
+
+  blank_fields[0] = "";
+  blank_fields[1] = " ";
+  projection = NULL;
+  lql_error_init(&error);
+  st = test_ctx->projection_parse(test_ctx, blank_fields, 2u, &projection,
+                                  &error);
+  if (st != LQL_STATUS_PARSE_ERROR || projection != NULL ||
+      error.message[0] == '\0') {
+    printf("blank projection path set mismatch: status=%s out=%p error=%s\n",
+           lql_status_string(st), (void *)projection, error.message);
+    ++failures;
+    test_ctx->projection_destroy(test_ctx, projection);
+  }
+}
+
 static void expect_buffered_projection_api(void) {
   static const char doc[] =
       "{\"id\":\"a\",\"count\":1,\"nested\":{\"x\":true},\"items\":[{\"sku\":"
@@ -5794,6 +5857,8 @@ static void expect_sdk_contract_manifest(void) {
       {"streaming", "seekable matched payload ranges",
        expect_seekable_payload_api},
       {"projection", "seekable file-range projection", expect_projection_api},
+      {"projection", "projection parser normalization",
+       expect_projection_parse_normalization_api},
       {"projection", "caller-buffered JSON projection",
        expect_buffered_projection_api},
       {"projection", "caller-provided source projection",
@@ -5848,7 +5913,7 @@ static void expect_sdk_contract_manifest(void) {
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
       {"version", 1},      {"selector", 6}, {"streaming", 11},
-      {"projection", 6},   {"compact", 2},  {"mutation", 19},
+      {"projection", 7},   {"compact", 2},  {"mutation", 19},
   };
   size_t i;
   size_t j;
@@ -6507,6 +6572,7 @@ int main(void) {
   expect_stream_error_corpus_api();
   expect_seekable_payload_api();
   expect_projection_api();
+  expect_projection_parse_normalization_api();
   expect_buffered_projection_api();
   expect_source_projection_api();
   expect_projection_path_invariant_api();

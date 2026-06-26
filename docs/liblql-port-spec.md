@@ -891,7 +891,8 @@ Current implementation status:
   mutation over object members, array-wildcard fields, any-child fields, and
   recursive descendants, mutation parse-error
   invariants,
-  parser failure output-handle clearing, projection invalid-argument
+  parser failure output-handle clearing, projection parser normalization for
+  whitespace, blank fields, and duplicate paths, projection invalid-argument
   `out_found` state, and query callback failure status propagation. Query and
   candidate-stream mutation
   invalid-argument failures now also assert a safe zeroed `lql_query_result`
