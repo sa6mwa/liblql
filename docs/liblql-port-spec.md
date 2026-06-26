@@ -787,12 +787,13 @@ Current implementation is an early slice:
   missing file path and invalid single-file input forms such as stdin or
   multiple files;
 - Go-backed SDK parity tests now exist for public `liblql` selector
-  parse/evaluate behavior, projection parser failures, buffered and seekable
-  file-range JSON projection including malformed JSON execution errors,
-  mutation plan parsing and parse failures, buffered and seekable file-range
-  JSON mutation including file-backed mutation values and malformed JSON
-  execution errors, compact serialization, compact error behavior, and current
-  streaming query behavior through the receiver C API, comparing
+  parse/evaluate behavior, projection parser failures, buffered, source-backed,
+  and seekable file-range JSON projection including malformed JSON execution
+  errors, mutation plan parsing and parse failures, buffered, source-backed, and
+  seekable file-range JSON mutation including file-backed mutation values and
+  malformed JSON execution errors, compact serialization, compact error
+  behavior, and current streaming query behavior through the receiver C API,
+  comparing
   `ctx->selector_parse()`, `ctx->selector_parse_or()`,
   `ctx->matches_json()`, `ctx->project_json()`, `ctx->project_source()`,
   `ctx->project_file_range()`, `ctx->mutation_plan_parse()`,

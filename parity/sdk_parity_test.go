@@ -799,6 +799,9 @@ func TestSDKMutationExecutionErrorParity(t *testing.T) {
 			if _, err := cMutateJSON(mutations, tc.doc); err == nil {
 				t.Fatalf("liblql buffered mutation unexpectedly accepted malformed JSON: %q", tc.doc)
 			}
+			if _, err := cMutateSource(mutations, tc.doc); err == nil {
+				t.Fatalf("liblql source mutation unexpectedly accepted malformed JSON: %q", tc.doc)
+			}
 			if _, err := cMutateFileRange(mutations, `{"outside":`, tc.doc, `}`); err == nil {
 				t.Fatalf("liblql file-range mutation unexpectedly accepted malformed JSON: %q", tc.doc)
 			}
