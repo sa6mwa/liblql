@@ -5668,6 +5668,47 @@ static void expect_source_candidate_mutation_api(void) {
     fclose(out);
     out = tmpfile();
     if (out == NULL) {
+      printf("source candidate mutation mixed tmpfile failed\n");
+      ++failures;
+    } else {
+      static const char mixed_doc[] =
+          "[{\"id\":\"a\",\"status\":\"open\"},7,[{\"id\":\"b\",\"status\":"
+          "\"open\"}],true]";
+      memset(&reader, 0, sizeof(reader));
+      reader.data = mixed_doc;
+      reader.len = strlen(mixed_doc);
+      reader.chunk_size = 5u;
+      memset(&result, 0, sizeof(result));
+      lql_error_init(&error);
+      st = test_ctx->mutate_source_candidates(test_ctx, NULL, plan, read_chunk,
+                                              &reader, out, 1, 0, &result,
+                                              &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation mixed failed: %s\n", error.message);
+        ++failures;
+      } else if (reader.calls <= 1) {
+        printf("source candidate mutation mixed did not fragment reads\n");
+        ++failures;
+      } else if (result.candidates_seen != 4u ||
+                 result.candidates_matched != 4u || result.stopped_early) {
+        printf("source candidate mutation mixed result mismatch: seen=%lu "
+               "matched=%lu stopped=%d\n",
+               (unsigned long)result.candidates_seen,
+               (unsigned long)result.candidates_matched, result.stopped_early);
+        ++failures;
+      } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                 strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n"
+                             "7\n"
+                             "{\"id\":\"b\",\"status\":\"done\"}\n"
+                             "true\n") != 0) {
+        printf("source candidate mutation mixed output mismatch: %s\n", buf);
+        ++failures;
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
       printf("source candidate mutation read-fail tmpfile failed\n");
       ++failures;
     } else {

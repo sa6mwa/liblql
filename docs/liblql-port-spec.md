@@ -1066,6 +1066,18 @@ Current implementation status:
   `SpillBytes` counters belong to Go's callback request shape and are not
   mirrored unless liblql grows an equivalent mutation callback/factory or
   aggregate accounting API;
+- callback-source mutation stream coverage now includes mixed scalar/object
+  candidates inside a root array: root-array items are emitted incrementally,
+  object candidates are mutated, scalar candidates pass through unchanged, and
+  partial read failures retain already-emitted candidate counters. The
+  remaining Go `MutateStream` mixed-framing case is narrower: a root array
+  followed by additional top-level values in the same callback source. lonejson
+  `v0.35.0` exposes `AUTO`, `NDJSON`, `SINGLE_VALUE`, and `ARRAY_ITEMS`
+  framing, but not a no-materialization mode that both emits root-array items
+  incrementally and then continues with subsequent top-level values. liblql
+  must not fake this by materializing the whole array or source; support for
+  that exact shape needs dependency API support or a future public liblql
+  framing contract that preserves streaming semantics;
 - lonejson `v0.35.0` exposes candidate `stream_offset`, `byte_size`, and
   `payload_size` plus callback-scoped `lonejson_spooled` handles with
   per-handle size/spilled inspection. It does not expose aggregate query-level
