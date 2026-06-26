@@ -1247,6 +1247,66 @@ EOF
   fi
 }
 
+check_package_version_fixtures() {
+  tmp_dir="$ROOT_DIR/build/package-version-fixtures"
+  old_dist=$DIST_DIR
+  version_value=9.8.7
+  source_tar="$tmp_dir/dist/${PROJECT}-${version_value}.tar.gz"
+  lua_source_tar="$tmp_dir/dist/${PROJECT}-lua-${version_value}.tar.gz"
+  rockspec="$tmp_dir/dist/${PROJECT}-${version_value}-1.rockspec"
+  manifest="$tmp_dir/dist/${PROJECT}-${version_value}-CHECKSUMS"
+
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir/dist" "$tmp_dir/extract"
+  DIST_DIR="$tmp_dir/dist"
+
+  LQL_VERSION_OVERRIDE=$version_value package_source
+  LQL_VERSION_OVERRIDE=$version_value package_lua_source
+  LQL_VERSION_OVERRIDE=$version_value package_lua_rockspec
+  LQL_VERSION_OVERRIDE=$version_value write_checksums
+
+  DIST_DIR=$old_dist
+
+  test -f "$source_tar"
+  test -f "$lua_source_tar"
+  test -f "$rockspec"
+  test -f "$manifest"
+
+  tar -xzf "$source_tar" -C "$tmp_dir/extract"
+  if [ "$(sed -n '1p' "$tmp_dir/extract/${PROJECT}-${version_value}/VERSION")" \
+    != "$version_value" ]; then
+    printf 'package version fixture: source archive VERSION mismatch\n' >&2
+    exit 1
+  fi
+  rm -rf "$tmp_dir/extract"
+  mkdir -p "$tmp_dir/extract"
+  tar -xzf "$lua_source_tar" -C "$tmp_dir/extract"
+  if [ "$(sed -n '1p' "$tmp_dir/extract/${PROJECT}-lua-${version_value}/VERSION")" \
+    != "$version_value" ]; then
+    printf 'package version fixture: Lua source archive VERSION mismatch\n' >&2
+    exit 1
+  fi
+  if ! grep -qx "version = \"${version_value}-1\"" "$rockspec" ||
+     ! grep -q "releases/download/v${version_value}/${PROJECT}-lua-${version_value}.tar.gz" \
+       "$rockspec"; then
+    printf 'package version fixture: release rockspec version metadata mismatch\n' >&2
+    exit 1
+  fi
+  for artifact in "${PROJECT}-${version_value}.tar.gz" \
+    "${PROJECT}-lua-${version_value}.tar.gz" \
+    "${PROJECT}-${version_value}-1.rockspec"; do
+    if ! awk '{print $2}' "$manifest" | grep -Fxq "$artifact"; then
+      printf 'package version fixture: checksum manifest omitted %s\n' \
+        "$artifact" >&2
+      exit 1
+    fi
+  done
+  if find "$tmp_dir/dist" -maxdepth 1 -name '*0.0.0*' | grep . >/dev/null; then
+    printf 'package version fixture: override packaging produced 0.0.0 artifact\n' >&2
+    exit 1
+  fi
+}
+
 check_lua_package_contract_fixtures() {
   tmp_dir="$ROOT_DIR/build/package-lua-contract-fixtures"
   version_value=$(version)
@@ -1362,6 +1422,9 @@ case "$TARGET" in
     ;;
   package-tool-path-fixtures)
     check_package_tool_path_fixtures
+    ;;
+  package-version-fixtures)
+    check_package_version_fixtures
     ;;
   package-lua-contract-fixtures)
     check_lua_package_contract_fixtures

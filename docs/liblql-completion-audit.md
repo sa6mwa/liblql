@@ -70,7 +70,7 @@ archive test suite. The 1 GiB benchmark gate wrote
 | Linux GNU/musl release artifacts | `make release-matrix`, `make release`, checksum manifest | Proven locally |
 | Darwin arm64 release artifacts | `LQL_PACKAGE_TARGETS=arm64-apple-darwin make release-matrix`, checksum manifest | Proven locally with available osxcross toolchain |
 | Source and Lua release artifacts | `make package-verify`, `make release`, checksum manifest | Proven locally |
-| Release version resolution | `make test` via `lql.release-version` CTest fixture | Proven locally for untagged git, source archive `VERSION`, lightweight tags, annotated-tag rejection, and shell/Make/CMake overrides |
+| Release version resolution | `make test` via `lql.release-version` and `lql.package-version-fixtures` CTest fixtures | Proven locally for untagged git, source archive `VERSION`, lightweight tags, annotated-tag rejection, shell/Make/CMake overrides, source/Lua package override names, embedded `VERSION`, release rockspec metadata, and checksum manifest naming |
 | Privacy and relocatability verification | `make package-verify`, `make release`, package privacy fixtures | Proven locally |
 | Warning-clean release build with `-Werror` | release-surface CTest in `make test-all` and source archive verification | Proven locally |
 

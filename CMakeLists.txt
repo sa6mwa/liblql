@@ -289,6 +289,11 @@ if(LQL_BUILD_TESTS)
       package-tool-path-fixtures)
   set_tests_properties(lql.package-tool-path-fixtures PROPERTIES
     LABELS "unit;operability;packaging" TIMEOUT 5)
+  add_test(NAME lql.package-version-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package.sh
+      package-version-fixtures)
+  set_tests_properties(lql.package-version-fixtures PROPERTIES
+    LABELS "unit;packaging" TIMEOUT 5)
   add_test(NAME lql.package-lua-contract-fixtures
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package.sh
       package-lua-contract-fixtures)
