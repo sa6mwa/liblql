@@ -38,6 +38,7 @@ static lql *clql_ctx = NULL;
 static lql_allocator *clql_alloc = NULL;
 
 static int is_regular_file_path(const char *path);
+static int is_valid_theme(const char *theme);
 
 static lql_read_result clql_file_read(void *user, unsigned char *buffer,
                                       size_t capacity) {
@@ -249,6 +250,26 @@ static int parse_short_bool_value(const char *arg, size_t pos, int *target,
   return 1;
 }
 
+static int is_valid_theme(const char *theme) {
+  static const char *const themes[] = {
+      "catppuccin-mocha", "classic",           "default",
+      "default-16",       "doom-dracula",      "doom-gruvbox",
+      "doom-iosvkem",     "doom-nord",         "gruvbox-light",
+      "jq",               "monokai-vibrant",   "none",
+      "one-dark-aurora",  "outrun-electric",   "pslog",
+      "solarized-nightfall", "synthwave84",    "tokyo-night"};
+  size_t i;
+  if (theme == NULL || theme[0] == '\0') {
+    return 1;
+  }
+  for (i = 0u; i < sizeof(themes) / sizeof(themes[0]); ++i) {
+    if (strcmp(theme, themes[i]) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int
 parse_short_option_cluster(char **argv, int argc, int *index, int *or_mode,
                            int *matches_only, int *compact, int *inline_mode,
@@ -362,6 +383,18 @@ parse_short_option_cluster(char **argv, int argc, int *index, int *or_mode,
           return -1;
         }
         ++(*index);
+        if (!is_valid_theme(argv[*index])) {
+          *error_message = "unknown theme";
+          return -1;
+        }
+      } else if (arg[pos + 1u] == '=') {
+        if (!is_valid_theme(arg + pos + 2u)) {
+          *error_message = "unknown theme";
+          return -1;
+        }
+      } else if (!is_valid_theme(arg + pos + 1u)) {
+        *error_message = "unknown theme";
+        return -1;
       }
       return 1;
     default:
@@ -867,7 +900,21 @@ int main(int argc, char **argv) {
         return 2;
       }
       ++i;
+      if (!is_valid_theme(argv[i])) {
+        fprintf(stderr, "clql: unknown theme %s\n", argv[i]);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
+        return 2;
+      }
     } else if (strncmp(argv[i], "--theme=", 8u) == 0) {
+      if (!is_valid_theme(argv[i] + 8u)) {
+        fprintf(stderr, "clql: unknown theme %s\n", argv[i] + 8u);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
+        return 2;
+      }
       /* Accepted for Go CLI compatibility; colorized pretty output is out of
        * scope. */
     } else if (strcmp(argv[i], "--mutate") == 0 || strcmp(argv[i], "-m") == 0) {

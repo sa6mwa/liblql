@@ -860,6 +860,8 @@ func TestCLQLThemeFlagCompatibility(t *testing.T) {
 	}{
 		{"long separate", []string{"-c", "--theme", "default"}},
 		{"long equals", []string{"-c", "--theme=default"}},
+		{"long none", []string{"-c", "--theme=none"}},
+		{"long jq alias", []string{"-c", "--theme=jq"}},
 		{"short separate", []string{"-c", "-t", "default"}},
 		{"short joined", []string{"-c", "-tdefault"}},
 		{"short equals", []string{"-c", "-t=default"}},
@@ -879,6 +881,37 @@ func TestCLQLThemeFlagCompatibility(t *testing.T) {
 			}
 			if string(out) != "{\"status\":\"open\"}\n" {
 				t.Fatalf("theme flag changed compact output: %q", string(out))
+			}
+		})
+	}
+	invalidCases := []struct {
+		name string
+		args []string
+	}{
+		{"long separate", []string{"-c", "--theme", "definitely-not-a-theme"}},
+		{"long equals", []string{"-c", "--theme=definitely-not-a-theme"}},
+		{"short separate", []string{"-c", "-t", "definitely-not-a-theme"}},
+		{"short joined", []string{"-c", "-tdefinitely-not-a-theme"}},
+		{"short equals", []string{"-c", "-t=definitely-not-a-theme"}},
+		{"clustered short joined", []string{"-ctdefinitely-not-a-theme"}},
+		{"clustered short equals", []string{"-ct=definitely-not-a-theme"}},
+	}
+	for _, tc := range invalidCases {
+		tc := tc
+		t.Run("invalid "+tc.name, func(t *testing.T) {
+			cmdArgs := append([]string{}, tc.args...)
+			cmdArgs = append(cmdArgs, `/status="open"`)
+			cmd := exec.Command(clql, cmdArgs...)
+			cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("clql invalid theme unexpectedly succeeded: out=%q", string(out))
+			}
+			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
+				t.Fatalf("clql invalid theme exit mismatch: err=%v out=%q", err, string(out))
+			}
+			if !bytes.Contains(out, []byte("unknown theme")) {
+				t.Fatalf("clql invalid theme diagnostic mismatch: out=%q", string(out))
 			}
 		})
 	}

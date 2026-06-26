@@ -868,7 +868,8 @@ Current implementation status:
 - fast CTest now includes `lql.cli-smoke`, which asserts the stable
   `clql --version` format, the documented `clql --help` option surface, and
   the CLI-owned compact selector behavior for prettyx-compatible `--theme` and
-  `-t` no-op forms, including joined and clustered short-option spellings;
+  `-t` no-op forms, including joined and clustered short-option spellings and
+  Go-compatible rejection of unknown theme names;
 - C SDK contract tests cover the currently implemented public liblql selector,
   selector inspection, streaming, projection, compacting, mutation, version,
   and capability surfaces, including mutation plan parse success, expansion
