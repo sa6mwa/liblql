@@ -112,14 +112,6 @@ static lql_status on_match_decision(void *user,
   return adapter->on_match(adapter->user, &match);
 }
 
-static lql_allocator *eval_selector_allocator(lql *self,
-                                              const lql_selector *selector) {
-  if (selector == NULL || selector->allocator == NULL) {
-    return lql_allocator_from_receiver(self);
-  }
-  return selector->allocator;
-}
-
 static void destroy_doc(eval_doc *doc) {
   doc->allocator->destroy(doc->allocator, doc->hits);
   doc->allocator->destroy(doc->allocator, doc->val_buf);
@@ -130,8 +122,11 @@ static void destroy_doc(eval_doc *doc) {
 
 static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   memset(doc, 0, sizeof(*doc));
-  doc->allocator = eval_selector_allocator(self, selector);
+  doc->allocator = lql_allocator_from_receiver(self);
   doc->selector = selector;
+  if (doc->allocator == NULL) {
+    return 0;
+  }
   if (selector != NULL && selector->hit_count != 0u) {
     doc->hits = (unsigned char *)doc->allocator->calloc(
         doc->allocator, selector->hit_count, 1u);

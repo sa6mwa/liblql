@@ -278,6 +278,22 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  receiver_allocator_fallback_hits=$(
+    grep -REn \
+      '(eval_selector_allocator|projection_allocator)[[:space:]]*\(|->[[:space:]]*allocator[[:space:]]*!=[[:space:]]*NULL[[:space:]]*\?' \
+      "$source_root/src/lql.c" \
+      "$source_root/src/lql_selector.c" \
+      "$source_root/src/lql_project.c" \
+      "$source_root/src/lql_eval.c" \
+      "$source_root/src/lql_mutation.c" \
+      "$source_root/src/lql_internal.h" 2>/dev/null || true
+  )
+  if [ -n "$receiver_allocator_fallback_hits" ]; then
+    printf 'public API style: receiver-owned operations must not fall back to handle-stored allocators\n' >&2
+    printf '%s\n' "$receiver_allocator_fallback_hits" >&2
+    failed=1
+  fi
+
   lonejson_default_allocator_hits=$(
     grep -En 'lonejson_new[[:space:]]*\([[:space:]]*NULL[[:space:]]*,' \
       "$source_root/src/lql_selector.c" \

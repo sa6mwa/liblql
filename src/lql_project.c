@@ -65,14 +65,6 @@ struct lql_projection {
   size_t path_count;
 };
 
-static lql_allocator *projection_allocator(lql *self,
-                                           const lql_projection *projection) {
-  if (projection == NULL || projection->allocator == NULL) {
-    return lql_allocator_from_receiver(self);
-  }
-  return projection->allocator;
-}
-
 static int seek_u64(FILE *file, lql_uint64 offset) {
   off_t seek_offset;
   seek_offset = (off_t)offset;
@@ -1001,8 +993,10 @@ projection_destroy_method(lql *self, lql_projection *projection) {
   if (projection == NULL) {
     return;
   }
-  allocator = projection->allocator != NULL ? projection->allocator
-                                            : lql_allocator_from_receiver(self);
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    return;
+  }
   for (i = 0u; i < projection->path_count; ++i) {
     projection_path_cleanup(allocator, &projection->paths[i]);
   }
@@ -1033,7 +1027,13 @@ static lql_status lql_project_reader(lql *self,
     return LQL_STATUS_JSON_ERROR;
   }
   memset(&state, 0, sizeof(state));
-  state.allocator = projection_allocator(self, projection);
+  state.allocator = lql_allocator_from_receiver(self);
+  if (state.allocator == NULL) {
+    lonejson_free(runtime);
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection receiver allocator required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
   state.projection = projection;
   state.error = &lj_error;
   init_projection_visitor(&visitor);

@@ -93,6 +93,10 @@ cat >"$tmp/src/lql.c" <<'EOF'
 void bad_cleanup_default_allocator(void) { allocator = lql_allocator_default(); }
 EOF
 
+cat >"$tmp/src/lql_project.c" <<'EOF'
+void *projection_allocator(void) { return projection->allocator != NULL ? projection->allocator : lql_allocator_from_receiver(self); }
+EOF
+
 printf '%s\n' 'stale cleanup surface is `lql_dealloc()`' >"$tmp/README.md"
 
 cat >"$tmp/lua/private.c" <<'EOF'
@@ -130,6 +134,7 @@ expect_diagnostic "$out" "forbidden liblql allocator macro wrapper call"
 expect_diagnostic "$out" "project runtime must not use null receiver allocator fallback"
 expect_diagnostic "$out" "cleanup paths must use explicit receiver/handle allocators"
 expect_diagnostic "$out" "selector internals must be receiver-owned at subsystem boundaries"
+expect_diagnostic "$out" "receiver-owned operations must not fall back to handle-stored allocators"
 expect_diagnostic "$out" "lonejson runtimes must use receiver allocator bridge"
 expect_diagnostic "$out" "private receiver implementations must not be called with NULL receivers"
 expect_diagnostic "$out" "receiver methods must be file-local methods"

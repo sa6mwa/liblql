@@ -1135,8 +1135,10 @@ mutation_plan_destroy_method(lql *self, lql_mutation_plan *plan) {
   if (plan == NULL) {
     return;
   }
-  allocator = plan->allocator != NULL ? plan->allocator
-                                      : lql_allocator_from_receiver(self);
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    return;
+  }
   for (i = 0u; i < plan->count; ++i) {
     mutation_item_cleanup(allocator, &plan->items[i]);
   }
@@ -2456,8 +2458,13 @@ static lql_status mutate_reader_with_supported_plan(
     return LQL_STATUS_JSON_ERROR;
   }
   memset(&state, 0, sizeof(state));
-  state.allocator = plan->allocator != NULL ? plan->allocator
-                                            : lql_allocator_from_receiver(self);
+  state.allocator = lql_allocator_from_receiver(self);
+  if (state.allocator == NULL) {
+    lonejson_free(runtime);
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "mutation receiver allocator required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
   state.plan = plan;
   state.error = &lj_error;
   state.applied = (int *)state.allocator->calloc(state.allocator, plan->count,
