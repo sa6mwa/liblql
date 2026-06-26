@@ -1048,20 +1048,37 @@ func TestCLQLBooleanFlagValueCompatibility(t *testing.T) {
 			}
 		})
 	}
-	t.Run("invalid boolean", func(t *testing.T) {
-		cmd := exec.Command(clql, "--compact=maybe", `/status="open"`)
-		cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
-		out, err := cmd.CombinedOutput()
-		if err == nil {
-			t.Fatalf("clql invalid boolean unexpectedly succeeded: out=%q", string(out))
-		}
-		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
-			t.Fatalf("clql invalid boolean exit mismatch: err=%v out=%q", err, string(out))
-		}
-		if !bytes.Contains(out, []byte("invalid boolean value for --compact")) {
-			t.Fatalf("clql invalid boolean diagnostic mismatch: out=%q", string(out))
-		}
-	})
+	invalidBoolCases := []struct {
+		name       string
+		args       []string
+		diagnostic string
+	}{
+		{"compact", []string{"--compact=maybe", `/status="open"`}, "invalid boolean value for --compact"},
+		{"matches only", []string{"--matches-only=maybe", `/status="open"`}, "invalid boolean value for --matches-only"},
+		{"or", []string{"--or=maybe", `/status="open"`}, "invalid boolean value for --or"},
+		{"inline", []string{"--inline=maybe", "-m", "/status=done", `/status="open"`}, "invalid boolean value for --inline"},
+		{"write", []string{"--write=maybe", "-m", "/status=done", `/status="open"`}, "invalid boolean value for --write"},
+		{"enable file mutations", []string{"--enable-file-mutations=maybe", "-m", "/status=done", `/status="open"`}, "invalid boolean value for --enable-file-mutations"},
+		{"short compact", []string{"-c=maybe", `/status="open"`}, "invalid boolean value for short option"},
+		{"short cluster", []string{"-cO=maybe", `/status="open"`}, "invalid boolean value for short option"},
+	}
+	for _, tc := range invalidBoolCases {
+		tc := tc
+		t.Run("invalid boolean "+tc.name, func(t *testing.T) {
+			cmd := exec.Command(clql, tc.args...)
+			cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("clql invalid boolean %s unexpectedly succeeded: out=%q", tc.name, string(out))
+			}
+			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
+				t.Fatalf("clql invalid boolean %s exit mismatch: err=%v out=%q", tc.name, err, string(out))
+			}
+			if !bytes.Contains(out, []byte(tc.diagnostic)) {
+				t.Fatalf("clql invalid boolean %s diagnostic mismatch: out=%q", tc.name, string(out))
+			}
+		})
+	}
 }
 
 func TestCLQLShortOptionClusterCompatibility(t *testing.T) {
