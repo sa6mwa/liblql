@@ -986,7 +986,8 @@ Current implementation status:
 - standalone Lua source package production now writes
   `dist/liblql-lua-<version>.tar.gz` with `VERSION`, exact
   `RELEASE_MANIFEST`, Lua sources, tests, benchmark runner, rockspec template,
-  and Lua release scripts; `make release-lua-artifacts` also renders
+  Lua release scripts, and the Lua 5.5 runtime-contract fixture; `make
+  release-lua-artifacts` also renders
   `dist/liblql-<version>-1.rockspec` with a public release URL and builds
   `dist/liblql-<version>-1.src.rock` through LuaRocks from the staged source
   package. Package verification checks checksum coverage, layout, manifest
