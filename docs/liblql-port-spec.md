@@ -857,10 +857,11 @@ Current implementation is an early slice:
   decision streams, callback-scoped seekable payload handles,
   callback-scoped source-spooled payload handles, callback-scoped payload
   streaming through `match.write_json(callback)`, file and buffered-JSON
-  projection, file and buffered-JSON mutation, relative file-backed mutation
-  values through explicit `enable_file_mutations` and `file_value_base_dir`
-  options, query stop reasons, candidate/match limit options, expired payload
-  handles, oversized Lua source-read chunk rejection, callback error
+  projection, file, buffered-JSON, and Lua callback-source mutation, relative
+  file-backed mutation values through explicit `enable_file_mutations` and
+  `file_value_base_dir` options, query stop reasons, candidate/match limit
+  options, expired payload handles, oversized Lua source-read chunk rejection,
+  source-read error propagation for query and mutation, callback error
   propagation, and structured errors; the public API style gate rejects
   Lua facade use of private liblql headers, `LQL_INTERNAL_SYMBOL`, or private
   `_impl` receiver implementation functions so Lua remains a public-header

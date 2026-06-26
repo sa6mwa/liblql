@@ -278,6 +278,31 @@ mutated = assert_no_error(mutated, err, "mutate_json")
 assert_equal(mutated, '{"status":"open","state":{"status":"running"}}\n',
              "mutate_json output")
 
+source_chunks = {
+  '{"status":"closed","id":"m1"}\n',
+  '{"status":"open","id":"m2","state":{"old":true}}\n'
+}
+source_index = 1
+mutated, err = client:mutate_source('/status="open"', function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end, {"/state/status=running", "rm:/state/old"}, {matches_only = true})
+mutated = assert_no_error(mutated, err, "mutate_source")
+assert_equal(mutated,
+             '{"status":"open","id":"m2","state":{"status":"running"}}\n',
+             "mutate_source output")
+
+local bad_mutate_source_result, bad_mutate_source_error =
+  client:mutate_source('/status="open"', function(_)
+    error("mutation source read failed")
+  end, {"/state/status=running"}, {matches_only = true})
+if bad_mutate_source_result ~= nil or not bad_mutate_source_error or
+    not string.find(bad_mutate_source_error.stderr or "",
+                    "mutation source read failed", 1, true) then
+  fail("expected structured mutate_source read callback error")
+end
+
 mutated, err = client:mutate_json('/status="open"', '{"status":"open"}',
                                  {
                                    "textfile:/payload=" .. text_payload_name,
