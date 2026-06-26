@@ -6883,6 +6883,10 @@ static void expect_selector_match_api(void) {
                "{\"timestamp\":\"2025-01-02T00:00:00Z\"}", 0);
   expect_match("date{field=/timestamp,since=2025-01-01}",
                "{\"timestamp\":\"2025-01-02T00:00:00Z\"}", 1);
+  expect_match("date{field=/timestamp,gte=2025-01-01,lt=2025-01-03}",
+               "{\"timestamp\":\"2025-01-02T00:00:00Z\"}", 1);
+  expect_match("date{field=/timestamp,gte=2025-01-01,lt=2025-01-03}",
+               "{\"timestamp\":\"2025-01-03T00:00:00Z\"}", 0);
   expect_match("date{field=/timestamp,since=now}",
                "{\"timestamp\":\"2099-01-01T00:00:00Z\"}", 1);
   expect_match("date{field=/timestamp,since=now}",
@@ -6963,6 +6967,9 @@ static void expect_selector_match_api(void) {
   expect_match("contains{f=/items/**/sku}", "{\"items\":[{\"sku\":\"a\"}]}", 1);
   expect_match("contains{f=/groups/.../sku}",
                "{\"groups\":[{\"items\":[{\"sku\":\"b\"}]}]}", 1);
+  expect_match("exists{/meta/.../etag}",
+               "{\"meta\":{\"nested\":{\"etag\":\"abc\"}}}", 1);
+  expect_match("exists{/meta/.../etag}", "{\"meta\":{\"nested\":{}}}", 0);
   expect_match("/items[]/price>=20",
                "{\"items\":[{\"sku\":\"A\",\"price\":10},{\"sku\":\"B\","
                "\"price\":25}]}",
