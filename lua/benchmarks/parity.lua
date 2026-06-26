@@ -14,7 +14,7 @@ local function count_lines_and_bytes(text)
 end
 
 local function usage()
-  io.stderr:write("usage: parity.lua MODE SELECTOR FIXTURE CANDIDATES CLQL\n")
+  io.stderr:write("usage: parity.lua MODE SELECTOR FIXTURE CANDIDATES\n")
   os.exit(2)
 end
 
@@ -22,14 +22,13 @@ local mode = arg[1]
 local expr = arg[2]
 local fixture = arg[3]
 local candidates = tonumber(arg[4] or "")
-local clql = arg[5]
 
-if not mode or not expr or not fixture or not candidates or not clql then
+if not mode or not expr or not fixture or not candidates then
   usage()
 end
 
 local ok, message = pcall(function()
-  local client = lql.new({clql = clql})
+  local client = lql.new()
   local output, err = client:select_file(expr, fixture)
   if err then
     if err.stderr == "" then

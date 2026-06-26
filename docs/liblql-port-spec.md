@@ -285,6 +285,12 @@ The Lua implementation should use public liblql/lonejson surfaces rather than
 duplicating LQL behavior independently unless an explicit Lua facade layer is
 needed for DX.
 
+Lua support targets Lua 5.5 only. The Lua facade must not shell out to `clql`;
+it must load a direct C module that depends on the public liblql SDK surface.
+The module must not use private liblql headers, private lonejson APIs, or
+symbol interposition tricks, and it must be safe to load in a process that
+already links liblql and other Lua bindings.
+
 ## Verification Requirements
 
 Verification is the primary quality gate.
@@ -726,14 +732,15 @@ Current implementation is an early slice:
   presets because the cgo test process cannot reliably load an
   ASan-instrumented shared liblql with the ASan runtime first; project-owned C
   unit tests remain the sanitizer authority for SDK behavior;
-- the Lua tree includes an initial CLI-backed facade over public `clql`, with
-  deterministic smoke tests for selector decisions, selection output,
+- the Lua tree includes a Lua 5.5 facade over a direct `lql.core` C module
+  linked against shared liblql and implemented through public liblql headers,
+  with deterministic smoke tests for selector decisions, selection output,
   file and buffered-JSON projection, file and buffered-JSON mutation, and
-  structured errors; this is not yet the final Lua C module;
+  structured errors; Lua streaming/spooled handle coverage is still incomplete;
 - the parity benchmark surface now has Go, C, and Lua runners over the shared
-  generated fixture matrix; the Lua runner currently loads `lua/lql.lua`, which
-  uses the same CLI-backed facade approach over public `clql`; Go helper
-  records and C native payload/plan helper records now report `ns_per_op`;
+  generated fixture matrix; the Lua runner loads `lua/lql.lua` and uses the
+  direct `lql.core` module rather than shelling out to `clql`; Go helper records
+  and C native payload/plan helper records now report `ns_per_op`;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and

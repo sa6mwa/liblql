@@ -39,13 +39,14 @@ mutation path. Host `liblql` and `clql` package archives are produced and
 verified locally, including extracted SDK consumer smokes; the source archive
 is produced and verified through an extracted-tree build/test smoke. The full
 host `clql` archive carries the lonejson runtime libraries it needs and is
-verified with an extracted `--version` smoke. The Lua tree now includes an
-initial `clql`-backed facade with deterministic smoke tests, and the parity
-benchmark surface has Go, C, and Lua runners over shared generated fixtures.
+verified with an extracted `--version` smoke. The Lua tree now includes a Lua
+5.5 facade backed by a direct `lql.core` C module over public liblql APIs, and
+the parity benchmark surface has Go, C, and Lua runners over shared generated
+fixtures.
 The standalone Lua source package, rendered release rockspec, and LuaRocks
-source rock are produced and verified locally. The direct Lua C module, full
-cross-target release matrix, and full `clql` parity are still active porting
-work.
+source rock are produced and verified locally. Full Lua streaming/spooled
+handle coverage, full cross-target release matrix, and full `clql` parity are
+still active porting work.
 
 ```sh
 make deps-debug

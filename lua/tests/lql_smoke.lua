@@ -34,7 +34,11 @@ write_file(input_path,
            '{"status":"closed","id":"a","count":1}\n' ..
              '{"status":"open","id":"b","count":2,"state":{"old":true}}\n')
 
-local client = lql.new({clql = os.getenv("CLQL_PATH")})
+if os.getenv("LQL_REQUIRE_CORE") == "1" and not lql.has_core() then
+  fail("direct lql.core module was not loaded")
+end
+
+local client = lql.new()
 
 local matched, err = client:matches_json('/status="open"', '{"status":"open"}')
 matched = assert_no_error(matched, err, "matches_json open")

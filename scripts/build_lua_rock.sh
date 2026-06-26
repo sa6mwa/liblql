@@ -15,5 +15,12 @@ LQL_ALLOW_LOCAL_LUA_SOURCE_URL=1 \
 LQL_LUA_SOURCE_URL="file://$root" \
   "$root/scripts/render_release_rockspec.sh" "$version" "$rockspec"
 
-(cd "$root" && luarocks --tree "$tree" make "$rockspec")
+LIBLQL_INCDIR=${LIBLQL_INCDIR:-"$root/include"}
+LIBLQL_LIBDIR=${LIBLQL_LIBDIR:-"$root/build/debug"}
+LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}:$root/build/debug:$LIBLQL_LIBDIR
+DYLD_LIBRARY_PATH=${DYLD_LIBRARY_PATH:-}:$root/build/debug:$LIBLQL_LIBDIR
+export LIBLQL_INCDIR LIBLQL_LIBDIR LD_LIBRARY_PATH DYLD_LIBRARY_PATH
+
+(cd "$root" && luarocks --tree "$tree" make "$rockspec" \
+  "LIBLQL_INCDIR=$LIBLQL_INCDIR" "LIBLQL_LIBDIR=$LIBLQL_LIBDIR")
 printf 'lua-rock: installed liblql %s into %s\n' "$version" "$tree"

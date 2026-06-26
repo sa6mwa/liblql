@@ -59,7 +59,9 @@ lua-rock:
 
 lua-env:
 	@printf 'export LUA_PATH=%s/build/luarocks/share/lua/5.5/?.lua;%s/build/luarocks/share/lua/5.5/?/init.lua;%s/lua/?.lua;%s/lua/?/init.lua;;\n' "$$(pwd)" "$$(pwd)" "$$(pwd)" "$$(pwd)"
-	@printf 'export CLQL_PATH=%s/build/debug/clql\n' "$$(pwd)"
+	@printf 'export LUA_CPATH=%s/build/luarocks/lib/lua/5.5/?.so;%s/build/luarocks/lib/lua/5.5/?/core.so;%s/build/debug/?.so;%s/build/debug/?/core.so;;\n' "$$(pwd)" "$$(pwd)" "$$(pwd)" "$$(pwd)"
+	@printf 'export LD_LIBRARY_PATH=%s/build/debug:%s/.cache/deps/x86_64-linux-gnu/install/lib:$${LD_LIBRARY_PATH:-}\n' "$$(pwd)" "$$(pwd)"
+	@printf 'export DYLD_LIBRARY_PATH=%s/build/debug:%s/.cache/deps/x86_64-linux-gnu/install/lib:$${DYLD_LIBRARY_PATH:-}\n' "$$(pwd)" "$$(pwd)"
 
 bench benchmarks: build-debug
 	@./scripts/check_parity_benchmark_schema.sh
@@ -100,7 +102,7 @@ print-release-version:
 	@./scripts/release_version.sh
 
 format:
-	@clang-format -i include/lql/*.h src/*.c src/*.h tests/*.c examples/*.c bench/*.c
+	@clang-format -i include/lql/*.h src/*.c src/*.h tests/*.c examples/*.c bench/*.c lua/*.c
 
 clean:
 	@./scripts/clean.sh

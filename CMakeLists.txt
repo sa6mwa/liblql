@@ -10,6 +10,7 @@ option(LQL_BUILD_SHARED "Build shared liblql" ON)
 option(LQL_BUILD_BINARY "Build clql" ON)
 option(LQL_BUILD_TESTS "Build tests" ON)
 option(LQL_BUILD_EXAMPLES "Build examples" ON)
+option(LQL_BUILD_LUA_MODULE "Build direct Lua C module when Lua headers exist" ON)
 option(LQL_INSTALL "Install liblql artifacts" ON)
 set(LQL_EXTERNAL_ROOT "" CACHE PATH "Dependency SDK root")
 set(LQL_TARGET_ID "" CACHE STRING "Release target id")
@@ -105,6 +106,33 @@ if(LQL_BUILD_EXAMPLES)
   lql_apply_project_warnings(lql_match_example)
 endif()
 
+if(LQL_BUILD_LUA_MODULE)
+  find_path(LQL_LUA_INCLUDE_DIR lua.h
+    PATH_SUFFIXES lua5.5 lua)
+  if(LQL_LUA_INCLUDE_DIR)
+    if(TARGET lql_shared)
+      set(LQL_LUA_LINK_TARGET lql_shared)
+    else()
+      set(LQL_LUA_LINK_TARGET "")
+    endif()
+    if(LQL_LUA_LINK_TARGET)
+      add_library(lql_lua_core MODULE lua/lql_core.c)
+      set_target_properties(lql_lua_core PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME core
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lql"
+        C_EXTENSIONS ON)
+      target_include_directories(lql_lua_core PRIVATE "${LQL_LUA_INCLUDE_DIR}")
+      target_link_libraries(lql_lua_core PRIVATE ${LQL_LUA_LINK_TARGET})
+      lql_apply_project_warnings(lql_lua_core)
+    else()
+      message(STATUS "Shared liblql target not available; direct Lua C module disabled")
+    endif()
+  else()
+    message(STATUS "Lua headers not found; direct Lua C module disabled")
+  endif()
+endif()
+
 include(CTest)
 if(LQL_BUILD_TESTS)
   enable_testing()
@@ -154,6 +182,18 @@ if(LQL_BUILD_TESTS)
         ${GO_EXECUTABLE} test -tags liblql_sdk_parity ./...
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/parity)
     set_tests_properties(lql.sdk-parity PROPERTIES LABELS "parity;api;local" TIMEOUT 60)
+  endif()
+  find_program(LUA_EXECUTABLE lua)
+  if(LUA_EXECUTABLE AND TARGET lql_lua_core)
+    add_test(NAME lql.lua-core
+      COMMAND ${CMAKE_COMMAND} -E env
+        "LUA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/lua/?.lua$<SEMICOLON>${CMAKE_CURRENT_SOURCE_DIR}/lua/?/init.lua$<SEMICOLON>$<SEMICOLON>"
+        "LUA_CPATH=${CMAKE_CURRENT_BINARY_DIR}/?.so$<SEMICOLON>${CMAKE_CURRENT_BINARY_DIR}/?/core.so$<SEMICOLON>$<SEMICOLON>"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:lql_shared>:${LQL_EXTERNAL_ROOT}/lib"
+        "DYLD_LIBRARY_PATH=$<TARGET_FILE_DIR:lql_shared>:${LQL_EXTERNAL_ROOT}/lib"
+        LQL_REQUIRE_CORE=1
+        ${LUA_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/lua/tests/lql_core_smoke.lua)
+    set_tests_properties(lql.lua-core PROPERTIES LABELS "unit;api;lua" TIMEOUT 5)
   endif()
 endif()
 

@@ -530,13 +530,16 @@ run_lua_mode() {
     emit_unsupported_impl "lua" "lua executable not found"
     return 1
   fi
-  if [ ! -x "$clql" ]; then
-    emit_unsupported_impl "lua" "clql binary not found; run make build-debug or set CLQL_PATH"
+  if [ ! -f "$root/build/debug/lql/core.so" ]; then
+    emit_unsupported_impl "lua" "lql.core module not found; run make build-debug"
     return 1
   fi
   record=$(LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
+    LUA_CPATH="$root/build/debug/?.so;$root/build/debug/?/core.so;;" \
+    LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+    DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
     "$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
-    "$fixture_path" "$candidates" "$clql")
+    "$fixture_path" "$candidates")
   lua_candidates=$(kv_field candidates "$record")
   lua_matches=$(kv_field matches "$record")
   lua_payloads=$(kv_field payloads "$record")
@@ -554,7 +557,7 @@ run_lua_mode() {
     "$lua_payload_bytes" >> "$lua_counts_file"
   payload_source_type=none
   case "$mode" in
-    plus_value_*) payload_source_type=clql_output ;;
+    plus_value_*) payload_source_type=lua_liblql ;;
   esac
   emit_submode_records "lua" "$dataset_name" "$selector_name" "$expr" \
     "$mode" "$bytes" "$lua_candidates" "$lua_matches" \

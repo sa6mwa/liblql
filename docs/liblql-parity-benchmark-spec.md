@@ -103,16 +103,16 @@ Current implementation status:
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
   The C native payload/plan helper reports `ns_per_op`, and the schema
   validator requires timing for supported C native helper modes. Shell-mediated
-  C CLI selection records and Lua facade records may still report `null`
-  timing.
+  C CLI selection records may still report `null` timing; Lua facade records
+  run through the direct Lua C module and may remain report-only until Lua
+  streaming/spooled handles are complete.
 - the current executable CLI-style selector matrix covers grouped
   equality/range, service contains, service case-insensitive contains, service
   `contains.any`, service `icontains.any`, and nested `/records[]/...`
   equivalents over the CLI-style single-root JSON fixture.
-- `make benchmarks-lua` loads the initial `lua/lql.lua` facade, which
-  orchestrates the public `clql` executable over the shared fixtures and emits
-  stable JSON Lines records. This is a CLI-backed Lua parity runner, not yet
-  the final Lua C module.
+- `make benchmarks-lua` loads `lua/lql.lua`, which uses the direct Lua 5.5
+  `lql.core` C module over public liblql APIs and emits stable JSON Lines
+  records.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
   and fails on missing runners or counter divergence.
 
@@ -379,11 +379,10 @@ the contract for tools and regression gates.
 ## Lua Requirements
 
 The Lua implementation lives in this repository and must be benchmarked through
-the repository's Lua facade, not by shelling out to Go or by calling C private
-test helpers directly. The initial Lua benchmark runner must go through
-`lua/lql.lua`, whose current implementation shells out to the public `clql`
-executable as an intentionally narrow bridge until the direct Lua C module
-exists.
+the repository's Lua facade, not by shelling out to Go or `clql` and not by
+calling C private test helpers directly. The Lua benchmark runner must go
+through `lua/lql.lua`, which loads the direct Lua 5.5 `lql.core` C module over
+public liblql APIs.
 
 Lua benchmark entry points should support:
 
@@ -444,9 +443,10 @@ Suggested staged gates:
 - C library plus-value/open-read modes must prove callback-scoped payload
   access without candidate retention and must have a documented C-native
   baseline distinct from CLI-mediated `clql` timing;
-- Lua may be report-only until the direct Lua module exists; the current
-  CLI-backed facade is expected to be dominated by `clql` process behavior and
-  should not define final Lua performance expectations.
+- Lua may be report-only until Lua streaming/spooled handle APIs are complete;
+  the current direct module covers buffered and seekable-file workflows through
+  public liblql but does not yet define final Lua streaming performance
+  expectations.
 
 Any performance gate must print actionable diagnostics with dataset, selector,
 mode, observed value, baseline/threshold, and reproduction command.
