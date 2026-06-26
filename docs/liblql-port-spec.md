@@ -861,7 +861,9 @@ Current implementation status:
   clauses;
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, strict `in.any` value whitespace validation, and
-  invalid selector invariants;
+  invalid selector invariants; C-native parser tests exercise those invalid
+  expression classes through both public selector parser entry points,
+  `ctx->selector_parse()` and `ctx->selector_parse_or()`;
 - `clql` exists as a selector/projection/mutation compatibility CLI with
   manifest-checked Go-backed parity coverage for selector composition,
   streaming selection, projection, mutation, inline/write modes, option

@@ -918,6 +918,21 @@ static void expect_parse_error(const char *expr) {
   }
 }
 
+static void expect_parse_or_error(const char *expr) {
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+
+  selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse_or(test_ctx, expr, &selector, &error);
+  if (st == LQL_STATUS_OK) {
+    printf("parse-or unexpectedly succeeded for %s\n", expr);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+  }
+}
+
 static void expect_match_or(const char *expr, const char *json, int want) {
   lql_selector *selector;
   lql_error error;
@@ -6085,6 +6100,19 @@ static void expect_selector_parse_error_api(void) {
   expect_parse_error("and.eq{field=/status,value=open");
   expect_parse_error("eq{field=/status,value=open}}");
   expect_parse_error("/count>=");
+
+  expect_parse_or_error("contains{field=/message,value=timeout,any=error}");
+  expect_parse_or_error("eq{field=/status,f=/other,value=open}");
+  expect_parse_or_error("range{field=/progress}");
+  expect_parse_or_error("range{gte=10}");
+  expect_parse_or_error("date{after=2025-01-01}");
+  expect_parse_or_error("in{field=/env}");
+  expect_parse_or_error("in{any=prod|stage}");
+  expect_parse_or_error("exists{/meta/etag,field=/status}");
+  expect_parse_or_error("or.0.and.foo.exists{/meta/etag}");
+  expect_parse_or_error("eq{field=/status,value=open},nonsense");
+  expect_parse_or_error("eq{field=/status,value=open}}");
+  expect_parse_or_error("/count>=");
 }
 
 static void expect_selector_inspection_api(void) {
