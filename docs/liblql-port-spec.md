@@ -1036,6 +1036,13 @@ Current implementation status:
   and callback-source streams. Go's `StreamError`, `AsStreamError`,
   `StreamErrorCodeOf`, and `ErrStreamStop` wrapping behavior is not mirrored
   unless liblql deliberately grows an equivalent public typed-error API;
+- reusable query payload sink behavior is a caller-owned callback contract in
+  C, not a public temp-file sink factory. C tests cover seekable payload ranges
+  and callback-source spooled payloads written into caller-managed sinks,
+  callback failure propagation, source-position preservation for seekable
+  payload writes, and caller reset/reuse of the same sink state across payload
+  streams. Go's reusable sink factory pooling and spill-file path lifecycle are
+  implementation details unless liblql adds a factory API;
 - lonejson `v0.35.0` exposes candidate `stream_offset`, `byte_size`, and
   `payload_size` plus callback-scoped `lonejson_spooled` handles with
   per-handle size/spilled inspection. It does not expose aggregate query-level
