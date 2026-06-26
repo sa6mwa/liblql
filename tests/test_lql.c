@@ -1282,13 +1282,11 @@ static void expect_stream_stop_controls(void) {
         result.candidates_seen != (lql_uint64)(want_calls) ||                  \
         result.candidates_matched != (lql_uint64)(want_matched) ||             \
         !result.stopped_early || result.stop_reason != (want_reason)) {        \
-      printf(label                                                             \
-             " stop mismatch calls=%d matched=%d result_seen=%lu "             \
-             "result_matched=%lu stopped=%d reason=%d\n",                     \
-             seen.calls, seen.matched,                                         \
-             (unsigned long)result.candidates_seen,                            \
-             (unsigned long)result.candidates_matched,                         \
-             result.stopped_early, (int)result.stop_reason);                   \
+      printf(label " stop mismatch calls=%d matched=%d result_seen=%lu "       \
+                   "result_matched=%lu stopped=%d reason=%d\n",                \
+             seen.calls, seen.matched, (unsigned long)result.candidates_seen,  \
+             (unsigned long)result.candidates_matched, result.stopped_early,   \
+             (int)result.stop_reason);                                         \
       ++failures;                                                              \
     }                                                                          \
   } while (0)
@@ -1301,17 +1299,17 @@ static void expect_stream_stop_controls(void) {
                 LQL_QUERY_STOP_BYTE_LIMIT);
   RUN_STOP_CASE("callback stop", (void)0, seen.stop_after_first = 1, 1, 1,
                 LQL_QUERY_STOP_CALLBACK);
-  RUN_STOP_CASE("callback stop precedence",
-                options.max_matches = 1u; options.max_candidates = 1u;
-                options.max_bytes_read = 1u,
-                seen.stop_after_first = 1, 1, 1, LQL_QUERY_STOP_CALLBACK);
-  RUN_STOP_CASE("max matches precedence",
-                options.max_matches = 1u; options.max_candidates = 1u;
-                options.max_bytes_read = 1u,
-                (void)0, 1, 1, LQL_QUERY_STOP_MATCH_LIMIT);
-  RUN_STOP_CASE("max candidates precedence",
-                options.max_candidates = 1u; options.max_bytes_read = 1u,
-                (void)0, 1, 1, LQL_QUERY_STOP_CANDIDATE_LIMIT);
+  RUN_STOP_CASE("callback stop precedence", options.max_matches = 1u;
+                options.max_candidates = 1u;
+                options.max_bytes_read = 1u, seen.stop_after_first = 1, 1, 1,
+                LQL_QUERY_STOP_CALLBACK);
+  RUN_STOP_CASE("max matches precedence", options.max_matches = 1u;
+                options.max_candidates = 1u;
+                options.max_bytes_read = 1u, (void)0, 1, 1,
+                LQL_QUERY_STOP_MATCH_LIMIT);
+  RUN_STOP_CASE("max candidates precedence", options.max_candidates = 1u;
+                options.max_bytes_read = 1u, (void)0, 1, 1,
+                LQL_QUERY_STOP_CANDIDATE_LIMIT);
 
 #undef RUN_STOP_CASE
 
@@ -1843,8 +1841,8 @@ static void expect_seekable_payload_api(void) {
     ++failures;
   } else {
     lql_error_init(&error);
-    st = test_ctx->payload_write_json_sink(test_ctx, &payload, write_memory_sink,
-                                           &sink, &error);
+    st = test_ctx->payload_write_json_sink(test_ctx, &payload,
+                                           write_memory_sink, &sink, &error);
     if (st != LQL_STATUS_STOP ||
         strcmp(error.message, "payload sink write failed") != 0) {
       printf("payload sink failure mismatch: status=%s error=%s\n",
@@ -1867,12 +1865,11 @@ static void expect_seekable_payload_api(void) {
     payload.offset = 52u;
     payload.size = 24u;
     lql_error_init(&error);
-    st = test_ctx->payload_write_json_sink(test_ctx, &payload, write_memory_sink,
-                                           &sink, &error);
+    st = test_ctx->payload_write_json_sink(test_ctx, &payload,
+                                           write_memory_sink, &sink, &error);
     pos = ftell(fp);
     if (st != LQL_STATUS_OK ||
-        strcmp(sink.data, "{\"status\":\"open\",\"id\":3}") != 0 ||
-        pos != 7L) {
+        strcmp(sink.data, "{\"status\":\"open\",\"id\":3}") != 0 || pos != 7L) {
       printf("payload sink position preservation mismatch: status=%s pos=%ld "
              "out=%s error=%s\n",
              lql_status_string(st), pos, sink.data, error.message);
@@ -3921,12 +3918,10 @@ static void expect_projected_candidate_mutation_api(void) {
         printf("source projected candidate result mismatch: seen=%lu "
                "matched=%lu stopped=%d\n",
                (unsigned long)result.candidates_seen,
-               (unsigned long)result.candidates_matched,
-               result.stopped_early);
+               (unsigned long)result.candidates_matched, result.stopped_early);
         ++failures;
       } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
-                 strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") !=
-                     0) {
+                 strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") != 0) {
         printf("source projected candidate output mismatch: %s\n", buf);
         ++failures;
       }
@@ -4698,8 +4693,24 @@ static void expect_selector_match_api(void) {
   expect_match("contains{f=/items/**/sku}", "{\"items\":[{\"sku\":\"a\"}]}", 1);
   expect_match("contains{f=/groups/.../sku}",
                "{\"groups\":[{\"items\":[{\"sku\":\"b\"}]}]}", 1);
+  expect_match("/items[]/price>=20",
+               "{\"items\":[{\"sku\":\"A\",\"price\":10},{\"sku\":\"B\","
+               "\"price\":25}]}",
+               1);
+  expect_match("/items[]/price>=20",
+               "{\"items\":[{\"sku\":\"A\",\"price\":10}]}", 0);
+  expect_match("/metrics/**/battery_mv<3600",
+               "{\"metrics\":[{\"battery_mv\":4100},{\"battery_mv\":3300}]}",
+               1);
+  expect_match("/metrics/**/battery_mv<3600",
+               "{\"metrics\":[{\"battery_mv\":4100}]}", 0);
+  expect_match("/items/*/price>=20",
+               "{\"items\":[{\"sku\":\"B\",\"price\":25}]}", 0);
+  expect_match("/items[]/sku=\"B\"", "{\"items\":{\"sku\":\"B\"}}", 0);
+  expect_match("/arrEmpty[]/sku=\"A\"", "{\"arrEmpty\":[]}", 0);
   expect_match("exists{/metadata/etag}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
   expect_match("exists{/metadata}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
+  expect_match("exists{/items/.../sku}", "{\"items\":[{\"sku\":\"A\"}]}", 1);
   expect_match("/metadata=\"\"", "{\"metadata\":{\"etag\":\"x\"}}", 0);
   expect_match("/items/0/sku=\"a\"", "{\"items\":[{\"sku\":\"a\"}]}", 1);
   expect_match("/status=\"open\",/progress>=50",
