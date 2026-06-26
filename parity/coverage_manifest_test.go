@@ -71,9 +71,19 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 func TestCLQLParityCoverageManifest(t *testing.T) {
 	tests := collectCLQLParityTests(t)
 	covered := make(map[string]string)
+	knownSurfaces := map[string]bool{
+		"cli":        true,
+		"mutation":   true,
+		"projection": true,
+		"selector":   true,
+		"streaming":  true,
+	}
 	for _, req := range cliParityCoverageManifest {
 		if req.Surface == "" || req.Requirement == "" {
 			t.Fatalf("CLI parity manifest has empty surface or requirement: %#v", req)
+		}
+		if !knownSurfaces[req.Surface] {
+			t.Fatalf("CLI parity manifest has unknown surface %q for requirement %q", req.Surface, req.Requirement)
 		}
 		if len(req.Tests) == 0 {
 			t.Fatalf("CLI parity manifest requirement has no tests: %s/%s", req.Surface, req.Requirement)

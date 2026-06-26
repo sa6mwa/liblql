@@ -5318,6 +5318,7 @@ static void expect_sdk_contract_manifest(void) {
   size_t i;
   size_t j;
   int count;
+  int known_surface;
 
   for (i = 0u; i < sizeof(manifest) / sizeof(manifest[0]); ++i) {
     if (manifest[i].surface == NULL || manifest[i].surface[0] == '\0' ||
@@ -5329,6 +5330,18 @@ static void expect_sdk_contract_manifest(void) {
     if (manifest[i].test == NULL) {
       printf("SDK contract manifest entry lacks a C unit function: %s/%s\n",
              manifest[i].surface, manifest[i].requirement);
+      ++failures;
+    }
+    known_surface = 0;
+    for (j = 0u; j < sizeof(surface_counts) / sizeof(surface_counts[0]); ++j) {
+      if (manifest[i].surface != NULL &&
+          strcmp(manifest[i].surface, surface_counts[j].surface) == 0) {
+        known_surface = 1;
+      }
+    }
+    if (!known_surface) {
+      printf("SDK contract manifest has unknown surface: %s\n",
+             manifest[i].surface != NULL ? manifest[i].surface : "(null)");
       ++failures;
     }
   }

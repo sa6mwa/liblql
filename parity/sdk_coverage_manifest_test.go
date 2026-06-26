@@ -49,9 +49,19 @@ var sdkParityCoverageManifest = []sdkParityCoverageRequirement{
 func TestSDKParityCoverageManifest(t *testing.T) {
 	tests := collectSDKParityTests(t)
 	covered := make(map[string]string)
+	knownSurfaces := map[string]bool{
+		"compact":    true,
+		"mutation":   true,
+		"projection": true,
+		"selector":   true,
+		"streaming":  true,
+	}
 	for _, req := range sdkParityCoverageManifest {
 		if req.Surface == "" || req.Requirement == "" {
 			t.Fatalf("SDK parity manifest has empty surface or requirement: %#v", req)
+		}
+		if !knownSurfaces[req.Surface] {
+			t.Fatalf("SDK parity manifest has unknown surface %q for requirement %q", req.Surface, req.Requirement)
 		}
 		if len(req.Tests) == 0 {
 			t.Fatalf("SDK parity manifest requirement has no tests: %s/%s", req.Surface, req.Requirement)
