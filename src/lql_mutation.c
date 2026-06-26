@@ -43,6 +43,7 @@ typedef struct mutation_item {
 } mutation_item;
 
 struct lql_mutation_plan {
+  lql_allocator *allocator;
   mutation_item *items;
   size_t count;
 };
@@ -71,6 +72,7 @@ typedef struct mutation_path_frame {
 } mutation_path_frame;
 
 typedef struct mutation_stream_state {
+  lql_allocator *allocator;
   const lql_mutation_plan *plan;
   lonejson_writer writer;
   lonejson_error *error;
@@ -97,52 +99,62 @@ typedef struct string_list {
   size_t count;
 } string_list;
 
-static void mutation_path_cleanup(mutation_path *path) {
+static lql_allocator *mutation_plan_allocator(const lql_mutation_plan *plan) {
+  if (plan == NULL || plan->allocator == NULL) {
+    return lql_allocator_from_receiver(NULL);
+  }
+  return plan->allocator;
+}
+
+static void mutation_path_cleanup(lql_allocator *allocator,
+                                  mutation_path *path) {
   size_t i;
   if (path == NULL) {
     return;
   }
   for (i = 0u; i < path->segment_count; ++i) {
-    lql_allocator_default()->destroy(lql_allocator_default(),
-                                     path->segments[i]);
+    allocator->destroy(allocator, path->segments[i]);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), path->segments);
+  allocator->destroy(allocator, path->segments);
   path->segments = NULL;
   path->segment_count = 0u;
 }
 
-static void mutation_item_cleanup(mutation_item *item) {
+static void mutation_item_cleanup(lql_allocator *allocator,
+                                  mutation_item *item) {
   if (item == NULL) {
     return;
   }
-  mutation_path_cleanup(&item->path);
-  lql_allocator_default()->destroy(lql_allocator_default(), item->value);
-  lql_allocator_default()->destroy(lql_allocator_default(), item->file_path);
+  mutation_path_cleanup(allocator, &item->path);
+  allocator->destroy(allocator, item->value);
+  allocator->destroy(allocator, item->file_path);
   memset(item, 0, sizeof(*item));
 }
 
 static void mutation_plan_cleanup_items(lql_mutation_plan *plan) {
+  lql_allocator *allocator;
   size_t i;
   if (plan == NULL) {
     return;
   }
+  allocator = mutation_plan_allocator(plan);
   for (i = 0u; i < plan->count; ++i) {
-    mutation_item_cleanup(&plan->items[i]);
+    mutation_item_cleanup(allocator, &plan->items[i]);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), plan->items);
+  allocator->destroy(allocator, plan->items);
   plan->items = NULL;
   plan->count = 0u;
 }
 
-static void string_list_cleanup(string_list *list) {
+static void string_list_cleanup(lql_allocator *allocator, string_list *list) {
   size_t i;
   if (list == NULL) {
     return;
   }
   for (i = 0u; i < list->count; ++i) {
-    lql_allocator_default()->destroy(lql_allocator_default(), list->items[i]);
+    allocator->destroy(allocator, list->items[i]);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), list->items);
+  allocator->destroy(allocator, list->items);
   list->items = NULL;
   list->count = 0u;
 }
@@ -164,7 +176,8 @@ static size_t trimmed_len(const char *start) {
   return (size_t)(end - start);
 }
 
-static char *trimmed_dup_range(const char *start, size_t len) {
+static char *trimmed_dup_range(lql_allocator *allocator, const char *start,
+                               size_t len) {
   const char *end;
   char *out;
   start = skip_space(start);
@@ -174,8 +187,7 @@ static char *trimmed_dup_range(const char *start, size_t len) {
     --end;
   }
   len = (size_t)(end - start);
-  out =
-      (char *)lql_allocator_default()->alloc(lql_allocator_default(), len + 1u);
+  out = (char *)allocator->alloc(allocator, len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -196,7 +208,7 @@ static int has_suffix(const char *s, const char *suffix) {
   return slen >= plen && strcmp(s + slen - plen, suffix) == 0;
 }
 
-static char *mutation_unquote(char *value) {
+static char *mutation_unquote(lql_allocator *allocator, char *value) {
   size_t len;
   char *out;
   char *r;
@@ -204,8 +216,7 @@ static char *mutation_unquote(char *value) {
   len = strlen(value);
   if (len >= 2u && ((value[0] == '"' && value[len - 1u] == '"') ||
                     (value[0] == '\'' && value[len - 1u] == '\''))) {
-    out = (char *)lql_allocator_default()->alloc(lql_allocator_default(),
-                                                 len - 1u);
+    out = (char *)allocator->alloc(allocator, len - 1u);
     if (out == NULL) {
       return NULL;
     }
@@ -218,7 +229,7 @@ static char *mutation_unquote(char *value) {
       *w++ = *r++;
     }
     *w = '\0';
-    lql_allocator_default()->destroy(lql_allocator_default(), value);
+    allocator->destroy(allocator, value);
     return out;
   }
   return value;
@@ -228,7 +239,8 @@ static int path_is_absolute(const char *path) {
   return path != NULL && path[0] == '/';
 }
 
-static char *join_paths(const char *base, const char *path) {
+static char *join_paths(lql_allocator *allocator, const char *base,
+                        const char *path) {
   size_t base_len;
   size_t path_len;
   char *out;
@@ -236,8 +248,8 @@ static char *join_paths(const char *base, const char *path) {
   base_len = strlen(base);
   path_len = strlen(path);
   need_sep = base_len != 0u && base[base_len - 1u] != '/';
-  out = (char *)lql_allocator_default()->alloc(
-      lql_allocator_default(), base_len + (need_sep ? 1u : 0u) + path_len + 1u);
+  out = (char *)allocator->alloc(allocator, base_len + (need_sep ? 1u : 0u) +
+                                                path_len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -249,22 +261,22 @@ static char *join_paths(const char *base, const char *path) {
   return out;
 }
 
-static char *resolve_file_value_path(const char *raw,
+static char *resolve_file_value_path(lql_allocator *allocator, const char *raw,
                                      const lql_mutation_parse_options *options,
                                      lql_error *error) {
   char *path;
   const char *home;
   char *expanded;
-  path = trimmed_dup_range(raw, strlen(raw));
+  path = trimmed_dup_range(allocator, raw, strlen(raw));
   if (path == NULL) {
     return NULL;
   }
-  path = mutation_unquote(path);
+  path = mutation_unquote(allocator, path);
   if (path == NULL) {
     return NULL;
   }
   if (path[0] == '\0') {
-    lql_allocator_default()->destroy(lql_allocator_default(), path);
+    allocator->destroy(allocator, path);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "file-backed mutation missing file path");
     return NULL;
@@ -272,17 +284,17 @@ static char *resolve_file_value_path(const char *raw,
   if (strcmp(path, "~") == 0 || has_prefix(path, "~/")) {
     home = getenv("HOME");
     if (home == NULL || home[0] == '\0') {
-      lql_allocator_default()->destroy(lql_allocator_default(), path);
+      allocator->destroy(allocator, path);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "failed to resolve home for file-backed mutation");
       return NULL;
     }
     if (strcmp(path, "~") == 0) {
-      expanded = lql_allocator_default()->strdup(lql_allocator_default(), home);
+      expanded = allocator->strdup(allocator, home);
     } else {
-      expanded = join_paths(home, path + 2u);
+      expanded = join_paths(allocator, home, path + 2u);
     }
-    lql_allocator_default()->destroy(lql_allocator_default(), path);
+    allocator->destroy(allocator, path);
     return expanded;
   }
   if (path_is_absolute(path)) {
@@ -293,11 +305,11 @@ static char *resolve_file_value_path(const char *raw,
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "relative file-backed mutation path requires file value base "
                   "dir");
-    lql_allocator_default()->destroy(lql_allocator_default(), path);
+    allocator->destroy(allocator, path);
     return NULL;
   }
-  expanded = join_paths(options->file_value_base_dir, path);
-  lql_allocator_default()->destroy(lql_allocator_default(), path);
+  expanded = join_paths(allocator, options->file_value_base_dir, path);
+  allocator->destroy(allocator, path);
   return expanded;
 }
 
@@ -443,10 +455,10 @@ static lonejson_read_result spooled_read(void *user, unsigned char *buffer,
   return lonejson_spooled_read((lonejson_spooled *)user, buffer, capacity);
 }
 
-static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
+static int append_buf(lql_allocator *allocator, char **buf, size_t *len,
+                      const char *data, size_t n) {
   char *next;
-  next = (char *)lql_allocator_default()->realloc(lql_allocator_default(), *buf,
-                                                  *len + n + 1u);
+  next = (char *)allocator->realloc(allocator, *buf, *len + n + 1u);
   if (next == NULL) {
     return 0;
   }
@@ -457,11 +469,11 @@ static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
   return 1;
 }
 
-static int add_string(string_list *list, char *value) {
+static int add_string(lql_allocator *allocator, string_list *list,
+                      char *value) {
   char **next;
-  next = (char **)lql_allocator_default()->realloc(
-      lql_allocator_default(), list->items,
-      sizeof(list->items[0]) * (list->count + 1u));
+  next = (char **)allocator->realloc(
+      allocator, list->items, sizeof(list->items[0]) * (list->count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -470,8 +482,8 @@ static int add_string(string_list *list, char *value) {
   return 1;
 }
 
-static int split_expressions(const char *input, string_list *out,
-                             lql_error *error) {
+static int split_expressions(lql_allocator *allocator, const char *input,
+                             string_list *out, lql_error *error) {
   const char *chunk;
   const char *p;
   int depth;
@@ -507,23 +519,23 @@ static int split_expressions(const char *input, string_list *out,
       if (depth == 0) {
         lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                       "unexpected closing brace");
-        string_list_cleanup(out);
+        string_list_cleanup(allocator, out);
         return 0;
       }
       --depth;
     } else if ((*p == ',' || *p == '\n') && !in_quote && depth == 0) {
-      item = trimmed_dup_range(chunk, (size_t)(p - chunk));
+      item = trimmed_dup_range(allocator, chunk, (size_t)(p - chunk));
       if (item == NULL) {
-        string_list_cleanup(out);
+        string_list_cleanup(allocator, out);
         return 0;
       }
-      if (item[0] != '\0' && !add_string(out, item)) {
-        lql_allocator_default()->destroy(lql_allocator_default(), item);
-        string_list_cleanup(out);
+      if (item[0] != '\0' && !add_string(allocator, out, item)) {
+        allocator->destroy(allocator, item);
+        string_list_cleanup(allocator, out);
         return 0;
       }
       if (item[0] == '\0') {
-        lql_allocator_default()->destroy(lql_allocator_default(), item);
+        allocator->destroy(allocator, item);
       }
       chunk = p + 1;
     }
@@ -532,33 +544,33 @@ static int split_expressions(const char *input, string_list *out,
   if (in_quote) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "unterminated quote in mutation expression");
-    string_list_cleanup(out);
+    string_list_cleanup(allocator, out);
     return 0;
   }
   if (depth != 0) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "unterminated brace in mutation expression");
-    string_list_cleanup(out);
+    string_list_cleanup(allocator, out);
     return 0;
   }
   len = trimmed_len(chunk);
   if (len != 0u) {
-    item = trimmed_dup_range(chunk, strlen(chunk));
-    if (item == NULL || !add_string(out, item)) {
-      lql_allocator_default()->destroy(lql_allocator_default(), item);
-      string_list_cleanup(out);
+    item = trimmed_dup_range(allocator, chunk, strlen(chunk));
+    if (item == NULL || !add_string(allocator, out, item)) {
+      allocator->destroy(allocator, item);
+      string_list_cleanup(allocator, out);
       return 0;
     }
   }
   return 1;
 }
 
-static char *decode_path_segment(const char *src, size_t len) {
+static char *decode_path_segment(lql_allocator *allocator, const char *src,
+                                 size_t len) {
   char *out;
   size_t i;
   size_t j;
-  out =
-      (char *)lql_allocator_default()->alloc(lql_allocator_default(), len + 1u);
+  out = (char *)allocator->alloc(allocator, len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -583,11 +595,12 @@ static char *decode_path_segment(const char *src, size_t len) {
   return out;
 }
 
-static int path_add_segment(mutation_path *path, char *segment) {
+static int path_add_segment(lql_allocator *allocator, mutation_path *path,
+                            char *segment) {
   char **next;
-  next = (char **)lql_allocator_default()->realloc(
-      lql_allocator_default(), path->segments,
-      sizeof(path->segments[0]) * (path->segment_count + 1u));
+  next = (char **)allocator->realloc(allocator, path->segments,
+                                     sizeof(path->segments[0]) *
+                                         (path->segment_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -596,7 +609,8 @@ static int path_add_segment(mutation_path *path, char *segment) {
   return 1;
 }
 
-static int expand_and_add_segment(mutation_path *path, char *segment) {
+static int expand_and_add_segment(lql_allocator *allocator, mutation_path *path,
+                                  char *segment) {
   size_t len;
   char *base;
   char *wild;
@@ -604,25 +618,27 @@ static int expand_and_add_segment(mutation_path *path, char *segment) {
   if (len > 2u && strcmp(segment, "[]") != 0 &&
       strcmp(segment + len - 2u, "[]") == 0) {
     segment[len - 2u] = '\0';
-    base = lql_allocator_default()->strdup(lql_allocator_default(), segment);
+    base = allocator->strdup(allocator, segment);
     segment[len - 2u] = '[';
     if (base == NULL) {
-      lql_allocator_default()->destroy(lql_allocator_default(), segment);
+      allocator->destroy(allocator, segment);
       return 0;
     }
-    wild = lql_allocator_default()->strdup(lql_allocator_default(), "[]");
+    wild = allocator->strdup(allocator, "[]");
     if (wild == NULL) {
-      lql_allocator_default()->destroy(lql_allocator_default(), base);
-      lql_allocator_default()->destroy(lql_allocator_default(), segment);
+      allocator->destroy(allocator, base);
+      allocator->destroy(allocator, segment);
       return 0;
     }
-    lql_allocator_default()->destroy(lql_allocator_default(), segment);
-    return path_add_segment(path, base) && path_add_segment(path, wild);
+    allocator->destroy(allocator, segment);
+    return path_add_segment(allocator, path, base) &&
+           path_add_segment(allocator, path, wild);
   }
-  return path_add_segment(path, segment);
+  return path_add_segment(allocator, path, segment);
 }
 
-static int split_path(const char *raw, mutation_path *out, lql_error *error) {
+static int split_path(lql_allocator *allocator, const char *raw,
+                      mutation_path *out, lql_error *error) {
   const char *path;
   const char *seg;
   const char *slash;
@@ -647,10 +663,10 @@ static int split_path(const char *raw, mutation_path *out, lql_error *error) {
     if (slash == NULL) {
       slash = path + len;
     }
-    decoded = decode_path_segment(seg, (size_t)(slash - seg));
-    if (decoded == NULL || !expand_and_add_segment(out, decoded)) {
-      lql_allocator_default()->destroy(lql_allocator_default(), decoded);
-      mutation_path_cleanup(out);
+    decoded = decode_path_segment(allocator, seg, (size_t)(slash - seg));
+    if (decoded == NULL || !expand_and_add_segment(allocator, out, decoded)) {
+      allocator->destroy(allocator, decoded);
+      mutation_path_cleanup(allocator, out);
       return 0;
     }
     if (slash == path + len) {
@@ -662,7 +678,7 @@ static int split_path(const char *raw, mutation_path *out, lql_error *error) {
       (out->segment_count == 1u && out->segments[0][0] == '\0')) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "mutation path refers to document root");
-    mutation_path_cleanup(out);
+    mutation_path_cleanup(allocator, out);
     return 0;
   }
   return 1;
@@ -670,9 +686,10 @@ static int split_path(const char *raw, mutation_path *out, lql_error *error) {
 
 static int append_item(lql_mutation_plan *plan, mutation_item *item) {
   mutation_item *next;
-  next = (mutation_item *)lql_allocator_default()->realloc(
-      lql_allocator_default(), plan->items,
-      sizeof(plan->items[0]) * (plan->count + 1u));
+  lql_allocator *allocator;
+  allocator = mutation_plan_allocator(plan);
+  next = (mutation_item *)allocator->realloc(
+      allocator, plan->items, sizeof(plan->items[0]) * (plan->count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -682,19 +699,18 @@ static int append_item(lql_mutation_plan *plan, mutation_item *item) {
   return 1;
 }
 
-static int prepend_path(mutation_item *item, const mutation_path *prefix) {
+static int prepend_path(lql_allocator *allocator, mutation_item *item,
+                        const mutation_path *prefix) {
   char **segments;
   size_t i;
   size_t count;
   count = prefix->segment_count + item->path.segment_count;
-  segments = (char **)lql_allocator_default()->calloc(
-      lql_allocator_default(), count, sizeof(segments[0]));
+  segments = (char **)allocator->calloc(allocator, count, sizeof(segments[0]));
   if (segments == NULL) {
     return 0;
   }
   for (i = 0u; i < prefix->segment_count; ++i) {
-    segments[i] = lql_allocator_default()->strdup(lql_allocator_default(),
-                                                  prefix->segments[i]);
+    segments[i] = allocator->strdup(allocator, prefix->segments[i]);
     if (segments[i] == NULL) {
       goto fail;
     }
@@ -703,16 +719,15 @@ static int prepend_path(mutation_item *item, const mutation_path *prefix) {
     segments[prefix->segment_count + i] = item->path.segments[i];
     item->path.segments[i] = NULL;
   }
-  lql_allocator_default()->destroy(lql_allocator_default(),
-                                   item->path.segments);
+  allocator->destroy(allocator, item->path.segments);
   item->path.segments = segments;
   item->path.segment_count = count;
   return 1;
 fail:
   for (i = 0u; i < count; ++i) {
-    lql_allocator_default()->destroy(lql_allocator_default(), segments[i]);
+    allocator->destroy(allocator, segments[i]);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), segments);
+  allocator->destroy(allocator, segments);
   return 0;
 }
 
@@ -731,25 +746,28 @@ static int parse_number(const char *s, double *out) {
   return 1;
 }
 
-static int parse_number_slice(const char *s, size_t len, double *out) {
+static int parse_number_slice(lql_allocator *allocator, const char *s,
+                              size_t len, double *out) {
   char *copy;
   int ok;
-  copy = trimmed_dup_range(s, len);
+  copy = trimmed_dup_range(allocator, s, len);
   if (copy == NULL) {
     return 0;
   }
   ok = parse_number(copy, out);
-  lql_allocator_default()->destroy(lql_allocator_default(), copy);
+  allocator->destroy(allocator, copy);
   return ok;
 }
 
 static const char *unquoted_value(const char *value, size_t *out_len);
 
-static int parse_mutation_expr(const char *expr, lql_mutation_plan *plan,
+static int parse_mutation_expr(lql_allocator *allocator, const char *expr,
+                               lql_mutation_plan *plan,
                                const lql_mutation_parse_options *options,
                                lql_error *error);
 
-static int parse_brace_mutation(const char *expr, lql_mutation_plan *plan,
+static int parse_brace_mutation(lql_allocator *allocator, const char *expr,
+                                lql_mutation_plan *plan,
                                 const lql_mutation_parse_options *options,
                                 lql_error *error) {
   const char *open;
@@ -769,62 +787,65 @@ static int parse_brace_mutation(const char *expr, lql_mutation_plan *plan,
   if (open == NULL || open == expr) {
     return 0;
   }
-  prefix_text = trimmed_dup_range(expr, (size_t)(open - expr));
+  prefix_text = trimmed_dup_range(allocator, expr, (size_t)(open - expr));
   if (prefix_text == NULL) {
     return -1;
   }
   if (strchr(prefix_text, '=') != NULL) {
-    lql_allocator_default()->destroy(lql_allocator_default(), prefix_text);
+    allocator->destroy(allocator, prefix_text);
     return 0;
   }
-  if (!split_path(prefix_text, &prefix, error)) {
-    lql_allocator_default()->destroy(lql_allocator_default(), prefix_text);
+  if (!split_path(allocator, prefix_text, &prefix, error)) {
+    allocator->destroy(allocator, prefix_text);
     return -1;
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), prefix_text);
-  body = trimmed_dup_range(open + 1, len - (size_t)(open - expr) - 2u);
+  allocator->destroy(allocator, prefix_text);
+  body =
+      trimmed_dup_range(allocator, open + 1, len - (size_t)(open - expr) - 2u);
   if (body == NULL) {
-    mutation_path_cleanup(&prefix);
+    mutation_path_cleanup(allocator, &prefix);
     return -1;
   }
-  if (!split_expressions(body, &parts, error)) {
-    lql_allocator_default()->destroy(lql_allocator_default(), body);
-    mutation_path_cleanup(&prefix);
+  if (!split_expressions(allocator, body, &parts, error)) {
+    allocator->destroy(allocator, body);
+    mutation_path_cleanup(allocator, &prefix);
     return -1;
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), body);
+  allocator->destroy(allocator, body);
   if (parts.count == 0u) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "brace mutation empty");
-    string_list_cleanup(&parts);
-    mutation_path_cleanup(&prefix);
+    string_list_cleanup(allocator, &parts);
+    mutation_path_cleanup(allocator, &prefix);
     return -1;
   }
   memset(&nested, 0, sizeof(nested));
+  nested.allocator = allocator;
   for (i = 0u; i < parts.count; ++i) {
-    if (!parse_mutation_expr(parts.items[i], &nested, options, error)) {
+    if (!parse_mutation_expr(allocator, parts.items[i], &nested, options,
+                             error)) {
       mutation_plan_cleanup_items(&nested);
-      string_list_cleanup(&parts);
-      mutation_path_cleanup(&prefix);
+      string_list_cleanup(allocator, &parts);
+      mutation_path_cleanup(allocator, &prefix);
       return -1;
     }
   }
   for (i = 0u; i < nested.count; ++i) {
-    if (!prepend_path(&nested.items[i], &prefix) ||
+    if (!prepend_path(allocator, &nested.items[i], &prefix) ||
         !append_item(plan, &nested.items[i])) {
       mutation_plan_cleanup_items(&nested);
-      string_list_cleanup(&parts);
-      mutation_path_cleanup(&prefix);
+      string_list_cleanup(allocator, &parts);
+      mutation_path_cleanup(allocator, &prefix);
       return -1;
     }
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), nested.items);
-  string_list_cleanup(&parts);
-  mutation_path_cleanup(&prefix);
+  allocator->destroy(allocator, nested.items);
+  string_list_cleanup(allocator, &parts);
+  mutation_path_cleanup(allocator, &prefix);
   return 1;
 }
 
-static int parse_set_value(char *value, int time_mode, mutation_item *item,
-                           lql_error *error) {
+static int parse_set_value(lql_allocator *allocator, char *value, int time_mode,
+                           mutation_item *item, lql_error *error) {
   lql_temporal temporal;
   const char *text;
   size_t len;
@@ -832,13 +853,13 @@ static int parse_set_value(char *value, int time_mode, mutation_item *item,
   char *copy;
   if (time_mode) {
     text = unquoted_value(value, &len);
-    copy = trimmed_dup_range(text, len);
+    copy = trimmed_dup_range(allocator, text, len);
     if (copy == NULL) {
       return 0;
     }
     if (ascii_equal_ignore_case(copy, "NOW")) {
       if (!lql_temporal_now(&temporal)) {
-        lql_allocator_default()->destroy(lql_allocator_default(), copy);
+        allocator->destroy(allocator, copy);
         lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                       "failed to resolve current time");
         return 0;
@@ -846,22 +867,21 @@ static int parse_set_value(char *value, int time_mode, mutation_item *item,
     } else if (!time_literal_has_zone(copy) ||
                !lql_parse_temporal_literal(copy, &temporal) ||
                temporal.date_only) {
-      lql_allocator_default()->destroy(lql_allocator_default(), copy);
+      allocator->destroy(allocator, copy);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR, "invalid time literal");
       return 0;
     }
-    lql_allocator_default()->destroy(lql_allocator_default(), copy);
+    allocator->destroy(allocator, copy);
     if (!lql_temporal_format_rfc3339_nano(&temporal, normalized,
                                           sizeof(normalized))) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR, "invalid time literal");
       return 0;
     }
-    item->value =
-        lql_allocator_default()->strdup(lql_allocator_default(), normalized);
+    item->value = allocator->strdup(allocator, normalized);
     if (item->value == NULL) {
       return 0;
     }
-    lql_allocator_default()->destroy(lql_allocator_default(), value);
+    allocator->destroy(allocator, value);
     item->time_value = 1;
     return 1;
   }
@@ -869,7 +889,8 @@ static int parse_set_value(char *value, int time_mode, mutation_item *item,
   return 1;
 }
 
-static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
+static int parse_mutation_expr(lql_allocator *allocator, const char *raw,
+                               lql_mutation_plan *plan,
                                const lql_mutation_parse_options *options,
                                lql_error *error) {
   char *expr;
@@ -884,7 +905,7 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
   double delta;
   size_t len;
 
-  expr = trimmed_dup_range(raw, strlen(raw));
+  expr = trimmed_dup_range(allocator, raw, strlen(raw));
   if (expr == NULL) {
     return 0;
   }
@@ -918,7 +939,7 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     if (file_mode != MUTATION_FILE_NONE || remove_mode) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "time-prefixed mutation has invalid prefix combination");
-      lql_allocator_default()->destroy(lql_allocator_default(), expr);
+      allocator->destroy(allocator, expr);
       return 0;
     }
     time_mode = 1;
@@ -929,29 +950,30 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     if (file_mode != MUTATION_FILE_NONE) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "file-backed mutation has invalid prefix combination");
-      lql_allocator_default()->destroy(lql_allocator_default(), expr);
+      allocator->destroy(allocator, expr);
       return 0;
     }
     item.kind = MUTATION_REMOVE;
-    if (!split_path(expr, &item.path, error) || !append_item(plan, &item)) {
-      mutation_item_cleanup(&item);
-      lql_allocator_default()->destroy(lql_allocator_default(), expr);
+    if (!split_path(allocator, expr, &item.path, error) ||
+        !append_item(plan, &item)) {
+      mutation_item_cleanup(allocator, &item);
+      allocator->destroy(allocator, expr);
       return 0;
     }
-    lql_allocator_default()->destroy(lql_allocator_default(), expr);
+    allocator->destroy(allocator, expr);
     return 1;
   }
   if (has_suffix(expr, "++") || has_suffix(expr, "--")) {
     if (file_mode != MUTATION_FILE_NONE) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "file-backed mutation does not support increment");
-      lql_allocator_default()->destroy(lql_allocator_default(), expr);
+      allocator->destroy(allocator, expr);
       return 0;
     }
     if (time_mode) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "time-prefixed mutation does not support increment");
-      lql_allocator_default()->destroy(lql_allocator_default(), expr);
+      allocator->destroy(allocator, expr);
       return 0;
     }
     len = strlen(expr);
@@ -959,31 +981,32 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     expr[len - 2u] = '\0';
     item.kind = MUTATION_INCREMENT;
     item.delta = delta;
-    if (!split_path(expr, &item.path, error) || !append_item(plan, &item)) {
-      mutation_item_cleanup(&item);
-      lql_allocator_default()->destroy(lql_allocator_default(), expr);
+    if (!split_path(allocator, expr, &item.path, error) ||
+        !append_item(plan, &item)) {
+      mutation_item_cleanup(allocator, &item);
+      allocator->destroy(allocator, expr);
       return 0;
     }
-    lql_allocator_default()->destroy(lql_allocator_default(), expr);
+    allocator->destroy(allocator, expr);
     return 1;
   }
-  brace_result = parse_brace_mutation(expr, plan, options, error);
+  brace_result = parse_brace_mutation(allocator, expr, plan, options, error);
   if (brace_result != 0) {
-    lql_allocator_default()->destroy(lql_allocator_default(), expr);
+    allocator->destroy(allocator, expr);
     return brace_result > 0;
   }
   eq = strchr(expr, '=');
   if (eq == NULL) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "invalid mutation, expected key=value");
-    lql_allocator_default()->destroy(lql_allocator_default(), expr);
+    allocator->destroy(allocator, expr);
     return 0;
   }
   *eq = '\0';
   path_text = expr;
-  value = trimmed_dup_range(eq + 1, strlen(eq + 1));
+  value = trimmed_dup_range(allocator, eq + 1, strlen(eq + 1));
   if (value == NULL) {
-    lql_allocator_default()->destroy(lql_allocator_default(), expr);
+    allocator->destroy(allocator, expr);
     return 0;
   }
   item.kind = MUTATION_SET;
@@ -991,24 +1014,24 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     if (options == NULL || !options->enable_file_values) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "file-backed mutations are disabled");
-      lql_allocator_default()->destroy(lql_allocator_default(), value);
-      lql_allocator_default()->destroy(lql_allocator_default(), expr);
+      allocator->destroy(allocator, value);
+      allocator->destroy(allocator, expr);
       return 0;
     }
     item.file_mode = file_mode;
-    item.file_path = resolve_file_value_path(value, options, error);
-    lql_allocator_default()->destroy(lql_allocator_default(), value);
+    item.file_path = resolve_file_value_path(allocator, value, options, error);
+    allocator->destroy(allocator, value);
     if (item.file_path == NULL) {
-      lql_allocator_default()->destroy(lql_allocator_default(), expr);
+      allocator->destroy(allocator, expr);
       return 0;
     }
-    if (!split_path(path_text, &item.path, error) ||
+    if (!split_path(allocator, path_text, &item.path, error) ||
         !append_item(plan, &item)) {
-      mutation_item_cleanup(&item);
-      lql_allocator_default()->destroy(lql_allocator_default(), expr);
+      mutation_item_cleanup(allocator, &item);
+      allocator->destroy(allocator, expr);
       return 0;
     }
-    lql_allocator_default()->destroy(lql_allocator_default(), expr);
+    allocator->destroy(allocator, expr);
     return 1;
   }
   if (!time_mode && (value[0] == '+' || value[0] == '-') &&
@@ -1016,24 +1039,25 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     if (delta == 0.0) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "increment mutation requires non-zero delta");
-      lql_allocator_default()->destroy(lql_allocator_default(), value);
-      lql_allocator_default()->destroy(lql_allocator_default(), expr);
+      allocator->destroy(allocator, value);
+      allocator->destroy(allocator, expr);
       return 0;
     }
     item.kind = MUTATION_INCREMENT;
     item.delta = delta;
-    lql_allocator_default()->destroy(lql_allocator_default(), value);
-  } else if (!parse_set_value(value, time_mode, &item, error)) {
-    lql_allocator_default()->destroy(lql_allocator_default(), value);
-    lql_allocator_default()->destroy(lql_allocator_default(), expr);
+    allocator->destroy(allocator, value);
+  } else if (!parse_set_value(allocator, value, time_mode, &item, error)) {
+    allocator->destroy(allocator, value);
+    allocator->destroy(allocator, expr);
     return 0;
   }
-  if (!split_path(path_text, &item.path, error) || !append_item(plan, &item)) {
-    mutation_item_cleanup(&item);
-    lql_allocator_default()->destroy(lql_allocator_default(), expr);
+  if (!split_path(allocator, path_text, &item.path, error) ||
+      !append_item(plan, &item)) {
+    mutation_item_cleanup(allocator, &item);
+    allocator->destroy(allocator, expr);
     return 0;
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), expr);
+  allocator->destroy(allocator, expr);
   return 1;
 }
 
@@ -1041,11 +1065,11 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
     lql *self, const char *const *exprs, size_t expr_count,
     const lql_mutation_parse_options *options, lql_mutation_plan **out,
     lql_error *error) {
+  lql_allocator *allocator;
   lql_mutation_plan *plan;
   string_list parts;
   size_t i;
   size_t j;
-  (void)self;
 
   if (out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "out is required");
@@ -1056,31 +1080,33 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "no field mutations provided");
     return LQL_STATUS_PARSE_ERROR;
   }
-  plan = (lql_mutation_plan *)lql_allocator_default()->calloc(
-      lql_allocator_default(), 1u, sizeof(*plan));
+  allocator = lql_allocator_from_receiver(self);
+  plan = (lql_mutation_plan *)allocator->calloc(allocator, 1u, sizeof(*plan));
   if (plan == NULL) {
     return LQL_STATUS_NO_MEMORY;
   }
+  plan->allocator = allocator;
   for (i = 0u; i < expr_count; ++i) {
     if (exprs[i] == NULL) {
       continue;
     }
-    if (!split_expressions(exprs[i], &parts, error)) {
+    if (!split_expressions(allocator, exprs[i], &parts, error)) {
       lql_mutation_plan_destroy_impl(NULL, plan);
       return error != NULL && error->code != LQL_STATUS_OK
                  ? error->code
                  : LQL_STATUS_NO_MEMORY;
     }
     for (j = 0u; j < parts.count; ++j) {
-      if (!parse_mutation_expr(parts.items[j], plan, options, error)) {
-        string_list_cleanup(&parts);
+      if (!parse_mutation_expr(allocator, parts.items[j], plan, options,
+                               error)) {
+        string_list_cleanup(allocator, &parts);
         lql_mutation_plan_destroy_impl(NULL, plan);
         return error != NULL && error->code != LQL_STATUS_OK
                    ? error->code
                    : LQL_STATUS_NO_MEMORY;
       }
     }
-    string_list_cleanup(&parts);
+    string_list_cleanup(allocator, &parts);
   }
   if (plan->count == 0u) {
     lql_mutation_plan_destroy_impl(NULL, plan);
@@ -1107,16 +1133,18 @@ lql_mutation_plan_count_impl(const lql *self, const lql_mutation_plan *plan) {
 
 LQL_INTERNAL_SYMBOL void
 lql_mutation_plan_destroy_impl(lql *self, lql_mutation_plan *plan) {
+  lql_allocator *allocator;
   size_t i;
-  (void)self;
   if (plan == NULL) {
     return;
   }
+  allocator = plan->allocator != NULL ? plan->allocator
+                                      : lql_allocator_from_receiver(self);
   for (i = 0u; i < plan->count; ++i) {
-    mutation_item_cleanup(&plan->items[i]);
+    mutation_item_cleanup(allocator, &plan->items[i]);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), plan->items);
-  lql_allocator_default()->destroy(lql_allocator_default(), plan);
+  allocator->destroy(allocator, plan->items);
+  allocator->destroy(allocator, plan);
 }
 
 static int mutation_is_root_field_supported(const mutation_item *item) {
@@ -1556,7 +1584,8 @@ static int inspect_file_textlike(const char *path, lonejson_error *error) {
   return expected == 0u ? 1 : 0;
 }
 
-static lonejson_status write_mutation_set_value(lonejson_writer *writer,
+static lonejson_status write_mutation_set_value(lql_allocator *allocator,
+                                                lonejson_writer *writer,
                                                 const mutation_item *item,
                                                 lonejson_error *error) {
   const char *value;
@@ -1600,7 +1629,7 @@ static lonejson_status write_mutation_set_value(lonejson_writer *writer,
   if (ascii_equal_ignore_case_n(text, len, "null")) {
     return lonejson_writer_null(writer, error);
   }
-  if (parse_number_slice(text, len, &number)) {
+  if (parse_number_slice(allocator, text, len, &number)) {
     (void)number;
     return lonejson_writer_number_text(writer, text, len, error);
   }
@@ -1639,9 +1668,8 @@ static lonejson_status mutation_push_path_frame(mutation_stream_state *state,
   memset(&frame, 0, sizeof(frame));
   frame.container = container;
   if (path != NULL && path->segment_count != 0u) {
-    frame.array_segments = (unsigned char *)lql_allocator_default()->calloc(
-        lql_allocator_default(), path->segment_count,
-        sizeof(frame.array_segments[0]));
+    frame.array_segments = (unsigned char *)state->allocator->calloc(
+        state->allocator, path->segment_count, sizeof(frame.array_segments[0]));
     if (frame.array_segments == NULL) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
@@ -1657,12 +1685,11 @@ static lonejson_status mutation_push_path_frame(mutation_stream_state *state,
     }
   }
   frame.segment_count = path == NULL ? 0u : path->segment_count;
-  next = (mutation_path_frame *)lql_allocator_default()->realloc(
-      lql_allocator_default(), state->path_frames,
+  next = (mutation_path_frame *)state->allocator->realloc(
+      state->allocator, state->path_frames,
       sizeof(state->path_frames[0]) * (state->path_frame_count + 1u));
   if (next == NULL) {
-    lql_allocator_default()->destroy(lql_allocator_default(),
-                                     frame.array_segments);
+    state->allocator->destroy(state->allocator, frame.array_segments);
     return LONEJSON_STATUS_ALLOCATION_FAILED;
   }
   state->path_frames = next;
@@ -1675,12 +1702,11 @@ static void mutation_pop_path_frame(mutation_stream_state *state) {
     return;
   }
   --state->path_frame_count;
-  lql_allocator_default()->destroy(
-      lql_allocator_default(),
+  state->allocator->destroy(
+      state->allocator,
       state->path_frames[state->path_frame_count].array_segments);
   if (state->path_frame_count == 0u) {
-    lql_allocator_default()->destroy(lql_allocator_default(),
-                                     state->path_frames);
+    state->allocator->destroy(state->allocator, state->path_frames);
     state->path_frames = NULL;
   }
 }
@@ -1887,8 +1913,8 @@ static lonejson_status write_synthetic_leaf_value(mutation_stream_state *state,
                                     error) != LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
-  } else if (write_mutation_set_value(&state->writer, item, error) !=
-             LONEJSON_STATUS_OK) {
+  } else if (write_mutation_set_value(state->allocator, &state->writer, item,
+                                      error) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   state->applied[index] = 1;
@@ -1917,8 +1943,8 @@ begin_array_value_mutation(mutation_stream_state *state,
     return LONEJSON_STATUS_OK;
   }
   if (item->kind == MUTATION_SET) {
-    if (write_mutation_set_value(&state->writer, item, error) !=
-        LONEJSON_STATUS_OK) {
+    if (write_mutation_set_value(state->allocator, &state->writer, item,
+                                 error) != LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
     state->applied[index] = 1;
@@ -1929,7 +1955,7 @@ begin_array_value_mutation(mutation_stream_state *state,
   state->active_increment = 1;
   state->active_keyed = 0;
   state->active_index = index;
-  lql_allocator_default()->destroy(lql_allocator_default(), state->num_buf);
+  state->allocator->destroy(state->allocator, state->num_buf);
   state->num_buf = NULL;
   state->num_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -2115,7 +2141,7 @@ static lonejson_status mutation_key_begin(void *user,
   (void)path;
   (void)error;
   state = (mutation_stream_state *)user;
-  lql_allocator_default()->destroy(lql_allocator_default(), state->key_buf);
+  state->allocator->destroy(state->allocator, state->key_buf);
   state->key_buf = NULL;
   state->key_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -2129,7 +2155,8 @@ static lonejson_status mutation_key_chunk(void *user,
   (void)path;
   (void)error;
   state = (mutation_stream_state *)user;
-  return append_buf(&state->key_buf, &state->key_len, data, len)
+  return append_buf(state->allocator, &state->key_buf, &state->key_len, data,
+                    len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
 }
@@ -2173,8 +2200,8 @@ static lonejson_status mutation_key_end(void *user,
     if (item->kind == MUTATION_SET) {
       if (lonejson_writer_key(&state->writer, state->key_buf, state->key_len,
                               error) != LONEJSON_STATUS_OK ||
-          write_mutation_set_value(&state->writer, item, error) !=
-              LONEJSON_STATUS_OK) {
+          write_mutation_set_value(state->allocator, &state->writer, item,
+                                   error) != LONEJSON_STATUS_OK) {
         return LONEJSON_STATUS_CALLBACK_FAILED;
       }
       state->applied[index] = 1;
@@ -2185,7 +2212,7 @@ static lonejson_status mutation_key_end(void *user,
     state->active_increment = 1;
     state->active_keyed = 1;
     state->active_index = index;
-    lql_allocator_default()->destroy(lql_allocator_default(), state->num_buf);
+    state->allocator->destroy(state->allocator, state->num_buf);
     state->num_buf = NULL;
     state->num_len = 0u;
     return LONEJSON_STATUS_OK;
@@ -2259,7 +2286,7 @@ static lonejson_status mutation_number_begin(void *user,
     state->root_is_object = 0;
   }
   if (state->skipping) {
-    lql_allocator_default()->destroy(lql_allocator_default(), state->num_buf);
+    state->allocator->destroy(state->allocator, state->num_buf);
     state->num_buf = NULL;
     state->num_len = 0u;
     return LONEJSON_STATUS_OK;
@@ -2271,7 +2298,7 @@ static lonejson_status mutation_number_begin(void *user,
   if (matched_value) {
     return LONEJSON_STATUS_OK;
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), state->num_buf);
+  state->allocator->destroy(state->allocator, state->num_buf);
   state->num_buf = NULL;
   state->num_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -2288,7 +2315,8 @@ static lonejson_status mutation_number_chunk(void *user,
   if (state->skipping) {
     return LONEJSON_STATUS_OK;
   }
-  return append_buf(&state->num_buf, &state->num_len, data, len)
+  return append_buf(state->allocator, &state->num_buf, &state->num_len, data,
+                    len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
 }
@@ -2431,24 +2459,23 @@ static lql_status mutate_reader_with_supported_plan(
     return LQL_STATUS_JSON_ERROR;
   }
   memset(&state, 0, sizeof(state));
+  state.allocator = mutation_plan_allocator(plan);
   state.plan = plan;
   state.error = &lj_error;
-  state.applied = (int *)lql_allocator_default()->calloc(
-      lql_allocator_default(), plan->count, sizeof(state.applied[0]));
-  state.prefix_seen_depth = (size_t *)lql_allocator_default()->calloc(
-      lql_allocator_default(), plan->count, sizeof(state.prefix_seen_depth[0]));
+  state.applied = (int *)state.allocator->calloc(state.allocator, plan->count,
+                                                 sizeof(state.applied[0]));
+  state.prefix_seen_depth = (size_t *)state.allocator->calloc(
+      state.allocator, plan->count, sizeof(state.prefix_seen_depth[0]));
   if (state.applied == NULL || state.prefix_seen_depth == NULL) {
-    lql_allocator_default()->destroy(lql_allocator_default(), state.applied);
-    lql_allocator_default()->destroy(lql_allocator_default(),
-                                     state.prefix_seen_depth);
+    state.allocator->destroy(state.allocator, state.applied);
+    state.allocator->destroy(state.allocator, state.prefix_seen_depth);
     lonejson_free(runtime);
     return LQL_STATUS_NO_MEMORY;
   }
   if (lonejson_writer_init_sink(runtime, &state.writer, file_sink, out,
                                 &lj_error) != LONEJSON_STATUS_OK) {
-    lql_allocator_default()->destroy(lql_allocator_default(), state.applied);
-    lql_allocator_default()->destroy(lql_allocator_default(),
-                                     state.prefix_seen_depth);
+    state.allocator->destroy(state.allocator, state.applied);
+    state.allocator->destroy(state.allocator, state.prefix_seen_depth);
     lonejson_free(runtime);
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
@@ -2476,11 +2503,10 @@ static lql_status mutate_reader_with_supported_plan(
   }
   lonejson_writer_cleanup(&state.writer);
   mutation_cleanup_path_frames(&state);
-  lql_allocator_default()->destroy(lql_allocator_default(), state.key_buf);
-  lql_allocator_default()->destroy(lql_allocator_default(), state.num_buf);
-  lql_allocator_default()->destroy(lql_allocator_default(), state.applied);
-  lql_allocator_default()->destroy(lql_allocator_default(),
-                                   state.prefix_seen_depth);
+  state.allocator->destroy(state.allocator, state.key_buf);
+  state.allocator->destroy(state.allocator, state.num_buf);
+  state.allocator->destroy(state.allocator, state.applied);
+  state.allocator->destroy(state.allocator, state.prefix_seen_depth);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
     if (error != NULL && error->code == LQL_STATUS_UNSUPPORTED) {

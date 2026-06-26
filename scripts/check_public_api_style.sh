@@ -220,23 +220,16 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
-  selector_default_allocator_hits=$(
+  library_default_allocator_hits=$(
     grep -En 'lql_allocator_default[[:space:]]*\(' \
-      "$source_root/src/lql_selector.c" 2>/dev/null || true
+      "$source_root/src/lql_selector.c" \
+      "$source_root/src/lql_project.c" \
+      "$source_root/src/lql_eval.c" \
+      "$source_root/src/lql_mutation.c" 2>/dev/null || true
   )
-  if [ -n "$selector_default_allocator_hits" ]; then
-    printf 'public API style: selector parser must use the receiver parser allocator\n' >&2
-    printf '%s\n' "$selector_default_allocator_hits" >&2
-    failed=1
-  fi
-
-  projection_default_allocator_hits=$(
-    grep -En 'lql_allocator_default[[:space:]]*\(' \
-      "$source_root/src/lql_project.c" 2>/dev/null || true
-  )
-  if [ -n "$projection_default_allocator_hits" ]; then
-    printf 'public API style: projection code must use the receiver/projection allocator\n' >&2
-    printf '%s\n' "$projection_default_allocator_hits" >&2
+  if [ -n "$library_default_allocator_hits" ]; then
+    printf 'public API style: library core must use receiver/handle allocators\n' >&2
+    printf '%s\n' "$library_default_allocator_hits" >&2
     failed=1
   fi
 

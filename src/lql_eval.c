@@ -15,6 +15,7 @@
 #include <sys/types.h>
 
 typedef struct eval_doc {
+  lql_allocator *allocator;
   const lql_selector *selector;
   unsigned char *hits;
   char *val_buf;
@@ -27,22 +28,28 @@ typedef struct eval_doc {
   char root_kind;
 } eval_doc;
 
+static lql_allocator *eval_selector_allocator(const lql_selector *selector) {
+  if (selector == NULL || selector->allocator == NULL) {
+    return lql_allocator_from_receiver(NULL);
+  }
+  return selector->allocator;
+}
+
 static void destroy_doc(eval_doc *doc) {
-  lql_allocator_default()->destroy(lql_allocator_default(), doc->hits);
-  lql_allocator_default()->destroy(lql_allocator_default(), doc->val_buf);
-  lql_allocator_default()->destroy(lql_allocator_default(),
-                                   doc->container_types);
-  lql_allocator_default()->destroy(lql_allocator_default(),
-                                   doc->container_depths);
+  doc->allocator->destroy(doc->allocator, doc->hits);
+  doc->allocator->destroy(doc->allocator, doc->val_buf);
+  doc->allocator->destroy(doc->allocator, doc->container_types);
+  doc->allocator->destroy(doc->allocator, doc->container_depths);
   memset(doc, 0, sizeof(*doc));
 }
 
 static int init_doc(eval_doc *doc, const lql_selector *selector) {
   memset(doc, 0, sizeof(*doc));
+  doc->allocator = eval_selector_allocator(selector);
   doc->selector = selector;
   if (selector != NULL && selector->hit_count != 0u) {
-    doc->hits = (unsigned char *)lql_allocator_default()->calloc(
-        lql_allocator_default(), selector->hit_count, 1u);
+    doc->hits = (unsigned char *)doc->allocator->calloc(
+        doc->allocator, selector->hit_count, 1u);
     if (doc->hits == NULL) {
       return 0;
     }
@@ -54,7 +61,7 @@ static void reset_doc(eval_doc *doc) {
   if (doc->selector != NULL && doc->selector->hit_count != 0u) {
     memset(doc->hits, 0, doc->selector->hit_count);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), doc->val_buf);
+  doc->allocator->destroy(doc->allocator, doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   doc->scalar_interested = 0;
@@ -62,10 +69,10 @@ static void reset_doc(eval_doc *doc) {
   doc->root_kind = '\0';
 }
 
-static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
+static int append_buf(lql_allocator *allocator, char **buf, size_t *len,
+                      const char *data, size_t n) {
   char *next;
-  next = (char *)lql_allocator_default()->realloc(lql_allocator_default(), *buf,
-                                                  *len + n + 1u);
+  next = (char *)allocator->realloc(allocator, *buf, *len + n + 1u);
   if (next == NULL) {
     return 0;
   }
@@ -83,15 +90,14 @@ push_container(eval_doc *doc, const lonejson_value_path *path, int type) {
   size_t next_cap;
   if (doc->container_count == doc->container_cap) {
     next_cap = doc->container_cap == 0u ? 8u : doc->container_cap * 2u;
-    next_types = (int *)lql_allocator_default()->realloc(
-        lql_allocator_default(), doc->container_types, sizeof(int) * next_cap);
+    next_types = (int *)doc->allocator->realloc(
+        doc->allocator, doc->container_types, sizeof(int) * next_cap);
     if (next_types == NULL) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
     doc->container_types = next_types;
-    next_depths = (size_t *)lql_allocator_default()->realloc(
-        lql_allocator_default(), doc->container_depths,
-        sizeof(size_t) * next_cap);
+    next_depths = (size_t *)doc->allocator->realloc(
+        doc->allocator, doc->container_depths, sizeof(size_t) * next_cap);
     if (next_depths == NULL) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
@@ -547,7 +553,7 @@ static lonejson_status on_string_begin(void *user,
                                        lonejson_error *error) {
   eval_doc *doc = (eval_doc *)user;
   (void)error;
-  lql_allocator_default()->destroy(lql_allocator_default(), doc->val_buf);
+  doc->allocator->destroy(doc->allocator, doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   doc->scalar_interested = scalar_path_interested(doc, path);
@@ -564,7 +570,7 @@ static lonejson_status on_string_chunk(void *user,
   if (!doc->scalar_interested) {
     return LONEJSON_STATUS_OK;
   }
-  return append_buf(&doc->val_buf, &doc->val_len, data, len)
+  return append_buf(doc->allocator, &doc->val_buf, &doc->val_len, data, len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
 }
@@ -580,7 +586,7 @@ static lonejson_status on_string_end(void *user,
   if (doc->scalar_interested) {
     observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 0, 0, 0);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), doc->val_buf);
+  doc->allocator->destroy(doc->allocator, doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   doc->scalar_interested = 0;
@@ -611,7 +617,7 @@ static lonejson_status on_number_end(void *user,
   if (doc->scalar_interested) {
     observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 1, 0, 0);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), doc->val_buf);
+  doc->allocator->destroy(doc->allocator, doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   doc->scalar_interested = 0;

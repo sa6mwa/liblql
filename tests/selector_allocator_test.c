@@ -93,14 +93,14 @@ static int expect_selector_success_uses_allocator(void) {
   lql_selector *selector;
   lql_error error;
   lql_status st;
+  int matched;
+  size_t outstanding_after_parse;
 
   counting_allocator_init(&counter);
   selector = NULL;
   lql_error_init(&error);
-  st = lql_parse_selector_internal(
-      &counter.api,
-      "or.1./status=\"open\",and.1.contains{field=/title,value=\"urgent\"}", 0,
-      &selector, &error);
+  st = lql_parse_selector_internal(&counter.api, "/status=\"open\"", 0,
+                                   &selector, &error);
   if (st != LQL_STATUS_OK || selector == NULL) {
     printf("selector allocator parse failed: %s\n", error.message);
     return 1;
@@ -110,12 +110,129 @@ static int expect_selector_success_uses_allocator(void) {
     lql_selector_destroy_impl(NULL, selector);
     return 1;
   }
+  outstanding_after_parse = counter.outstanding;
+  matched = 0;
+  lql_error_init(&error);
+  st = lql_matches_json_impl(NULL, selector, "{\"status\":\"open\"}",
+                             strlen("{\"status\":\"open\"}"), &matched, &error);
+  if (st != LQL_STATUS_OK || !matched) {
+    printf("selector allocator eval failed: %s\n", error.message);
+    lql_selector_destroy_impl(NULL, selector);
+    return 1;
+  }
+  if (counter.outstanding != outstanding_after_parse) {
+    printf("selector eval allocator cleanup imbalance: before=%lu after=%lu\n",
+           (unsigned long)outstanding_after_parse,
+           (unsigned long)counter.outstanding);
+    lql_selector_destroy_impl(NULL, selector);
+    return 1;
+  }
   lql_selector_destroy_impl(NULL, selector);
   if (counter.outstanding != 0u || counter.destroy_count == 0u) {
     printf(
         "selector allocator cleanup imbalance: outstanding=%lu destroys=%lu\n",
         (unsigned long)counter.outstanding,
         (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
+static int expect_mutation_success_uses_allocator(void) {
+  counting_allocator counter;
+  lql_impl impl;
+  lql receiver;
+  lql_mutation_plan *plan;
+  const char *exprs[2];
+  lql_error error;
+  lql_status st;
+  size_t outstanding_after_parse;
+  FILE *out;
+
+  counting_allocator_init(&counter);
+  memset(&impl, 0, sizeof(impl));
+  memset(&receiver, 0, sizeof(receiver));
+  impl.allocator = &counter.api;
+  receiver.impl = &impl;
+  exprs[0] = "/count=+2";
+  exprs[1] = "/title=\"done\"";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse_impl(&receiver, exprs, 2u, &plan, &error);
+  if (st != LQL_STATUS_OK || plan == NULL) {
+    printf("mutation allocator parse failed: %s\n", error.message);
+    return 1;
+  }
+  if (counter.alloc_count == 0u ||
+      lql_mutation_plan_count_impl(NULL, plan) != 2u) {
+    printf("mutation allocator was not used or count mismatch\n");
+    lql_mutation_plan_destroy_impl(NULL, plan);
+    return 1;
+  }
+  outstanding_after_parse = counter.outstanding;
+  out = tmpfile();
+  if (out == NULL) {
+    printf("mutation allocator tmpfile failed\n");
+    lql_mutation_plan_destroy_impl(NULL, plan);
+    return 1;
+  }
+  lql_error_init(&error);
+  st = lql_mutate_json_impl(&receiver, plan, "{\"count\":3,\"title\":\"old\"}",
+                            strlen("{\"count\":3,\"title\":\"old\"}"), out,
+                            &error);
+  fclose(out);
+  if (st != LQL_STATUS_OK) {
+    printf("mutation allocator runtime failed: %s\n", error.message);
+    lql_mutation_plan_destroy_impl(NULL, plan);
+    return 1;
+  }
+  if (counter.outstanding != outstanding_after_parse) {
+    printf(
+        "mutation runtime allocator cleanup imbalance: before=%lu after=%lu\n",
+        (unsigned long)outstanding_after_parse,
+        (unsigned long)counter.outstanding);
+    lql_mutation_plan_destroy_impl(NULL, plan);
+    return 1;
+  }
+  lql_mutation_plan_destroy_impl(NULL, plan);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf(
+        "mutation allocator cleanup imbalance: outstanding=%lu destroys=%lu\n",
+        (unsigned long)counter.outstanding,
+        (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
+static int expect_mutation_parse_failure_cleans_allocator(void) {
+  counting_allocator counter;
+  lql_impl impl;
+  lql receiver;
+  lql_mutation_plan *plan;
+  const char *exprs[1];
+  lql_error error;
+  lql_status st;
+
+  counting_allocator_init(&counter);
+  memset(&impl, 0, sizeof(impl));
+  memset(&receiver, 0, sizeof(receiver));
+  impl.allocator = &counter.api;
+  receiver.impl = &impl;
+  exprs[0] = "/=1";
+  plan = NULL;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse_impl(&receiver, exprs, 1u, &plan, &error);
+  if (st == LQL_STATUS_OK || plan != NULL) {
+    printf("mutation allocator parse failure unexpectedly succeeded\n");
+    lql_mutation_plan_destroy_impl(NULL, plan);
+    return 1;
+  }
+  if (counter.alloc_count == 0u || counter.outstanding != 0u) {
+    printf("mutation allocator failure cleanup imbalance: allocs=%lu "
+           "outstanding=%lu\n",
+           (unsigned long)counter.alloc_count,
+           (unsigned long)counter.outstanding);
     return 1;
   }
   return 0;
@@ -260,5 +377,7 @@ int main(void) {
   failures += expect_selector_parse_failure_cleans_allocator();
   failures += expect_projection_success_uses_allocator();
   failures += expect_projection_parse_failure_cleans_allocator();
+  failures += expect_mutation_success_uses_allocator();
+  failures += expect_mutation_parse_failure_cleans_allocator();
   return failures == 0 ? 0 : 1;
 }

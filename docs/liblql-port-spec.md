@@ -581,23 +581,21 @@ Current implementation is an early slice:
   allocator wrapper calls, allocator macro wrapper calls, or direct
   `malloc`/`calloc`/`realloc`/`free`/`strdup` calls in project-owned C sources
   outside `src/lql_allocator.c`;
-- selector parse-tree ownership is allocator-consistent: receiver selector
-  parse methods pass the receiver allocator into the selector parser, produced
-  `lql_selector` handles remember that allocator, and selector/node cleanup
-  destroys the parse tree with the same allocator; the public API style gate
-  rejects direct `lql_allocator_default()` calls in `src/lql_selector.c` so the
-  parser cannot bypass the receiver allocator boundary;
-- projection ownership is allocator-consistent: receiver projection parse
-  methods pass the receiver allocator into projection path parsing, produced
-  `lql_projection` handles remember that allocator, projection visitor scratch
-  buffers use the projection allocator, and projection cleanup destroys the
-  handle with that allocator; the public API style gate rejects direct
-  `lql_allocator_default()` calls in `src/lql_project.c` so projection code
-  cannot bypass the receiver/projection allocator boundary; `lql.handle-allocator`
-  exercises successful and failed selector and projection parses, plus a
-  projection runtime pass, through a counting internal allocator to prove handle
-  allocations and projection scratch buffers return to zero outstanding
-  allocations on cleanup;
+- selector, projection, and mutation plan ownership is allocator-consistent:
+  receiver parse methods pass the receiver allocator into handle parsers,
+  produced `lql_selector`, `lql_projection`, and `lql_mutation_plan` handles
+  remember that allocator, and handle cleanup destroys persistent parse state
+  with the same allocator; selector eval scratch buffers use the selector
+  allocator, projection visitor scratch buffers use the projection allocator,
+  and mutation runtime scratch buffers use the mutation plan allocator; the
+  public API style gate rejects direct `lql_allocator_default()` calls in
+  `src/lql_selector.c`, `src/lql_project.c`, `src/lql_eval.c`, and
+  `src/lql_mutation.c` so library core code cannot bypass receiver/handle
+  allocator boundaries; `lql.handle-allocator` exercises successful and failed
+  selector, projection, and mutation parses plus selector eval, projection
+  runtime, and mutation runtime passes through a counting internal allocator to
+  prove handle allocations and runtime scratch buffers return to zero
+  outstanding allocations on cleanup;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through
