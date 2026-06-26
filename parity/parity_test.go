@@ -954,6 +954,90 @@ func TestCLQLBooleanFlagValueCompatibility(t *testing.T) {
 			t.Fatalf("clql --enable-file-mutations=false exit mismatch: err=%v out=%q", err, string(out))
 		}
 	})
+	t.Run("inline true", func(t *testing.T) {
+		tmp, err := os.CreateTemp(t.TempDir(), "clql-inline-true-*.json")
+		if err != nil {
+			t.Fatalf("create inline true temp: %v", err)
+		}
+		if _, err := tmp.WriteString(`{"status":"open"}`); err != nil {
+			t.Fatalf("write inline true temp: %v", err)
+		}
+		if err := tmp.Close(); err != nil {
+			t.Fatalf("close inline true temp: %v", err)
+		}
+		cmd := exec.Command(clql, "--inline=true", "-m", "/status=done", `contains{f=/}`, tmp.Name())
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql --inline=true failed: %v out=%q", err, string(out))
+		}
+		if len(out) != 0 {
+			t.Fatalf("clql --inline=true wrote stdout: %q", string(out))
+		}
+		got, err := os.ReadFile(tmp.Name())
+		if err != nil {
+			t.Fatalf("read inline true temp: %v", err)
+		}
+		if string(got) != "{\"status\":\"done\"}\n" {
+			t.Fatalf("clql --inline=true file mismatch: %q", string(got))
+		}
+	})
+	t.Run("write true", func(t *testing.T) {
+		tmp, err := os.CreateTemp(t.TempDir(), "clql-write-true-*.json")
+		if err != nil {
+			t.Fatalf("create write true temp: %v", err)
+		}
+		if _, err := tmp.WriteString(`{"status":"open"}`); err != nil {
+			t.Fatalf("write write true temp: %v", err)
+		}
+		if err := tmp.Close(); err != nil {
+			t.Fatalf("close write true temp: %v", err)
+		}
+		cmd := exec.Command(clql, "--write=true", "-m", "/status=done", `contains{f=/}`, tmp.Name())
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql --write=true failed: %v out=%q", err, string(out))
+		}
+		if len(out) != 0 {
+			t.Fatalf("clql --write=true wrote stdout: %q", string(out))
+		}
+		got, err := os.ReadFile(tmp.Name())
+		if err != nil {
+			t.Fatalf("read write true temp: %v", err)
+		}
+		if string(got) != "{\"status\":\"done\"}\n" {
+			t.Fatalf("clql --write=true file mismatch: %q", string(got))
+		}
+	})
+	for _, flag := range []string{"--inline=false", "--write=false"} {
+		flag := flag
+		t.Run(flag, func(t *testing.T) {
+			tmp, err := os.CreateTemp(t.TempDir(), "clql-inline-false-*.json")
+			if err != nil {
+				t.Fatalf("create %s temp: %v", flag, err)
+			}
+			if _, err := tmp.WriteString(`{"status":"open"}`); err != nil {
+				t.Fatalf("write %s temp: %v", flag, err)
+			}
+			if err := tmp.Close(); err != nil {
+				t.Fatalf("close %s temp: %v", flag, err)
+			}
+			cmd := exec.Command(clql, flag, "-m", "/status=done", `contains{f=/}`, tmp.Name())
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("clql %s failed: %v out=%q", flag, err, string(out))
+			}
+			if string(out) != "{\"status\":\"done\"}\n" {
+				t.Fatalf("clql %s stdout mismatch: %q", flag, string(out))
+			}
+			got, err := os.ReadFile(tmp.Name())
+			if err != nil {
+				t.Fatalf("read %s temp: %v", flag, err)
+			}
+			if string(got) != `{"status":"open"}` {
+				t.Fatalf("clql %s changed file despite false value: %q", flag, string(got))
+			}
+		})
+	}
 	t.Run("invalid boolean", func(t *testing.T) {
 		cmd := exec.Command(clql, "--compact=maybe", `/status="open"`)
 		cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
