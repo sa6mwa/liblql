@@ -1015,6 +1015,13 @@ Current implementation status:
   whitespace, deep indexed merge behavior, and deep conflict rejection. Go's
   `url.Values` and slice-based selector parse entry points are not C public API
   unless a future C builder/config surface is deliberately added;
+- C selector parser/evaluator coverage includes the remaining applicable
+  public string-parser corpus from Go's selector tests: match-all aliases,
+  empty-token handling, examples as observable AND/OR behavior, string-term
+  empty-value simplification, contains/icontains any-value forms, in.any
+  validation, shorthand range/date forms, explicit indexed merge/conflict
+  behavior, and malformed parser regression inputs that must return normally
+  without crashing;
 - C temporal selector coverage is based on observable parse/evaluation
   behavior rather than Go's internal temporal cache helpers. The C tests cover
   date-only equality, naive UTC datetimes, nanosecond precision, timezone

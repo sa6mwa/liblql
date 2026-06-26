@@ -6705,6 +6705,7 @@ static void expect_selector_omitted_string_path_api(void);
 static void expect_selector_parse_equivalence_api(void);
 static void expect_selector_quoted_parse_api(void);
 static void expect_selector_any_or_equivalence_api(void);
+static void expect_selector_match_all_alias_api(void);
 static void expect_selector_or_api(void);
 static void expect_selector_parse_error_api(void);
 static void expect_selector_inspection_api(void);
@@ -6738,6 +6739,8 @@ static void expect_sdk_contract_manifest(void) {
        expect_selector_quoted_parse_api},
       {"selector", "contains-any and explicit OR evaluation equivalence",
        expect_selector_any_or_equivalence_api},
+      {"selector", "match-all aliases and parser regression inputs",
+       expect_selector_match_all_alias_api},
       {"selector", "OR parse/evaluation public API", expect_selector_or_api},
       {"selector", "selector capability and execution-trait inspection",
        expect_selector_inspection_api},
@@ -6825,7 +6828,7 @@ static void expect_sdk_contract_manifest(void) {
   };
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 8}, {"streaming", 13},
+      {"version", 1},      {"selector", 9}, {"streaming", 13},
       {"projection", 7},   {"compact", 2},  {"mutation", 20},
   };
   size_t i;
@@ -7338,6 +7341,39 @@ static void expect_selector_any_or_equivalence_api(void) {
                                           "{\"msg\":\"all good\"}");
 }
 
+static void expect_selector_match_all_alias_api(void) {
+  static const char *const aliases[] = {"", "{}", ".", "/"};
+  static const char *const regressions[] = {
+      "And.-1", "ANd.\xe0\xa5\xb0\x8b.30zz v1\nst",
+      "ANd.066666666000"};
+  size_t i;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+
+  for (i = 0u; i < sizeof(aliases) / sizeof(aliases[0]); ++i) {
+    selector = NULL;
+    lql_error_init(&error);
+    st = test_ctx->selector_parse(test_ctx, aliases[i], &selector, &error);
+    if (st != LQL_STATUS_OK || !test_ctx->selector_is_empty(test_ctx, selector)) {
+      printf("match-all alias %s mismatch: status=%s empty=%d error=%s\n",
+             aliases[i], lql_status_string(st),
+             test_ctx->selector_is_empty(test_ctx, selector), error.message);
+      ++failures;
+    }
+    test_ctx->selector_destroy(test_ctx, selector);
+  }
+
+  for (i = 0u; i < sizeof(regressions) / sizeof(regressions[0]); ++i) {
+    selector = NULL;
+    lql_error_init(&error);
+    st = test_ctx->selector_parse(test_ctx, regressions[i], &selector, &error);
+    if (st == LQL_STATUS_OK && selector != NULL) {
+      test_ctx->selector_destroy(test_ctx, selector);
+    }
+  }
+}
+
 static void expect_selector_or_api(void) {
   expect_match_or("/status=\"open\",/progress>=50",
                   "{\"status\":\"closed\",\"progress\":72}", 1);
@@ -7638,6 +7674,7 @@ int main(void) {
   expect_selector_parse_equivalence_api();
   expect_selector_quoted_parse_api();
   expect_selector_any_or_equivalence_api();
+  expect_selector_match_all_alias_api();
   expect_selector_or_api();
   expect_selector_inspection_api();
   expect_selector_parse_error_api();
