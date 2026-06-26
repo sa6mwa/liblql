@@ -61,6 +61,11 @@ static lql_status execute_query_source_decisions(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *query_options, lql_query_decision_fn on_decision,
     void *user, lql_query_result *out_result, lql_error *error);
+static lql_status execute_query_source_decisions_with_base(
+    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
+    lql_uint64 offset_base, lql_uint64 index_base,
+    const lql_query_options *query_options, lql_query_decision_fn on_decision,
+    void *user, lql_query_result *out_result, lql_error *error);
 static lql_status execute_query_source_spooled_matches(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *query_options, lql_query_match_fn on_match,
@@ -1094,6 +1099,7 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
   query_stream_state *state = (query_stream_state *)user;
   lql_query_options nested_options;
   lql_query_result nested_result;
+  spooled_source_reader nested_reader;
   lql_query_decision decision;
   lql_status st;
   int matched;
@@ -1106,6 +1112,49 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
         state->receiver, state->selector, state->file,
         state->offset_base + (lql_uint64)candidate->stream_offset,
         (lql_uint64)candidate->byte_size,
+        state->index_base + state->result.candidates_seen, &nested_options,
+        state->on_decision, state->user, &nested_result, NULL);
+    reset_doc(&state->doc);
+    state->result.candidates_seen += nested_result.candidates_seen;
+    state->result.candidates_matched += nested_result.candidates_matched;
+    state->result.bytes_read =
+        state->offset_base + (lql_uint64)candidate->stream_offset +
+        (lql_uint64)candidate->byte_size;
+    if (nested_result.stopped_early) {
+      state->result.stopped_early = 1;
+      state->result.stop_reason = nested_result.stop_reason;
+      return LONEJSON_CANDIDATE_STOP;
+    }
+    if (st != LQL_STATUS_OK) {
+      state->callback_status = st;
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+    if (query_limit_enabled(state->options.max_matches) &&
+        state->result.candidates_matched >= state->options.max_matches) {
+      query_stop(state, LQL_QUERY_STOP_MATCH_LIMIT);
+      return LONEJSON_CANDIDATE_STOP;
+    }
+    if (query_limit_enabled(state->options.max_candidates) &&
+        state->result.candidates_seen >= state->options.max_candidates) {
+      query_stop(state, LQL_QUERY_STOP_CANDIDATE_LIMIT);
+      return LONEJSON_CANDIDATE_STOP;
+    }
+    if (query_limit_enabled(state->options.max_bytes_read) &&
+        state->result.bytes_read >= state->options.max_bytes_read) {
+      query_stop(state, LQL_QUERY_STOP_BYTE_LIMIT);
+      return LONEJSON_CANDIDATE_STOP;
+    }
+    return LONEJSON_CANDIDATE_CONTINUE;
+  }
+  if (state->doc.root_kind == '[' && state->receiver != NULL &&
+      candidate->payload_spool != NULL) {
+    nested_reader.cursor = *candidate->payload_spool;
+    nested_reader.cursor.read_offset = 0u;
+    nested_options = query_remaining_options(&state->options, &state->result);
+    memset(&nested_result, 0, sizeof(nested_result));
+    st = execute_query_source_decisions_with_base(
+        state->receiver, state->selector, spooled_source_read, &nested_reader,
+        state->offset_base + (lql_uint64)candidate->stream_offset,
         state->index_base + state->result.candidates_seen, &nested_options,
         state->on_decision, state->user, &nested_result, NULL);
     reset_doc(&state->doc);
@@ -2043,6 +2092,16 @@ static lql_status execute_query_source_decisions(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *query_options, lql_query_decision_fn on_decision,
     void *user, lql_query_result *out_result, lql_error *error) {
+  return execute_query_source_decisions_with_base(
+      self, selector, read, read_user, 0u, 0u, query_options, on_decision, user,
+      out_result, error);
+}
+
+static lql_status execute_query_source_decisions_with_base(
+    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
+    lql_uint64 offset_base, lql_uint64 index_base,
+    const lql_query_options *query_options, lql_query_decision_fn on_decision,
+    void *user, lql_query_result *out_result, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
@@ -2052,7 +2111,10 @@ static lql_status execute_query_source_decisions(
   source_reader_adapter adapter;
 
   memset(&state, 0, sizeof(state));
+  state.receiver = self;
   state.selector = selector;
+  state.offset_base = offset_base;
+  state.index_base = index_base;
   state.on_decision = on_decision;
   state.user = user;
   state.callback_status = LQL_STATUS_OK;
@@ -2074,7 +2136,7 @@ static lql_status execute_query_source_decisions(
   adapter.total_read = 0u;
   init_eval_visitor(&visitor);
   options = lonejson_default_candidate_stream_options();
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
   options.path_visitor = &visitor;
   options.visitor_user = &state.doc;
   options.candidate_begin = on_candidate_begin;

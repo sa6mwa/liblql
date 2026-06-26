@@ -1115,6 +1115,11 @@ func TestSDKStreamingDecisionParity(t *testing.T) {
 			doc:  `[{"status":"open","id":1},{"status":"closed","id":2},{"status":"open","id":3}]`,
 		},
 		{
+			name: "nested array candidates",
+			expr: `/id="b"`,
+			doc:  `[{"id":"a"},[{"id":"b"}],{"id":"c"}]`,
+		},
+		{
 			name: "mixed scalar and object candidates",
 			expr: `/id="x"`,
 			doc:  "\"x\"\n{\"id\":\"x\"}\n123\n",

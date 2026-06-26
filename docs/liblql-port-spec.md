@@ -274,7 +274,11 @@ therefore a library/API concern rather than a JSON parser workaround:
 - public `FILE *` APIs are the seekable/rewindable source surface;
 - callback-source APIs are the non-seekable source surface;
 - matched seekable candidates expose callback-scoped seekable range payloads;
-- decision-only and seekable plus-value paths use lonejson `CAPTURE_NONE`;
+- seekable decision-only and seekable plus-value paths use lonejson
+  `CAPTURE_NONE`;
+- callback-source decision streams use callback-scoped spooled replay for
+  nested top-level array candidates because non-seekable sources cannot be
+  rewound by offset;
 - non-seekable plus-value paths use callback-scoped spooled handles and caller
   sinks rather than contiguous candidate materialization.
 
@@ -1034,8 +1038,9 @@ Current implementation status:
   corpora; this is behavioral oracle coverage, not C SDK unit coverage and not
   a requirement that the C API mirror Go API shape;
 - Nested top-level array flattening is proven for `clql` stdin and seekable
-  file selection, `ctx->query_file_decisions()`, `ctx->query_file_matches()`,
-  and `ctx->query_source_spooled_matches()`. Seekable recursion rereads nested
+  file selection, `ctx->query_file_decisions()`,
+  `ctx->query_source_decisions()`, `ctx->query_file_matches()`, and
+  `ctx->query_source_spooled_matches()`. Seekable recursion rereads nested
   candidate ranges with absolute-offset `pread()` range readers so the active
   parser cursor is not disturbed and no hidden candidate materialization is
   introduced; callback-source recursion uses callback-scoped spooled payloads;

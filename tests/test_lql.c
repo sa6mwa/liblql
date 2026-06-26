@@ -1839,6 +1839,32 @@ static void expect_stream_nested_array_items(void) {
            (unsigned long)result.candidates_matched);
     ++failures;
   }
+  memset(&seen, 0, sizeof(seen));
+  memset(&reader, 0, sizeof(reader));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 5u;
+  lql_error_init(&error);
+  st = test_ctx->query_source_decisions(test_ctx, selector, read_chunk,
+                                        &reader, record_decision, &seen,
+                                        &result, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("nested array source decision query failed: %s\n", error.message);
+    fclose(fp);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (reader.calls <= 1 || seen.calls != 3 || seen.matched != 1 ||
+      result.candidates_seen != (lql_uint64)3 ||
+      result.candidates_matched != (lql_uint64)1) {
+    printf("nested array source decision mismatch calls=%d matched=%d "
+           "seen=%lu matched_result=%lu reader_calls=%d\n",
+           seen.calls, seen.matched, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched, reader.calls);
+    ++failures;
+  }
   if (fseek(fp, 0L, SEEK_SET) != 0) {
     printf("nested array range payload seek failed\n");
     fclose(fp);
