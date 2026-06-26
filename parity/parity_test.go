@@ -598,7 +598,11 @@ func TestCLQLMultipleSelectorArgumentParity(t *testing.T) {
 	}
 	body := `{"id":"a","status":"open","progress":72}
 {"id":"b","status":"open","progress":4}
-{"id":"c","status":"closed","progress":80}`
+{"id":"c","status":"closed","progress":80}
+{"id":"d","status":404,"lvl":"warn","domain":"pkt.systems"}
+{"id":"e","status":404,"lvl":"warn","domain":"qzj.se"}
+{"id":"f","status":404,"lvl":"warn","domain":"other.example"}
+{"id":"g","status":500,"lvl":"warn","domain":"pkt.systems"}`
 	tmp, err := os.CreateTemp(t.TempDir(), "clql-multi-selector-*.json")
 	if err != nil {
 		t.Fatalf("create temp: %v", err)
@@ -618,6 +622,20 @@ func TestCLQLMultipleSelectorArgumentParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("go parse progress selector: %v", err)
 	}
+	status404, err := lql.ParseSelectorString(`/status=404`)
+	if err != nil {
+		t.Fatalf("go parse status 404 selector: %v", err)
+	}
+	lvlWarn, err := lql.ParseSelectorString(`/lvl="warn"`)
+	if err != nil {
+		t.Fatalf("go parse warn selector: %v", err)
+	}
+	domainPktOrQzj, err := lql.ParseSelectorString(
+		`or.eq{field=/domain,value=pkt.systems},or.eq{field=/domain,value=qzj.se}`,
+	)
+	if err != nil {
+		t.Fatalf("go parse domain OR selector: %v", err)
+	}
 	cases := []struct {
 		name string
 		args []string
@@ -632,6 +650,20 @@ func TestCLQLMultipleSelectorArgumentParity(t *testing.T) {
 			name: "or",
 			args: []string{"--or", `/status="open"`, `/progress>=50`, tmp.Name()},
 			sel:  lql.Selector{Or: []lql.Selector{statusOpen, progressHigh}},
+		},
+		{
+			name: "and with explicit or argument",
+			args: []string{
+				`/status=404`,
+				`/lvl="warn"`,
+				`or.eq{field=/domain,value=pkt.systems},or.eq{field=/domain,value=qzj.se}`,
+				tmp.Name(),
+			},
+			sel: lql.Selector{And: []lql.Selector{
+				status404,
+				lvlWarn,
+				domainPktOrQzj,
+			}},
 		},
 	}
 	for _, tc := range cases {

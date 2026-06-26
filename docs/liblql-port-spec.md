@@ -956,7 +956,8 @@ Current implementation status:
 - CLI selector parity includes scalar, string, numeric, temporal, contains,
   prefix, existence, wildcard, recursive, numeric object/array segment,
   nested logical, and newline-separated selector cases from the Go oracle
-  corpus;
+  corpus, including multiple CLI selector arguments that combine ordinary
+  AND terms with an embedded explicit OR group;
 - CLI malformed JSON execution is covered by Go-backed parity tests over stdin
   and seekable file inputs for selection, matches-only selection, compact
   output, projection, and mutation, with exit-code and diagnostic assertions;
