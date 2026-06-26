@@ -4966,6 +4966,56 @@ static void expect_file_range_candidate_mutation_api(void) {
         }
       }
     }
+
+    {
+      FILE *nested_source;
+      FILE *nested_out;
+      static const char nested_doc[] =
+          "[{\"id\":\"a\",\"status\":\"open\"},[{\"id\":\"b\",\"status\":"
+          "\"open\"}],{\"id\":\"c\",\"status\":\"closed\"}]";
+      nested_source = tmpfile();
+      nested_out = tmpfile();
+      if (nested_source == NULL || nested_out == NULL) {
+        printf("candidate mutation nested tmpfile failed\n");
+        ++failures;
+      } else if (fwrite(nested_doc, 1u, strlen(nested_doc), nested_source) !=
+                     strlen(nested_doc) ||
+                 fseek(nested_source, 0L, SEEK_SET) != 0) {
+        printf("candidate mutation nested source setup failed\n");
+        ++failures;
+      } else {
+        memset(&result, 0, sizeof(result));
+        lql_error_init(&error);
+        st = test_ctx->mutate_file_range_candidates(
+            test_ctx, selector, plan, nested_source, 0u,
+            (lql_uint64)strlen(nested_doc), nested_out, 1, 0, &result, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("candidate mutation nested failed: %s\n", error.message);
+          ++failures;
+        } else if (result.candidates_seen != 3u ||
+                   result.candidates_matched != 2u || result.stopped_early) {
+          printf("candidate mutation nested result mismatch: seen=%lu "
+                 "matched=%lu stopped=%d\n",
+                 (unsigned long)result.candidates_seen,
+                 (unsigned long)result.candidates_matched,
+                 result.stopped_early);
+          ++failures;
+        } else if (!read_tmpfile(nested_out, buf, sizeof(buf), &len) ||
+                   strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n"
+                               "{\"id\":\"b\",\"status\":\"done\"}\n"
+                               "{\"id\":\"c\",\"status\":\"closed\"}\n") !=
+                       0) {
+          printf("candidate mutation nested output mismatch: %s\n", buf);
+          ++failures;
+        }
+      }
+      if (nested_source != NULL) {
+        fclose(nested_source);
+      }
+      if (nested_out != NULL) {
+        fclose(nested_out);
+      }
+    }
   }
   test_ctx->mutation_plan_destroy(test_ctx, plan);
   test_ctx->selector_destroy(test_ctx, selector);
@@ -5109,6 +5159,48 @@ static void expect_source_candidate_mutation_api(void) {
                              "{\"id\":\"b\",\"status\":\"done\"}\n") != 0) {
         printf("source candidate mutation match-all output mismatch: %s\n",
                buf);
+        ++failures;
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source candidate mutation nested tmpfile failed\n");
+      ++failures;
+    } else {
+      static const char nested_doc[] =
+          "[{\"id\":\"a\",\"status\":\"open\"},[{\"id\":\"b\",\"status\":"
+          "\"open\"}],{\"id\":\"c\",\"status\":\"closed\"}]";
+      memset(&reader, 0, sizeof(reader));
+      reader.data = nested_doc;
+      reader.len = strlen(nested_doc);
+      reader.chunk_size = 6u;
+      memset(&result, 0, sizeof(result));
+      lql_error_init(&error);
+      st = test_ctx->mutate_source_candidates(test_ctx, selector, plan,
+                                              read_chunk, &reader, out, 1, 0,
+                                              &result, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation nested failed: %s\n",
+               error.message);
+        ++failures;
+      } else if (reader.calls <= 1) {
+        printf("source candidate mutation nested did not fragment reads\n");
+        ++failures;
+      } else if (result.candidates_seen != 3u ||
+                 result.candidates_matched != 2u || result.stopped_early) {
+        printf("source candidate mutation nested result mismatch: seen=%lu "
+               "matched=%lu stopped=%d\n",
+               (unsigned long)result.candidates_seen,
+               (unsigned long)result.candidates_matched,
+               result.stopped_early);
+        ++failures;
+      } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                 strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n"
+                             "{\"id\":\"b\",\"status\":\"done\"}\n"
+                             "{\"id\":\"c\",\"status\":\"closed\"}\n") != 0) {
+        printf("source candidate mutation nested output mismatch: %s\n", buf);
         ++failures;
       }
     }

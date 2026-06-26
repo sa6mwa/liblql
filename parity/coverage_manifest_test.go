@@ -62,6 +62,7 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"mutation", "unmatched candidate preservation", []string{"TestCLQLMutationPreservesUnmatchedCandidatesParity"}},
 	{"mutation", "stdin mutation", []string{"TestCLQLStdinMutationParity"}},
 	{"mutation", "top-level array mutation over stdin and seekable files", []string{"TestCLQLTopLevelArrayMutationParity"}},
+	{"mutation", "nested top-level array mutation over stdin and seekable files", []string{"TestCLQLNestedTopLevelArrayMutationParity"}},
 	{"mutation", "match-all mixed candidate stream mutation", []string{"TestCLQLMatchAllMutationMixedStreamParity"}},
 	{"mutation", "seekable file mutation matches-only output", []string{"TestCLQLMutationMatchesOnlyParity"}},
 	{"mutation", "seekable file projection before mutation", []string{"TestCLQLMutationProjectionParity"}},

@@ -573,6 +573,25 @@ func TestSDKMutationFileRangeCandidateStreamParity(t *testing.T) {
 			mutations:   []string{`/status=done`},
 			matchesOnly: true,
 		},
+		{
+			name:      "nested top-level array match all",
+			doc:       `[{"id":"a","status":"open"},[{"id":"b","status":"open"}],{"id":"c","status":"closed"}]`,
+			mutations: []string{`/status=done`},
+		},
+		{
+			name:        "nested top-level array selector",
+			selector:    `/status="open"`,
+			doc:         `[{"id":"a","status":"open"},[{"id":"b","status":"open"}],{"id":"c","status":"closed"}]`,
+			mutations:   []string{`/status=done`},
+			matchesOnly: false,
+		},
+		{
+			name:        "nested top-level array matches only",
+			selector:    `/status="open"`,
+			doc:         `[{"id":"a","status":"open"},[{"id":"b","status":"open"}],{"id":"c","status":"closed"}]`,
+			mutations:   []string{`/status=done`},
+			matchesOnly: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -584,9 +603,9 @@ func TestSDKMutationFileRangeCandidateStreamParity(t *testing.T) {
 					t.Fatalf("go mutate stream: %v", err)
 				}
 			} else {
-				wantJSON, err = goQueryMutateJSON(tc.selector, tc.mutations, tc.doc)
+				wantJSON, err = goQueryCandidateMutateJSON(tc.selector, tc.mutations, tc.doc, tc.matchesOnly)
 				if err != nil {
-					t.Fatalf("go query mutate stream: %v", err)
+					t.Fatalf("go query candidate mutate stream: %v", err)
 				}
 			}
 			gotJSON, err := cMutateFileRangeCandidates(tc.selector, tc.mutations, `{"outside":`, tc.doc, `}`, tc.matchesOnly)

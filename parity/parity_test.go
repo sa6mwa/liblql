@@ -2550,6 +2550,75 @@ func TestCLQLTopLevelArrayMutationParity(t *testing.T) {
 	})
 }
 
+func TestCLQLNestedTopLevelArrayMutationParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := `[{"id":"a","status":"open"},[{"id":"b","status":"open"}],{"id":"c","status":"closed"}]`
+	selector := `/status="open"`
+	mutations := []string{`/status=done`}
+	wantJSON, err := goQueryCandidateMutateJSON(selector, mutations, body, false)
+	if err != nil {
+		t.Fatalf("go nested top-level array mutation: %v", err)
+	}
+	want, err := decodeJSONValues(wantJSON)
+	if err != nil {
+		t.Fatalf("decode go nested top-level array mutation: %v", err)
+	}
+
+	t.Run("stdin", func(t *testing.T) {
+		args := []string{"-c"}
+		for _, mutation := range mutations {
+			args = append(args, "-m", mutation)
+		}
+		args = append(args, selector)
+		cmd := exec.Command(clql, args...)
+		cmd.Stdin = bytes.NewBufferString(body)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql stdin nested top-level array mutation failed: %v out=%q", err, string(out))
+		}
+		got, err := decodeJSONValues(out)
+		if err != nil {
+			t.Fatalf("decode clql stdin nested top-level array mutation: %v out=%q", err, string(out))
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("stdin nested top-level array mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+		}
+	})
+
+	t.Run("file", func(t *testing.T) {
+		tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-nested-top-array-*.json")
+		if err != nil {
+			t.Fatalf("create temp: %v", err)
+		}
+		if _, err := tmp.WriteString(body); err != nil {
+			t.Fatalf("write temp: %v", err)
+		}
+		if err := tmp.Close(); err != nil {
+			t.Fatalf("close temp: %v", err)
+		}
+		args := []string{"-c"}
+		for _, mutation := range mutations {
+			args = append(args, "-m", mutation)
+		}
+		args = append(args, selector, tmp.Name())
+		cmd := exec.Command(clql, args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("clql file nested top-level array mutation failed: %v out=%q", err, string(out))
+		}
+		got, err := decodeJSONValues(out)
+		if err != nil {
+			t.Fatalf("decode clql file nested top-level array mutation: %v out=%q", err, string(out))
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("file nested top-level array mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+		}
+	})
+}
+
 func TestCLQLMatchAllMutationMixedStreamParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
@@ -2625,6 +2694,62 @@ func TestCLQLMatchAllMutationMixedStreamParity(t *testing.T) {
 			t.Fatalf("file mixed mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
 		}
 	})
+}
+
+func goQueryCandidateMutateJSON(selectorExpr string, mutations []string, doc string, matchesOnly bool) ([]byte, error) {
+	selector, err := lql.ParseSelectorString(selectorExpr)
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	err = lql.QueryStream(lql.QueryStreamRequest{
+		Reader:      bytes.NewBufferString(doc),
+		Selector:    selector,
+		Mode:        lql.QueryDecisionPlusValue,
+		IncludeJSON: true,
+		MatchedOnly: matchesOnly,
+		OnValue: func(value lql.QueryStreamValue) error {
+			var payload []byte
+			if value.JSON != nil {
+				payload = value.JSON
+			} else if value.OpenJSON != nil {
+				rc, err := value.OpenJSON()
+				if err != nil {
+					return err
+				}
+				defer rc.Close()
+				payload, err = io.ReadAll(rc)
+				if err != nil {
+					return err
+				}
+			}
+			if value.Matched {
+				if err := lql.MutateStream(lql.MutateStreamRequest{
+					Reader:    bytes.NewReader(payload),
+					Writer:    &out,
+					Mutations: parsed,
+				}); err != nil {
+					return err
+				}
+			} else {
+				if _, err := out.Write(payload); err != nil {
+					return err
+				}
+			}
+			if err := out.WriteByte('\n'); err != nil {
+				return err
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
 
 func TestCLQLMutationMatchesOnlyParity(t *testing.T) {
