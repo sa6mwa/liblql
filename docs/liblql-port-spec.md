@@ -252,13 +252,15 @@ As of lonejson `v0.35.0`, the installed public header confirms that
 `lonejson_candidate_info` exposes candidate index, stream offset, byte size, and
 payload size as `lonejson_uint64` range values. liblql should therefore treat
 CR 3 plus CR 6 as sufficient for decision-only candidate streaming and
-seekable-source payload reconstruction. The remaining work is liblql source
-policy, not JSON parser work:
+seekable-source payload reconstruction. The implemented liblql source policy is
+therefore a library/API concern rather than a JSON parser workaround:
 
-- classify public input sources as seekable/rewindable or non-seekable;
-- expose seekable source ranges as callback-scoped payload handles;
-- use lonejson `CAPTURE_NONE` for decision-only and seekable plus-value paths;
-- use caller sinks or spooled handles only for non-seekable plus-value paths.
+- public `FILE *` APIs are the seekable/rewindable source surface;
+- callback-source APIs are the non-seekable source surface;
+- matched seekable candidates expose callback-scoped seekable range payloads;
+- decision-only and seekable plus-value paths use lonejson `CAPTURE_NONE`;
+- non-seekable plus-value paths use callback-scoped spooled handles and caller
+  sinks rather than contiguous candidate materialization.
 
 Seekable range APIs use 64-bit liblql offsets and sizes. When a platform
 `FILE *` seek cannot represent a 64-bit range offset, liblql must fail the
