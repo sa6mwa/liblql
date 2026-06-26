@@ -880,6 +880,9 @@ Current implementation is an early slice:
   fast CTest includes package privacy negative fixtures proving the verifier
   fails on repository paths, `$HOME`, absolute local `file://` URLs, and
   absolute ELF RPATH/RUNPATH entries when host tooling can create the fixture;
+  checksum manifest fixture coverage proves release-looking tarball, rockspec,
+  and source-rock artifacts under `dist/` cannot be left out of the upload
+  manifest;
 - standalone Lua source package production now writes
   `dist/liblql-lua-<version>.tar.gz` with `VERSION`, exact
   `RELEASE_MANIFEST`, Lua sources, tests, benchmark runner, rockspec template,

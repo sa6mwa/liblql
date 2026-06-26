@@ -182,6 +182,12 @@ if(LQL_BUILD_TESTS)
   set_tests_properties(lql.package-privacy-fixtures PROPERTIES
     LABELS "unit;packaging" TIMEOUT 5)
 
+  add_test(NAME lql.package-manifest-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package.sh
+      package-manifest-fixtures)
+  set_tests_properties(lql.package-manifest-fixtures PROPERTIES
+    LABELS "unit;packaging" TIMEOUT 5)
+
   set(LQL_HEADER_SMOKE_WARNINGS)
   if(LQL_PROJECT_WARNINGS)
     set(LQL_HEADER_SMOKE_WARNINGS ${LQL_PROJECT_WARNINGS})

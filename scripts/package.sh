@@ -786,6 +786,7 @@ verify_checksums() {
     printf 'package-verify: stale checksum manifest found in dist\n' >&2
     exit 1
   fi
+  verify_release_artifacts_listed "$manifest"
   (cd "$DIST_DIR" && sha256sum -c "$(basename "$manifest")")
   rm -rf "$ROOT_DIR/build/package-verify"
   while read -r _hash artifact_name; do
@@ -798,6 +799,31 @@ verify_checksums() {
   done <"$manifest"
   verify_no_local_paths "$(basename "$manifest")" "$manifest"
   printf 'package-verify: verified %s\n' "$manifest"
+}
+
+verify_release_artifacts_listed() {
+  manifest=$1
+  listed="$ROOT_DIR/build/package-verify-listed.txt"
+  actual="$ROOT_DIR/build/package-verify-actual.txt"
+
+  mkdir -p "$ROOT_DIR/build"
+  awk '{print $2}' "$manifest" | LC_ALL=C sort -u >"$listed"
+  (
+    cd "$DIST_DIR"
+    for artifact in "${PROJECT}-"*.tar.gz "${PROJECT}-"*.rockspec \
+      "${PROJECT}-"*.src.rock "${CLI_PROJECT}-"*.tar.gz; do
+      [ -e "$artifact" ] || continue
+      printf '%s\n' "$artifact"
+    done
+  ) | LC_ALL=C sort -u >"$actual"
+
+  while IFS= read -r artifact; do
+    [ -n "$artifact" ] || continue
+    if ! grep -Fxq "$artifact" "$listed"; then
+      printf 'package-verify: release artifact missing from checksum manifest: %s\n' "$artifact" >&2
+      exit 1
+    fi
+  done <"$actual"
 }
 
 expect_privacy_failure() {
@@ -869,6 +895,39 @@ check_package_privacy_fixtures() {
   expect_runtime_path_failure "$tmp_dir"
 }
 
+check_package_manifest_fixtures() {
+  tmp_dir="$ROOT_DIR/build/package-manifest-fixtures"
+  old_dist=$DIST_DIR
+  old_root=$ROOT_DIR
+
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir/dist" "$tmp_dir/build"
+  DIST_DIR="$tmp_dir/dist"
+  ROOT_DIR="$tmp_dir"
+  printf 'listed\n' >"$DIST_DIR/${PROJECT}-0.0.0.tar.gz"
+  printf 'unlisted\n' >"$DIST_DIR/${CLI_PROJECT}-0.0.0-x86_64-linux-gnu.tar.gz"
+  (
+    cd "$DIST_DIR"
+    sha256sum "${PROJECT}-0.0.0.tar.gz" >"${PROJECT}-0.0.0-CHECKSUMS"
+  )
+  if (verify_release_artifacts_listed "$DIST_DIR/${PROJECT}-0.0.0-CHECKSUMS") \
+    >"$tmp_dir/out" 2>&1; then
+    printf 'package manifest fixture unexpectedly accepted unlisted artifact\n' >&2
+    ROOT_DIR=$old_root
+    DIST_DIR=$old_dist
+    exit 1
+  fi
+  if ! grep -F 'release artifact missing from checksum manifest' "$tmp_dir/out" >/dev/null; then
+    printf 'package manifest fixture did not report unlisted artifact\n' >&2
+    cat "$tmp_dir/out" >&2
+    ROOT_DIR=$old_root
+    DIST_DIR=$old_dist
+    exit 1
+  fi
+  ROOT_DIR=$old_root
+  DIST_DIR=$old_dist
+}
+
 case "$TARGET" in
   package)
     package_all
@@ -897,6 +956,9 @@ case "$TARGET" in
     ;;
   package-privacy-fixtures)
     check_package_privacy_fixtures
+    ;;
+  package-manifest-fixtures)
+    check_package_manifest_fixtures
     ;;
   release-matrix)
     MATRIX_MODE=1
