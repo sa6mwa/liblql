@@ -3,6 +3,7 @@
 package parity
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -49,7 +50,29 @@ var sdkParityCoverageManifest = []sdkParityCoverageRequirement{
 
 func TestSDKParityCoverageManifest(t *testing.T) {
 	tests := collectSDKParityTests(t)
+	if err := validateSDKParityCoverageManifest(sdkParityCoverageManifest, tests); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSDKParityCoverageManifestRejectsDuplicateRequirement(t *testing.T) {
+	manifest := []sdkParityCoverageRequirement{
+		{"selector", "duplicate requirement", []string{"TestSDKAlpha"}},
+		{"selector", "duplicate requirement", []string{"TestSDKBeta"}},
+	}
+	tests := map[string]bool{
+		"TestSDKAlpha": true,
+		"TestSDKBeta":  true,
+	}
+	err := validateSDKParityCoverageManifest(manifest, tests)
+	if err == nil || !strings.Contains(err.Error(), "lists requirement twice") {
+		t.Fatalf("expected duplicate requirement rejection, got %v", err)
+	}
+}
+
+func validateSDKParityCoverageManifest(manifest []sdkParityCoverageRequirement, tests map[string]bool) error {
 	covered := make(map[string]string)
+	requirements := make(map[string]struct{})
 	knownSurfaces := map[string]bool{
 		"compact":    true,
 		"mutation":   true,
@@ -57,31 +80,37 @@ func TestSDKParityCoverageManifest(t *testing.T) {
 		"selector":   true,
 		"streaming":  true,
 	}
-	for _, req := range sdkParityCoverageManifest {
+	for _, req := range manifest {
 		if req.Surface == "" || req.Requirement == "" {
-			t.Fatalf("SDK parity manifest has empty surface or requirement: %#v", req)
+			return fmt.Errorf("SDK parity manifest has empty surface or requirement: %#v", req)
 		}
 		if !knownSurfaces[req.Surface] {
-			t.Fatalf("SDK parity manifest has unknown surface %q for requirement %q", req.Surface, req.Requirement)
+			return fmt.Errorf("SDK parity manifest has unknown surface %q for requirement %q", req.Surface, req.Requirement)
 		}
 		if len(req.Tests) == 0 {
-			t.Fatalf("SDK parity manifest requirement has no tests: %s/%s", req.Surface, req.Requirement)
+			return fmt.Errorf("SDK parity manifest requirement has no tests: %s/%s", req.Surface, req.Requirement)
 		}
+		requirementKey := req.Surface + "/" + req.Requirement
+		if _, ok := requirements[requirementKey]; ok {
+			return fmt.Errorf("SDK parity manifest lists requirement twice: %s", requirementKey)
+		}
+		requirements[requirementKey] = struct{}{}
 		for _, name := range req.Tests {
 			if !tests[name] {
-				t.Fatalf("SDK parity manifest references missing test %s for %s/%s", name, req.Surface, req.Requirement)
+				return fmt.Errorf("SDK parity manifest references missing test %s for %s/%s", name, req.Surface, req.Requirement)
 			}
 			if prev, ok := covered[name]; ok {
-				t.Fatalf("SDK parity manifest lists %s twice: %s and %s/%s", name, prev, req.Surface, req.Requirement)
+				return fmt.Errorf("SDK parity manifest lists %s twice: %s and %s/%s", name, prev, req.Surface, req.Requirement)
 			}
-			covered[name] = req.Surface + "/" + req.Requirement
+			covered[name] = requirementKey
 		}
 	}
 	for name := range tests {
 		if _, ok := covered[name]; !ok {
-			t.Fatalf("SDK parity test %s is missing from the SDK coverage manifest", name)
+			return fmt.Errorf("SDK parity test %s is missing from the SDK coverage manifest", name)
 		}
 	}
+	return nil
 }
 
 func collectSDKParityTests(t *testing.T) map[string]bool {

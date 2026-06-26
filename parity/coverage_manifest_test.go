@@ -1,6 +1,7 @@
 package parity
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -73,7 +74,29 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 
 func TestCLQLParityCoverageManifest(t *testing.T) {
 	tests := collectCLQLParityTests(t)
+	if err := validateCLQLParityCoverageManifest(cliParityCoverageManifest, tests); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCLQLParityCoverageManifestRejectsDuplicateRequirement(t *testing.T) {
+	manifest := []cliParityCoverageRequirement{
+		{"cli", "duplicate requirement", []string{"TestCLQLAlpha"}},
+		{"cli", "duplicate requirement", []string{"TestCLQLBeta"}},
+	}
+	tests := map[string]bool{
+		"TestCLQLAlpha": true,
+		"TestCLQLBeta":  true,
+	}
+	err := validateCLQLParityCoverageManifest(manifest, tests)
+	if err == nil || !strings.Contains(err.Error(), "lists requirement twice") {
+		t.Fatalf("expected duplicate requirement rejection, got %v", err)
+	}
+}
+
+func validateCLQLParityCoverageManifest(manifest []cliParityCoverageRequirement, tests map[string]bool) error {
 	covered := make(map[string]string)
+	requirements := make(map[string]struct{})
 	knownSurfaces := map[string]bool{
 		"cli":        true,
 		"mutation":   true,
@@ -81,31 +104,37 @@ func TestCLQLParityCoverageManifest(t *testing.T) {
 		"selector":   true,
 		"streaming":  true,
 	}
-	for _, req := range cliParityCoverageManifest {
+	for _, req := range manifest {
 		if req.Surface == "" || req.Requirement == "" {
-			t.Fatalf("CLI parity manifest has empty surface or requirement: %#v", req)
+			return fmt.Errorf("CLI parity manifest has empty surface or requirement: %#v", req)
 		}
 		if !knownSurfaces[req.Surface] {
-			t.Fatalf("CLI parity manifest has unknown surface %q for requirement %q", req.Surface, req.Requirement)
+			return fmt.Errorf("CLI parity manifest has unknown surface %q for requirement %q", req.Surface, req.Requirement)
 		}
 		if len(req.Tests) == 0 {
-			t.Fatalf("CLI parity manifest requirement has no tests: %s/%s", req.Surface, req.Requirement)
+			return fmt.Errorf("CLI parity manifest requirement has no tests: %s/%s", req.Surface, req.Requirement)
 		}
+		requirementKey := req.Surface + "/" + req.Requirement
+		if _, ok := requirements[requirementKey]; ok {
+			return fmt.Errorf("CLI parity manifest lists requirement twice: %s", requirementKey)
+		}
+		requirements[requirementKey] = struct{}{}
 		for _, name := range req.Tests {
 			if !tests[name] {
-				t.Fatalf("CLI parity manifest references missing test %s for %s/%s", name, req.Surface, req.Requirement)
+				return fmt.Errorf("CLI parity manifest references missing test %s for %s/%s", name, req.Surface, req.Requirement)
 			}
 			if prev, ok := covered[name]; ok {
-				t.Fatalf("CLI parity manifest lists %s twice: %s and %s/%s", name, prev, req.Surface, req.Requirement)
+				return fmt.Errorf("CLI parity manifest lists %s twice: %s and %s/%s", name, prev, req.Surface, req.Requirement)
 			}
-			covered[name] = req.Surface + "/" + req.Requirement
+			covered[name] = requirementKey
 		}
 	}
 	for name := range tests {
 		if _, ok := covered[name]; !ok {
-			t.Fatalf("CLQL parity test %s is missing from the CLI coverage manifest", name)
+			return fmt.Errorf("CLQL parity test %s is missing from the CLI coverage manifest", name)
 		}
 	}
+	return nil
 }
 
 func collectCLQLParityTests(t *testing.T) map[string]bool {

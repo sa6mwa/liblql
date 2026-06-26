@@ -413,7 +413,9 @@ Both surfaces need executable coverage manifests, but the manifests serve
 different purposes. Go-backed manifests classify oracle coverage. C manifests
 classify product contract coverage. A claimed public SDK behavior needs
 C-native tests for its public C contract; it does not need a C clone of every
-Go parity example.
+Go parity example. Manifest gates must reject duplicate test-function entries
+and duplicate `surface/requirement` keys so coverage cannot be overstated by
+double-counting either a test or a claimed requirement.
 
 ## C-Native Strategy
 
@@ -938,7 +940,9 @@ Current implementation status:
   transitional oracle for semantic convergence; they run under the explicit
   `make parity-test` target and broader gates, not the fast `make test`
   target. They must not be counted as C SDK unit tests and must not drive
-  mechanical duplication of Go rows into C tests;
+  mechanical duplication of Go rows into C tests. Their coverage manifests
+  reject missing tests, duplicate test-function entries, and duplicate
+  `surface/requirement` keys;
 - CLI malformed JSON execution is covered by Go-backed parity tests over stdin
   and seekable file inputs for selection, matches-only selection, compact
   output, projection, and mutation, with exit-code and diagnostic assertions;
