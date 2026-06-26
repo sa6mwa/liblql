@@ -534,35 +534,36 @@ run_lua_mode() {
     emit_unsupported_impl "lua" "lql.core module not found; run make build-debug"
     return 1
   fi
-  record=$(LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
-    LUA_CPATH="$root/build/debug/?.so;$root/build/debug/?/core.so;;" \
-    LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
-    DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
-    "$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
-    "$fixture_path" "$candidates")
-  lua_candidates=$(kv_field candidates "$record")
-  lua_matches=$(kv_field matches "$record")
-  lua_payloads=$(kv_field payloads "$record")
-  lua_payload_bytes=$(kv_field payload_bytes "$record")
-  if [ -z "$lua_candidates" ] || [ -z "$lua_matches" ] ||
-    [ -z "$lua_payloads" ] || [ -z "$lua_payload_bytes" ]; then
-    printf 'Lua benchmark emitted an invalid record: %s\n' "$record" >&2
-    return 1
-  fi
-  printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
-    "$mode" "warmup_included" "$lua_candidates" "$lua_matches" "$lua_payloads" \
-    "$lua_payload_bytes" >> "$lua_counts_file"
-  printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
-    "$mode" "steady_state" "$lua_candidates" "$lua_matches" "$lua_payloads" \
-    "$lua_payload_bytes" >> "$lua_counts_file"
   payload_source_type=none
   case "$mode" in
     plus_value_*) payload_source_type=lua_liblql ;;
   esac
-  emit_submode_records "lua" "$dataset_name" "$selector_name" "$expr" \
-    "$mode" "$bytes" "$lua_candidates" "$lua_matches" \
-    "$lua_payloads" "$lua_payload_bytes" "$payload_source_type" null false \
-    "" "$fixture_sha"
+  for submode in warmup_included steady_state; do
+    record=$(LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
+      LUA_CPATH="$root/build/debug/?.so;$root/build/debug/?/core.so;;" \
+      LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+      DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+      "$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
+      "$fixture_path" "$candidates" "$submode")
+    lua_candidates=$(kv_field candidates "$record")
+    lua_matches=$(kv_field matches "$record")
+    lua_payloads=$(kv_field payloads "$record")
+    lua_payload_bytes=$(kv_field payload_bytes "$record")
+    lua_elapsed_ns=$(kv_field elapsed_ns "$record")
+    if [ -z "$lua_candidates" ] || [ -z "$lua_matches" ] ||
+      [ -z "$lua_payloads" ] || [ -z "$lua_payload_bytes" ] ||
+      [ -z "$lua_elapsed_ns" ]; then
+      printf 'Lua benchmark emitted an invalid record: %s\n' "$record" >&2
+      return 1
+    fi
+    printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+      "$mode" "$submode" "$lua_candidates" "$lua_matches" "$lua_payloads" \
+      "$lua_payload_bytes" >> "$lua_counts_file"
+    emit_record "lua" "$dataset_name" "$selector_name" "$expr" \
+      "$mode" "$submode" "$bytes" "$lua_candidates" "$lua_matches" \
+      "$lua_payloads" "$lua_payload_bytes" "$payload_source_type" \
+      "$lua_elapsed_ns" false "" "$fixture_sha"
+  done
 }
 
 run_matrix_for_impl() {

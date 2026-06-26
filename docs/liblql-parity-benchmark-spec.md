@@ -101,18 +101,18 @@ Current implementation status:
   candidate JSON after callback scope.
   The current C plan benchmark reuses the parsed public `lql_selector` handle;
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
-  The C native payload/plan helper reports `ns_per_op`, and the schema
-  validator requires timing for supported C native helper modes. Shell-mediated
-  C CLI selection records may still report `null` timing; Lua facade records
-  run through the direct Lua C module and may remain report-only until Lua
-  streaming/spooled handles are complete.
+  The C native payload/plan helper and Lua facade runner report `ns_per_op`;
+  the schema validator requires timing for supported Go, Lua, and C native
+  helper modes. Shell-mediated C CLI selection records may still report `null`
+  timing.
 - the current executable CLI-style selector matrix covers grouped
   equality/range, service contains, service case-insensitive contains, service
   `contains.any`, service `icontains.any`, and nested `/records[]/...`
   equivalents over the CLI-style single-root JSON fixture.
 - `make benchmarks-lua` loads `lua/lql.lua`, which uses the direct Lua 5.5
   `lql.core` C module over public liblql APIs, creates a receiver-backed
-  client with `lql.new()`, and emits stable JSON Lines records.
+  client with `lql.new()`, performs an untimed warmup pass for `steady_state`,
+  and emits timed stable JSON Lines records.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
   and fails on missing runners or counter divergence.
 

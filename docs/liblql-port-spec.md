@@ -778,8 +778,9 @@ Current implementation is an early slice:
   structured errors;
 - the parity benchmark surface now has Go, C, and Lua runners over the shared
   generated fixture matrix; the Lua runner loads `lua/lql.lua` and uses the
-  direct `lql.core` module rather than shelling out to `clql`; Go helper records
-  and C native payload/plan helper records now report `ns_per_op`;
+  direct `lql.core` module rather than shelling out to `clql`; Go helper
+  records, C native payload/plan helper records, and Lua facade runner records
+  now report `ns_per_op`;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and

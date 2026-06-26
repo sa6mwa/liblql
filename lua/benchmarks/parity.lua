@@ -6,7 +6,7 @@ local function die(message)
 end
 
 local function usage()
-  io.stderr:write("usage: parity.lua MODE SELECTOR FIXTURE CANDIDATES\n")
+  io.stderr:write("usage: parity.lua MODE SELECTOR FIXTURE CANDIDATES [SUBMODE]\n")
   os.exit(2)
 end
 
@@ -14,12 +14,17 @@ local mode = arg[1]
 local expr = arg[2]
 local fixture = arg[3]
 local candidates = tonumber(arg[4] or "")
+local submode = arg[5] or "warmup_included"
 
 if not mode or not expr or not fixture or not candidates then
   usage()
 end
 
-local ok, message = pcall(function()
+if submode ~= "warmup_included" and submode ~= "steady_state" then
+  die("unsupported submode: " .. submode)
+end
+
+local function run_once()
   local client = lql.new()
   local payloads = 0
   local payload_bytes = 0
@@ -52,8 +57,24 @@ local ok, message = pcall(function()
   if result then
     matches = result.candidates_matched
   end
+  return matches, payloads, payload_bytes
+end
+
+local ok, message = pcall(function()
+  local matches
+  local payloads
+  local payload_bytes
+  local start
+  local elapsed_ns
+  if submode == "steady_state" then
+    run_once()
+  end
+  start = os.clock()
+  matches, payloads, payload_bytes = run_once()
+  elapsed_ns = math.floor(((os.clock() - start) * 1000000000) + 0.5)
   io.write("candidates=", candidates, " matches=", matches, " payloads=",
-           payloads, " payload_bytes=", payload_bytes, "\n")
+           payloads, " payload_bytes=", payload_bytes, " elapsed_ns=",
+           elapsed_ns, "\n")
 end)
 
 if not ok then
