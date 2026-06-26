@@ -884,7 +884,9 @@ Current implementation status:
   failures, buffered, source-backed,
   and seekable file-range JSON projection including malformed JSON execution
   errors, mutation plan parsing and parse failures, buffered, source-backed, and
-  seekable file-range JSON mutation including file-backed mutation values and
+  seekable file-range JSON mutation including file-backed mutation values,
+  escaped JSON Pointer mutation paths, numeric object/array segment behavior,
+  wildcard and recursive mutation paths, array wildcard value mutation, and
   malformed JSON execution errors, compact serialization, compact error
   behavior, and current streaming query behavior through the receiver C API,
   comparing

@@ -844,6 +844,45 @@ func sdkMutationCases() []struct {
 				`/value="42"`,
 			},
 		},
+		{
+			name: "escaped JSON pointer paths",
+			doc:  `{"a/b":{"~key":"old","count":1},"plain":true}`,
+			mutations: []string{
+				`/a~1b/~0key=done`,
+				`/a~1b/count=+2`,
+				`/a~1b/missing=value`,
+			},
+		},
+		{
+			name: "wildcard object and array paths",
+			doc:  `{"items":[{"status":"old"},{"status":"new"}],"labels":{"env":"prod","tier":"edge"},"numeric_object":{"0":{"status":"unchanged"}}}`,
+			mutations: []string{
+				`/items[]/status=ready`,
+				`/labels/*=tagged`,
+				`/numeric_object[]/status=bad`,
+			},
+		},
+		{
+			name: "recursive one child segments",
+			doc:  `{"items":[{"status":"old"}],"boxes":{"a":{"status":"old"}},"groups":[{"items":[{"sku":"A","count":1,"drop":true}]}]}`,
+			mutations: []string{
+				`/items/**/status=ready`,
+				`/boxes/**/status=ready`,
+				`/groups/.../sku=Z`,
+				`/groups/.../count=+2`,
+			},
+		},
+		{
+			name: "array wildcard value mutation",
+			doc:  `{"nums":[1,2],"words":["a","b"],"drops":[true,false],"objects":[{"a":1}],"groups":[{"items":[{"count":1}]}]}`,
+			mutations: []string{
+				`/nums[]=+2`,
+				`/words[]=ready`,
+				`rm:/drops[]`,
+				`/objects[]=done`,
+				`/groups/.../count=+2`,
+			},
+		},
 	}
 }
 
