@@ -87,13 +87,13 @@ All liblql-owned allocation must pass through the active receiver's central
 allocator. Production code must not use direct `malloc`, `calloc`, `realloc`,
 or `free` outside the allocator implementation, and it must not recreate
 `lql_alloc`/`lql_dealloc` style free wrapper functions or `LQL_ALLOCATOR_*`
-macro wrappers around the allocator. Project-owned public consumers such as
-`clql` must allocate glue memory through receiver memory methods after
-`lql_new()` succeeds rather than including private allocator headers or calling
-private allocator accessors. Public APIs must avoid returning liblql-owned heap
-memory unless they also provide an ownership-specific receiver cleanup method,
-so downstream users do not cross allocator boundaries or depend on allocator
-wrapper functions.
+macro wrappers around the allocator. Project-owned glue such as `clql` must
+allocate scratch memory through private receiver allocator helpers after
+`lql_new()` succeeds, without touching raw allocator accessors or default
+allocator globals. Public APIs must not expose generic allocation/free receiver
+methods; any future API that returns liblql-owned heap memory must have an
+ownership-specific cleanup method, so downstream users do not cross allocator
+boundaries or depend on allocator wrapper functions.
 
 The API should eventually expose these surfaces:
 
@@ -601,13 +601,15 @@ Current implementation status:
   parity helper that omits the receiver argument and proves the style gate fails
   closed;
 - project-owned allocations have an internal central liblql allocator receiver
-  surface plus public receiver memory methods for receiver-owned glue buffers;
+  surface for receiver-owned glue buffers, but no public generic
+  allocation/free receiver methods;
   the old `lql_alloc`/`lql_calloc`/`lql_realloc`/`lql_dealloc`/`lql_strdup`
   wrapper layer and the private `LQL_ALLOCATOR_*` macro wrapper layer have been
   removed, and direct C runtime allocation calls are limited to the allocator
   implementation; `make test` enforces this by failing on old allocator wrapper
-  calls, allocator macro wrapper calls, private allocator access from `clql`, or
-  direct `malloc`/`calloc`/`realloc`/`free`/`strdup` calls in project-owned C
+  calls, allocator macro wrapper calls, public receiver memory wrappers, raw
+  allocator accessor/default allocator use from `clql`, or direct
+  `malloc`/`calloc`/`realloc`/`free`/`strdup` calls in project-owned C
   sources outside `src/lql_allocator.c`;
 - lonejson parser/serializer runtimes created by liblql core are constructed
   through a private receiver allocator bridge, not `lonejson_new(NULL, ...)`.
@@ -833,13 +835,13 @@ Current implementation status:
   execution shortcuts in `src/clql.c` so CLI behavior remains aligned with the
   library surface rather than an internal-only path;
 - `clql` process-glue allocations for parsed argv lists, joined selector text,
-  and inline temp path ownership use the active `lql *` receiver memory methods
-  after `lql_new()` succeeds; `src/clql.c` includes only the public liblql
-  header, and the style gate rejects `lql_internal.h`,
-  `lql_allocator_from_receiver()`, direct `lql_allocator_default()` use in
+  and inline temp path ownership use private receiver allocator helpers after
+  `lql_new()` succeeds; the style gate rejects raw
+  `lql_allocator_from_receiver()` and direct `lql_allocator_default()` use in
   `src/clql.c`, and null-receiver allocator fallback in project runtime code,
   so argv-derived buffers cannot be allocated before receiver construction or
-  freed through a different allocator domain;
+  freed through a different allocator domain while still keeping generic
+  allocation/free wrappers out of the public SDK;
 - `clql -m/--mutate -f/--field` follows Go CLI order for seekable file input
   and non-seekable stdin: project each output candidate first, then mutate the
   projected value only for matched candidates; this path uses callback-scoped

@@ -49,7 +49,9 @@ run_expect_ok
 
 sed '/void (\*destroy)/i\
   /* Forbidden cleanup spelling. */\
-  void (*selector_free)(void *selector);' "$header" >"$tmp/header.bad"
+  void (*selector_free)(void *selector);\
+  /* Forbidden generic allocator wrapper. */\
+  void *(*memory_alloc)(lql *self, unsigned long size);' "$header" >"$tmp/header.bad"
 mv "$tmp/header.bad" "$header"
 cat >>"$header" <<'EOF'
 void lql_free(lql *self);
@@ -162,6 +164,7 @@ expect_diagnostic "$out" "forbidden static free-operation/cleanup wrapper"
 expect_diagnostic "$out" "direct C runtime allocation"
 expect_diagnostic "$out" "forbidden liblql allocator wrapper call"
 expect_diagnostic "$out" "forbidden liblql allocator macro wrapper call"
+expect_diagnostic "$out" "receiver memory wrappers must not be public SDK methods"
 expect_diagnostic "$out" "project runtime must not use null receiver allocator fallback"
 expect_diagnostic "$out" "receiver allocator accessor must not fall back to default allocator"
 expect_diagnostic "$out" "cleanup paths must use explicit receiver/handle allocators"
@@ -179,7 +182,7 @@ expect_diagnostic "$out" "README documents forbidden operation/cleanup wrapper"
 expect_diagnostic "$out" "Lua facade must use public liblql APIs only"
 expect_diagnostic "$out" "clql must route execution through receiver methods"
 expect_diagnostic "$out" "clql glue allocation must use the active receiver allocator"
-expect_diagnostic "$out" "clql glue allocation must use receiver memory methods"
+expect_diagnostic "$out" "clql glue allocation must use private receiver allocator helpers"
 expect_diagnostic "$out" "project-owned consumers must query version/capabilities through the receiver"
 expect_diagnostic "$out" "tests and examples must exercise operations through receiver methods"
 expect_diagnostic "$out" "parity C operation helpers must receive lql \*ctx first"

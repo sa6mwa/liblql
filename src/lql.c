@@ -14,10 +14,6 @@
 
 static const char *receiver_version(const lql *self);
 static void receiver_capabilities_get(const lql *self, lql_capabilities *out);
-static void *receiver_memory_alloc(lql *self, size_t size);
-static void *receiver_memory_realloc(lql *self, void *ptr, size_t size);
-static char *receiver_memory_strdup(lql *self, const char *text);
-static void receiver_memory_destroy(lql *self, void *ptr);
 static void receiver_destroy(lql *self);
 static void capabilities_fill(lql_capabilities *out);
 static lql_status selector_parse_method(lql *self, const char *expr,
@@ -84,10 +80,6 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
   lql_eval_methods_install(ctx);
   lql_project_methods_install(ctx);
   lql_mutation_methods_install(ctx);
-  ctx->memory_alloc = receiver_memory_alloc;
-  ctx->memory_realloc = receiver_memory_realloc;
-  ctx->memory_strdup = receiver_memory_strdup;
-  ctx->memory_destroy = receiver_memory_destroy;
   ctx->destroy = receiver_destroy;
   *out = ctx;
   return LQL_STATUS_OK;
@@ -180,44 +172,6 @@ static const char *receiver_version(const lql *self) {
 static void receiver_capabilities_get(const lql *self, lql_capabilities *out) {
   (void)self;
   capabilities_fill(out);
-}
-
-static void *receiver_memory_alloc(lql *self, size_t size) {
-  lql_allocator *allocator;
-  allocator = lql_allocator_from_receiver(self);
-  if (allocator == NULL) {
-    return NULL;
-  }
-  return allocator->alloc(allocator, size);
-}
-
-static void *receiver_memory_realloc(lql *self, void *ptr, size_t size) {
-  lql_allocator *allocator;
-  allocator = lql_allocator_from_receiver(self);
-  if (allocator == NULL) {
-    return NULL;
-  }
-  return allocator->realloc(allocator, ptr, size);
-}
-
-static char *receiver_memory_strdup(lql *self, const char *text) {
-  lql_allocator *allocator;
-  allocator = lql_allocator_from_receiver(self);
-  if (allocator == NULL || text == NULL) {
-    return NULL;
-  }
-  return allocator->strdup(allocator, text);
-}
-
-static void receiver_memory_destroy(lql *self, void *ptr) {
-  lql_allocator *allocator;
-  if (ptr == NULL) {
-    return;
-  }
-  allocator = lql_allocator_from_receiver(self);
-  if (allocator != NULL) {
-    allocator->destroy(allocator, ptr);
-  }
 }
 
 static void receiver_destroy(lql *self) {

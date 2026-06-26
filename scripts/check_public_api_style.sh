@@ -266,6 +266,17 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  public_memory_method_hits=$(
+    grep -En \
+      'memory_(alloc|realloc|strdup|destroy)[[:space:]]*\)' \
+      "$source_root/include/lql/lql.h" 2>/dev/null || true
+  )
+  if [ -n "$public_memory_method_hits" ]; then
+    printf 'public API style: receiver memory wrappers must not be public SDK methods\n' >&2
+    printf '%s\n' "$public_memory_method_hits" >&2
+    failed=1
+  fi
+
   cleanup_default_allocator_hits=$(
     grep -En 'allocator[[:space:]]*=[[:space:]]*lql_allocator_default[[:space:]]*\(' \
       "$source_root/src/lql.c" \
@@ -457,11 +468,11 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
 
   cli_private_allocator_hits=$(
     grep -En \
-      'lql_internal\.h|lql_allocator_from_receiver[[:space:]]*\(' \
+      'lql_allocator_from_receiver[[:space:]]*\(' \
       "$source_root/src/clql.c" 2>/dev/null || true
   )
   if [ -n "$cli_private_allocator_hits" ]; then
-    printf 'public API style: clql glue allocation must use receiver memory methods\n' >&2
+    printf 'public API style: clql glue allocation must use private receiver allocator helpers, not the raw accessor\n' >&2
     printf '%s\n' "$cli_private_allocator_hits" >&2
     failed=1
   fi

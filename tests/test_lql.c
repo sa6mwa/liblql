@@ -14,8 +14,6 @@ static void expect_receiver_api(void) {
   lql_selector *selector;
   lql_capabilities caps;
   lql_error error;
-  char *copy;
-  char *scratch;
   int matched;
   lql_status st;
 
@@ -68,32 +66,10 @@ static void expect_receiver_api(void) {
       ctx->mutate_source_paths == NULL ||
       ctx->mutate_source_candidates == NULL ||
       ctx->mutate_source_projected_candidates == NULL ||
-      ctx->mutate_json == NULL || ctx->memory_alloc == NULL ||
-      ctx->memory_realloc == NULL || ctx->memory_strdup == NULL ||
-      ctx->memory_destroy == NULL || ctx->destroy == NULL) {
+      ctx->mutate_json == NULL || ctx->destroy == NULL) {
     printf("receiver method table missing required methods\n");
     ++failures;
   }
-  scratch = (char *)ctx->memory_alloc(ctx, 4u);
-  if (scratch == NULL) {
-    printf("receiver memory_alloc failed\n");
-    ++failures;
-  } else {
-    memcpy(scratch, "abc", 4u);
-    scratch = (char *)ctx->memory_realloc(ctx, scratch, 8u);
-    if (scratch == NULL || strcmp(scratch, "abc") != 0) {
-      printf("receiver memory_realloc mismatch\n");
-      ++failures;
-    }
-  }
-  copy = ctx->memory_strdup(ctx, "receiver-memory");
-  if (copy == NULL || strcmp(copy, "receiver-memory") != 0) {
-    printf("receiver memory_strdup mismatch\n");
-    ++failures;
-  }
-  ctx->memory_destroy(ctx, scratch);
-  ctx->memory_destroy(ctx, copy);
-  ctx->memory_destroy(ctx, NULL);
   memset(&caps, 0, sizeof(caps));
   ctx->capabilities_get(ctx, &caps);
   if (strcmp(ctx->version(ctx), LQL_VERSION) != 0 || !caps.selector_parse ||

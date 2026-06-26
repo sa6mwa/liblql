@@ -29,6 +29,13 @@ struct lql_impl {
 
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_from_receiver(const lql *self);
+LQL_INTERNAL_SYMBOL void *lql_receiver_alloc(lql *self, size_t size);
+LQL_INTERNAL_SYMBOL void *lql_receiver_calloc(lql *self, size_t count,
+                                              size_t size);
+LQL_INTERNAL_SYMBOL void *lql_receiver_realloc(lql *self, void *ptr,
+                                               size_t size);
+LQL_INTERNAL_SYMBOL char *lql_receiver_strdup(lql *self, const char *text);
+LQL_INTERNAL_SYMBOL void lql_receiver_destroy(lql *self, void *ptr);
 LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
                                                       lql_allocator *allocator,
                                                       lql_error *error);

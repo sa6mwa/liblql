@@ -376,14 +376,6 @@ struct lql {
   lql_status (*mutate_json)(lql *self, const lql_mutation_plan *plan,
                             const char *json, size_t json_len, FILE *out,
                             lql_error *error);
-  /* Allocates receiver-owned memory using the active central allocator. */
-  void *(*memory_alloc)(lql *self, size_t size);
-  /* Reallocates receiver-owned memory using the active central allocator. */
-  void *(*memory_realloc)(lql *self, void *ptr, size_t size);
-  /* Duplicates text as receiver-owned memory; NULL text returns NULL. */
-  char *(*memory_strdup)(lql *self, const char *text);
-  /* Releases memory allocated by this receiver; NULL ptr is accepted. */
-  void (*memory_destroy)(lql *self, void *ptr);
   /* Destroys the receiver; NULL behavior is undefined. */
   void (*destroy)(lql *self);
 };

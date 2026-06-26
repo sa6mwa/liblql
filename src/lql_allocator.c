@@ -56,6 +56,55 @@ lql_allocator_from_receiver(const lql *self) {
   return impl->allocator;
 }
 
+LQL_INTERNAL_SYMBOL void *lql_receiver_alloc(lql *self, size_t size) {
+  lql_allocator *allocator;
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    return NULL;
+  }
+  return allocator->alloc(allocator, size);
+}
+
+LQL_INTERNAL_SYMBOL void *lql_receiver_calloc(lql *self, size_t count,
+                                              size_t size) {
+  lql_allocator *allocator;
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    return NULL;
+  }
+  return allocator->calloc(allocator, count, size);
+}
+
+LQL_INTERNAL_SYMBOL void *lql_receiver_realloc(lql *self, void *ptr,
+                                               size_t size) {
+  lql_allocator *allocator;
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    return NULL;
+  }
+  return allocator->realloc(allocator, ptr, size);
+}
+
+LQL_INTERNAL_SYMBOL char *lql_receiver_strdup(lql *self, const char *text) {
+  lql_allocator *allocator;
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL || text == NULL) {
+    return NULL;
+  }
+  return allocator->strdup(allocator, text);
+}
+
+LQL_INTERNAL_SYMBOL void lql_receiver_destroy(lql *self, void *ptr) {
+  lql_allocator *allocator;
+  if (ptr == NULL) {
+    return;
+  }
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator != NULL) {
+    allocator->destroy(allocator, ptr);
+  }
+}
+
 static void *lonejson_lql_malloc(void *ctx, size_t size) {
   lql_allocator *allocator;
   allocator = (lql_allocator *)ctx;
