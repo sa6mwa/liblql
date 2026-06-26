@@ -1780,6 +1780,72 @@ static void expect_stream_array_items(void) {
   }
 }
 
+static void expect_stream_nested_array_items(void) {
+  static const char input[] = "[{\"id\":\"a\"},[{\"id\":\"b\"}],{\"id\":\"c\"}]";
+  FILE *out;
+  lql_selector *selector;
+  lql_query_result result;
+  payload_seen payload;
+  chunk_reader reader;
+  char buf[64];
+  long end;
+  size_t got;
+  lql_error error;
+  lql_status st;
+
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, "/id=\"b\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("nested array stream parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  out = tmpfile();
+  if (out == NULL) {
+    printf("nested array payload tmpfile failed\n");
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  memset(&payload, 0, sizeof(payload));
+  memset(&reader, 0, sizeof(reader));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 5u;
+  payload.out = out;
+  lql_error_init(&error);
+  st = test_ctx->query_source_spooled_matches(
+      test_ctx, selector, read_chunk, &reader, record_spooled_payload,
+      &payload, &result, &error);
+  test_ctx->selector_destroy(test_ctx, selector);
+  if (st != LQL_STATUS_OK) {
+    printf("nested array source payload query failed: %s\n", error.message);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  end = ftell(out);
+  if (end < 0 || end >= (long)sizeof(buf) || fseek(out, 0L, SEEK_SET) != 0) {
+    printf("nested array payload output sizing failed\n");
+    fclose(out);
+    ++failures;
+    return;
+  }
+  got = fread(buf, 1u, (size_t)end, out);
+  fclose(out);
+  buf[got] = '\0';
+  if (payload.calls != 1 || result.candidates_seen != (lql_uint64)3 ||
+      result.candidates_matched != (lql_uint64)1 ||
+      strcmp(buf, "{\"id\":\"b\"}") != 0) {
+    printf("nested array payload mismatch calls=%d seen=%lu matched=%lu "
+           "payload=%s\n",
+           payload.calls, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched, buf);
+    ++failures;
+  }
+}
+
 static void expect_stream_stop_controls(void) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"open\"}\n{\"status\":\"closed\"}\n";
@@ -6098,6 +6164,8 @@ static void expect_sdk_contract_manifest(void) {
        expect_source_spooled_payload_api},
       {"streaming", "top-level array candidate streams",
        expect_stream_array_items},
+      {"streaming", "nested array candidate streams",
+       expect_stream_nested_array_items},
       {"streaming", "stream stop controls", expect_stream_stop_controls},
       {"streaming", "query and payload public API error contracts",
        expect_stream_error_api},
@@ -6163,7 +6231,7 @@ static void expect_sdk_contract_manifest(void) {
   };
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 8}, {"streaming", 11},
+      {"version", 1},      {"selector", 8}, {"streaming", 12},
       {"projection", 7},   {"compact", 2},  {"mutation", 20},
   };
   size_t i;
@@ -6899,6 +6967,7 @@ int main(void) {
   expect_stream_large_irrelevant_scalar_api();
   expect_source_spooled_payload_api();
   expect_stream_array_items();
+  expect_stream_nested_array_items();
   expect_stream_stop_controls();
   expect_stream_error_api();
   expect_stream_error_corpus_api();

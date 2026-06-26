@@ -225,7 +225,9 @@ The stream API must handle:
 
 - one top-level JSON value;
 - NDJSON / repeated top-level JSON values;
-- top-level arrays as streams of candidate values;
+- top-level arrays as streams of candidate values, including recursively
+  flattened nested top-level array candidates where the public API can do so
+  without hidden full-value materialization;
 - large candidates with bounded memory;
 - decision-only mode;
 - plus-value mode with callback-scoped payload access;
@@ -940,6 +942,8 @@ Current implementation status:
   selectors without being dropped from decision accounting.
   Projection-before-mutation candidate-stream tests cover both seekable and
   callback-source inputs in preserve-unmatched and matches-only modes.
+  C-native streaming tests also cover recursive flattening of nested
+  top-level array candidates for callback-source spooled match payloads.
   Handle-producing selector, projection, and mutation APIs also have
   C-only ownership contract tests for optional diagnostics, output-handle
   clearing on parse failure, empty-selector ownership, and `NULL` cleanup/count
@@ -1027,6 +1031,13 @@ Current implementation status:
   success/error, mutation success/error, compact success/error, and stream
   corpora; this is behavioral oracle coverage, not C SDK unit coverage and not
   a requirement that the C API mirror Go API shape;
+- Nested top-level array flattening is currently proven for `clql` stdin
+  selection and public `ctx->query_source_spooled_matches()` callback-source
+  payload streams. It is not yet claimed for `ctx->query_file_decisions()` or
+  `ctx->query_file_matches()` because those seekable no-capture/range-payload
+  paths cannot safely reread nested candidate ranges from the same active
+  parser callback without either a lonejson nested-candidate API or hidden
+  payload capture;
 - C SDK projection tests assert duplicate projection paths are
   idempotent and parent/child projection path conflicts are rejected through
   the public projection API;

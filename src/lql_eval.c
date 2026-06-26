@@ -822,6 +822,7 @@ typedef struct spooled_match_state {
 } spooled_match_state;
 
 typedef struct source_spooled_match_state {
+  lql *receiver;
   const lql_selector *selector;
   lql_query_options options;
   lql_query_match_fn on_match;
@@ -832,6 +833,36 @@ typedef struct source_spooled_match_state {
 } source_spooled_match_state;
 
 static int query_limit_enabled(lql_uint64 limit) { return limit != 0u; }
+
+static lql_query_options query_remaining_options(
+    const lql_query_options *options, const lql_query_result *result) {
+  lql_query_options remaining;
+  memset(&remaining, 0, sizeof(remaining));
+  if (options == NULL || result == NULL) {
+    return remaining;
+  }
+  remaining = *options;
+  if (query_limit_enabled(options->max_matches)) {
+    remaining.max_matches = result->candidates_matched >= options->max_matches
+                                ? (lql_uint64)1
+                                : options->max_matches -
+                                      result->candidates_matched;
+  }
+  if (query_limit_enabled(options->max_candidates)) {
+    remaining.max_candidates = result->candidates_seen >=
+                                       options->max_candidates
+                                   ? (lql_uint64)1
+                                   : options->max_candidates -
+                                         result->candidates_seen;
+  }
+  if (query_limit_enabled(options->max_bytes_read)) {
+    remaining.max_bytes_read = result->bytes_read >= options->max_bytes_read
+                                   ? (lql_uint64)1
+                                   : options->max_bytes_read -
+                                         result->bytes_read;
+  }
+  return remaining;
+}
 
 static int eval_seek_u64(FILE *file, lql_uint64 offset) {
   off_t seek_offset;
@@ -1102,9 +1133,11 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
                          lonejson_error *error);
 
 static lonejson_status write_spooled_array_candidates(
-    lql *self, const lql_mutation_plan *mutation_plan,
-    const lonejson_spooled *spooled, FILE *out, int compact,
-    lonejson *compact_runtime, lonejson_error *error) {
+    lql *self, const lql_selector *selector,
+    const lql_projection *projection, const lql_mutation_plan *mutation_plan,
+    int matches_only, const lonejson_spooled *spooled, FILE *out, int compact,
+    lonejson *compact_runtime, lql_query_result *out_result,
+    lonejson_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
@@ -1120,14 +1153,17 @@ static lonejson_status write_spooled_array_candidates(
   }
   memset(&state, 0, sizeof(state));
   state.receiver = self;
+  state.selector = selector;
   state.out = out;
   state.compact = compact;
+  state.projection = projection;
   state.mutation_plan = mutation_plan;
   state.compact_runtime = compact_runtime;
-  state.expand_arrays = 0;
+  state.matches_only = matches_only;
+  state.expand_arrays = 1;
   lql_error_init(&state.projection_error);
   lql_error_init(&state.mutation_error);
-  if (!init_doc(&state.doc, self, NULL)) {
+  if (!init_doc(&state.doc, self, selector)) {
     lonejson_free(runtime);
     error->code = LONEJSON_STATUS_ALLOCATION_FAILED;
     strcpy(error->message, "failed to initialize nested array mutation");
@@ -1146,6 +1182,9 @@ static lonejson_status write_spooled_array_candidates(
                                         &options, &lj_error);
   destroy_doc(&state.doc);
   lonejson_free(runtime);
+  if (out_result != NULL) {
+    *out_result = state.result;
+  }
   if (st != LONEJSON_STATUS_OK) {
     if (state.mutation_error.code != LQL_STATUS_OK) {
       error->code = LONEJSON_STATUS_CALLBACK_FAILED;
@@ -1186,11 +1225,39 @@ on_source_spooled_candidate_end(void *user,
                                 const lonejson_candidate_info *candidate,
                                 lonejson_error *error) {
   source_spooled_match_state *state;
+  spooled_source_reader nested_reader;
+  lql_query_options nested_options;
+  lql_query_result nested_result;
   lql_query_match match;
   lql_status st;
   int matched;
 
   state = (source_spooled_match_state *)user;
+  if (state->doc.root_kind == '[' && candidate->payload_spool != NULL &&
+      state->receiver != NULL) {
+    nested_reader.cursor = *candidate->payload_spool;
+    nested_reader.cursor.read_offset = 0u;
+    nested_options = query_remaining_options(&state->options, &state->result);
+    memset(&nested_result, 0, sizeof(nested_result));
+    st = execute_query_source_spooled_matches(
+        state->receiver, state->selector, spooled_source_read, &nested_reader,
+        &nested_options, state->on_match, state->user, &nested_result, NULL);
+    reset_doc(&state->doc);
+    state->result.candidates_seen += nested_result.candidates_seen;
+    state->result.candidates_matched += nested_result.candidates_matched;
+    state->result.bytes_read =
+        (lql_uint64)(candidate->stream_offset + candidate->byte_size);
+    if (nested_result.stopped_early) {
+      state->result.stopped_early = 1;
+      state->result.stop_reason = nested_result.stop_reason;
+      return LONEJSON_CANDIDATE_STOP;
+    }
+    if (st != LQL_STATUS_OK) {
+      state->callback_status = st;
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+    return LONEJSON_CANDIDATE_CONTINUE;
+  }
   matched = state->selector == NULL ||
             state->selector->root.kind == LQL_NODE_ALL ||
             eval_node(&state->selector->root, &state->doc);
@@ -1253,6 +1320,7 @@ static lonejson_candidate_callback_result
 on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
                          lonejson_error *error) {
   spooled_match_state *state = (spooled_match_state *)user;
+  lql_query_result nested_result;
   lonejson_status write_status;
   int matched;
   int projected;
@@ -1260,6 +1328,24 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
   write_status = LONEJSON_STATUS_OK;
   projected = 0;
   wrote_output = 0;
+  if (state->doc.root_kind == '[' && state->expand_arrays &&
+      candidate->payload_spool != NULL) {
+    memset(&nested_result, 0, sizeof(nested_result));
+    write_status = write_spooled_array_candidates(
+        state->receiver, state->selector, state->projection,
+        state->mutation_plan, state->matches_only, candidate->payload_spool,
+        state->out, state->compact, state->compact_runtime, &nested_result,
+        error);
+    reset_doc(&state->doc);
+    state->result.candidates_seen += nested_result.candidates_seen;
+    state->result.candidates_matched += nested_result.candidates_matched;
+    state->result.bytes_read =
+        (lql_uint64)(candidate->stream_offset + candidate->byte_size);
+    if (write_status != LONEJSON_STATUS_OK) {
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+    return LONEJSON_CANDIDATE_CONTINUE;
+  }
   matched = state->selector == NULL ||
             state->selector->root.kind == LQL_NODE_ALL ||
             eval_node(&state->selector->root, &state->doc);
@@ -1298,9 +1384,14 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
         wrote_output = 1;
       } else if (matched) {
         if (state->doc.root_kind == '[' && state->expand_arrays) {
+          memset(&nested_result, 0, sizeof(nested_result));
           write_status = write_spooled_array_candidates(
-              state->receiver, state->mutation_plan, candidate->payload_spool,
-              state->out, state->compact, state->compact_runtime, error);
+              state->receiver, state->selector, state->projection,
+              state->mutation_plan, state->matches_only,
+              candidate->payload_spool, state->out, state->compact,
+              state->compact_runtime, &nested_result, error);
+          state->result.candidates_seen += nested_result.candidates_seen;
+          state->result.candidates_matched += nested_result.candidates_matched;
           if (write_status != LONEJSON_STATUS_OK) {
             reset_doc(&state->doc);
             return LONEJSON_CANDIDATE_ERROR;
@@ -1858,6 +1949,7 @@ static lql_status execute_query_source_spooled_matches(
   source_reader_adapter adapter;
 
   memset(&state, 0, sizeof(state));
+  state.receiver = self;
   state.selector = selector;
   state.on_match = on_match;
   state.user = user;

@@ -1169,6 +1169,13 @@ func TestSDKStreamingPayloadParity(t *testing.T) {
 			mode:                2,
 			wantSpooledPayloads: 1,
 		},
+		{
+			name:                "nested array callback source spooled payload",
+			expr:                `/id="b"`,
+			doc:                 `[{"id":"a"},[{"id":"b"}],{"id":"c"}]`,
+			mode:                2,
+			wantSpooledPayloads: 1,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			want, err := goStreamQuery(tc.expr, tc.doc, tc.mode, 0, 0, 0, false)
