@@ -1654,6 +1654,7 @@ static void expect_seekable_payload_api(void) {
   lql_status st;
   char buf[128];
   size_t len;
+  long pos;
 
   fp = tmpfile();
   out = tmpfile();
@@ -1747,13 +1748,60 @@ static void expect_seekable_payload_api(void) {
   payload.source = fp;
   payload.offset = 0u;
   payload.size = 24u;
+  if (fseek(fp, 7L, SEEK_SET) != 0) {
+    printf("payload sink failure position setup failed\n");
+    ++failures;
+  } else {
+    lql_error_init(&error);
+    st = test_ctx->payload_write_json_sink(test_ctx, &payload, write_memory_sink,
+                                           &sink, &error);
+    if (st != LQL_STATUS_STOP ||
+        strcmp(error.message, "payload sink write failed") != 0) {
+      printf("payload sink failure mismatch: status=%s error=%s\n",
+             lql_status_string(st), error.message);
+      ++failures;
+    }
+    pos = ftell(fp);
+    if (pos != 7L) {
+      printf("payload sink failure did not restore source position: %ld\n",
+             pos);
+      ++failures;
+    }
+  }
+
+  if (fseek(fp, 7L, SEEK_SET) != 0) {
+    printf("payload position setup failed\n");
+    ++failures;
+  } else {
+    memset(&sink, 0, sizeof(sink));
+    payload.offset = 52u;
+    payload.size = 24u;
+    lql_error_init(&error);
+    st = test_ctx->payload_write_json_sink(test_ctx, &payload, write_memory_sink,
+                                           &sink, &error);
+    pos = ftell(fp);
+    if (st != LQL_STATUS_OK ||
+        strcmp(sink.data, "{\"status\":\"open\",\"id\":3}") != 0 ||
+        pos != 7L) {
+      printf("payload sink position preservation mismatch: status=%s pos=%ld "
+             "out=%s error=%s\n",
+             lql_status_string(st), pos, sink.data, error.message);
+      ++failures;
+    }
+  }
+
+  memset(&sink, 0, sizeof(sink));
+  payload.offset = ~(lql_uint64)0;
+  payload.size = 1u;
   lql_error_init(&error);
   st = test_ctx->payload_write_json_sink(test_ctx, &payload, write_memory_sink,
                                          &sink, &error);
-  if (st != LQL_STATUS_STOP ||
-      strcmp(error.message, "payload sink write failed") != 0) {
-    printf("payload sink failure mismatch: status=%s error=%s\n",
-           lql_status_string(st), error.message);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message, "failed to write seekable payload range") != 0 ||
+      sink.len != 0u) {
+    printf("payload large-offset failure mismatch: status=%s len=%lu "
+           "error=%s\n",
+           lql_status_string(st), (unsigned long)sink.len, error.message);
     ++failures;
   }
 
