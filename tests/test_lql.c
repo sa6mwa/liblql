@@ -99,12 +99,12 @@ static void expect_public_utility_api(void) {
     printf("lql_strdup copy mismatch\n");
     ++failures;
   }
-  lql_free(copy);
+  lql_dealloc(copy);
   if (lql_strdup(NULL) != NULL) {
     printf("lql_strdup NULL mismatch\n");
     ++failures;
   }
-  lql_free(NULL);
+  lql_dealloc(NULL);
 
   lql_error_init(&error);
   st = test_ctx->selector_parse(test_ctx, "/status=open", NULL, &error);

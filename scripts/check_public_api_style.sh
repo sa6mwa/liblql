@@ -37,12 +37,13 @@ lql_mutate_file_range_root_fields
 lql_mutate_file_range_paths
 lql_mutate_source_paths
 lql_mutate_json
+lql_free
 '
 
 failed=0
 for symbol in $forbidden; do
   if grep -Eq "^[[:space:]]*([_A-Za-z][_A-Za-z0-9]*[[:space:]]+)+${symbol}[[:space:]]*\\(" "$header"; then
-    printf 'public API style: forbidden free-operation prototype in %s: %s\n' "$header" "$symbol" >&2
+    printf 'public API style: forbidden free-operation/cleanup prototype in %s: %s\n' "$header" "$symbol" >&2
     failed=1
   fi
 done
@@ -55,7 +56,7 @@ if [ -n "$shared" ] && [ -f "$shared" ]; then
     fi
     for symbol in $forbidden; do
       if printf '%s\n' "$symbols" | grep -Eq "^_?${symbol}$"; then
-        printf 'public API style: forbidden exported operation symbol in %s: %s\n' "$shared" "$symbol" >&2
+        printf 'public API style: forbidden exported operation/cleanup symbol in %s: %s\n' "$shared" "$symbol" >&2
         failed=1
       fi
     done
@@ -69,7 +70,7 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
       "$source_root/src" "$source_root/tests" "$source_root/parity" \
       "$source_root/lua" "$source_root/examples" "$source_root/bench" \
       2>/dev/null; then
-      printf 'public API style: forbidden free-operation macro wrapper: %s\n' "$symbol" >&2
+      printf 'public API style: forbidden free-operation/cleanup macro wrapper: %s\n' "$symbol" >&2
       failed=1
     fi
     if grep -REn \
@@ -77,7 +78,7 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
       "$source_root/src" "$source_root/tests" "$source_root/parity" \
       "$source_root/lua" "$source_root/examples" "$source_root/bench" \
       2>/dev/null; then
-      printf 'public API style: forbidden static free-operation wrapper: %s\n' "$symbol" >&2
+      printf 'public API style: forbidden static free-operation/cleanup wrapper: %s\n' "$symbol" >&2
       failed=1
     fi
   done

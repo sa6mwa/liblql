@@ -152,7 +152,7 @@ typedef lql_status (*lql_write_fn)(void *user, const void *data, size_t len);
    Mutable implementation state, if any, is kept behind impl. Prefer
    ctx->method(ctx, ...) for handle operations. Standalone public functions are
    limited to construction, diagnostics, version/capability helpers, and
-   allocator/cleanup utilities. */
+   allocator utilities. */
 struct lql {
   void *impl;
   const char *(*version)(const lql *self);
@@ -270,13 +270,12 @@ const char *lql_version(void);
 void lql_capabilities_get(lql_capabilities *out);
 
 /* Project-owned allocation helpers. liblql-owned returned memory must be
-   released through lql_dealloc(), lql_free(), or the documented type-specific
-   cleanup function rather than through the C runtime directly. */
+   released through lql_dealloc() or the documented receiver cleanup method
+   rather than through the C runtime directly. */
 void *lql_alloc(size_t size);
 void *lql_calloc(size_t count, size_t size);
 void *lql_realloc(void *ptr, size_t size);
 void lql_dealloc(void *ptr);
-void lql_free(void *ptr);
 char *lql_strdup(const char *text);
 
 #ifdef __cplusplus

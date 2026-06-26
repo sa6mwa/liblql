@@ -66,24 +66,24 @@ instantiatable `lql *` with `lql_new()`, invoke operations as
 `ctx->operation(ctx, ...)`, and release it with `ctx->destroy(ctx)` or
 `lql_destroy(ctx)`. Selector, query, payload, projection, compact, and mutation
 operations are receiver methods only; standalone public functions are limited
-to construction, diagnostics, version/capability helpers, and
-allocator/cleanup utilities. Project-owned code must also use receiver calls
-directly rather than recreating removed operation free functions through local
-macros or static wrapper shims.
+to construction, diagnostics, version/capability helpers, and allocator
+utilities. Project-owned code must also use receiver calls directly rather than
+recreating removed operation free functions or free-operation cleanup aliases
+through local macros or static wrapper shims.
 
 The API should be handle-oriented and explicit about ownership:
 
 - parser/compiled selector handles are owned by the caller and freed with
-  liblql cleanup functions;
+  receiver cleanup methods;
 - result payload handles are valid only for documented callback lifetimes and
   must not imply retained candidate copies;
-- all project-allocated strings or buffers are released through liblql cleanup
-  functions;
+- all project-allocated strings or buffers are released through
+  `lql_dealloc()`;
 - error messages are actionable and available through explicit error objects.
 
 All liblql-owned allocation must pass through the central liblql allocator
-surface (`lql_alloc()`, `lql_calloc()`, `lql_realloc()`, `lql_dealloc()`, and
-public cleanup helpers such as `lql_free()`). Production code must not use
+surface (`lql_alloc()`, `lql_calloc()`, `lql_realloc()`, and
+`lql_dealloc()`) or receiver cleanup methods. Production code must not use
 direct `malloc`, `calloc`, `realloc`, or `free` outside the allocator
 implementation. Publicly returned memory must be released by liblql-owned
 cleanup functions so downstream users do not cross allocator boundaries.

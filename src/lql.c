@@ -361,8 +361,6 @@ void *lql_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
 
 void lql_dealloc(void *ptr) { free(ptr); }
 
-void lql_free(void *ptr) { lql_dealloc(ptr); }
-
 static const char *receiver_version(const lql *self) {
   (void)self;
   return lql_version();
