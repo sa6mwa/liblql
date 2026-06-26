@@ -27,10 +27,10 @@ typedef struct eval_doc {
 } eval_doc;
 
 static void destroy_doc(eval_doc *doc) {
-  lql_dealloc(doc->hits);
-  lql_dealloc(doc->val_buf);
-  lql_dealloc(doc->container_types);
-  lql_dealloc(doc->container_depths);
+  LQL_ALLOCATOR_DESTROY(doc->hits);
+  LQL_ALLOCATOR_DESTROY(doc->val_buf);
+  LQL_ALLOCATOR_DESTROY(doc->container_types);
+  LQL_ALLOCATOR_DESTROY(doc->container_depths);
   memset(doc, 0, sizeof(*doc));
 }
 
@@ -38,7 +38,7 @@ static int init_doc(eval_doc *doc, const lql_selector *selector) {
   memset(doc, 0, sizeof(*doc));
   doc->selector = selector;
   if (selector != NULL && selector->hit_count != 0u) {
-    doc->hits = (unsigned char *)lql_calloc(selector->hit_count, 1u);
+    doc->hits = (unsigned char *)LQL_ALLOCATOR_CALLOC(selector->hit_count, 1u);
     if (doc->hits == NULL) {
       return 0;
     }
@@ -50,7 +50,7 @@ static void reset_doc(eval_doc *doc) {
   if (doc->selector != NULL && doc->selector->hit_count != 0u) {
     memset(doc->hits, 0, doc->selector->hit_count);
   }
-  lql_dealloc(doc->val_buf);
+  LQL_ALLOCATOR_DESTROY(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   doc->container_count = 0u;
@@ -59,7 +59,7 @@ static void reset_doc(eval_doc *doc) {
 
 static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
   char *next;
-  next = (char *)lql_realloc(*buf, *len + n + 1u);
+  next = (char *)LQL_ALLOCATOR_REALLOC(*buf, *len + n + 1u);
   if (next == NULL) {
     return 0;
   }
@@ -77,14 +77,14 @@ push_container(eval_doc *doc, const lonejson_value_path *path, int type) {
   size_t next_cap;
   if (doc->container_count == doc->container_cap) {
     next_cap = doc->container_cap == 0u ? 8u : doc->container_cap * 2u;
-    next_types =
-        (int *)lql_realloc(doc->container_types, sizeof(int) * next_cap);
+    next_types = (int *)LQL_ALLOCATOR_REALLOC(doc->container_types,
+                                              sizeof(int) * next_cap);
     if (next_types == NULL) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
     doc->container_types = next_types;
-    next_depths =
-        (size_t *)lql_realloc(doc->container_depths, sizeof(size_t) * next_cap);
+    next_depths = (size_t *)LQL_ALLOCATOR_REALLOC(doc->container_depths,
+                                                  sizeof(size_t) * next_cap);
     if (next_depths == NULL) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
@@ -515,7 +515,7 @@ static lonejson_status on_string_begin(void *user,
   eval_doc *doc = (eval_doc *)user;
   (void)path;
   (void)error;
-  lql_dealloc(doc->val_buf);
+  LQL_ALLOCATOR_DESTROY(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -542,7 +542,7 @@ static lonejson_status on_string_end(void *user,
     doc->root_kind = 's';
   }
   observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 0, 0, 0);
-  lql_dealloc(doc->val_buf);
+  LQL_ALLOCATOR_DESTROY(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -570,7 +570,7 @@ static lonejson_status on_number_end(void *user,
     doc->root_kind = 'n';
   }
   observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 1, 0, 0);
-  lql_dealloc(doc->val_buf);
+  LQL_ALLOCATOR_DESTROY(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   return LONEJSON_STATUS_OK;

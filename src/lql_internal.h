@@ -11,11 +11,29 @@
 #define LQL_INTERNAL_SYMBOL
 #endif
 
-LQL_INTERNAL_SYMBOL void *lql_alloc(size_t size);
-LQL_INTERNAL_SYMBOL void *lql_calloc(size_t count, size_t size);
-LQL_INTERNAL_SYMBOL void *lql_realloc(void *ptr, size_t size);
-LQL_INTERNAL_SYMBOL void lql_dealloc(void *ptr);
-LQL_INTERNAL_SYMBOL char *lql_strdup(const char *text);
+typedef struct lql_allocator lql_allocator;
+
+struct lql_allocator {
+  void *impl;
+  void *(*alloc)(lql_allocator *self, size_t size);
+  void *(*calloc)(lql_allocator *self, size_t count, size_t size);
+  void *(*realloc)(lql_allocator *self, void *ptr, size_t size);
+  void (*destroy)(lql_allocator *self, void *ptr);
+  char *(*strdup)(lql_allocator *self, const char *text);
+};
+
+LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
+
+#define LQL_ALLOCATOR_ALLOC(size)                                              \
+  (lql_allocator_default()->alloc(lql_allocator_default(), (size)))
+#define LQL_ALLOCATOR_CALLOC(count, size)                                      \
+  (lql_allocator_default()->calloc(lql_allocator_default(), (count), (size)))
+#define LQL_ALLOCATOR_REALLOC(ptr, size)                                       \
+  (lql_allocator_default()->realloc(lql_allocator_default(), (ptr), (size)))
+#define LQL_ALLOCATOR_DESTROY(ptr)                                             \
+  (lql_allocator_default()->destroy(lql_allocator_default(), (ptr)))
+#define LQL_ALLOCATOR_STRDUP(text)                                             \
+  (lql_allocator_default()->strdup(lql_allocator_default(), (text)))
 
 typedef enum lql_node_kind {
   LQL_NODE_ALL = 0,
@@ -110,7 +128,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_or_impl(lql *self,
                                                           lql_selector **out,
                                                           lql_error *error);
 LQL_INTERNAL_SYMBOL void lql_selector_destroy_impl(lql *self,
-                                                lql_selector *selector);
+                                                   lql_selector *selector);
 LQL_INTERNAL_SYMBOL int
 lql_selector_is_empty_impl(const lql *self, const lql_selector *selector);
 LQL_INTERNAL_SYMBOL lql_status lql_eval_selector(const lql_selector *selector,
@@ -188,8 +206,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
 LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
     lql *self, const char *const *fields, size_t field_count,
     lql_projection **out, lql_error *error);
-LQL_INTERNAL_SYMBOL void lql_projection_destroy_impl(lql *self,
-                                                  lql_projection *projection);
+LQL_INTERNAL_SYMBOL void
+lql_projection_destroy_impl(lql *self, lql_projection *projection);
 LQL_INTERNAL_SYMBOL lql_status lql_project_file_range_impl(
     lql *self, const lql_projection *projection, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, int *out_found, lql_error *error);
@@ -220,8 +238,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
     lql_error *error);
 LQL_INTERNAL_SYMBOL size_t
 lql_mutation_plan_count_impl(const lql *self, const lql_mutation_plan *plan);
-LQL_INTERNAL_SYMBOL void lql_mutation_plan_destroy_impl(lql *self,
-                                                     lql_mutation_plan *plan);
+LQL_INTERNAL_SYMBOL void
+lql_mutation_plan_destroy_impl(lql *self, lql_mutation_plan *plan);
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_root_fields_impl(
     lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, lql_error *error);
@@ -232,8 +250,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_candidates_impl(
     lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
     FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
     int matches_only, lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status
-lql_mutate_file_range_projected_candidates_impl(
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_projected_candidates_impl(
     lql *self, const lql_selector *selector, const lql_projection *projection,
     const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, int compact, int matches_only,

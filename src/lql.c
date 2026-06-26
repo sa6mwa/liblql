@@ -108,7 +108,7 @@ lql_status lql_new(lql **out, lql_error *error) {
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   *out = NULL;
-  ctx = (lql *)lql_calloc(1u, sizeof(*ctx));
+  ctx = (lql *)LQL_ALLOCATOR_CALLOC(1u, sizeof(*ctx));
   if (ctx == NULL) {
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
     return LQL_STATUS_NO_MEMORY;
@@ -241,21 +241,6 @@ void lql_capabilities_get(lql_capabilities *out) {
   out->mutation_file_values = 1;
 }
 
-LQL_INTERNAL_SYMBOL char *lql_strdup(const char *text) {
-  size_t len;
-  char *out;
-  if (text == NULL) {
-    return NULL;
-  }
-  len = strlen(text);
-  out = (char *)lql_alloc(len + 1u);
-  if (out == NULL) {
-    return NULL;
-  }
-  memcpy(out, text, len + 1u);
-  return out;
-}
-
 static const char *receiver_version(const lql *self) {
   (void)self;
   return lql_version();
@@ -282,8 +267,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_candidates_impl(
       out_result, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status
-lql_mutate_file_range_projected_candidates_impl(
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_projected_candidates_impl(
     lql *self, const lql_selector *selector, const lql_projection *projection,
     const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, int compact, int matches_only,
@@ -328,28 +312,28 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_projected_candidates_impl(
                   "projection, plan, read, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return lql_eval_query_source_spooled_rewrite(
-      selector, read, read_user, out, compact, projection, plan, matches_only,
-      out_result, error);
+  return lql_eval_query_source_spooled_rewrite(selector, read, read_user, out,
+                                               compact, projection, plan,
+                                               matches_only, out_result, error);
 }
 
-static void receiver_destroy(lql *self) { lql_dealloc(self); }
+static void receiver_destroy(lql *self) { LQL_ALLOCATOR_DESTROY(self); }
 
 LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_node *node) {
   size_t i;
   if (node == NULL) {
     return;
   }
-  lql_dealloc(node->term.field);
-  lql_dealloc(node->term.value);
+  LQL_ALLOCATOR_DESTROY(node->term.field);
+  LQL_ALLOCATOR_DESTROY(node->term.value);
   for (i = 0u; i < node->term.any_count; ++i) {
-    lql_dealloc(node->term.any[i]);
+    LQL_ALLOCATOR_DESTROY(node->term.any[i]);
   }
-  lql_dealloc(node->term.any);
+  LQL_ALLOCATOR_DESTROY(node->term.any);
   for (i = 0u; i < node->child_count; ++i) {
     lql_node_cleanup(&node->children[i]);
   }
-  lql_dealloc(node->children);
+  LQL_ALLOCATOR_DESTROY(node->children);
   memset(node, 0, sizeof(*node));
 }
 
@@ -370,11 +354,11 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_or_impl(lql *self,
 }
 
 LQL_INTERNAL_SYMBOL void lql_selector_destroy_impl(lql *self,
-                                                lql_selector *selector) {
+                                                   lql_selector *selector) {
   (void)self;
   if (selector != NULL) {
     lql_node_cleanup(&selector->root);
-    lql_dealloc(selector);
+    LQL_ALLOCATOR_DESTROY(selector);
   }
 }
 

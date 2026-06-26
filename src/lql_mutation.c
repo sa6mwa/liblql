@@ -103,9 +103,9 @@ static void mutation_path_cleanup(mutation_path *path) {
     return;
   }
   for (i = 0u; i < path->segment_count; ++i) {
-    lql_dealloc(path->segments[i]);
+    LQL_ALLOCATOR_DESTROY(path->segments[i]);
   }
-  lql_dealloc(path->segments);
+  LQL_ALLOCATOR_DESTROY(path->segments);
   path->segments = NULL;
   path->segment_count = 0u;
 }
@@ -115,8 +115,8 @@ static void mutation_item_cleanup(mutation_item *item) {
     return;
   }
   mutation_path_cleanup(&item->path);
-  lql_dealloc(item->value);
-  lql_dealloc(item->file_path);
+  LQL_ALLOCATOR_DESTROY(item->value);
+  LQL_ALLOCATOR_DESTROY(item->file_path);
   memset(item, 0, sizeof(*item));
 }
 
@@ -128,7 +128,7 @@ static void mutation_plan_cleanup_items(lql_mutation_plan *plan) {
   for (i = 0u; i < plan->count; ++i) {
     mutation_item_cleanup(&plan->items[i]);
   }
-  lql_dealloc(plan->items);
+  LQL_ALLOCATOR_DESTROY(plan->items);
   plan->items = NULL;
   plan->count = 0u;
 }
@@ -139,9 +139,9 @@ static void string_list_cleanup(string_list *list) {
     return;
   }
   for (i = 0u; i < list->count; ++i) {
-    lql_dealloc(list->items[i]);
+    LQL_ALLOCATOR_DESTROY(list->items[i]);
   }
-  lql_dealloc(list->items);
+  LQL_ALLOCATOR_DESTROY(list->items);
   list->items = NULL;
   list->count = 0u;
 }
@@ -173,7 +173,7 @@ static char *trimmed_dup_range(const char *start, size_t len) {
     --end;
   }
   len = (size_t)(end - start);
-  out = (char *)lql_alloc(len + 1u);
+  out = (char *)LQL_ALLOCATOR_ALLOC(len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -202,7 +202,7 @@ static char *mutation_unquote(char *value) {
   len = strlen(value);
   if (len >= 2u && ((value[0] == '"' && value[len - 1u] == '"') ||
                     (value[0] == '\'' && value[len - 1u] == '\''))) {
-    out = (char *)lql_alloc(len - 1u);
+    out = (char *)LQL_ALLOCATOR_ALLOC(len - 1u);
     if (out == NULL) {
       return NULL;
     }
@@ -215,7 +215,7 @@ static char *mutation_unquote(char *value) {
       *w++ = *r++;
     }
     *w = '\0';
-    lql_dealloc(value);
+    LQL_ALLOCATOR_DESTROY(value);
     return out;
   }
   return value;
@@ -233,7 +233,8 @@ static char *join_paths(const char *base, const char *path) {
   base_len = strlen(base);
   path_len = strlen(path);
   need_sep = base_len != 0u && base[base_len - 1u] != '/';
-  out = (char *)lql_alloc(base_len + (need_sep ? 1u : 0u) + path_len + 1u);
+  out = (char *)LQL_ALLOCATOR_ALLOC(base_len + (need_sep ? 1u : 0u) + path_len +
+                                    1u);
   if (out == NULL) {
     return NULL;
   }
@@ -260,7 +261,7 @@ static char *resolve_file_value_path(const char *raw,
     return NULL;
   }
   if (path[0] == '\0') {
-    lql_dealloc(path);
+    LQL_ALLOCATOR_DESTROY(path);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "file-backed mutation missing file path");
     return NULL;
@@ -268,17 +269,17 @@ static char *resolve_file_value_path(const char *raw,
   if (strcmp(path, "~") == 0 || has_prefix(path, "~/")) {
     home = getenv("HOME");
     if (home == NULL || home[0] == '\0') {
-      lql_dealloc(path);
+      LQL_ALLOCATOR_DESTROY(path);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "failed to resolve home for file-backed mutation");
       return NULL;
     }
     if (strcmp(path, "~") == 0) {
-      expanded = lql_strdup(home);
+      expanded = LQL_ALLOCATOR_STRDUP(home);
     } else {
       expanded = join_paths(home, path + 2u);
     }
-    lql_dealloc(path);
+    LQL_ALLOCATOR_DESTROY(path);
     return expanded;
   }
   if (path_is_absolute(path)) {
@@ -289,11 +290,11 @@ static char *resolve_file_value_path(const char *raw,
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "relative file-backed mutation path requires file value base "
                   "dir");
-    lql_dealloc(path);
+    LQL_ALLOCATOR_DESTROY(path);
     return NULL;
   }
   expanded = join_paths(options->file_value_base_dir, path);
-  lql_dealloc(path);
+  LQL_ALLOCATOR_DESTROY(path);
   return expanded;
 }
 
@@ -441,7 +442,7 @@ static lonejson_read_result spooled_read(void *user, unsigned char *buffer,
 
 static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
   char *next;
-  next = (char *)lql_realloc(*buf, *len + n + 1u);
+  next = (char *)LQL_ALLOCATOR_REALLOC(*buf, *len + n + 1u);
   if (next == NULL) {
     return 0;
   }
@@ -454,8 +455,8 @@ static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
 
 static int add_string(string_list *list, char *value) {
   char **next;
-  next = (char **)lql_realloc(list->items,
-                              sizeof(list->items[0]) * (list->count + 1u));
+  next = (char **)LQL_ALLOCATOR_REALLOC(list->items, sizeof(list->items[0]) *
+                                                         (list->count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -512,12 +513,12 @@ static int split_expressions(const char *input, string_list *out,
         return 0;
       }
       if (item[0] != '\0' && !add_string(out, item)) {
-        lql_dealloc(item);
+        LQL_ALLOCATOR_DESTROY(item);
         string_list_cleanup(out);
         return 0;
       }
       if (item[0] == '\0') {
-        lql_dealloc(item);
+        LQL_ALLOCATOR_DESTROY(item);
       }
       chunk = p + 1;
     }
@@ -539,7 +540,7 @@ static int split_expressions(const char *input, string_list *out,
   if (len != 0u) {
     item = trimmed_dup_range(chunk, strlen(chunk));
     if (item == NULL || !add_string(out, item)) {
-      lql_dealloc(item);
+      LQL_ALLOCATOR_DESTROY(item);
       string_list_cleanup(out);
       return 0;
     }
@@ -551,7 +552,7 @@ static char *decode_path_segment(const char *src, size_t len) {
   char *out;
   size_t i;
   size_t j;
-  out = (char *)lql_alloc(len + 1u);
+  out = (char *)LQL_ALLOCATOR_ALLOC(len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -578,8 +579,8 @@ static char *decode_path_segment(const char *src, size_t len) {
 
 static int path_add_segment(mutation_path *path, char *segment) {
   char **next;
-  next = (char **)lql_realloc(path->segments, sizeof(path->segments[0]) *
-                                                  (path->segment_count + 1u));
+  next = (char **)LQL_ALLOCATOR_REALLOC(
+      path->segments, sizeof(path->segments[0]) * (path->segment_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -596,19 +597,19 @@ static int expand_and_add_segment(mutation_path *path, char *segment) {
   if (len > 2u && strcmp(segment, "[]") != 0 &&
       strcmp(segment + len - 2u, "[]") == 0) {
     segment[len - 2u] = '\0';
-    base = lql_strdup(segment);
+    base = LQL_ALLOCATOR_STRDUP(segment);
     segment[len - 2u] = '[';
     if (base == NULL) {
-      lql_dealloc(segment);
+      LQL_ALLOCATOR_DESTROY(segment);
       return 0;
     }
-    wild = lql_strdup("[]");
+    wild = LQL_ALLOCATOR_STRDUP("[]");
     if (wild == NULL) {
-      lql_dealloc(base);
-      lql_dealloc(segment);
+      LQL_ALLOCATOR_DESTROY(base);
+      LQL_ALLOCATOR_DESTROY(segment);
       return 0;
     }
-    lql_dealloc(segment);
+    LQL_ALLOCATOR_DESTROY(segment);
     return path_add_segment(path, base) && path_add_segment(path, wild);
   }
   return path_add_segment(path, segment);
@@ -641,7 +642,7 @@ static int split_path(const char *raw, mutation_path *out, lql_error *error) {
     }
     decoded = decode_path_segment(seg, (size_t)(slash - seg));
     if (decoded == NULL || !expand_and_add_segment(out, decoded)) {
-      lql_dealloc(decoded);
+      LQL_ALLOCATOR_DESTROY(decoded);
       mutation_path_cleanup(out);
       return 0;
     }
@@ -662,8 +663,8 @@ static int split_path(const char *raw, mutation_path *out, lql_error *error) {
 
 static int append_item(lql_mutation_plan *plan, mutation_item *item) {
   mutation_item *next;
-  next = (mutation_item *)lql_realloc(plan->items, sizeof(plan->items[0]) *
-                                                       (plan->count + 1u));
+  next = (mutation_item *)LQL_ALLOCATOR_REALLOC(
+      plan->items, sizeof(plan->items[0]) * (plan->count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -678,12 +679,12 @@ static int prepend_path(mutation_item *item, const mutation_path *prefix) {
   size_t i;
   size_t count;
   count = prefix->segment_count + item->path.segment_count;
-  segments = (char **)lql_calloc(count, sizeof(segments[0]));
+  segments = (char **)LQL_ALLOCATOR_CALLOC(count, sizeof(segments[0]));
   if (segments == NULL) {
     return 0;
   }
   for (i = 0u; i < prefix->segment_count; ++i) {
-    segments[i] = lql_strdup(prefix->segments[i]);
+    segments[i] = LQL_ALLOCATOR_STRDUP(prefix->segments[i]);
     if (segments[i] == NULL) {
       goto fail;
     }
@@ -692,15 +693,15 @@ static int prepend_path(mutation_item *item, const mutation_path *prefix) {
     segments[prefix->segment_count + i] = item->path.segments[i];
     item->path.segments[i] = NULL;
   }
-  lql_dealloc(item->path.segments);
+  LQL_ALLOCATOR_DESTROY(item->path.segments);
   item->path.segments = segments;
   item->path.segment_count = count;
   return 1;
 fail:
   for (i = 0u; i < count; ++i) {
-    lql_dealloc(segments[i]);
+    LQL_ALLOCATOR_DESTROY(segments[i]);
   }
-  lql_dealloc(segments);
+  LQL_ALLOCATOR_DESTROY(segments);
   return 0;
 }
 
@@ -727,7 +728,7 @@ static int parse_number_slice(const char *s, size_t len, double *out) {
     return 0;
   }
   ok = parse_number(copy, out);
-  lql_dealloc(copy);
+  LQL_ALLOCATOR_DESTROY(copy);
   return ok;
 }
 
@@ -762,25 +763,25 @@ static int parse_brace_mutation(const char *expr, lql_mutation_plan *plan,
     return -1;
   }
   if (strchr(prefix_text, '=') != NULL) {
-    lql_dealloc(prefix_text);
+    LQL_ALLOCATOR_DESTROY(prefix_text);
     return 0;
   }
   if (!split_path(prefix_text, &prefix, error)) {
-    lql_dealloc(prefix_text);
+    LQL_ALLOCATOR_DESTROY(prefix_text);
     return -1;
   }
-  lql_dealloc(prefix_text);
+  LQL_ALLOCATOR_DESTROY(prefix_text);
   body = trimmed_dup_range(open + 1, len - (size_t)(open - expr) - 2u);
   if (body == NULL) {
     mutation_path_cleanup(&prefix);
     return -1;
   }
   if (!split_expressions(body, &parts, error)) {
-    lql_dealloc(body);
+    LQL_ALLOCATOR_DESTROY(body);
     mutation_path_cleanup(&prefix);
     return -1;
   }
-  lql_dealloc(body);
+  LQL_ALLOCATOR_DESTROY(body);
   if (parts.count == 0u) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "brace mutation empty");
     string_list_cleanup(&parts);
@@ -805,7 +806,7 @@ static int parse_brace_mutation(const char *expr, lql_mutation_plan *plan,
       return -1;
     }
   }
-  lql_dealloc(nested.items);
+  LQL_ALLOCATOR_DESTROY(nested.items);
   string_list_cleanup(&parts);
   mutation_path_cleanup(&prefix);
   return 1;
@@ -826,7 +827,7 @@ static int parse_set_value(char *value, int time_mode, mutation_item *item,
     }
     if (ascii_equal_ignore_case(copy, "NOW")) {
       if (!lql_temporal_now(&temporal)) {
-        lql_dealloc(copy);
+        LQL_ALLOCATOR_DESTROY(copy);
         lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                       "failed to resolve current time");
         return 0;
@@ -834,21 +835,21 @@ static int parse_set_value(char *value, int time_mode, mutation_item *item,
     } else if (!time_literal_has_zone(copy) ||
                !lql_parse_temporal_literal(copy, &temporal) ||
                temporal.date_only) {
-      lql_dealloc(copy);
+      LQL_ALLOCATOR_DESTROY(copy);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR, "invalid time literal");
       return 0;
     }
-    lql_dealloc(copy);
+    LQL_ALLOCATOR_DESTROY(copy);
     if (!lql_temporal_format_rfc3339_nano(&temporal, normalized,
                                           sizeof(normalized))) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR, "invalid time literal");
       return 0;
     }
-    item->value = lql_strdup(normalized);
+    item->value = LQL_ALLOCATOR_STRDUP(normalized);
     if (item->value == NULL) {
       return 0;
     }
-    lql_dealloc(value);
+    LQL_ALLOCATOR_DESTROY(value);
     item->time_value = 1;
     return 1;
   }
@@ -905,7 +906,7 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     if (file_mode != MUTATION_FILE_NONE || remove_mode) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "time-prefixed mutation has invalid prefix combination");
-      lql_dealloc(expr);
+      LQL_ALLOCATOR_DESTROY(expr);
       return 0;
     }
     time_mode = 1;
@@ -916,29 +917,29 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     if (file_mode != MUTATION_FILE_NONE) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "file-backed mutation has invalid prefix combination");
-      lql_dealloc(expr);
+      LQL_ALLOCATOR_DESTROY(expr);
       return 0;
     }
     item.kind = MUTATION_REMOVE;
     if (!split_path(expr, &item.path, error) || !append_item(plan, &item)) {
       mutation_item_cleanup(&item);
-      lql_dealloc(expr);
+      LQL_ALLOCATOR_DESTROY(expr);
       return 0;
     }
-    lql_dealloc(expr);
+    LQL_ALLOCATOR_DESTROY(expr);
     return 1;
   }
   if (has_suffix(expr, "++") || has_suffix(expr, "--")) {
     if (file_mode != MUTATION_FILE_NONE) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "file-backed mutation does not support increment");
-      lql_dealloc(expr);
+      LQL_ALLOCATOR_DESTROY(expr);
       return 0;
     }
     if (time_mode) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "time-prefixed mutation does not support increment");
-      lql_dealloc(expr);
+      LQL_ALLOCATOR_DESTROY(expr);
       return 0;
     }
     len = strlen(expr);
@@ -948,29 +949,29 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     item.delta = delta;
     if (!split_path(expr, &item.path, error) || !append_item(plan, &item)) {
       mutation_item_cleanup(&item);
-      lql_dealloc(expr);
+      LQL_ALLOCATOR_DESTROY(expr);
       return 0;
     }
-    lql_dealloc(expr);
+    LQL_ALLOCATOR_DESTROY(expr);
     return 1;
   }
   brace_result = parse_brace_mutation(expr, plan, options, error);
   if (brace_result != 0) {
-    lql_dealloc(expr);
+    LQL_ALLOCATOR_DESTROY(expr);
     return brace_result > 0;
   }
   eq = strchr(expr, '=');
   if (eq == NULL) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "invalid mutation, expected key=value");
-    lql_dealloc(expr);
+    LQL_ALLOCATOR_DESTROY(expr);
     return 0;
   }
   *eq = '\0';
   path_text = expr;
   value = trimmed_dup_range(eq + 1, strlen(eq + 1));
   if (value == NULL) {
-    lql_dealloc(expr);
+    LQL_ALLOCATOR_DESTROY(expr);
     return 0;
   }
   item.kind = MUTATION_SET;
@@ -978,24 +979,24 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     if (options == NULL || !options->enable_file_values) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "file-backed mutations are disabled");
-      lql_dealloc(value);
-      lql_dealloc(expr);
+      LQL_ALLOCATOR_DESTROY(value);
+      LQL_ALLOCATOR_DESTROY(expr);
       return 0;
     }
     item.file_mode = file_mode;
     item.file_path = resolve_file_value_path(value, options, error);
-    lql_dealloc(value);
+    LQL_ALLOCATOR_DESTROY(value);
     if (item.file_path == NULL) {
-      lql_dealloc(expr);
+      LQL_ALLOCATOR_DESTROY(expr);
       return 0;
     }
     if (!split_path(path_text, &item.path, error) ||
         !append_item(plan, &item)) {
       mutation_item_cleanup(&item);
-      lql_dealloc(expr);
+      LQL_ALLOCATOR_DESTROY(expr);
       return 0;
     }
-    lql_dealloc(expr);
+    LQL_ALLOCATOR_DESTROY(expr);
     return 1;
   }
   if (!time_mode && (value[0] == '+' || value[0] == '-') &&
@@ -1003,24 +1004,24 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
     if (delta == 0.0) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "increment mutation requires non-zero delta");
-      lql_dealloc(value);
-      lql_dealloc(expr);
+      LQL_ALLOCATOR_DESTROY(value);
+      LQL_ALLOCATOR_DESTROY(expr);
       return 0;
     }
     item.kind = MUTATION_INCREMENT;
     item.delta = delta;
-    lql_dealloc(value);
+    LQL_ALLOCATOR_DESTROY(value);
   } else if (!parse_set_value(value, time_mode, &item, error)) {
-    lql_dealloc(value);
-    lql_dealloc(expr);
+    LQL_ALLOCATOR_DESTROY(value);
+    LQL_ALLOCATOR_DESTROY(expr);
     return 0;
   }
   if (!split_path(path_text, &item.path, error) || !append_item(plan, &item)) {
     mutation_item_cleanup(&item);
-    lql_dealloc(expr);
+    LQL_ALLOCATOR_DESTROY(expr);
     return 0;
   }
-  lql_dealloc(expr);
+  LQL_ALLOCATOR_DESTROY(expr);
   return 1;
 }
 
@@ -1043,7 +1044,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "no field mutations provided");
     return LQL_STATUS_PARSE_ERROR;
   }
-  plan = (lql_mutation_plan *)lql_calloc(1u, sizeof(*plan));
+  plan = (lql_mutation_plan *)LQL_ALLOCATOR_CALLOC(1u, sizeof(*plan));
   if (plan == NULL) {
     return LQL_STATUS_NO_MEMORY;
   }
@@ -1091,8 +1092,8 @@ lql_mutation_plan_count_impl(const lql *self, const lql_mutation_plan *plan) {
   return plan == NULL ? 0u : plan->count;
 }
 
-LQL_INTERNAL_SYMBOL void lql_mutation_plan_destroy_impl(lql *self,
-                                                     lql_mutation_plan *plan) {
+LQL_INTERNAL_SYMBOL void
+lql_mutation_plan_destroy_impl(lql *self, lql_mutation_plan *plan) {
   size_t i;
   (void)self;
   if (plan == NULL) {
@@ -1101,8 +1102,8 @@ LQL_INTERNAL_SYMBOL void lql_mutation_plan_destroy_impl(lql *self,
   for (i = 0u; i < plan->count; ++i) {
     mutation_item_cleanup(&plan->items[i]);
   }
-  lql_dealloc(plan->items);
-  lql_dealloc(plan);
+  LQL_ALLOCATOR_DESTROY(plan->items);
+  LQL_ALLOCATOR_DESTROY(plan);
 }
 
 static int mutation_is_root_field_supported(const mutation_item *item) {
@@ -1625,7 +1626,7 @@ static lonejson_status mutation_push_path_frame(mutation_stream_state *state,
   memset(&frame, 0, sizeof(frame));
   frame.container = container;
   if (path != NULL && path->segment_count != 0u) {
-    frame.array_segments = (unsigned char *)lql_calloc(
+    frame.array_segments = (unsigned char *)LQL_ALLOCATOR_CALLOC(
         path->segment_count, sizeof(frame.array_segments[0]));
     if (frame.array_segments == NULL) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
@@ -1642,11 +1643,11 @@ static lonejson_status mutation_push_path_frame(mutation_stream_state *state,
     }
   }
   frame.segment_count = path == NULL ? 0u : path->segment_count;
-  next = (mutation_path_frame *)lql_realloc(state->path_frames,
-                                            sizeof(state->path_frames[0]) *
-                                                (state->path_frame_count + 1u));
+  next = (mutation_path_frame *)LQL_ALLOCATOR_REALLOC(
+      state->path_frames,
+      sizeof(state->path_frames[0]) * (state->path_frame_count + 1u));
   if (next == NULL) {
-    lql_dealloc(frame.array_segments);
+    LQL_ALLOCATOR_DESTROY(frame.array_segments);
     return LONEJSON_STATUS_ALLOCATION_FAILED;
   }
   state->path_frames = next;
@@ -1659,9 +1660,10 @@ static void mutation_pop_path_frame(mutation_stream_state *state) {
     return;
   }
   --state->path_frame_count;
-  lql_dealloc(state->path_frames[state->path_frame_count].array_segments);
+  LQL_ALLOCATOR_DESTROY(
+      state->path_frames[state->path_frame_count].array_segments);
   if (state->path_frame_count == 0u) {
-    lql_dealloc(state->path_frames);
+    LQL_ALLOCATOR_DESTROY(state->path_frames);
     state->path_frames = NULL;
   }
 }
@@ -1712,8 +1714,9 @@ static int mutation_descends_from_virtual_object(
                                      &segment, 0);
 }
 
-static int mutation_requires_missing_object_key_value(
-    mutation_stream_state *state, const lonejson_value_path *parent) {
+static int
+mutation_requires_missing_object_key_value(mutation_stream_state *state,
+                                           const lonejson_value_path *parent) {
   size_t i;
   size_t depth;
   const mutation_item *item;
@@ -1737,9 +1740,8 @@ static int mutation_requires_missing_object_key_value(
     item = &state->plan->items[i];
     if (state->applied[i] || item->kind == MUTATION_REMOVE ||
         mutation_path_has_wildcard(&item->path) ||
-        !mutation_descends_from_virtual_object(item, parent, frame,
-                                               state->key_buf,
-                                               state->key_len) ||
+        !mutation_descends_from_virtual_object(
+            item, parent, frame, state->key_buf, state->key_len) ||
         state->prefix_seen_depth[i] > depth) {
       continue;
     }
@@ -1748,9 +1750,10 @@ static int mutation_requires_missing_object_key_value(
   return 0;
 }
 
-static lonejson_status write_missing_object_key_value(
-    mutation_stream_state *state, const lonejson_value_path *parent,
-    lonejson_error *error) {
+static lonejson_status
+write_missing_object_key_value(mutation_stream_state *state,
+                               const lonejson_value_path *parent,
+                               lonejson_error *error) {
   size_t i;
   size_t depth;
   const mutation_item *item;
@@ -1780,9 +1783,8 @@ static lonejson_status write_missing_object_key_value(
     item = &state->plan->items[i];
     if (state->applied[i] || item->kind == MUTATION_REMOVE ||
         mutation_path_has_wildcard(&item->path) ||
-        !mutation_descends_from_virtual_object(item, parent, frame,
-                                               state->key_buf,
-                                               state->key_len) ||
+        !mutation_descends_from_virtual_object(
+            item, parent, frame, state->key_buf, state->key_len) ||
         state->prefix_seen_depth[i] > depth) {
       continue;
     }
@@ -1791,8 +1793,7 @@ static lonejson_status write_missing_object_key_value(
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
   }
-  if (lonejson_writer_end_object(&state->writer, error) !=
-      LONEJSON_STATUS_OK) {
+  if (lonejson_writer_end_object(&state->writer, error) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   return LONEJSON_STATUS_OK;
@@ -1911,7 +1912,7 @@ begin_array_value_mutation(mutation_stream_state *state,
   state->active_increment = 1;
   state->active_keyed = 0;
   state->active_index = index;
-  lql_dealloc(state->num_buf);
+  LQL_ALLOCATOR_DESTROY(state->num_buf);
   state->num_buf = NULL;
   state->num_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -2097,7 +2098,7 @@ static lonejson_status mutation_key_begin(void *user,
   (void)path;
   (void)error;
   state = (mutation_stream_state *)user;
-  lql_dealloc(state->key_buf);
+  LQL_ALLOCATOR_DESTROY(state->key_buf);
   state->key_buf = NULL;
   state->key_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -2167,7 +2168,7 @@ static lonejson_status mutation_key_end(void *user,
     state->active_increment = 1;
     state->active_keyed = 1;
     state->active_index = index;
-    lql_dealloc(state->num_buf);
+    LQL_ALLOCATOR_DESTROY(state->num_buf);
     state->num_buf = NULL;
     state->num_len = 0u;
     return LONEJSON_STATUS_OK;
@@ -2241,7 +2242,7 @@ static lonejson_status mutation_number_begin(void *user,
     state->root_is_object = 0;
   }
   if (state->skipping) {
-    lql_dealloc(state->num_buf);
+    LQL_ALLOCATOR_DESTROY(state->num_buf);
     state->num_buf = NULL;
     state->num_len = 0u;
     return LONEJSON_STATUS_OK;
@@ -2253,7 +2254,7 @@ static lonejson_status mutation_number_begin(void *user,
   if (matched_value) {
     return LONEJSON_STATUS_OK;
   }
-  lql_dealloc(state->num_buf);
+  LQL_ALLOCATOR_DESTROY(state->num_buf);
   state->num_buf = NULL;
   state->num_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -2415,19 +2416,20 @@ static lql_status mutate_reader_with_supported_plan(
   memset(&state, 0, sizeof(state));
   state.plan = plan;
   state.error = &lj_error;
-  state.applied = (int *)lql_calloc(plan->count, sizeof(state.applied[0]));
-  state.prefix_seen_depth =
-      (size_t *)lql_calloc(plan->count, sizeof(state.prefix_seen_depth[0]));
+  state.applied =
+      (int *)LQL_ALLOCATOR_CALLOC(plan->count, sizeof(state.applied[0]));
+  state.prefix_seen_depth = (size_t *)LQL_ALLOCATOR_CALLOC(
+      plan->count, sizeof(state.prefix_seen_depth[0]));
   if (state.applied == NULL || state.prefix_seen_depth == NULL) {
-    lql_dealloc(state.applied);
-    lql_dealloc(state.prefix_seen_depth);
+    LQL_ALLOCATOR_DESTROY(state.applied);
+    LQL_ALLOCATOR_DESTROY(state.prefix_seen_depth);
     lonejson_free(runtime);
     return LQL_STATUS_NO_MEMORY;
   }
   if (lonejson_writer_init_sink(runtime, &state.writer, file_sink, out,
                                 &lj_error) != LONEJSON_STATUS_OK) {
-    lql_dealloc(state.applied);
-    lql_dealloc(state.prefix_seen_depth);
+    LQL_ALLOCATOR_DESTROY(state.applied);
+    LQL_ALLOCATOR_DESTROY(state.prefix_seen_depth);
     lonejson_free(runtime);
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
@@ -2455,10 +2457,10 @@ static lql_status mutate_reader_with_supported_plan(
   }
   lonejson_writer_cleanup(&state.writer);
   mutation_cleanup_path_frames(&state);
-  lql_dealloc(state.key_buf);
-  lql_dealloc(state.num_buf);
-  lql_dealloc(state.applied);
-  lql_dealloc(state.prefix_seen_depth);
+  LQL_ALLOCATOR_DESTROY(state.key_buf);
+  LQL_ALLOCATOR_DESTROY(state.num_buf);
+  LQL_ALLOCATOR_DESTROY(state.applied);
+  LQL_ALLOCATOR_DESTROY(state.prefix_seen_depth);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
     if (error != NULL && error->code == LQL_STATUS_UNSUPPORTED) {

@@ -80,12 +80,13 @@ The API should be handle-oriented and explicit about ownership:
 - error messages are actionable and available through explicit error objects.
 
 All liblql-owned allocation must pass through the internal central liblql
-allocator surface or receiver cleanup methods. Production code must not use
-direct `malloc`, `calloc`, `realloc`, or `free` outside the allocator
-implementation. Public APIs must avoid returning liblql-owned heap memory
-unless they also provide an ownership-specific receiver cleanup method, so
-downstream users do not cross allocator boundaries or depend on allocator
-wrapper functions.
+allocator receiver or public receiver cleanup methods. Production code must not
+use direct `malloc`, `calloc`, `realloc`, or `free` outside the allocator
+implementation, and it must not recreate `lql_alloc`/`lql_dealloc` style free
+wrapper functions around the allocator. Public APIs must avoid returning
+liblql-owned heap memory unless they also provide an ownership-specific
+receiver cleanup method, so downstream users do not cross allocator boundaries
+or depend on allocator wrapper functions.
 
 The API should eventually expose these surfaces:
 
@@ -553,10 +554,11 @@ Current implementation is an early slice:
   so cleanup stays on the `*_destroy` receiver surface and the allocator
   boundary stays internal; the same style gate rejects undocumented public
   receiver fields so the installed SDK surface remains self-describing;
-- project-owned allocations have an internal central liblql allocator surface,
-  and
-  direct C runtime allocation calls are limited to the allocator
-  implementation; `make test` enforces this by failing on direct
+- project-owned allocations have an internal central liblql allocator receiver
+  surface, the old `lql_alloc`/`lql_calloc`/`lql_realloc`/`lql_dealloc`/
+  `lql_strdup` wrapper layer has been removed, and direct C runtime allocation
+  calls are limited to the allocator implementation; `make test` enforces this
+  by failing on old allocator wrapper calls or direct
   `malloc`/`calloc`/`realloc`/`free`/`strdup` calls in project-owned C sources
   outside `src/lql_allocator.c`;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate

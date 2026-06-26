@@ -12,7 +12,7 @@ typedef struct lql_token_list {
 
 static char *lql_strndup_local(const char *src, size_t len) {
   char *out;
-  out = (char *)lql_alloc(len + 1u);
+  out = (char *)LQL_ALLOCATOR_ALLOC(len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -35,16 +35,17 @@ static char *trim_dup(const char *src, size_t len) {
 static void token_list_cleanup(lql_token_list *list) {
   size_t i;
   for (i = 0u; i < list->count; ++i) {
-    lql_dealloc(list->items[i]);
+    LQL_ALLOCATOR_DESTROY(list->items[i]);
   }
-  lql_dealloc(list->items);
+  LQL_ALLOCATOR_DESTROY(list->items);
   list->items = NULL;
   list->count = 0u;
 }
 
 static int token_list_push(lql_token_list *list, char *item) {
   char **next;
-  next = (char **)lql_realloc(list->items, sizeof(char *) * (list->count + 1u));
+  next = (char **)LQL_ALLOCATOR_REALLOC(list->items,
+                                        sizeof(char *) * (list->count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -55,8 +56,8 @@ static int token_list_push(lql_token_list *list, char *item) {
 
 static int term_any_push(lql_term *term, char *item) {
   char **next;
-  next =
-      (char **)lql_realloc(term->any, sizeof(char *) * (term->any_count + 1u));
+  next = (char **)LQL_ALLOCATOR_REALLOC(term->any, sizeof(char *) *
+                                                       (term->any_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -102,11 +103,11 @@ static lql_status split_top(const char *expr, lql_token_list *out,
         return LQL_STATUS_NO_MEMORY;
       }
       if (item[0] != '\0' && !token_list_push(out, item)) {
-        lql_dealloc(item);
+        LQL_ALLOCATOR_DESTROY(item);
         return LQL_STATUS_NO_MEMORY;
       }
       if (item[0] == '\0') {
-        lql_dealloc(item);
+        LQL_ALLOCATOR_DESTROY(item);
       }
       start = p + 1;
     }
@@ -121,11 +122,11 @@ static lql_status split_top(const char *expr, lql_token_list *out,
     return LQL_STATUS_NO_MEMORY;
   }
   if (item[0] != '\0' && !token_list_push(out, item)) {
-    lql_dealloc(item);
+    LQL_ALLOCATOR_DESTROY(item);
     return LQL_STATUS_NO_MEMORY;
   }
   if (item[0] == '\0') {
-    lql_dealloc(item);
+    LQL_ALLOCATOR_DESTROY(item);
   }
   return LQL_STATUS_OK;
 }
@@ -197,11 +198,11 @@ static lql_status split_assignments(const char *expr, lql_token_list *out,
         return LQL_STATUS_NO_MEMORY;
       }
       if (item[0] != '\0' && !token_list_push(out, item)) {
-        lql_dealloc(item);
+        LQL_ALLOCATOR_DESTROY(item);
         return LQL_STATUS_NO_MEMORY;
       }
       if (item[0] == '\0') {
-        lql_dealloc(item);
+        LQL_ALLOCATOR_DESTROY(item);
       }
       next = p;
       while (*next == ',' || isspace((unsigned char)*next)) {
@@ -221,11 +222,11 @@ static lql_status split_assignments(const char *expr, lql_token_list *out,
     return LQL_STATUS_NO_MEMORY;
   }
   if (item[0] != '\0' && !token_list_push(out, item)) {
-    lql_dealloc(item);
+    LQL_ALLOCATOR_DESTROY(item);
     return LQL_STATUS_NO_MEMORY;
   }
   if (item[0] == '\0') {
-    lql_dealloc(item);
+    LQL_ALLOCATOR_DESTROY(item);
   }
   return LQL_STATUS_OK;
 }
@@ -252,7 +253,7 @@ static char *unquote(char *value) {
     *w = '\0';
     return out;
   }
-  return lql_strdup(value);
+  return LQL_ALLOCATOR_STRDUP(value);
 }
 
 static int append_text(char **buf, size_t *len, size_t *cap, const char *text,
@@ -264,7 +265,7 @@ static int append_text(char **buf, size_t *len, size_t *cap, const char *text,
     while (*len + n + 1u > next_cap) {
       next_cap *= 2u;
     }
-    next = (char *)lql_realloc(*buf, next_cap);
+    next = (char *)LQL_ALLOCATOR_REALLOC(*buf, next_cap);
     if (next == NULL) {
       return 0;
     }
@@ -296,7 +297,7 @@ static char *normalize_field_path(const char *field) {
     return NULL;
   }
   if (field[0] != '/') {
-    return lql_strdup(field);
+    return LQL_ALLOCATOR_STRDUP(field);
   }
   out = NULL;
   out_len = 0u;
@@ -321,18 +322,18 @@ static char *normalize_field_path(const char *field) {
     }
     if (out_len > 1u) {
       if (!append_text(&out, &out_len, &out_cap, "/", 1u)) {
-        lql_dealloc(out);
+        LQL_ALLOCATOR_DESTROY(out);
         return NULL;
       }
     }
     if (!append_text(&out, &out_len, &out_cap, seg,
                      count == 0u ? len : base_len)) {
-      lql_dealloc(out);
+      LQL_ALLOCATOR_DESTROY(out);
       return NULL;
     }
     for (i = 0u; i < count; ++i) {
       if (!append_text(&out, &out_len, &out_cap, "/[]", 3u)) {
-        lql_dealloc(out);
+        LQL_ALLOCATOR_DESTROY(out);
         return NULL;
       }
     }
@@ -417,17 +418,17 @@ static void dispose_seen_key_values(char *field, char *value, char *any,
                                     char *ignore_case, char *gt, char *gte,
                                     char *lt, char *lte, char *after,
                                     char *before, char *since) {
-  lql_dealloc(field);
-  lql_dealloc(value);
-  lql_dealloc(any);
-  lql_dealloc(ignore_case);
-  lql_dealloc(gt);
-  lql_dealloc(gte);
-  lql_dealloc(lt);
-  lql_dealloc(lte);
-  lql_dealloc(after);
-  lql_dealloc(before);
-  lql_dealloc(since);
+  LQL_ALLOCATOR_DESTROY(field);
+  LQL_ALLOCATOR_DESTROY(value);
+  LQL_ALLOCATOR_DESTROY(any);
+  LQL_ALLOCATOR_DESTROY(ignore_case);
+  LQL_ALLOCATOR_DESTROY(gt);
+  LQL_ALLOCATOR_DESTROY(gte);
+  LQL_ALLOCATOR_DESTROY(lt);
+  LQL_ALLOCATOR_DESTROY(lte);
+  LQL_ALLOCATOR_DESTROY(after);
+  LQL_ALLOCATOR_DESTROY(before);
+  LQL_ALLOCATOR_DESTROY(since);
 }
 
 static int remember_key_value(char **slot, char **raw_value, int *skip,
@@ -439,12 +440,12 @@ static int remember_key_value(char **slot, char **raw_value, int *skip,
     return 1;
   }
   if (strcmp(*slot, *raw_value) == 0) {
-    lql_dealloc(*raw_value);
+    LQL_ALLOCATOR_DESTROY(*raw_value);
     *raw_value = NULL;
     *skip = 1;
     return 1;
   }
-  lql_dealloc(*raw_value);
+  LQL_ALLOCATOR_DESTROY(*raw_value);
   *raw_value = NULL;
   lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                 "selector expression has duplicate key");
@@ -519,11 +520,11 @@ static int parse_any_values(char *decoded, lql_term *term,
     }
     if (item[0] != '\0') {
       if (!term_any_push(term, item)) {
-        lql_dealloc(item);
+        LQL_ALLOCATOR_DESTROY(item);
         return 0;
       }
     } else {
-      lql_dealloc(item);
+      LQL_ALLOCATOR_DESTROY(item);
     }
     cursor = bar == NULL ? NULL : bar + 1;
   }
@@ -731,7 +732,7 @@ static lql_status parse_key_values(char *body, lql_node_kind kind,
     }
     if (kind == LQL_NODE_IN && key_is_any(key) && value_had_leading_space &&
         raw_value[0] != '\0') {
-      lql_dealloc(raw_value);
+      LQL_ALLOCATOR_DESTROY(raw_value);
       st = LQL_STATUS_PARSE_ERROR;
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector any values must not have surrounding whitespace");
@@ -768,7 +769,7 @@ static lql_status parse_key_values(char *body, lql_node_kind kind,
       seen_slot = &seen_since;
     }
     if (seen_slot == NULL) {
-      lql_dealloc(raw_value);
+      LQL_ALLOCATOR_DESTROY(raw_value);
       st = LQL_STATUS_PARSE_ERROR;
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector operator does not support key");
@@ -787,21 +788,21 @@ static lql_status parse_key_values(char *body, lql_node_kind kind,
     }
     if (key_is_field(key)) {
       normalized = normalize_field_path(decoded);
-      lql_dealloc(decoded);
+      LQL_ALLOCATOR_DESTROY(decoded);
       if (normalized == NULL) {
         goto fail;
       }
-      lql_dealloc(term->field);
+      LQL_ALLOCATOR_DESTROY(term->field);
       term->field = normalized;
     } else if (kind == LQL_NODE_DATE && key_is_value(key)) {
       if (!set_date_bound(term, "value", decoded, error)) {
-        lql_dealloc(decoded);
+        LQL_ALLOCATOR_DESTROY(decoded);
         st = LQL_STATUS_PARSE_ERROR;
         goto fail;
       }
-      lql_dealloc(decoded);
+      LQL_ALLOCATOR_DESTROY(decoded);
     } else if (key_is_value(key)) {
-      lql_dealloc(term->value);
+      LQL_ALLOCATOR_DESTROY(term->value);
       term->value = decoded;
       term->value_set = 1;
     } else if (kind == LQL_NODE_DATE &&
@@ -810,42 +811,42 @@ static lql_status parse_key_values(char *body, lql_node_kind kind,
                   : key_is_before(key) ? "lt"
                                        : "since";
       if (!set_date_bound(term, date_slot, decoded, error)) {
-        lql_dealloc(decoded);
+        LQL_ALLOCATOR_DESTROY(decoded);
         st = LQL_STATUS_PARSE_ERROR;
         goto fail;
       }
-      lql_dealloc(decoded);
+      LQL_ALLOCATOR_DESTROY(decoded);
     } else if (key_is_any(key)) {
       if (!parse_any_values(decoded, term, kind == LQL_NODE_IN, error)) {
-        lql_dealloc(decoded);
+        LQL_ALLOCATOR_DESTROY(decoded);
         st = error != NULL && error->code != LQL_STATUS_OK
                  ? error->code
                  : LQL_STATUS_PARSE_ERROR;
         goto fail;
       }
-      lql_dealloc(decoded);
+      LQL_ALLOCATOR_DESTROY(decoded);
     } else if (key_is_ignore_case(key)) {
       if (!parse_bool_value(decoded, &term->ignore_case)) {
-        lql_dealloc(decoded);
+        LQL_ALLOCATOR_DESTROY(decoded);
         st = LQL_STATUS_PARSE_ERROR;
         lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                       "selector ignoreCase must be true/false/t/f");
         goto fail;
       }
-      lql_dealloc(decoded);
+      LQL_ALLOCATOR_DESTROY(decoded);
     } else if (key_is_range_bound(key)) {
       if (kind == LQL_NODE_DATE) {
         if (!set_date_bound(term, key, decoded, error)) {
-          lql_dealloc(decoded);
+          LQL_ALLOCATOR_DESTROY(decoded);
           st = LQL_STATUS_PARSE_ERROR;
           goto fail;
         }
       } else if (!set_range_bound(term, key, decoded, error)) {
-        lql_dealloc(decoded);
+        LQL_ALLOCATOR_DESTROY(decoded);
         st = LQL_STATUS_PARSE_ERROR;
         goto fail;
       }
-      lql_dealloc(decoded);
+      LQL_ALLOCATOR_DESTROY(decoded);
     }
   }
   token_list_cleanup(&parts);
@@ -978,14 +979,14 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
   lql_status st;
 
   memset(out, 0, sizeof(*out));
-  copy = lql_strdup(expr);
+  copy = LQL_ALLOCATOR_STRDUP(expr);
   if (copy == NULL) {
     return LQL_STATUS_NO_MEMORY;
   }
   if (strcmp(copy, "/") == 0 || strcmp(copy, ".") == 0 ||
       strcmp(copy, "{}") == 0) {
     out->kind = LQL_NODE_ALL;
-    lql_dealloc(copy);
+    LQL_ALLOCATOR_DESTROY(copy);
     return LQL_STATUS_OK;
   }
   if (strncmp(copy, "and.", 4u) == 0 || strncmp(copy, "or.", 3u) == 0 ||
@@ -995,21 +996,21 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     *dot = '\0';
     st = parse_one(dot + 1, &child, error);
     if (st != LQL_STATUS_OK) {
-      lql_dealloc(copy);
+      LQL_ALLOCATOR_DESTROY(copy);
       return st;
     }
     out->kind = strcmp(name, "and") == 0  ? LQL_NODE_AND
                 : strcmp(name, "or") == 0 ? LQL_NODE_OR
                                           : LQL_NODE_NOT;
-    out->children = (lql_node *)lql_calloc(1u, sizeof(lql_node));
+    out->children = (lql_node *)LQL_ALLOCATOR_CALLOC(1u, sizeof(lql_node));
     if (out->children == NULL) {
       lql_node_cleanup(&child);
-      lql_dealloc(copy);
+      LQL_ALLOCATOR_DESTROY(copy);
       return LQL_STATUS_NO_MEMORY;
     }
     out->children[0] = child;
     out->child_count = 1u;
-    lql_dealloc(copy);
+    LQL_ALLOCATOR_DESTROY(copy);
     return LQL_STATUS_OK;
   }
 
@@ -1041,18 +1042,18 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     raw_field = trim_dup(copy, strlen(copy));
     raw_value = trim_dup(value, strlen(value));
     if (raw_field == NULL || raw_value == NULL) {
-      lql_dealloc(raw_field);
-      lql_dealloc(raw_value);
-      lql_dealloc(copy);
+      LQL_ALLOCATOR_DESTROY(raw_field);
+      LQL_ALLOCATOR_DESTROY(raw_value);
+      LQL_ALLOCATOR_DESTROY(copy);
       return LQL_STATUS_NO_MEMORY;
     }
     out->term.field = normalize_field_path(raw_field);
     out->term.value = unquote(raw_value);
-    lql_dealloc(raw_field);
-    lql_dealloc(raw_value);
+    LQL_ALLOCATOR_DESTROY(raw_field);
+    LQL_ALLOCATOR_DESTROY(raw_value);
     out->term.value_set = 1;
     if (out->term.field == NULL || out->term.value == NULL) {
-      lql_dealloc(copy);
+      LQL_ALLOCATOR_DESTROY(copy);
       return LQL_STATUS_NO_MEMORY;
     }
     if (op0 == '!') {
@@ -1060,10 +1061,10 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       child.kind = LQL_NODE_EQ;
       child.term = out->term;
       memset(&out->term, 0, sizeof(out->term));
-      out->children = (lql_node *)lql_calloc(1u, sizeof(lql_node));
+      out->children = (lql_node *)LQL_ALLOCATOR_CALLOC(1u, sizeof(lql_node));
       if (out->children == NULL) {
         lql_node_cleanup(&child);
-        lql_dealloc(copy);
+        LQL_ALLOCATOR_DESTROY(copy);
         return LQL_STATUS_NO_MEMORY;
       }
       out->kind = LQL_NODE_NOT;
@@ -1080,7 +1081,7 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       if (bound_key != NULL) {
         if (!set_range_bound(&out->term, bound_key, out->term.value, error)) {
           lql_node_cleanup(out);
-          lql_dealloc(copy);
+          LQL_ALLOCATOR_DESTROY(copy);
           return error != NULL && error->code != LQL_STATUS_OK
                      ? error->code
                      : LQL_STATUS_PARSE_ERROR;
@@ -1092,7 +1093,7 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     } else {
       out->kind = LQL_NODE_EQ;
     }
-    lql_dealloc(copy);
+    LQL_ALLOCATOR_DESTROY(copy);
     return LQL_STATUS_OK;
   }
 
@@ -1104,31 +1105,31 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     out->kind = kind_from_name(copy);
     if (out->kind == LQL_NODE_ALL) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR, "unknown selector operator");
-      lql_dealloc(copy);
+      LQL_ALLOCATOR_DESTROY(copy);
       return LQL_STATUS_PARSE_ERROR;
     }
     if (out->kind == LQL_NODE_EXISTS) {
       value = unquote(body + 1);
       out->term.field = value == NULL ? NULL : normalize_field_path(value);
-      lql_dealloc(value);
-      lql_dealloc(copy);
+      LQL_ALLOCATOR_DESTROY(value);
+      LQL_ALLOCATOR_DESTROY(copy);
       return out->term.field == NULL ? LQL_STATUS_NO_MEMORY : LQL_STATUS_OK;
     }
     st = parse_key_values(body + 1, out->kind, &out->term, error);
     if (st != LQL_STATUS_OK) {
-      lql_dealloc(copy);
+      LQL_ALLOCATOR_DESTROY(copy);
       return st;
     }
     if (string_term_is_match_all_alias(out->kind, &out->term)) {
       lql_node_cleanup(out);
       out->kind = LQL_NODE_ALL;
     }
-    lql_dealloc(copy);
+    LQL_ALLOCATOR_DESTROY(copy);
     return LQL_STATUS_OK;
   }
 
   lql_set_error(error, LQL_STATUS_PARSE_ERROR, "invalid selector expression");
-  lql_dealloc(copy);
+  LQL_ALLOCATOR_DESTROY(copy);
   return LQL_STATUS_PARSE_ERROR;
 }
 
@@ -1167,8 +1168,8 @@ static void assign_hit_indexes(lql_node *node, size_t *next) {
 
 static int append_node(lql_node *parent, lql_node *child) {
   lql_node *next;
-  next = (lql_node *)lql_realloc(parent->children,
-                                 sizeof(lql_node) * (parent->child_count + 1u));
+  next = (lql_node *)LQL_ALLOCATOR_REALLOC(
+      parent->children, sizeof(lql_node) * (parent->child_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -1194,12 +1195,12 @@ static void indexed_groups_cleanup(indexed_group *groups, size_t count) {
     return;
   }
   for (i = 0u; i < count; ++i) {
-    lql_dealloc(groups[i].index);
+    LQL_ALLOCATOR_DESTROY(groups[i].index);
     lql_node_cleanup(&groups[i].node);
     lql_node_cleanup(&groups[i].or_group);
     indexed_groups_cleanup(groups[i].groups, groups[i].group_count);
   }
-  lql_dealloc(groups);
+  LQL_ALLOCATOR_DESTROY(groups);
 }
 
 static lql_status finalize_indexed_group(indexed_group *group,
@@ -1228,7 +1229,7 @@ static int parse_indexed_wrapper(const char *token, lql_node_kind *wrapper,
     return 0;
   }
   len = (size_t)(p - idx);
-  copy = (char *)lql_alloc(len + 1u);
+  copy = (char *)LQL_ALLOCATOR_ALLOC(len + 1u);
   if (copy == NULL) {
     return -1;
   }
@@ -1298,8 +1299,8 @@ static indexed_group *ensure_indexed_group(indexed_group **groups,
   indexed_group *next;
   group = find_indexed_group(*groups, *count, wrapper, *index);
   if (group == NULL) {
-    next = (indexed_group *)lql_realloc(*groups,
-                                        sizeof(indexed_group) * (*count + 1u));
+    next = (indexed_group *)LQL_ALLOCATOR_REALLOC(
+        *groups, sizeof(indexed_group) * (*count + 1u));
     if (next == NULL) {
       return 0;
     }
@@ -1324,7 +1325,7 @@ static lql_status append_plain_group_node(indexed_group *group, lql_node *child,
     if (!append_node(&group->or_group, &child->children[0])) {
       return LQL_STATUS_NO_MEMORY;
     }
-    lql_dealloc(child->children);
+    LQL_ALLOCATOR_DESTROY(child->children);
     child->children = NULL;
     child->child_count = 0u;
     return LQL_STATUS_OK;
@@ -1359,7 +1360,7 @@ static lql_status append_token_to_group(indexed_group *group, const char *token,
   if (wrapper_status > 0) {
     child_group = ensure_indexed_group(&group->groups, &group->group_count,
                                        wrapper, &index);
-    lql_dealloc(index);
+    LQL_ALLOCATOR_DESTROY(index);
     if (child_group == NULL) {
       return LQL_STATUS_NO_MEMORY;
     }
@@ -1446,7 +1447,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
   }
   *out = NULL;
   if (expr == NULL || *expr == '\0') {
-    selector = (lql_selector *)lql_calloc(1u, sizeof(*selector));
+    selector = (lql_selector *)LQL_ALLOCATOR_CALLOC(1u, sizeof(*selector));
     if (selector == NULL) {
       return LQL_STATUS_NO_MEMORY;
     }
@@ -1458,7 +1459,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
   if (st != LQL_STATUS_OK) {
     return st;
   }
-  selector = (lql_selector *)lql_calloc(1u, sizeof(*selector));
+  selector = (lql_selector *)LQL_ALLOCATOR_CALLOC(1u, sizeof(*selector));
   if (selector == NULL) {
     token_list_cleanup(&tokens);
     return LQL_STATUS_NO_MEMORY;
@@ -1489,7 +1490,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
       lql_node_cleanup(&root_group.node);
       indexed_groups_cleanup(root_group.groups, root_group.group_count);
     }
-    lql_dealloc(index);
+    LQL_ALLOCATOR_DESTROY(index);
   } else {
     memset(&root_group, 0, sizeof(root_group));
     root_group.node.kind = or_mode ? LQL_NODE_OR : LQL_NODE_AND;

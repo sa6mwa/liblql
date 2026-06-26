@@ -175,12 +175,25 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
       "$source_root/examples" "$source_root/bench" \
       -type f \( -name '*.c' -o -name '*.h' \) \
       ! -path "$source_root/src/lql_allocator.c" \
-      -exec grep -HEn '(^|[^_[:alnum:]])(malloc|calloc|realloc|free|strdup)[[:space:]]*\(' {} + \
+      -exec grep -HEn '(^|[^_[:alnum:]>])(malloc|calloc|realloc|free|strdup)[[:space:]]*\(' {} + \
       2>/dev/null || true
   )
   if [ -n "$alloc_hits" ]; then
     printf 'public API style: direct C runtime allocation outside src/lql_allocator.c\n' >&2
     printf '%s\n' "$alloc_hits" >&2
+    failed=1
+  fi
+
+  allocator_wrapper_hits=$(
+    grep -REn \
+      '(^|[^_[:alnum:]])(lql_alloc|lql_calloc|lql_realloc|lql_dealloc|lql_strdup)[[:space:]]*\(' \
+      "$source_root/src" "$source_root/tests" "$source_root/parity" \
+      "$source_root/lua" "$source_root/examples" "$source_root/bench" \
+      2>/dev/null || true
+  )
+  if [ -n "$allocator_wrapper_hits" ]; then
+    printf 'public API style: forbidden liblql allocator wrapper call\n' >&2
+    printf '%s\n' "$allocator_wrapper_hits" >&2
     failed=1
   fi
 
