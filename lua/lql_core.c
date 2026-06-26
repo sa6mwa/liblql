@@ -973,6 +973,140 @@ static lql_status lua_lql_parse_mutation_plan(lua_State *L, lql *ctx,
   return st;
 }
 
+static int lua_lql_compact_json(lua_State *L) {
+  lua_lql_client *client;
+  const char *json;
+  size_t json_len;
+  lql_error error;
+  lql_status st;
+  FILE *out;
+  lua_lql_buffer buffer;
+
+  client = lua_lql_check_client(L, 1);
+  json = luaL_checklstring(L, 2, &json_len);
+  out = NULL;
+  lua_lql_buffer_init(&buffer, L);
+  lql_error_init(&error);
+  out = tmpfile();
+  if (out == NULL) {
+    lua_lql_set_error(&error, LQL_STATUS_JSON_ERROR,
+                      "failed to create Lua output file");
+    st = LQL_STATUS_JSON_ERROR;
+  } else {
+    st = client->ctx->compact_json(client->ctx, json, json_len, out, &error);
+    if (st == LQL_STATUS_OK) {
+      st = lua_lql_file_to_buffer(out, &buffer);
+    }
+    fclose(out);
+  }
+  if (st != LQL_STATUS_OK) {
+    lua_lql_buffer_dispose(&buffer);
+    return lua_lql_fail(L, &error);
+  }
+  lua_pushlstring(L, buffer.data != NULL ? buffer.data : "", buffer.len);
+  lua_lql_buffer_dispose(&buffer);
+  return 1;
+}
+
+static int lua_lql_compact_file(lua_State *L) {
+  lua_lql_client *client;
+  const char *path;
+  lql_error error;
+  lql_status st;
+  FILE *input;
+  FILE *out;
+  long size;
+  lua_lql_buffer buffer;
+
+  client = lua_lql_check_client(L, 1);
+  path = luaL_checkstring(L, 2);
+  input = NULL;
+  out = NULL;
+  size = 0L;
+  lua_lql_buffer_init(&buffer, L);
+  lql_error_init(&error);
+  input = fopen(path, "rb");
+  if (input == NULL) {
+    lua_lql_set_error(&error, LQL_STATUS_JSON_ERROR,
+                      "failed to open Lua input file");
+    st = LQL_STATUS_JSON_ERROR;
+  } else if (fseek(input, 0L, SEEK_END) != 0 || (size = ftell(input)) < 0L ||
+             fseek(input, 0L, SEEK_SET) != 0) {
+    lua_lql_set_error(&error, LQL_STATUS_JSON_ERROR,
+                      "failed to inspect Lua input file");
+    st = LQL_STATUS_JSON_ERROR;
+  } else {
+    out = tmpfile();
+    if (out == NULL) {
+      lua_lql_set_error(&error, LQL_STATUS_JSON_ERROR,
+                        "failed to create Lua output file");
+      st = LQL_STATUS_JSON_ERROR;
+    } else {
+      st = client->ctx->compact_file_range(client->ctx, input, 0u,
+                                           (lql_uint64)size, out, &error);
+      if (st == LQL_STATUS_OK) {
+        st = lua_lql_file_to_buffer(out, &buffer);
+      }
+      fclose(out);
+    }
+  }
+  if (input != NULL) {
+    fclose(input);
+  }
+  if (st != LQL_STATUS_OK) {
+    lua_lql_buffer_dispose(&buffer);
+    return lua_lql_fail(L, &error);
+  }
+  lua_pushlstring(L, buffer.data != NULL ? buffer.data : "", buffer.len);
+  lua_lql_buffer_dispose(&buffer);
+  return 1;
+}
+
+static int lua_lql_compact_source(lua_State *L) {
+  lua_lql_client *client;
+  lql_error error;
+  lql_status st;
+  FILE *out;
+  lua_lql_buffer buffer;
+  lua_lql_source_state source_state;
+
+  client = lua_lql_check_client(L, 1);
+  luaL_checktype(L, 2, LUA_TFUNCTION);
+  out = NULL;
+  lua_lql_buffer_init(&buffer, L);
+  memset(&source_state, 0, sizeof(source_state));
+  lql_error_init(&error);
+  out = tmpfile();
+  if (out == NULL) {
+    lua_lql_set_error(&error, LQL_STATUS_JSON_ERROR,
+                      "failed to create Lua output file");
+    st = LQL_STATUS_JSON_ERROR;
+  } else {
+    lua_pushvalue(L, 2);
+    source_state.read_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    source_state.lua = L;
+    source_state.error = &error;
+    st = client->ctx->compact_source(client->ctx, lua_lql_read_source_chunk,
+                                     &source_state, out, &error);
+    luaL_unref(L, LUA_REGISTRYINDEX, source_state.read_ref);
+    if (source_state.read_failed) {
+      lua_lql_set_error(&error, LQL_STATUS_JSON_ERROR,
+                        source_state.read_message);
+    }
+    if (st == LQL_STATUS_OK) {
+      st = lua_lql_file_to_buffer(out, &buffer);
+    }
+    fclose(out);
+  }
+  if (st != LQL_STATUS_OK) {
+    lua_lql_buffer_dispose(&buffer);
+    return lua_lql_fail(L, &error);
+  }
+  lua_pushlstring(L, buffer.data != NULL ? buffer.data : "", buffer.len);
+  lua_lql_buffer_dispose(&buffer);
+  return 1;
+}
+
 static int lua_lql_matches_json(lua_State *L) {
   lua_lql_client *client;
   const char *json;
@@ -1897,6 +2031,9 @@ static const luaL_Reg lua_lql_client_methods[] = {
     {"selector_capabilities", lua_lql_selector_capabilities_get},
     {"selector_execution_traits", lua_lql_selector_execution_traits_get},
     {"matches_json", lua_lql_matches_json},
+    {"compact_json", lua_lql_compact_json},
+    {"compact_file", lua_lql_compact_file},
+    {"compact_source", lua_lql_compact_source},
     {"select_json", lua_lql_select_json},
     {"select_file", lua_lql_select_file},
     {"select_source", lua_lql_select_source},

@@ -29,6 +29,7 @@ end
 
 local tmp_base = os.tmpname()
 local input_path = tmp_base .. ".jsonl"
+local compact_input_path = tmp_base .. ".compact.json"
 local tmp_dir, tmp_name = string.match(tmp_base, "^(.*)/(.*)$")
 if not tmp_dir then
   tmp_dir = "."
@@ -46,6 +47,8 @@ local nul_payload_path = tmp_dir .. "/" .. nul_payload_name
 write_file(input_path,
            '{"status":"closed","id":"a","count":1}\n' ..
              '{"status":"open","id":"b","count":2,"state":{"old":true}}\n')
+write_file(compact_input_path,
+           ' { "status" : "open", "items" : [ 1, 2 ] } ')
 write_file(text_payload_path, 'lua\n"payload"')
 write_file(bin_payload_path, string.char(0, 1, 2, 97))
 write_file(invalid_utf8_payload_path, "lua" .. string.char(255))
@@ -176,6 +179,39 @@ assert_equal(matched, true, "matches_json parsed selector OR")
 matched, err = client:matches_json('/status="open"', '{"status":"closed"}')
 matched = assert_no_error(matched, err, "matches_json closed")
 assert_equal(matched, false, "matches_json closed")
+
+local compacted
+compacted, err =
+  client:compact_json(' { "status" : "open", "items" : [ 1, 2 ] } ')
+compacted = assert_no_error(compacted, err, "compact_json")
+assert_equal(compacted, '{"status":"open","items":[1,2]}',
+             "compact_json output")
+
+compacted, err = client:compact_file(compact_input_path)
+compacted = assert_no_error(compacted, err, "compact_file")
+assert_equal(compacted, '{"status":"open","items":[1,2]}',
+             "compact_file output")
+
+local compact_chunks = {' { "status" : ', '"open", "items" : [ 1, 2 ] } '}
+local compact_index = 1
+compacted, err = client:compact_source(function(_)
+  local chunk = compact_chunks[compact_index]
+  compact_index = compact_index + 1
+  return chunk
+end)
+compacted = assert_no_error(compacted, err, "compact_source")
+assert_equal(compacted, '{"status":"open","items":[1,2]}',
+             "compact_source output")
+
+local bad_compact_source_result, bad_compact_source_error =
+  client:compact_source(function(_)
+    error("compact source read failed")
+  end)
+if bad_compact_source_result ~= nil or not bad_compact_source_error or
+    not string.find(bad_compact_source_error.stderr or "",
+                    "compact source read failed", 1, true) then
+  fail("expected structured compact_source read callback error")
+end
 
 local selected
 selected, err = client:select_file('/status="open"', input_path,
@@ -699,6 +735,7 @@ if not err or err.stderr == "" then
 end
 
 os.remove(input_path)
+os.remove(compact_input_path)
 os.remove(text_payload_path)
 os.remove(bin_payload_path)
 os.remove(invalid_utf8_payload_path)

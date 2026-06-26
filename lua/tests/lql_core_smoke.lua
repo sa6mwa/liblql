@@ -70,6 +70,24 @@ matched, err = client:matches_json(or_selector,
 matched = assert_no_error(matched, err, "core matches_json parsed OR miss")
 assert_equal(matched, false, "core matches_json parsed OR miss")
 
+local compacted
+compacted, err =
+  client:compact_json(' { "status" : "open", "items" : [ 1, 2 ] } ')
+compacted = assert_no_error(compacted, err, "core compact_json")
+assert_equal(compacted, '{"status":"open","items":[1,2]}',
+             "core compact_json output")
+
+local compact_chunks = {' { "status" : ', '"open", "items" : [ 1, 2 ] } '}
+local compact_index = 1
+compacted, err = client:compact_source(function(_)
+  local chunk = compact_chunks[compact_index]
+  compact_index = compact_index + 1
+  return chunk
+end)
+compacted = assert_no_error(compacted, err, "core compact_source")
+assert_equal(compacted, '{"status":"open","items":[1,2]}',
+             "core compact_source output")
+
 local object_doc =
   '{"hello":{"world":{"nested":true}},"arrays":[{"id":1}]}'
 local array_doc = '{"hello":{"world":[1,2,3]},"arrays":[{"id":1}]}'
