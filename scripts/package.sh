@@ -8,6 +8,7 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 DIST_DIR=${LQL_DIST_DIR:-"$ROOT_DIR/dist"}
 TARGETS=${LQL_PACKAGE_TARGETS:-x86_64-linux-gnu}
 MATRIX_TARGETS="x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-linux-musl armhf-linux-gnu armhf-linux-musl arm64-apple-darwin"
+MATRIX_MODE=0
 
 version() {
   (cd "$ROOT_DIR" && ./scripts/release_version.sh)
@@ -51,8 +52,29 @@ package_one() {
   lib_root="$work_dir/${PROJECT}-${version_value}-${target_id}"
   cli_root="$work_dir/${CLI_PROJECT}-${version_value}-${target_id}"
   dep_root="$ROOT_DIR/.cache/deps/$target_id/lonejson"
+  cc=$(target_cc "$target_id" || true)
 
-  (cd "$ROOT_DIR" && cmake --preset "$preset")
+  if [ -z "$cc" ]; then
+    if [ "$MATRIX_MODE" = 1 ]; then
+      printf 'release-matrix: skipping %s: target compiler unavailable\n' "$target_id" >&2
+      return 0
+    fi
+    printf 'package: target compiler unavailable for %s\n' "$target_id" >&2
+    exit 1
+  fi
+
+  if ! compiler_link_smoke "$target_id" "$cc"; then
+    if [ "$MATRIX_MODE" = 1 ]; then
+      printf 'release-matrix: skipping %s: target compiler cannot link\n' "$target_id" >&2
+      return 0
+    fi
+    printf 'package: target compiler cannot link for %s: %s\n' "$target_id" "$cc" >&2
+    exit 1
+  fi
+
+  "$ROOT_DIR/scripts/deps.sh" "$target_id"
+  reset_build_dir_if_compiler_changed "$build_dir" "$cc"
+  (cd "$ROOT_DIR" && CC="$cc" cmake --preset "$preset")
   (cd "$ROOT_DIR" && cmake --build --preset "$preset")
   rm -rf "$work_dir"
   mkdir -p "$install_root"
@@ -78,6 +100,71 @@ package_one() {
 
   make_tar_gz "$lib_root" "$DIST_DIR/${PROJECT}-${version_value}-${target_id}.tar.gz"
   make_tar_gz "$cli_root" "$DIST_DIR/${CLI_PROJECT}-${version_value}-${target_id}.tar.gz"
+}
+
+target_cc() {
+  target_id=$1
+  case "$target_id" in
+    x86_64-linux-gnu)
+      command -v "${CC:-cc}" 2>/dev/null
+      ;;
+    x86_64-linux-musl)
+      command -v "${LQL_CC_X86_64_LINUX_MUSL:-x86_64-linux-musl-gcc}" 2>/dev/null
+      ;;
+    aarch64-linux-gnu)
+      command -v "${LQL_CC_AARCH64_LINUX_GNU:-aarch64-linux-gnu-gcc}" 2>/dev/null
+      ;;
+    aarch64-linux-musl)
+      command -v "${LQL_CC_AARCH64_LINUX_MUSL:-aarch64-linux-musl-gcc}" 2>/dev/null ||
+        command -v "$HOME/.local/cross/aarch64-linux-musl/bin/aarch64-linux-musl-gcc" 2>/dev/null
+      ;;
+    armhf-linux-gnu)
+      command -v "${LQL_CC_ARMHF_LINUX_GNU:-arm-linux-gnueabihf-gcc}" 2>/dev/null ||
+        command -v armhf-linux-gnu-gcc 2>/dev/null
+      ;;
+    armhf-linux-musl)
+      command -v "${LQL_CC_ARMHF_LINUX_MUSL:-arm-linux-musleabihf-gcc}" 2>/dev/null ||
+        command -v armhf-linux-musl-gcc 2>/dev/null ||
+        command -v "$HOME/.local/cross/arm-linux-musleabihf/bin/arm-linux-musleabihf-gcc" 2>/dev/null
+      ;;
+    arm64-apple-darwin)
+      darwin_host=${CPKT_OSXCROSS_HOST:-arm64-apple-darwin25}
+      command -v "${LQL_CC_ARM64_APPLE_DARWIN:-$darwin_host-cc}" 2>/dev/null ||
+        command -v "$darwin_host-clang" 2>/dev/null ||
+        command -v "${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/$darwin_host-cc" 2>/dev/null ||
+        command -v "${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin/$darwin_host-clang" 2>/dev/null
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+reset_build_dir_if_compiler_changed() {
+  build_dir=$1
+  cc=$2
+  cache="$build_dir/CMakeCache.txt"
+  if [ ! -f "$cache" ]; then
+    return
+  fi
+  cached=$(sed -n 's/^CMAKE_C_COMPILER:FILEPATH=//p' "$cache")
+  if [ -n "$cached" ] && [ "$cached" != "$cc" ]; then
+    rm -rf "$build_dir"
+  fi
+}
+
+compiler_link_smoke() {
+  target_id=$1
+  cc=$2
+  smoke_dir="$ROOT_DIR/build/package-compiler-smoke/$target_id"
+  rm -rf "$smoke_dir"
+  mkdir -p "$smoke_dir"
+  cat >"$smoke_dir/smoke.c" <<'EOF'
+int main(void) {
+  return 0;
+}
+EOF
+  "$cc" "$smoke_dir/smoke.c" -o "$smoke_dir/smoke" >/dev/null 2>&1
 }
 
 package_source() {
@@ -224,6 +311,40 @@ verify_elf_runtime_paths() {
   done <"/tmp/lql-package-files.$$"
   rm -f /tmp/lql-readelf.$$ "/tmp/lql-package-files.$$"
   if [ "$failed" != "0" ]; then
+    exit 1
+  fi
+}
+
+verify_target_file() {
+  artifact=$1
+  target_id=$2
+  file_path=$3
+  if ! command -v file >/dev/null 2>&1; then
+    printf 'package-verify: file(1) unavailable; skipping target file check for %s\n' "$file_path"
+    return
+  fi
+  desc=$(file -L "$file_path")
+  case "$target_id" in
+    x86_64-linux-gnu|x86_64-linux-musl)
+      expected='x86-64'
+      ;;
+    aarch64-linux-gnu|aarch64-linux-musl)
+      expected='ARM aarch64'
+      ;;
+    armhf-linux-gnu|armhf-linux-musl)
+      expected='ARM'
+      ;;
+    arm64-apple-darwin)
+      expected='Mach-O 64-bit arm64'
+      ;;
+    *)
+      expected=''
+      ;;
+  esac
+  if [ -n "$expected" ] && ! printf '%s\n' "$desc" | grep -F "$expected" >/dev/null; then
+    printf 'package-verify: target architecture mismatch in %s\n' "$artifact" >&2
+    printf '  target=%s\n  file=%s\n  got=%s\n  want-substring=%s\n' \
+      "$target_id" "$file_path" "$desc" "$expected" >&2
     exit 1
   fi
 }
@@ -515,6 +636,12 @@ verify_one_archive() {
       test -f "$root/include/lql/lql.h"
       test -f "$root/include/lql/version.h"
       test -f "$root/lib/liblql.a"
+      if [ -f "$root/lib/liblql.so" ]; then
+        verify_target_file "$artifact" "$target_id" "$root/lib/liblql.so"
+      fi
+      if [ -f "$root/lib/liblql.dylib" ]; then
+        verify_target_file "$artifact" "$target_id" "$root/lib/liblql.dylib"
+      fi
       test -f "$root/lib/cmake/liblql/liblqlConfig.cmake"
       test -f "$root/lib/cmake/liblql/liblqlConfigVersion.cmake"
       test -f "$root/lib/pkgconfig/liblql.pc"
@@ -526,7 +653,9 @@ verify_one_archive() {
       fi
       ;;
     ${CLI_PROJECT}-${version_value}-*)
+      target_id=${expected#${CLI_PROJECT}-${version_value}-}
       test -x "$root/bin/clql"
+      verify_target_file "$artifact" "$target_id" "$root/bin/clql"
       test -d "$root/lib"
       test -f "$root/share/doc/clql/LICENSE"
       test -f "$root/share/doc/clql/README.md"
@@ -601,6 +730,7 @@ case "$TARGET" in
     verify_checksums
     ;;
   release-matrix)
+    MATRIX_MODE=1
     TARGETS=${LQL_PACKAGE_TARGETS:-$MATRIX_TARGETS}
     package_all
     verify_checksums

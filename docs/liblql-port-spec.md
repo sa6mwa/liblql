@@ -798,7 +798,12 @@ Current implementation is an early slice:
   exact manifest verification, and extracted-tree configure/build/test smoke;
 - host `clql` archive production carries required lonejson runtime libraries
   and verifies extracted `clql --version` through a relocatable runpath;
-  full cross-target release-matrix packaging remains pending.
+- `make release-matrix` selects target-correct Linux compilers, acquires the
+  matching lonejson SDK archive for each target, builds and verifies
+  `liblql` and `clql` artifacts for `x86_64`, `aarch64`, and `armhf`
+  GNU/musl targets, and fails package verification if packaged shared
+  libraries or `clql` binaries do not match their target architecture;
+  Darwin packaging remains conditional on a working target compiler/linker.
 
 The repository must not claim full LQL parity until the verification gates prove
 it.

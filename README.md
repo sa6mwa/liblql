@@ -51,8 +51,10 @@ receiver and covers callback decision streams plus callback-scoped seekable
 payload handles. The parity benchmark surface has Go, C, and Lua runners over
 shared generated fixtures.
 The standalone Lua source package, rendered release rockspec, and LuaRocks
-source rock are produced and verified locally. Full cross-target release
-matrix and full `clql` parity are still active porting work.
+source rock are produced and verified locally. The release matrix builds and
+verifies Linux GNU/musl artifacts for x86_64, aarch64, and armhf with
+target-correct compilers; Darwin remains conditional on a working osxcross
+toolchain. Full `clql` parity is still active porting work.
 
 ```sh
 make deps-debug
