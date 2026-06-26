@@ -1060,6 +1060,16 @@ Current implementation status:
   add `lql_query_result` aggregate spill counters by inference; doing so needs
   either a lonejson public accounting surface or an explicit not-applicable
   decision for Go's capture-policy counter fields;
+- stream spool internals are not a standalone C product surface. liblql exposes
+  callback-scoped `LQL_PAYLOAD_SPOOLED` payload handles and operations on those
+  handles, not a public spool object with configurable temp-file naming,
+  in-memory byte access, spill counters, or cleanup methods. C tests cover the
+  public behavior: spooled payload write, sink write, projection, nested
+  candidate traversal through spooled replay, stop limits before payload
+  callbacks, reader failure/over-capacity errors, and source-candidate mutation
+  over spooled candidates. Go spool file permissions, file reuse, spill
+  counters, and private cleanup lifecycle are not mirrored unless liblql adds a
+  public spool/factory API;
 - CLI malformed JSON execution is covered by Go-backed parity tests over stdin
   and seekable file inputs for selection, matches-only selection, compact
   output, projection, and mutation, with exit-code and diagnostic assertions;
