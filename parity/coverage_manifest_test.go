@@ -25,6 +25,7 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"cli", "short option cluster compatibility", []string{"TestCLQLShortOptionClusterCompatibility"}},
 	{"cli", "end-of-options positional compatibility", []string{"TestCLQLEndOfOptionsCompatibility"}},
 	{"cli", "interspersed flag order compatibility", []string{"TestCLQLInterspersedFlagOrderCompatibility"}},
+	{"cli", "directory positional arguments are selector text, not input files", []string{"TestCLQLDirectoryPositionalCompatibility"}},
 	{"selector", "scalar, string, numeric, temporal, path, wildcard, existence, and logical matching", []string{"TestCLQLSelectorParity"}},
 	{"selector", "relative date.since macros", []string{"TestCLQLSelectorSinceMacroParity"}},
 	{"selector", "top-level OR flag composition", []string{"TestCLQLOrFlagParity"}},

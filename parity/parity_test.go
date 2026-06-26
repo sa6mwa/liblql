@@ -1298,6 +1298,26 @@ func TestCLQLInterspersedFlagOrderCompatibility(t *testing.T) {
 	}
 }
 
+func TestCLQLDirectoryPositionalCompatibility(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	dir := t.TempDir()
+	cmd := exec.Command(clql, `/status="open"`, dir)
+	cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("clql unexpectedly treated directory positional as input: out=%q", string(out))
+	}
+	if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
+		t.Fatalf("directory positional exit mismatch: err=%v out=%q", err, string(out))
+	}
+	if !bytes.Contains(out, []byte("invalid selector expression")) {
+		t.Fatalf("directory positional diagnostic mismatch: out=%q", string(out))
+	}
+}
+
 func TestCLQLMatchAllFileSelectionParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

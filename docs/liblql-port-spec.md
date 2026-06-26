@@ -972,6 +972,8 @@ Current implementation status:
   dash-prefixed positional input paths can be selected after the terminator;
 - CLI pflag-compatible interspersed option parsing is covered so projection
   flags before or after selector arguments produce the same selected output;
+- CLI positional argument compatibility covers directory arguments as selector
+  text rather than input files, matching the Go CLI split behavior;
 - CLI non-inline mutation supports multiple seekable input files and mixed
   file/stdin inputs in argument order, matching the Go CLI's
   `splitMutationArgs` behavior while preserving inline mode's single-file
