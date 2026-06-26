@@ -369,8 +369,10 @@ Fast test command contract:
   properties by spending noticeable wall-clock time or materializing large
   documents;
 - `make parity-test` runs the Go-backed CLI and SDK parity suites explicitly;
-- `make test-all` includes both the fast C/API tests and parity tests before
-  sanitizer and Lua checks.
+- `make fuzz-smoke` runs bounded public API seed coverage over parser,
+  projection, compaction, mutation, and streaming query entry points;
+- `make test-all` includes the fast C/API tests, parity tests, fuzz smoke,
+  sanitizer checks, and Lua checks.
 
 Parity benchmark spec:
 
@@ -846,6 +848,12 @@ Current implementation is an early slice:
   unit group in `tests/test_lql.c` must have exactly one manifest entry and
   exactly one `main()` call, so C-only regressions cannot be added without
   executable coverage accounting;
+- bounded fuzz smoke coverage exists through `lql.fuzz-smoke` and
+  `make fuzz-smoke`, exercising public selector parse/evaluate, projection,
+  compaction, mutation, callback-source decision streams, and callback-source
+  spooled payload streams with deterministic malformed and valid seeds; this is
+  a local regression/sanitizer seed gate, not a replacement for long-running
+  fuzz campaigns;
 - the Go-backed SDK parity suite is intentionally excluded from sanitizer CTest
   presets because the cgo test process cannot reliably load an
   ASan-instrumented shared liblql with the ASan runtime first; project-owned C

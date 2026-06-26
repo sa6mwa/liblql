@@ -1,4 +1,4 @@
-.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan lua-rock lua-env lua-test bench benchmarks bench-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -6,8 +6,9 @@ help:
 	  'make build                   configure and build debug preset' \
 	  'make test                    run fast C/API tests' \
 	  'make parity-test             run Go-backed parity tests' \
-	  'make test-all                run tests, sanitizers, and Lua smoke tests' \
+	  'make test-all                run tests, fuzz smoke, sanitizers, and Lua smoke tests' \
 	  'make asan                    run ASan/UBSan tests' \
+	  'make fuzz-smoke              run bounded public API fuzz smoke seeds' \
 	  'make lua-rock                install Lua facade into build/luarocks' \
 	  'make lua-env                 print Lua facade environment exports' \
 	  'make lua-test                run Lua facade smoke tests' \
@@ -42,17 +43,20 @@ build-release: deps-release
 	@cmake --build --preset x86_64-linux-gnu-release
 
 test test-debug: build-debug
-	@ctest --preset debug -LE parity
+	@ctest --preset debug -LE 'parity|fuzz'
 
 parity-test: build-debug
 	@ctest --preset debug -L parity
 
-test-all: test parity-test asan lua-test
+test-all: test parity-test asan fuzz-smoke lua-test
 
 asan: deps-debug
 	@cmake --preset asan
 	@cmake --build --preset asan
 	@ctest --preset asan -LE parity
+
+fuzz-smoke: build-debug
+	@ctest --preset debug -L fuzz
 
 lua-test: build-debug
 	@./scripts/run_lua_tests.sh

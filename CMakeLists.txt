@@ -147,6 +147,13 @@ if(LQL_BUILD_TESTS)
   add_test(NAME lql.unit COMMAND test_lql)
   set_tests_properties(lql.unit PROPERTIES LABELS "unit;local" TIMEOUT 2)
 
+  add_executable(lql_fuzz_smoke tests/fuzz_smoke.c)
+  target_link_libraries(lql_fuzz_smoke PRIVATE $<IF:$<BOOL:${LQL_BUILD_STATIC}>,lql_static,lql_shared>)
+  lql_apply_project_warnings(lql_fuzz_smoke)
+  add_test(NAME lql.fuzz-smoke COMMAND lql_fuzz_smoke)
+  set_tests_properties(lql.fuzz-smoke PROPERTIES LABELS "fuzz;local"
+    TIMEOUT 5)
+
   add_test(NAME lql.sdk-manifest
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_sdk_unit_manifest.sh
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lql.c)
