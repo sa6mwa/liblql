@@ -3696,6 +3696,11 @@ static void expect_source_candidate_mutation_api(void) {
                (unsigned long)result.bytes_read, fail_reader.calls,
                error.message);
         ++failures;
+      } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                 strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n") != 0) {
+        printf("source candidate mutation partial read output mismatch: %s\n",
+               buf);
+        ++failures;
       }
     }
   }
