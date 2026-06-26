@@ -887,7 +887,9 @@ Current implementation status:
   and explicit file-backed parse options, file-backed mutation value execution
   over buffered, source-backed, and seekable file-range APIs, source-backed
   projection, compacting, and mutation over fragmented caller reads, source
-  callback read failures with empty failed-output state, mutation parse-error
+  callback read failures with empty failed-output state, wildcard remove
+  mutation over object members, array-wildcard fields, any-child fields, and
+  recursive descendants, mutation parse-error
   invariants,
   parser failure output-handle clearing, projection invalid-argument
   `out_found` state, and query callback failure status propagation. Query and

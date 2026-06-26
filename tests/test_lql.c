@@ -5514,6 +5514,52 @@ static void expect_wildcard_mutation_api(void) {
   fclose(out);
 }
 
+static void expect_wildcard_remove_mutation_api(void) {
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_mutation_plan *plan;
+  const char *exprs[4];
+  char buf[1024];
+  size_t len;
+  static const char doc[] =
+      "{\"labels\":{\"env\":\"prod\",\"owner\":\"alice\"},\"items\":[{"
+      "\"sku\":\"A\",\"price\":10},{\"sku\":\"B\",\"price\":20}],\"nested\":{"
+      "\"items\":[{\"sku\":\"C\",\"price\":30}]}}";
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("wildcard remove mutation tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  exprs[0] = "rm:/labels/*";
+  exprs[1] = "rm:/items[]/price";
+  exprs[2] = "rm:/items/**/sku";
+  exprs[3] = "rm:/nested/.../price";
+  plan = NULL;
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 4u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("wildcard remove mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    st = test_ctx->mutate_json(test_ctx, plan, doc, strlen(doc), out, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("wildcard remove mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf,
+                      "{\"labels\":{},\"items\":[{},{}],\"nested\":{"
+                      "\"items\":[{\"sku\":\"C\"}]}}") != 0) {
+      printf("wildcard remove mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  fclose(out);
+}
+
 static void expect_wildcard_mutation_error_precedence_api(void) {
   FILE *out;
   lql_error error;
@@ -5790,6 +5836,8 @@ static void expect_sdk_contract_manifest(void) {
       {"mutation", "concrete array element mutation",
        expect_array_element_mutation_api},
       {"mutation", "wildcard path mutation", expect_wildcard_mutation_api},
+      {"mutation", "wildcard remove mutation",
+       expect_wildcard_remove_mutation_api},
       {"mutation", "wildcard mutation error precedence",
        expect_wildcard_mutation_error_precedence_api},
       {"mutation", "one-child and recursive path mutation",
@@ -5800,7 +5848,7 @@ static void expect_sdk_contract_manifest(void) {
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
       {"version", 1},      {"selector", 6}, {"streaming", 11},
-      {"projection", 6},   {"compact", 2},  {"mutation", 18},
+      {"projection", 6},   {"compact", 2},  {"mutation", 19},
   };
   size_t i;
   size_t j;
@@ -6481,6 +6529,7 @@ int main(void) {
   expect_mutation_shorthand_api();
   expect_array_element_mutation_api();
   expect_wildcard_mutation_api();
+  expect_wildcard_remove_mutation_api();
   expect_wildcard_mutation_error_precedence_api();
   expect_recursive_mutation_api();
   expect_array_wildcard_value_mutation_api();
