@@ -3661,6 +3661,9 @@ static void expect_source_candidate_mutation_api(void) {
         printf("source candidate mutation read error mismatch: %s\n",
                error.message);
         ++failures;
+      } else if (!read_tmpfile(out, buf, sizeof(buf), &len) || len != 0u) {
+        printf("source candidate mutation read error wrote output: %s\n", buf);
+        ++failures;
       }
     }
 
