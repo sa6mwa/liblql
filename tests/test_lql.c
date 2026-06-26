@@ -912,12 +912,17 @@ static void expect_stream_file(void) {
 static void expect_stream_mixed_scalar_candidates(void) {
   static const char input[] = "\"x\"\n{\"id\":\"x\"}\n123\n";
   FILE *fp;
+  FILE *out;
   lql_selector *selector;
   lql_query_result result;
   stream_seen seen;
+  payload_seen payloads;
   lql_error error;
   lql_status st;
+  char buf[128];
+  size_t len;
 
+  out = NULL;
   memset(&seen, 0, sizeof(seen));
   lql_error_init(&error);
   st = test_ctx->selector_parse(test_ctx, "/id=\"x\"", &selector, &error);
@@ -945,9 +950,9 @@ static void expect_stream_mixed_scalar_candidates(void) {
   st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
                                       &seen, &result, &error);
   fclose(fp);
-  test_ctx->selector_destroy(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("mixed scalar stream query failed: %s\n", error.message);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
@@ -966,6 +971,66 @@ static void expect_stream_mixed_scalar_candidates(void) {
     printf("mixed scalar stream ranges mismatch\n");
     ++failures;
   }
+
+  fp = tmpfile();
+  out = tmpfile();
+  if (fp == NULL || out == NULL) {
+    printf("mixed scalar payload tmpfile failed\n");
+    if (fp != NULL) {
+      fclose(fp);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||
+      fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("mixed scalar payload write/seek failed\n");
+    fclose(fp);
+    fclose(out);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  memset(&payloads, 0, sizeof(payloads));
+  memset(&result, 0, sizeof(result));
+  payloads.out = out;
+  lql_error_init(&error);
+  st = test_ctx->query_file_matches(test_ctx, selector, fp, record_payload,
+                                    &payloads, &result, &error);
+  fclose(fp);
+  if (st != LQL_STATUS_OK) {
+    printf("mixed scalar payload query failed: %s\n", error.message);
+    fclose(out);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (payloads.calls != 1 || result.candidates_seen != (lql_uint64)3 ||
+      result.candidates_matched != (lql_uint64)1 ||
+      result.bytes_read != (lql_uint64)19) {
+    printf("mixed scalar payload counts mismatch calls=%d seen=%lu "
+           "matched=%lu bytes=%lu\n",
+           payloads.calls, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched,
+           (unsigned long)result.bytes_read);
+    ++failures;
+  }
+  if (payloads.offsets[0] != (lql_uint64)4 ||
+      payloads.sizes[0] != (lql_uint64)10) {
+    printf("mixed scalar payload range mismatch\n");
+    ++failures;
+  }
+  if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+      strcmp(buf, "{\"id\":\"x\"}") != 0) {
+    printf("mixed scalar payload output mismatch: %s\n", buf);
+    ++failures;
+  }
+  fclose(out);
+  test_ctx->selector_destroy(test_ctx, selector);
 }
 
 static void expect_source_stream(void) {

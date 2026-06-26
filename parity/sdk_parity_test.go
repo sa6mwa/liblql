@@ -918,22 +918,49 @@ func TestSDKStreamingDecisionParity(t *testing.T) {
 }
 
 func TestSDKStreamingPayloadParity(t *testing.T) {
-	doc := "{\"status\":\"open\",\"id\":1}\n{\"status\":\"closed\",\"id\":2}\n{\"status\":\"open\",\"id\":3}\n"
 	for _, tc := range []struct {
 		name                 string
+		expr                 string
+		doc                  string
 		mode                 int
 		wantSeekablePayloads int
 		wantSpooledPayloads  int
 	}{
-		{name: "seekable file ranges", mode: 1, wantSeekablePayloads: 2},
-		{name: "callback source spooled payloads", mode: 2, wantSpooledPayloads: 2},
+		{
+			name:                 "seekable file ranges",
+			expr:                 `/status="open"`,
+			doc:                  "{\"status\":\"open\",\"id\":1}\n{\"status\":\"closed\",\"id\":2}\n{\"status\":\"open\",\"id\":3}\n",
+			mode:                 1,
+			wantSeekablePayloads: 2,
+		},
+		{
+			name:                "callback source spooled payloads",
+			expr:                `/status="open"`,
+			doc:                 "{\"status\":\"open\",\"id\":1}\n{\"status\":\"closed\",\"id\":2}\n{\"status\":\"open\",\"id\":3}\n",
+			mode:                2,
+			wantSpooledPayloads: 2,
+		},
+		{
+			name:                 "mixed scalar seekable file range",
+			expr:                 `/id="x"`,
+			doc:                  "\"x\"\n{\"id\":\"x\"}\n123\n",
+			mode:                 1,
+			wantSeekablePayloads: 1,
+		},
+		{
+			name:                "mixed scalar callback source spooled payload",
+			expr:                `/id="x"`,
+			doc:                 "\"x\"\n{\"id\":\"x\"}\n123\n",
+			mode:                2,
+			wantSpooledPayloads: 1,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			want, err := goStreamQuery(`/status="open"`, doc, tc.mode, 0, 0, 0, false)
+			want, err := goStreamQuery(tc.expr, tc.doc, tc.mode, 0, 0, 0, false)
 			if err != nil {
 				t.Fatalf("go stream payload: %v", err)
 			}
-			got, err := cStreamQuery(`/status="open"`, doc, tc.mode, 0, 0, 0, false)
+			got, err := cStreamQuery(tc.expr, tc.doc, tc.mode, 0, 0, 0, false)
 			if err != nil {
 				t.Fatalf("liblql stream payload: %v", err)
 			}
