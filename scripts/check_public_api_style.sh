@@ -329,6 +329,22 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  consumer_global_query_hits=$(
+    grep -REn \
+      'lql_(version|capabilities_get)[[:space:]]*\(' \
+      "$source_root/src/clql.c" \
+      "$source_root/lua" \
+      "$source_root/examples" \
+      "$source_root/tests/header_smoke.c" \
+      "$source_root/tests/header_smoke.cpp" \
+      "$source_root/scripts/package.sh" 2>/dev/null || true
+  )
+  if [ -n "$consumer_global_query_hits" ]; then
+    printf 'public API style: project-owned consumers must query version/capabilities through the receiver\n' >&2
+    printf '%s\n' "$consumer_global_query_hits" >&2
+    failed=1
+  fi
+
   test_receiver_bypass_hits=$(
     grep -REn \
       'lql_parse_selector_internal[[:space:]]*\(|lql_eval_query_|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \

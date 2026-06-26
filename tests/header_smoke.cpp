@@ -9,10 +9,13 @@ static int check_lql_header_cpp(void) {
   lql_status status;
 
   lql_error_init(&error);
-  lql_capabilities_get(&capabilities);
   status = lql_new(&ctx, &error);
+  if (status != LQL_STATUS_OK || ctx == 0) {
+    return 1;
+  }
+  ctx->capabilities_get(ctx, &capabilities);
+  ctx->destroy(ctx);
   (void)status;
-  (void)ctx;
   (void)selector;
   (void)LQL_VERSION;
   return capabilities.selector_parse ? 0 : 1;

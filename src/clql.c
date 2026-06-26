@@ -717,6 +717,13 @@ int main(int argc, char **argv) {
   selector_expr_owned = NULL;
   input_path = NULL;
   clql_alloc = lql_allocator_default();
+  lql_error_init(&error);
+  st = lql_new(&clql_ctx, &error);
+  if (st != LQL_STATUS_OK) {
+    fprintf(stderr, "clql: %s\n", error.message);
+    return 1;
+  }
+  (void)atexit(destroy_clql_ctx);
   for (i = 1; i < argc; ++i) {
     if (end_options) {
       if (!add_projection_arg(&positionals, argv[i])) {
@@ -733,7 +740,7 @@ int main(int argc, char **argv) {
       continue;
     }
     if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
-      printf("clql %s\n", lql_version());
+      printf("clql %s\n", clql_ctx->version(clql_ctx));
       destroy_projection_args(&fields);
       destroy_projection_args(&mutations);
       destroy_projection_args(&positionals);
@@ -770,7 +777,7 @@ int main(int argc, char **argv) {
           return 0;
         }
         if (show_version) {
-          printf("clql %s\n", lql_version());
+          printf("clql %s\n", clql_ctx->version(clql_ctx));
           destroy_projection_args(&fields);
           destroy_projection_args(&mutations);
           destroy_projection_args(&positionals);
@@ -961,17 +968,6 @@ int main(int argc, char **argv) {
     return 2;
   }
   destroy_projection_args(&positionals);
-  lql_error_init(&error);
-  st = lql_new(&clql_ctx, &error);
-  if (st != LQL_STATUS_OK) {
-    fprintf(stderr, "clql: %s\n", error.message);
-    clql_alloc->destroy(clql_alloc, selector_expr_owned);
-    destroy_projection_args(&fields);
-    destroy_projection_args(&mutations);
-    destroy_projection_args(&input_paths);
-    return 1;
-  }
-  (void)atexit(destroy_clql_ctx);
   if (fields.count != 0u) {
     st = clql_ctx->projection_parse(clql_ctx, (const char *const *)fields.items,
                                     fields.count, &projection, &error);

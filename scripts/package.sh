@@ -540,13 +540,16 @@ int main(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  if (strcmp(lql_version(), LQL_VERSION) != 0) {
-    fprintf(stderr, "version mismatch: %s != %s\n", lql_version(), LQL_VERSION);
+  if (strcmp(ctx->version(ctx), LQL_VERSION) != 0) {
+    fprintf(stderr, "version mismatch: %s != %s\n", ctx->version(ctx),
+            LQL_VERSION);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
     return 1;
   }
   {
     lql_capabilities caps;
-    lql_capabilities_get(&caps);
+    ctx->capabilities_get(ctx, &caps);
     if (!caps.selector_parse || !caps.source_decision_stream ||
         !caps.source_spooled_match_stream || !caps.spooled_payloads ||
         !caps.payload_sink_write ||

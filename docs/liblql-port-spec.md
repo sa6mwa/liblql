@@ -639,6 +639,13 @@ Current implementation status:
   operation symbols; `lql.public-api-style-fixtures` includes negative cases
   proving both private `_impl` calls and private `_impl` method definitions fail
   closed;
+- standalone version and capability helpers remain exported for construction,
+  diagnostics, header smoke, and source-compatibility use, but project-owned
+  consumers with a live `lql *` receiver must call `ctx->version(ctx)` and
+  `ctx->capabilities_get(ctx, ...)`; `clql`, Lua, examples, header smoke
+  consumers, and package smoke consumers are style-gated against calling
+  `lql_version()` or `lql_capabilities_get()` directly so the documented and
+  exercised product surface stays receiver-first after construction;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through

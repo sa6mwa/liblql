@@ -169,6 +169,12 @@ EOF
 run_expect_fail "clql receiver-owned glue allocator use"
 rm -f "$tmp/src/clql.c"
 
+cat >"$tmp/examples/global_query.c" <<'EOF'
+void consumer_global_query(void) { (void)lql_version(); }
+EOF
+run_expect_fail "consumer standalone version query"
+rm -f "$tmp/examples/global_query.c"
+
 cat >"$tmp/tests/private_operation.c" <<'EOF'
 void test_private_operation(void) { (void)lql_mutate_json_impl(0, 0, 0, 0, 0, 0); }
 EOF
