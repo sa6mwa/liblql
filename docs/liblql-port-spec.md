@@ -686,7 +686,9 @@ Current implementation is an early slice:
   `contains.any`, `icontains.any`, `in.any`, wildcard selector paths, and
   bracket-sugar array paths, string-term `ignoreCase`/`ic` flags, and
   multi-bound numeric ranges, with omitted string-term values treated as path
-  assertions; temporal `date` terms, datetime `range` bounds, and relative
+  assertions that include JSON `null`, while explicit `exists`, `eq`, `in`, and
+  valued string terms do not treat JSON `null` as an empty string or non-null
+  value; temporal `date` terms, datetime `range` bounds, and relative
   `date.since` macros are implemented; nested indexed `and.N` / `or.N`
   logical wrapper groups, including `and.or.N` and `or.and.N` wrapper chains,
   are parsed and evaluated recursively; shorthand selectors tolerate whitespace

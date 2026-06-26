@@ -4192,6 +4192,24 @@ static void expect_selector_match_api(void) {
                0);
   expect_match("contains{field=/metadata,value=\"\"}",
                "{\"metadata\":{\"etag\":\"x\"}}", 0);
+  expect_match("contains{f=/hello/world}",
+               "{\"hello\":{\"world\":null}}", 1);
+  expect_match("icontains{f=/hello/world}",
+               "{\"hello\":{\"world\":null}}", 1);
+  expect_match("prefix{f=/hello/world}",
+               "{\"hello\":{\"world\":null}}", 1);
+  expect_match("iprefix{f=/hello/world}",
+               "{\"hello\":{\"world\":null}}", 1);
+  expect_match("exists{/hello/world}",
+               "{\"hello\":{\"world\":null}}", 0);
+  expect_match("/hello/world=\"\"",
+               "{\"hello\":{\"world\":null}}", 0);
+  expect_match("contains{f=/hello/world,v=\"\"}",
+               "{\"hello\":{\"world\":null}}", 0);
+  expect_match("prefix{f=/hello/world,v=\"\"}",
+               "{\"hello\":{\"world\":null}}", 0);
+  expect_match("in{f=/hello/world,any=null|\"\"}",
+               "{\"hello\":{\"world\":null}}", 0);
   expect_match("contains{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
   expect_match("icontains{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
   expect_match("prefix{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);

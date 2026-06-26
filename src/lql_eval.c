@@ -275,7 +275,7 @@ static int resolve_since_macro(lql_since_macro macro, lql_temporal *out) {
 
 static void observe_node(eval_doc *doc, const lql_node *node,
                          const lonejson_value_path *path, const char *value,
-                         int is_number, int is_container) {
+                         int is_number, int is_container, int is_null) {
   size_t i;
   size_t n;
   size_t j;
@@ -290,7 +290,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
   if (!node_is_term(node)) {
     for (i = 0u; i < node->child_count; ++i) {
       observe_node(doc, &node->children[i], path, value, is_number,
-                   is_container);
+                   is_container, is_null);
     }
     return;
   }
@@ -299,7 +299,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
   }
   switch (node->kind) {
   case LQL_NODE_EQ:
-    if (is_container) {
+    if (is_container || is_null) {
       break;
     }
     if (strcmp(value, node->term.value == NULL ? "" : node->term.value) == 0) {
@@ -312,6 +312,10 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     break;
   case LQL_NODE_NE:
     if (is_container) {
+      break;
+    }
+    if (is_null) {
+      doc->hits[node->hit_index] = 1u;
       break;
     }
     if (strcmp(value, node->term.value == NULL ? "" : node->term.value) != 0 &&
@@ -328,7 +332,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
       doc->hits[node->hit_index] = 1u;
       break;
     }
-    if (is_container) {
+    if (is_container || is_null) {
       break;
     }
     if (node->term.any_count == 0u) {
@@ -354,7 +358,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
       doc->hits[node->hit_index] = 1u;
       break;
     }
-    if (is_container) {
+    if (is_container || is_null) {
       break;
     }
     n = strlen(node->term.value == NULL ? "" : node->term.value);
@@ -366,7 +370,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     }
     break;
   case LQL_NODE_RANGE:
-    if (!is_container && node->term.range_is_temporal) {
+    if (!is_container && !is_null && node->term.range_is_temporal) {
       if (lql_parse_temporal_literal(value, &temporal) &&
           (!node->term.has_temporal_gt ||
            lql_temporal_compare(&temporal, &node->term.temporal_gt) > 0) &&
@@ -378,7 +382,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
            lql_temporal_compare(&temporal, &node->term.temporal_lte) <= 0)) {
         doc->hits[node->hit_index] = 1u;
       }
-    } else if (!is_container && is_number) {
+    } else if (!is_container && !is_null && is_number) {
       number = strtod(value, NULL);
       if ((!node->term.has_range_gt || number > node->term.range_gt) &&
           (!node->term.has_range_gte || number >= node->term.range_gte) &&
@@ -389,7 +393,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     }
     break;
   case LQL_NODE_DATE:
-    if (!is_container &&
+    if (!is_container && !is_null &&
         (node->term.since_macro == LQL_SINCE_NONE ||
          resolve_since_macro(node->term.since_macro, &since_macro)) &&
         lql_parse_temporal_literal(value, &temporal) &&
@@ -409,7 +413,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     }
     break;
   case LQL_NODE_IN:
-    if (is_container) {
+    if (is_container || is_null) {
       break;
     }
     for (j = 0u; j < node->term.any_count; ++j) {
@@ -421,7 +425,9 @@ static void observe_node(eval_doc *doc, const lql_node *node,
     }
     break;
   case LQL_NODE_EXISTS:
-    doc->hits[node->hit_index] = 1u;
+    if (!is_null) {
+      doc->hits[node->hit_index] = 1u;
+    }
     break;
   default:
     break;
@@ -429,11 +435,13 @@ static void observe_node(eval_doc *doc, const lql_node *node,
 }
 
 static void observe_value(eval_doc *doc, const lonejson_value_path *path,
-                          const char *value, int is_number, int is_container) {
+                          const char *value, int is_number, int is_container,
+                          int is_null) {
   if (doc->selector == NULL || doc->selector->root.kind == LQL_NODE_ALL) {
     return;
   }
-  observe_node(doc, &doc->selector->root, path, value, is_number, is_container);
+  observe_node(doc, &doc->selector->root, path, value, is_number, is_container,
+               is_null);
 }
 
 static int eval_node(const lql_node *node, const eval_doc *doc) {
@@ -470,7 +478,7 @@ static lonejson_status on_object_begin(void *user,
   if (path->segment_count == 0u) {
     doc->root_kind = '{';
   }
-  observe_value(doc, path, "", 0, 1);
+  observe_value(doc, path, "", 0, 1, 0);
   return push_container(doc, path, '{');
 }
 
@@ -490,7 +498,7 @@ static lonejson_status on_array_begin(void *user,
   if (path->segment_count == 0u) {
     doc->root_kind = '[';
   }
-  observe_value(doc, path, "", 0, 1);
+  observe_value(doc, path, "", 0, 1, 0);
   return push_container(doc, path, '[');
 }
 
@@ -533,7 +541,7 @@ static lonejson_status on_string_end(void *user,
   if (path->segment_count == 0u) {
     doc->root_kind = 's';
   }
-  observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 0, 0);
+  observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 0, 0, 0);
   lql_dealloc(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
@@ -561,7 +569,7 @@ static lonejson_status on_number_end(void *user,
   if (path->segment_count == 0u) {
     doc->root_kind = 'n';
   }
-  observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 1, 0);
+  observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 1, 0, 0);
   lql_dealloc(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
@@ -575,7 +583,7 @@ static lonejson_status on_boolean(void *user, const lonejson_value_path *path,
   if (path->segment_count == 0u) {
     doc->root_kind = 'b';
   }
-  observe_value(doc, path, value ? "true" : "false", 0, 0);
+  observe_value(doc, path, value ? "true" : "false", 0, 0, 0);
   return LONEJSON_STATUS_OK;
 }
 
@@ -586,7 +594,7 @@ static lonejson_status on_null(void *user, const lonejson_value_path *path,
   if (path->segment_count == 0u) {
     doc->root_kind = '0';
   }
-  observe_value(doc, path, "", 0, 0);
+  observe_value(doc, path, "", 0, 0, 1);
   return LONEJSON_STATUS_OK;
 }
 
