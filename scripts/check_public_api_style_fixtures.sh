@@ -86,6 +86,7 @@ EOF
 
 cat >"$tmp/src/lql_selector.c" <<'EOF'
 void bad_null_private_receiver(void) { lql_selector_destroy_impl(NULL, selector); }
+void bad_selector_allocator_entry(lql_allocator *allocator) { lql_parse_selector_internal(allocator, expr, 0, out, error); }
 EOF
 
 cat >"$tmp/src/lql.c" <<'EOF'
@@ -128,6 +129,7 @@ expect_diagnostic "$out" "forbidden liblql allocator wrapper call"
 expect_diagnostic "$out" "forbidden liblql allocator macro wrapper call"
 expect_diagnostic "$out" "project runtime must not use null receiver allocator fallback"
 expect_diagnostic "$out" "cleanup paths must use explicit receiver/handle allocators"
+expect_diagnostic "$out" "selector internals must be receiver-owned at subsystem boundaries"
 expect_diagnostic "$out" "lonejson runtimes must use receiver allocator bridge"
 expect_diagnostic "$out" "private receiver implementations must not be called with NULL receivers"
 expect_diagnostic "$out" "receiver methods must be file-local methods"

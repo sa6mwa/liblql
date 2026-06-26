@@ -192,10 +192,14 @@ static void receiver_destroy(lql *self) {
   allocator->destroy(allocator, self);
 }
 
-LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_allocator *allocator,
-                                          lql_node *node) {
+LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql *self, lql_node *node) {
+  lql_allocator *allocator;
   size_t i;
   if (node == NULL) {
+    return;
+  }
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
     return;
   }
   allocator->destroy(allocator, node->term.field);
@@ -205,7 +209,7 @@ LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_allocator *allocator,
   }
   allocator->destroy(allocator, node->term.any);
   for (i = 0u; i < node->child_count; ++i) {
-    lql_node_cleanup(allocator, &node->children[i]);
+    lql_node_cleanup(self, &node->children[i]);
   }
   allocator->destroy(allocator, node->children);
   memset(node, 0, sizeof(*node));
@@ -215,25 +219,25 @@ static lql_status selector_parse_method(lql *self,
                                                        const char *expr,
                                                        lql_selector **out,
                                                        lql_error *error) {
-  return lql_parse_selector_internal(lql_allocator_from_receiver(self), expr, 0,
-                                     out, error);
+  return lql_parse_selector_internal(self, expr, 0, out, error);
 }
 
 static lql_status selector_parse_or_method(lql *self,
                                                           const char *expr,
                                                           lql_selector **out,
                                                           lql_error *error) {
-  return lql_parse_selector_internal(lql_allocator_from_receiver(self), expr, 1,
-                                     out, error);
+  return lql_parse_selector_internal(self, expr, 1, out, error);
 }
 
 static void selector_destroy_method(lql *self,
                                                    lql_selector *selector) {
   if (selector != NULL) {
     lql_allocator *allocator;
-    allocator = selector->allocator != NULL ? selector->allocator
-                                            : lql_allocator_from_receiver(self);
-    lql_node_cleanup(allocator, &selector->root);
+    lql_node_cleanup(self, &selector->root);
+    allocator = lql_allocator_from_receiver(self);
+    if (allocator == NULL) {
+      return;
+    }
     allocator->destroy(allocator, selector);
   }
 }

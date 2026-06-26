@@ -265,6 +265,19 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  selector_allocator_entry_hits=$(
+    grep -REn \
+      'lql_(parse_selector_internal|node_cleanup)[^(]*\([[:space:]]*lql_allocator[[:space:]*]|lql_(parse_selector_internal|node_cleanup)[[:space:]]*\([[:space:]]*allocator' \
+      "$source_root/src/lql.c" \
+      "$source_root/src/lql_selector.c" \
+      "$source_root/src/lql_internal.h" 2>/dev/null || true
+  )
+  if [ -n "$selector_allocator_entry_hits" ]; then
+    printf 'public API style: selector internals must be receiver-owned at subsystem boundaries\n' >&2
+    printf '%s\n' "$selector_allocator_entry_hits" >&2
+    failed=1
+  fi
+
   lonejson_default_allocator_hits=$(
     grep -En 'lonejson_new[[:space:]]*\([[:space:]]*NULL[[:space:]]*,' \
       "$source_root/src/lql_selector.c" \

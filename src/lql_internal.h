@@ -118,11 +118,10 @@ struct lql_selector {
 
 LQL_INTERNAL_SYMBOL void lql_set_error(lql_error *error, lql_status status,
                                        const char *message);
-LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_allocator *allocator,
-                                          lql_node *node);
+LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql *self, lql_node *node);
 LQL_INTERNAL_SYMBOL lql_status
-lql_parse_selector_internal(lql_allocator *allocator, const char *expr,
-                            int or_mode, lql_selector **out, lql_error *error);
+lql_parse_selector_internal(lql *self, const char *expr, int or_mode,
+                            lql_selector **out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status
 lql_eval_selector(lql *self, const lql_selector *selector, const char *json,
                   size_t json_len, int *out_matched, lql_error *error);
