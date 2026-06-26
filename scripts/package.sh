@@ -351,16 +351,26 @@ verify_no_local_paths() {
 verify_elf_runtime_paths() {
   artifact=$1
   root=$2
+  readelf_tool=${LQL_READELF:-readelf}
   failed=0
-  if ! command -v readelf >/dev/null 2>&1; then
+  case "$(basename "$artifact")" in
+    *apple-darwin*) return ;;
+  esac
+  if ! command -v "$readelf_tool" >/dev/null 2>&1; then
+    case "$(basename "$artifact")" in
+      *-linux-gnu.tar.gz|*-linux-musl.tar.gz)
+        printf 'package-verify: readelf unavailable for ELF runtime path inspection: %s\n' "$artifact" >&2
+        exit 1
+        ;;
+    esac
     return
   fi
   find "$root" -type f >"/tmp/lql-package-files.$$"
   while IFS= read -r file; do
-    if ! readelf -h "$file" >/dev/null 2>&1; then
+    if ! "$readelf_tool" -h "$file" >/dev/null 2>&1; then
       continue
     fi
-    if readelf -d "$file" 2>/dev/null | grep -E 'RPATH|RUNPATH' >/tmp/lql-readelf.$$; then
+    if "$readelf_tool" -d "$file" 2>/dev/null | grep -E 'RPATH|RUNPATH' >/tmp/lql-readelf.$$; then
       if grep -E '/home|/tmp|/var/tmp|/Users|/workspace|/build|\.cache' /tmp/lql-readelf.$$ >/dev/null; then
         printf 'package-verify: non-relocatable runtime path in %s: %s\n' "$artifact" "$file" >&2
         cat /tmp/lql-readelf.$$ >&2
@@ -969,6 +979,34 @@ expect_target_file_tool_failure() {
   fi
 }
 
+expect_readelf_tool_failure() {
+  tmp_dir=$1
+  fixture="$tmp_dir/readelf-tool"
+  output="$tmp_dir/readelf-tool.out"
+
+  mkdir -p "$fixture" "$tmp_dir/no-readelf-bin"
+  printf 'not-a-real-elf\n' >"$fixture/liblql.so"
+  if (LQL_READELF="$tmp_dir/no-readelf-bin/readelf" verify_elf_runtime_paths \
+    liblql-0.0.0-x86_64-linux-gnu.tar.gz "$fixture") \
+    >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly accepted missing readelf\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'package-verify: readelf unavailable for ELF runtime path inspection' \
+    "$output" >/dev/null; then
+    printf 'package privacy fixture did not report missing readelf\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+  if ! (LQL_READELF="$tmp_dir/no-readelf-bin/readelf" verify_elf_runtime_paths \
+    liblql-0.0.0-arm64-apple-darwin.tar.gz "$fixture") \
+    >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly required readelf for Darwin artifact\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+}
+
 check_package_privacy_fixtures() {
   tmp_dir="$ROOT_DIR/build/package-privacy-fixtures"
 
@@ -980,6 +1018,7 @@ check_package_privacy_fixtures() {
   expect_privacy_failure home-file-url "file://$HOME" "$tmp_dir"
   expect_runtime_path_failure "$tmp_dir"
   expect_target_file_tool_failure "$tmp_dir"
+  expect_readelf_tool_failure "$tmp_dir"
 }
 
 check_package_manifest_fixtures() {

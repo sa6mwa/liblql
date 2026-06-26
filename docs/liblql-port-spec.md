@@ -991,7 +991,9 @@ Current implementation status:
   extracted host direct, CMake `find_package`, and pkg-config consumer smokes;
   fast CTest includes package privacy negative fixtures proving the verifier
   fails on repository paths, `$HOME`, absolute local `file://` URLs, and
-  absolute ELF RPATH/RUNPATH entries when host tooling can create the fixture;
+  absolute ELF RPATH/RUNPATH entries when host tooling can create the fixture,
+  and fails closed when `file(1)` or Linux ELF `readelf` inspection is
+  unavailable for binary artifact verification;
   checksum manifest fixture coverage proves release-looking tarball, rockspec,
   and source-rock artifacts under `dist/` cannot be left out of the upload
   manifest;
