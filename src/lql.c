@@ -145,6 +145,7 @@ lql_status lql_new(lql **out, lql_error *error) {
       lql_query_source_spooled_matches_with_options_impl;
   ctx->payload_write_json = lql_payload_write_json_impl;
   ctx->payload_write_json_sink = lql_payload_write_json_sink_impl;
+  ctx->payload_project_json = lql_payload_project_json_impl;
   ctx->projection_parse = lql_projection_parse_impl;
   ctx->projection_destroy = lql_projection_destroy_impl;
   ctx->project_file_range = lql_project_file_range_impl;
@@ -235,6 +236,7 @@ void lql_capabilities_get(lql_capabilities *out) {
   out->source_spooled_match_stream = 1;
   out->spooled_payloads = 1;
   out->payload_sink_write = 1;
+  out->payload_projection = 1;
   out->projection_file_range = 1;
   out->projection_source = 1;
   out->projection_buffered_json = 1;
@@ -590,4 +592,29 @@ LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_sink_impl(
     return copy_status;
   }
   return LQL_STATUS_OK;
+}
+
+LQL_INTERNAL_SYMBOL lql_status lql_payload_project_json_impl(
+    lql *self, const lql_payload *payload, const lql_projection *projection,
+    FILE *out, int *out_found, lql_error *error) {
+  if (out_found != NULL) {
+    *out_found = 0;
+  }
+  if (payload == NULL || projection == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "payload, projection, and output file are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (payload->kind == LQL_PAYLOAD_SEEKABLE_RANGE && payload->source != NULL) {
+    return lql_project_file_range_impl(self, projection, payload->source,
+                                       payload->offset, payload->size, out,
+                                       out_found, error);
+  }
+  if (payload->kind == LQL_PAYLOAD_SPOOLED && payload->spooled != NULL) {
+    return lql_project_spooled(projection,
+                               (const lonejson_spooled *)payload->spooled, out,
+                               out_found, error);
+  }
+  lql_set_error(error, LQL_STATUS_UNSUPPORTED, "payload cannot be projected");
+  return LQL_STATUS_UNSUPPORTED;
 }

@@ -50,11 +50,11 @@ static void expect_receiver_api(void) {
       ctx->query_source_spooled_matches == NULL ||
       ctx->query_source_spooled_matches_with_options == NULL ||
       ctx->payload_write_json == NULL || ctx->payload_write_json_sink == NULL ||
-      ctx->projection_parse == NULL || ctx->projection_destroy == NULL ||
-      ctx->project_file_range == NULL || ctx->project_source == NULL ||
-      ctx->project_json == NULL || ctx->compact_file_range == NULL ||
-      ctx->compact_source == NULL || ctx->compact_json == NULL ||
-      ctx->mutation_plan_parse == NULL ||
+      ctx->payload_project_json == NULL || ctx->projection_parse == NULL ||
+      ctx->projection_destroy == NULL || ctx->project_file_range == NULL ||
+      ctx->project_source == NULL || ctx->project_json == NULL ||
+      ctx->compact_file_range == NULL || ctx->compact_source == NULL ||
+      ctx->compact_json == NULL || ctx->mutation_plan_parse == NULL ||
       ctx->mutation_plan_parse_with_options == NULL ||
       ctx->mutation_plan_count == NULL || ctx->mutation_plan_destroy == NULL ||
       ctx->mutate_file_range_root_fields == NULL ||
@@ -195,12 +195,13 @@ static void expect_version_api(void) {
       !caps.file_decision_stream || !caps.file_match_stream ||
       !caps.source_decision_stream || !caps.seekable_range_payloads ||
       !caps.source_spooled_match_stream || !caps.spooled_payloads ||
-      !caps.payload_sink_write || !caps.projection_file_range ||
-      !caps.projection_source || !caps.projection_buffered_json ||
-      !caps.compact_file_range || !caps.compact_source ||
-      !caps.compact_buffered_json || !caps.mutation_parse ||
-      !caps.mutation_file_range || !caps.mutation_file_range_candidates ||
-      !caps.mutation_source || !caps.mutation_source_candidates ||
+      !caps.payload_sink_write || !caps.payload_projection ||
+      !caps.projection_file_range || !caps.projection_source ||
+      !caps.projection_buffered_json || !caps.compact_file_range ||
+      !caps.compact_source || !caps.compact_buffered_json ||
+      !caps.mutation_parse || !caps.mutation_file_range ||
+      !caps.mutation_file_range_candidates || !caps.mutation_source ||
+      !caps.mutation_source_candidates ||
       !caps.mutation_file_range_projected_candidates ||
       !caps.mutation_source_projected_candidates ||
       !caps.mutation_buffered_json || !caps.mutation_file_values) {
@@ -845,6 +846,34 @@ static lql_status record_spooled_payload_sink(void *user,
   return st;
 }
 
+typedef struct projected_payload_seen {
+  FILE *out;
+  const lql_projection *projection;
+  int calls;
+} projected_payload_seen;
+
+static lql_status
+record_spooled_payload_projection(void *user, const lql_query_match *match) {
+  projected_payload_seen *seen = (projected_payload_seen *)user;
+  lql_error error;
+  lql_status st;
+  int found;
+
+  if (!match->decision.matched || match->payload.kind != LQL_PAYLOAD_SPOOLED ||
+      match->payload.spooled == NULL || seen->projection == NULL) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  found = 0;
+  lql_error_init(&error);
+  st = test_ctx->payload_project_json(
+      test_ctx, &match->payload, seen->projection, seen->out, &found, &error);
+  if (st != LQL_STATUS_OK || !found) {
+    return st == LQL_STATUS_OK ? LQL_STATUS_INVALID_ARGUMENT : st;
+  }
+  ++seen->calls;
+  return LQL_STATUS_STOP;
+}
+
 static void expect_match(const char *expr, const char *json, int want) {
   lql_selector *selector;
   lql_error error;
@@ -1235,10 +1264,13 @@ static void expect_source_spooled_payload_api(void) {
   lql_query_options options;
   lql_query_result result;
   payload_seen seen;
+  projected_payload_seen projected;
   memory_sink sink;
   chunk_reader reader;
+  lql_projection *projection;
   lql_error error;
   lql_status st;
+  const char *fields[1];
   char buf[256];
   size_t len;
 
@@ -1296,6 +1328,72 @@ static void expect_source_spooled_payload_api(void) {
     ++failures;
   }
   fclose(seen.out);
+
+  fields[0] = "/id";
+  projection = NULL;
+  memset(&projected, 0, sizeof(projected));
+  memset(&reader, 0, sizeof(reader));
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 5u;
+  projected.out = tmpfile();
+  if (projected.out == NULL) {
+    printf("source spooled payload projection tmpfile failed\n");
+    ++failures;
+    return;
+  }
+  lql_error_init(&error);
+  st = test_ctx->projection_parse(test_ctx, fields, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source spooled payload projection parse failed: %s\n",
+           error.message);
+    fclose(projected.out);
+    ++failures;
+    return;
+  }
+  projected.projection = projection;
+  lql_error_init(&error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source spooled payload projection selector failed: %s\n",
+           error.message);
+    test_ctx->projection_destroy(test_ctx, projection);
+    fclose(projected.out);
+    ++failures;
+    return;
+  }
+  st = test_ctx->query_source_spooled_matches_with_options(
+      test_ctx, selector, read_chunk, &reader, &options,
+      record_spooled_payload_projection, &projected, &result, &error);
+  test_ctx->selector_destroy(test_ctx, selector);
+  test_ctx->projection_destroy(test_ctx, projection);
+  if (st != LQL_STATUS_OK) {
+    printf("source spooled payload projection query failed: %s\n",
+           error.message);
+    fclose(projected.out);
+    ++failures;
+    return;
+  }
+  if (projected.calls != 1 || result.candidates_seen != (lql_uint64)2 ||
+      result.candidates_matched != (lql_uint64)1 || !result.stopped_early ||
+      result.stop_reason != LQL_QUERY_STOP_CALLBACK) {
+    printf("source spooled payload projection counts mismatch calls=%d "
+           "seen=%lu matched=%lu stop=%d\n",
+           projected.calls, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched, (int)result.stop_reason);
+    ++failures;
+  }
+  if (!read_tmpfile(projected.out, buf, sizeof(buf), &len)) {
+    printf("source spooled payload projection output read failed\n");
+    ++failures;
+  } else if (strcmp(buf, "{\"id\":\"b\"}") != 0) {
+    printf("source spooled payload projection output mismatch: %s\n", buf);
+    ++failures;
+  }
+  fclose(projected.out);
 
   memset(&sink, 0, sizeof(sink));
   memset(&reader, 0, sizeof(reader));
@@ -1584,6 +1682,7 @@ static void expect_stream_error_api(void) {
   FILE *source;
   FILE *out;
   lql_selector *selector;
+  lql_projection *projection;
   lql_payload payload;
   stream_seen seen;
   payload_seen payload_seen_value;
@@ -1591,8 +1690,10 @@ static void expect_stream_error_api(void) {
   lql_error error;
   lql_query_result result;
   lql_status st;
+  const char *fields[1];
 
   selector = NULL;
+  projection = NULL;
   source = tmpfile();
   out = tmpfile();
   if (source == NULL || out == NULL) {
@@ -1616,9 +1717,21 @@ static void expect_stream_error_api(void) {
     ++failures;
     return;
   }
+  fields[0] = "/status";
+  lql_error_init(&error);
+  st = test_ctx->projection_parse(test_ctx, fields, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("stream error projection parse failed: %s\n", error.message);
+    test_ctx->selector_destroy(test_ctx, selector);
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
   if (fwrite(malformed, 1u, strlen(malformed), source) != strlen(malformed) ||
       fseek(source, 0L, SEEK_SET) != 0) {
     printf("stream error malformed source setup failed\n");
+    test_ctx->projection_destroy(test_ctx, projection);
     test_ctx->selector_destroy(test_ctx, selector);
     fclose(source);
     fclose(out);
@@ -1840,6 +1953,38 @@ static void expect_stream_error_api(void) {
     ++failures;
   }
 
+  lql_error_init(&error);
+  st = test_ctx->payload_project_json(test_ctx, NULL, projection, out, NULL,
+                                      &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message,
+             "payload, projection, and output file are required") != 0) {
+    printf("payload project NULL payload mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = test_ctx->payload_project_json(test_ctx, &payload, NULL, out, NULL,
+                                      &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message,
+             "payload, projection, and output file are required") != 0) {
+    printf("payload project NULL projection mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  memset(&payload, 0, sizeof(payload));
+  payload.kind = LQL_PAYLOAD_NONE;
+  lql_error_init(&error);
+  st = test_ctx->payload_project_json(test_ctx, &payload, projection, out, NULL,
+                                      &error);
+  if (st != LQL_STATUS_UNSUPPORTED ||
+      strcmp(error.message, "payload cannot be projected") != 0) {
+    printf("payload project unsupported kind mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  test_ctx->projection_destroy(test_ctx, projection);
   fclose(source);
   fclose(out);
 }

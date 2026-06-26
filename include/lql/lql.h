@@ -116,6 +116,8 @@ typedef struct lql_capabilities {
   int spooled_payloads;
   /* Match payloads can be written to caller-managed sink callbacks. */
   int payload_sink_write;
+  /* Match payloads can be projected while callback-scoped. */
+  int payload_projection;
   /* Projection from one seekable file range is available. */
   int projection_file_range;
   /* Projection from caller-provided read callbacks is available. */
@@ -236,6 +238,11 @@ struct lql {
   lql_status (*payload_write_json_sink)(lql *self, const lql_payload *payload,
                                         lql_write_fn write, void *write_user,
                                         lql_error *error);
+  /* Projects a callback-scoped payload to FILE out. */
+  lql_status (*payload_project_json)(lql *self, const lql_payload *payload,
+                                     const lql_projection *projection,
+                                     FILE *out, int *out_found,
+                                     lql_error *error);
   /* Parses projection paths; caller destroys *out on success. */
   lql_status (*projection_parse)(lql *self, const char *const *fields,
                                  size_t field_count, lql_projection **out,

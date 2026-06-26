@@ -604,6 +604,9 @@ Current implementation is an early slice:
 - seekable and spooled payload handles can be written to caller-managed sink
   callbacks through `ctx->payload_write_json_sink()` without requiring a
   `FILE *`;
+- seekable and spooled payload handles can be projected during callback scope
+  through `ctx->payload_project_json()` without materializing the complete
+  candidate in liblql;
 - selection-mode `clql -M/--matches-only` matches Go CLI behavior by writing
   matched JSON candidates and returning success even when no candidates match;
   mutation-mode `-M` remains the Go-compatible output filter for matched
@@ -854,15 +857,16 @@ Current implementation is an early slice:
   `lql.new()` returns a C-owned client userdata backed by a public `lql *`
   receiver, with deterministic smoke tests for selector decisions, selection
   output, file-backed callback decision streams, Lua callback-backed source
-  decision streams, callback-scoped seekable payload handles,
-  callback-scoped source-spooled payload handles, callback-scoped payload
-  streaming through `match.write_json(callback)`, file and buffered-JSON
-  projection, file, buffered-JSON, and Lua callback-source mutation, relative
-  file-backed mutation values through explicit `enable_file_mutations` and
-  `file_value_base_dir` options, query stop reasons, candidate/match limit
-  options, expired payload handles, oversized Lua source-read chunk rejection,
-  source-read error propagation for query and mutation, callback error
-  propagation, and structured errors; the public API style gate rejects
+  decision streams, Lua callback-source selection, callback-scoped seekable
+  payload handles, callback-scoped source-spooled payload handles,
+  callback-scoped payload streaming through `match.write_json(callback)`, file,
+  buffered-JSON, and Lua callback-source projection, file, buffered-JSON, and
+  Lua callback-source mutation, relative file-backed mutation values through
+  explicit `enable_file_mutations` and `file_value_base_dir` options, query
+  stop reasons, candidate/match limit options, expired payload handles,
+  oversized Lua source-read chunk rejection, source-read error propagation for
+  query, selection, and mutation, callback error propagation, and structured
+  errors; the public API style gate rejects
   Lua facade use of private liblql headers, `LQL_INTERNAL_SYMBOL`, or private
   `_impl` receiver implementation functions so Lua remains a public-header
   binding rather than a private in-process shortcut;

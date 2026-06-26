@@ -172,6 +172,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_impl(
 LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_sink_impl(
     lql *self, const lql_payload *payload, lql_write_fn write, void *write_user,
     lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_payload_project_json_impl(
+    lql *self, const lql_payload *payload, const lql_projection *projection,
+    FILE *out, int *out_found, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
     const lql_selector *selector, FILE *file, const lql_query_options *options,
     lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,

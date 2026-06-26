@@ -137,6 +137,30 @@ assert_equal(result.candidates_seen, 2, "query_source candidates")
 assert_equal(result.candidates_matched, 1, "query_source matches")
 assert_equal(source_decisions[2].matched, true, "query_source second match")
 
+source_chunks = {
+  '{"status":"closed","id":"ss1"}\n',
+  '{"status":"open","id":"ss2","count":6}\n'
+}
+source_index = 1
+selected, err = client:select_source('/status="open"', function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end)
+selected = assert_no_error(selected, err, "select_source")
+assert_equal(selected, '{"status":"open","id":"ss2","count":6}\n',
+             "select_source output")
+
+local bad_select_source_result, bad_select_source_error =
+  client:select_source('/status="open"', function(_)
+    error("selection source read failed")
+  end)
+if bad_select_source_result ~= nil or not bad_select_source_error or
+    not string.find(bad_select_source_error.stderr or "",
+                    "selection source read failed", 1, true) then
+  fail("expected structured select_source read callback error")
+end
+
 local payloads = {}
 local streamed_payloads = {}
 local retained_payload
@@ -260,6 +284,19 @@ projected, err = client:project_json('/status="open"',
                                     {"/id", "/count"})
 projected = assert_no_error(projected, err, "project_json")
 assert_equal(projected, '{"id":"c","count":3}\n', "project_json output")
+
+source_chunks = {
+  '{"status":"closed","id":"ps1","count":1}\n',
+  '{"status":"open","id":"ps2","count":7}\n'
+}
+source_index = 1
+projected, err = client:project_source('/status="open"', function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end, {"/id", "/count"})
+projected = assert_no_error(projected, err, "project_source")
+assert_equal(projected, '{"id":"ps2","count":7}\n', "project_source output")
 
 local mutated
 mutated, err = client:mutate_file('/status="open"', input_path,
