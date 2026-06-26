@@ -380,8 +380,8 @@ verify_target_file() {
   target_id=$2
   file_path=$3
   if ! command -v file >/dev/null 2>&1; then
-    printf 'package-verify: file(1) unavailable; skipping target file check for %s\n' "$file_path"
-    return
+    printf 'package-verify: file(1) unavailable for target file check: %s\n' "$file_path" >&2
+    exit 1
   fi
   desc=$(file -L "$file_path")
   case "$target_id" in
@@ -948,6 +948,27 @@ EOF
   fi
 }
 
+expect_target_file_tool_failure() {
+  tmp_dir=$1
+  fixture="$tmp_dir/target-file-tool"
+  output="$tmp_dir/target-file-tool.out"
+
+  mkdir -p "$fixture" "$tmp_dir/no-file-bin"
+  printf 'not-a-real-binary\n' >"$fixture/liblql.so"
+  if (PATH="$tmp_dir/no-file-bin" verify_target_file \
+    target-file-tool x86_64-linux-gnu "$fixture/liblql.so") \
+    >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly accepted missing file(1)\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'package-verify: file(1) unavailable for target file check' \
+    "$output" >/dev/null; then
+    printf 'package privacy fixture did not report missing file(1)\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+}
+
 check_package_privacy_fixtures() {
   tmp_dir="$ROOT_DIR/build/package-privacy-fixtures"
 
@@ -958,6 +979,7 @@ check_package_privacy_fixtures() {
   expect_privacy_failure repo-file-url "file://$ROOT_DIR" "$tmp_dir"
   expect_privacy_failure home-file-url "file://$HOME" "$tmp_dir"
   expect_runtime_path_failure "$tmp_dir"
+  expect_target_file_tool_failure "$tmp_dir"
 }
 
 check_package_manifest_fixtures() {
