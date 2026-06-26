@@ -1601,6 +1601,7 @@ static void expect_stream_stop_controls(void) {
   lql_query_options options;
   lql_query_result result;
   stream_seen seen;
+  chunk_reader reader;
   lql_error error;
   lql_status st;
 
@@ -1677,6 +1678,67 @@ static void expect_stream_stop_controls(void) {
                 LQL_QUERY_STOP_CANDIDATE_LIMIT);
 
 #undef RUN_STOP_CASE
+
+#define RUN_SOURCE_STOP_CASE(label, setup_options, setup_seen, want_calls,     \
+                             want_matched, want_reason)                        \
+  do {                                                                         \
+    memset(&options, 0, sizeof(options));                                      \
+    memset(&seen, 0, sizeof(seen));                                            \
+    memset(&reader, 0, sizeof(reader));                                        \
+    memset(&result, 0, sizeof(result));                                        \
+    reader.data = input;                                                       \
+    reader.len = strlen(input);                                                \
+    reader.chunk_size = 7u;                                                    \
+    setup_options;                                                             \
+    setup_seen;                                                                \
+    st = test_ctx->query_source_decisions_with_options(                        \
+        test_ctx, selector, read_chunk, &reader, &options, record_decision,    \
+        &seen, &result, &error);                                               \
+    if (st != LQL_STATUS_OK) {                                                 \
+      printf(label " source query failed: %s\n", error.message);               \
+      ++failures;                                                              \
+      break;                                                                   \
+    }                                                                          \
+    if (seen.calls != (want_calls) || seen.matched != (want_matched) ||        \
+        result.candidates_seen != (lql_uint64)(want_calls) ||                  \
+        result.candidates_matched != (lql_uint64)(want_matched) ||             \
+        !result.stopped_early || result.stop_reason != (want_reason)) {        \
+      printf(label " source stop mismatch calls=%d matched=%d "                \
+                   "result_seen=%lu result_matched=%lu stopped=%d "           \
+                   "reason=%d\n",                                             \
+             seen.calls, seen.matched, (unsigned long)result.candidates_seen,  \
+             (unsigned long)result.candidates_matched, result.stopped_early,   \
+             (int)result.stop_reason);                                         \
+      ++failures;                                                              \
+    }                                                                          \
+  } while (0)
+
+  RUN_SOURCE_STOP_CASE("source max matches", options.max_matches = 1u,
+                       (void)0, 1, 1, LQL_QUERY_STOP_MATCH_LIMIT);
+  RUN_SOURCE_STOP_CASE("source max candidates", options.max_candidates = 2u,
+                       (void)0, 2, 2, LQL_QUERY_STOP_CANDIDATE_LIMIT);
+  RUN_SOURCE_STOP_CASE("source max bytes", options.max_bytes_read = 17u,
+                       (void)0, 1, 1, LQL_QUERY_STOP_BYTE_LIMIT);
+  RUN_SOURCE_STOP_CASE("source callback stop", (void)0,
+                       seen.stop_after_first = 1, 1, 1,
+                       LQL_QUERY_STOP_CALLBACK);
+  RUN_SOURCE_STOP_CASE("source callback stop precedence",
+                       options.max_matches = 1u;
+                       options.max_candidates = 1u;
+                       options.max_bytes_read = 1u,
+                       seen.stop_after_first = 1, 1, 1,
+                       LQL_QUERY_STOP_CALLBACK);
+  RUN_SOURCE_STOP_CASE("source max matches precedence",
+                       options.max_matches = 1u;
+                       options.max_candidates = 1u;
+                       options.max_bytes_read = 1u,
+                       (void)0, 1, 1, LQL_QUERY_STOP_MATCH_LIMIT);
+  RUN_SOURCE_STOP_CASE("source max candidates precedence",
+                       options.max_candidates = 1u;
+                       options.max_bytes_read = 1u,
+                       (void)0, 1, 1, LQL_QUERY_STOP_CANDIDATE_LIMIT);
+
+#undef RUN_SOURCE_STOP_CASE
 
   test_ctx->selector_destroy(test_ctx, selector);
 }
