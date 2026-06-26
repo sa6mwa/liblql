@@ -101,16 +101,23 @@ static void clear_query_result(lql_query_result *out_result) {
 }
 
 lql_status lql_new(lql **out, lql_error *error) {
+  return lql_new_with_allocator(out, lql_allocator_default(), error);
+}
+
+LQL_INTERNAL_SYMBOL lql_status
+lql_new_with_allocator(lql **out, lql_allocator *allocator, lql_error *error) {
   lql *ctx;
   lql_impl *impl;
-  lql_allocator *allocator;
 
   if (out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "out lql required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   *out = NULL;
-  allocator = lql_allocator_default();
+  if (allocator == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "allocator required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
   ctx = (lql *)allocator->calloc(allocator, 1u, sizeof(*ctx));
   if (ctx == NULL) {
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");

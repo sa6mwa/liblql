@@ -127,4 +127,10 @@ EOF
 run_expect_fail "clql receiver-owned glue allocator use"
 rm -f "$tmp/src/clql.c"
 
+cat >"$tmp/tests/private_operation.c" <<'EOF'
+void test_private_operation(void) { (void)lql_mutate_json_impl(0, 0, 0, 0, 0, 0); }
+EOF
+run_expect_fail "test private operation bypass"
+rm -f "$tmp/tests/private_operation.c"
+
 run_expect_ok

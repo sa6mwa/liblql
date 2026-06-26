@@ -255,6 +255,18 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  test_receiver_bypass_hits=$(
+    grep -REn \
+      'lql_parse_selector_internal[[:space:]]*\(|lql_eval_query_|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \
+      "$source_root/tests" "$source_root/examples" "$source_root/bench" \
+      2>/dev/null || true
+  )
+  if [ -n "$test_receiver_bypass_hits" ]; then
+    printf 'public API style: tests and examples must exercise operations through receiver methods\n' >&2
+    printf '%s\n' "$test_receiver_bypass_hits" >&2
+    failed=1
+  fi
+
   lua_private_hits=$(
     grep -REn \
       'lql_internal\.h|LQL_INTERNAL_SYMBOL|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \

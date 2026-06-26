@@ -593,11 +593,17 @@ Current implementation is an early slice:
   public API style gate rejects direct `lql_allocator_default()` calls in
   `src/lql_selector.c`, `src/lql_project.c`, `src/lql_eval.c`, and
   `src/lql_mutation.c` so library core code cannot bypass receiver/handle
-  allocator boundaries; `lql.handle-allocator` exercises successful and failed
-  selector, projection, and mutation parses plus selector eval, projection
-  runtime, and mutation runtime passes through a counting internal allocator to
-  prove handle allocations and runtime scratch buffers return to zero
-  outstanding allocations on cleanup;
+  allocator boundaries; `lql.handle-allocator` constructs real receivers with
+  a counting internal allocator rather than fabricating private `lql` state,
+  exercises successful and failed selector, projection, and mutation parses
+  plus selector eval, projection runtime, and mutation runtime through receiver
+  method dispatch, and proves handle allocations, runtime scratch buffers, and
+  receiver-owned allocations return to zero outstanding allocations on cleanup;
+- the public API style gate rejects selector/query/payload/projection/compact/
+  mutation `_impl`, `lql_eval_query_*`, and `lql_parse_selector_internal()`
+  operation calls from tests, examples, and benchmarks, so executable examples
+  and C-side product tests exercise liblql through the receiver surface instead
+  of preserving private operation bypasses;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through

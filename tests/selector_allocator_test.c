@@ -90,6 +90,7 @@ static void counting_allocator_init(counting_allocator *counter) {
 
 static int expect_selector_success_uses_allocator(void) {
   counting_allocator counter;
+  lql *ctx;
   lql_selector *selector;
   lql_error error;
   lql_status st;
@@ -97,37 +98,48 @@ static int expect_selector_success_uses_allocator(void) {
   size_t outstanding_after_parse;
 
   counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("selector allocator receiver failed: %s\n", error.message);
+    return 1;
+  }
   selector = NULL;
   lql_error_init(&error);
-  st = lql_parse_selector_internal(&counter.api, "/status=\"open\"", 0,
-                                   &selector, &error);
+  st = ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK || selector == NULL) {
     printf("selector allocator parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
     return 1;
   }
   if (selector->allocator != &counter.api || counter.alloc_count == 0u) {
     printf("selector allocator was not recorded or used\n");
-    lql_selector_destroy_impl(NULL, selector);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
     return 1;
   }
   outstanding_after_parse = counter.outstanding;
   matched = 0;
   lql_error_init(&error);
-  st = lql_matches_json_impl(NULL, selector, "{\"status\":\"open\"}",
-                             strlen("{\"status\":\"open\"}"), &matched, &error);
+  st = ctx->matches_json(ctx, selector, "{\"status\":\"open\"}",
+                         strlen("{\"status\":\"open\"}"), &matched, &error);
   if (st != LQL_STATUS_OK || !matched) {
     printf("selector allocator eval failed: %s\n", error.message);
-    lql_selector_destroy_impl(NULL, selector);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
     return 1;
   }
   if (counter.outstanding != outstanding_after_parse) {
     printf("selector eval allocator cleanup imbalance: before=%lu after=%lu\n",
            (unsigned long)outstanding_after_parse,
            (unsigned long)counter.outstanding);
-    lql_selector_destroy_impl(NULL, selector);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
     return 1;
   }
-  lql_selector_destroy_impl(NULL, selector);
+  ctx->selector_destroy(ctx, selector);
+  ctx->destroy(ctx);
   if (counter.outstanding != 0u || counter.destroy_count == 0u) {
     printf(
         "selector allocator cleanup imbalance: outstanding=%lu destroys=%lu\n",
@@ -140,8 +152,7 @@ static int expect_selector_success_uses_allocator(void) {
 
 static int expect_mutation_success_uses_allocator(void) {
   counting_allocator counter;
-  lql_impl impl;
-  lql receiver;
+  lql *ctx;
   lql_mutation_plan *plan;
   const char *exprs[2];
   lql_error error;
@@ -150,40 +161,47 @@ static int expect_mutation_success_uses_allocator(void) {
   FILE *out;
 
   counting_allocator_init(&counter);
-  memset(&impl, 0, sizeof(impl));
-  memset(&receiver, 0, sizeof(receiver));
-  impl.allocator = &counter.api;
-  receiver.impl = &impl;
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("mutation allocator receiver failed: %s\n", error.message);
+    return 1;
+  }
   exprs[0] = "/count=+2";
   exprs[1] = "/title=\"done\"";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse_impl(&receiver, exprs, 2u, &plan, &error);
+  st = ctx->mutation_plan_parse(ctx, exprs, 2u, &plan, &error);
   if (st != LQL_STATUS_OK || plan == NULL) {
     printf("mutation allocator parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
     return 1;
   }
   if (counter.alloc_count == 0u ||
-      lql_mutation_plan_count_impl(NULL, plan) != 2u) {
+      ctx->mutation_plan_count(ctx, plan) != 2u) {
     printf("mutation allocator was not used or count mismatch\n");
-    lql_mutation_plan_destroy_impl(NULL, plan);
+    ctx->mutation_plan_destroy(ctx, plan);
+    ctx->destroy(ctx);
     return 1;
   }
   outstanding_after_parse = counter.outstanding;
   out = tmpfile();
   if (out == NULL) {
     printf("mutation allocator tmpfile failed\n");
-    lql_mutation_plan_destroy_impl(NULL, plan);
+    ctx->mutation_plan_destroy(ctx, plan);
+    ctx->destroy(ctx);
     return 1;
   }
   lql_error_init(&error);
-  st = lql_mutate_json_impl(&receiver, plan, "{\"count\":3,\"title\":\"old\"}",
-                            strlen("{\"count\":3,\"title\":\"old\"}"), out,
-                            &error);
+  st = ctx->mutate_json(ctx, plan, "{\"count\":3,\"title\":\"old\"}",
+                        strlen("{\"count\":3,\"title\":\"old\"}"), out,
+                        &error);
   fclose(out);
   if (st != LQL_STATUS_OK) {
     printf("mutation allocator runtime failed: %s\n", error.message);
-    lql_mutation_plan_destroy_impl(NULL, plan);
+    ctx->mutation_plan_destroy(ctx, plan);
+    ctx->destroy(ctx);
     return 1;
   }
   if (counter.outstanding != outstanding_after_parse) {
@@ -191,10 +209,12 @@ static int expect_mutation_success_uses_allocator(void) {
         "mutation runtime allocator cleanup imbalance: before=%lu after=%lu\n",
         (unsigned long)outstanding_after_parse,
         (unsigned long)counter.outstanding);
-    lql_mutation_plan_destroy_impl(NULL, plan);
+    ctx->mutation_plan_destroy(ctx, plan);
+    ctx->destroy(ctx);
     return 1;
   }
-  lql_mutation_plan_destroy_impl(NULL, plan);
+  ctx->mutation_plan_destroy(ctx, plan);
+  ctx->destroy(ctx);
   if (counter.outstanding != 0u || counter.destroy_count == 0u) {
     printf(
         "mutation allocator cleanup imbalance: outstanding=%lu destroys=%lu\n",
@@ -207,27 +227,31 @@ static int expect_mutation_success_uses_allocator(void) {
 
 static int expect_mutation_parse_failure_cleans_allocator(void) {
   counting_allocator counter;
-  lql_impl impl;
-  lql receiver;
+  lql *ctx;
   lql_mutation_plan *plan;
   const char *exprs[1];
   lql_error error;
   lql_status st;
 
   counting_allocator_init(&counter);
-  memset(&impl, 0, sizeof(impl));
-  memset(&receiver, 0, sizeof(receiver));
-  impl.allocator = &counter.api;
-  receiver.impl = &impl;
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("mutation allocator receiver failed: %s\n", error.message);
+    return 1;
+  }
   exprs[0] = "/=1";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse_impl(&receiver, exprs, 1u, &plan, &error);
+  st = ctx->mutation_plan_parse(ctx, exprs, 1u, &plan, &error);
   if (st == LQL_STATUS_OK || plan != NULL) {
     printf("mutation allocator parse failure unexpectedly succeeded\n");
-    lql_mutation_plan_destroy_impl(NULL, plan);
+    ctx->mutation_plan_destroy(ctx, plan);
+    ctx->destroy(ctx);
     return 1;
   }
+  ctx->destroy(ctx);
   if (counter.alloc_count == 0u || counter.outstanding != 0u) {
     printf("mutation allocator failure cleanup imbalance: allocs=%lu "
            "outstanding=%lu\n",
@@ -240,21 +264,31 @@ static int expect_mutation_parse_failure_cleans_allocator(void) {
 
 static int expect_selector_parse_failure_cleans_allocator(void) {
   counting_allocator counter;
+  lql *ctx;
   lql_selector *selector;
   lql_error error;
   lql_status st;
 
   counting_allocator_init(&counter);
-  selector = NULL;
+  ctx = NULL;
   lql_error_init(&error);
-  st = lql_parse_selector_internal(
-      &counter.api, "contains{field=/title,value=urgent,field=/other}", 0,
-      &selector, &error);
-  if (st == LQL_STATUS_OK || selector != NULL) {
-    printf("selector allocator parse failure unexpectedly succeeded\n");
-    lql_selector_destroy_impl(NULL, selector);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("selector allocator receiver failed: %s\n", error.message);
     return 1;
   }
+  selector = NULL;
+  lql_error_init(&error);
+  st = ctx->selector_parse(
+      ctx, "contains{field=/title,value=urgent,field=/other}", &selector,
+      &error);
+  if (st == LQL_STATUS_OK || selector != NULL) {
+    printf("selector allocator parse failure unexpectedly succeeded\n");
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  ctx->destroy(ctx);
   if (counter.alloc_count == 0u || counter.outstanding != 0u) {
     printf("selector allocator failure cleanup imbalance: allocs=%lu "
            "outstanding=%lu\n",
@@ -267,8 +301,7 @@ static int expect_selector_parse_failure_cleans_allocator(void) {
 
 static int expect_projection_success_uses_allocator(void) {
   counting_allocator counter;
-  lql_impl impl;
-  lql receiver;
+  lql *ctx;
   lql_projection *projection;
   const char *fields[2];
   lql_error error;
@@ -278,42 +311,49 @@ static int expect_projection_success_uses_allocator(void) {
   FILE *out;
 
   counting_allocator_init(&counter);
-  memset(&impl, 0, sizeof(impl));
-  memset(&receiver, 0, sizeof(receiver));
-  impl.allocator = &counter.api;
-  receiver.impl = &impl;
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("projection allocator receiver failed: %s\n", error.message);
+    return 1;
+  }
   fields[0] = "/title";
   fields[1] = "/items/0/name";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse_impl(&receiver, fields, 2u, &projection, &error);
+  st = ctx->projection_parse(ctx, fields, 2u, &projection, &error);
   if (st != LQL_STATUS_OK || projection == NULL) {
     printf("projection allocator parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
     return 1;
   }
   if (counter.alloc_count == 0u) {
     printf("projection allocator was not used\n");
-    lql_projection_destroy_impl(NULL, projection);
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
     return 1;
   }
   outstanding_after_parse = counter.outstanding;
   out = tmpfile();
   if (out == NULL) {
     printf("projection allocator tmpfile failed\n");
-    lql_projection_destroy_impl(NULL, projection);
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
     return 1;
   }
   found = 0;
   lql_error_init(&error);
-  st = lql_project_json_impl(
-      &receiver, projection,
+  st = ctx->project_json(
+      ctx, projection,
       "{\"title\":\"T\",\"items\":[{\"name\":\"N\"}],\"ignored\":1}",
       strlen("{\"title\":\"T\",\"items\":[{\"name\":\"N\"}],\"ignored\":1}"),
       out, &found, &error);
   fclose(out);
   if (st != LQL_STATUS_OK || !found) {
     printf("projection allocator project failed: %s\n", error.message);
-    lql_projection_destroy_impl(NULL, projection);
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
     return 1;
   }
   if (counter.outstanding != outstanding_after_parse) {
@@ -321,10 +361,12 @@ static int expect_projection_success_uses_allocator(void) {
            "after=%lu\n",
            (unsigned long)outstanding_after_parse,
            (unsigned long)counter.outstanding);
-    lql_projection_destroy_impl(NULL, projection);
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
     return 1;
   }
-  lql_projection_destroy_impl(NULL, projection);
+  ctx->projection_destroy(ctx, projection);
+  ctx->destroy(ctx);
   if (counter.outstanding != 0u || counter.destroy_count == 0u) {
     printf("projection allocator cleanup imbalance: outstanding=%lu "
            "destroys=%lu\n",
@@ -337,28 +379,32 @@ static int expect_projection_success_uses_allocator(void) {
 
 static int expect_projection_parse_failure_cleans_allocator(void) {
   counting_allocator counter;
-  lql_impl impl;
-  lql receiver;
+  lql *ctx;
   lql_projection *projection;
   const char *fields[2];
   lql_error error;
   lql_status st;
 
   counting_allocator_init(&counter);
-  memset(&impl, 0, sizeof(impl));
-  memset(&receiver, 0, sizeof(receiver));
-  impl.allocator = &counter.api;
-  receiver.impl = &impl;
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("projection allocator receiver failed: %s\n", error.message);
+    return 1;
+  }
   fields[0] = "/items";
   fields[1] = "/items/0/name";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse_impl(&receiver, fields, 2u, &projection, &error);
+  st = ctx->projection_parse(ctx, fields, 2u, &projection, &error);
   if (st == LQL_STATUS_OK || projection != NULL) {
     printf("projection allocator parse failure unexpectedly succeeded\n");
-    lql_projection_destroy_impl(NULL, projection);
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
     return 1;
   }
+  ctx->destroy(ctx);
   if (counter.alloc_count == 0u || counter.outstanding != 0u) {
     printf("projection allocator failure cleanup imbalance: allocs=%lu "
            "outstanding=%lu\n",

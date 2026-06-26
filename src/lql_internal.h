@@ -29,6 +29,8 @@ struct lql_impl {
 
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_from_receiver(const lql *self);
+LQL_INTERNAL_SYMBOL lql_status
+lql_new_with_allocator(lql **out, lql_allocator *allocator, lql_error *error);
 
 typedef enum lql_node_kind {
   LQL_NODE_ALL = 0,
