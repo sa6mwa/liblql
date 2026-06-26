@@ -975,6 +975,10 @@ Current implementation status:
   file/stdin inputs in argument order, matching the Go CLI's
   `splitMutationArgs` behavior while preserving inline mode's single-file
   restriction;
+- CLI mutation parse-error parity covers root paths, zero increments, invalid
+  time forms, disabled file-backed values, enabled invalid file-backed
+  operation forms, and malformed brace shorthand with Go-oracle exit-code
+  assertions;
 - CLI inline mutation input rejection matches the Go CLI distinction between
   missing file path and invalid single-file input forms such as stdin or
   multiple files; inline and write-mode execution failures for empty or

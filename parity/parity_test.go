@@ -1406,25 +1406,41 @@ func TestCLQLMutationParseErrorParity(t *testing.T) {
 	if clql == "" {
 		t.Skip("CLQL_PATH not set")
 	}
-	cases := []string{
-		`badexpr`,
-		`/`,
-		`/count=+0`,
-		`time:/state/updated=tomorrowish`,
-		`time:/state/updated=2025-01-01`,
-		`file:/payload=blob.txt`,
-		`/state/details{/owner="alice"}}`,
+	cases := []struct {
+		name              string
+		expr              string
+		enableFileValues  bool
+		goEnableFileValue bool
+	}{
+		{name: "bad expression", expr: `badexpr`},
+		{name: "root path", expr: `/`},
+		{name: "zero increment", expr: `/count=+0`},
+		{name: "invalid time", expr: `time:/state/updated=tomorrowish`},
+		{name: "date only time value", expr: `time:/state/updated=2025-01-01`},
+		{name: "disabled file backed value", expr: `file:/payload=blob.txt`},
+		{name: "file backed increment", expr: `file:/payload++`, enableFileValues: true, goEnableFileValue: true},
+		{name: "file backed remove", expr: `file:rm:/payload=blob.txt`, enableFileValues: true, goEnableFileValue: true},
+		{name: "file backed time", expr: `file:time:/payload=blob.txt`, enableFileValues: true, goEnableFileValue: true},
+		{name: "brace parse error", expr: `/state/details{/owner="alice"}}`},
 	}
-	for _, expr := range cases {
-		t.Run(expr, func(t *testing.T) {
-			if _, err := lql.ParseMutations([]string{expr}, time.Unix(1700000000, 0)); err == nil {
-				t.Fatalf("go mutation parser unexpectedly accepted %q", expr)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := lql.ParseMutationsOptions{
+				EnableFileValues: tc.goEnableFileValue,
+				FileValueBaseDir: t.TempDir(),
 			}
-			cmd := exec.Command(clql, "-m", expr, `contains{f=/}`)
+			if _, err := lql.ParseMutationsWithOptions([]string{tc.expr}, time.Unix(1700000000, 0), opts); err == nil {
+				t.Fatalf("go mutation parser unexpectedly accepted %q", tc.expr)
+			}
+			args := []string{"-m", tc.expr, `contains{f=/}`}
+			if tc.enableFileValues {
+				args = append([]string{"-F"}, args...)
+			}
+			cmd := exec.Command(clql, args...)
 			cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
 			out, err := cmd.CombinedOutput()
 			if err == nil {
-				t.Fatalf("clql mutation parser unexpectedly accepted %q: out=%q", expr, string(out))
+				t.Fatalf("clql mutation parser unexpectedly accepted %q: out=%q", tc.expr, string(out))
 			}
 			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
 				t.Fatalf("clql mutation parse exit mismatch: err=%v out=%q", err, string(out))
