@@ -1056,7 +1056,9 @@ Current implementation status:
   Go parity fixtures;
 - Lua direct-core smoke tests assert projection field normalization through
   `client:project_json()`, including whitespace trimming, blank-field elision,
-  duplicate-field idempotence, and structured blank-only field-set errors;
+  duplicate-field idempotence, structured blank-only field-set errors, and
+  projection-plan validation before selector-match filtering so invalid
+  projection inputs are not hidden by non-matching buffered JSON candidates;
 - Lua direct-core smoke tests assert recursive wildcard path mutations and
   array-wildcard value mutations through `client:mutate_json()`, proving those
   mutation semantics through the direct public liblql binding rather than

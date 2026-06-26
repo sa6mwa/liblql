@@ -115,6 +115,14 @@ if blank_projection ~= nil or not blank_projection_err or
   fail("expected structured core blank projection field error")
 end
 
+local nonmatch_blank_projection, nonmatch_blank_projection_err =
+  client:project_json('/status="closed"', '{"status":"open","id":"x"}',
+                      {"  ", "\t"})
+if nonmatch_blank_projection ~= nil or not nonmatch_blank_projection_err or
+    (nonmatch_blank_projection_err.stderr or "") == "" then
+  fail("expected structured core nonmatch blank projection field error")
+end
+
 local mutated
 mutated, err = client:mutate_json('/status="open"',
                                  '{"status":"open","state":{"old":true}}',

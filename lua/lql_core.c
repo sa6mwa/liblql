@@ -1074,12 +1074,12 @@ static int lua_lql_project_json(lua_State *L) {
   lql_error_init(&error);
   st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
   if (st == LQL_STATUS_OK) {
-    st = client->ctx->matches_json(client->ctx, selector, json, json_len,
-                                   &matched, &error);
-  }
-  if (st == LQL_STATUS_OK && matched) {
     st = client->ctx->projection_parse(client->ctx, fields, field_count,
                                        &projection, &error);
+  }
+  if (st == LQL_STATUS_OK) {
+    st = client->ctx->matches_json(client->ctx, selector, json, json_len,
+                                   &matched, &error);
   }
   if (st == LQL_STATUS_OK && matched) {
     out = tmpfile();
