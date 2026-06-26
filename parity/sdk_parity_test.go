@@ -625,11 +625,15 @@ func sdkMutationCases() []struct {
 	}{
 		{
 			name: "root set increment delete create",
-			doc:  `{"status":"open","count":1,"old":true}`,
+			doc:  `{"status":"open","count":1,"score":5,"old":true,"remove_me":true,"delete_me":true,"del_me":true}`,
 			mutations: []string{
 				"/status=done",
-				"/count++",
+				"/count--",
+				"/score=-2",
 				"rm:/old",
+				"remove:/remove_me",
+				"delete:/delete_me",
+				"del:/del_me",
 				"/missing=value",
 			},
 		},

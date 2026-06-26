@@ -653,6 +653,9 @@ Current implementation is an early slice:
   parity tests; JSON-looking quoted values follow Go typing behavior, so quoted
   numeric, boolean, and null literals are emitted as JSON values rather than
   strings while ordinary escaped text remains a JSON string;
+- mutation parser and execution coverage includes Go-compatible decrement and
+  signed-delta increment spellings plus `rm:`, `remove:`, `delete:`, and `del:`
+  delete aliases;
 - `clql -m/--mutate selector < data.json` applies the same supported streaming
   mutation subset to matched non-seekable stdin candidates through
   callback-scoped spooled payloads, preserves unmatched candidates by default,

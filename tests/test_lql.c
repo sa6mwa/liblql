@@ -2480,7 +2480,7 @@ static void expect_mutation_plan_api(void) {
   lql_mutation_parse_options options;
   lql_error error;
   lql_status st;
-  const char *valid[6];
+  const char *valid[11];
   const char *wildcards[3];
   const char *file_backed[2];
   const char *invalid_default[8];
@@ -2494,13 +2494,18 @@ static void expect_mutation_plan_api(void) {
   valid[3] = "/state/metrics=+3";
   valid[4] = "time:/state/updated=NOW";
   valid[5] = "rm:/state/legacy";
+  valid[6] = "/state/metrics--";
+  valid[7] = "/state/metrics=-2";
+  valid[8] = "remove:/state/remove_me";
+  valid[9] = "delete:/state/delete_me";
+  valid[10] = "del:/state/del_me";
   plan = NULL;
   lql_error_init(&error);
-  st = test_ctx->mutation_plan_parse(test_ctx, valid, 6u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, valid, 11u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("mutation plan parse failed: %s\n", error.message);
     ++failures;
-  } else if (test_ctx->mutation_plan_count(test_ctx, plan) != 7u) {
+  } else if (test_ctx->mutation_plan_count(test_ctx, plan) != 12u) {
     printf("mutation plan count mismatch: %lu\n",
            (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
     ++failures;
@@ -2792,12 +2797,14 @@ static void expect_root_field_mutation_api(void) {
   lql_error error;
   lql_status st;
   lql_mutation_plan *plan;
-  const char *exprs[5];
+  const char *exprs[9];
   const char *file_exprs[4];
   lql_mutation_parse_options options;
   char buf[256];
   size_t len;
-  static const char doc[] = "{\"status\":\"open\",\"count\":1,\"old\":true}";
+  static const char doc[] =
+      "{\"status\":\"open\",\"count\":1,\"score\":5,\"old\":true,"
+      "\"remove_me\":true,\"delete_me\":true,\"del_me\":true}";
 
   source = tmpfile();
   out = tmpfile();
@@ -2820,13 +2827,17 @@ static void expect_root_field_mutation_api(void) {
     return;
   }
   exprs[0] = "/status=done";
-  exprs[1] = "/count++";
+  exprs[1] = "/count--";
   exprs[2] = "rm:/old";
   exprs[3] = "/missing=value";
   exprs[4] = "/quoted_number=\"2\"";
+  exprs[5] = "/score=-2";
+  exprs[6] = "remove:/remove_me";
+  exprs[7] = "delete:/delete_me";
+  exprs[8] = "del:/del_me";
   plan = NULL;
   lql_error_init(&error);
-  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 5u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 9u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("root mutation plan parse failed: %s\n", error.message);
     ++failures;
@@ -2838,8 +2849,8 @@ static void expect_root_field_mutation_api(void) {
       ++failures;
     } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                strcmp(buf,
-                      "{\"status\":\"done\",\"count\":2,\"missing\":\"value\","
-                      "\"quoted_number\":2}") != 0) {
+                      "{\"status\":\"done\",\"count\":0,\"score\":3,"
+                      "\"missing\":\"value\",\"quoted_number\":2}") != 0) {
       printf("root mutation output mismatch: %s\n", buf);
       ++failures;
     }
@@ -2896,8 +2907,10 @@ static void expect_root_field_mutation_api(void) {
       ++failures;
     } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                strcmp(buf,
-                      "{\"status\":\"open\",\"count\":1,\"old\":true,"
-                      "\"text_payload\":\"hi\",\"bin_payload\":\"aGk=\","
+                      "{\"status\":\"open\",\"count\":1,\"score\":5,"
+                      "\"old\":true,\"remove_me\":true,\"delete_me\":true,"
+                      "\"del_me\":true,\"text_payload\":\"hi\","
+                      "\"bin_payload\":\"aGk=\","
                       "\"auto_text\":\"hi\",\"auto_bin\":\"AAECYQ==\"}") != 0) {
       printf("file-backed root mutation output mismatch: %s\n", buf);
       ++failures;

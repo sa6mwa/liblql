@@ -1414,7 +1414,7 @@ func TestCLQLRootMutationParity(t *testing.T) {
 	if clql == "" {
 		t.Skip("CLQL_PATH not set")
 	}
-	body := `{"status":"open","count":1,"old":true}`
+	body := `{"status":"open","count":1,"score":5,"old":true,"remove_me":true,"delete_me":true,"del_me":true}`
 	tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-root-*.json")
 	if err != nil {
 		t.Fatalf("create temp: %v", err)
@@ -1429,8 +1429,12 @@ func TestCLQLRootMutationParity(t *testing.T) {
 		clql,
 		"-c",
 		"-m", "/status=done",
-		"-m", "/count++",
+		"-m", "/count--",
+		"-m", "/score=-2",
 		"-m", "rm:/old",
+		"-m", "remove:/remove_me",
+		"-m", "delete:/delete_me",
+		"-m", "del:/del_me",
 		"-m", "/missing=value",
 		`contains{f=/}`,
 		tmp.Name(),
@@ -1444,11 +1448,23 @@ func TestCLQLRootMutationParity(t *testing.T) {
 		t.Fatalf("decode clql mutation: %v out=%q", err, string(out))
 	}
 
-	doc := map[string]any{"status": "open", "count": float64(1), "old": true}
+	doc := map[string]any{
+		"status":    "open",
+		"count":     float64(1),
+		"score":     float64(5),
+		"old":       true,
+		"remove_me": true,
+		"delete_me": true,
+		"del_me":    true,
+	}
 	muts, err := lql.ParseMutations([]string{
 		"/status=done",
-		"/count++",
+		"/count--",
+		"/score=-2",
 		"rm:/old",
+		"remove:/remove_me",
+		"delete:/delete_me",
+		"del:/del_me",
 		"/missing=value",
 	}, time.Unix(1700000000, 0))
 	if err != nil {
