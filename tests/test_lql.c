@@ -183,8 +183,9 @@ static void expect_version_api(void) {
       !caps.projection_source || !caps.projection_buffered_json ||
       !caps.compact_file_range || !caps.compact_source ||
       !caps.compact_buffered_json || !caps.mutation_parse ||
-      !caps.mutation_file_range || !caps.mutation_source ||
-      !caps.mutation_buffered_json || !caps.mutation_file_values) {
+      !caps.mutation_file_range || !caps.mutation_file_range_candidates ||
+      !caps.mutation_source || !caps.mutation_buffered_json ||
+      !caps.mutation_file_values) {
     printf("capability query omitted an implemented public surface\n");
     ++failures;
   }
@@ -2562,6 +2563,15 @@ static void expect_mutation_error_api(void) {
     }
 
     lql_error_init(&error);
+    st = test_ctx->mutate_file_range_candidates(
+        test_ctx, NULL, NULL, source, 0u, 2u, out, 1, 0, NULL, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "plan, file, and out are required") != 0) {
+      printf("candidate mutation NULL plan mismatch: %s\n", error.message);
+      ++failures;
+    }
+
+    lql_error_init(&error);
     st = test_ctx->mutate_json(test_ctx, NULL, "{}", strlen("{}"), out, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
         strcmp(error.message, "plan, json, and out are required") != 0) {
@@ -2958,6 +2968,121 @@ static void expect_source_mutation_api(void) {
   }
   test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(out);
+}
+
+static void expect_file_range_candidate_mutation_api(void) {
+  FILE *source;
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_selector *selector;
+  lql_mutation_plan *plan;
+  lql_query_result result;
+  const char *expr;
+  const char *mutation;
+  char buf[512];
+  size_t len;
+  static const char doc[] =
+      "[{\"id\":\"a\",\"status\":\"open\"},{\"id\":\"b\",\"status\":\"closed\"}]";
+
+  source = tmpfile();
+  out = tmpfile();
+  if (source == NULL || out == NULL) {
+    printf("candidate mutation tmpfile failed\n");
+    if (source != NULL) {
+      fclose(source);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+  if (fwrite(doc, 1u, strlen(doc), source) != strlen(doc) ||
+      fflush(source) != 0 || fseek(source, 0L, SEEK_SET) != 0) {
+    printf("candidate mutation source setup failed\n");
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+
+  selector = NULL;
+  plan = NULL;
+  expr = "/status=\"open\"";
+  mutation = "/status=done";
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, expr, &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("candidate mutation selector parse failed: %s\n", error.message);
+    ++failures;
+  }
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, &mutation, 1u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("candidate mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  }
+  if (selector != NULL && plan != NULL) {
+    memset(&result, 0, sizeof(result));
+    lql_error_init(&error);
+    st = test_ctx->mutate_file_range_candidates(
+        test_ctx, selector, plan, source, 0u, (lql_uint64)strlen(doc), out, 1,
+        0, &result, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("candidate mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (result.candidates_seen != 2u || result.candidates_matched != 1u ||
+               result.stopped_early || result.bytes_read == 0u) {
+      printf("candidate mutation result mismatch: seen=%lu matched=%lu "
+             "stopped=%d bytes=%lu\n",
+             (unsigned long)result.candidates_seen,
+             (unsigned long)result.candidates_matched, result.stopped_early,
+             (unsigned long)result.bytes_read);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n"
+                           "{\"id\":\"b\",\"status\":\"closed\"}\n") != 0) {
+      printf("candidate mutation output mismatch: %s\n", buf);
+      ++failures;
+    }
+
+    if (fseek(source, 0L, SEEK_SET) != 0) {
+      printf("candidate mutation source rewind failed\n");
+      ++failures;
+    } else {
+      fclose(out);
+      out = tmpfile();
+      if (out == NULL) {
+        printf("candidate mutation matches-only tmpfile failed\n");
+        ++failures;
+      } else {
+        memset(&result, 0, sizeof(result));
+        lql_error_init(&error);
+        st = test_ctx->mutate_file_range_candidates(
+            test_ctx, selector, plan, source, 0u, (lql_uint64)strlen(doc), out,
+            1, 1, &result, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("candidate mutation matches-only failed: %s\n", error.message);
+          ++failures;
+        } else if (result.candidates_seen != 2u ||
+                   result.candidates_matched != 1u || result.stopped_early) {
+          printf("candidate mutation matches-only result mismatch\n");
+          ++failures;
+        } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                   strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n") != 0) {
+          printf("candidate mutation matches-only output mismatch: %s\n", buf);
+          ++failures;
+        }
+      }
+    }
+  }
+  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->selector_free(test_ctx, selector);
+  fclose(source);
+  if (out != NULL) {
+    fclose(out);
+  }
 }
 
 static void expect_mutation_quoted_value_api(void) {
@@ -3523,6 +3648,8 @@ static void expect_sdk_contract_manifest(void) {
        expect_buffered_mutation_api},
       {"mutation", "caller-provided source mutation",
        expect_source_mutation_api},
+      {"mutation", "seekable candidate stream mutation",
+       expect_file_range_candidate_mutation_api},
       {"mutation", "quoted mutation value typing",
        expect_mutation_quoted_value_api},
       {"mutation", "file-backed mutation value execution",
@@ -3793,6 +3920,7 @@ int main(void) {
   expect_path_mutation_api();
   expect_buffered_mutation_api();
   expect_source_mutation_api();
+  expect_file_range_candidate_mutation_api();
   expect_mutation_quoted_value_api();
   expect_mutation_file_backed_value_api();
   expect_mutation_shorthand_api();

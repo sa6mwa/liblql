@@ -628,11 +628,16 @@ Current implementation is an early slice:
   segments; supported set values include `time:` normalization to UTC
   RFC3339Nano strings and `file:/textfile:/base64file:` source-backed file
   values; public C execution is currently available for seekable file ranges,
+  seekable candidate streams through `ctx->mutate_file_range_candidates()`,
   caller-provided read callbacks through `ctx->mutate_source_paths()`, and
   explicitly caller-buffered JSON values through `ctx->mutate_json()`;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path, existing-position wildcard, and
   existing-position recursive mutations to matched candidates;
+- public SDK seekable candidate-stream mutation exposes the selector-plus-plan
+  path used by `clql`: top-level arrays are expanded as candidate streams,
+  matched candidates are mutated, unmatched candidates are preserved unless
+  `matches_only` is set, and result counters report candidates and matches;
 - brace shorthand mutation execution is covered by C SDK contract tests and
   Go-backed CLI parity tests for nested set, increment, delete, and path
   expansion behavior;
@@ -731,7 +736,8 @@ Current implementation is an early slice:
   `ctx->project_file_range()`, `ctx->mutation_plan_parse()`,
   `ctx->mutation_plan_parse_with_options()`, `ctx->mutation_plan_count()`,
   `ctx->mutate_json()`, `ctx->mutate_file_range_root_fields()`,
-  `ctx->mutate_file_range_paths()`, `ctx->mutate_source_paths()`,
+  `ctx->mutate_file_range_paths()`,
+  `ctx->mutate_file_range_candidates()`, `ctx->mutate_source_paths()`,
   `ctx->compact_json()`, `ctx->compact_source()`,
   `ctx->compact_file_range()`, `ctx->query_file_decisions()`,
   `ctx->query_source_decisions()`, `ctx->query_file_matches()`, and

@@ -130,6 +130,10 @@ static lql_status
 receiver_mutate_file_range_paths(lql *self, const lql_mutation_plan *plan,
                                  FILE *file, lql_uint64 offset, lql_uint64 size,
                                  FILE *out, lql_error *error);
+static lql_status receiver_mutate_file_range_candidates(
+    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
+    FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
+    int matches_only, lql_query_result *out_result, lql_error *error);
 static lql_status receiver_mutate_source_paths(lql *self,
                                                const lql_mutation_plan *plan,
                                                lql_read_fn read,
@@ -254,6 +258,7 @@ lql_status lql_new(lql **out, lql_error *error) {
   ctx->mutation_plan_free = receiver_mutation_plan_free;
   ctx->mutate_file_range_root_fields = receiver_mutate_file_range_root_fields;
   ctx->mutate_file_range_paths = receiver_mutate_file_range_paths;
+  ctx->mutate_file_range_candidates = receiver_mutate_file_range_candidates;
   ctx->mutate_source_paths = receiver_mutate_source_paths;
   ctx->mutate_json = receiver_mutate_json;
   ctx->destroy = lql_destroy;
@@ -333,6 +338,7 @@ void lql_capabilities_get(lql_capabilities *out) {
   out->compact_buffered_json = 1;
   out->mutation_parse = 1;
   out->mutation_file_range = 1;
+  out->mutation_file_range_candidates = 1;
   out->mutation_source = 1;
   out->mutation_buffered_json = 1;
   out->mutation_file_values = 1;
@@ -600,6 +606,21 @@ receiver_mutate_file_range_paths(lql *self, const lql_mutation_plan *plan,
                                  FILE *out, lql_error *error) {
   (void)self;
   return lql_mutate_file_range_paths_impl(plan, file, offset, size, out, error);
+}
+
+static lql_status receiver_mutate_file_range_candidates(
+    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
+    FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
+    int matches_only, lql_query_result *out_result, lql_error *error) {
+  (void)self;
+  if (plan == NULL || file == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "plan, file, and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return lql_eval_query_file_range_spooled_matches(
+      selector, file, offset, size, out, compact, NULL, plan, matches_only,
+      out_result, error);
 }
 
 static lql_status receiver_mutate_source_paths(lql *self,

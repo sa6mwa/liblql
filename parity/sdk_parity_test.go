@@ -379,6 +379,51 @@ func TestSDKMutationFileRangeParity(t *testing.T) {
 	}
 }
 
+func TestSDKMutationFileRangeCandidateStreamParity(t *testing.T) {
+	cases := []struct {
+		name        string
+		selector    string
+		doc         string
+		mutations   []string
+		matchesOnly bool
+	}{
+		{
+			name:      "top-level array match all",
+			doc:       `[{"id":"a","status":"open"},{"id":"b","status":"open"}]`,
+			mutations: []string{`/status=done`},
+		},
+		{
+			name:        "top-level array matches only",
+			selector:    `/status="open"`,
+			doc:         `[{"id":"a","status":"open"},{"id":"b","status":"closed"}]`,
+			mutations:   []string{`/status=done`},
+			matchesOnly: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var wantJSON []byte
+			var err error
+			if tc.selector == "" {
+				wantJSON, err = goMutateJSON(tc.mutations, tc.doc)
+				if err != nil {
+					t.Fatalf("go mutate stream: %v", err)
+				}
+			} else {
+				wantJSON, err = goQueryMutateJSON(tc.selector, tc.mutations, tc.doc)
+				if err != nil {
+					t.Fatalf("go query mutate stream: %v", err)
+				}
+			}
+			gotJSON, err := cMutateFileRangeCandidates(tc.selector, tc.mutations, `{"outside":`, tc.doc, `}`, tc.matchesOnly)
+			if err != nil {
+				t.Fatalf("liblql file-range candidate mutate: %v", err)
+			}
+			assertDecodedJSONValuesParity(t, gotJSON, wantJSON, "candidate stream mutation")
+		})
+	}
+}
+
 func TestSDKMutationRootFieldFileRangeParity(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -874,6 +919,28 @@ func goMutateJSONWithOptions(mutations []string, doc string, opts lql.ParseMutat
 		Writer:    &out,
 		Mutations: parsed,
 	}); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+func goQueryMutateJSON(selectorExpr string, mutations []string, doc string) ([]byte, error) {
+	selector, err := lql.ParseSelectorString(selectorExpr)
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	_, err = lql.QueryMutateStreamWithResult(lql.QueryMutateStreamRequest{
+		Reader:    bytes.NewBufferString(doc),
+		Writer:    &out,
+		Selector:  selector,
+		Mutations: parsed,
+	})
+	if err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil

@@ -613,6 +613,85 @@ static int liblql_mutate_file_range_value(const char *const *exprs,
 	return 0;
 }
 
+static int liblql_mutate_file_range_candidates_value(
+    const char *selector_expr, const char *const *exprs, size_t expr_count,
+    const char *prefix, const char *json, const char *suffix, int matches_only,
+    char **out_json, size_t *out_len, char *errbuf, size_t errbuf_len) {
+	lql_error error;
+	lql_selector *selector;
+	lql_mutation_plan *plan;
+	lql_status status;
+	FILE *input;
+	FILE *tmp;
+	unsigned long long offset;
+	unsigned long long size;
+
+	lql_error_init(&error);
+	selector = NULL;
+	plan = NULL;
+	input = NULL;
+	*out_json = NULL;
+	*out_len = 0u;
+	if (selector_expr != NULL && selector_expr[0] != '\0') {
+		status = liblql_receiver()->selector_parse(liblql_receiver(), selector_expr,
+		                                           &selector, &error);
+		if (status != LQL_STATUS_OK) {
+			if (errbuf != NULL && errbuf_len > 0u) {
+				strncpy(errbuf, error.message, errbuf_len - 1u);
+				errbuf[errbuf_len - 1u] = '\0';
+			}
+			return (int)status;
+		}
+	}
+	status = liblql_receiver()->mutation_plan_parse(liblql_receiver(), exprs,
+	                                                expr_count, &plan, &error);
+	if (status != LQL_STATUS_OK) {
+		liblql_receiver()->selector_free(liblql_receiver(), selector);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_prepare_range_input(prefix, json, suffix, &input, &offset, &size,
+	                               errbuf, errbuf_len) != 0) {
+		liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+		liblql_receiver()->selector_free(liblql_receiver(), selector);
+		return -1;
+	}
+	tmp = tmpfile();
+	if (tmp == NULL) {
+		fclose(input);
+		liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+		liblql_receiver()->selector_free(liblql_receiver(), selector);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	status = liblql_receiver()->mutate_file_range_candidates(
+	    liblql_receiver(), selector, plan, input, (lql_uint64)offset,
+	    (lql_uint64)size, tmp, 1, matches_only, NULL, &error);
+	fclose(input);
+	liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+	liblql_receiver()->selector_free(liblql_receiver(), selector);
+	if (status != LQL_STATUS_OK) {
+		fclose(tmp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_read_tmp(tmp, out_json, out_len, errbuf, errbuf_len) != 0) {
+		fclose(tmp);
+		return -1;
+	}
+	fclose(tmp);
+	return 0;
+}
+
 static int liblql_compact_json_value(const char *json, char **out_json,
                                      size_t *out_len, char *errbuf,
                                      size_t errbuf_len) {
@@ -1180,6 +1259,32 @@ func cMutateFileRangeWithOptions(mutations []string, prefix, doc, suffix string,
 
 func cMutateFileRangeRootFields(mutations []string, prefix, doc, suffix string) ([]byte, error) {
 	return cMutateFileRangeMode(mutations, prefix, doc, suffix, false, "", true)
+}
+
+func cMutateFileRangeCandidates(selector string, mutations []string, prefix, doc, suffix string, matchesOnly bool) ([]byte, error) {
+	cExprs, freeExprs := cStringArray(mutations)
+	defer freeExprs()
+
+	cSelector := C.CString(selector)
+	cPrefix := C.CString(prefix)
+	cDoc := C.CString(doc)
+	cSuffix := C.CString(suffix)
+	defer C.free(unsafe.Pointer(cSelector))
+	defer C.free(unsafe.Pointer(cPrefix))
+	defer C.free(unsafe.Pointer(cDoc))
+	defer C.free(unsafe.Pointer(cSuffix))
+
+	var out *C.char
+	var outLen C.size_t
+	var errbuf [256]C.char
+	status := C.liblql_mutate_file_range_candidates_value(cSelector, cExprs,
+		C.size_t(len(mutations)), cPrefix, cDoc, cSuffix, cBool(matchesOnly),
+		&out, &outLen, &errbuf[0], C.size_t(len(errbuf)))
+	if status != 0 {
+		return nil, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
 }
 
 func cMutateFileRangeMode(mutations []string, prefix, doc, suffix string, enableFileValues bool, fileValueBaseDir string, rootFieldsOnly bool) ([]byte, error) {
