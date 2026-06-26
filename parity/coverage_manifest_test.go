@@ -56,6 +56,7 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"mutation", "escaped JSON Pointer paths over seekable files", []string{"TestCLQLEscapedMutationPathParity"}},
 	{"mutation", "escaped JSON Pointer paths over stdin", []string{"TestCLQLStdinEscapedMutationPathParity"}},
 	{"mutation", "concrete array element paths", []string{"TestCLQLArrayElementMutationParity"}},
+	{"mutation", "numeric path segment object-key and array-index behavior", []string{"TestCLQLNumericPathMutationParity"}},
 	{"mutation", "object and array wildcard paths", []string{"TestCLQLWildcardMutationParity"}},
 	{"mutation", "one-child and recursive path segments", []string{"TestCLQLRecursiveMutationParity"}},
 	{"mutation", "array wildcard value mutation", []string{"TestCLQLArrayWildcardValueMutationParity"}},

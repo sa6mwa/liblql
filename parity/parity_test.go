@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -2221,6 +2222,66 @@ func TestCLQLArrayElementMutationParity(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("array mutation parity mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+	}
+}
+
+func TestCLQLNumericPathMutationParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	body := strings.Join([]string{
+		`{"voucher":{"lines":{"10":{"amount":5,"status":"open","code":"before"}}}}`,
+		`{"voucher":{"lines":[{"amount":0},{"amount":1},{"amount":2},{"amount":3},{"amount":4},{"amount":5},{"amount":6},{"amount":7},{"amount":8},{"amount":9},{"amount":7,"status":"closed","code":"before"}]}}`,
+		`{"voucher":{"lines":{}}}`,
+	}, "\n")
+	mutations := []string{
+		`/voucher/lines/10/amount=+2`,
+		`/voucher/lines/10/status=patched`,
+		`/voucher/.../10/code=patched`,
+	}
+	tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-numeric-path-*.json")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close temp: %v", err)
+	}
+	args := []string{"-c"}
+	for _, mutation := range mutations {
+		args = append(args, "-m", mutation)
+	}
+	args = append(args, `contains{f=/}`, tmp.Name())
+	cmd := exec.Command(clql, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clql numeric path mutation failed: %v out=%q", err, string(out))
+	}
+	got, err := decodeJSONValues(out)
+	if err != nil {
+		t.Fatalf("decode clql numeric path mutation: %v out=%q", err, string(out))
+	}
+	muts, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatalf("go parse numeric path mutations: %v", err)
+	}
+	var wantOut bytes.Buffer
+	if err := lql.MutateStream(lql.MutateStreamRequest{
+		Reader:    bytes.NewBufferString(body),
+		Writer:    &wantOut,
+		Mutations: muts,
+	}); err != nil {
+		t.Fatalf("go stream numeric path mutations: %v", err)
+	}
+	want, err := decodeJSONValues(wantOut.Bytes())
+	if err != nil {
+		t.Fatalf("decode go numeric path mutation result: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("numeric path mutation parity mismatch: got=%#v want=%#v out=%q", got, want, string(out))
 	}
 }
 
