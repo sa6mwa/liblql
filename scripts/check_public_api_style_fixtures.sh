@@ -48,6 +48,13 @@ sed '$d' "$header" >"$tmp/header.clean"
 mv "$tmp/header.clean" "$header"
 
 cat >>"$header" <<'EOF'
+int lql_payload_project_json(lql *self, void *payload, void *projection);
+EOF
+run_expect_fail "public payload operation wrapper"
+sed '$d' "$header" >"$tmp/header.clean"
+mv "$tmp/header.clean" "$header"
+
+cat >>"$header" <<'EOF'
 void lql_dealloc(void *ptr);
 EOF
 run_expect_fail "public allocator free wrapper"

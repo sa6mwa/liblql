@@ -30,6 +30,7 @@ lql_query_file_matches
 lql_query_file_matches_with_options
 lql_payload_write_json
 lql_payload_write_json_sink
+lql_payload_project_json
 lql_projection_parse
 lql_projection_free
 lql_projection_destroy
