@@ -20,11 +20,37 @@ typedef struct payload_counts {
   FILE *sink;
 } payload_counts;
 
+typedef struct bench_source {
+  FILE *file;
+} bench_source;
+
 static lql_status observe_decision(void *user,
                                    const lql_query_decision *decision) {
   (void)user;
   (void)decision;
   return LQL_STATUS_OK;
+}
+
+static lql_read_result read_bench_source(void *user, unsigned char *buffer,
+                                         size_t capacity) {
+  bench_source *source;
+  lql_read_result result;
+
+  memset(&result, 0, sizeof(result));
+  source = (bench_source *)user;
+  if (source == NULL || source->file == NULL || buffer == NULL ||
+      capacity == 0u) {
+    result.eof = 1;
+    return result;
+  }
+  result.bytes_read = fread(buffer, 1u, capacity, source->file);
+  if (result.bytes_read < capacity && ferror(source->file)) {
+    result.error_code = 1;
+  }
+  if (result.bytes_read == 0u && feof(source->file)) {
+    result.eof = 1;
+  }
+  return result;
 }
 
 static void print_u64(lql_uint64 value) {
@@ -90,6 +116,28 @@ static lql_status count_payload(void *user, const lql_query_match *match) {
   return LQL_STATUS_OK;
 }
 
+static lql_status count_spooled_payload(void *user,
+                                        const lql_query_match *match) {
+  payload_counts *counts;
+  lql_status st;
+  lql_error error;
+
+  counts = (payload_counts *)user;
+  if (match->payload.kind != LQL_PAYLOAD_SPOOLED ||
+      match->payload.size != match->decision.size) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  lql_error_init(&error);
+  st = counts->ctx->payload_write_json(counts->ctx, &match->payload,
+                                       counts->sink, &error);
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  counts->payloads++;
+  counts->payload_bytes += match->payload.size;
+  return LQL_STATUS_OK;
+}
+
 int main(int argc, char **argv) {
   const char *mode;
   const char *expr;
@@ -102,6 +150,7 @@ int main(int argc, char **argv) {
   lql_error error;
   lql_status st;
   payload_counts counts;
+  bench_source source;
   clock_t start;
   clock_t end;
 
@@ -138,12 +187,17 @@ int main(int argc, char **argv) {
 
   memset(&counts, 0, sizeof(counts));
   counts.ctx = ctx;
+  memset(&source, 0, sizeof(source));
+  source.file = fixture;
   memset(&result, 0, sizeof(result));
   start = clock();
   if (strcmp(mode, "decision_only_selector") == 0 ||
       strcmp(mode, "decision_only_plan") == 0) {
     st = ctx->query_file_decisions(ctx, selector, fixture, observe_decision,
                                    NULL, &result, &error);
+  } else if (strcmp(mode, "decision_only_source_selector") == 0) {
+    st = ctx->query_source_decisions(ctx, selector, read_bench_source, &source,
+                                     observe_decision, NULL, &result, &error);
   } else if (strcmp(mode, "plus_value_selector") == 0 ||
              strcmp(mode, "plus_value_plan") == 0) {
     sink = fopen("/dev/null", "wb");
@@ -157,6 +211,20 @@ int main(int argc, char **argv) {
     counts.sink = sink;
     st = ctx->query_file_matches(ctx, selector, fixture, count_payload, &counts,
                                  &result, &error);
+    fclose(sink);
+  } else if (strcmp(mode, "plus_value_source_selector") == 0) {
+    sink = fopen("/dev/null", "wb");
+    if (sink == NULL) {
+      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
+      fclose(fixture);
+      ctx->selector_destroy(ctx, selector);
+      ctx->destroy(ctx);
+      return 1;
+    }
+    counts.sink = sink;
+    st = ctx->query_source_spooled_matches(ctx, selector, read_bench_source,
+                                           &source, count_spooled_payload,
+                                           &counts, &result, &error);
     fclose(sink);
   } else if (strcmp(mode, "plus_value_openjson_selector") == 0 ||
              strcmp(mode, "plus_value_openjson_plan") == 0) {

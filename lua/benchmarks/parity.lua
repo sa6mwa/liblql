@@ -31,6 +31,14 @@ local function run_once()
   local matches = 0
   local result
   local err
+  local source_file
+  local function read_source()
+    local chunk = source_file:read(1024)
+    if not chunk or #chunk == 0 then
+      return nil
+    end
+    return chunk
+  end
   if mode == "plus_value_selector" or mode == "plus_value_plan" or
       mode == "plus_value_openjson_selector" or
       mode == "plus_value_openjson_plan" then
@@ -43,8 +51,30 @@ local function run_once()
       end
       payloads = payloads + 1
     end)
+  elseif mode == "plus_value_source_selector" then
+    source_file = assert(io.open(fixture, "rb"))
+    result, err = client:each_match_source(expr, read_source, function(match)
+      local ok, payload_err = match.write_json(function(chunk)
+        payload_bytes = payload_bytes + #chunk
+      end)
+      if payload_err then
+        source_file:close()
+        die(payload_err.stderr or "payload read failed")
+      end
+      payloads = payloads + 1
+    end)
+    source_file:close()
   elseif mode ~= "decision_only_selector" and mode ~= "decision_only_plan" then
-    die("unsupported mode: " .. mode)
+    if mode ~= "decision_only_source_selector" then
+      die("unsupported mode: " .. mode)
+    end
+    source_file = assert(io.open(fixture, "rb"))
+    result, err = client:query_source(expr, read_source, function(decision)
+      if decision.matched then
+        matches = matches + 1
+      end
+    end)
+    source_file:close()
   else
     result, err = client:query_file(expr, fixture, function(decision)
       if decision.matched then

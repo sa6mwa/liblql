@@ -77,7 +77,10 @@ Current implementation status:
   digest for its generated fixture, and every
   implementation/dataset/selector/mode tuple emits both `warmup_included` and
   `steady_state` records. The smoke gate also validates supported C records
-  against `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`, defaulting to 128 MiB. This proves
+  against `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`, defaulting to 128 MiB. It includes
+  direct callback-source decision and plus-value selector modes so Go, C, and
+  Lua exercise non-seekable source readers and callback-scoped spooled payload
+  access through their public SDK surfaces. This proves
   the RSS gate wiring and catches obvious materialization regressions in the
   smoke matrix; it is not the final large-fixture memory proof. The smoke gate
   is explicit and is not part of `make test-all`; `make prerelease` runs it
@@ -323,22 +326,38 @@ Mirror Go `BenchmarkQueryStreamSynthetic` modes:
      `plus_value_selector`, with the parsed public selector reused across the
      query run as the plan-like handle.
 
-5. `plus_value_openjson_selector`
+5. `decision_only_source_selector`
+   - read fixture bytes through callback-source or ordinary reader APIs instead
+     of passing a seekable file handle as the query source;
+   - run query in decision-only mode;
+   - count candidates and matches;
+   - do not expose payloads or capture candidate values.
+
+6. `plus_value_source_selector`
+   - read fixture bytes through callback-source or ordinary reader APIs instead
+     of passing a seekable file handle as the query source;
+   - include callback-scoped payload access;
+   - for C, the expected payload source type is `spooled` because the public
+     source API is non-seekable and cannot reconstruct payloads by offset;
+   - do not retain complete candidate payloads after the match callback
+     returns.
+
+7. `plus_value_openjson_selector`
    - force a very small memory threshold for `large_single_json`;
    - read each matched/callback payload through the callback-scoped open/read
      source path, preferring seek/reread by candidate offset for seekable
      inputs and using spooled handles only for non-seekable inputs;
    - verify byte counts and cleanup behavior.
 
-6. `plus_value_openjson_plan`
+8. `plus_value_openjson_plan`
    - plan variant of seekable-range or spool/open-read mode.
 
 Also mirror CLI benchmark parse behavior:
 
-7. `reuse_selector`
+9. `reuse_selector`
    - parse/compile selector once before timing loop.
 
-8. `reparse_selector_each_run`
+10. `reparse_selector_each_run`
    - include parse/compile cost in each run.
 
 Every benchmark mode should have `warmup_included` and `steady_state`
@@ -481,10 +500,10 @@ Suggested staged gates:
 - C library plus-value/open-read modes must prove callback-scoped payload
   access without candidate retention and must have a documented C-native
   baseline distinct from CLI-mediated `clql` timing;
-- Lua memory is gated for the current direct-module seekable-file benchmark
-  workflows. Lua streaming/spooled handle APIs may add more benchmark modes
-  later, but existing Lua-supported modes must keep bounded memory and must not
-  materialize complete candidates or result sets to satisfy the benchmark.
+- Lua memory is gated for the current direct-module seekable-file and
+  callback-source benchmark workflows. Lua-supported modes must keep bounded
+  memory and must not materialize complete candidates or result sets to satisfy
+  the benchmark.
 
 Any performance gate must print actionable diagnostics with dataset, selector,
 mode, observed value, baseline/threshold, and reproduction command.

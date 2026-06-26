@@ -199,10 +199,16 @@ emit_unsupported_impl() {
       "decision_only_plan" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "decision_only_source_selector" 0 0 0 0 0 "none" null null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
       "plus_value_selector" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
       "plus_value_plan" 0 0 0 0 0 "none" null null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "plus_value_source_selector" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
       "plus_value_openjson_selector" 0 0 0 0 0 "none" null null true "$reason" \
@@ -533,6 +539,7 @@ run_c_native_mode() {
     "$c_payload_bytes" >> "$c_counts_file"
   payload_source_type=none
   case "$mode" in
+    plus_value_source_selector) payload_source_type=spooled ;;
     plus_value_*) payload_source_type=seekable_range ;;
   esac
   emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
@@ -602,6 +609,7 @@ run_lua_mode() {
   fi
   payload_source_type=none
   case "$mode" in
+    plus_value_source_selector) payload_source_type=spooled ;;
     plus_value_*) payload_source_type=lua_liblql ;;
   esac
   for submode in warmup_included steady_state; do
@@ -682,15 +690,19 @@ selected_modes() {
       printf '%s\n' \
         decision_only_selector \
         decision_only_plan \
+        decision_only_source_selector \
         plus_value_selector \
         plus_value_plan \
+        plus_value_source_selector \
         plus_value_openjson_selector \
         plus_value_openjson_plan
       ;;
     memory)
       printf '%s\n' \
         decision_only_selector \
+        decision_only_source_selector \
         plus_value_selector \
+        plus_value_source_selector \
         plus_value_openjson_selector
       ;;
     *)

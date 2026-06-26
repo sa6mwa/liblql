@@ -38,6 +38,14 @@ type record struct {
 	UnsupportedReason string `json:"unsupported_reason"`
 }
 
+type readerOnly struct {
+	reader io.Reader
+}
+
+func (r readerOnly) Read(p []byte) (int, error) {
+	return r.reader.Read(p)
+}
+
 func main() {
 	var fixture string
 	var dataset string
@@ -154,6 +162,9 @@ func runQuery(file *os.File, sel lql.Selector, mode string) (lql.QueryStreamResu
 		Reader:   file,
 		Selector: sel,
 	}
+	if isSourceMode(mode) {
+		request.Reader = readerOnly{reader: file}
+	}
 	if isPlanMode(mode) {
 		plan, err := lql.NewQueryStreamPlan(sel)
 		if err != nil {
@@ -196,8 +207,10 @@ func runQuery(file *os.File, sel lql.Selector, mode string) (lql.QueryStreamResu
 func isSupportedMode(mode string) bool {
 	return mode == "decision_only_selector" ||
 		mode == "decision_only_plan" ||
+		mode == "decision_only_source_selector" ||
 		mode == "plus_value_selector" ||
 		mode == "plus_value_plan" ||
+		mode == "plus_value_source_selector" ||
 		mode == "plus_value_openjson_selector" ||
 		mode == "plus_value_openjson_plan"
 }
@@ -209,7 +222,13 @@ func isPlanMode(mode string) bool {
 
 func isPlusValueMode(mode string) bool {
 	return mode == "plus_value_selector" || mode == "plus_value_plan" ||
+		mode == "plus_value_source_selector" ||
 		mode == "plus_value_openjson_selector" || mode == "plus_value_openjson_plan"
+}
+
+func isSourceMode(mode string) bool {
+	return mode == "decision_only_source_selector" ||
+		mode == "plus_value_source_selector"
 }
 
 func sha256File(file *os.File) (string, error) {

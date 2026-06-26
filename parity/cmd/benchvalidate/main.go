@@ -143,7 +143,9 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 	}
 	switch rec.Mode {
 	case "decision_only_selector", "decision_only_plan", "plus_value_selector",
-		"plus_value_plan", "plus_value_openjson_selector", "plus_value_openjson_plan":
+		"decision_only_source_selector", "plus_value_plan",
+		"plus_value_source_selector", "plus_value_openjson_selector",
+		"plus_value_openjson_plan":
 	default:
 		return fmt.Errorf("line %d: unsupported mode %q", line, rec.Mode)
 	}
@@ -214,7 +216,12 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 		if rec.PayloadSourceType == "none" {
 			return fmt.Errorf("line %d: plus-value payload source type is required", line)
 		}
-		if rec.Impl == "c" && rec.PayloadSourceType != "seekable_range" {
+		if rec.Impl == "c" && isSourceMode(rec.Mode) &&
+			rec.PayloadSourceType != "spooled" {
+			return fmt.Errorf("line %d: c/%s must use spooled payloads for callback-source plus-value benchmarks", line, rec.Mode)
+		}
+		if rec.Impl == "c" && !isSourceMode(rec.Mode) &&
+			rec.PayloadSourceType != "seekable_range" {
 			return fmt.Errorf("line %d: c/%s must use seekable_range payloads for fixture-backed plus-value benchmarks", line, rec.Mode)
 		}
 	}
@@ -222,12 +229,19 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 }
 
 func isDecisionOnlyMode(mode string) bool {
-	return mode == "decision_only_selector" || mode == "decision_only_plan"
+	return mode == "decision_only_selector" || mode == "decision_only_plan" ||
+		mode == "decision_only_source_selector"
 }
 
 func isPlusValueMode(mode string) bool {
 	return mode == "plus_value_selector" || mode == "plus_value_plan" ||
+		mode == "plus_value_source_selector" ||
 		mode == "plus_value_openjson_selector" || mode == "plus_value_openjson_plan"
+}
+
+func isSourceMode(mode string) bool {
+	return mode == "decision_only_source_selector" ||
+		mode == "plus_value_source_selector"
 }
 
 func requiresTiming(rec record) bool {
