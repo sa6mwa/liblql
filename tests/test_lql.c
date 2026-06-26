@@ -62,10 +62,14 @@ static void expect_receiver_api(void) {
       ctx->mutate_file_range_root_fields == NULL ||
       ctx->mutate_file_range_paths == NULL ||
       ctx->mutate_file_range_candidates == NULL ||
+      ctx->mutate_file_range_candidates_with_options == NULL ||
       ctx->mutate_file_range_projected_candidates == NULL ||
+      ctx->mutate_file_range_projected_candidates_with_options == NULL ||
       ctx->mutate_source_paths == NULL ||
       ctx->mutate_source_candidates == NULL ||
+      ctx->mutate_source_candidates_with_options == NULL ||
       ctx->mutate_source_projected_candidates == NULL ||
+      ctx->mutate_source_projected_candidates_with_options == NULL ||
       ctx->mutate_json == NULL || ctx->destroy == NULL) {
     printf("receiver method table missing required methods\n");
     ++failures;
@@ -4858,6 +4862,7 @@ static void expect_file_range_candidate_mutation_api(void) {
   lql_selector *selector;
   lql_mutation_plan *plan;
   lql_query_result result;
+  lql_query_options options;
   const char *expr;
   const char *mutation;
   char buf[512];
@@ -4994,6 +4999,59 @@ static void expect_file_range_candidate_mutation_api(void) {
     }
 
     {
+      FILE *limit_source;
+      FILE *limit_out;
+      static const char limit_doc[] =
+          "{\"id\":\"a\",\"status\":\"open\"}\n"
+          "{\"id\":\"b\",\"status\":\"open\"}\n"
+          "{\"id\":\"c\",\"status\":\"closed\"}\n";
+      limit_source = tmpfile();
+      limit_out = tmpfile();
+      if (limit_source == NULL || limit_out == NULL) {
+        printf("candidate mutation options tmpfile failed\n");
+        ++failures;
+      } else if (fwrite(limit_doc, 1u, strlen(limit_doc), limit_source) !=
+                     strlen(limit_doc) ||
+                 fseek(limit_source, 0L, SEEK_SET) != 0) {
+        printf("candidate mutation options source setup failed\n");
+        ++failures;
+      } else {
+        memset(&options, 0, sizeof(options));
+        options.max_matches = 1u;
+        memset(&result, 0, sizeof(result));
+        lql_error_init(&error);
+        st = test_ctx->mutate_file_range_candidates_with_options(
+            test_ctx, selector, plan, limit_source, 0u,
+            (lql_uint64)strlen(limit_doc), limit_out, 1, 1, &options, &result,
+            &error);
+        if (st != LQL_STATUS_OK) {
+          printf("candidate mutation options failed: %s\n", error.message);
+          ++failures;
+        } else if (result.candidates_seen != 1u ||
+                   result.candidates_matched != 1u ||
+                   !result.stopped_early ||
+                   result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT) {
+          printf("candidate mutation options result mismatch: seen=%lu "
+                 "matched=%lu stopped=%d reason=%d\n",
+                 (unsigned long)result.candidates_seen,
+                 (unsigned long)result.candidates_matched,
+                 result.stopped_early, (int)result.stop_reason);
+          ++failures;
+        } else if (!read_tmpfile(limit_out, buf, sizeof(buf), &len) ||
+                   strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n") != 0) {
+          printf("candidate mutation options output mismatch: %s\n", buf);
+          ++failures;
+        }
+      }
+      if (limit_source != NULL) {
+        fclose(limit_source);
+      }
+      if (limit_out != NULL) {
+        fclose(limit_out);
+      }
+    }
+
+    {
       FILE *nested_source;
       FILE *nested_out;
       static const char nested_doc[] =
@@ -5058,6 +5116,7 @@ static void expect_source_candidate_mutation_api(void) {
   lql_selector *selector;
   lql_mutation_plan *plan;
   lql_query_result result;
+  lql_query_options options;
   chunk_reader reader;
   fail_after_reader fail_reader;
   const char *expr;
@@ -5120,6 +5179,62 @@ static void expect_source_candidate_mutation_api(void) {
                            "{\"id\":\"b\",\"status\":\"closed\"}\n") != 0) {
       printf("source candidate mutation output mismatch: %s\n", buf);
       ++failures;
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source candidate mutation options tmpfile failed\n");
+      ++failures;
+    } else {
+      static const char limit_doc[] =
+          "{\"event\":\"tabs_update\",\"id\":1}\n"
+          "{\"event\":\"tabs_update\",\"id\":2}\n"
+          "{\"event\":\"noop\",\"id\":3}\n";
+      lql_selector *limit_selector;
+      limit_selector = NULL;
+      lql_error_init(&error);
+      st = test_ctx->selector_parse(test_ctx, "/event=\"tabs_update\"",
+                                    &limit_selector, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation options selector failed: %s\n",
+               error.message);
+        ++failures;
+      } else {
+        memset(&reader, 0, sizeof(reader));
+        reader.data = limit_doc;
+        reader.len = strlen(limit_doc);
+        reader.chunk_size = 5u;
+        memset(&options, 0, sizeof(options));
+        options.max_matches = 1u;
+        memset(&result, 0, sizeof(result));
+        lql_error_init(&error);
+        st = test_ctx->mutate_source_candidates_with_options(
+            test_ctx, limit_selector, plan, read_chunk, &reader, out, 1, 1,
+            &options, &result, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("source candidate mutation options failed: %s\n",
+                 error.message);
+          ++failures;
+        } else if (result.candidates_seen != 1u ||
+                   result.candidates_matched != 1u ||
+                   !result.stopped_early ||
+                   result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT ||
+                   reader.calls <= 1) {
+          printf("source candidate mutation options result mismatch: seen=%lu "
+                 "matched=%lu stopped=%d reason=%d reads=%d\n",
+                 (unsigned long)result.candidates_seen,
+                 (unsigned long)result.candidates_matched,
+                 result.stopped_early, (int)result.stop_reason, reader.calls);
+          ++failures;
+        } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                   strcmp(buf, "{\"event\":\"tabs_update\",\"id\":1,"
+                               "\"status\":\"done\"}\n") != 0) {
+          printf("source candidate mutation options output mismatch: %s\n", buf);
+          ++failures;
+        }
+      }
+      test_ctx->selector_destroy(test_ctx, limit_selector);
     }
 
     fclose(out);
@@ -5332,6 +5447,7 @@ static void expect_projected_candidate_mutation_api(void) {
   lql_projection *projection;
   lql_mutation_plan *plan;
   lql_query_result result;
+  lql_query_options options;
   chunk_reader reader;
   const char *selector_expr;
   const char *fields[2];
@@ -5427,16 +5543,20 @@ static void expect_projected_candidate_mutation_api(void) {
         ++failures;
       } else {
         memset(&result, 0, sizeof(result));
+        memset(&options, 0, sizeof(options));
+        options.max_matches = 1u;
         lql_error_init(&error);
-        st = test_ctx->mutate_file_range_projected_candidates(
+        st = test_ctx->mutate_file_range_projected_candidates_with_options(
             test_ctx, selector, projection, plan, source, 0u,
-            (lql_uint64)strlen(doc), out, 1, 1, &result, &error);
+            (lql_uint64)strlen(doc), out, 1, 1, &options, &result, &error);
         if (st != LQL_STATUS_OK) {
           printf("file projected candidate matches-only mutation failed: %s\n",
                  error.message);
           ++failures;
-        } else if (result.candidates_seen != 2u ||
-                   result.candidates_matched != 1u || result.stopped_early ||
+        } else if (result.candidates_seen != 1u ||
+                   result.candidates_matched != 1u ||
+                   !result.stopped_early ||
+                   result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT ||
                    result.bytes_read == 0u) {
           printf("file projected candidate matches-only result mismatch: "
                  "seen=%lu matched=%lu stopped=%d bytes=%lu\n",
@@ -5500,13 +5620,15 @@ static void expect_projected_candidate_mutation_api(void) {
     } else {
       memset(&reader, 0, sizeof(reader));
       memset(&result, 0, sizeof(result));
+      memset(&options, 0, sizeof(options));
+      options.max_matches = 1u;
       reader.data = doc;
       reader.len = strlen(doc);
       reader.chunk_size = 7u;
       lql_error_init(&error);
-      st = test_ctx->mutate_source_projected_candidates(
+      st = test_ctx->mutate_source_projected_candidates_with_options(
           test_ctx, selector, projection, plan, read_chunk, &reader, out, 1, 1,
-          &result, &error);
+          &options, &result, &error);
       if (st != LQL_STATUS_OK) {
         printf("source projected candidate mutation failed: %s\n",
                error.message);
@@ -5514,8 +5636,9 @@ static void expect_projected_candidate_mutation_api(void) {
       } else if (reader.calls <= 1) {
         printf("source projected candidate mutation did not fragment reads\n");
         ++failures;
-      } else if (result.candidates_seen != 2u ||
-                 result.candidates_matched != 1u || result.stopped_early) {
+      } else if (result.candidates_seen != 1u ||
+                 result.candidates_matched != 1u || !result.stopped_early ||
+                 result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT) {
         printf("source projected candidate result mismatch: seen=%lu "
                "matched=%lu stopped=%d\n",
                (unsigned long)result.candidates_seen,

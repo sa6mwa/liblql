@@ -30,6 +30,7 @@ end
 local tmp_base = os.tmpname()
 local input_path = tmp_base .. ".jsonl"
 local compact_input_path = tmp_base .. ".compact.json"
+local limit_input_path = tmp_base .. ".limit.jsonl"
 local tmp_dir, tmp_name = string.match(tmp_base, "^(.*)/(.*)$")
 if not tmp_dir then
   tmp_dir = "."
@@ -49,6 +50,9 @@ write_file(input_path,
              '{"status":"open","id":"b","count":2,"state":{"old":true}}\n')
 write_file(compact_input_path,
            ' { "status" : "open", "items" : [ 1, 2 ] } ')
+write_file(limit_input_path,
+           '{"status":"open","id":"l1","state":{"old":true}}\n' ..
+             '{"status":"open","id":"l2","state":{"old":true}}\n')
 write_file(text_payload_path, 'lua\n"payload"')
 write_file(bin_payload_path, string.char(0, 1, 2, 97))
 write_file(invalid_utf8_payload_path, "lua" .. string.char(255))
@@ -670,6 +674,17 @@ assert_equal(mutated,
              '{"status":"open","id":"b","count":2,"state":{"status":"planned"}}\n',
              "mutate_file parsed mutation plan output")
 
+mutated, err = client:mutate_file('/status="open"', limit_input_path,
+                                 {"/state/status=limited", "rm:/state/old"},
+                                 {
+                                   matches_only = true,
+                                   max_matches = 1
+                                 })
+mutated = assert_no_error(mutated, err, "mutate_file max_matches")
+assert_equal(mutated,
+             '{"status":"open","id":"l1","state":{"status":"limited"}}\n',
+             "mutate_file max_matches output")
+
 mutated, err = client:mutate_file(open_selector, input_path,
                                  {"/state/status=parsed", "rm:/state/old"},
                                  {matches_only = true})
@@ -731,6 +746,25 @@ mutated = assert_no_error(mutated, err, "mutate_source parsed mutation plan")
 assert_equal(mutated,
              '{"status":"open","id":"mh2","state":{"status":"planned"}}\n',
              "mutate_source parsed mutation plan output")
+
+source_chunks = {
+  '{"status":"open","id":"ml1","state":{"old":true}}\n',
+  '{"status":"open","id":"ml2","state":{"old":true}}\n'
+}
+source_index = 1
+mutated, err = client:mutate_source('/status="open"', function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end, {"/state/status=limited", "rm:/state/old"},
+  {
+    matches_only = true,
+    max_matches = 1
+  })
+mutated = assert_no_error(mutated, err, "mutate_source max_matches")
+assert_equal(mutated,
+             '{"status":"open","id":"ml1","state":{"status":"limited"}}\n',
+             "mutate_source max_matches output")
 
 source_chunks = {
   '{"status":"closed","id":"mp1"}\n',

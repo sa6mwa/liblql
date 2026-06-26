@@ -819,13 +819,18 @@ Current implementation status:
   `textfile:` execution rejects invalid UTF-8 and NUL bytes while `file:` auto
   mode can classify those payloads as base64-backed values; public C
   execution is currently available for seekable file ranges,
-  seekable candidate streams through `ctx->mutate_file_range_candidates()`,
+  seekable candidate streams through `ctx->mutate_file_range_candidates()` and
+  `ctx->mutate_file_range_candidates_with_options()`,
   projection-before-mutation seekable candidate streams through
-  `ctx->mutate_file_range_projected_candidates()`,
+  `ctx->mutate_file_range_projected_candidates()` and
+  `ctx->mutate_file_range_projected_candidates_with_options()`,
   caller-provided read callbacks through `ctx->mutate_source_paths()`,
   callback-source candidate streams through
-  `ctx->mutate_source_candidates()`, projection-before-mutation callback-source
-  candidate streams through `ctx->mutate_source_projected_candidates()`, and
+  `ctx->mutate_source_candidates()` and
+  `ctx->mutate_source_candidates_with_options()`,
+  projection-before-mutation callback-source candidate streams through
+  `ctx->mutate_source_projected_candidates()` and
+  `ctx->mutate_source_projected_candidates_with_options()`, and
   explicitly caller-buffered JSON values through `ctx->mutate_json()`;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path, existing-position wildcard, and
@@ -836,7 +841,8 @@ Current implementation status:
   flattened where the stream surface supports candidate payload access, matched
   candidates are mutated, unmatched candidates are preserved unless
   `matches_only` is set, match-all candidate-stream mutation mutates every
-  top-level array candidate, and result counters report candidates and matches;
+  top-level array candidate, option-aware variants enforce match, candidate, and
+  byte stop limits, and result counters report candidates and matches;
 - brace shorthand mutation execution is covered by C SDK contract tests and
   Go-backed CLI parity tests for nested set, increment, delete, and path
   expansion behavior;
@@ -1042,9 +1048,13 @@ Current implementation status:
   `ctx->mutate_json()`, `ctx->mutate_file_range_root_fields()`,
   `ctx->mutate_file_range_paths()`,
   `ctx->mutate_file_range_candidates()`,
+  `ctx->mutate_file_range_candidates_with_options()`,
   `ctx->mutate_file_range_projected_candidates()`,
+  `ctx->mutate_file_range_projected_candidates_with_options()`,
   `ctx->mutate_source_paths()`, `ctx->mutate_source_candidates()`,
-  `ctx->mutate_source_projected_candidates()`, `ctx->compact_json()`,
+  `ctx->mutate_source_candidates_with_options()`,
+  `ctx->mutate_source_projected_candidates()`,
+  `ctx->mutate_source_projected_candidates_with_options()`, `ctx->compact_json()`,
   `ctx->compact_source()`,
   `ctx->compact_file_range()`, `ctx->query_file_decisions()`,
   `ctx->query_source_decisions()`, `ctx->query_file_matches()`, and

@@ -353,12 +353,25 @@ struct lql {
       lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
       FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
       int matches_only, lql_query_result *out_result, lql_error *error);
+  /* Mutates a seekable candidate stream with explicit query stop limits. */
+  lql_status (*mutate_file_range_candidates_with_options)(
+      lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
+      FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
+      int matches_only, const lql_query_options *options,
+      lql_query_result *out_result, lql_error *error);
   /* Projects and mutates matched projections in a seekable candidate stream. */
   lql_status (*mutate_file_range_projected_candidates)(
       lql *self, const lql_selector *selector, const lql_projection *projection,
       const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
       lql_uint64 size, FILE *out, int compact, int matches_only,
       lql_query_result *out_result, lql_error *error);
+  /* Projects and mutates a seekable candidate stream with stop limits. */
+  lql_status (*mutate_file_range_projected_candidates_with_options)(
+      lql *self, const lql_selector *selector, const lql_projection *projection,
+      const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
+      lql_uint64 size, FILE *out, int compact, int matches_only,
+      const lql_query_options *options, lql_query_result *out_result,
+      lql_error *error);
   /* Mutates supported paths in one caller-provided source stream. */
   lql_status (*mutate_source_paths)(lql *self, const lql_mutation_plan *plan,
                                     lql_read_fn read, void *read_user,
@@ -368,11 +381,24 @@ struct lql {
       lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
       lql_read_fn read, void *read_user, FILE *out, int compact,
       int matches_only, lql_query_result *out_result, lql_error *error);
+  /* Mutates a callback-source candidate stream with explicit stop limits. */
+  lql_status (*mutate_source_candidates_with_options)(
+      lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
+      lql_read_fn read, void *read_user, FILE *out, int compact,
+      int matches_only, const lql_query_options *options,
+      lql_query_result *out_result, lql_error *error);
   /* Projects and mutates matched projections in a source candidate stream. */
   lql_status (*mutate_source_projected_candidates)(
       lql *self, const lql_selector *selector, const lql_projection *projection,
       const lql_mutation_plan *plan, lql_read_fn read, void *read_user,
       FILE *out, int compact, int matches_only, lql_query_result *out_result,
+      lql_error *error);
+  /* Projects and mutates a source candidate stream with stop limits. */
+  lql_status (*mutate_source_projected_candidates_with_options)(
+      lql *self, const lql_selector *selector, const lql_projection *projection,
+      const lql_mutation_plan *plan, lql_read_fn read, void *read_user,
+      FILE *out, int compact, int matches_only,
+      const lql_query_options *options, lql_query_result *out_result,
       lql_error *error);
   /* Mutates one caller-buffered JSON value to FILE out. */
   lql_status (*mutate_json)(lql *self, const lql_mutation_plan *plan,

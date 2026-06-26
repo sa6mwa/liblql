@@ -2075,6 +2075,7 @@ static int lua_lql_mutate_file(lua_State *L) {
   lql_mutation_plan *plan;
   lql_error error;
   lql_status st;
+  lql_query_options options;
   FILE *input;
   FILE *out;
   lua_lql_buffer buffer;
@@ -2090,6 +2091,7 @@ static int lua_lql_mutate_file(lua_State *L) {
   plan_owned = 0;
   input = NULL;
   out = NULL;
+  lua_lql_options_query(L, 5, &options);
   lua_lql_buffer_init(&buffer, L);
   memset(&state, 0, sizeof(state));
   lql_error_init(&error);
@@ -2123,9 +2125,9 @@ static int lua_lql_mutate_file(lua_State *L) {
     state.matches_only = lua_lql_options_bool(L, 5, "matches_only");
     state.mutation_plan = plan;
     state.error = &error;
-    st = client->ctx->query_file_decisions(client->ctx, selector, input,
-                                           lua_lql_on_mutate_file, &state, NULL,
-                                           &error);
+    st = client->ctx->query_file_decisions_with_options(
+        client->ctx, selector, input, &options, lua_lql_on_mutate_file, &state,
+        NULL, &error);
   }
   if (st == LQL_STATUS_OK) {
     st = lua_lql_file_to_buffer(out, &buffer);
@@ -2157,6 +2159,7 @@ static int lua_lql_mutate_source(lua_State *L) {
   lql_mutation_plan *plan;
   lql_error error;
   lql_status st;
+  lql_query_options options;
   FILE *out;
   lua_lql_buffer buffer;
   lua_lql_source_state source_state;
@@ -2171,6 +2174,7 @@ static int lua_lql_mutate_source(lua_State *L) {
   plan = NULL;
   plan_owned = 0;
   out = NULL;
+  lua_lql_options_query(L, 5, &options);
   lua_lql_buffer_init(&buffer, L);
   memset(&source_state, 0, sizeof(source_state));
   memset(&result, 0, sizeof(result));
@@ -2194,10 +2198,10 @@ static int lua_lql_mutate_source(lua_State *L) {
     source_state.read_ref = luaL_ref(L, LUA_REGISTRYINDEX);
     source_state.lua = L;
     source_state.error = &error;
-    st = client->ctx->mutate_source_candidates(
+    st = client->ctx->mutate_source_candidates_with_options(
         client->ctx, selector, plan, lua_lql_read_source_chunk, &source_state,
         out, lua_lql_options_bool(L, 5, "compact"),
-        lua_lql_options_bool(L, 5, "matches_only"), &result, &error);
+        lua_lql_options_bool(L, 5, "matches_only"), &options, &result, &error);
     luaL_unref(L, LUA_REGISTRYINDEX, source_state.read_ref);
   }
   if (source_state.read_failed) {
