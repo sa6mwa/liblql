@@ -1233,6 +1233,7 @@ static int append_node(lql_selector_parser *ctx, lql_node *parent,
 }
 
 typedef struct indexed_group {
+  int indexed;
   lql_node_kind wrapper;
   char *index;
   lql_node node;
@@ -1331,16 +1332,15 @@ static int node_conflicts_with_child(const lql_node *node,
                                      const lql_node *child) {
   size_t i;
   const lql_node *current;
-  if (node == NULL || child == NULL || child->kind != LQL_NODE_EQ ||
-      child->term.field == NULL) {
+  if (node == NULL || child == NULL) {
+    return 0;
+  }
+  if (!node_is_term(child) && child->kind != LQL_NODE_NOT) {
     return 0;
   }
   for (i = 0u; i < node->child_count; ++i) {
     current = &node->children[i];
-    if (current->kind == LQL_NODE_EQ && current->term.field != NULL &&
-        strcmp(current->term.field, child->term.field) == 0 &&
-        strcmp(current->term.value == NULL ? "" : current->term.value,
-               child->term.value == NULL ? "" : child->term.value) != 0) {
+    if (current->kind == child->kind) {
       return 1;
     }
   }
@@ -1366,6 +1366,7 @@ static indexed_group *ensure_indexed_group(lql_selector_parser *ctx,
     group->wrapper = wrapper;
     group->index = *index;
     *index = NULL;
+    group->indexed = 1;
     group->node.kind = LQL_NODE_AND;
     ++*count;
   }
@@ -1379,6 +1380,12 @@ static lql_status append_plain_group_node(lql_selector_parser *ctx,
     if (group->or_group.kind == LQL_NODE_ALL) {
       group->or_group.kind = LQL_NODE_OR;
     }
+    if (group->indexed &&
+        node_conflicts_with_child(&group->or_group, &child->children[0])) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "selector expression has conflicting indexed clauses");
+      return LQL_STATUS_PARSE_ERROR;
+    }
     if (!append_node(ctx, &group->or_group, &child->children[0])) {
       return LQL_STATUS_NO_MEMORY;
     }
@@ -1387,7 +1394,7 @@ static lql_status append_plain_group_node(lql_selector_parser *ctx,
     child->child_count = 0u;
     return LQL_STATUS_OK;
   }
-  if (node_conflicts_with_child(&group->node, child)) {
+  if (group->indexed && node_conflicts_with_child(&group->node, child)) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "selector expression has conflicting indexed clauses");
     return LQL_STATUS_PARSE_ERROR;

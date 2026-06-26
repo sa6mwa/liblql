@@ -1005,6 +1005,11 @@ Current implementation status:
   nested logical, and newline-separated selector cases from the Go oracle
   corpus, including multiple CLI selector arguments that combine ordinary
   AND terms with an embedded explicit OR group;
+- C selector parse conformance covers the applicable public receiver string
+  parser surface for brace assignment order, aliases, wrapper prefixes,
+  whitespace, deep indexed merge behavior, and deep conflict rejection. Go's
+  `url.Values` and slice-based selector parse entry points are not C public API
+  unless a future C builder/config surface is deliberately added;
 - CLI malformed JSON execution is covered by Go-backed parity tests over stdin
   and seekable file inputs for selection, matches-only selection, compact
   output, projection, and mutation, with exit-code and diagnostic assertions;

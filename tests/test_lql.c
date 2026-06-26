@@ -7087,6 +7087,40 @@ static void expect_selector_parse_equivalence_api(void) {
                                      "{\"status\":\"open\"}",
                                      "{\"status\":\"closed\"}");
   }
+  expect_match("and.eq{field=/status,value=open}", "{\"status\":\"open\"}", 1);
+  expect_match("and.eq{field=/status,value=open}", "{\"status\":\"closed\"}",
+               0);
+  expect_match("and.0.eq{field=/status,value=open}",
+               "{\"status\":\"open\"}", 1);
+  expect_match("and.0.eq{field=/status,value=open}",
+               "{\"status\":\"closed\"}", 0);
+  expect_match("or.eq{field=/status,value=open}", "{\"status\":\"open\"}", 1);
+  expect_match("or.eq{field=/status,value=open}", "{\"status\":\"closed\"}",
+               0);
+  expect_match("or.0.eq{field=/status,value=open}",
+               "{\"status\":\"open\"}", 1);
+  expect_match("or.0.eq{field=/status,value=open}",
+               "{\"status\":\"closed\"}", 0);
+  expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"open\"}",
+               1);
+  expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"closed\"}",
+               0);
+  expect_match("and.not.eq{field=/status,value=closed}",
+               "{\"status\":\"open\"}", 1);
+  expect_match("and.not.eq{field=/status,value=closed}",
+               "{\"status\":\"closed\"}", 0);
+  expect_match("or.not.eq{field=/status,value=closed}",
+               "{\"status\":\"open\"}", 1);
+  expect_match("or.not.eq{field=/status,value=closed}",
+               "{\"status\":\"closed\"}", 0);
+  expect_match("and.or.0.eq{field=/status,value=open}",
+               "{\"status\":\"open\"}", 1);
+  expect_match("and.or.0.eq{field=/status,value=open}",
+               "{\"status\":\"closed\"}", 0);
+  expect_match("or.and.0.eq{field=/status,value=open}",
+               "{\"status\":\"open\"}", 1);
+  expect_match("or.and.0.eq{field=/status,value=open}",
+               "{\"status\":\"closed\"}", 0);
   {
     static const char *const exprs[] = {
         "contains{field=/msg,any=timeout|error}",
@@ -7132,6 +7166,16 @@ static void expect_selector_parse_equivalence_api(void) {
   }
   {
     static const char *const exprs[] = {
+        "date{f=/timestamp,a=2025-01-01,b=2025-01-03}",
+        "date{a=2025-01-01,f=/timestamp,b=2025-01-03}",
+        "date{b=2025-01-03,a=2025-01-01,f=/timestamp}"};
+    expect_selector_equivalent_forms(
+        "date alias order matrix", exprs, sizeof(exprs) / sizeof(exprs[0]),
+        "{\"timestamp\":\"2025-01-02T06:00:00Z\"}",
+        "{\"timestamp\":\"2025-01-03T00:00:00Z\"}");
+  }
+  {
+    static const char *const exprs[] = {
         "eq{field=/status,value=open},in{field=/env,any=prod|stage}",
         "eq{field=/status,value=open}\nin{field=/env,any=prod|stage}",
         " eq{field=/status,value=open},\n in{field=/env,any=prod|stage} "};
@@ -7148,6 +7192,22 @@ static void expect_selector_parse_equivalence_api(void) {
         "nested wrapper aliases", exprs, sizeof(exprs) / sizeof(exprs[0]),
         "{\"status\":\"open\"}", "{\"status\":\"closed\"}");
   }
+  expect_match("and.0.or.0.and.0.eq{field=/status,value=open},and.0.or.0."
+               "and.0.range{field=/progress,gte=10}",
+               "{\"status\":\"open\",\"progress\":12}", 1);
+  expect_match("and.0.or.0.and.0.eq{field=/status,value=open},and.0.or.0."
+               "and.0.range{field=/progress,gte=10}",
+               "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match("or.0.and.0.or.0.eq{field=/status,value=open},or.0.and.0."
+               "or.0.exists{/meta/etag}",
+               "{\"status\":\"open\",\"meta\":{\"etag\":\"x\"}}", 1);
+  expect_match("or.0.and.0.or.0.eq{field=/status,value=open},or.0.and.0."
+               "or.0.exists{/meta/etag}",
+               "{\"status\":\"open\",\"meta\":{}}", 0);
+  expect_match("and.0.or.0.not.in{field=/env,any=prod|stage}",
+               "{\"env\":\"dev\"}", 1);
+  expect_match("and.0.or.0.not.in{field=/env,any=prod|stage}",
+               "{\"env\":\"prod\"}", 0);
 }
 
 static void expect_selector_quoted_parse_api(void) {
@@ -7293,6 +7353,12 @@ static void expect_selector_parse_error_api(void) {
       "or.0.eq{field=/status,value=open},or.0.eq{field=/status,value=closed}");
   expect_parse_error("and.0.eq{field=/status,value=open},and.0.eq{field=/"
                      "status,value=closed}");
+  expect_parse_error("and.0.or.0.and.0.eq{field=/status,value=open},and.0."
+                     "or.0.and.0.eq{field=/status,value=closed}");
+  expect_parse_error("or.0.and.0.or.0.exists{/meta/etag},or.0.and.0.or.0."
+                     "exists{/meta/id}");
+  expect_parse_error("and.0.or.0.not.in{field=/env,any=prod|stage},and.0."
+                     "or.0.not.in{field=/env,any=dev}");
   expect_parse_error("range{field=/progress,gte=10,gte=20}");
   expect_parse_error("range{field=/progress,gte=10,foo=bar}");
   expect_parse_error("range{field=/progress,gte=10,lt=2025-01-01}");
