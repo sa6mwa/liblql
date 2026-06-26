@@ -144,12 +144,17 @@ func TestCLQLVersionSmoke(t *testing.T) {
 	if clql == "" {
 		t.Skip("CLQL_PATH not set")
 	}
-	out, err := exec.Command(clql, "--version").CombinedOutput()
-	if err != nil {
-		t.Fatalf("clql --version failed: %v out=%q", err, string(out))
-	}
-	if !bytes.HasPrefix(out, []byte("clql ")) || !bytes.HasSuffix(out, []byte("\n")) {
-		t.Fatalf("clql --version output mismatch: %q", string(out))
+	for _, flag := range []string{"--version", "-v"} {
+		flag := flag
+		t.Run(flag, func(t *testing.T) {
+			out, err := exec.Command(clql, flag).CombinedOutput()
+			if err != nil {
+				t.Fatalf("clql %s failed: %v out=%q", flag, err, string(out))
+			}
+			if !bytes.HasPrefix(out, []byte("clql ")) || !bytes.HasSuffix(out, []byte("\n")) {
+				t.Fatalf("clql %s output mismatch: %q", flag, string(out))
+			}
+		})
 	}
 }
 
@@ -166,6 +171,11 @@ func TestCLQLHelpSmoke(t *testing.T) {
 			}
 			needles := [][]byte{
 				[]byte("usage: clql"),
+				[]byte("--or|-O"),
+				[]byte("--compact|-c"),
+				[]byte("--inline|-i|--write|-w"),
+				[]byte("--enable-file-mutations|-F"),
+				[]byte("--theme|-t theme"),
 				[]byte("--field"),
 				[]byte("--mutate"),
 				[]byte("--matches-only"),

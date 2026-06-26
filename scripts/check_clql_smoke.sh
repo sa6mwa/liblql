@@ -10,16 +10,24 @@ if [ "$version_out" != "clql $version" ]; then
   printf 'clql smoke: expected: clql %s\n' "$version" >&2
   exit 1
 fi
+short_version_out=$("$clql" -v)
+if [ "$short_version_out" != "clql $version" ]; then
+  printf 'clql smoke: unexpected -v output: %s\n' "$short_version_out" >&2
+  printf 'clql smoke: expected: clql %s\n' "$version" >&2
+  exit 1
+fi
 
 help_out=$("$clql" --help)
 for needle in \
   "usage: clql" \
   "--or|-O" \
   "--compact|-c" \
+  "--inline|-i|--write|-w" \
+  "--enable-file-mutations|-F" \
+  "--theme|-t theme" \
   "--field|-f field" \
   "--mutate|-m expr" \
   "--matches-only|-M" \
-  "--enable-file-mutations|-F" \
   "clql --help" \
   "clql --version"
 do
