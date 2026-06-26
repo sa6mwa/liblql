@@ -163,6 +163,11 @@ if(LQL_BUILD_TESTS)
       ${LQL_PUBLIC_API_STYLE_SHARED}
       ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(lql.public-api-style PROPERTIES LABELS "unit;api" TIMEOUT 5)
+  add_test(NAME lql.public-api-style-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_public_api_style_fixtures.sh
+      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_public_api_style.sh)
+  set_tests_properties(lql.public-api-style-fixtures PROPERTIES
+    LABELS "unit;api" TIMEOUT 5)
 
   set(LQL_HEADER_SMOKE_WARNINGS)
   if(LQL_PROJECT_WARNINGS)
