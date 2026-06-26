@@ -2238,6 +2238,14 @@ static void expect_source_projection_api(void) {
     printf("source projection NULL found mismatch: %s\n", error.message);
     ++failures;
   }
+  fclose(out);
+  out = tmpfile();
+  if (out == NULL) {
+    printf("source projection read-error tmpfile failed\n");
+    test_ctx->projection_destroy(test_ctx, projection);
+    ++failures;
+    return;
+  }
   found = 1;
   lql_error_init(&error);
   st = test_ctx->project_source(test_ctx, projection, read_fail_once, NULL, out,
@@ -2246,6 +2254,9 @@ static void expect_source_projection_api(void) {
       strcmp(error.message, "projection source read failed") != 0) {
     printf("source projection read error mismatch: found=%d error=%s\n", found,
            error.message);
+    ++failures;
+  } else if (!read_tmpfile(out, buf, sizeof(buf), &len) || len != 0u) {
+    printf("source projection read error wrote output: %s\n", buf);
     ++failures;
   }
 
