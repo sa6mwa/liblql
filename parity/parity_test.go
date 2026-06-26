@@ -1097,58 +1097,96 @@ func TestCLQLMalformedJSONExecutionErrors(t *testing.T) {
 	if clql == "" {
 		t.Skip("CLQL_PATH not set")
 	}
-	body := `{"status":`
+	type malformedCorpus struct {
+		name       string
+		body       string
+		wantStdout map[string]string
+	}
+	corpora := []malformedCorpus{
+		{
+			name:       "no completed candidates",
+			body:       `{"status":`,
+			wantStdout: map[string]string{},
+		},
+		{
+			name: "one completed match before malformed tail",
+			body: "{\"status\":\"open\",\"id\":\"a\"}\n{\"status\":",
+			wantStdout: map[string]string{
+				"selection":    "{\"status\":\"open\",\"id\":\"a\"}\n",
+				"matches-only": "{\"status\":\"open\",\"id\":\"a\"}\n",
+				"compact":      "{\"status\":\"open\",\"id\":\"a\"}\n",
+				"projection":   "{\"id\":\"a\"}\n",
+				"mutation":     "{\"status\":\"done\",\"id\":\"a\"}\n",
+			},
+		},
+	}
 	selector, err := lql.ParseSelectorString(`/status="open"`)
 	if err != nil {
 		t.Fatalf("go parse selector: %v", err)
 	}
-	if _, err := lql.QueryStreamWithResult(lql.QueryStreamRequest{
-		Reader:   bytes.NewBufferString(body),
-		Selector: selector,
-		Mode:     lql.QueryDecisionOnly,
-		OnDecision: func(lql.QueryStreamDecision) error {
-			return nil
-		},
-	}); err == nil {
-		t.Fatalf("go stream unexpectedly accepted malformed JSON")
-	}
-
 	dir := t.TempDir()
-	inputPath := filepath.Join(dir, "malformed.json")
-	if err := os.WriteFile(inputPath, []byte(body), 0600); err != nil {
-		t.Fatalf("write malformed input: %v", err)
-	}
 	cases := []struct {
-		name  string
-		args  []string
-		stdin bool
+		name      string
+		stdoutKey string
+		args      func(string) []string
+		stdin     bool
 	}{
-		{"stdin selection", []string{`/status="open"`}, true},
-		{"stdin matches-only", []string{"-M", `/status="open"`}, true},
-		{"stdin compact", []string{"-c", `/status="open"`}, true},
-		{"stdin projection", []string{"-f", "/id", `/status="open"`}, true},
-		{"stdin mutation", []string{"-m", "/status=done", `/status="open"`}, true},
-		{"file selection", []string{`/status="open"`, inputPath}, false},
-		{"file matches-only", []string{"-M", `/status="open"`, inputPath}, false},
-		{"file compact", []string{"-c", `/status="open"`, inputPath}, false},
-		{"file projection", []string{"-f", "/id", `/status="open"`, inputPath}, false},
-		{"file mutation", []string{"-m", "/status=done", `/status="open"`, inputPath}, false},
+		{"stdin selection", "selection", func(_ string) []string { return []string{`/status="open"`} }, true},
+		{"stdin matches-only", "matches-only", func(_ string) []string { return []string{"-M", `/status="open"`} }, true},
+		{"stdin compact", "compact", func(_ string) []string { return []string{"-c", `/status="open"`} }, true},
+		{"stdin projection", "projection", func(_ string) []string { return []string{"-f", "/id", `/status="open"`} }, true},
+		{"stdin mutation", "mutation", func(_ string) []string { return []string{"-m", "/status=done", `/status="open"`} }, true},
+		{"file selection", "selection", func(path string) []string { return []string{`/status="open"`, path} }, false},
+		{"file matches-only", "matches-only", func(path string) []string { return []string{"-M", `/status="open"`, path} }, false},
+		{"file compact", "compact", func(path string) []string { return []string{"-c", `/status="open"`, path} }, false},
+		{"file projection", "projection", func(path string) []string { return []string{"-f", "/id", `/status="open"`, path} }, false},
+		{"file mutation", "mutation", func(path string) []string { return []string{"-m", "/status=done", `/status="open"`, path} }, false},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command(clql, tc.args...)
-			if tc.stdin {
-				cmd.Stdin = bytes.NewBufferString(body)
+	for _, corpus := range corpora {
+		t.Run(corpus.name, func(t *testing.T) {
+			if _, err := lql.QueryStreamWithResult(lql.QueryStreamRequest{
+				Reader:   bytes.NewBufferString(corpus.body),
+				Selector: selector,
+				Mode:     lql.QueryDecisionOnly,
+				OnDecision: func(lql.QueryStreamDecision) error {
+					return nil
+				},
+			}); err == nil {
+				t.Fatalf("go stream unexpectedly accepted malformed JSON")
 			}
-			out, err := cmd.CombinedOutput()
-			if err == nil {
-				t.Fatalf("clql unexpectedly accepted malformed JSON: out=%q", string(out))
+			inputPath := filepath.Join(dir, corpus.name+".json")
+			if err := os.WriteFile(inputPath, []byte(corpus.body), 0600); err != nil {
+				t.Fatalf("write malformed input: %v", err)
 			}
-			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
-				t.Fatalf("clql malformed JSON exit mismatch: err=%v out=%q", err, string(out))
-			}
-			if !bytes.Contains(out, []byte("clql: ")) {
-				t.Fatalf("clql malformed JSON diagnostic missing prefix: out=%q", string(out))
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					cmd := exec.Command(clql, tc.args(inputPath)...)
+					if tc.stdin {
+						cmd.Stdin = bytes.NewBufferString(corpus.body)
+					}
+					var stdout bytes.Buffer
+					var stderr bytes.Buffer
+					cmd.Stdout = &stdout
+					cmd.Stderr = &stderr
+					err := cmd.Run()
+					if err == nil {
+						t.Fatalf("clql unexpectedly accepted malformed JSON: stdout=%q stderr=%q",
+							stdout.String(), stderr.String())
+					}
+					if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+						t.Fatalf("clql malformed JSON exit mismatch: err=%v stdout=%q stderr=%q",
+							err, stdout.String(), stderr.String())
+					}
+					if !bytes.Contains(stderr.Bytes(), []byte("clql: ")) {
+						t.Fatalf("clql malformed JSON diagnostic missing prefix: stderr=%q",
+							stderr.String())
+					}
+					if stdout.String() != corpus.wantStdout[tc.stdoutKey] {
+						t.Fatalf("clql malformed JSON stdout mismatch: got=%q want=%q stderr=%q",
+							stdout.String(), corpus.wantStdout[tc.stdoutKey],
+							stderr.String())
+					}
+				})
 			}
 		})
 	}
