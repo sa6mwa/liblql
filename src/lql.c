@@ -15,6 +15,7 @@
 static const char *receiver_version(const lql *self);
 static void receiver_capabilities_get(const lql *self, lql_capabilities *out);
 static void receiver_destroy(lql *self);
+static void capabilities_fill(lql_capabilities *out);
 static lql_status selector_parse_method(lql *self, const char *expr,
                                         lql_selector **out, lql_error *error);
 static lql_status selector_parse_or_method(lql *self, const char *expr,
@@ -120,9 +121,7 @@ const char *lql_status_string(lql_status status) {
   return "unknown";
 }
 
-const char *lql_version(void) { return LQL_VERSION; }
-
-void lql_capabilities_get(lql_capabilities *out) {
+static void capabilities_fill(lql_capabilities *out) {
   if (out == NULL) {
     return;
   }
@@ -156,12 +155,12 @@ void lql_capabilities_get(lql_capabilities *out) {
 
 static const char *receiver_version(const lql *self) {
   (void)self;
-  return lql_version();
+  return LQL_VERSION;
 }
 
 static void receiver_capabilities_get(const lql *self, lql_capabilities *out) {
   (void)self;
-  lql_capabilities_get(out);
+  capabilities_fill(out);
 }
 
 static void receiver_destroy(lql *self) {

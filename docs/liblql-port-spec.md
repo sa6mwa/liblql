@@ -639,13 +639,11 @@ Current implementation status:
   operation symbols; `lql.public-api-style-fixtures` includes negative cases
   proving both private `_impl` calls and private `_impl` method definitions fail
   closed;
-- standalone version and capability helpers remain exported for construction,
-  diagnostics, header smoke, and source-compatibility use, but project-owned
-  consumers with a live `lql *` receiver must call `ctx->version(ctx)` and
-  `ctx->capabilities_get(ctx, ...)`; `clql`, Lua, examples, header smoke
-  consumers, and package smoke consumers are style-gated against calling
-  `lql_version()` or `lql_capabilities_get()` directly so the documented and
-  exercised product surface stays receiver-first after construction;
+- version and capability queries are receiver-only for public consumers:
+  `clql`, Lua, examples, header smoke consumers, and package smoke consumers
+  must call `ctx->version(ctx)` and `ctx->capabilities_get(ctx, ...)` so the
+  documented and exercised product surface stays receiver-first after
+  construction;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through
@@ -711,11 +709,10 @@ Current implementation status:
 - the initial C compact API exposes `ctx->compact_file_range()` for streaming
   seekable ranges, `ctx->compact_source()` for caller-provided read callbacks,
   and `ctx->compact_json()` for explicitly buffered JSON values;
-- the public C API exposes `lql_version()` and installs generated
-  `lql/version.h` version macros, plus `lql_capabilities_get()` for the
-  currently implemented public API surfaces, with package and source-archive
-  verification proving the generated header and capability query build from
-  installed and extracted trees;
+- the public C API installs generated `lql/version.h` version macros and
+  exposes runtime version/capability queries through the receiver, with package
+  and source-archive verification proving the generated header and capability
+  query build from installed and extracted trees;
 - the initial C mutation API exposes receiver methods
   `ctx->mutation_plan_parse()`, `ctx->mutation_plan_parse_with_options()`,
   `ctx->mutation_plan_count()`, and `ctx->mutation_plan_destroy()` for CLI-style

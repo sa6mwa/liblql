@@ -181,8 +181,9 @@ static void expect_public_utility_api(void) {
 static void expect_version_api(void) {
   lql_capabilities caps;
 
-  if (strcmp(lql_version(), LQL_VERSION) != 0) {
-    printf("version API mismatch: %s != %s\n", lql_version(), LQL_VERSION);
+  if (strcmp(test_ctx->version(test_ctx), LQL_VERSION) != 0) {
+    printf("receiver version mismatch: %s != %s\n",
+           test_ctx->version(test_ctx), LQL_VERSION);
     ++failures;
   }
   if (strchr(LQL_VERSION, '.') == NULL) {
@@ -190,7 +191,7 @@ static void expect_version_api(void) {
     ++failures;
   }
   memset(&caps, 0, sizeof(caps));
-  lql_capabilities_get(&caps);
+  test_ctx->capabilities_get(test_ctx, &caps);
   if (!caps.selector_parse || !caps.matches_json ||
       !caps.file_decision_stream || !caps.file_match_stream ||
       !caps.source_decision_stream || !caps.seekable_range_payloads ||
@@ -208,7 +209,7 @@ static void expect_version_api(void) {
     printf("capability query omitted an implemented public surface\n");
     ++failures;
   }
-  lql_capabilities_get(NULL);
+  test_ctx->capabilities_get(test_ctx, NULL);
 }
 
 typedef struct stream_seen {

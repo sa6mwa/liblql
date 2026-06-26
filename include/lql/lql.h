@@ -336,10 +336,6 @@ struct lql {
 lql_status lql_new(lql **out, lql_error *error);
 void lql_error_init(lql_error *error);
 const char *lql_status_string(lql_status status);
-/* Returns the resolved liblql semantic version string. */
-const char *lql_version(void);
-/* Writes the supported public API capability set to out. NULL is accepted. */
-void lql_capabilities_get(lql_capabilities *out);
 
 #ifdef __cplusplus
 }

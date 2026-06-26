@@ -6,14 +6,14 @@ shared=${2:-}
 source_root=${3:-}
 
 allowed_exports='
-lql_capabilities_get
 lql_error_init
 lql_new
 lql_status_string
-lql_version
 '
 
 forbidden='
+lql_capabilities_get
+lql_version
 lql_selector_parse
 lql_selector_parse_or
 lql_selector_free
