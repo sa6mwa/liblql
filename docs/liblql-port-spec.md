@@ -1010,6 +1010,11 @@ Current implementation status:
   wildcard increment that matches a non-numeric descendant is still evaluated
   and reported when a later parent replacement would otherwise skip the
   original subtree;
+- C SDK selector tests assert omitted-value string selectors
+  (`contains`/`icontains`/`prefix`/`iprefix`) act as path-existence assertions
+  across object, array, and null values, including wildcard path variants, while
+  explicit empty-string root string selectors remain match-all and their
+  negation remains never-match;
 - C SDK mutation tests assert explicit file-backed text values reject invalid
   UTF-8 and NUL bytes at execution time with actionable diagnostics instead of
   writing invalid JSON string content;

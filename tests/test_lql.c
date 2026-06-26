@@ -5825,6 +5825,7 @@ typedef struct sdk_contract_surface_count {
 } sdk_contract_surface_count;
 
 static void expect_selector_match_api(void);
+static void expect_selector_omitted_string_path_api(void);
 static void expect_selector_parse_equivalence_api(void);
 static void expect_selector_any_or_equivalence_api(void);
 static void expect_selector_or_api(void);
@@ -5851,6 +5852,9 @@ static void expect_sdk_contract_manifest(void) {
        "scalar, string, numeric, temporal, path, wildcard, "
        "existence, and logical matching",
        expect_selector_match_api},
+      {"selector",
+       "omitted-value string selectors assert path existence across value kinds",
+       expect_selector_omitted_string_path_api},
       {"selector", "parse-equivalence invariants",
        expect_selector_parse_equivalence_api},
       {"selector", "contains-any and explicit OR evaluation equivalence",
@@ -5936,7 +5940,7 @@ static void expect_sdk_contract_manifest(void) {
   };
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 6}, {"streaming", 11},
+      {"version", 1},      {"selector", 7}, {"streaming", 11},
       {"projection", 7},   {"compact", 2},  {"mutation", 19},
   };
   size_t i;
@@ -6195,6 +6199,46 @@ static void expect_selector_match_api(void) {
                1);
   expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"closed\"}",
                0);
+}
+
+static void expect_selector_omitted_string_path_api(void) {
+  static const char object_doc[] =
+      "{\"hello\":{\"world\":{\"nested\":true}},\"arrays\":[{\"id\":1}]}";
+  static const char array_doc[] =
+      "{\"hello\":{\"world\":[1,2,3]},\"arrays\":[{\"id\":1}]}";
+  static const char null_doc[] =
+      "{\"hello\":{\"world\":null},\"arrays\":[{\"id\":1}]}";
+  static const char missing_doc[] =
+      "{\"hello\":{\"other\":\"x\"},\"arrays\":[{\"id\":1}]}";
+  static const char wildcard_doc[] =
+      "{\"hello\":{\"world\":{\"nested\":true},\"names\":[\"alice\","
+      "\"bob\"]},\"arrays\":[{\"id\":1},{\"id\":2}]}";
+  static const char *const selectors[] = {
+      "contains{f=/hello/world}", "icontains{f=/hello/world}",
+      "prefix{f=/hello/world}", "iprefix{f=/hello/world}"};
+  size_t i;
+
+  for (i = 0u; i < sizeof(selectors) / sizeof(selectors[0]); ++i) {
+    expect_match(selectors[i], object_doc, 1);
+    expect_match(selectors[i], array_doc, 1);
+    expect_match(selectors[i], null_doc, 1);
+    expect_match(selectors[i], missing_doc, 0);
+  }
+
+  expect_match("contains{f=/hello/*}", wildcard_doc, 1);
+  expect_match("contains{f=/hello/...}", wildcard_doc, 1);
+  expect_match("contains{f=/arrays/[]}", wildcard_doc, 1);
+  expect_match("contains{f=/arrays/[]/id}", wildcard_doc, 1);
+  expect_match("contains{f=/hello/missing}", wildcard_doc, 0);
+  expect_match("contains{f=/missing/*}", wildcard_doc, 0);
+  expect_match("contains{f=/missing/...}", wildcard_doc, 0);
+  expect_match("contains{f=/missing/[]}", wildcard_doc, 0);
+
+  expect_match("contains{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("icontains{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("prefix{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("iprefix{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("not.icontains{f=/,v=\"\"}", "{\"status\":\"open\"}", 0);
 }
 
 static void expect_selector_parse_equivalence_api(void) {
@@ -6578,6 +6622,7 @@ int main(void) {
   expect_output_state_contract_api();
   expect_handle_ownership_contract_api();
   expect_selector_match_api();
+  expect_selector_omitted_string_path_api();
   expect_selector_parse_equivalence_api();
   expect_selector_any_or_equivalence_api();
   expect_selector_or_api();
