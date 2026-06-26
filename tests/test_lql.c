@@ -65,7 +65,6 @@ static void expect_receiver_api(void) {
   }
   ctx->selector_free(ctx, selector);
   ctx->destroy(ctx);
-  lql_destroy(NULL);
 }
 
 static void expect_public_utility_api(void) {

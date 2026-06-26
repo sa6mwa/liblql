@@ -63,13 +63,13 @@ The public API is C89-compatible and installed under `include/lql/`.
 
 The primary public C API is receiver-function based. Callers create an
 instantiatable `lql *` with `lql_new()`, invoke operations as
-`ctx->operation(ctx, ...)`, and release it with `ctx->destroy(ctx)` or
-`lql_destroy(ctx)`. Selector, query, payload, projection, compact, and mutation
-operations are receiver methods only; standalone public functions are limited
-to construction, diagnostics, version/capability helpers, and allocator
-utilities. Project-owned code must also use receiver calls directly rather than
-recreating removed operation free functions or free-operation cleanup aliases
-through local macros or static wrapper shims.
+`ctx->operation(ctx, ...)`, and release it with `ctx->destroy(ctx)`. Selector,
+query, payload, projection, compact, mutation, and receiver cleanup operations
+are receiver methods only; standalone public functions are limited to
+construction, diagnostics, version/capability helpers, and allocator utilities.
+Project-owned code must also use receiver calls directly rather than recreating
+removed operation free functions or free-operation cleanup aliases through local
+macros or static wrapper shims.
 
 The API should be handle-oriented and explicit about ownership:
 

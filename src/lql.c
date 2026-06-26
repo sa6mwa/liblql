@@ -145,6 +145,7 @@ static lql_status receiver_mutate_source_candidates(
 static lql_status receiver_mutate_json(lql *self, const lql_mutation_plan *plan,
                                        const char *json, size_t json_len,
                                        FILE *out, lql_error *error);
+static void receiver_destroy(lql *self);
 
 static int seek_u64(FILE *file, lql_uint64 offset) {
   off_t seek_offset;
@@ -265,12 +266,10 @@ lql_status lql_new(lql **out, lql_error *error) {
   ctx->mutate_source_paths = receiver_mutate_source_paths;
   ctx->mutate_source_candidates = receiver_mutate_source_candidates;
   ctx->mutate_json = receiver_mutate_json;
-  ctx->destroy = lql_destroy;
+  ctx->destroy = receiver_destroy;
   *out = ctx;
   return LQL_STATUS_OK;
 }
-
-void lql_destroy(lql *ctx) { lql_dealloc(ctx); }
 
 void lql_error_init(lql_error *error) {
   if (error != NULL) {
@@ -650,6 +649,8 @@ static lql_status receiver_mutate_json(lql *self, const lql_mutation_plan *plan,
   (void)self;
   return lql_mutate_json_impl(plan, json, json_len, out, error);
 }
+
+static void receiver_destroy(lql *self) { lql_dealloc(self); }
 
 LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_node *node) {
   size_t i;

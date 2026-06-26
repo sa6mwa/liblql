@@ -153,10 +153,10 @@ typedef lql_read_result (*lql_read_fn)(void *user, unsigned char *buffer,
 typedef lql_status (*lql_write_fn)(void *user, const void *data, size_t len);
 
 /* Instantiatable liblql receiver shell. Fields are initialized by lql_new().
-   Mutable implementation state, if any, is kept behind impl. Prefer
-   ctx->method(ctx, ...) for handle operations. Standalone public functions are
-   limited to construction, diagnostics, version/capability helpers, and
-   allocator utilities. */
+   Mutable implementation state, if any, is kept behind impl. Use
+   ctx->method(ctx, ...) for all handle operations and cleanup. Standalone
+   public functions are limited to construction, diagnostics,
+   version/capability helpers, and allocator utilities. */
 struct lql {
   void *impl;
   const char *(*version)(const lql *self);
@@ -273,9 +273,6 @@ struct lql {
 /* Allocates and initializes a liblql receiver. On failure, *out is NULL when
    out is non-NULL and error receives an actionable diagnostic. */
 lql_status lql_new(lql **out, lql_error *error);
-/* Destroys a liblql receiver. NULL is accepted. */
-void lql_destroy(lql *ctx);
-
 void lql_error_init(lql_error *error);
 const char *lql_status_string(lql_status status);
 /* Returns the resolved liblql semantic version string. */
