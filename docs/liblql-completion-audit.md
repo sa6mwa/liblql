@@ -57,9 +57,9 @@ archive test suite. The 1 GiB benchmark gate wrote
 | Central allocator boundary | public API style gate, handle allocator tests, ASan/UBSan in `make test-all` | Proven locally |
 | No adjacent Go source references in repository files | repository-boundary CTest in `make test-all` | Proven locally |
 | lonejson from GitHub release SDK archives | dependency acquisition in clean `make release`; package dependency manifests verified | Proven locally |
-| Selector behavior for claimed scope | C SDK tests plus Go-backed `make parity-test` inside `make test-all` and source archive verification | Proven locally for claimed scope |
-| Projection behavior for claimed scope | C SDK tests, CLI parity tests, SDK parity tests, source archive verification | Proven locally for claimed scope |
-| Mutation behavior for claimed scope | C SDK tests, CLI parity tests, SDK parity tests, source archive verification | Proven locally for claimed scope |
+| Selector behavior for claimed scope | C SDK tests with unique manifest requirement keys plus Go-backed `make parity-test` inside `make test-all` and source archive verification | Proven locally for claimed scope |
+| Projection behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests, source archive verification | Proven locally for claimed scope |
+| Mutation behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests, source archive verification | Proven locally for claimed scope |
 | Streaming decision and plus-value behavior | C SDK streaming tests, benchmark memory gates, 1 GiB memory gate | Proven locally for claimed scope |
 | Lua facade is direct liblql binding, not `clql` backed | Lua C module tests, Lua runtime fixtures, Lua release artifact verification | Proven locally |
 | Lua 5.5 only | C compile-time guard, Lua runtime fixtures, Lua package contract fixtures | Proven locally |

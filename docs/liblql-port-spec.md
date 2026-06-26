@@ -1020,7 +1020,7 @@ Current implementation status:
   exactly one `main()` call, so C-only regressions cannot be added without
   executable coverage accounting; `lql.sdk-manifest-fixtures` proves missing
   receiver method coverage, unmanifested SDK units, duplicate manifest entries,
-  and duplicate main calls are rejected;
+  duplicate requirement keys, and duplicate main calls are rejected;
 - C SDK mutation tests assert ordered wildcard error precedence: an earlier
   wildcard increment that matches a non-numeric descendant is still evaluated
   and reported when a later parent replacement would otherwise skip the

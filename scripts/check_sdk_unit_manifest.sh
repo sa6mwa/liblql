@@ -126,6 +126,39 @@ EOF
   fi
 
   cat >"$fixture_test" <<'EOF'
+typedef void (*sdk_contract_test_fn)(void);
+typedef struct sdk_contract_requirement {
+  const char *surface;
+  const char *requirement;
+  sdk_contract_test_fn test;
+} sdk_contract_requirement;
+static void expect_alpha_api(void) {
+  lql *ctx = 0;
+  ctx->alpha(ctx);
+}
+static void expect_destroy_api(void) {
+  lql *ctx = 0;
+  ctx->destroy(ctx);
+}
+static void expect_sdk_contract_manifest(void) {
+  static const sdk_contract_requirement manifest[] = {
+      {"receiver", "duplicate requirement", expect_alpha_api},
+      {"receiver", "duplicate requirement", expect_destroy_api},
+  };
+  (void)manifest;
+}
+int main(void) {
+  expect_alpha_api();
+  expect_destroy_api();
+  return 0;
+}
+EOF
+  if sh "$0" "$fixture_test" "$fixture_header" >/dev/null 2>&1; then
+    printf 'SDK unit manifest fixture: expected duplicate requirement key to fail\n' >&2
+    exit 1
+  fi
+
+  cat >"$fixture_test" <<'EOF'
 static void expect_alpha_api(void) {
   lql *ctx = 0;
   ctx->alpha(ctx);
@@ -206,6 +239,7 @@ trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 functions_file=$tmp_dir/functions
 manifest_file=$tmp_dir/manifest
 manifest_all_file=$tmp_dir/manifest-all
+requirement_keys_file=$tmp_dir/requirement-keys
 main_file=$tmp_dir/main
 main_all_file=$tmp_dir/main-all
 methods_file=$tmp_dir/receiver-methods
@@ -217,7 +251,7 @@ sed -n 's/^static void \(expect_[A-Za-z0-9_]*\)(void) {$/\1/p' "$test_file" |
   sort > "$functions_file"
 
 awk '
-  /static void expect_sdk_contract_manifest\(void\)/ { in_manifest = 1 }
+  /static const .*manifest.*=[[:space:]]*\{/ { in_manifest = 1; line = ""; next }
   in_manifest && /};/ { in_manifest = 0 }
   in_manifest {
     while (match($0, /expect_[A-Za-z0-9_]*/)) {
@@ -227,6 +261,38 @@ awk '
   }
 ' "$test_file" | grep -v '^expect_sdk_contract_manifest$' | sort > "$manifest_all_file"
 sort -u "$manifest_all_file" > "$manifest_file"
+
+awk '
+  /static const .*manifest.*=[[:space:]]*\{/ { in_manifest = 1; line = ""; next }
+  in_manifest && /};/ { in_manifest = 0 }
+  in_manifest {
+    line = line " " $0
+    if ($0 ~ /}/) {
+      entry = line
+      line = ""
+      if (entry ~ /[{][[:space:]]*"/) {
+        sub(/^[^{]*[{][[:space:]]*"/, "", entry)
+        surface = entry
+        sub(/".*$/, "", surface)
+        sub(/^[^"]*"[[:space:]]*,[[:space:]]*"/, "", entry)
+        requirement = entry
+        sub(/".*$/, "", requirement)
+        if (surface != "" && requirement != "") {
+          print surface "/" requirement
+        }
+      }
+    }
+  }
+' "$test_file" | sort > "$requirement_keys_file"
+
+if [ -s "$requirement_keys_file" ] &&
+   [ "$(wc -l < "$requirement_keys_file" | tr -d ' ')" != \
+     "$(sort -u "$requirement_keys_file" | wc -l | tr -d ' ')" ]; then
+  printf 'SDK unit manifest check: manifest lists one or more requirement keys more than once\n' >&2
+  printf '%s\n' '--- duplicate requirement keys ---' >&2
+  sort "$requirement_keys_file" | uniq -d >&2
+  exit 1
+fi
 
 awk '
   /^int main\(void\)/ { in_main = 1 }
