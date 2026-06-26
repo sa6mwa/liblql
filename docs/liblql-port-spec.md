@@ -974,8 +974,8 @@ Current implementation status:
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
   payload kinds, decoded matched payload JSON collected through the public
-  payload sink API, and malformed JSON stream errors. Full non-stopped streams
-  report consumed input bytes, including
+  payload sink API, plus-value stop limits, and malformed JSON stream errors.
+  Full non-stopped streams report consumed input bytes, including
   trailing delimiters, while early-stop streams retain candidate-end accounting
   for stop decisions;
 - C SDK unit coverage is manifest-checked: every `expect_* (void)` SDK

@@ -1163,7 +1163,14 @@ func TestSDKStreamingStopParity(t *testing.T) {
 		{name: "source max candidates", mode: 3, maxCandidates: 2},
 		{name: "source max bytes", mode: 3, maxBytes: 17},
 		{name: "source decision callback stop", mode: 3, stopCallback: true},
+		{name: "payload max matches", mode: 1, maxMatches: 1},
+		{name: "payload max candidates", mode: 1, maxCandidates: 2},
+		{name: "payload max bytes", mode: 1, maxBytes: 17},
 		{name: "payload callback stop", mode: 1, stopCallback: true},
+		{name: "source payload max matches", mode: 2, maxMatches: 1},
+		{name: "source payload max candidates", mode: 2, maxCandidates: 2},
+		{name: "source payload max bytes", mode: 2, maxBytes: 17},
+		{name: "source payload callback stop", mode: 2, stopCallback: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
