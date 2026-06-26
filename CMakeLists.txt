@@ -207,7 +207,8 @@ if(LQL_BUILD_TESTS)
   add_test(NAME lql.release-surface
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_make_release_target.sh
       ${CMAKE_CURRENT_SOURCE_DIR}/Makefile
-      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/release_gate.sh)
+      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/release_gate.sh
+      ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
   set_tests_properties(lql.release-surface PROPERTIES
     LABELS "unit;packaging" TIMEOUT 5)
 

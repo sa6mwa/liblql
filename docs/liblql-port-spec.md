@@ -973,8 +973,10 @@ Current implementation status:
   runs the full local test gate, benchmark smoke gate, scalable memory
   benchmark gate, release target matrix, package verification, and checksum
   manifest verification. The `lql.release-surface` CTest check rejects a
-  placeholder release target and is included in source-archive verification so
-  extracted release sources preserve the same lifecycle surface;
+  placeholder release target, verifies the project warning policy includes
+  `-Werror`, verifies project-owned compiled targets apply that policy, and is
+  included in source-archive verification so extracted release sources preserve
+  the same lifecycle surface;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification, artifact-local lonejson dependency provenance manifests, and
