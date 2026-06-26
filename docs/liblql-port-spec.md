@@ -1015,6 +1015,22 @@ Current implementation status:
   date-only equality, naive UTC datetimes, nanosecond precision, timezone
   offset normalization, temporal ranges, and stable current-date macro
   behavior through public selector matching;
+- stream error/result coverage is based on liblql's public C contract rather
+  than Go's typed error wrapping helpers. C exposes `lql_status`,
+  `lql_status_string()`, `lql_error`, `lql_query_result`, and
+  `LQL_STATUS_STOP`; C tests cover public status names, actionable diagnostics,
+  safe zeroed result state on invalid arguments, callback-requested graceful
+  stops, stop precedence, and partial result counters after malformed seekable
+  and callback-source streams. Go's `StreamError`, `AsStreamError`,
+  `StreamErrorCodeOf`, and `ErrStreamStop` wrapping behavior is not mirrored
+  unless liblql deliberately grows an equivalent public typed-error API;
+- lonejson `v0.35.0` exposes candidate `stream_offset`, `byte_size`, and
+  `payload_size` plus callback-scoped `lonejson_spooled` handles with
+  per-handle size/spilled inspection. It does not expose aggregate query-level
+  capture-byte, spill-count, or spill-byte counters. liblql must therefore not
+  add `lql_query_result` aggregate spill counters by inference; doing so needs
+  either a lonejson public accounting surface or an explicit not-applicable
+  decision for Go's capture-policy counter fields;
 - CLI malformed JSON execution is covered by Go-backed parity tests over stdin
   and seekable file inputs for selection, matches-only selection, compact
   output, projection, and mutation, with exit-code and diagnostic assertions;
