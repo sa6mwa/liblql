@@ -168,6 +168,11 @@ if(LQL_BUILD_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lql.c
       ${CMAKE_CURRENT_SOURCE_DIR}/include/lql/lql.h)
   set_tests_properties(lql.sdk-manifest PROPERTIES LABELS "unit;api" TIMEOUT 5)
+  add_test(NAME lql.sdk-manifest-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_sdk_unit_manifest.sh
+      --fixtures)
+  set_tests_properties(lql.sdk-manifest-fixtures PROPERTIES
+    LABELS "unit;api" TIMEOUT 5)
 
   if(TARGET lql_shared)
     set(LQL_PUBLIC_API_STYLE_SHARED $<TARGET_FILE:lql_shared>)

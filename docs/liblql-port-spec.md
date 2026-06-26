@@ -607,7 +607,9 @@ Current implementation status:
 - the SDK contract manifest gate parses the installed receiver method table and
   fails if any public receiver method lacks C-side method-call coverage in
   `tests/test_lql.c`, so method-table growth cannot silently outrun native SDK
-  tests;
+  tests; `lql.sdk-manifest-fixtures` proves the gate fails when a receiver
+  method lacks C-side coverage or when a C SDK unit exists outside the
+  manifest;
 - core code is style-gated against calling private receiver implementation
   functions with a `NULL` receiver; parse-failure cleanup paths must use the
   explicit owning allocator or handle cleanup surface instead of routing

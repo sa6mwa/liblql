@@ -1,6 +1,103 @@
 #!/bin/sh
 set -eu
 
+if [ "${1:-}" = "--fixtures" ]; then
+  tmp_fixture=${TMPDIR:-/tmp}/liblql-sdk-manifest-fixtures.$$
+  trap 'rm -rf "$tmp_fixture"' EXIT HUP INT TERM
+  mkdir -p "$tmp_fixture"
+  fixture_header=$tmp_fixture/lql.h
+  fixture_test=$tmp_fixture/test_lql.c
+
+  cat >"$fixture_header" <<'EOF'
+typedef struct lql lql;
+struct lql {
+  void *impl;
+  void (*alpha)(lql *self);
+  void (*destroy)(lql *self);
+};
+EOF
+
+  cat >"$fixture_test" <<'EOF'
+static void expect_alpha_api(void) {
+}
+static void expect_destroy_api(void) {
+}
+static void expect_sdk_contract_manifest(void) {
+  static const int manifest[] = {
+      (int)(long)expect_alpha_api,
+      (int)(long)expect_destroy_api,
+  };
+  (void)manifest;
+}
+int main(void) {
+  lql *ctx = 0;
+  ctx->alpha(ctx);
+  ctx->destroy(ctx);
+  expect_alpha_api();
+  expect_destroy_api();
+  return 0;
+}
+EOF
+
+  if ! sh "$0" "$fixture_test" "$fixture_header"; then
+    printf 'SDK unit manifest fixture: expected clean fixture to pass\n' >&2
+    exit 1
+  fi
+
+  cat >"$fixture_header" <<'EOF'
+typedef struct lql lql;
+struct lql {
+  void *impl;
+  void (*alpha)(lql *self);
+  void (*beta)(lql *self);
+  void (*destroy)(lql *self);
+};
+EOF
+  if sh "$0" "$fixture_test" "$fixture_header" >/dev/null 2>&1; then
+    printf 'SDK unit manifest fixture: expected missing receiver method coverage to fail\n' >&2
+    exit 1
+  fi
+
+  cat >"$fixture_header" <<'EOF'
+typedef struct lql lql;
+struct lql {
+  void *impl;
+  void (*alpha)(lql *self);
+  void (*destroy)(lql *self);
+};
+EOF
+  cat >"$fixture_test" <<'EOF'
+static void expect_alpha_api(void) {
+}
+static void expect_destroy_api(void) {
+}
+static void expect_extra_api(void) {
+}
+static void expect_sdk_contract_manifest(void) {
+  static const int manifest[] = {
+      (int)(long)expect_alpha_api,
+      (int)(long)expect_destroy_api,
+  };
+  (void)manifest;
+}
+int main(void) {
+  lql *ctx = 0;
+  ctx->alpha(ctx);
+  ctx->destroy(ctx);
+  expect_alpha_api();
+  expect_destroy_api();
+  expect_extra_api();
+  return 0;
+}
+EOF
+  if sh "$0" "$fixture_test" "$fixture_header" >/dev/null 2>&1; then
+    printf 'SDK unit manifest fixture: expected unmanifested SDK unit to fail\n' >&2
+    exit 1
+  fi
+
+  exit 0
+fi
+
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
   printf 'usage: %s tests/test_lql.c [include/lql/lql.h]\n' "$0" >&2
   exit 2
