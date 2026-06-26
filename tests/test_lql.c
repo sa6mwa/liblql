@@ -1002,6 +1002,73 @@ static void expect_stream_file(void) {
   }
 }
 
+static void expect_stream_numeric_path_segments(void) {
+  static const char input[] =
+      "{\"voucher\":{\"lines\":{\"10\":{\"amount\":3500,\"status\":\"open\"}}}}"
+      "\n"
+      "{\"voucher\":{\"lines\":[{\"amount\":0},{\"amount\":1},{\"amount\":2},"
+      "{\"amount\":3},{\"amount\":4},{\"amount\":5},{\"amount\":6},"
+      "{\"amount\":7},{\"amount\":8},{\"amount\":9},{\"amount\":3600,"
+      "\"status\":\"closed\"}]}}\n"
+      "{\"batches\":[{\"lines\":{\"10\":{\"amount\":4100,\"status\":\"open\"}}}"
+      "]}"
+      "\n"
+      "{\"voucher\":{\"lines\":{\"10\":{\"amount\":1200,"
+      "\"status\":\"processing\"}}}}\n";
+  FILE *fp;
+  lql_selector *selector;
+  lql_query_result result;
+  stream_seen seen;
+  lql_error error;
+  lql_status st;
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, "/voucher/lines/10/amount>=3000",
+                                &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("numeric path stream parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  fp = tmpfile();
+  if (fp == NULL) {
+    printf("numeric path stream tmpfile failed\n");
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||
+      fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("numeric path stream write/seek failed\n");
+    fclose(fp);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
+                                      &seen, &result, &error);
+  fclose(fp);
+  test_ctx->selector_destroy(test_ctx, selector);
+  if (st != LQL_STATUS_OK) {
+    printf("numeric path stream query failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  if (seen.calls != 4 || seen.matched != 2 ||
+      result.candidates_seen != (lql_uint64)4 ||
+      result.candidates_matched != (lql_uint64)2 ||
+      result.bytes_read != (lql_uint64)strlen(input)) {
+    printf("numeric path stream counts mismatch calls=%d matched=%d "
+           "seen=%lu matched_result=%lu bytes=%lu want_bytes=%lu\n",
+           seen.calls, seen.matched, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched,
+           (unsigned long)result.bytes_read, (unsigned long)strlen(input));
+    ++failures;
+  }
+}
+
 static void expect_stream_mixed_scalar_candidates(void) {
   static const char input[] = "\"x\"\n{\"id\":\"x\"}\n123\n";
   FILE *fp;
@@ -5246,6 +5313,8 @@ static void expect_sdk_contract_manifest(void) {
        expect_selector_inspection_api},
       {"selector", "parse-error invariants", expect_selector_parse_error_api},
       {"streaming", "seekable FILE decision streams", expect_stream_file},
+      {"streaming", "numeric object-key and array-index path segment streams",
+       expect_stream_numeric_path_segments},
       {"streaming", "mixed scalar and object candidate decision streams",
        expect_stream_mixed_scalar_candidates},
       {"streaming", "callback-source decision streams", expect_source_stream},
@@ -5312,7 +5381,7 @@ static void expect_sdk_contract_manifest(void) {
   };
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 4}, {"streaming", 10},
+      {"version", 1},      {"selector", 4}, {"streaming", 11},
       {"projection", 6},   {"compact", 2},  {"mutation", 16},
   };
   size_t i;
@@ -5508,6 +5577,43 @@ static void expect_selector_match_api(void) {
                "{\"items\":[{\"sku\":\"B\",\"price\":25}]}", 0);
   expect_match("/items[]/sku=\"B\"", "{\"items\":{\"sku\":\"B\"}}", 0);
   expect_match("/arrEmpty[]/sku=\"A\"", "{\"arrEmpty\":[]}", 0);
+  expect_match("/voucher/lines/10/amount>=3000",
+               "{\"voucher\":{\"lines\":{\"10\":{\"amount\":3500,\"status\":"
+               "\"open\"}}}}",
+               1);
+  expect_match("/voucher/lines/10/amount>=3000",
+               "{\"voucher\":{\"lines\":[{\"amount\":0},{\"amount\":1},{"
+               "\"amount\":2},{\"amount\":3},{\"amount\":4},{\"amount\":5},{"
+               "\"amount\":6},{\"amount\":7},{\"amount\":8},{\"amount\":9},{"
+               "\"amount\":3600,\"status\":\"closed\"}]}}",
+               1);
+  expect_match("/voucher/lines/10/amount>=3000",
+               "{\"voucher\":{\"lines\":{\"10\":{\"amount\":1200,\"status\":"
+               "\"processing\"}}}}",
+               0);
+  expect_match("in{field=/voucher/lines/10/status,any=open|closed}",
+               "{\"voucher\":{\"lines\":{\"10\":{\"amount\":3500,\"status\":"
+               "\"open\"}}}}",
+               1);
+  expect_match("in{field=/voucher/lines/10/status,any=open|closed}",
+               "{\"voucher\":{\"lines\":[{\"status\":\"0\"},{\"status\":\"1\"},"
+               "{\"status\":\"2\"},{\"status\":\"3\"},{\"status\":\"4\"},{"
+               "\"status\":\"5\"},{\"status\":\"6\"},{\"status\":\"7\"},{"
+               "\"status\":\"8\"},{\"status\":\"9\"},{\"amount\":3600,"
+               "\"status\":\"closed\"}]}}",
+               1);
+  expect_match("contains{field=/voucher/lines/10/msg,value=hello}",
+               "{\"voucher\":{\"lines\":{\"10\":{\"msg\":\"hello object "
+               "line\"}}}}",
+               1);
+  expect_match("iprefix{field=/voucher/lines/10/code,value=auth-10}",
+               "{\"voucher\":{\"lines\":[{\"code\":\"0\"},{\"code\":\"1\"},{"
+               "\"code\":\"2\"},{\"code\":\"3\"},{\"code\":\"4\"},{\"code\":"
+               "\"5\"},{\"code\":\"6\"},{\"code\":\"7\"},{\"code\":\"8\"},{"
+               "\"code\":\"9\"},{\"code\":\"AUTH-10-ARRAY\"}]}}",
+               1);
+  expect_match("/voucher/.../10/amount>=3000",
+               "{\"voucher\":{\"lines\":{\"10\":{\"amount\":3500}}}}", 1);
   expect_match("exists{/metadata/etag}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
   expect_match("exists{'/meta,etag'}", "{\"meta,etag\":\"x\"}", 1);
   expect_match("exists{/metadata}", "{\"metadata\":{\"etag\":\"x\"}}", 1);
@@ -5808,6 +5914,7 @@ int main(void) {
   expect_selector_parse_error_api();
   expect_version_api();
   expect_stream_file();
+  expect_stream_numeric_path_segments();
   expect_stream_mixed_scalar_candidates();
   expect_source_stream();
   expect_stream_large_irrelevant_scalar_api();

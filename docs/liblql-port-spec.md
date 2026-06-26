@@ -841,9 +841,12 @@ Current implementation status:
   value; temporal `date` terms, datetime `range` bounds, and relative
   `date.since` macros are implemented; nested indexed `and.N` / `or.N`
   logical wrapper groups, including `and.or.N` and `or.and.N` wrapper chains,
-  are parsed and evaluated recursively; shorthand selectors tolerate whitespace
-  around comparison operators, and brace selector assignments accept comma,
-  newline, or whitespace-separated `key=value` clauses;
+  are parsed and evaluated recursively; concrete numeric path segments are
+  covered as both object keys and array indexes through receiver selector
+  evaluation and seekable candidate-stream decisions; shorthand selectors
+  tolerate whitespace around comparison operators, and brace selector
+  assignments accept comma, newline, or whitespace-separated `key=value`
+  clauses;
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, strict `in.any` value whitespace validation, and
   invalid selector invariants;
@@ -909,11 +912,11 @@ Current implementation status:
   and seekable file-range JSON projection including malformed JSON execution
   errors, mutation plan parsing and parse failures, buffered, source-backed, and
   seekable file-range JSON mutation including file-backed mutation values,
-  escaped JSON Pointer mutation paths, numeric object/array segment behavior,
-  wildcard and recursive mutation paths, array wildcard value mutation, and
-  malformed JSON execution errors, compact serialization, compact error
-  behavior, and current streaming query behavior through the receiver C API,
-  comparing
+  escaped JSON Pointer mutation paths, numeric object/array segment behavior
+  for selector evaluation and mutation, wildcard and recursive mutation paths,
+  array wildcard value mutation, and malformed JSON execution errors, compact
+  serialization, compact error behavior, and current streaming query behavior
+  through the receiver C API, comparing
   `ctx->selector_parse()`, `ctx->selector_parse_or()`,
   `ctx->matches_json()`, `ctx->project_json()`, `ctx->project_source()`,
   `ctx->project_file_range()`, `ctx->mutation_plan_parse()`,
