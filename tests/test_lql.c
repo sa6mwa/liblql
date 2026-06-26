@@ -3508,6 +3508,7 @@ static void expect_mutation_error_api(void) {
   FILE *source;
   FILE *out;
   lql_mutation_plan *plan;
+  lql_mutation_plan *nested_plan;
   lql_query_result result;
   lql_error error;
   lql_status st;
@@ -3561,6 +3562,7 @@ static void expect_mutation_error_api(void) {
     ++failures;
   }
 
+  nested_plan = NULL;
   expr = "/status=done";
   plan = NULL;
   lql_error_init(&error);
@@ -3595,6 +3597,30 @@ static void expect_mutation_error_api(void) {
       printf("path mutation NULL out mismatch: %s\n", error.message);
       ++failures;
     }
+
+    expr = "/state/status=done";
+    lql_error_init(&error);
+    st = test_ctx->mutation_plan_parse(test_ctx, &expr, 1u, &nested_plan,
+                                       &error);
+    if (st != LQL_STATUS_OK) {
+      printf("nested mutation plan setup failed: %s\n", error.message);
+      ++failures;
+    } else {
+      lql_error_init(&error);
+      st = test_ctx->mutate_file_range_root_fields(
+          test_ctx, nested_plan, source, 0u, 2u, out, &error);
+      if (st != LQL_STATUS_UNSUPPORTED ||
+          strcmp(error.message,
+                 "mutation plan requires unsupported non-root behavior") !=
+              0) {
+        printf("root mutation nested-plan unsupported mismatch: status=%s "
+               "error=%s\n",
+               lql_status_string(st), error.message);
+        ++failures;
+      }
+    }
+    test_ctx->mutation_plan_destroy(test_ctx, nested_plan);
+    nested_plan = NULL;
 
     memset(&result, 0x5a, sizeof(result));
     lql_error_init(&error);
