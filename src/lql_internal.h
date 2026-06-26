@@ -29,8 +29,9 @@ struct lql_impl {
 
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_from_receiver(const lql *self);
-LQL_INTERNAL_SYMBOL lql_status
-lql_new_with_allocator(lql **out, lql_allocator *allocator, lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
+                                                      lql_allocator *allocator,
+                                                      lql_error *error);
 
 typedef enum lql_node_kind {
   LQL_NODE_ALL = 0,
@@ -129,12 +130,9 @@ LQL_INTERNAL_SYMBOL void lql_selector_destroy_impl(lql *self,
                                                    lql_selector *selector);
 LQL_INTERNAL_SYMBOL int
 lql_selector_is_empty_impl(const lql *self, const lql_selector *selector);
-LQL_INTERNAL_SYMBOL lql_status lql_eval_selector(lql *self,
-                                                 const lql_selector *selector,
-                                                 const char *json,
-                                                 size_t json_len,
-                                                 int *out_matched,
-                                                 lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status
+lql_eval_selector(lql *self, const lql_selector *selector, const char *json,
+                  size_t json_len, int *out_matched, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status
 lql_matches_json_impl(lql *self, const lql_selector *selector, const char *json,
                       size_t json_len, int *out_matched, lql_error *error);
@@ -197,10 +195,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_range_spooled_matches(
     const lql_mutation_plan *mutation_plan, int matches_only,
     lql_query_result *out_result, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_spooled_matches(
-    lql *self, const lql_selector *selector, FILE *file, FILE *out,
-    int compact, const lql_projection *projection,
-    const lql_mutation_plan *mutation_plan, int matches_only,
-    lql_query_result *out_result, lql_error *error);
+    lql *self, const lql_selector *selector, FILE *file, FILE *out, int compact,
+    const lql_projection *projection, const lql_mutation_plan *mutation_plan,
+    int matches_only, lql_query_result *out_result, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     FILE *out, int compact, const lql_projection *projection,
@@ -220,10 +217,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_project_source_impl(
 LQL_INTERNAL_SYMBOL lql_status lql_project_json_impl(
     lql *self, const lql_projection *projection, const char *json,
     size_t json_len, FILE *out, int *out_found, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_project_spooled(
-    lql *self, const lql_projection *projection,
-    const lonejson_spooled *spooled, FILE *out, int *out_found,
-    lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status
+lql_project_spooled(lql *self, const lql_projection *projection,
+                    const lonejson_spooled *spooled, FILE *out, int *out_found,
+                    lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status
 lql_compact_file_range_impl(lql *self, FILE *file, lql_uint64 offset,
                             lql_uint64 size, FILE *out, lql_error *error);
@@ -275,8 +272,8 @@ LQL_INTERNAL_SYMBOL lql_status
 lql_mutate_json_impl(lql *self, const lql_mutation_plan *plan, const char *json,
                      size_t json_len, FILE *out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_spooled_paths(
-    lql *self, const lql_mutation_plan *plan,
-    const lonejson_spooled *spooled, FILE *out, lql_error *error);
+    lql *self, const lql_mutation_plan *plan, const lonejson_spooled *spooled,
+    FILE *out, lql_error *error);
 LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
                                                    lql_temporal *out);
 LQL_INTERNAL_SYMBOL int lql_temporal_compare(const lql_temporal *left,

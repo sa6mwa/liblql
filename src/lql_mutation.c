@@ -2536,6 +2536,12 @@ static lql_status mutate_file_range_with_supported_plan(
                                            out, error);
 }
 
+static void clear_query_result(lql_query_result *out_result) {
+  if (out_result != NULL) {
+    memset(out_result, 0, sizeof(*out_result));
+  }
+}
+
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_root_fields_impl(
     lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, lql_error *error) {
@@ -2617,6 +2623,68 @@ lql_mutate_json_impl(lql *self, const lql_mutation_plan *plan, const char *json,
   reader.offset = 0u;
   return mutate_reader_with_supported_plan(self, plan, buffer_read, &reader,
                                            out, error);
+}
+
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_candidates_impl(
+    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
+    FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
+    int matches_only, lql_query_result *out_result, lql_error *error) {
+  if (plan == NULL || file == NULL || out == NULL) {
+    clear_query_result(out_result);
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "plan, file, and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return lql_eval_query_file_range_spooled_matches(
+      self, selector, file, offset, size, out, compact, NULL, plan,
+      matches_only, out_result, error);
+}
+
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_projected_candidates_impl(
+    lql *self, const lql_selector *selector, const lql_projection *projection,
+    const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
+    lql_uint64 size, FILE *out, int compact, int matches_only,
+    lql_query_result *out_result, lql_error *error) {
+  if (projection == NULL || plan == NULL || file == NULL || out == NULL) {
+    clear_query_result(out_result);
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection, plan, file, and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return lql_eval_query_file_range_spooled_matches(
+      self, selector, file, offset, size, out, compact, projection, plan,
+      matches_only, out_result, error);
+}
+
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_candidates_impl(
+    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
+    lql_read_fn read, void *read_user, FILE *out, int compact, int matches_only,
+    lql_query_result *out_result, lql_error *error) {
+  if (plan == NULL || read == NULL || out == NULL) {
+    clear_query_result(out_result);
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "plan, read, and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return lql_eval_query_source_spooled_rewrite(self, selector, read, read_user,
+                                               out, compact, NULL, plan,
+                                               matches_only, out_result, error);
+}
+
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_projected_candidates_impl(
+    lql *self, const lql_selector *selector, const lql_projection *projection,
+    const lql_mutation_plan *plan, lql_read_fn read, void *read_user, FILE *out,
+    int compact, int matches_only, lql_query_result *out_result,
+    lql_error *error) {
+  if (projection == NULL || plan == NULL || read == NULL || out == NULL) {
+    clear_query_result(out_result);
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection, plan, read, and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return lql_eval_query_source_spooled_rewrite(self, selector, read, read_user,
+                                               out, compact, projection, plan,
+                                               matches_only, out_result, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_spooled_paths(

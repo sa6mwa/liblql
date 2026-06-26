@@ -626,6 +626,11 @@ Current implementation status:
   core cleanup paths are style-gated against reintroducing
   `allocator = lql_allocator_default()` fallback branches, so cleanup ownership
   remains explicit instead of silently crossing allocator domains;
+- receiver operation implementation functions are style-gated as receiver
+  table targets only: project core may define them and wire them into the
+  constructor method table, but must not call those `_impl` functions directly
+  as a second internal operation API; `lql.public-api-style-fixtures` includes
+  a negative core-call fixture proving the rule fails closed;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through

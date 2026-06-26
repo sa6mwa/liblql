@@ -178,8 +178,7 @@ static int expect_mutation_success_uses_allocator(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  if (counter.alloc_count == 0u ||
-      ctx->mutation_plan_count(ctx, plan) != 2u) {
+  if (counter.alloc_count == 0u || ctx->mutation_plan_count(ctx, plan) != 2u) {
     printf("mutation allocator was not used or count mismatch\n");
     ctx->mutation_plan_destroy(ctx, plan);
     ctx->destroy(ctx);
@@ -195,8 +194,7 @@ static int expect_mutation_success_uses_allocator(void) {
   }
   lql_error_init(&error);
   st = ctx->mutate_json(ctx, plan, "{\"count\":3,\"title\":\"old\"}",
-                        strlen("{\"count\":3,\"title\":\"old\"}"), out,
-                        &error);
+                        strlen("{\"count\":3,\"title\":\"old\"}"), out, &error);
   fclose(out);
   if (st != LQL_STATUS_OK) {
     printf("mutation allocator runtime failed: %s\n", error.message);
@@ -279,9 +277,9 @@ static int expect_selector_parse_failure_cleans_allocator(void) {
   }
   selector = NULL;
   lql_error_init(&error);
-  st = ctx->selector_parse(
-      ctx, "contains{field=/title,value=urgent,field=/other}", &selector,
-      &error);
+  st = ctx->selector_parse(ctx,
+                           "contains{field=/title,value=urgent,field=/other}",
+                           &selector, &error);
   if (st == LQL_STATUS_OK || selector != NULL) {
     printf("selector allocator parse failure unexpectedly succeeded\n");
     ctx->selector_destroy(ctx, selector);
