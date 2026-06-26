@@ -233,6 +233,21 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  allocator_accessor_fallback_hits=$(
+    awk '
+      /lql_allocator_from_receiver[[:space:]]*\(/ { in_func = 1 }
+      in_func && /lql_allocator_default[[:space:]]*\(/ {
+        print FILENAME ":" FNR ":" $0
+      }
+      in_func && /^}/ { in_func = 0 }
+    ' "$source_root/src/lql_allocator.c" 2>/dev/null || true
+  )
+  if [ -n "$allocator_accessor_fallback_hits" ]; then
+    printf 'public API style: receiver allocator accessor must not fall back to default allocator\n' >&2
+    printf '%s\n' "$allocator_accessor_fallback_hits" >&2
+    failed=1
+  fi
+
   null_receiver_allocator_hits=$(
     grep -REn 'lql_allocator_from_receiver[[:space:]]*\([[:space:]]*NULL[[:space:]]*\)' \
       "$source_root/src/lql.c" \

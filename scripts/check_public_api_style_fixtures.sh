@@ -93,6 +93,15 @@ cat >"$tmp/src/lql.c" <<'EOF'
 void bad_cleanup_default_allocator(void) { allocator = lql_allocator_default(); }
 EOF
 
+cat >"$tmp/src/lql_allocator.c" <<'EOF'
+void *lql_allocator_from_receiver(void *self) {
+  if (self == 0) {
+    return lql_allocator_default();
+  }
+  return self;
+}
+EOF
+
 cat >"$tmp/src/lql_project.c" <<'EOF'
 void *projection_allocator(void) { return projection->allocator != NULL ? projection->allocator : lql_allocator_from_receiver(self); }
 EOF
@@ -132,6 +141,7 @@ expect_diagnostic "$out" "direct C runtime allocation"
 expect_diagnostic "$out" "forbidden liblql allocator wrapper call"
 expect_diagnostic "$out" "forbidden liblql allocator macro wrapper call"
 expect_diagnostic "$out" "project runtime must not use null receiver allocator fallback"
+expect_diagnostic "$out" "receiver allocator accessor must not fall back to default allocator"
 expect_diagnostic "$out" "cleanup paths must use explicit receiver/handle allocators"
 expect_diagnostic "$out" "selector internals must be receiver-owned at subsystem boundaries"
 expect_diagnostic "$out" "receiver-owned operations must not fall back to handle-stored allocators"

@@ -632,10 +632,12 @@ Current implementation status:
   across private helper boundaries; core source files are style-gated against
   `lql_allocator_from_receiver(NULL)` so library behavior cannot silently fall
   back to default allocator ownership when a receiver is available;
-- selector node cleanup requires its caller to provide the owning allocator;
-  core cleanup paths are style-gated against reintroducing
-  `allocator = lql_allocator_default()` fallback branches, so cleanup ownership
-  remains explicit instead of silently crossing allocator domains;
+- selector node cleanup requires its caller to provide the owning receiver, and
+  the receiver allocator accessor must fail closed rather than falling back to
+  the default allocator for invalid receivers; core cleanup paths are
+  style-gated against reintroducing `allocator = lql_allocator_default()`
+  fallback branches, so cleanup ownership remains explicit instead of silently
+  crossing allocator domains;
 - receiver methods are installed through module-owned method installers and
   implemented as file-local method bodies rather than private `*_impl`
   operation symbols; `lql.public-api-style-fixtures` includes negative cases
