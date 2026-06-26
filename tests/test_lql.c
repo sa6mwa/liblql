@@ -6477,6 +6477,10 @@ static void expect_selector_quoted_parse_api(void) {
                "{\"msg\":\"well hello world\"}", 1);
   expect_match("contains{field=/msg,value='hello world'}",
                "{\"msg\":\"hello\"}", 0);
+  expect_match("in{field=/greeting,any=\"hello world|goodbye jupiter\"}",
+               "{\"greeting\":\"goodbye jupiter\"}", 1);
+  expect_match("in{field=/greeting,any=\"hello world|goodbye jupiter\"}",
+               "{\"greeting\":\"hello\"}", 0);
   expect_match("exists{'/meta,etag'}", "{\"meta,etag\":\"x\"}", 1);
   expect_match("exists{'/meta,etag'}", "{\"meta\":{\"etag\":\"x\"}}", 0);
 }
