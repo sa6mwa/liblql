@@ -18,6 +18,62 @@ manifest_path() {
   printf '%s/%s-%s-CHECKSUMS\n' "$DIST_DIR" "$PROJECT" "$(version)"
 }
 
+read_lonejson_stamp() {
+  target_id=$1
+  stamp="$ROOT_DIR/.cache/deps/$target_id/lonejson/.lql-dep-stamp"
+  dep_name=
+  dep_version=
+  dep_target=
+  dep_sha=
+  if [ ! -f "$stamp" ]; then
+    printf 'package: lonejson dependency stamp missing for %s: %s\n' "$target_id" "$stamp" >&2
+    exit 1
+  fi
+  set -- $(sed -n '1p' "$stamp")
+  dep_name=${1:-}
+  dep_version=${2:-}
+  dep_target=${3:-}
+  dep_sha=${4:-}
+  if [ "$dep_name" != "lonejson" ] || [ "$dep_target" != "$target_id" ] || [ -z "$dep_sha" ]; then
+    printf 'package: invalid lonejson dependency stamp for %s: %s\n' "$target_id" "$stamp" >&2
+    exit 1
+  fi
+  LONEJSON_DEP_VERSION=$dep_version
+  LONEJSON_DEP_SHA256=$dep_sha
+  LONEJSON_DEP_ARCHIVE="liblonejson-${LONEJSON_DEP_VERSION}-${target_id}.tar.gz"
+  LONEJSON_DEP_URL="https://github.com/sa6mwa/lonejson/releases/download/v${LONEJSON_DEP_VERSION}/${LONEJSON_DEP_ARCHIVE}"
+}
+
+write_dependency_manifest() {
+  out=$1
+  target_id=$2
+  bundled=$3
+  role=$4
+
+  read_lonejson_stamp "$target_id"
+  mkdir -p "$(dirname "$out")"
+  cat >"$out" <<EOF
+{
+  "schema": "liblql.dependencies.v1",
+  "target": "$target_id",
+  "dependencies": [
+    {
+      "name": "lonejson",
+      "version": "$LONEJSON_DEP_VERSION",
+      "target": "$target_id",
+      "source": "github-release",
+      "source_url": "$LONEJSON_DEP_URL",
+      "archive": "$LONEJSON_DEP_ARCHIVE",
+      "sha256": "$LONEJSON_DEP_SHA256",
+      "license": "MIT",
+      "bundled": $bundled,
+      "role": "$role"
+    }
+  ]
+}
+EOF
+}
+
 clean_dist() {
   mkdir -p "$DIST_DIR"
   find "$DIST_DIR" -maxdepth 1 \( \
@@ -82,9 +138,11 @@ package_one() {
 
   cp -R "$install_root" "$lib_root"
   rm -rf "$lib_root/bin"
+  write_dependency_manifest "$lib_root/share/$PROJECT/dependencies.json" \
+    "$target_id" false "external-sdk"
 
   mkdir -p "$cli_root/bin" "$cli_root/lib" "$cli_root/share/doc/$CLI_PROJECT" \
-    "$cli_root/share/doc/lonejson"
+    "$cli_root/share/doc/lonejson" "$cli_root/share/$CLI_PROJECT"
   cp "$install_root/bin/clql" "$cli_root/bin/clql"
   if ls "$dep_root"/lib/liblonejson.so* >/dev/null 2>&1; then
     cp -P "$dep_root"/lib/liblonejson.so* "$cli_root/lib/"
@@ -97,6 +155,8 @@ package_one() {
   if [ -f "$dep_root/share/doc/liblonejson/LICENSE" ]; then
     cp "$dep_root/share/doc/liblonejson/LICENSE" "$cli_root/share/doc/lonejson/LICENSE"
   fi
+  write_dependency_manifest "$cli_root/share/$CLI_PROJECT/dependencies.json" \
+    "$target_id" true "runtime"
 
   make_tar_gz "$lib_root" "$DIST_DIR/${PROJECT}-${version_value}-${target_id}.tar.gz"
   make_tar_gz "$cli_root" "$DIST_DIR/${CLI_PROJECT}-${version_value}-${target_id}.tar.gz"
@@ -346,6 +406,39 @@ verify_target_file() {
     printf '  target=%s\n  file=%s\n  got=%s\n  want-substring=%s\n' \
       "$target_id" "$file_path" "$desc" "$expected" >&2
     exit 1
+  fi
+}
+
+verify_dependency_manifest() {
+  artifact=$1
+  root=$2
+  package_name=$3
+  target_id=$4
+  bundled=$5
+  role=$6
+  dep_manifest="$root/share/$package_name/dependencies.json"
+
+  test -f "$dep_manifest"
+  grep -qx '{' "$dep_manifest"
+  grep -q '"schema": "liblql.dependencies.v1"' "$dep_manifest"
+  grep -q "\"target\": \"$target_id\"" "$dep_manifest"
+  grep -q '"name": "lonejson"' "$dep_manifest"
+  grep -q "\"target\": \"$target_id\"" "$dep_manifest"
+  grep -q '"source": "github-release"' "$dep_manifest"
+  grep -q '"source_url": "https://github.com/sa6mwa/lonejson/releases/download/v' "$dep_manifest"
+  grep -q "\"archive\": \"liblonejson-.*-${target_id}.tar.gz\"" "$dep_manifest"
+  grep -Eq '"sha256": "[0-9a-f]{64}"' "$dep_manifest"
+  grep -q '"license": "MIT"' "$dep_manifest"
+  grep -q "\"bundled\": $bundled" "$dep_manifest"
+  grep -q "\"role\": \"$role\"" "$dep_manifest"
+  verify_no_local_paths "$artifact" "$dep_manifest"
+
+  if [ "$package_name" = "$PROJECT" ]; then
+    grep -q 'find_dependency(lonejson CONFIG)' "$root/lib/cmake/liblql/liblqlConfig.cmake"
+    grep -q 'Requires.private: lonejson' "$root/lib/pkgconfig/liblql.pc"
+  fi
+  if [ "$bundled" = true ]; then
+    test -f "$root/share/doc/lonejson/LICENSE"
   fi
 }
 
@@ -647,6 +740,8 @@ verify_one_archive() {
       test -f "$root/lib/pkgconfig/liblql.pc"
       test -f "$root/share/doc/liblql/LICENSE"
       test -f "$root/share/doc/liblql/README.md"
+      verify_dependency_manifest "$artifact" "$root" "$PROJECT" "$target_id" \
+        false "external-sdk"
       if [ -e "$root/bin/clql" ]; then
         printf 'package-verify: liblql SDK must not contain clql binary\n' >&2
         exit 1
@@ -659,6 +754,8 @@ verify_one_archive() {
       test -d "$root/lib"
       test -f "$root/share/doc/clql/LICENSE"
       test -f "$root/share/doc/clql/README.md"
+      verify_dependency_manifest "$artifact" "$root" "$CLI_PROJECT" "$target_id" \
+        true "runtime"
       if is_host_smoke_target "${expected#${CLI_PROJECT}-${version_value}-}"; then
         "$root/bin/clql" --version | grep -qx "clql $version_value"
       fi

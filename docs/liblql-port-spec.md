@@ -875,8 +875,8 @@ Current implementation is an early slice:
   extracted release sources preserve the same lifecycle surface;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
-  verification plus extracted host direct, CMake `find_package`, and
-  pkg-config consumer smokes;
+  verification, artifact-local lonejson dependency provenance manifests, and
+  extracted host direct, CMake `find_package`, and pkg-config consumer smokes;
 - standalone Lua source package production now writes
   `dist/liblql-lua-<version>.tar.gz` with `VERSION`, exact
   `RELEASE_MANIFEST`, Lua sources, tests, benchmark runner, rockspec template,
@@ -889,7 +889,11 @@ Current implementation is an early slice:
 - source archive production exists with injected `VERSION`, `RELEASE_MANIFEST`,
   exact manifest verification, and extracted-tree configure/build/test smoke;
 - host `clql` archive production carries required lonejson runtime libraries
-  and verifies extracted `clql --version` through a relocatable runpath;
+  and verifies extracted `clql --version` through a relocatable runpath; `clql`
+  dependency provenance marks lonejson as bundled runtime and package
+  verification requires the bundled lonejson license, while the liblql SDK
+  manifest marks lonejson as an external SDK dependency and checks the
+  CMake/pkg-config dependency declarations;
 - `make release-matrix` selects target-correct Linux compilers, acquires the
   matching lonejson SDK archive for each target, builds and verifies
   `liblql` and `clql` artifacts for `x86_64`, `aarch64`, and `armhf`

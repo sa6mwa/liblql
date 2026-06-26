@@ -48,8 +48,10 @@ mutation path. Host `liblql` and `clql` package archives are produced and
 verified locally, including extracted SDK consumer smokes; the source archive
 is produced and verified through an extracted-tree build/test smoke. The full
 host `clql` archive carries the lonejson runtime libraries it needs and is
-verified with an extracted `--version` smoke. The Lua tree now includes a Lua
-5.5 facade backed by a direct `lql.core` C module over public liblql APIs;
+verified with an extracted `--version` smoke. Binary archives include
+artifact-local lonejson dependency provenance under `share/<package>/`.
+The Lua tree now includes a Lua 5.5 facade backed by a direct `lql.core` C
+module over public liblql APIs;
 `lql.new()` returns a C-owned client userdata backed by a public `lql *`
 receiver and covers callback decision streams plus callback-scoped seekable
 payload handles. The parity benchmark surface has Go, C, and Lua runners over
