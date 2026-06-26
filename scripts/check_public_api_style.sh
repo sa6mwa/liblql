@@ -37,6 +37,7 @@ lql_mutate_file_range_root_fields
 lql_mutate_file_range_paths
 lql_mutate_file_range_candidates
 lql_mutate_source_paths
+lql_mutate_source_candidates
 lql_mutate_json
 lql_free
 '

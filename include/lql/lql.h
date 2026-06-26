@@ -136,6 +136,8 @@ typedef struct lql_capabilities {
   int mutation_file_range_candidates;
   /* Mutation execution against caller-provided read callbacks is available. */
   int mutation_source;
+  /* Mutation execution against callback-source candidate streams is available. */
+  int mutation_source_candidates;
   /* Mutation execution against caller-buffered JSON is available. */
   int mutation_buffered_json;
   /* Explicit opt-in file-backed mutation values are available. */
@@ -257,6 +259,11 @@ struct lql {
   lql_status (*mutate_source_paths)(lql *self, const lql_mutation_plan *plan,
                                     lql_read_fn read, void *read_user,
                                     FILE *out, lql_error *error);
+  lql_status (*mutate_source_candidates)(
+      lql *self, const lql_selector *selector,
+      const lql_mutation_plan *plan, lql_read_fn read, void *read_user,
+      FILE *out, int compact, int matches_only, lql_query_result *out_result,
+      lql_error *error);
   lql_status (*mutate_json)(lql *self, const lql_mutation_plan *plan,
                             const char *json, size_t json_len, FILE *out,
                             lql_error *error);

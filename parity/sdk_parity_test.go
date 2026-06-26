@@ -420,6 +420,12 @@ func TestSDKMutationFileRangeCandidateStreamParity(t *testing.T) {
 				t.Fatalf("liblql file-range candidate mutate: %v", err)
 			}
 			assertDecodedJSONValuesParity(t, gotJSON, wantJSON, "candidate stream mutation")
+
+			gotSourceJSON, err := cMutateSourceCandidates(tc.selector, tc.mutations, tc.doc, tc.matchesOnly)
+			if err != nil {
+				t.Fatalf("liblql source candidate mutate: %v", err)
+			}
+			assertDecodedJSONValuesParity(t, gotSourceJSON, wantJSON, "source candidate stream mutation")
 		})
 	}
 }

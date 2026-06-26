@@ -24,7 +24,8 @@ including Go-compatible numeric child handling under arrays and time
 normalization can be applied to seekable file ranges without full-document
 materialization, to seekable candidate streams through
 `ctx->mutate_file_range_candidates()`, to caller-provided read callbacks through
-`ctx->mutate_source_paths()`, or to explicitly caller-buffered JSON values
+`ctx->mutate_source_paths()`, to callback-source candidate streams through
+`ctx->mutate_source_candidates()`, or to explicitly caller-buffered JSON values
 through `ctx->mutate_json()`. `clql` also supports seekable-file inline/write
 mutation through a temp-file rename.
 The public C API now exposes an instantiatable receiver shell through

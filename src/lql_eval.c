@@ -1589,3 +1589,94 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_spooled_matches(
   }
   return LQL_STATUS_OK;
 }
+
+LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
+    const lql_selector *selector, lql_read_fn read, void *read_user, FILE *out,
+    int compact, const lql_projection *projection,
+    const lql_mutation_plan *mutation_plan, int matches_only,
+    lql_query_result *out_result, lql_error *error) {
+  lonejson *runtime;
+  lonejson_error lj_error;
+  lonejson_path_value_visitor visitor;
+  lonejson_candidate_stream_options options;
+  lonejson_status st;
+  spooled_match_state state;
+  source_reader_adapter adapter;
+
+  if (read == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "read and output file are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  memset(&state, 0, sizeof(state));
+  state.selector = selector;
+  state.out = out;
+  state.compact = compact;
+  state.projection = projection;
+  state.mutation_plan = mutation_plan;
+  state.matches_only = matches_only;
+  state.expand_arrays = 1;
+  lql_error_init(&state.projection_error);
+  lql_error_init(&state.mutation_error);
+  memset(&adapter, 0, sizeof(adapter));
+  adapter.read = read;
+  adapter.user = read_user;
+  if (!init_doc(&state.doc, selector)) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  runtime = lonejson_new(NULL, &lj_error);
+  if (runtime == NULL) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    free_doc(&state.doc);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (compact) {
+    state.compact_runtime = lonejson_new(NULL, &lj_error);
+    if (state.compact_runtime == NULL) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+      lonejson_free(runtime);
+      free_doc(&state.doc);
+      return LQL_STATUS_JSON_ERROR;
+    }
+  }
+  init_eval_visitor(&visitor);
+  options = lonejson_default_candidate_stream_options();
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
+  options.path_visitor = &visitor;
+  options.visitor_user = &state.doc;
+  options.candidate_begin = on_spooled_candidate_begin;
+  options.candidate_end = on_spooled_candidate_end;
+  options.candidate_user = &state;
+  st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
+                                        &options, &lj_error);
+  if (state.compact_runtime != NULL) {
+    lonejson_free(state.compact_runtime);
+  }
+  if (out_result != NULL) {
+    if (!state.result.stopped_early) {
+      state.result.bytes_read = adapter.total_read;
+    }
+    *out_result = state.result;
+  }
+  free_doc(&state.doc);
+  lonejson_free(runtime);
+  if (st != LONEJSON_STATUS_OK) {
+    if (state.mutation_error.code != LQL_STATUS_OK) {
+      lql_set_error(error, state.mutation_error.code,
+                    state.mutation_error.message);
+      return state.mutation_error.code;
+    }
+    if (state.projection_error.code != LQL_STATUS_OK) {
+      lql_set_error(error, state.projection_error.code,
+                    state.projection_error.message);
+      return state.projection_error.code;
+    }
+    if (adapter.error_code != 0) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR, "source read failed");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  return LQL_STATUS_OK;
+}

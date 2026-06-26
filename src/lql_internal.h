@@ -169,6 +169,11 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_spooled_matches(
     const lql_selector *selector, FILE *file, FILE *out, int compact,
     const lql_projection *projection, const lql_mutation_plan *mutation_plan,
     int matches_only, lql_query_result *out_result, lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
+    const lql_selector *selector, lql_read_fn read, void *read_user, FILE *out,
+    int compact, const lql_projection *projection,
+    const lql_mutation_plan *mutation_plan, int matches_only,
+    lql_query_result *out_result, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status
 lql_projection_parse_impl(const char *const *fields, size_t field_count,
                           lql_projection **out, lql_error *error);
