@@ -183,7 +183,7 @@ if(LQL_BUILD_TESTS)
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_public_api_style_fixtures.sh
       ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_public_api_style.sh)
   set_tests_properties(lql.public-api-style-fixtures PROPERTIES
-    LABELS "unit;api" TIMEOUT 5)
+    LABELS "unit;api" TIMEOUT 15)
 
   add_test(NAME lql.release-surface
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_make_release_target.sh

@@ -726,6 +726,11 @@ Current implementation is an early slice:
   private `_impl` receiver entry points directly; `lql.public-api-style`
   rejects those private execution shortcuts in `src/clql.c` so CLI behavior
   remains aligned with the library surface rather than an internal-only path;
+- `clql` process-glue allocations for parsed argv lists, joined selector text,
+  and inline temp path ownership use one CLI glue allocator independent of
+  `clql_ctx`; the style gate rejects receiver-derived `clql_ctx` glue
+  allocation so argv-derived buffers cannot be allocated before `lql_new()` and
+  later freed through a different receiver-owned allocator;
 - `clql -m/--mutate -f/--field` follows Go CLI order for seekable file input
   and non-seekable stdin: project each output candidate first, then mutate the
   projected value only for matched candidates; this path uses callback-scoped

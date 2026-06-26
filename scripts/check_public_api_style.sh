@@ -244,6 +244,17 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  cli_allocator_owner_hits=$(
+    grep -En \
+      'lql_allocator_from_receiver[[:space:]]*\([[:space:]]*clql_ctx[[:space:]]*\)' \
+      "$source_root/src/clql.c" 2>/dev/null || true
+  )
+  if [ -n "$cli_allocator_owner_hits" ]; then
+    printf 'public API style: clql glue allocation must not depend on liblql receiver ownership\n' >&2
+    printf '%s\n' "$cli_allocator_owner_hits" >&2
+    failed=1
+  fi
+
   lua_private_hits=$(
     grep -REn \
       'lql_internal\.h|LQL_INTERNAL_SYMBOL|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \

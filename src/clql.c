@@ -35,11 +35,15 @@ typedef struct output_ranges {
 } output_ranges;
 
 static lql *clql_ctx = NULL;
+static lql_allocator *clql_glue_allocator = NULL;
 
 static int is_regular_file_path(const char *path);
 
 static lql_allocator *clql_allocator(void) {
-  return lql_allocator_from_receiver(clql_ctx);
+  if (clql_glue_allocator == NULL) {
+    clql_glue_allocator = lql_allocator_from_receiver(NULL);
+  }
+  return clql_glue_allocator;
 }
 
 static lql_read_result clql_file_read(void *user, unsigned char *buffer,

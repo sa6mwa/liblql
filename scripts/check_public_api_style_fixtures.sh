@@ -121,4 +121,10 @@ EOF
 run_expect_fail "clql private evaluator use"
 rm -f "$tmp/src/clql.c"
 
+cat >"$tmp/src/clql.c" <<'EOF'
+void *clql_allocator(void) { return lql_allocator_from_receiver(clql_ctx); }
+EOF
+run_expect_fail "clql receiver-owned glue allocator use"
+rm -f "$tmp/src/clql.c"
+
 run_expect_ok
