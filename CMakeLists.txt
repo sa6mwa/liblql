@@ -223,6 +223,11 @@ if(LQL_BUILD_TESTS)
       --fixtures)
   set_tests_properties(lql.release-surface-fixtures PROPERTIES
     LABELS "unit;packaging" TIMEOUT 5)
+  add_test(NAME lql.release-version
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_release_version.sh
+      ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(lql.release-version PROPERTIES
+    LABELS "unit;packaging" TIMEOUT 20)
 
   add_test(NAME lql.repository-boundaries
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_repository_boundaries.sh

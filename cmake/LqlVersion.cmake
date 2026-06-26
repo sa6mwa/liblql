@@ -4,13 +4,36 @@ function(lql_resolve_version out_var)
     return()
   endif()
   execute_process(
-    COMMAND git describe --tags --exact-match --match "v[0-9]*.[0-9]*.[0-9]*"
+    COMMAND git tag --points-at HEAD --list "v[0-9]*.[0-9]*.[0-9]*"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    OUTPUT_VARIABLE tag
+    OUTPUT_VARIABLE tags
     ERROR_QUIET
     OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(tag MATCHES "^v([0-9]+\\.[0-9]+\\.[0-9]+)$")
-    set(${out_var} "${CMAKE_MATCH_1}" PARENT_SCOPE)
+  set(resolved_tag_version "")
+  if(tags)
+    string(REPLACE "\n" ";" tag_list "${tags}")
+    foreach(candidate IN LISTS tag_list)
+      if(candidate MATCHES "^v([0-9]+\\.[0-9]+\\.[0-9]+)$")
+        set(candidate_version "${CMAKE_MATCH_1}")
+        execute_process(
+          COMMAND git cat-file -t "refs/tags/${candidate}"
+          WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+          OUTPUT_VARIABLE candidate_type
+          ERROR_QUIET
+          OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(candidate_type STREQUAL "commit")
+          if(resolved_tag_version AND
+             NOT resolved_tag_version STREQUAL candidate_version)
+            message(FATAL_ERROR
+              "Multiple lightweight release tags point at HEAD: ${resolved_tag_version} and ${candidate_version}")
+          endif()
+          set(resolved_tag_version "${candidate_version}")
+        endif()
+      endif()
+    endforeach()
+  endif()
+  if(resolved_tag_version)
+    set(${out_var} "${resolved_tag_version}" PARENT_SCOPE)
   elseif(EXISTS "${CMAKE_SOURCE_DIR}/VERSION" AND NOT EXISTS "${CMAKE_SOURCE_DIR}/.git")
     file(READ "${CMAKE_SOURCE_DIR}/VERSION" version_file)
     string(STRIP "${version_file}" version_file)
