@@ -585,8 +585,8 @@ run_matrix_for_impl() {
           "$candidates" "$selector_name" "$expr" || return 1
         ;;
       c)
-        run_c "$dataset_name" "$fixture_path" "$candidates" "$selector_name" \
-          "$expr" || return 1
+        run_c_native_mode decision_only_selector "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
         run_c_native_mode decision_only_plan "$dataset_name" "$fixture_path" \
           "$candidates" "$selector_name" "$expr" || return 1
         run_c_native_mode plus_value_selector "$dataset_name" "$fixture_path" \

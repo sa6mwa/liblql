@@ -77,9 +77,9 @@ Current implementation status:
   implementation/dataset/selector/mode tuple emits both `warmup_included` and
   `steady_state` records. The smoke gate is explicit and is not part of
   `make test-all`; `make prerelease` runs it after the normal test gate.
-- `make benchmarks-c` exercises the C CLI for decision-only output and the
-  public liblql API for matched-only seekable plus-value payload access over a
-  shared generated fixture.
+- `make benchmarks-c` exercises the public liblql API for decision-only output
+  and matched-only seekable plus-value payload access over a shared generated
+  fixture.
 - `make benchmarks-go` exercises `parity/cmd/lqlbench`, which uses the pinned
   Go module and emits stable JSON Lines without scraping `go test` output.
   Go helper records report `ns_per_op`; `steady_state` performs one untimed
@@ -101,10 +101,8 @@ Current implementation status:
   candidate JSON after callback scope.
   The current C plan benchmark reuses the parsed public `lql_selector` handle;
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
-  The C native payload/plan helper and Lua facade runner report `ns_per_op`;
-  the schema validator requires timing for supported Go, Lua, and C native
-  helper modes. Shell-mediated C CLI selection records may still report `null`
-  timing.
+  The C native helper and Lua facade runner report `ns_per_op`; the schema
+  validator requires timing for all supported Go, C, and Lua records.
 - the current executable CLI-style selector matrix covers grouped
   equality/range, service contains, service case-insensitive contains, service
   `contains.any`, service `icontains.any`, and nested `/records[]/...`

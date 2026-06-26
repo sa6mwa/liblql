@@ -198,7 +198,7 @@ func requiresTiming(rec record) bool {
 	if rec.Impl == "go" {
 		return true
 	}
-	if rec.Impl == "c" && rec.Mode != "decision_only_selector" {
+	if rec.Impl == "c" {
 		return true
 	}
 	if rec.Impl == "lua" {

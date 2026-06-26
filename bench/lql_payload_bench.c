@@ -172,7 +172,8 @@ int main(int argc, char **argv) {
   counts.ctx = ctx;
   memset(&result, 0, sizeof(result));
   start = clock();
-  if (strcmp(mode, "decision_only_plan") == 0) {
+  if (strcmp(mode, "decision_only_selector") == 0 ||
+      strcmp(mode, "decision_only_plan") == 0) {
     st = ctx->query_file_decisions(ctx, selector, fixture, observe_decision,
                                    NULL, &result, &error);
   } else if (strcmp(mode, "plus_value_selector") == 0 ||
