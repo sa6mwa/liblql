@@ -543,17 +543,30 @@ project(liblql_package_consumer C)
 set(CMAKE_C_STANDARD 90)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+if(NOT DEFINED LQL_CONSUMER_TARGET)
+  set(LQL_CONSUMER_TARGET liblql::lql_static)
+endif()
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 find_package(liblql CONFIG REQUIRED)
 add_executable(consumer ../consumer.c)
-target_link_libraries(consumer PRIVATE liblql::lql_static)
+target_link_libraries(consumer PRIVATE ${LQL_CONSUMER_TARGET})
 EOF
-  cmake -S "$smoke_dir/cmake" -B "$smoke_dir/cmake-build" \
+  cmake -S "$smoke_dir/cmake" -B "$smoke_dir/cmake-static-build" \
     -DCMAKE_PREFIX_PATH="$root;$dep_root" >/dev/null
-  cmake --build "$smoke_dir/cmake-build" >/dev/null
-  "$smoke_dir/cmake-build/consumer"
+  cmake --build "$smoke_dir/cmake-static-build" >/dev/null
+  "$smoke_dir/cmake-static-build/consumer"
+
+  if [ -f "$root/lib/liblql.so" ] || [ -f "$root/lib/liblql.dylib" ]; then
+    cmake -S "$smoke_dir/cmake" -B "$smoke_dir/cmake-shared-build" \
+      -DCMAKE_PREFIX_PATH="$root;$dep_root" \
+      -DLQL_CONSUMER_TARGET=liblql::lql_shared >/dev/null
+    cmake --build "$smoke_dir/cmake-shared-build" >/dev/null
+    LD_LIBRARY_PATH="$root/lib:$dep_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+      DYLD_LIBRARY_PATH="$root/lib:$dep_root/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" \
+      "$smoke_dir/cmake-shared-build/consumer"
+  fi
 
   if command -v pkg-config >/dev/null 2>&1; then
     PKG_CONFIG_PATH="$root/lib/pkgconfig:$dep_root/lib/pkgconfig" \
@@ -563,6 +576,16 @@ EOF
       -o "$smoke_dir/pkgconfig/consumer"
     LD_LIBRARY_PATH="$root/lib:$dep_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
       "$smoke_dir/pkgconfig/consumer"
+    if [ -f "$root/lib/liblql.so" ] || [ -f "$root/lib/liblql.dylib" ]; then
+      PKG_CONFIG_PATH="$root/lib/pkgconfig:$dep_root/lib/pkgconfig" \
+        "$cc" -std=c90 -Wall -Wextra -Wpedantic -Werror \
+        "$smoke_dir/consumer.c" \
+        $(PKG_CONFIG_PATH="$root/lib/pkgconfig:$dep_root/lib/pkgconfig" pkg-config --cflags --libs liblql) \
+        -o "$smoke_dir/pkgconfig/consumer-shared"
+      LD_LIBRARY_PATH="$root/lib:$dep_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        DYLD_LIBRARY_PATH="$root/lib:$dep_root/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" \
+        "$smoke_dir/pkgconfig/consumer-shared"
+    fi
   else
     printf 'package-verify: pkg-config unavailable; skipping pkg-config consumer smoke for %s\n' "$artifact"
   fi

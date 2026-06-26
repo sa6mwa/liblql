@@ -980,7 +980,9 @@ Current implementation status:
   fails when `-Werror` or project target warning application is removed;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
-  verification, artifact-local lonejson dependency provenance manifests, and
+  verification, artifact-local lonejson dependency provenance manifests, shared
+  and static install-tree CMake consumer smoke tests, shared and static
+  pkg-config consumer smoke tests, and
   extracted host direct, CMake `find_package`, and pkg-config consumer smokes;
   fast CTest includes package privacy negative fixtures proving the verifier
   fails on repository paths, `$HOME`, absolute local `file://` URLs, and
