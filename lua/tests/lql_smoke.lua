@@ -63,6 +63,56 @@ if invalid_selector ~= nil or not invalid_selector_err or
   fail("expected structured selector_parse error")
 end
 
+local capabilities
+capabilities, err = client:selector_capabilities(
+                      'and.eq{field=/status,value=open},' ..
+                        'icontains{field=/msg,value=timeout},' ..
+                        'exists{/meta/**/etag}')
+capabilities = assert_no_error(capabilities, err, "selector_capabilities")
+assert_equal(capabilities["and"], true, "selector_capabilities and")
+assert_equal(capabilities.eq, true, "selector_capabilities eq")
+assert_equal(capabilities.contains, true, "selector_capabilities contains")
+assert_equal(capabilities.exists, true, "selector_capabilities exists")
+assert_equal(capabilities.wildcard_path, true,
+             "selector_capabilities wildcard")
+assert_equal(capabilities.recursive_path, true,
+             "selector_capabilities recursive")
+
+local parsed_capabilities
+parsed_capabilities, err = client:selector_capabilities(open_selector)
+parsed_capabilities = assert_no_error(parsed_capabilities, err,
+                                      "selector_capabilities parsed")
+assert_equal(parsed_capabilities.eq, true, "parsed selector_capabilities eq")
+assert_equal(parsed_capabilities.recursive_path, false,
+             "parsed selector_capabilities recursive")
+
+local traits
+traits, err = client:selector_execution_traits(
+                'and.eq{field=/status,value=open},' ..
+                  'icontains{field=/msg,value=timeout},' ..
+                  'exists{/meta/**/etag}')
+traits = assert_no_error(traits, err, "selector_execution_traits")
+assert_equal(traits.uses_contains_like, true,
+             "selector_execution_traits contains")
+assert_equal(traits.uses_recursive_path, true,
+             "selector_execution_traits recursive")
+assert_equal(traits.uses_wildcard_path, true,
+             "selector_execution_traits wildcard")
+assert_equal(traits.requires_object_root, true,
+             "selector_execution_traits root")
+assert_equal(traits.early_non_match_likely, false,
+             "selector_execution_traits early")
+
+local match_all_traits
+match_all_traits, err =
+  client:selector_execution_traits('icontains{f=/,v=""}')
+match_all_traits = assert_no_error(match_all_traits, err,
+                                   "match-all selector_execution_traits")
+assert_equal(match_all_traits.requires_object_root, false,
+             "match-all selector_execution_traits root")
+assert_equal(match_all_traits.uses_contains_like, false,
+             "match-all selector_execution_traits contains")
+
 local matched, err = client:matches_json('/status="open"', '{"status":"open"}')
 matched = assert_no_error(matched, err, "matches_json open")
 assert_equal(matched, true, "matches_json open")

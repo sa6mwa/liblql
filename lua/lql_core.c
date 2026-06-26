@@ -197,6 +197,95 @@ static int lua_lql_selector_parse(lua_State *L) {
   return 1;
 }
 
+static void lua_lql_push_bool_field(lua_State *L, const char *name, int value) {
+  lua_pushboolean(L, value ? 1 : 0);
+  lua_setfield(L, -2, name);
+}
+
+static void lua_lql_push_selector_capabilities(
+    lua_State *L, const lql_selector_capabilities *capabilities) {
+  lua_newtable(L);
+  lua_lql_push_bool_field(L, "and", capabilities->and_);
+  lua_lql_push_bool_field(L, "or", capabilities->or_);
+  lua_lql_push_bool_field(L, "not", capabilities->not_);
+  lua_lql_push_bool_field(L, "eq", capabilities->eq);
+  lua_lql_push_bool_field(L, "range", capabilities->range);
+  lua_lql_push_bool_field(L, "date", capabilities->date);
+  lua_lql_push_bool_field(L, "in", capabilities->in);
+  lua_lql_push_bool_field(L, "prefix", capabilities->prefix);
+  lua_lql_push_bool_field(L, "contains", capabilities->contains);
+  lua_lql_push_bool_field(L, "exists", capabilities->exists);
+  lua_lql_push_bool_field(L, "wildcard_path", capabilities->wildcard_path);
+  lua_lql_push_bool_field(L, "recursive_path", capabilities->recursive_path);
+}
+
+static void lua_lql_push_selector_execution_traits(
+    lua_State *L, const lql_selector_execution_traits *traits) {
+  lua_newtable(L);
+  lua_lql_push_bool_field(L, "uses_contains_like",
+                          traits->uses_contains_like);
+  lua_lql_push_bool_field(L, "uses_recursive_path",
+                          traits->uses_recursive_path);
+  lua_lql_push_bool_field(L, "uses_wildcard_path", traits->uses_wildcard_path);
+  lua_lql_push_bool_field(L, "requires_object_root",
+                          traits->requires_object_root);
+  lua_lql_push_bool_field(L, "early_non_match_likely",
+                          traits->early_non_match_likely);
+}
+
+static int lua_lql_selector_capabilities_get(lua_State *L) {
+  lua_lql_client *client;
+  lql_selector *selector;
+  lql_selector_capabilities capabilities;
+  lql_error error;
+  lql_status st;
+  int selector_owned;
+
+  client = lua_lql_check_client(L, 1);
+  selector = NULL;
+  selector_owned = 0;
+  lql_error_init(&error);
+  st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
+  if (st == LQL_STATUS_OK) {
+    client->ctx->selector_capabilities_get(client->ctx, selector,
+                                           &capabilities);
+  }
+  if (selector_owned) {
+    client->ctx->selector_destroy(client->ctx, selector);
+  }
+  if (st != LQL_STATUS_OK) {
+    return lua_lql_fail(L, &error);
+  }
+  lua_lql_push_selector_capabilities(L, &capabilities);
+  return 1;
+}
+
+static int lua_lql_selector_execution_traits_get(lua_State *L) {
+  lua_lql_client *client;
+  lql_selector *selector;
+  lql_selector_execution_traits traits;
+  lql_error error;
+  lql_status st;
+  int selector_owned;
+
+  client = lua_lql_check_client(L, 1);
+  selector = NULL;
+  selector_owned = 0;
+  lql_error_init(&error);
+  st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
+  if (st == LQL_STATUS_OK) {
+    client->ctx->selector_execution_traits_get(client->ctx, selector, &traits);
+  }
+  if (selector_owned) {
+    client->ctx->selector_destroy(client->ctx, selector);
+  }
+  if (st != LQL_STATUS_OK) {
+    return lua_lql_fail(L, &error);
+  }
+  lua_lql_push_selector_execution_traits(L, &traits);
+  return 1;
+}
+
 static void lua_lql_set_error(lql_error *error, lql_status status,
                               const char *message) {
   if (error != NULL) {
@@ -1706,6 +1795,8 @@ static int lua_lql_mutate_source(lua_State *L) {
 
 static const luaL_Reg lua_lql_client_methods[] = {
     {"selector_parse", lua_lql_selector_parse},
+    {"selector_capabilities", lua_lql_selector_capabilities_get},
+    {"selector_execution_traits", lua_lql_selector_execution_traits_get},
     {"matches_json", lua_lql_matches_json},
     {"select_json", lua_lql_select_json},
     {"select_file", lua_lql_select_file},

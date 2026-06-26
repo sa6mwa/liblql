@@ -957,7 +957,8 @@ Current implementation status:
   `lql.new()` returns a C-owned client userdata backed by a public `lql *`
   receiver, with deterministic smoke tests for selector decisions, selection
   output, parsed selector userdata reuse over the public receiver surface,
-  file-backed callback decision streams, Lua callback-backed source decision
+  selector capability and execution-trait inspection, file-backed callback
+  decision streams, Lua callback-backed source decision
   streams, Lua callback-source selection, callback-scoped seekable payload
   handles, callback-scoped source-spooled payload handles,
   callback-scoped payload streaming through `match.write_json(callback)`, file,
