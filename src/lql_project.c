@@ -946,7 +946,7 @@ static void projection_state_cleanup(projection_state *state) {
   state->open_array_next = NULL;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
+static lql_status projection_parse_method(
     lql *self, const char *const *fields, size_t field_count,
     lql_projection **out, lql_error *error) {
   lql_allocator *allocator;
@@ -994,8 +994,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL void
-lql_projection_destroy_impl(lql *self, lql_projection *projection) {
+static void
+projection_destroy_method(lql *self, lql_projection *projection) {
   lql_allocator *allocator;
   size_t i;
   if (projection == NULL) {
@@ -1074,7 +1074,7 @@ static lql_status lql_project_reader(lql *self,
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_project_file_range_impl(
+static lql_status project_file_range_method(
     lql *self, const lql_projection *projection, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, int *out_found, lql_error *error) {
   limited_file_reader reader;
@@ -1097,7 +1097,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_project_file_range_impl(
                             out_found, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_project_source_impl(
+static lql_status project_source_method(
     lql *self, const lql_projection *projection, lql_read_fn read,
     void *read_user, FILE *out, int *out_found, lql_error *error) {
   projection_source_reader reader;
@@ -1123,7 +1123,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_project_source_impl(
   return st;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_project_json_impl(
+static lql_status project_json_method(
     lql *self, const lql_projection *projection, const char *json,
     size_t json_len, FILE *out, int *out_found, lql_error *error) {
   buffer_reader reader;
@@ -1190,8 +1190,8 @@ static lql_status compact_reader(lql *self, lonejson_reader_fn read,
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL lql_status
-lql_compact_file_range_impl(lql *self, FILE *file, lql_uint64 offset,
+static lql_status
+compact_file_range_method(lql *self, FILE *file, lql_uint64 offset,
                             lql_uint64 size, FILE *out, lql_error *error) {
   limited_file_reader reader;
 
@@ -1210,7 +1210,7 @@ lql_compact_file_range_impl(lql *self, FILE *file, lql_uint64 offset,
   return compact_reader(self, limited_read, &reader, out, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_compact_source_impl(
+static lql_status compact_source_method(
     lql *self, lql_read_fn read, void *read_user, FILE *out, lql_error *error) {
   projection_source_reader reader;
   lql_status st;
@@ -1230,7 +1230,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_compact_source_impl(
   return st;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_compact_json_impl(lql *self,
+static lql_status compact_json_method(lql *self,
                                                      const char *json,
                                                      size_t json_len, FILE *out,
                                                      lql_error *error) {
@@ -1266,4 +1266,15 @@ LQL_INTERNAL_SYMBOL lql_status lql_compact_json_impl(lql *self,
     return LQL_STATUS_JSON_ERROR;
   }
   return LQL_STATUS_OK;
+}
+
+LQL_INTERNAL_SYMBOL void lql_project_methods_install(lql *ctx) {
+  ctx->projection_parse = projection_parse_method;
+  ctx->projection_destroy = projection_destroy_method;
+  ctx->project_file_range = project_file_range_method;
+  ctx->project_source = project_source_method;
+  ctx->project_json = project_json_method;
+  ctx->compact_file_range = compact_file_range_method;
+  ctx->compact_source = compact_source_method;
+  ctx->compact_json = compact_json_method;
 }

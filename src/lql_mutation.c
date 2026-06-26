@@ -1058,7 +1058,7 @@ static int parse_mutation_expr(lql_allocator *allocator, const char *raw,
   return 1;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
+static lql_status mutation_plan_parse_with_options_method(
     lql *self, const char *const *exprs, size_t expr_count,
     const lql_mutation_parse_options *options, lql_mutation_plan **out,
     lql_error *error) {
@@ -1115,21 +1115,21 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_impl(
+static lql_status mutation_plan_parse_method(
     lql *self, const char *const *exprs, size_t expr_count,
     lql_mutation_plan **out, lql_error *error) {
   return self->mutation_plan_parse_with_options(self, exprs, expr_count, NULL,
                                                 out, error);
 }
 
-LQL_INTERNAL_SYMBOL size_t
-lql_mutation_plan_count_impl(const lql *self, const lql_mutation_plan *plan) {
+static size_t
+mutation_plan_count_method(const lql *self, const lql_mutation_plan *plan) {
   (void)self;
   return plan == NULL ? 0u : plan->count;
 }
 
-LQL_INTERNAL_SYMBOL void
-lql_mutation_plan_destroy_impl(lql *self, lql_mutation_plan *plan) {
+static void
+mutation_plan_destroy_method(lql *self, lql_mutation_plan *plan) {
   lql_allocator *allocator;
   size_t i;
   if (plan == NULL) {
@@ -2542,7 +2542,7 @@ static void clear_query_result(lql_query_result *out_result) {
   }
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_root_fields_impl(
+static lql_status mutate_file_range_root_fields_method(
     lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, lql_error *error) {
   if (plan == NULL || file == NULL || out == NULL) {
@@ -2559,7 +2559,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_root_fields_impl(
                                                out, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_paths_impl(
+static lql_status mutate_file_range_paths_method(
     lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, lql_error *error) {
   if (plan == NULL || file == NULL || out == NULL) {
@@ -2576,7 +2576,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_paths_impl(
                                                out, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_paths_impl(
+static lql_status mutate_source_paths_method(
     lql *self, const lql_mutation_plan *plan, lql_read_fn read, void *read_user,
     FILE *out, lql_error *error) {
   mutation_source_reader reader;
@@ -2603,8 +2603,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_paths_impl(
   return st;
 }
 
-LQL_INTERNAL_SYMBOL lql_status
-lql_mutate_json_impl(lql *self, const lql_mutation_plan *plan, const char *json,
+static lql_status
+mutate_json_method(lql *self, const lql_mutation_plan *plan, const char *json,
                      size_t json_len, FILE *out, lql_error *error) {
   buffer_reader reader;
 
@@ -2625,7 +2625,7 @@ lql_mutate_json_impl(lql *self, const lql_mutation_plan *plan, const char *json,
                                            out, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_candidates_impl(
+static lql_status mutate_file_range_candidates_method(
     lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
     FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
     int matches_only, lql_query_result *out_result, lql_error *error) {
@@ -2640,7 +2640,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_candidates_impl(
       matches_only, out_result, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_projected_candidates_impl(
+static lql_status mutate_file_range_projected_candidates_method(
     lql *self, const lql_selector *selector, const lql_projection *projection,
     const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, int compact, int matches_only,
@@ -2656,7 +2656,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_projected_candidates_impl(
       matches_only, out_result, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_candidates_impl(
+static lql_status mutate_source_candidates_method(
     lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
     lql_read_fn read, void *read_user, FILE *out, int compact, int matches_only,
     lql_query_result *out_result, lql_error *error) {
@@ -2671,7 +2671,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_candidates_impl(
                                                matches_only, out_result, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_projected_candidates_impl(
+static lql_status mutate_source_projected_candidates_method(
     lql *self, const lql_selector *selector, const lql_projection *projection,
     const lql_mutation_plan *plan, lql_read_fn read, void *read_user, FILE *out,
     int compact, int matches_only, lql_query_result *out_result,
@@ -2705,4 +2705,21 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_spooled_paths(
   cursor.read_offset = 0u;
   return mutate_reader_with_supported_plan(self, plan, spooled_read, &cursor,
                                            out, error);
+}
+
+LQL_INTERNAL_SYMBOL void lql_mutation_methods_install(lql *ctx) {
+  ctx->mutation_plan_parse = mutation_plan_parse_method;
+  ctx->mutation_plan_parse_with_options = mutation_plan_parse_with_options_method;
+  ctx->mutation_plan_count = mutation_plan_count_method;
+  ctx->mutation_plan_destroy = mutation_plan_destroy_method;
+  ctx->mutate_file_range_root_fields = mutate_file_range_root_fields_method;
+  ctx->mutate_file_range_paths = mutate_file_range_paths_method;
+  ctx->mutate_file_range_candidates = mutate_file_range_candidates_method;
+  ctx->mutate_file_range_projected_candidates =
+      mutate_file_range_projected_candidates_method;
+  ctx->mutate_source_paths = mutate_source_paths_method;
+  ctx->mutate_source_candidates = mutate_source_candidates_method;
+  ctx->mutate_source_projected_candidates =
+      mutate_source_projected_candidates_method;
+  ctx->mutate_json = mutate_json_method;
 }

@@ -34,6 +34,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
                                                       lql_error *error);
 LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
                                                lonejson_error *error);
+LQL_INTERNAL_SYMBOL void lql_eval_methods_install(lql *ctx);
+LQL_INTERNAL_SYMBOL void lql_project_methods_install(lql *ctx);
+LQL_INTERNAL_SYMBOL void lql_mutation_methods_install(lql *ctx);
 
 typedef enum lql_node_kind {
   LQL_NODE_ALL = 0,
@@ -120,65 +123,9 @@ LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_allocator *allocator,
 LQL_INTERNAL_SYMBOL lql_status
 lql_parse_selector_internal(lql_allocator *allocator, const char *expr,
                             int or_mode, lql_selector **out, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_impl(lql *self,
-                                                       const char *expr,
-                                                       lql_selector **out,
-                                                       lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_or_impl(lql *self,
-                                                          const char *expr,
-                                                          lql_selector **out,
-                                                          lql_error *error);
-LQL_INTERNAL_SYMBOL void lql_selector_destroy_impl(lql *self,
-                                                   lql_selector *selector);
-LQL_INTERNAL_SYMBOL int
-lql_selector_is_empty_impl(const lql *self, const lql_selector *selector);
 LQL_INTERNAL_SYMBOL lql_status
 lql_eval_selector(lql *self, const lql_selector *selector, const char *json,
                   size_t json_len, int *out_matched, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status
-lql_matches_json_impl(lql *self, const lql_selector *selector, const char *json,
-                      size_t json_len, int *out_matched, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_query_file_decisions_impl(
-    lql *self, const lql_selector *selector, FILE *file,
-    lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
-    lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_query_file_decisions_with_options_impl(
-    lql *self, const lql_selector *selector, FILE *file,
-    const lql_query_options *options, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_query_source_decisions_impl(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
-    lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_query_source_decisions_with_options_impl(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    const lql_query_options *options, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_query_source_spooled_matches_impl(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    lql_query_match_fn on_match, void *user, lql_query_result *out_result,
-    lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status
-lql_query_source_spooled_matches_with_options_impl(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    const lql_query_options *options, lql_query_match_fn on_match, void *user,
-    lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status
-lql_query_file_matches_impl(lql *self, const lql_selector *selector, FILE *file,
-                            lql_query_match_fn on_match, void *user,
-                            lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_query_file_matches_with_options_impl(
-    lql *self, const lql_selector *selector, FILE *file,
-    const lql_query_options *options, lql_query_match_fn on_match, void *user,
-    lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_impl(
-    lql *self, const lql_payload *payload, FILE *out, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_sink_impl(
-    lql *self, const lql_payload *payload, lql_write_fn write, void *write_user,
-    lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_payload_project_json_impl(
-    lql *self, const lql_payload *payload, const lql_projection *projection,
-    FILE *out, int *out_found, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
     lql *self, const lql_selector *selector, FILE *file,
     const lql_query_options *options, lql_query_decision_fn on_decision,
@@ -205,74 +152,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
     FILE *out, int compact, const lql_projection *projection,
     const lql_mutation_plan *mutation_plan, int matches_only,
     lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
-    lql *self, const char *const *fields, size_t field_count,
-    lql_projection **out, lql_error *error);
-LQL_INTERNAL_SYMBOL void
-lql_projection_destroy_impl(lql *self, lql_projection *projection);
-LQL_INTERNAL_SYMBOL lql_status lql_project_file_range_impl(
-    lql *self, const lql_projection *projection, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, int *out_found, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_project_source_impl(
-    lql *self, const lql_projection *projection, lql_read_fn read,
-    void *read_user, FILE *out, int *out_found, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_project_json_impl(
-    lql *self, const lql_projection *projection, const char *json,
-    size_t json_len, FILE *out, int *out_found, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status
 lql_project_spooled(lql *self, const lql_projection *projection,
                     const lonejson_spooled *spooled, FILE *out, int *out_found,
                     lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status
-lql_compact_file_range_impl(lql *self, FILE *file, lql_uint64 offset,
-                            lql_uint64 size, FILE *out, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_compact_source_impl(
-    lql *self, lql_read_fn read, void *read_user, FILE *out, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_compact_json_impl(lql *self,
-                                                     const char *json,
-                                                     size_t json_len, FILE *out,
-                                                     lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_impl(
-    lql *self, const char *const *exprs, size_t expr_count,
-    lql_mutation_plan **out, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
-    lql *self, const char *const *exprs, size_t expr_count,
-    const lql_mutation_parse_options *options, lql_mutation_plan **out,
-    lql_error *error);
-LQL_INTERNAL_SYMBOL size_t
-lql_mutation_plan_count_impl(const lql *self, const lql_mutation_plan *plan);
-LQL_INTERNAL_SYMBOL void
-lql_mutation_plan_destroy_impl(lql *self, lql_mutation_plan *plan);
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_root_fields_impl(
-    lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_paths_impl(
-    lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_candidates_impl(
-    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
-    FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
-    int matches_only, lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_projected_candidates_impl(
-    lql *self, const lql_selector *selector, const lql_projection *projection,
-    const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, int compact, int matches_only,
-    lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_paths_impl(
-    lql *self, const lql_mutation_plan *plan, lql_read_fn read, void *read_user,
-    FILE *out, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_candidates_impl(
-    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
-    lql_read_fn read, void *read_user, FILE *out, int compact, int matches_only,
-    lql_query_result *out_result, lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_projected_candidates_impl(
-    lql *self, const lql_selector *selector, const lql_projection *projection,
-    const lql_mutation_plan *plan, lql_read_fn read, void *read_user, FILE *out,
-    int compact, int matches_only, lql_query_result *out_result,
-    lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status
-lql_mutate_json_impl(lql *self, const lql_mutation_plan *plan, const char *json,
-                     size_t json_len, FILE *out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_spooled_paths(
     lql *self, const lql_mutation_plan *plan, const lonejson_spooled *spooled,
     FILE *out, lql_error *error);

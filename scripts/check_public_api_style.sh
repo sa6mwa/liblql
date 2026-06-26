@@ -292,20 +292,18 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
-  core_private_operation_hits=$(
+  receiver_impl_symbol_hits=$(
     grep -REn 'lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \
       "$source_root/src/lql.c" \
       "$source_root/src/lql_selector.c" \
       "$source_root/src/lql_project.c" \
       "$source_root/src/lql_eval.c" \
-      "$source_root/src/lql_mutation.c" 2>/dev/null |
-      grep -Ev '^[^:]+:[0-9]+:[[:space:]]*ctx->[A-Za-z0-9_]+[[:space:]]*=[[:space:]]*lql_[A-Za-z0-9_]+_impl[[:space:]]*;' |
-      grep -Ev '^[^:]+:[0-9]+:[[:space:]]*(LQL_INTERNAL_SYMBOL[[:space:]]+)?(lql_status|void|int|size_t)[[:space:]*]*lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' |
-      grep -Ev '^[^:]+:[0-9]+:lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' || true
+      "$source_root/src/lql_mutation.c" \
+      "$source_root/src/lql_internal.h" 2>/dev/null || true
   )
-  if [ -n "$core_private_operation_hits" ]; then
-    printf 'public API style: core code must not call private receiver operation implementations directly\n' >&2
-    printf '%s\n' "$core_private_operation_hits" >&2
+  if [ -n "$receiver_impl_symbol_hits" ]; then
+    printf 'public API style: receiver methods must be file-local methods, not private *_impl operation symbols\n' >&2
+    printf '%s\n' "$receiver_impl_symbol_hits" >&2
     failed=1
   fi
 

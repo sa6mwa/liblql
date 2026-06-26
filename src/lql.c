@@ -15,6 +15,17 @@
 static const char *receiver_version(const lql *self);
 static void receiver_capabilities_get(const lql *self, lql_capabilities *out);
 static void receiver_destroy(lql *self);
+static lql_status selector_parse_method(lql *self, const char *expr,
+                                        lql_selector **out, lql_error *error);
+static lql_status selector_parse_or_method(lql *self, const char *expr,
+                                           lql_selector **out,
+                                           lql_error *error);
+static void selector_destroy_method(lql *self, lql_selector *selector);
+static int selector_is_empty_method(const lql *self,
+                                    const lql_selector *selector);
+static lql_status matches_json_method(lql *self, const lql_selector *selector,
+                                      const char *json, size_t json_len,
+                                      int *out_matched, lql_error *error);
 
 lql_status lql_new(lql **out, lql_error *error) {
   return lql_new_with_allocator(out, lql_allocator_default(), error);
@@ -50,49 +61,14 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
   ctx->impl = impl;
   ctx->version = receiver_version;
   ctx->capabilities_get = receiver_capabilities_get;
-  ctx->selector_parse = lql_selector_parse_impl;
-  ctx->selector_parse_or = lql_selector_parse_or_impl;
-  ctx->selector_destroy = lql_selector_destroy_impl;
-  ctx->selector_is_empty = lql_selector_is_empty_impl;
-  ctx->matches_json = lql_matches_json_impl;
-  ctx->query_file_decisions = lql_query_file_decisions_impl;
-  ctx->query_file_decisions_with_options =
-      lql_query_file_decisions_with_options_impl;
-  ctx->query_source_decisions = lql_query_source_decisions_impl;
-  ctx->query_source_decisions_with_options =
-      lql_query_source_decisions_with_options_impl;
-  ctx->query_file_matches = lql_query_file_matches_impl;
-  ctx->query_file_matches_with_options =
-      lql_query_file_matches_with_options_impl;
-  ctx->query_source_spooled_matches = lql_query_source_spooled_matches_impl;
-  ctx->query_source_spooled_matches_with_options =
-      lql_query_source_spooled_matches_with_options_impl;
-  ctx->payload_write_json = lql_payload_write_json_impl;
-  ctx->payload_write_json_sink = lql_payload_write_json_sink_impl;
-  ctx->payload_project_json = lql_payload_project_json_impl;
-  ctx->projection_parse = lql_projection_parse_impl;
-  ctx->projection_destroy = lql_projection_destroy_impl;
-  ctx->project_file_range = lql_project_file_range_impl;
-  ctx->project_source = lql_project_source_impl;
-  ctx->project_json = lql_project_json_impl;
-  ctx->compact_file_range = lql_compact_file_range_impl;
-  ctx->compact_source = lql_compact_source_impl;
-  ctx->compact_json = lql_compact_json_impl;
-  ctx->mutation_plan_parse = lql_mutation_plan_parse_impl;
-  ctx->mutation_plan_parse_with_options =
-      lql_mutation_plan_parse_with_options_impl;
-  ctx->mutation_plan_count = lql_mutation_plan_count_impl;
-  ctx->mutation_plan_destroy = lql_mutation_plan_destroy_impl;
-  ctx->mutate_file_range_root_fields = lql_mutate_file_range_root_fields_impl;
-  ctx->mutate_file_range_paths = lql_mutate_file_range_paths_impl;
-  ctx->mutate_file_range_candidates = lql_mutate_file_range_candidates_impl;
-  ctx->mutate_file_range_projected_candidates =
-      lql_mutate_file_range_projected_candidates_impl;
-  ctx->mutate_source_paths = lql_mutate_source_paths_impl;
-  ctx->mutate_source_candidates = lql_mutate_source_candidates_impl;
-  ctx->mutate_source_projected_candidates =
-      lql_mutate_source_projected_candidates_impl;
-  ctx->mutate_json = lql_mutate_json_impl;
+  ctx->selector_parse = selector_parse_method;
+  ctx->selector_parse_or = selector_parse_or_method;
+  ctx->selector_destroy = selector_destroy_method;
+  ctx->selector_is_empty = selector_is_empty_method;
+  ctx->matches_json = matches_json_method;
+  lql_eval_methods_install(ctx);
+  lql_project_methods_install(ctx);
+  lql_mutation_methods_install(ctx);
   ctx->destroy = receiver_destroy;
   *out = ctx;
   return LQL_STATUS_OK;
@@ -221,7 +197,7 @@ LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_allocator *allocator,
   memset(node, 0, sizeof(*node));
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_impl(lql *self,
+static lql_status selector_parse_method(lql *self,
                                                        const char *expr,
                                                        lql_selector **out,
                                                        lql_error *error) {
@@ -229,7 +205,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_impl(lql *self,
                                      out, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_or_impl(lql *self,
+static lql_status selector_parse_or_method(lql *self,
                                                           const char *expr,
                                                           lql_selector **out,
                                                           lql_error *error) {
@@ -237,7 +213,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_or_impl(lql *self,
                                      out, error);
 }
 
-LQL_INTERNAL_SYMBOL void lql_selector_destroy_impl(lql *self,
+static void selector_destroy_method(lql *self,
                                                    lql_selector *selector) {
   if (selector != NULL) {
     lql_allocator *allocator;
@@ -248,14 +224,14 @@ LQL_INTERNAL_SYMBOL void lql_selector_destroy_impl(lql *self,
   }
 }
 
-LQL_INTERNAL_SYMBOL int
-lql_selector_is_empty_impl(const lql *self, const lql_selector *selector) {
+static int
+selector_is_empty_method(const lql *self, const lql_selector *selector) {
   (void)self;
   return selector == NULL || selector->root.kind == LQL_NODE_ALL;
 }
 
-LQL_INTERNAL_SYMBOL lql_status
-lql_matches_json_impl(lql *self, const lql_selector *selector, const char *json,
+static lql_status
+matches_json_method(lql *self, const lql_selector *selector, const char *json,
                       size_t json_len, int *out_matched, lql_error *error) {
   if (out_matched == NULL || json == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,

@@ -1377,7 +1377,7 @@ lql_eval_selector(lql *self, const lql_selector *selector, const char *json,
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_query_file_decisions_impl(
+static lql_status query_file_decisions_method(
     lql *self, const lql_selector *selector, FILE *file,
     lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
     lql_error *error) {
@@ -1385,7 +1385,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_file_decisions_impl(
       self, selector, file, NULL, on_decision, user, out_result, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_query_file_decisions_with_options_impl(
+static lql_status query_file_decisions_with_options_method(
     lql *self, const lql_selector *selector, FILE *file,
     const lql_query_options *options, lql_query_decision_fn on_decision,
     void *user, lql_query_result *out_result, lql_error *error) {
@@ -1399,7 +1399,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_file_decisions_with_options_impl(
                                        on_decision, user, out_result, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_query_source_decisions_impl(
+static lql_status query_source_decisions_method(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
     lql_error *error) {
@@ -1408,7 +1408,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_source_decisions_impl(
                                                    user, out_result, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_query_source_decisions_with_options_impl(
+static lql_status query_source_decisions_with_options_method(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *options, lql_query_decision_fn on_decision,
     void *user, lql_query_result *out_result, lql_error *error) {
@@ -1423,7 +1423,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_source_decisions_with_options_impl(
                                          error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_query_source_spooled_matches_impl(
+static lql_status query_source_spooled_matches_method(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     lql_query_match_fn on_match, void *user, lql_query_result *out_result,
     lql_error *error) {
@@ -1431,8 +1431,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_source_spooled_matches_impl(
       self, selector, read, read_user, NULL, on_match, user, out_result, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status
-lql_query_source_spooled_matches_with_options_impl(
+static lql_status
+query_source_spooled_matches_with_options_method(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *options, lql_query_match_fn on_match, void *user,
     lql_query_result *out_result, lql_error *error) {
@@ -1447,15 +1447,15 @@ lql_query_source_spooled_matches_with_options_impl(
                                                out_result, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status
-lql_query_file_matches_impl(lql *self, const lql_selector *selector, FILE *file,
+static lql_status
+query_file_matches_method(lql *self, const lql_selector *selector, FILE *file,
                             lql_query_match_fn on_match, void *user,
                             lql_query_result *out_result, lql_error *error) {
   return self->query_file_matches_with_options(
       self, selector, file, NULL, on_match, user, out_result, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_query_file_matches_with_options_impl(
+static lql_status query_file_matches_with_options_method(
     lql *self, const lql_selector *selector, FILE *file,
     const lql_query_options *options, lql_query_match_fn on_match, void *user,
     lql_query_result *out_result, lql_error *error) {
@@ -1480,7 +1480,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_file_matches_with_options_impl(
   return st;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_impl(
+static lql_status payload_write_json_method(
     lql *self, const lql_payload *payload, FILE *out, lql_error *error) {
   if (payload == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -1491,7 +1491,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_impl(
                                        error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_sink_impl(
+static lql_status payload_write_json_sink_method(
     lql *self, const lql_payload *payload, lql_write_fn write, void *write_user,
     lql_error *error) {
   lql_payload_sink_adapter adapter;
@@ -1560,7 +1560,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_sink_impl(
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_payload_project_json_impl(
+static lql_status payload_project_json_method(
     lql *self, const lql_payload *payload, const lql_projection *projection,
     FILE *out, int *out_found, lql_error *error) {
   if (out_found != NULL) {
@@ -2048,4 +2048,21 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
     return LQL_STATUS_JSON_ERROR;
   }
   return LQL_STATUS_OK;
+}
+
+LQL_INTERNAL_SYMBOL void lql_eval_methods_install(lql *ctx) {
+  ctx->query_file_decisions = query_file_decisions_method;
+  ctx->query_file_decisions_with_options =
+      query_file_decisions_with_options_method;
+  ctx->query_source_decisions = query_source_decisions_method;
+  ctx->query_source_decisions_with_options =
+      query_source_decisions_with_options_method;
+  ctx->query_file_matches = query_file_matches_method;
+  ctx->query_file_matches_with_options = query_file_matches_with_options_method;
+  ctx->query_source_spooled_matches = query_source_spooled_matches_method;
+  ctx->query_source_spooled_matches_with_options =
+      query_source_spooled_matches_with_options_method;
+  ctx->payload_write_json = payload_write_json_method;
+  ctx->payload_write_json_sink = payload_write_json_sink_method;
+  ctx->payload_project_json = payload_project_json_method;
 }

@@ -140,6 +140,12 @@ EOF
 run_expect_fail "core private receiver operation call"
 rm -f "$tmp/src/lql_eval.c"
 
+cat >"$tmp/src/lql_eval.c" <<'EOF'
+static int lql_query_file_decisions_impl(void) { return 0; }
+EOF
+run_expect_fail "private receiver implementation symbol"
+rm -f "$tmp/src/lql_eval.c"
+
 printf '%s\n' 'stale cleanup surface is `lql_dealloc()`' >"$tmp/README.md"
 run_expect_fail "README allocator wrapper documentation"
 printf '%s\n' '# fixture' >"$tmp/README.md"
