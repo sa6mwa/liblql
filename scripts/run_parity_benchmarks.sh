@@ -611,6 +611,16 @@ generate_fixture() {
       "contains_blob" 'contains{field=/blob,value=xxxx}' >> "$case_matrix"
     printf '%s %s %s %s %s\n' "large_ndjson" "$ndjson_fixture" "$count" \
       "icontains_blob" 'icontains{field=/blob,value=XXXX}' >> "$case_matrix"
+    printf '%s %s %s %s %s\n' "large_ndjson" "$ndjson_fixture" "$count" \
+      "temporal_eq_date_only" '/timestamp="2026-03-05"' >> "$case_matrix"
+    printf '%s %s %s %s %s\n' "large_ndjson" "$ndjson_fixture" "$count" \
+      "temporal_range_shorthand_gte" '/timestamp>=2026-03-05T10:28:21Z' >> "$case_matrix"
+    printf '%s %s %s %s %s\n' "large_ndjson" "$ndjson_fixture" "$count" \
+      "temporal_range_selector" 'range{field=/timestamp,gte=2026-03-05T10:28:21Z,lt=2026-03-05T10:30:00Z}' >> "$case_matrix"
+    printf '%s %s %s %s %s\n' "large_ndjson" "$ndjson_fixture" "$count" \
+      "date_selector_after_before" 'date{field=/timestamp,after=2026-03-05T10:28:21Z,before=2026-03-05T10:30:00Z}' >> "$case_matrix"
+    printf '%s %s %s %s %s\n' "large_ndjson" "$ndjson_fixture" "$count" \
+      "date_selector_since_macro" 'date{f=/timestamp,since=yesterday}' >> "$case_matrix"
     return 0
   fi
   generate_fixtures
