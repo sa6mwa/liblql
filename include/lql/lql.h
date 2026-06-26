@@ -113,6 +113,8 @@ typedef struct lql_capabilities {
   int source_spooled_match_stream;
   /* Match payloads can identify callback-scoped spooled handles. */
   int spooled_payloads;
+  /* Match payloads can be written to caller-managed sink callbacks. */
+  int payload_sink_write;
   /* Projection from one seekable file range is available. */
   int projection_file_range;
   /* Projection from caller-provided read callbacks is available. */
@@ -143,6 +145,7 @@ typedef lql_status (*lql_query_match_fn)(void *user,
                                          const lql_query_match *match);
 typedef lql_read_result (*lql_read_fn)(void *user, unsigned char *buffer,
                                        size_t capacity);
+typedef lql_status (*lql_write_fn)(void *user, const void *data, size_t len);
 
 void lql_error_init(lql_error *error);
 const char *lql_status_string(lql_status status);
@@ -211,6 +214,11 @@ lql_status lql_query_file_matches_with_options(
    match callback. */
 lql_status lql_payload_write_json(const lql_payload *payload, FILE *out,
                                   lql_error *error);
+/* Writes a callback-scoped payload to a caller-managed sink callback. The sink
+   receives bounded chunks and must return LQL_STATUS_OK to continue. */
+lql_status lql_payload_write_json_sink(const lql_payload *payload,
+                                       lql_write_fn write, void *write_user,
+                                       lql_error *error);
 
 /* Parses JSON Pointer projection fields into a caller-owned projection handle.
    The root path is rejected, and paths must not start with an array index. */

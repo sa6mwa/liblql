@@ -267,6 +267,7 @@ int main(void) {
     lql_capabilities_get(&caps);
     if (!caps.selector_parse || !caps.source_decision_stream ||
         !caps.source_spooled_match_stream || !caps.spooled_payloads ||
+        !caps.payload_sink_write ||
         !caps.projection_source || !caps.projection_buffered_json ||
         !caps.compact_source ||
         !caps.mutation_file_range || !caps.mutation_source ||

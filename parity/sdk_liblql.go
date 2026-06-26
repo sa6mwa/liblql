@@ -766,6 +766,14 @@ static lql_status liblql_count_decision(void *user,
 	return LQL_STATUS_OK;
 }
 
+static lql_status liblql_payload_file_write(void *user, const void *data,
+                                            size_t len) {
+	FILE *out;
+	out = (FILE *)user;
+	return fwrite(data, 1u, len, out) == len ? LQL_STATUS_OK
+	                                         : LQL_STATUS_JSON_ERROR;
+}
+
 static lql_status liblql_collect_match(void *user,
                                        const lql_query_match *match) {
 	liblql_stream_state *state;
@@ -780,7 +788,9 @@ static lql_status liblql_collect_match(void *user,
 		++state->summary->spooled_payloads;
 	}
 	lql_error_init(&error);
-	status = lql_payload_write_json(&match->payload, state->payload_out, &error);
+	status = lql_payload_write_json_sink(&match->payload,
+	                                     liblql_payload_file_write,
+	                                     state->payload_out, &error);
 	if (status != LQL_STATUS_OK) {
 		return status;
 	}

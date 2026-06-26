@@ -118,12 +118,12 @@ static void expect_version_api(void) {
       !caps.file_decision_stream || !caps.file_match_stream ||
       !caps.source_decision_stream || !caps.seekable_range_payloads ||
       !caps.source_spooled_match_stream || !caps.spooled_payloads ||
-      !caps.projection_file_range || !caps.projection_source ||
-      !caps.projection_buffered_json || !caps.compact_file_range ||
-      !caps.compact_source || !caps.compact_buffered_json ||
-      !caps.mutation_parse || !caps.mutation_file_range ||
-      !caps.mutation_source || !caps.mutation_buffered_json ||
-      !caps.mutation_file_values) {
+      !caps.payload_sink_write || !caps.projection_file_range ||
+      !caps.projection_source || !caps.projection_buffered_json ||
+      !caps.compact_file_range || !caps.compact_source ||
+      !caps.compact_buffered_json || !caps.mutation_parse ||
+      !caps.mutation_file_range || !caps.mutation_source ||
+      !caps.mutation_buffered_json || !caps.mutation_file_values) {
     printf("capability query omitted an implemented public surface\n");
     ++failures;
   }
@@ -145,6 +145,13 @@ typedef struct payload_seen {
   lql_uint64 sizes[4];
   FILE *out;
 } payload_seen;
+
+typedef struct memory_sink {
+  char data[256];
+  size_t len;
+  int calls;
+  int fail_after_first;
+} memory_sink;
 
 typedef struct chunk_reader {
   const char *data;
@@ -197,6 +204,23 @@ static lql_read_result read_fail_once(void *user, unsigned char *buffer,
   return result;
 }
 
+static lql_status write_memory_sink(void *user, const void *data, size_t len) {
+  memory_sink *sink;
+
+  sink = (memory_sink *)user;
+  ++sink->calls;
+  if (sink->fail_after_first && sink->calls == 1) {
+    return LQL_STATUS_STOP;
+  }
+  if (sink->len + len >= sizeof(sink->data)) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  memcpy(sink->data + sink->len, data, len);
+  sink->len += len;
+  sink->data[sink->len] = '\0';
+  return LQL_STATUS_OK;
+}
+
 static lql_status record_decision(void *user,
                                   const lql_query_decision *decision) {
   stream_seen *seen = (stream_seen *)user;
@@ -243,6 +267,23 @@ static lql_status record_payload(void *user, const lql_query_match *match) {
   return LQL_STATUS_OK;
 }
 
+static lql_status record_payload_sink(void *user,
+                                      const lql_query_match *match) {
+  memory_sink *sink = (memory_sink *)user;
+  lql_error error;
+  lql_status st;
+
+  if (!match->decision.matched ||
+      match->payload.kind != LQL_PAYLOAD_SEEKABLE_RANGE ||
+      match->payload.source == NULL) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  lql_error_init(&error);
+  st = lql_payload_write_json_sink(&match->payload, write_memory_sink, sink,
+                                   &error);
+  return st;
+}
+
 static lql_status record_spooled_payload(void *user,
                                          const lql_query_match *match) {
   payload_seen *seen = (payload_seen *)user;
@@ -270,6 +311,22 @@ static lql_status record_spooled_payload(void *user,
     return LQL_STATUS_STOP;
   }
   return LQL_STATUS_OK;
+}
+
+static lql_status record_spooled_payload_sink(void *user,
+                                              const lql_query_match *match) {
+  memory_sink *sink = (memory_sink *)user;
+  lql_error error;
+  lql_status st;
+
+  if (!match->decision.matched || match->payload.kind != LQL_PAYLOAD_SPOOLED ||
+      match->payload.spooled == NULL) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  lql_error_init(&error);
+  st = lql_payload_write_json_sink(&match->payload, write_memory_sink, sink,
+                                   &error);
+  return st;
 }
 
 static void expect_match(const char *expr, const char *json, int want) {
@@ -455,6 +512,7 @@ static void expect_source_spooled_payload_api(void) {
   lql_query_options options;
   lql_query_result result;
   payload_seen seen;
+  memory_sink sink;
   chunk_reader reader;
   lql_error error;
   lql_status st;
@@ -514,6 +572,33 @@ static void expect_source_spooled_payload_api(void) {
     ++failures;
   }
   fclose(seen.out);
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&reader, 0, sizeof(reader));
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 7u;
+  options.max_matches = 1u;
+  lql_error_init(&error);
+  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source spooled payload sink parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  st = lql_query_source_spooled_matches_with_options(
+      selector, read_chunk, &reader, &options, record_spooled_payload_sink,
+      &sink, &result, &error);
+  lql_selector_free(selector);
+  if (st != LQL_STATUS_OK) {
+    printf("source spooled payload sink query failed: %s\n", error.message);
+    ++failures;
+  } else if (strcmp(sink.data, "{\"status\":\"open\",\"id\":\"b\"}") != 0) {
+    printf("source spooled payload sink output mismatch: %s\n", sink.data);
+    ++failures;
+  }
 }
 
 static void expect_stream_array_items(void) {
@@ -852,6 +937,22 @@ static void expect_stream_error_api(void) {
     ++failures;
   }
 
+  lql_error_init(&error);
+  st = lql_payload_write_json_sink(NULL, write_memory_sink, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "payload and write callback are required") != 0) {
+    printf("payload sink NULL payload mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  lql_error_init(&error);
+  st = lql_payload_write_json_sink(&payload, NULL, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "payload and write callback are required") != 0) {
+    printf("payload sink NULL write mismatch: %s\n", error.message);
+    ++failures;
+  }
+
   fclose(source);
   fclose(out);
 }
@@ -1008,7 +1109,9 @@ static void expect_seekable_payload_api(void) {
   lql_selector *selector;
   lql_query_result result;
   payload_seen seen;
+  memory_sink sink;
   lql_query_options options;
+  lql_payload payload;
   lql_error error;
   lql_status st;
   char buf[128];
@@ -1077,6 +1180,40 @@ static void expect_seekable_payload_api(void) {
   } else if (strcmp(buf, "{\"status\":\"open\",\"id\":1}"
                          "{\"status\":\"open\",\"id\":3}") != 0) {
     printf("payload output mismatch: %s\n", buf);
+    ++failures;
+  }
+
+  if (fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("payload sink rewind failed\n");
+    ++failures;
+  } else {
+    memset(&sink, 0, sizeof(sink));
+    memset(&result, 0, sizeof(result));
+    st = lql_query_file_matches(selector, fp, record_payload_sink, &sink,
+                                &result, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("payload sink query failed: %s\n", error.message);
+      ++failures;
+    } else if (strcmp(sink.data, "{\"status\":\"open\",\"id\":1}"
+                                 "{\"status\":\"open\",\"id\":3}") != 0) {
+      printf("payload sink output mismatch: %s\n", sink.data);
+      ++failures;
+    }
+  }
+
+  memset(&payload, 0, sizeof(payload));
+  memset(&sink, 0, sizeof(sink));
+  sink.fail_after_first = 1;
+  payload.kind = LQL_PAYLOAD_SEEKABLE_RANGE;
+  payload.source = fp;
+  payload.offset = 0u;
+  payload.size = 24u;
+  lql_error_init(&error);
+  st = lql_payload_write_json_sink(&payload, write_memory_sink, &sink, &error);
+  if (st != LQL_STATUS_STOP ||
+      strcmp(error.message, "payload sink write failed") != 0) {
+    printf("payload sink failure mismatch: status=%s error=%s\n",
+           lql_status_string(st), error.message);
     ++failures;
   }
 

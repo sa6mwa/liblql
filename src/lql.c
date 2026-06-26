@@ -19,6 +19,12 @@ typedef struct lql_match_adapter {
   void *user;
 } lql_match_adapter;
 
+typedef struct lql_payload_sink_adapter {
+  lql_write_fn write;
+  void *user;
+  lql_status status;
+} lql_payload_sink_adapter;
+
 static int seek_u64(FILE *file, lql_uint64 offset) {
   off_t seek_offset;
   seek_offset = (off_t)offset;
@@ -28,31 +34,42 @@ static int seek_u64(FILE *file, lql_uint64 offset) {
   return fseeko(file, seek_offset, SEEK_SET) == 0;
 }
 
-static int copy_range(FILE *in, FILE *out, lql_uint64 size) {
+static lql_status copy_range_to_sink(FILE *in, lql_uint64 size,
+                                     lql_write_fn write, void *user) {
   char buf[8192];
   size_t want;
   size_t got;
+  lql_status st;
   while (size != 0u) {
     want = size > (lql_uint64)sizeof(buf) ? sizeof(buf) : (size_t)size;
     got = fread(buf, 1u, want, in);
     if (got == 0u) {
-      return 0;
+      return LQL_STATUS_JSON_ERROR;
     }
-    if (fwrite(buf, 1u, got, out) != got) {
-      return 0;
+    st = write(user, buf, got);
+    if (st != LQL_STATUS_OK) {
+      return st;
     }
     size -= (lql_uint64)got;
   }
-  return 1;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status payload_file_sink(void *user, const void *data,
-                                         size_t len, lonejson_error *error) {
+static lql_status payload_file_write(void *user, const void *data, size_t len) {
   FILE *out;
-  (void)error;
   out = (FILE *)user;
-  return fwrite(data, 1u, len, out) == len ? LONEJSON_STATUS_OK
-                                           : LONEJSON_STATUS_IO_ERROR;
+  return fwrite(data, 1u, len, out) == len ? LQL_STATUS_OK
+                                           : LQL_STATUS_JSON_ERROR;
+}
+
+static lonejson_status payload_lql_sink(void *user, const void *data,
+                                        size_t len, lonejson_error *error) {
+  lql_payload_sink_adapter *adapter;
+  (void)error;
+  adapter = (lql_payload_sink_adapter *)user;
+  adapter->status = adapter->write(adapter->user, data, len);
+  return adapter->status == LQL_STATUS_OK ? LONEJSON_STATUS_OK
+                                          : LONEJSON_STATUS_CALLBACK_FAILED;
 }
 
 static lql_status on_match_decision(void *user,
@@ -134,6 +151,7 @@ void lql_capabilities_get(lql_capabilities *out) {
   out->seekable_range_payloads = 1;
   out->source_spooled_match_stream = 1;
   out->spooled_payloads = 1;
+  out->payload_sink_write = 1;
   out->projection_file_range = 1;
   out->projection_source = 1;
   out->projection_buffered_json = 1;
@@ -311,19 +329,39 @@ lql_status lql_query_file_matches_with_options(
 
 lql_status lql_payload_write_json(const lql_payload *payload, FILE *out,
                                   lql_error *error) {
-  off_t current;
   if (payload == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "payload and output file are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
+  return lql_payload_write_json_sink(payload, payload_file_write, out, error);
+}
+
+lql_status lql_payload_write_json_sink(const lql_payload *payload,
+                                       lql_write_fn write, void *write_user,
+                                       lql_error *error) {
+  lql_payload_sink_adapter adapter;
+  off_t current;
+  lql_status copy_status;
+  if (payload == NULL || write == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "payload and write callback are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
   if (payload->kind != LQL_PAYLOAD_SEEKABLE_RANGE || payload->source == NULL) {
     if (payload->kind == LQL_PAYLOAD_SPOOLED && payload->spooled != NULL) {
       lonejson_error lj_error;
+      memset(&adapter, 0, sizeof(adapter));
+      adapter.write = write;
+      adapter.user = write_user;
       if (lonejson_spooled_write_to_sink(
-              (const lonejson_spooled *)payload->spooled, payload_file_sink,
-              out, &lj_error) == LONEJSON_STATUS_OK) {
+              (const lonejson_spooled *)payload->spooled, payload_lql_sink,
+              &adapter, &lj_error) == LONEJSON_STATUS_OK) {
         return LQL_STATUS_OK;
+      }
+      if (adapter.status != LQL_STATUS_OK) {
+        lql_set_error(error, adapter.status, "payload sink write failed");
+        return adapter.status;
       }
       lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
       return LQL_STATUS_JSON_ERROR;
@@ -338,12 +376,26 @@ lql_status lql_payload_write_json(const lql_payload *payload, FILE *out,
                   "failed to record source position");
     return LQL_STATUS_UNSUPPORTED;
   }
-  if (!seek_u64(payload->source, payload->offset) ||
-      !copy_range(payload->source, out, payload->size) ||
-      fseeko(payload->source, current, SEEK_SET) != 0) {
+  if (!seek_u64(payload->source, payload->offset)) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
                   "failed to write seekable payload range");
     return LQL_STATUS_JSON_ERROR;
+  }
+  copy_status =
+      copy_range_to_sink(payload->source, payload->size, write, write_user);
+  if (fseeko(payload->source, current, SEEK_SET) != 0) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to write seekable payload range");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (copy_status != LQL_STATUS_OK) {
+    if (copy_status == LQL_STATUS_JSON_ERROR) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "failed to write seekable payload range");
+    } else {
+      lql_set_error(error, copy_status, "payload sink write failed");
+    }
+    return copy_status;
   }
   return LQL_STATUS_OK;
 }

@@ -496,13 +496,16 @@ Current implementation is an early slice:
   payload capture;
 - callback-source matched-candidate query streams expose callback-scoped
   `LQL_PAYLOAD_SPOOLED` payload handles and `lql_payload_write_json()` support
-  for non-seekable plus-value access without retaining payloads after the match
-  callback returns;
+  plus `lql_payload_write_json_sink()` support for non-seekable plus-value
+  access without retaining payloads after the match callback returns;
 - matched-candidate `FILE *` query streams expose callback-scoped
   `LQL_PAYLOAD_SEEKABLE_RANGE` payload handles, with
-  `lql_payload_write_json()` preserving the parser source position while it
-  rereads the matched candidate range; this path still uses candidate
-  `CAPTURE_NONE` and does not retain candidate JSON;
+  `lql_payload_write_json()` and `lql_payload_write_json_sink()` preserving the
+  parser source position while rereading the matched candidate range; this path
+  still uses candidate `CAPTURE_NONE` and does not retain candidate JSON;
+- seekable and spooled payload handles can be written to caller-managed sink
+  callbacks through `lql_payload_write_json_sink()` without requiring a
+  `FILE *`;
 - selection-mode `clql -M/--matches-only` matches Go CLI behavior by writing
   matched JSON candidates and returning success even when no candidates match;
   mutation-mode `-M` remains the Go-compatible output filter for matched
@@ -682,10 +685,14 @@ Current implementation is an early slice:
 - C SDK streaming tests assert the current malformed JSON corpus across
   seekable file decision streams, seekable file payload streams,
   callback-source decision streams, and callback-source spooled payload streams;
+- C SDK payload tests assert callback-scoped seekable and spooled payloads can
+  be written through caller-managed sink callbacks, including sink failure
+  propagation;
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
-  payload kinds, decoded matched payload JSON, and malformed JSON stream
-  errors. Full non-stopped streams report consumed input bytes, including
+  payload kinds, decoded matched payload JSON collected through the public
+  payload sink API, and malformed JSON stream errors. Full non-stopped streams
+  report consumed input bytes, including
   trailing delimiters, while early-stop streams retain candidate-end accounting
   for stop decisions;
 - C SDK unit coverage is manifest-checked: every `expect_* (void)` SDK
