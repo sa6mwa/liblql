@@ -2925,6 +2925,57 @@ func TestCLQLInlineMutationParity(t *testing.T) {
 	}
 }
 
+func TestCLQLInlineMutationProjectionDropAllParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	for _, flag := range []string{"-i", "-w"} {
+		flag := flag
+		t.Run(flag, func(t *testing.T) {
+			body := `{"id":"a"}
+{"id":"b"}`
+			tmp, err := os.CreateTemp(t.TempDir(), "clql-inline-project-empty-*.json")
+			if err != nil {
+				t.Fatalf("create temp: %v", err)
+			}
+			if _, err := tmp.WriteString(body); err != nil {
+				t.Fatalf("write temp: %v", err)
+			}
+			if err := tmp.Close(); err != nil {
+				t.Fatalf("close temp: %v", err)
+			}
+			cmd := exec.Command(
+				clql,
+				"-c",
+				flag,
+				"-f", "/missing",
+				"-m", "/noop=1",
+				`contains{f=/}`,
+				tmp.Name(),
+			)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("clql inline projection drop-all failed: %v out=%q", err, string(out))
+			}
+			if len(out) != 0 {
+				t.Fatalf("inline projection drop-all wrote stdout: %q", string(out))
+			}
+			gotBytes, err := os.ReadFile(tmp.Name())
+			if err != nil {
+				t.Fatalf("read inline projection drop-all file: %v", err)
+			}
+			got, err := decodeJSONValues(gotBytes)
+			if err != nil {
+				t.Fatalf("decode inline projection drop-all file: %v payload=%q", err, string(gotBytes))
+			}
+			if len(got) != 0 {
+				t.Fatalf("inline projection drop-all mismatch: got=%#v payload=%q", got, string(gotBytes))
+			}
+		})
+	}
+}
+
 func TestCLQLInlineMutationRejectsInvalidInputs(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {

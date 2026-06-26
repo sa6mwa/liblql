@@ -70,6 +70,7 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"mutation", "stdin projection before mutation with unmatched preservation", []string{"TestCLQLStdinMutationProjectionPreservesUnmatchedParity"}},
 	{"mutation", "stdin mutation matches-only output", []string{"TestCLQLStdinMutationMatchesOnlyParity"}},
 	{"mutation", "inline and write mutation modes", []string{"TestCLQLInlineMutationParity"}},
+	{"mutation", "inline and write mutation projection can produce empty files", []string{"TestCLQLInlineMutationProjectionDropAllParity"}},
 	{"mutation", "inline mutation input rejection", []string{"TestCLQLInlineMutationRejectsInvalidInputs"}},
 	{"mutation", "inline mutation execution errors preserve input files", []string{"TestCLQLInlineMutationExecutionErrors"}},
 }
