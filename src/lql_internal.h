@@ -222,11 +222,9 @@ LQL_INTERNAL_SYMBOL size_t
 lql_mutation_plan_count_impl(const lql *self, const lql_mutation_plan *plan);
 LQL_INTERNAL_SYMBOL void lql_mutation_plan_destroy_impl(lql *self,
                                                      lql_mutation_plan *plan);
-lql_status lql_mutate_file_range_root_fields_impl(lql *self,
-                                                  const lql_mutation_plan *plan,
-                                                  FILE *file, lql_uint64 offset,
-                                                  lql_uint64 size, FILE *out,
-                                                  lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_root_fields_impl(
+    lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
+    lql_uint64 size, FILE *out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_paths_impl(
     lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, lql_error *error);
