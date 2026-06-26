@@ -117,7 +117,7 @@ EOF
 cat >"$tmp/src/clql.c" <<'EOF'
 void *bad_cli_null_receiver_allocator(void) { return lql_allocator_from_receiver(NULL); }
 void cli_private_exec(void) { (void)lql_eval_query_file_spooled_matches; }
-void *clql_allocator(void) { return lql_allocator_from_receiver(clql_ctx); }
+void *bad_clql_default_allocator(void) { return lql_allocator_default(); }
 EOF
 
 cat >"$tmp/examples/global_query.c" <<'EOF'
@@ -159,7 +159,7 @@ expect_diagnostic "$out" "receiver operation internals must not be shared"
 expect_diagnostic "$out" "README documents forbidden operation/cleanup wrapper"
 expect_diagnostic "$out" "Lua facade must use public liblql APIs only"
 expect_diagnostic "$out" "clql must route execution through receiver methods"
-expect_diagnostic "$out" "clql glue allocation must not depend on liblql receiver ownership"
+expect_diagnostic "$out" "clql glue allocation must use the active receiver allocator"
 expect_diagnostic "$out" "project-owned consumers must query version/capabilities through the receiver"
 expect_diagnostic "$out" "tests and examples must exercise operations through receiver methods"
 expect_diagnostic "$out" "parity C operation helpers must receive lql \*ctx first"

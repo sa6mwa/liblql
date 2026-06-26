@@ -810,11 +810,11 @@ Current implementation status:
   execution shortcuts in `src/clql.c` so CLI behavior remains aligned with the
   library surface rather than an internal-only path;
 - `clql` process-glue allocations for parsed argv lists, joined selector text,
-  and inline temp path ownership use one CLI glue allocator independent of
-  `clql_ctx`; the style gate rejects both receiver-derived `clql_ctx` glue
-  allocation and null-receiver allocator fallback in project runtime code, so
-  argv-derived buffers cannot be allocated before `lql_new()` and later freed
-  through a different receiver-owned allocator;
+  and inline temp path ownership use the active `lql *` receiver allocator
+  after `lql_new()` succeeds; the style gate rejects direct
+  `lql_allocator_default()` use in `src/clql.c` and null-receiver allocator
+  fallback in project runtime code, so argv-derived buffers cannot be allocated
+  before receiver construction or freed through a different allocator domain;
 - `clql -m/--mutate -f/--field` follows Go CLI order for seekable file input
   and non-seekable stdin: project each output candidate first, then mutate the
   projected value only for matched candidates; this path uses callback-scoped

@@ -716,13 +716,13 @@ int main(int argc, char **argv) {
   selector_expr = NULL;
   selector_expr_owned = NULL;
   input_path = NULL;
-  clql_alloc = lql_allocator_default();
   lql_error_init(&error);
   st = lql_new(&clql_ctx, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
     return 1;
   }
+  clql_alloc = lql_allocator_from_receiver(clql_ctx);
   (void)atexit(destroy_clql_ctx);
   for (i = 1; i < argc; ++i) {
     if (end_options) {
