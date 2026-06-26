@@ -233,6 +233,17 @@ if(LQL_BUILD_TESTS)
   set_tests_properties(lql.clean-fixtures PROPERTIES
     LABELS "unit;operability" TIMEOUT 5)
 
+  add_test(NAME lql.script-modes
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_script_modes.sh
+      ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(lql.script-modes PROPERTIES
+    LABELS "unit;operability" TIMEOUT 5)
+  add_test(NAME lql.script-modes-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_script_modes.sh
+      --fixtures)
+  set_tests_properties(lql.script-modes-fixtures PROPERTIES
+    LABELS "unit;operability" TIMEOUT 5)
+
   add_test(NAME lql.cmake-presets
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_cmake_presets.sh
       ${CMAKE_CURRENT_SOURCE_DIR}/CMakePresets.json)

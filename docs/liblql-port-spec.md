@@ -577,6 +577,10 @@ Current implementation status:
   public allocator-free wrappers, receiver `*_free` fields, static cleanup
   wrappers, direct runtime allocation, old allocator wrapper calls, and
   `LQL_ALLOCATOR_*` macro wrapper calls;
+- `make test` includes `lql.script-modes` and fixture coverage that fails when
+  repository-owned shell entrypoints under `scripts/` are not executable, so
+  lifecycle and API-style gates remain directly runnable developer surfaces
+  instead of relying only on `sh script` invocation from CTest;
 - Go-backed SDK parity remains an oracle harness, not an alternate C SDK
   surface: C helpers in `parity/sdk_liblql.go` that perform liblql operations
   must receive `lql *ctx` as their first argument and dispatch through
