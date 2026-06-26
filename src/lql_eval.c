@@ -851,8 +851,8 @@ static lql_status eval_project_then_maybe_mutate_spooled(
                     "failed to size projection temp file");
       st = LQL_STATUS_JSON_ERROR;
     } else if (matched && mutation_plan != NULL) {
-      st = lql_mutate_file_range_paths_impl(self, mutation_plan, projected_file,
-                                            0u, projected_size, out, error);
+      st = self->mutate_file_range_paths(self, mutation_plan, projected_file,
+                                         0u, projected_size, out, error);
     } else if (!eval_seek_u64(projected_file, 0u) ||
                !eval_copy_range(projected_file, out, projected_size)) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR,
@@ -1193,8 +1193,8 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
           wrote_output = 1;
         } else if (lql_mutate_spooled_paths(
                        state->receiver, state->mutation_plan,
-                       candidate->payload_spool,
-                       state->out, &state->mutation_error) != LQL_STATUS_OK) {
+                       candidate->payload_spool, state->out,
+                       &state->mutation_error) != LQL_STATUS_OK) {
           error->code = LONEJSON_STATUS_CALLBACK_FAILED;
           strncpy(error->message, state->mutation_error.message,
                   sizeof(error->message) - 1u);
@@ -1259,12 +1259,9 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_eval_selector(lql *self,
-                                                 const lql_selector *selector,
-                                                 const char *json,
-                                                 size_t json_len,
-                                                 int *out_matched,
-                                                 lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status
+lql_eval_selector(lql *self, const lql_selector *selector, const char *json,
+                  size_t json_len, int *out_matched, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;

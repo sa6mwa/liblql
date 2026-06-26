@@ -972,21 +972,21 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
   projection->allocator = allocator;
   for (i = 0u; i < field_count; ++i) {
     if (!parse_projection_path(allocator, fields[i], &path)) {
-      lql_projection_destroy_impl(self, projection);
+      self->projection_destroy(self, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "invalid or unsupported projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
     if (!add_path(projection, &path)) {
       projection_path_cleanup(allocator, &path);
-      lql_projection_destroy_impl(self, projection);
+      self->projection_destroy(self, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "conflicting projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
   }
   if (projection->path_count == 0u) {
-    lql_projection_destroy_impl(self, projection);
+    self->projection_destroy(self, projection);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "projection fields required");
     return LQL_STATUS_PARSE_ERROR;
   }
@@ -1142,10 +1142,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_project_json_impl(
                             out_found, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_project_spooled(
-    lql *self, const lql_projection *projection,
-    const lonejson_spooled *spooled, FILE *out, int *out_found,
-    lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status
+lql_project_spooled(lql *self, const lql_projection *projection,
+                    const lonejson_spooled *spooled, FILE *out, int *out_found,
+                    lql_error *error) {
   lonejson_spooled cursor;
   if (spooled == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,

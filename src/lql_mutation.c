@@ -1088,7 +1088,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
       continue;
     }
     if (!split_expressions(allocator, exprs[i], &parts, error)) {
-      lql_mutation_plan_destroy_impl(self, plan);
+      self->mutation_plan_destroy(self, plan);
       return error != NULL && error->code != LQL_STATUS_OK
                  ? error->code
                  : LQL_STATUS_NO_MEMORY;
@@ -1097,7 +1097,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
       if (!parse_mutation_expr(allocator, parts.items[j], plan, options,
                                error)) {
         string_list_cleanup(allocator, &parts);
-        lql_mutation_plan_destroy_impl(self, plan);
+        self->mutation_plan_destroy(self, plan);
         return error != NULL && error->code != LQL_STATUS_OK
                    ? error->code
                    : LQL_STATUS_NO_MEMORY;
@@ -1106,7 +1106,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
     string_list_cleanup(allocator, &parts);
   }
   if (plan->count == 0u) {
-    lql_mutation_plan_destroy_impl(self, plan);
+    self->mutation_plan_destroy(self, plan);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "no valid field mutations parsed");
     return LQL_STATUS_PARSE_ERROR;
@@ -1118,8 +1118,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
 LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_impl(
     lql *self, const char *const *exprs, size_t expr_count,
     lql_mutation_plan **out, lql_error *error) {
-  return lql_mutation_plan_parse_with_options_impl(self, exprs, expr_count,
-                                                   NULL, out, error);
+  return self->mutation_plan_parse_with_options(self, exprs, expr_count, NULL,
+                                                out, error);
 }
 
 LQL_INTERNAL_SYMBOL size_t
@@ -2516,12 +2516,9 @@ static lql_status mutate_reader_with_supported_plan(
   return LQL_STATUS_OK;
 }
 
-static lql_status
-mutate_file_range_with_supported_plan(lql *self,
-                                      const lql_mutation_plan *plan,
-                                      FILE *file, lql_uint64 offset,
-                                      lql_uint64 size, FILE *out,
-                                      lql_error *error) {
+static lql_status mutate_file_range_with_supported_plan(
+    lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
+    lql_uint64 size, FILE *out, lql_error *error) {
   limited_file_reader reader;
   if (file == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -2623,8 +2620,8 @@ lql_mutate_json_impl(lql *self, const lql_mutation_plan *plan, const char *json,
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_spooled_paths(
-    lql *self, const lql_mutation_plan *plan,
-    const lonejson_spooled *spooled, FILE *out, lql_error *error) {
+    lql *self, const lql_mutation_plan *plan, const lonejson_spooled *spooled,
+    FILE *out, lql_error *error) {
   lonejson_spooled cursor;
   if (plan == NULL || spooled == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,

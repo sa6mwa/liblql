@@ -35,12 +35,9 @@ typedef struct output_ranges {
 } output_ranges;
 
 static lql *clql_ctx = NULL;
+static lql_allocator *clql_alloc = NULL;
 
 static int is_regular_file_path(const char *path);
-
-static lql_allocator *clql_allocator(void) {
-  return lql_allocator_default();
-}
 
 static lql_read_result clql_file_read(void *user, unsigned char *buffer,
                                       size_t capacity) {
@@ -179,7 +176,7 @@ static void destroy_projection_args(projection_args *args) {
   if (args == NULL) {
     return;
   }
-  clql_allocator()->destroy(clql_allocator(), args->items);
+  clql_alloc->destroy(clql_alloc, args->items);
   args->items = NULL;
   args->count = 0u;
 }
@@ -189,9 +186,8 @@ static int add_projection_arg(projection_args *args, const char *path) {
   if (args == NULL || path == NULL) {
     return 0;
   }
-  next = (char **)clql_allocator()->realloc(
-      clql_allocator(), args->items,
-      sizeof(args->items[0]) * (args->count + 1u));
+  next = (char **)clql_alloc->realloc(
+      clql_alloc, args->items, sizeof(args->items[0]) * (args->count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -396,9 +392,9 @@ static char *join_selector_args(const projection_args *args, size_t skip_index,
     ++count;
   }
   if (count == 0u) {
-    return clql_allocator()->strdup(clql_allocator(), "");
+    return clql_alloc->strdup(clql_alloc, "");
   }
-  out = (char *)clql_allocator()->alloc(clql_allocator(), total);
+  out = (char *)clql_alloc->alloc(clql_alloc, total);
   if (out == NULL) {
     return NULL;
   }
@@ -442,9 +438,9 @@ static char *join_selector_args_excluding_inputs(const projection_args *args) {
     ++count;
   }
   if (count == 0u) {
-    return clql_allocator()->strdup(clql_allocator(), "");
+    return clql_alloc->strdup(clql_alloc, "");
   }
-  out = (char *)clql_allocator()->alloc(clql_allocator(), total);
+  out = (char *)clql_alloc->alloc(clql_alloc, total);
   if (out == NULL) {
     return NULL;
   }
@@ -587,20 +583,17 @@ static lql_status output_payload_match(void *user,
   }
   if (ranges->projection != NULL) {
     projected = 0;
-    if (ranges->ctx->payload_project_json(ranges->ctx, &match->payload,
-                                          ranges->projection, ranges->out,
-                                          &projected,
-                                          &ranges->callback_error) !=
-        LQL_STATUS_OK) {
+    if (ranges->ctx->payload_project_json(
+            ranges->ctx, &match->payload, ranges->projection, ranges->out,
+            &projected, &ranges->callback_error) != LQL_STATUS_OK) {
       return ranges->callback_error.code;
     }
     if (!projected) {
       return LQL_STATUS_OK;
     }
-  } else if (ranges->ctx->payload_write_json(ranges->ctx, &match->payload,
-                                             ranges->out,
-                                             &ranges->callback_error) !=
-             LQL_STATUS_OK) {
+  } else if (ranges->ctx->payload_write_json(
+                 ranges->ctx, &match->payload, ranges->out,
+                 &ranges->callback_error) != LQL_STATUS_OK) {
     return ranges->callback_error.code;
   }
   if (fputc('\n', ranges->out) == EOF) {
@@ -635,8 +628,8 @@ static int create_inline_temp(const char *path, char **out_path,
   FILE *file;
   struct stat st;
   len = strlen(path);
-  template_path = (char *)clql_allocator()->alloc(
-      clql_allocator(), len + strlen(".lql-XXXXXX") + 1u);
+  template_path =
+      (char *)clql_alloc->alloc(clql_alloc, len + strlen(".lql-XXXXXX") + 1u);
   if (template_path == NULL) {
     return 0;
   }
@@ -644,7 +637,7 @@ static int create_inline_temp(const char *path, char **out_path,
   memcpy(template_path + len, ".lql-XXXXXX", strlen(".lql-XXXXXX") + 1u);
   fd = mkstemp(template_path);
   if (fd < 0) {
-    clql_allocator()->destroy(clql_allocator(), template_path);
+    clql_alloc->destroy(clql_alloc, template_path);
     return 0;
   }
   if (stat(path, &st) == 0) {
@@ -654,7 +647,7 @@ static int create_inline_temp(const char *path, char **out_path,
   if (file == NULL) {
     close(fd);
     unlink(template_path);
-    clql_allocator()->destroy(clql_allocator(), template_path);
+    clql_alloc->destroy(clql_alloc, template_path);
     return 0;
   }
   *out_path = template_path;
@@ -723,6 +716,7 @@ int main(int argc, char **argv) {
   selector_expr = NULL;
   selector_expr_owned = NULL;
   input_path = NULL;
+  clql_alloc = lql_allocator_default();
   for (i = 1; i < argc; ++i) {
     if (end_options) {
       if (!add_projection_arg(&positionals, argv[i])) {
@@ -959,8 +953,7 @@ int main(int argc, char **argv) {
   selector_expr = selector_expr_owned;
   if (argc == 1) {
     usage(stderr);
-    clql_allocator()->destroy(clql_allocator(),
-                                     selector_expr_owned);
+    clql_alloc->destroy(clql_alloc, selector_expr_owned);
     destroy_projection_args(&fields);
     destroy_projection_args(&mutations);
     destroy_projection_args(&positionals);
@@ -972,8 +965,7 @@ int main(int argc, char **argv) {
   st = lql_new(&clql_ctx, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
-    clql_allocator()->destroy(clql_allocator(),
-                                     selector_expr_owned);
+    clql_alloc->destroy(clql_alloc, selector_expr_owned);
     destroy_projection_args(&fields);
     destroy_projection_args(&mutations);
     destroy_projection_args(&input_paths);
@@ -985,8 +977,7 @@ int main(int argc, char **argv) {
                                     fields.count, &projection, &error);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
-      clql_allocator()->destroy(clql_allocator(),
-                                       selector_expr_owned);
+      clql_alloc->destroy(clql_alloc, selector_expr_owned);
       destroy_projection_args(&fields);
       destroy_projection_args(&mutations);
       destroy_projection_args(&input_paths);
@@ -1002,8 +993,7 @@ int main(int argc, char **argv) {
         &mutation_options, &mutation_plan, &error);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
-      clql_allocator()->destroy(clql_allocator(),
-                                       selector_expr_owned);
+      clql_alloc->destroy(clql_alloc, selector_expr_owned);
       clql_ctx->projection_destroy(clql_ctx, projection);
       destroy_projection_args(&fields);
       destroy_projection_args(&mutations);
@@ -1017,8 +1007,7 @@ int main(int argc, char **argv) {
                                           &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
-    clql_allocator()->destroy(clql_allocator(),
-                                     selector_expr_owned);
+    clql_alloc->destroy(clql_alloc, selector_expr_owned);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
     destroy_projection_args(&fields);
@@ -1028,8 +1017,7 @@ int main(int argc, char **argv) {
   }
   if (inline_mode && mutation_plan == NULL) {
     fprintf(stderr, "clql: inline mode requires mutation expressions\n");
-    clql_allocator()->destroy(clql_allocator(),
-                                     selector_expr_owned);
+    clql_alloc->destroy(clql_alloc, selector_expr_owned);
     clql_ctx->selector_destroy(clql_ctx, selector);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
@@ -1040,8 +1028,7 @@ int main(int argc, char **argv) {
   }
   if (inline_mode && input_paths.count == 0u) {
     fprintf(stderr, "clql: inline mode requires a file path\n");
-    clql_allocator()->destroy(clql_allocator(),
-                                     selector_expr_owned);
+    clql_alloc->destroy(clql_alloc, selector_expr_owned);
     clql_ctx->selector_destroy(clql_ctx, selector);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
@@ -1053,8 +1040,7 @@ int main(int argc, char **argv) {
   if (inline_mode && (input_paths.count != 1u || input_path == NULL ||
                       strcmp(input_path, "-") == 0)) {
     fprintf(stderr, "clql: inline mode requires a single JSON file\n");
-    clql_allocator()->destroy(clql_allocator(),
-                                     selector_expr_owned);
+    clql_alloc->destroy(clql_alloc, selector_expr_owned);
     clql_ctx->selector_destroy(clql_ctx, selector);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
@@ -1078,8 +1064,7 @@ int main(int argc, char **argv) {
         }
         if (st != LQL_STATUS_OK) {
           fprintf(stderr, "clql: %s\n", error.message);
-          clql_allocator()->destroy(clql_allocator(),
-                                           selector_expr_owned);
+          clql_alloc->destroy(clql_alloc, selector_expr_owned);
           clql_ctx->selector_destroy(clql_ctx, selector);
           clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
           clql_ctx->projection_destroy(clql_ctx, projection);
@@ -1097,8 +1082,7 @@ int main(int argc, char **argv) {
                 input_paths.items[i]);
         close_input_path(input);
         close_input_path(range_source);
-        clql_allocator()->destroy(clql_allocator(),
-                                         selector_expr_owned);
+        clql_alloc->destroy(clql_alloc, selector_expr_owned);
         clql_ctx->selector_destroy(clql_ctx, selector);
         clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
         clql_ctx->projection_destroy(clql_ctx, projection);
@@ -1127,8 +1111,7 @@ int main(int argc, char **argv) {
       close_input_path(range_source);
       if (st != LQL_STATUS_OK) {
         fprintf(stderr, "clql: %s\n", error.message);
-        clql_allocator()->destroy(clql_allocator(),
-                                         selector_expr_owned);
+        clql_alloc->destroy(clql_alloc, selector_expr_owned);
         clql_ctx->selector_destroy(clql_ctx, selector);
         clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
         clql_ctx->projection_destroy(clql_ctx, projection);
@@ -1138,8 +1121,7 @@ int main(int argc, char **argv) {
         return 1;
       }
     }
-    clql_allocator()->destroy(clql_allocator(),
-                                     selector_expr_owned);
+    clql_alloc->destroy(clql_alloc, selector_expr_owned);
     clql_ctx->selector_destroy(clql_ctx, selector);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
@@ -1153,8 +1135,7 @@ int main(int argc, char **argv) {
     range_source = fopen(input_path, "rb");
     if (input == NULL || range_source == NULL) {
       fprintf(stderr, "clql: failed to open input %s\n", input_path);
-      clql_allocator()->destroy(clql_allocator(),
-                                       selector_expr_owned);
+      clql_alloc->destroy(clql_alloc, selector_expr_owned);
       close_input_path(input);
       close_input_path(range_source);
       clql_ctx->selector_destroy(clql_ctx, selector);
@@ -1171,8 +1152,7 @@ int main(int argc, char **argv) {
     if (inline_mode &&
         !create_inline_temp(input_path, &inline_tmp_path, &inline_out)) {
       fprintf(stderr, "clql: failed to create inline temp file\n");
-      clql_allocator()->destroy(clql_allocator(),
-                                       selector_expr_owned);
+      clql_alloc->destroy(clql_alloc, selector_expr_owned);
       close_input_path(input);
       close_input_path(range_source);
       clql_ctx->selector_destroy(clql_ctx, selector);
@@ -1218,12 +1198,10 @@ int main(int argc, char **argv) {
       if (st != LQL_STATUS_OK) {
         unlink(inline_tmp_path);
       }
-      clql_allocator()->destroy(clql_allocator(),
-                                       inline_tmp_path);
+      clql_alloc->destroy(clql_alloc, inline_tmp_path);
       inline_tmp_path = NULL;
     }
-    clql_allocator()->destroy(clql_allocator(),
-                                     selector_expr_owned);
+    clql_alloc->destroy(clql_alloc, selector_expr_owned);
     clql_ctx->selector_destroy(clql_ctx, selector);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
@@ -1262,8 +1240,7 @@ int main(int argc, char **argv) {
     }
   }
   clql_ctx->selector_destroy(clql_ctx, selector);
-  clql_allocator()->destroy(clql_allocator(),
-                                   selector_expr_owned);
+  clql_alloc->destroy(clql_alloc, selector_expr_owned);
   clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
   clql_ctx->projection_destroy(clql_ctx, projection);
   destroy_projection_args(&fields);

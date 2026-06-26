@@ -976,7 +976,8 @@ Current implementation status:
   placeholder release target, verifies the project warning policy includes
   `-Werror`, verifies project-owned compiled targets apply that policy, and is
   included in source-archive verification so extracted release sources preserve
-  the same lifecycle surface;
+  the same lifecycle surface; `lql.release-surface-fixtures` proves the gate
+  fails when `-Werror` or project target warning application is removed;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification, artifact-local lonejson dependency provenance manifests, and
