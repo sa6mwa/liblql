@@ -1782,10 +1782,13 @@ static void expect_stream_array_items(void) {
 
 static void expect_stream_nested_array_items(void) {
   static const char input[] = "[{\"id\":\"a\"},[{\"id\":\"b\"}],{\"id\":\"c\"}]";
+  FILE *fp;
   FILE *out;
   lql_selector *selector;
   lql_query_result result;
+  stream_seen seen;
   payload_seen payload;
+  memory_sink sink;
   chunk_reader reader;
   char buf[64];
   long end;
@@ -1799,6 +1802,70 @@ static void expect_stream_nested_array_items(void) {
     printf("nested array stream parse failed: %s\n", error.message);
     ++failures;
     return;
+  }
+  fp = tmpfile();
+  if (fp == NULL) {
+    printf("nested array decision tmpfile failed\n");
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||
+      fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("nested array decision tmpfile write/seek failed\n");
+    fclose(fp);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  memset(&seen, 0, sizeof(seen));
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
+                                      &seen, &result, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("nested array file decision query failed: %s\n", error.message);
+    fclose(fp);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (seen.calls != 3 || seen.matched != 1 ||
+      result.candidates_seen != (lql_uint64)3 ||
+      result.candidates_matched != (lql_uint64)1) {
+    printf("nested array file decision mismatch calls=%d matched=%d seen=%lu "
+           "matched_result=%lu\n",
+           seen.calls, seen.matched, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched);
+    ++failures;
+  }
+  if (fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("nested array range payload seek failed\n");
+    fclose(fp);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  memset(&sink, 0, sizeof(sink));
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = test_ctx->query_file_matches(test_ctx, selector, fp, record_payload_sink,
+                                    &sink, &result, &error);
+  fclose(fp);
+  if (st != LQL_STATUS_OK) {
+    printf("nested array file payload query failed: %s\n", error.message);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (result.candidates_seen != (lql_uint64)3 ||
+      result.candidates_matched != (lql_uint64)1 ||
+      strcmp(sink.data, "{\"id\":\"b\"}") != 0) {
+    printf("nested array file payload mismatch seen=%lu matched=%lu "
+           "payload=%s\n",
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched, sink.data);
+    ++failures;
   }
   out = tmpfile();
   if (out == NULL) {

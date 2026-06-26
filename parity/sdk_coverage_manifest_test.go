@@ -44,6 +44,7 @@ var sdkParityCoverageManifest = []sdkParityCoverageRequirement{
 	{"compact", "public liblql buffered, source-backed, and seekable file-range compaction match standard compact JSON behavior for current compact corpus", []string{"TestSDKCompactParity"}},
 	{"compact", "public liblql buffered, source-backed, and seekable file-range compaction errors match standard compact JSON errors for current invalid corpus", []string{"TestSDKCompactErrorParity"}},
 	{"streaming", "public liblql file and callback-source decision stream summaries match Go query stream summaries for current stream corpus", []string{"TestSDKStreamingDecisionParity"}},
+	{"streaming", "public liblql seekable file decision streams flatten nested top-level arrays like Go query streams", []string{"TestSDKStreamingNestedArrayFileDecisionParity"}},
 	{"streaming", "public liblql seekable and spooled payload streams written through caller-managed sinks match Go query stream payload behavior for current stream corpus", []string{"TestSDKStreamingPayloadParity"}},
 	{"streaming", "public liblql stream stop controls match Go query stream stop behavior for current stop corpus", []string{"TestSDKStreamingStopParity"}},
 	{"streaming", "public liblql stream JSON errors match Go query stream errors for current malformed corpus", []string{"TestSDKStreamingErrorParity"}},

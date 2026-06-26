@@ -1132,6 +1132,22 @@ func TestSDKStreamingDecisionParity(t *testing.T) {
 	}
 }
 
+func TestSDKStreamingNestedArrayFileDecisionParity(t *testing.T) {
+	doc := `[{"id":"a"},[{"id":"b"}],{"id":"c"}]`
+	want, err := goStreamQuery(`/id="b"`, doc, 0, 0, 0, 0, false)
+	if err != nil {
+		t.Fatalf("go nested array file decision: %v", err)
+	}
+	got, err := cStreamQuery(`/id="b"`, doc, 0, 0, 0, 0, false)
+	if err != nil {
+		t.Fatalf("liblql nested array file decision: %v", err)
+	}
+	assertStreamSummaryParity(t, got, want)
+	if got.DecisionCallbacks != want.DecisionCallbacks {
+		t.Fatalf("nested array decision callback mismatch: got=%d want=%d", got.DecisionCallbacks, want.DecisionCallbacks)
+	}
+}
+
 func TestSDKStreamingPayloadParity(t *testing.T) {
 	for _, tc := range []struct {
 		name                 string
@@ -1168,6 +1184,13 @@ func TestSDKStreamingPayloadParity(t *testing.T) {
 			doc:                 "\"x\"\n{\"id\":\"x\"}\n123\n",
 			mode:                2,
 			wantSpooledPayloads: 1,
+		},
+		{
+			name:                 "nested array seekable file range",
+			expr:                 `/id="b"`,
+			doc:                  `[{"id":"a"},[{"id":"b"}],{"id":"c"}]`,
+			mode:                 1,
+			wantSeekablePayloads: 1,
 		},
 		{
 			name:                "nested array callback source spooled payload",

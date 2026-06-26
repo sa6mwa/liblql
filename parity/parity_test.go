@@ -555,6 +555,11 @@ func TestCLQLSeekableFileOutputParity(t *testing.T) {
 			body: `[{"status":"closed","id":"a"}, {"status":"open","id":"b"}]`,
 		},
 		{
+			name: "nested array match",
+			expr: `/id="b"`,
+			body: `[{"id":"a"},[{"id":"b"}],{"id":"c"}]`,
+		},
+		{
 			name: "no match",
 			expr: `/status="open"`,
 			body: "{\"status\":\"closed\",\"id\":\"a\"}\n{\"status\":\"done\",\"id\":\"b\"}\n",

@@ -943,7 +943,8 @@ Current implementation status:
   Projection-before-mutation candidate-stream tests cover both seekable and
   callback-source inputs in preserve-unmatched and matches-only modes.
   C-native streaming tests also cover recursive flattening of nested
-  top-level array candidates for callback-source spooled match payloads.
+  top-level array candidates for seekable decision streams, seekable range
+  payload streams, and callback-source spooled match payloads.
   Handle-producing selector, projection, and mutation APIs also have
   C-only ownership contract tests for optional diagnostics, output-handle
   clearing on parse failure, empty-selector ownership, and `NULL` cleanup/count
@@ -1031,13 +1032,12 @@ Current implementation status:
   success/error, mutation success/error, compact success/error, and stream
   corpora; this is behavioral oracle coverage, not C SDK unit coverage and not
   a requirement that the C API mirror Go API shape;
-- Nested top-level array flattening is currently proven for `clql` stdin
-  selection and public `ctx->query_source_spooled_matches()` callback-source
-  payload streams. It is not yet claimed for `ctx->query_file_decisions()` or
-  `ctx->query_file_matches()` because those seekable no-capture/range-payload
-  paths cannot safely reread nested candidate ranges from the same active
-  parser callback without either a lonejson nested-candidate API or hidden
-  payload capture;
+- Nested top-level array flattening is proven for `clql` stdin and seekable
+  file selection, `ctx->query_file_decisions()`, `ctx->query_file_matches()`,
+  and `ctx->query_source_spooled_matches()`. Seekable recursion rereads nested
+  candidate ranges with absolute-offset `pread()` range readers so the active
+  parser cursor is not disturbed and no hidden candidate materialization is
+  introduced; callback-source recursion uses callback-scoped spooled payloads;
 - C SDK projection tests assert duplicate projection paths are
   idempotent and parent/child projection path conflicts are rejected through
   the public projection API;
