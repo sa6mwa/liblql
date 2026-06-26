@@ -18,6 +18,12 @@ local function assert_no_error(value, err, message)
   return value
 end
 
+local function assert_match(client, selector, json, want, message)
+  local matched, err = client:matches_json(selector, json)
+  matched = assert_no_error(matched, err, message)
+  assert_equal(matched, want, message)
+end
+
 if os.getenv("LQL_REQUIRE_CORE") == "1" and not lql.has_core() then
   fail("direct lql.core module was not loaded")
 end
@@ -31,6 +37,45 @@ assert_equal(matched, true, "core matches_json open")
 matched, err = client:matches_json('/status="open"', '{"status":"closed"}')
 matched = assert_no_error(matched, err, "core matches_json closed")
 assert_equal(matched, false, "core matches_json closed")
+
+local object_doc =
+  '{"hello":{"world":{"nested":true}},"arrays":[{"id":1}]}'
+local array_doc = '{"hello":{"world":[1,2,3]},"arrays":[{"id":1}]}'
+local null_doc = '{"hello":{"world":null},"arrays":[{"id":1}]}'
+local missing_doc = '{"hello":{"other":"x"},"arrays":[{"id":1}]}'
+local path_selectors = {
+  'contains{f=/hello/world}',
+  'icontains{f=/hello/world}',
+  'prefix{f=/hello/world}',
+  'iprefix{f=/hello/world}'
+}
+
+for _, selector in ipairs(path_selectors) do
+  assert_match(client, selector, object_doc, true,
+               "core omitted string selector object")
+  assert_match(client, selector, array_doc, true,
+               "core omitted string selector array")
+  assert_match(client, selector, null_doc, true,
+               "core omitted string selector null")
+  assert_match(client, selector, missing_doc, false,
+               "core omitted string selector missing")
+end
+
+local wildcard_doc =
+  '{"hello":{"world":{"nested":true},"names":["alice","bob"]},' ..
+  '"arrays":[{"id":1},{"id":2}]}'
+assert_match(client, 'contains{f=/hello/*}', wildcard_doc, true,
+             "core omitted string object wildcard")
+assert_match(client, 'contains{f=/hello/...}', wildcard_doc, true,
+             "core omitted string recursive wildcard")
+assert_match(client, 'contains{f=/arrays/[]}', wildcard_doc, true,
+             "core omitted string array wildcard")
+assert_match(client, 'contains{f=/arrays/[]/id}', wildcard_doc, true,
+             "core omitted string array child wildcard")
+assert_match(client, 'contains{f=/missing/...}', wildcard_doc, false,
+             "core omitted string missing recursive wildcard")
+assert_match(client, 'not.icontains{f=/,v=""}', '{"status":"open"}', false,
+             "core empty root string negation")
 
 local selected
 selected, err = client:select_json('/status="open"',

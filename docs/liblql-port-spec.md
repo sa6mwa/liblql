@@ -1015,6 +1015,10 @@ Current implementation status:
   across object, array, and null values, including wildcard path variants, while
   explicit empty-string root string selectors remain match-all and their
   negation remains never-match;
+- Lua direct-core smoke tests assert the same omitted-value string selector
+  contract through `client:matches_json()`, so the Lua facade proves this
+  behavior through public liblql receiver calls rather than relying on `clql` or
+  Go parity fixtures;
 - C SDK mutation tests assert explicit file-backed text values reject invalid
   UTF-8 and NUL bytes at execution time with actionable diagnostics instead of
   writing invalid JSON string content;
