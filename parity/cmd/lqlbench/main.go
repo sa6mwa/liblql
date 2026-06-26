@@ -48,7 +48,23 @@ func (r readerOnly) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 
-func benchmarkMutationsForExpr(expr string) []string {
+func benchmarkMutationsForSelector(selectorName string, expr string) []string {
+	switch selectorName {
+	case "realworld_eq_sparse":
+		return []string{"/event=session_sync"}
+	case "realworld_eq_dense":
+		return []string{"/component=lql"}
+	case "realworld_nested_eq_sparse":
+		return []string{"/query/hash=ff"}
+	case "realworld_range_sparse":
+		return []string{"/code=+1"}
+	case "realworld_recursive_nested_eq_sparse":
+		return []string{"rm:/payload"}
+	case "realworld_contains_event_sparse":
+		return []string{"/meta/bench=true"}
+	case "realworld_multi_clause_and":
+		return []string{"/component=lql", "/event=session_sync", "/code=+1", "rm:/payload", "/meta/bench=true"}
+	}
 	if strings.Contains(expr, "/voucher/lines/10/") {
 		return []string{"/voucher/lines/10/bench=true"}
 	}
@@ -116,13 +132,13 @@ func main() {
 		payloadSourceType = "projection"
 	}
 	if submode == "steady_state" {
-		if _, _, _, err := runBenchmark(file, sel, expr, mode); err != nil {
+		if _, _, _, err := runBenchmark(file, sel, selectorName, expr, mode); err != nil {
 			fmt.Fprintf(os.Stderr, "lqlbench: warmup stream: %v\n", err)
 			os.Exit(1)
 		}
 	}
 	start := time.Now()
-	result, payloads, payloadBytes, err := runBenchmark(file, sel, expr, mode)
+	result, payloads, payloadBytes, err := runBenchmark(file, sel, selectorName, expr, mode)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "lqlbench: stream: %v\n", err)
 		os.Exit(1)
@@ -156,9 +172,9 @@ func main() {
 	}
 }
 
-func runBenchmark(file *os.File, sel lql.Selector, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
+func runBenchmark(file *os.File, sel lql.Selector, selectorName string, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
 	if isMutationMode(mode) {
-		return runMutation(file, sel, expr, mode)
+		return runMutation(file, sel, selectorName, expr, mode)
 	}
 	if isProjectionMode(mode) {
 		return runProjection(file, sel, mode)
@@ -181,11 +197,11 @@ func peakRSSBytes() *int64 {
 	return &value
 }
 
-func runMutation(file *os.File, sel lql.Selector, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
+func runMutation(file *os.File, sel lql.Selector, selectorName string, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
 	if _, err := file.Seek(0, 0); err != nil {
 		return lql.QueryStreamResult{}, 0, 0, err
 	}
-	parsed, err := lql.ParseMutations(benchmarkMutationsForExpr(expr), time.Unix(1700000000, 0))
+	parsed, err := lql.ParseMutations(benchmarkMutationsForSelector(selectorName, expr), time.Unix(1700000000, 0))
 	if err != nil {
 		return lql.QueryStreamResult{}, 0, 0, err
 	}

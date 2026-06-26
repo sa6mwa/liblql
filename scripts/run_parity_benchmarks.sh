@@ -70,6 +70,8 @@ cli_array_fixture="$fixture_dir/selection_array.json"
 cli_single_fixture="$fixture_dir/selection_single_json.json"
 lockd_ndjson_fixture="$fixture_dir/lockd_ndjson.jsonl"
 mixed_root_ndjson_fixture="$fixture_dir/mixed_root_ndjson.jsonl"
+realworld_compact_fixture="$fixture_dir/realworld_compact_ndjson.jsonl"
+realworld_pretty_nested_fixture="$fixture_dir/realworld_pretty_nested.jsonl"
 case_matrix="$fixture_dir/cases.tsv"
 go_counts_file="$fixture_dir/go-counts.txt"
 c_counts_file="$fixture_dir/c-counts.txt"
@@ -389,6 +391,132 @@ lockd_record_json() {
     "$record_blob"
 }
 
+realworld_blob() {
+  seed=$1
+  n=$2
+  awk -v seed="$seed" -v n="$n" 'BEGIN {
+    alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+    for (i = 0; i < n; ++i) {
+      pos = ((seed + i * 7) % length(alphabet)) + 1;
+      printf "%s", substr(alphabet, pos, 1);
+    }
+  }'
+}
+
+realworld_event() {
+  i=$1
+  if [ $((i % 61)) -eq 0 ]; then
+    printf 'session_sync'
+    return 0
+  fi
+  case $((i % 4)) in
+    0) printf 'heartbeat' ;;
+    1) printf 'cache_refresh' ;;
+    2) printf 'ui_render' ;;
+    *) printf 'snapshot_emit' ;;
+  esac
+}
+
+realworld_component() {
+  i=$1
+  if [ $((i % 5)) -ne 0 ]; then
+    printf 'edge'
+    return 0
+  fi
+  case $((i % 3)) in
+    0) printf 'worker' ;;
+    1) printf 'ingest' ;;
+    *) printf 'scheduler' ;;
+  esac
+}
+
+realworld_hash() {
+  i=$1
+  if [ $((i % 97)) -eq 0 ]; then
+    printf 'c5d2460186f7233c927e7db2dcc703c0a3a8e0d5f0d8a3c5b4f1e2d3c4b5a697'
+    return 0
+  fi
+  printf '%08x%08x%08x%08x%08x%08x%08x%08x' \
+    $((i * 17 + 3)) $((i * 19 + 5)) $((i * 23 + 7)) \
+    $((i * 29 + 11)) $((i * 31 + 13)) $((i * 37 + 17)) \
+    $((i * 41 + 19)) $((i * 43 + 23))
+}
+
+realworld_session_ids_json() {
+  i=$1
+  event=$2
+  if [ $((i % 73)) -eq 0 ]; then
+    printf ',"session_ids":["sid-0a3f-target","sid-%04d-extra"]' "$i"
+  elif [ $((i % 2)) -eq 0 ]; then
+    printf ',"session_ids":["sid-%04d-a","sid-%04d-b"]' "$i" "$i"
+  elif [ "$event" = "session_sync" ]; then
+    printf ',"session_ids":["sid-%04d-a","sid-%04d-b"]' "$i" "$i"
+  fi
+}
+
+realworld_record_json() {
+  i=$1
+  nested=$2
+  event=$(realworld_event "$i")
+  component=$(realworld_component "$i")
+  code=$((3 + (i % 11)))
+  active_idx=$((i % 4))
+  tab_count=$((2 + (i % 4)))
+  hash=$(realworld_hash "$i")
+  session_ids=$(realworld_session_ids_json "$i" "$event")
+  if [ "$event" = "session_sync" ]; then
+    active_idx=0
+    tab_count=1
+    if [ "$code" -lt 10 ]; then
+      code=$((10 + (i % 4)))
+    fi
+  fi
+  case $((i % 3)) in
+    0) zone=eu-north ;;
+    1) zone=us-east ;;
+    *) zone=ap-south ;;
+  esac
+  if [ $((i % 5)) -eq 0 ]; then
+    retryable=true
+  else
+    retryable=false
+  fi
+  if [ "$nested" = "1" ]; then
+    blob_a=$(realworld_blob "$i" $((72 + (i % 24))))
+    printf '{"event":"%s","component":"%s","code":%d,"active_idx":%d,"tab_count":%d,"query":{"hash":"%s","latency_ms":%d,"fingerprint":"fp-%04d"},"payload":[{"kind":"segment","meta":{"label":"seg-%03d","rank":%d},"blob":"%s"},{"kind":"summary","children":[{"id":"child-%03d","enabled":%s},{"id":"child-%03d","enabled":%s}],"notes":["synthetic","anonymous","shape-%d"]}],"timestamp":"2026-03-10T12:%02d:%02dZ","meta":{"zone":"%s","build":"build-%03d","retryable":%s}%s}' \
+      "$event" "$component" "$code" "$active_idx" "$tab_count" "$hash" \
+      $((12 + (i % 180))) $(((i * 17) % 4096)) $((i % 128)) \
+      $((i % 9)) "$blob_a" $((i % 64)) \
+      "$([ $((i % 3)) -ne 0 ] && printf true || printf false)" \
+      $(((i + 7) % 64)) \
+      "$([ $((i % 4)) -ne 0 ] && printf true || printf false)" \
+      $((i % 11)) $((i % 60)) $(((i * 7) % 60)) "$zone" \
+      $((i % 200)) "$retryable" "$session_ids"
+  else
+    blob_b=$(realworld_blob "$i" $((96 + (i % 32))))
+    case $((i % 3)) in
+      0) payload_status=ok ;;
+      1) payload_status=warm ;;
+      *) payload_status=cold ;;
+    esac
+    printf '{"event":"%s","component":"%s","code":%d,"active_idx":%d,"tab_count":%d,"query":{"hash":"%s","latency_ms":%d,"fingerprint":"fp-%04d"},"payload":{"blob":"%s","status":"%s","frames":[{"id":%d,"kind":"header"},{"id":%d,"kind":"body"}],"lookup":{"active":%s,"score":%d}},"timestamp":"2026-03-10T12:%02d:%02dZ","meta":{"zone":"%s","build":"build-%03d","retryable":%s}%s}' \
+      "$event" "$component" "$code" "$active_idx" "$tab_count" "$hash" \
+      $((12 + (i % 180))) $(((i * 17) % 4096)) "$blob_b" \
+      "$payload_status" $((i % 8)) $(((i + 3) % 8)) \
+      "$([ $((i % 2)) -eq 0 ] && printf true || printf false)" \
+      $(((i * 29) % 1000)) $((i % 60)) $(((i * 7) % 60)) \
+      "$zone" $((i % 200)) "$retryable" "$session_ids"
+  fi
+}
+
+realworld_pretty_record_json() {
+  i=$1
+  nested=$2
+  record=$(realworld_record_json "$i" "$nested")
+  printf '%s\n' "$record" | sed 's/[{},]/&\
+  /g'
+}
+
 mixed_root_record_json() {
   i=$1
   case $((i % 4)) in
@@ -417,6 +545,8 @@ generate_fixtures() {
   : > "$cli_single_fixture"
   : > "$lockd_ndjson_fixture"
   : > "$mixed_root_ndjson_fixture"
+  : > "$realworld_compact_fixture"
+  : > "$realworld_pretty_nested_fixture"
   while [ "$i" -lt "$count" ]; do
     record_json "$i" >> "$ndjson_fixture"
     printf '\n' >> "$ndjson_fixture"
@@ -426,6 +556,10 @@ generate_fixtures() {
     printf '\n' >> "$lockd_ndjson_fixture"
     mixed_root_record_json "$i" >> "$mixed_root_ndjson_fixture"
     printf '\n' >> "$mixed_root_ndjson_fixture"
+    realworld_record_json "$i" 0 >> "$realworld_compact_fixture"
+    printf '\n' >> "$realworld_compact_fixture"
+    realworld_pretty_record_json "$i" 1 >> "$realworld_pretty_nested_fixture"
+    printf '\n' >> "$realworld_pretty_nested_fixture"
     i=$((i + 1))
   done
   printf '[' > "$array_fixture"
@@ -487,6 +621,10 @@ generate_fixture() {
   add_selection_selector_cases "selection_array" "$cli_array_fixture" "$count" ""
   add_lockd_selector_cases "lockd_ndjson" "$lockd_ndjson_fixture" "$count"
   add_capture_selector_cases "mixed_root_ndjson" "$mixed_root_ndjson_fixture" "$count"
+  add_realworld_selector_cases "realworld_compact_ndjson" \
+    "$realworld_compact_fixture" "$count"
+  add_realworld_selector_cases "realworld_pretty_nested" \
+    "$realworld_pretty_nested_fixture" "$count"
   printf '%s %s %s %s %s\n' "large_single_json" "$single_fixture" 1 \
     "records_status_open" '/records[]/status="open"' >> "$case_matrix"
   add_selection_selector_cases "selection_single_json" "$cli_single_fixture" 1 \
@@ -500,6 +638,8 @@ generate_fixture() {
         ($1 == "large_array" && $4 == "date_window") ||
         ($1 == "lockd_ndjson" && $4 == "lockd_session_sync") ||
         ($1 == "mixed_root_ndjson" && $4 == "mixed_low_match_id") ||
+        ($1 == "realworld_compact_ndjson" && $4 == "realworld_multi_clause_and") ||
+        ($1 == "realworld_pretty_nested" && $4 == "realworld_recursive_nested_eq_sparse") ||
         ($1 == "selection_single_json" && $4 == "contains_service")
       ' "$case_matrix" > "$case_matrix.smoke"
       mv "$case_matrix.smoke" "$case_matrix"
@@ -569,6 +709,40 @@ add_lockd_selector_cases() {
   } >> "$case_matrix"
 }
 
+add_realworld_selector_cases() {
+  dataset_name=$1
+  fixture_path=$2
+  candidates=$3
+  {
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_eq_sparse" '/event="session_sync"'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_eq_dense" '/component="edge"'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_eq_none" '/event="__nope__"'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_range_sparse" '/code>=11'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_nested_eq_sparse" '/query/hash="c5d2460186f7233c927e7db2dcc703c0a3a8e0d5f0d8a3c5b4f1e2d3c4b5a697"'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_array_eq_sparse" '/session_ids[]="sid-0a3f-target"'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_recursive_eq_sparse" '/.../event="session_sync"'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_recursive_nested_eq_sparse" '/.../hash="c5d2460186f7233c927e7db2dcc703c0a3a8e0d5f0d8a3c5b4f1e2d3c4b5a697"'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_contains_event_sparse" 'contains{field=/event,value=sync}'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_icontains_component_dense" 'icontains{field=/component,value=EDGE}'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_contains_any_event_sparse" 'contains{field=/event,any=sync|__nope__}'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_icontains_any_component_dense" 'icontains{field=/component,any=EDGE|__nope__}'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "realworld_multi_clause_and" '/component="edge",/event="session_sync",/active_idx=0,/tab_count=1,exists{/session_ids},/code>=10'
+  } >> "$case_matrix"
+}
+
 add_capture_selector_cases() {
   dataset_name=$1
   fixture_path=$2
@@ -625,7 +799,7 @@ run_c_native_mode() {
     return 1
   fi
   fixture_sha=$(file_sha256 "$fixture_path")
-  record=$("$payload_bench" "$mode" "$expr" "$fixture_path")
+  record=$("$payload_bench" "$mode" "$expr" "$fixture_path" "$selector_name")
   c_candidates=$(kv_field candidates "$record")
   c_matches=$(kv_field matches "$record")
   c_payloads=$(kv_field payloads "$record")
@@ -955,6 +1129,8 @@ if [ "$check" -eq 1 ] && [ "$exit_status" -eq 0 ]; then
     [ -s "$cli_single_fixture" ] || fixtures_ready=0
     [ -s "$lockd_ndjson_fixture" ] || fixtures_ready=0
     [ -s "$mixed_root_ndjson_fixture" ] || fixtures_ready=0
+    [ -s "$realworld_compact_fixture" ] || fixtures_ready=0
+    [ -s "$realworld_pretty_nested_fixture" ] || fixtures_ready=0
   fi
   if [ "$fixtures_ready" -ne 1 ]; then
     printf 'benchmark check failed: fixture was not generated\n' >&2

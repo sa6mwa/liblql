@@ -66,12 +66,13 @@ local function run_once(client, selector_arg)
       mode == "plus_value_openjson_plan" then
     result, err = client:each_match_file(selector_arg, fixture, function(match)
       local ok, payload_err = match.write_json(function(chunk)
-        payload_bytes = payload_bytes + #chunk
+        local _ = #chunk
       end)
       if payload_err then
         die(payload_err.stderr or "payload read failed")
       end
       payloads = payloads + 1
+      payload_bytes = payload_bytes + match.size
     end)
   elseif mode == "mutate_file_selector" or mode == "mutate_file_plan" then
     if mode == "mutate_file_plan" then
@@ -101,13 +102,14 @@ local function run_once(client, selector_arg)
     source_file = assert(io.open(fixture, "rb"))
     result, err = client:each_match_source(expr, read_source, function(match)
       local ok, payload_err = match.write_json(function(chunk)
-        payload_bytes = payload_bytes + #chunk
+        local _ = #chunk
       end)
       if payload_err then
         source_file:close()
         die(payload_err.stderr or "payload read failed")
       end
       payloads = payloads + 1
+      payload_bytes = payload_bytes + match.size
     end)
     source_file:close()
   elseif mode ~= "decision_only_selector" and mode ~= "decision_only_plan" then

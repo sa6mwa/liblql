@@ -144,8 +144,11 @@ Current implementation status:
 - the current executable dataset matrix covers NDJSON, top-level array, and
   single-root JSON object fixture shapes for both library-style and CLI-style
   record forms, plus a lockd-shaped NDJSON fixture with session, tab, event,
-  operation, timestamp, and payload fields, and a mixed-root NDJSON fixture
-  that interleaves scalar and object candidates. All fixtures are generated
+  operation, timestamp, and payload fields, a mixed-root NDJSON fixture that
+  interleaves scalar and object candidates, and the Go realworld benchmark
+  fixture family: compact realworld NDJSON and pretty nested realworld streams
+  with sparse events, dense components, nested hash fields, session ID arrays,
+  metadata, timestamps, and nested payload blobs. All fixtures are generated
   once and shared by Go, C, and Lua.
 - the current executable selector matrix covers equality, contains,
   `contains.any`, case-insensitive contains, timestamp comparison, date
@@ -155,6 +158,12 @@ Current implementation status:
   `/records[]/...` selection over the single-root JSON fixture. Mixed-root
   selectors include an object-root pruning case and a one-record low-match case
   so capture-policy modes cannot be validated only on dense all-object streams.
+  The full runner also mirrors Go realworld benchmark selectors for sparse and
+  dense equality, no-match equality, numeric ranges, nested hashes, array
+  membership, recursive field lookup, contains/icontains, any-value string
+  terms, and multi-clause AND evaluation. The smoke gate includes compact
+  multi-clause realworld selection and pretty/nested recursive hash selection
+  so this fixture family remains part of the ordinary benchmark gate.
 - the current executable mode matrix covers `decision_only_selector`,
   `decision_only_plan`, `reuse_selector`, `reparse_selector_each_run`,
   `decision_only_source_selector`, `plus_value_selector`, `plus_value_plan`,
@@ -172,10 +181,13 @@ Current implementation status:
   path selector cases mutate `/voucher/lines/10/bench`, so the mutation
   benchmark also exercises numeric object-key and array-index path writes.
   Lockd selector cases mutate `/processed=true`, matching the Go lockd fixture
-  benchmark's observable mutation shape. Lua currently returns mutated output
-  as a Lua string through its public facade, so Lua mutation is included in the
-  smoke parity matrix but not in the scalable memory profile until the Lua
-  facade exposes a streaming mutation output sink.
+  benchmark's observable mutation shape. Realworld selector cases map to the
+  same mutation families as the Go realworld mutation benchmark: dense and
+  sparse top-level sets, nested hash set, numeric increment, payload removal,
+  nested metadata creation, and multi-mutation. Lua currently returns mutated
+  output as a Lua string through its public facade, so Lua mutation is included
+  in the smoke parity matrix but not in the scalable memory profile until the
+  Lua facade exposes a streaming mutation output sink.
   The current C plan benchmark reuses the parsed public `lql_selector` handle;
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
   The C native helper and Lua facade runner report `ns_per_op`; the schema
@@ -194,11 +206,12 @@ Current implementation status:
   `reuse_selector`, reparses expression strings for
   `reparse_selector_each_run`, performs an untimed warmup pass for
   `steady_state`,
-  counts plus-value payload bytes through `match.write_json(callback)` rather
-  than `match.json()` materialization, and emits timed stable JSON Lines
-  records. Lua `mutate_file` uses liblql's native seekable candidate mutation
-  receiver path rather than re-querying and mutating with the same `FILE *`;
-  this keeps the parser stream position stable on larger fixtures.
+  proves plus-value payload readability through `match.write_json(callback)`
+  while counting the original `match.size` byte contract rather than emitted
+  normalized JSON bytes, and emits timed stable JSON Lines records. Lua
+  `mutate_file` uses liblql's native seekable candidate mutation receiver path
+  rather than re-querying and mutating with the same `FILE *`; this keeps the
+  parser stream position stable on larger fixtures.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
   and fails on missing runners, strict-validation unsupported records, or
   counter divergence.
@@ -316,6 +329,15 @@ all three implementations use it. The long-term benchmark should include both
 library-style query payloads and CLI-style selection payloads because they
 stress different selector paths.
 
+The realworld benchmark family mirrors the synthetic corpus used by the Go
+`BenchmarkQueryStreamRealworld` and `BenchmarkMutateStreamRealworld` tests.
+It includes both compact NDJSON and pretty multi-line JSON values. Records have
+top-level `event`, `component`, `code`, `active_idx`, and `tab_count` fields;
+a nested `query.hash`; optional `session_ids` arrays; `timestamp` and `meta`
+objects; and either object-shaped or deeply nested array-shaped `payload`
+values. Sparse target values appear at deterministic intervals so selectors
+exercise both dense and low-match scans.
+
 ## Selector Matrix
 
 At minimum, benchmark these selectors:
@@ -337,6 +359,22 @@ For CLI-style selection parity, also include:
 - `contains{field=/service,any=auth|search}`
 - `icontains{field=/service,any=AUTH|GATEWAY}`
 - nested `/records[]/...` equivalents for `large_single_json`
+
+For realworld query parity, also include:
+
+- `/event="session_sync"`
+- `/component="edge"`
+- `/event="__nope__"`
+- `/code>=11`
+- `/query/hash="c5d2460186f7233c927e7db2dcc703c0a3a8e0d5f0d8a3c5b4f1e2d3c4b5a697"`
+- `/session_ids[]="sid-0a3f-target"`
+- `/.../event="session_sync"`
+- `/.../hash="c5d2460186f7233c927e7db2dcc703c0a3a8e0d5f0d8a3c5b4f1e2d3c4b5a697"`
+- `contains{field=/event,value=sync}`
+- `icontains{field=/component,value=EDGE}`
+- `contains{field=/event,any=sync|__nope__}`
+- `icontains{field=/component,any=EDGE|__nope__}`
+- `/component="edge",/event="session_sync",/active_idx=0,/tab_count=1,exists{/session_ids},/code>=10`
 
 Each selector entry must declare whether it is expected to be supported by the
 current C and Lua implementations. Unsupported selectors may be skipped only

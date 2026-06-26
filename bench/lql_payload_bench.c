@@ -29,8 +29,48 @@ typedef struct bench_source {
 static const char *default_mutation_exprs[] = {"/bench/touched=true"};
 static const char *numeric_mutation_exprs[] = {"/voucher/lines/10/bench=true"};
 static const char *lockd_mutation_exprs[] = {"/processed=true"};
+static const char *realworld_dense_mutation_exprs[] = {"/component=lql"};
+static const char *realworld_sparse_mutation_exprs[] = {"/event=session_sync"};
+static const char *realworld_nested_mutation_exprs[] = {"/query/hash=ff"};
+static const char *realworld_increment_mutation_exprs[] = {"/code=+1"};
+static const char *realworld_remove_mutation_exprs[] = {"rm:/payload"};
+static const char *realworld_create_mutation_exprs[] = {"/meta/bench=true"};
+static const char *realworld_multi_mutation_exprs[] = {
+    "/component=lql", "/event=session_sync", "/code=+1", "rm:/payload",
+    "/meta/bench=true"};
 
-static const char *const *mutation_exprs_for_selector(const char *expr) {
+static const char *const *mutation_exprs_for_selector(const char *selector_name,
+                                                      const char *expr,
+                                                      lql_uint64 *out_count) {
+  if (out_count != NULL) {
+    *out_count = 1u;
+  }
+  if (selector_name != NULL) {
+    if (strcmp(selector_name, "realworld_eq_sparse") == 0) {
+      return realworld_sparse_mutation_exprs;
+    }
+    if (strcmp(selector_name, "realworld_eq_dense") == 0) {
+      return realworld_dense_mutation_exprs;
+    }
+    if (strcmp(selector_name, "realworld_nested_eq_sparse") == 0) {
+      return realworld_nested_mutation_exprs;
+    }
+    if (strcmp(selector_name, "realworld_range_sparse") == 0) {
+      return realworld_increment_mutation_exprs;
+    }
+    if (strcmp(selector_name, "realworld_recursive_nested_eq_sparse") == 0) {
+      return realworld_remove_mutation_exprs;
+    }
+    if (strcmp(selector_name, "realworld_contains_event_sparse") == 0) {
+      return realworld_create_mutation_exprs;
+    }
+    if (strcmp(selector_name, "realworld_multi_clause_and") == 0) {
+      if (out_count != NULL) {
+        *out_count = 5u;
+      }
+      return realworld_multi_mutation_exprs;
+    }
+  }
   if (expr != NULL && strstr(expr, "/voucher/lines/10/") != NULL) {
     return numeric_mutation_exprs;
   }
@@ -216,6 +256,7 @@ int main(int argc, char **argv) {
   const char *mode;
   const char *expr;
   const char *fixture_path;
+  const char *selector_name;
   FILE *fixture;
   FILE *sink;
   lql *ctx;
@@ -229,17 +270,22 @@ int main(int argc, char **argv) {
   bench_source source;
   lql_uint64 fixture_size;
   const char *const *mutation_exprs;
+  lql_uint64 mutation_expr_count;
   clock_t start;
   clock_t end;
 
-  if (argc != 4) {
-    fprintf(stderr, "usage: lql_payload_bench MODE SELECTOR FIXTURE\n");
+  if (argc != 4 && argc != 5) {
+    fprintf(stderr,
+            "usage: lql_payload_bench MODE SELECTOR FIXTURE [SELECTOR_NAME]\n");
     return 2;
   }
   mode = argv[1];
   expr = argv[2];
   fixture_path = argv[3];
-  mutation_exprs = mutation_exprs_for_selector(expr);
+  selector_name = argc == 5 ? argv[4] : NULL;
+  mutation_expr_count = 1u;
+  mutation_exprs =
+      mutation_exprs_for_selector(selector_name, expr, &mutation_expr_count);
 
   lql_error_init(&error);
   ctx = NULL;
@@ -390,8 +436,8 @@ int main(int argc, char **argv) {
       ctx->destroy(ctx);
       return 1;
     }
-    st = ctx->mutation_plan_parse(ctx, mutation_exprs, 1u, &mutation_plan,
-                                  &error);
+    st = ctx->mutation_plan_parse(ctx, mutation_exprs, mutation_expr_count,
+                                  &mutation_plan, &error);
     if (st == LQL_STATUS_OK) {
       st = ctx->mutate_file_range_candidates(ctx, selector, mutation_plan,
                                              fixture, 0u, fixture_size, sink,
@@ -407,8 +453,8 @@ int main(int argc, char **argv) {
       ctx->destroy(ctx);
       return 1;
     }
-    st = ctx->mutation_plan_parse(ctx, mutation_exprs, 1u, &mutation_plan,
-                                  &error);
+    st = ctx->mutation_plan_parse(ctx, mutation_exprs, mutation_expr_count,
+                                  &mutation_plan, &error);
     if (st == LQL_STATUS_OK) {
       st = ctx->mutate_source_candidates(ctx, selector, mutation_plan,
                                          read_bench_source, &source, sink, 1, 1,
