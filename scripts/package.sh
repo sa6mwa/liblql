@@ -735,6 +735,9 @@ case "$TARGET" in
     package_all
     verify_checksums
     ;;
+  print-manifest)
+    manifest_path
+    ;;
   *)
     printf 'unknown package target: %s\n' "$TARGET" >&2
     exit 2

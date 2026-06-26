@@ -20,6 +20,7 @@ help:
 	  'make release-lua-artifacts   build Lua source, rockspec, and source rock' \
 	  'make package-verify          verify generated packages' \
 	  'make release-matrix          build release target matrix where toolchains exist' \
+	  'make release                 clean, test, benchmark, package, and verify release artifacts' \
 	  'make clean                   remove generated build/dist/cache state'
 
 deps-debug:
@@ -100,8 +101,7 @@ prerelease: format test-all bench-check package-verify
 prerelease-hardening: prerelease release-matrix
 
 release:
-	@printf '%s\n' 'release requires explicit engineer-controlled tag/publish flow'
-	@exit 2
+	@./scripts/release_gate.sh
 
 print-release-version:
 	@./scripts/release_version.sh

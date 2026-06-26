@@ -857,6 +857,12 @@ Current implementation is an early slice:
   These gates are strong evidence for the current implementation state, but
   they are not a substitute for a requirement-by-requirement completion audit
   before claiming full LQL parity or final release readiness;
+- `make release` is the final local release gate. It cleans generated state,
+  runs the full local test gate, benchmark smoke gate, scalable memory
+  benchmark gate, release target matrix, package verification, and checksum
+  manifest verification. The `lql.release-surface` CTest check rejects a
+  placeholder release target and is included in source-archive verification so
+  extracted release sources preserve the same lifecycle surface;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and

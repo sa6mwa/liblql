@@ -169,6 +169,13 @@ if(LQL_BUILD_TESTS)
   set_tests_properties(lql.public-api-style-fixtures PROPERTIES
     LABELS "unit;api" TIMEOUT 5)
 
+  add_test(NAME lql.release-surface
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_make_release_target.sh
+      ${CMAKE_CURRENT_SOURCE_DIR}/Makefile
+      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/release_gate.sh)
+  set_tests_properties(lql.release-surface PROPERTIES
+    LABELS "unit;packaging" TIMEOUT 5)
+
   set(LQL_HEADER_SMOKE_WARNINGS)
   if(LQL_PROJECT_WARNINGS)
     set(LQL_HEADER_SMOKE_WARNINGS ${LQL_PROJECT_WARNINGS})
