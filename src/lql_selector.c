@@ -820,6 +820,8 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
   char *op;
   char *value;
   char *name;
+  char *raw_field;
+  char *raw_value;
   lql_node child;
   lql_status st;
 
@@ -884,8 +886,18 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     op0 = op[0];
     value = op + 1 + (size_t)op2;
     *op = '\0';
-    out->term.field = normalize_field_path(copy);
-    out->term.value = unquote(value);
+    raw_field = trim_dup(copy, strlen(copy));
+    raw_value = trim_dup(value, strlen(value));
+    if (raw_field == NULL || raw_value == NULL) {
+      lql_dealloc(raw_field);
+      lql_dealloc(raw_value);
+      lql_dealloc(copy);
+      return LQL_STATUS_NO_MEMORY;
+    }
+    out->term.field = normalize_field_path(raw_field);
+    out->term.value = unquote(raw_value);
+    lql_dealloc(raw_field);
+    lql_dealloc(raw_value);
     out->term.value_set = 1;
     if (out->term.field == NULL || out->term.value == NULL) {
       lql_dealloc(copy);

@@ -23,9 +23,11 @@ type sdkSelectorMatchCase struct {
 func TestSDKSelectorMatchesJSONParity(t *testing.T) {
 	cases := []sdkSelectorMatchCase{
 		{`/status="open"`, `{"status":"open"}`},
+		{` /status = "open" `, `{"status":"open"}`},
 		{`/status="closed"`, `{"status":"open"}`},
 		{`eq{field=/status,field=/status,value=open,value=open}`, `{"status":"open"}`},
 		{`/progress>=50`, `{"progress":72}`},
+		{` /progress >= 50 `, `{"progress":72}`},
 		{`/progress<50`, `{"progress":72}`},
 		{`/timestamp="2025-01-01"`, `{"timestamp":"2025-01-01T15:00:00Z"}`},
 		{`/timestamp="2025-01-01"`, `{"timestamp":"2025-01-02T00:00:00Z"}`},

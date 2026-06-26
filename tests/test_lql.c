@@ -3831,10 +3831,12 @@ static void expect_sdk_contract_manifest(void) {
 
 static void expect_selector_match_api(void) {
   expect_match("/status=\"open\"", "{\"status\":\"open\"}", 1);
+  expect_match(" /status = \"open\" ", "{\"status\":\"open\"}", 1);
   expect_match("/status=\"closed\"", "{\"status\":\"open\"}", 0);
   expect_match("eq{field=/status,field=/status,value=open,value=open}",
                "{\"status\":\"open\"}", 1);
   expect_match("/progress>=50", "{\"progress\":72}", 1);
+  expect_match(" /progress >= 50 ", "{\"progress\":72}", 1);
   expect_match("/progress<50", "{\"progress\":72}", 0);
   expect_match("/timestamp=\"2025-01-01\"",
                "{\"timestamp\":\"2025-01-01T15:00:00Z\"}", 1);
