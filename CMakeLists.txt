@@ -165,7 +165,8 @@ if(LQL_BUILD_TESTS)
 
   add_test(NAME lql.sdk-manifest
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_sdk_unit_manifest.sh
-      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lql.c)
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lql.c
+      ${CMAKE_CURRENT_SOURCE_DIR}/include/lql/lql.h)
   set_tests_properties(lql.sdk-manifest PROPERTIES LABELS "unit;api" TIMEOUT 5)
 
   if(TARGET lql_shared)

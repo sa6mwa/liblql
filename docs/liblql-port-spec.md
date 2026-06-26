@@ -604,6 +604,10 @@ Current implementation status:
   operation calls from tests, examples, and benchmarks, so executable examples
   and C-side product tests exercise liblql through the receiver surface instead
   of preserving private operation bypasses;
+- the SDK contract manifest gate parses the installed receiver method table and
+  fails if any public receiver method lacks C-side method-call coverage in
+  `tests/test_lql.c`, so method-table growth cannot silently outrun native SDK
+  tests;
 - core code is style-gated against calling private receiver implementation
   functions with a `NULL` receiver; parse-failure cleanup paths must use the
   explicit owning allocator or handle cleanup surface instead of routing

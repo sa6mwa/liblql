@@ -1,14 +1,19 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ne 1 ]; then
-  printf 'usage: %s tests/test_lql.c\n' "$0" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  printf 'usage: %s tests/test_lql.c [include/lql/lql.h]\n' "$0" >&2
   exit 2
 fi
 
 test_file=$1
+header_file=${2:-}
 if [ ! -f "$test_file" ]; then
   printf 'SDK unit manifest check: missing test file: %s\n' "$test_file" >&2
+  exit 2
+fi
+if [ -n "$header_file" ] && [ ! -f "$header_file" ]; then
+  printf 'SDK unit manifest check: missing public header: %s\n' "$header_file" >&2
   exit 2
 fi
 
@@ -21,6 +26,8 @@ manifest_file=$tmp_dir/manifest
 manifest_all_file=$tmp_dir/manifest-all
 main_file=$tmp_dir/main
 main_all_file=$tmp_dir/main-all
+methods_file=$tmp_dir/receiver-methods
+missing_methods_file=$tmp_dir/missing-receiver-methods
 
 sed -n 's/^static void \(expect_[A-Za-z0-9_]*\)(void) {$/\1/p' "$test_file" |
   grep -v '^expect_sdk_contract_manifest$' |
@@ -87,4 +94,30 @@ if ! cmp -s "$functions_file" "$main_file"; then
   printf '%s\n' '--- actual main calls ---' >&2
   cat "$main_file" >&2
   exit 1
+fi
+
+if [ -n "$header_file" ]; then
+  awk '
+    /struct lql[[:space:]]*\{/ { in_receiver = 1; next }
+    in_receiver && /^};/ { in_receiver = 0; next }
+    in_receiver {
+      if (match($0, /\(\*[A-Za-z_][A-Za-z0-9_]*\)/)) {
+        name = substr($0, RSTART + 2, RLENGTH - 3)
+        print name
+      }
+    }
+  ' "$header_file" | sort -u > "$methods_file"
+
+  : > "$missing_methods_file"
+  while IFS= read -r method; do
+    if ! grep -Eq -- "->[[:space:]]*${method}[[:space:]]*\\(" "$test_file"; then
+      printf '%s\n' "$method" >> "$missing_methods_file"
+    fi
+  done < "$methods_file"
+
+  if [ -s "$missing_methods_file" ]; then
+    printf 'SDK unit manifest check: receiver methods lack C-side method-call coverage\n' >&2
+    cat "$missing_methods_file" >&2
+    exit 1
+  fi
 fi
