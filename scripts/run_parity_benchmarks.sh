@@ -69,6 +69,7 @@ cli_ndjson_fixture="$fixture_dir/selection_ndjson.jsonl"
 cli_array_fixture="$fixture_dir/selection_array.json"
 cli_single_fixture="$fixture_dir/selection_single_json.json"
 lockd_ndjson_fixture="$fixture_dir/lockd_ndjson.jsonl"
+mixed_root_ndjson_fixture="$fixture_dir/mixed_root_ndjson.jsonl"
 case_matrix="$fixture_dir/cases.tsv"
 go_counts_file="$fixture_dir/go-counts.txt"
 c_counts_file="$fixture_dir/c-counts.txt"
@@ -382,6 +383,24 @@ lockd_record_json() {
     "$record_blob"
 }
 
+mixed_root_record_json() {
+  i=$1
+  case $((i % 4)) in
+    0)
+      printf '"scalar-%d"' "$i"
+      ;;
+    1)
+      printf '%d' "$i"
+      ;;
+    2)
+      record_json "$i"
+      ;;
+    *)
+      printf 'false'
+      ;;
+  esac
+}
+
 generate_fixtures() {
   i=0
   : > "$ndjson_fixture"
@@ -391,6 +410,7 @@ generate_fixtures() {
   : > "$cli_array_fixture"
   : > "$cli_single_fixture"
   : > "$lockd_ndjson_fixture"
+  : > "$mixed_root_ndjson_fixture"
   while [ "$i" -lt "$count" ]; do
     record_json "$i" >> "$ndjson_fixture"
     printf '\n' >> "$ndjson_fixture"
@@ -398,6 +418,8 @@ generate_fixtures() {
     printf '\n' >> "$cli_ndjson_fixture"
     lockd_record_json "$i" >> "$lockd_ndjson_fixture"
     printf '\n' >> "$lockd_ndjson_fixture"
+    mixed_root_record_json "$i" >> "$mixed_root_ndjson_fixture"
+    printf '\n' >> "$mixed_root_ndjson_fixture"
     i=$((i + 1))
   done
   printf '[' > "$array_fixture"
@@ -454,6 +476,7 @@ generate_fixture() {
   add_selection_selector_cases "selection_ndjson" "$cli_ndjson_fixture" "$count" ""
   add_selection_selector_cases "selection_array" "$cli_array_fixture" "$count" ""
   add_lockd_selector_cases "lockd_ndjson" "$lockd_ndjson_fixture" "$count"
+  add_capture_selector_cases "mixed_root_ndjson" "$mixed_root_ndjson_fixture" "$count"
   printf '%s %s %s %s %s\n' "large_single_json" "$single_fixture" 1 \
     "records_status_open" '/records[]/status="open"' >> "$case_matrix"
   add_selection_selector_cases "selection_single_json" "$cli_single_fixture" 1 \
@@ -466,6 +489,7 @@ generate_fixture() {
         ($1 == "large_ndjson" && $4 == "numeric_path_amount") ||
         ($1 == "large_array" && $4 == "date_window") ||
         ($1 == "lockd_ndjson" && $4 == "lockd_session_sync") ||
+        ($1 == "mixed_root_ndjson" && $4 == "mixed_low_match_id") ||
         ($1 == "selection_single_json" && $4 == "contains_service")
       ' "$case_matrix" > "$case_matrix.smoke"
       mv "$case_matrix.smoke" "$case_matrix"
@@ -532,6 +556,18 @@ add_lockd_selector_cases() {
       "lockd_tabs_update" '/event="tabs_update"'
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
       "lockd_write_event" 'and.eq{field=/op,value=write},and.exists{field=/lockd/key}'
+  } >> "$case_matrix"
+}
+
+add_capture_selector_cases() {
+  dataset_name=$1
+  fixture_path=$2
+  candidates=$3
+  {
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "mixed_object_root_status" '/status="closed"'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "mixed_low_match_id" '/id="id-2"'
   } >> "$case_matrix"
 }
 
@@ -896,6 +932,7 @@ if [ "$check" -eq 1 ] && [ "$exit_status" -eq 0 ]; then
     [ -s "$cli_array_fixture" ] || fixtures_ready=0
     [ -s "$cli_single_fixture" ] || fixtures_ready=0
     [ -s "$lockd_ndjson_fixture" ] || fixtures_ready=0
+    [ -s "$mixed_root_ndjson_fixture" ] || fixtures_ready=0
   fi
   if [ "$fixtures_ready" -ne 1 ]; then
     printf 'benchmark check failed: fixture was not generated\n' >&2

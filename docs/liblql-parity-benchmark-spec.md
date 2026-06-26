@@ -133,14 +133,17 @@ Current implementation status:
 - the current executable dataset matrix covers NDJSON, top-level array, and
   single-root JSON object fixture shapes for both library-style and CLI-style
   record forms, plus a lockd-shaped NDJSON fixture with session, tab, event,
-  operation, timestamp, and payload fields. All fixtures are generated once and
-  shared by Go, C, and Lua.
+  operation, timestamp, and payload fields, and a mixed-root NDJSON fixture
+  that interleaves scalar and object candidates. All fixtures are generated
+  once and shared by Go, C, and Lua.
 - the current executable selector matrix covers equality, contains,
   `contains.any`, case-insensitive contains, timestamp comparison, date
   window, numeric range terms, and concrete numeric object-key/array-index path
   traversal over record-stream fixtures, lockd-style `/event="session_sync"`,
   `/event="tabs_update"`, and `/lockd/key` existence terms, plus nested
-  `/records[]/...` selection over the single-root JSON fixture.
+  `/records[]/...` selection over the single-root JSON fixture. Mixed-root
+  selectors include an object-root pruning case and a one-record low-match case
+  so capture-policy modes cannot be validated only on dense all-object streams.
 - the current executable mode matrix covers `decision_only_selector`,
   `decision_only_plan`, `reuse_selector`, `reparse_selector_each_run`,
   `decision_only_source_selector`, `plus_value_selector`, `plus_value_plan`,
