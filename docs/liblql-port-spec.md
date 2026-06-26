@@ -83,10 +83,11 @@ All liblql-owned allocation must pass through the internal central liblql
 allocator receiver or public receiver cleanup methods. Production code must not
 use direct `malloc`, `calloc`, `realloc`, or `free` outside the allocator
 implementation, and it must not recreate `lql_alloc`/`lql_dealloc` style free
-wrapper functions around the allocator. Public APIs must avoid returning
-liblql-owned heap memory unless they also provide an ownership-specific
-receiver cleanup method, so downstream users do not cross allocator boundaries
-or depend on allocator wrapper functions.
+wrapper functions or `LQL_ALLOCATOR_*` macro wrappers around the allocator.
+Project-owned code must call the allocator receiver directly. Public APIs must
+avoid returning liblql-owned heap memory unless they also provide an
+ownership-specific receiver cleanup method, so downstream users do not cross
+allocator boundaries or depend on allocator wrapper functions.
 
 The API should eventually expose these surfaces:
 
@@ -556,12 +557,14 @@ Current implementation is an early slice:
   receiver fields so the installed SDK surface remains self-describing; the
   style fixture suite includes negative cases for public cleanup wrappers,
   public allocator-free wrappers, receiver `*_free` fields, static cleanup
-  wrappers, direct runtime allocation, and old allocator wrapper calls;
+  wrappers, direct runtime allocation, old allocator wrapper calls, and
+  `LQL_ALLOCATOR_*` macro wrapper calls;
 - project-owned allocations have an internal central liblql allocator receiver
   surface, the old `lql_alloc`/`lql_calloc`/`lql_realloc`/`lql_dealloc`/
-  `lql_strdup` wrapper layer has been removed, and direct C runtime allocation
-  calls are limited to the allocator implementation; `make test` enforces this
-  by failing on old allocator wrapper calls or direct
+  `lql_strdup` wrapper layer and the private `LQL_ALLOCATOR_*` macro wrapper
+  layer have been removed, and direct C runtime allocation calls are limited to
+  the allocator implementation; `make test` enforces this by failing on old
+  allocator wrapper calls, allocator macro wrapper calls, or direct
   `malloc`/`calloc`/`realloc`/`free`/`strdup` calls in project-owned C sources
   outside `src/lql_allocator.c`;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate

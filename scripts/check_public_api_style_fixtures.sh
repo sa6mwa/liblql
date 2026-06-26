@@ -91,6 +91,12 @@ EOF
 run_expect_fail "liblql allocator wrapper call"
 rm -f "$tmp/src/alloc_wrapper.c"
 
+cat >"$tmp/src/alloc_macro_wrapper.c" <<'EOF'
+void *bad_alloc_macro_wrapper(void) { return LQL_ALLOCATOR_ALLOC(1); }
+EOF
+run_expect_fail "liblql allocator macro wrapper call"
+rm -f "$tmp/src/alloc_macro_wrapper.c"
+
 printf '%s\n' 'stale cleanup surface is `lql_dealloc()`' >"$tmp/README.md"
 run_expect_fail "README allocator wrapper documentation"
 printf '%s\n' '# fixture' >"$tmp/README.md"

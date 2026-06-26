@@ -206,6 +206,19 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  allocator_macro_hits=$(
+    grep -REn \
+      '(^|[^_[:alnum:]])LQL_ALLOCATOR_(ALLOC|CALLOC|REALLOC|DESTROY|STRDUP)[[:space:]]*\(' \
+      "$source_root/src" "$source_root/tests" "$source_root/parity" \
+      "$source_root/lua" "$source_root/examples" "$source_root/bench" \
+      2>/dev/null || true
+  )
+  if [ -n "$allocator_macro_hits" ]; then
+    printf 'public API style: forbidden liblql allocator macro wrapper call\n' >&2
+    printf '%s\n' "$allocator_macro_hits" >&2
+    failed=1
+  fi
+
   lua_private_hits=$(
     grep -REn \
       'lql_internal\.h|LQL_INTERNAL_SYMBOL|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \

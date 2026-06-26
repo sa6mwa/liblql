@@ -108,7 +108,8 @@ lql_status lql_new(lql **out, lql_error *error) {
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   *out = NULL;
-  ctx = (lql *)LQL_ALLOCATOR_CALLOC(1u, sizeof(*ctx));
+  ctx = (lql *)lql_allocator_default()->calloc(lql_allocator_default(), 1u,
+                                               sizeof(*ctx));
   if (ctx == NULL) {
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
     return LQL_STATUS_NO_MEMORY;
@@ -317,23 +318,26 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_projected_candidates_impl(
                                                matches_only, out_result, error);
 }
 
-static void receiver_destroy(lql *self) { LQL_ALLOCATOR_DESTROY(self); }
+static void receiver_destroy(lql *self) {
+  lql_allocator_default()->destroy(lql_allocator_default(), self);
+}
 
 LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_node *node) {
   size_t i;
   if (node == NULL) {
     return;
   }
-  LQL_ALLOCATOR_DESTROY(node->term.field);
-  LQL_ALLOCATOR_DESTROY(node->term.value);
+  lql_allocator_default()->destroy(lql_allocator_default(), node->term.field);
+  lql_allocator_default()->destroy(lql_allocator_default(), node->term.value);
   for (i = 0u; i < node->term.any_count; ++i) {
-    LQL_ALLOCATOR_DESTROY(node->term.any[i]);
+    lql_allocator_default()->destroy(lql_allocator_default(),
+                                     node->term.any[i]);
   }
-  LQL_ALLOCATOR_DESTROY(node->term.any);
+  lql_allocator_default()->destroy(lql_allocator_default(), node->term.any);
   for (i = 0u; i < node->child_count; ++i) {
     lql_node_cleanup(&node->children[i]);
   }
-  LQL_ALLOCATOR_DESTROY(node->children);
+  lql_allocator_default()->destroy(lql_allocator_default(), node->children);
   memset(node, 0, sizeof(*node));
 }
 
@@ -358,7 +362,7 @@ LQL_INTERNAL_SYMBOL void lql_selector_destroy_impl(lql *self,
   (void)self;
   if (selector != NULL) {
     lql_node_cleanup(&selector->root);
-    LQL_ALLOCATOR_DESTROY(selector);
+    lql_allocator_default()->destroy(lql_allocator_default(), selector);
   }
 }
 

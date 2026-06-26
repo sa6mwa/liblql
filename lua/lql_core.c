@@ -182,8 +182,8 @@ static lql_status lua_lql_write_buffer(void *user, const void *data,
       }
       next_cap *= 2u;
     }
-    next = (char *)lua_lql_alloc(buffer->lua, buffer->data, buffer->cap,
-                                 next_cap);
+    next =
+        (char *)lua_lql_alloc(buffer->lua, buffer->data, buffer->cap, next_cap);
     if (next == NULL) {
       return LQL_STATUS_NO_MEMORY;
     }
@@ -229,8 +229,8 @@ static int lua_lql_fields(lua_State *L, int index, const char ***out_fields,
   count = (size_t)lua_rawlen(L, index);
   fields = NULL;
   if (count > 0u) {
-    fields = (const char **)lua_lql_alloc(L, NULL, 0u,
-                                          sizeof(fields[0]) * count);
+    fields =
+        (const char **)lua_lql_alloc(L, NULL, 0u, sizeof(fields[0]) * count);
     if (fields == NULL) {
       return 0;
     }
@@ -736,8 +736,7 @@ static int lua_lql_project_json(lua_State *L) {
   client->ctx->projection_destroy(client->ctx, projection);
   client->ctx->selector_destroy(client->ctx, selector);
   if (fields != NULL) {
-    (void)lua_lql_alloc(L, (void *)fields, sizeof(fields[0]) * field_count,
-                        0u);
+    (void)lua_lql_alloc(L, (void *)fields, sizeof(fields[0]) * field_count, 0u);
   }
   if (st != LQL_STATUS_OK) {
     lua_lql_buffer_dispose(&buffer);
@@ -1073,8 +1072,7 @@ static int lua_lql_project_file(lua_State *L) {
   client->ctx->projection_destroy(client->ctx, projection);
   client->ctx->selector_destroy(client->ctx, selector);
   if (fields != NULL) {
-    (void)lua_lql_alloc(L, (void *)fields, sizeof(fields[0]) * field_count,
-                        0u);
+    (void)lua_lql_alloc(L, (void *)fields, sizeof(fields[0]) * field_count, 0u);
   }
   if (st != LQL_STATUS_OK) {
     lua_lql_buffer_dispose(&buffer);

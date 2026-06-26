@@ -24,17 +24,6 @@ struct lql_allocator {
 
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
 
-#define LQL_ALLOCATOR_ALLOC(size)                                              \
-  (lql_allocator_default()->alloc(lql_allocator_default(), (size)))
-#define LQL_ALLOCATOR_CALLOC(count, size)                                      \
-  (lql_allocator_default()->calloc(lql_allocator_default(), (count), (size)))
-#define LQL_ALLOCATOR_REALLOC(ptr, size)                                       \
-  (lql_allocator_default()->realloc(lql_allocator_default(), (ptr), (size)))
-#define LQL_ALLOCATOR_DESTROY(ptr)                                             \
-  (lql_allocator_default()->destroy(lql_allocator_default(), (ptr)))
-#define LQL_ALLOCATOR_STRDUP(text)                                             \
-  (lql_allocator_default()->strdup(lql_allocator_default(), (text)))
-
 typedef enum lql_node_kind {
   LQL_NODE_ALL = 0,
   LQL_NODE_AND,
