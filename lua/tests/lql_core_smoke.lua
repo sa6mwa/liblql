@@ -148,6 +148,25 @@ projected = assert_no_error(projected, err, "core project_json")
 assert_equal(projected, '{"id":"b","count":2}\n',
              "core project_json output")
 
+local projection, projection_err = client:projection_parse({"/id", "/count"})
+projection = assert_no_error(projection, projection_err,
+                             "core projection_parse")
+
+projected, err = client:project_json('/status="open"',
+                                    '{"status":"open","id":"bp","count":12}',
+                                    projection)
+projected = assert_no_error(projected, err,
+                            "core project_json parsed projection")
+assert_equal(projected, '{"id":"bp","count":12}\n',
+             "core project_json parsed projection output")
+
+local bad_projection_handle, bad_projection_handle_err =
+  client:projection_parse({"  ", "\t"})
+if bad_projection_handle ~= nil or not bad_projection_handle_err or
+    (bad_projection_handle_err.stderr or "") == "" then
+  fail("expected structured core projection_parse error")
+end
+
 projected, err = client:project_json('/status="open"',
                                     '{"status":"open","id":"trimmed",' ..
                                       '"meta":{"trace":7,"drop":true}}',
@@ -181,6 +200,33 @@ mutated, err = client:mutate_json('/status="open"',
 mutated = assert_no_error(mutated, err, "core mutate_json")
 assert_equal(mutated, '{"status":"open","state":{"status":"running"}}\n',
              "core mutate_json output")
+
+local mutation_plan, mutation_plan_err =
+  client:mutation_plan_parse({"/state/status=planned", "rm:/state/old"})
+mutation_plan = assert_no_error(mutation_plan, mutation_plan_err,
+                                "core mutation_plan_parse")
+
+local mutation_count, mutation_count_err =
+  client:mutation_plan_count(mutation_plan)
+mutation_count = assert_no_error(mutation_count, mutation_count_err,
+                                 "core mutation_plan_count")
+assert_equal(mutation_count, 2, "core mutation_plan_count parsed plan")
+
+mutated, err = client:mutate_json('/status="open"',
+                                 '{"status":"open","state":{"old":true}}',
+                                 mutation_plan,
+                                 {matches_only = true})
+mutated = assert_no_error(mutated, err,
+                          "core mutate_json parsed mutation plan")
+assert_equal(mutated, '{"status":"open","state":{"status":"planned"}}\n',
+             "core mutate_json parsed mutation plan output")
+
+local bad_mutation_plan, bad_mutation_plan_err =
+  client:mutation_plan_parse({"badexpr"})
+if bad_mutation_plan ~= nil or not bad_mutation_plan_err or
+    (bad_mutation_plan_err.stderr or "") == "" then
+  fail("expected structured core mutation_plan_parse error")
+end
 
 mutated, err = client:mutate_json('/status="open"',
                                  '{"status":"closed","state":{"old":true}}',

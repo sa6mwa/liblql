@@ -516,6 +516,14 @@ projected, err = client:project_file('/status="open"', input_path,
 projected = assert_no_error(projected, err, "project_file")
 assert_equal(projected, '{"id":"b","count":2}\n', "project_file output")
 
+local projection, projection_err = client:projection_parse({"/id", "/count"})
+projection = assert_no_error(projection, projection_err, "projection_parse")
+
+projected, err = client:project_file('/status="open"', input_path, projection)
+projected = assert_no_error(projected, err, "project_file parsed projection")
+assert_equal(projected, '{"id":"b","count":2}\n',
+             "project_file parsed projection output")
+
 projected, err = client:project_file(open_selector, input_path,
                                      {"/id", "/count"})
 projected = assert_no_error(projected, err, "project_file parsed selector")
@@ -527,6 +535,13 @@ projected, err = client:project_json('/status="open"',
                                     {"/id", "/count"})
 projected = assert_no_error(projected, err, "project_json")
 assert_equal(projected, '{"id":"c","count":3}\n', "project_json output")
+
+projected, err = client:project_json('/status="open"',
+                                    '{"status":"open","id":"ch","count":13}',
+                                    projection)
+projected = assert_no_error(projected, err, "project_json parsed projection")
+assert_equal(projected, '{"id":"ch","count":13}\n',
+             "project_json parsed projection output")
 
 projected, err = client:project_json(open_selector,
                                      '{"status":"open","id":"cp","count":4}',
@@ -547,6 +562,21 @@ projected, err = client:project_source('/status="open"', function(_)
 end, {"/id", "/count"})
 projected = assert_no_error(projected, err, "project_source")
 assert_equal(projected, '{"id":"ps2","count":7}\n', "project_source output")
+
+source_chunks = {
+  '{"status":"closed","id":"psh1","count":1}\n',
+  '{"status":"open","id":"psh2","count":15}\n'
+}
+source_index = 1
+projected, err = client:project_source('/status="open"', function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end, projection)
+projected = assert_no_error(projected, err,
+                            "project_source parsed projection")
+assert_equal(projected, '{"id":"psh2","count":15}\n',
+             "project_source parsed projection output")
 
 source_chunks = {
   '{"status":"closed","id":"psp1","count":1}\n',
@@ -576,6 +606,12 @@ if bad_project_source_result ~= nil or not bad_project_source_error or
   fail("expected structured project_source read callback error")
 end
 
+local bad_projection, bad_projection_err = client:projection_parse({"  "})
+if bad_projection ~= nil or not bad_projection_err or
+    (bad_projection_err.stderr or "") == "" then
+  fail("expected structured projection_parse error")
+end
+
 local mutated
 mutated, err = client:mutate_file('/status="open"', input_path,
                                  {"/state/status=running", "rm:/state/old"},
@@ -584,6 +620,26 @@ mutated = assert_no_error(mutated, err, "mutate_file")
 assert_equal(mutated,
              '{"status":"open","id":"b","count":2,"state":{"status":"running"}}\n',
              "mutate_file output")
+
+local mutation_plan, mutation_plan_err =
+  client:mutation_plan_parse({"/state/status=planned", "rm:/state/old"})
+mutation_plan = assert_no_error(mutation_plan, mutation_plan_err,
+                                "mutation_plan_parse")
+
+local mutation_plan_count, mutation_plan_count_err =
+  client:mutation_plan_count(mutation_plan)
+mutation_plan_count = assert_no_error(mutation_plan_count,
+                                      mutation_plan_count_err,
+                                      "mutation_plan_count")
+assert_equal(mutation_plan_count, 2, "mutation_plan_count parsed plan")
+
+mutated, err = client:mutate_file('/status="open"', input_path,
+                                 mutation_plan,
+                                 {matches_only = true})
+mutated = assert_no_error(mutated, err, "mutate_file parsed mutation plan")
+assert_equal(mutated,
+             '{"status":"open","id":"b","count":2,"state":{"status":"planned"}}\n',
+             "mutate_file parsed mutation plan output")
 
 mutated, err = client:mutate_file(open_selector, input_path,
                                  {"/state/status=parsed", "rm:/state/old"},
@@ -600,6 +656,14 @@ mutated, err = client:mutate_json('/status="open"',
 mutated = assert_no_error(mutated, err, "mutate_json")
 assert_equal(mutated, '{"status":"open","state":{"status":"running"}}\n',
              "mutate_json output")
+
+mutated, err = client:mutate_json('/status="open"',
+                                 '{"status":"open","state":{"old":true}}',
+                                 mutation_plan,
+                                 {matches_only = true})
+mutated = assert_no_error(mutated, err, "mutate_json parsed mutation plan")
+assert_equal(mutated, '{"status":"open","state":{"status":"planned"}}\n',
+             "mutate_json parsed mutation plan output")
 
 mutated, err = client:mutate_json(open_selector,
                                  '{"status":"open","state":{"old":true}}',
@@ -625,6 +689,21 @@ assert_equal(mutated,
              "mutate_source output")
 
 source_chunks = {
+  '{"status":"closed","id":"mh1"}\n',
+  '{"status":"open","id":"mh2","state":{"old":true}}\n'
+}
+source_index = 1
+mutated, err = client:mutate_source('/status="open"', function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end, mutation_plan, {matches_only = true})
+mutated = assert_no_error(mutated, err, "mutate_source parsed mutation plan")
+assert_equal(mutated,
+             '{"status":"open","id":"mh2","state":{"status":"planned"}}\n',
+             "mutate_source parsed mutation plan output")
+
+source_chunks = {
   '{"status":"closed","id":"mp1"}\n',
   '{"status":"open","id":"mp2","state":{"old":true}}\n'
 }
@@ -647,6 +726,13 @@ if bad_mutate_source_result ~= nil or not bad_mutate_source_error or
     not string.find(bad_mutate_source_error.stderr or "",
                     "mutation source read failed", 1, true) then
   fail("expected structured mutate_source read callback error")
+end
+
+local bad_mutation_plan, bad_mutation_plan_err =
+  client:mutation_plan_parse({"badexpr"})
+if bad_mutation_plan ~= nil or not bad_mutation_plan_err or
+    (bad_mutation_plan_err.stderr or "") == "" then
+  fail("expected structured mutation_plan_parse error")
 end
 
 expect_oversized_source_error("mutate_source", function(read_fn)
