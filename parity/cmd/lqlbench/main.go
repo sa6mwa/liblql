@@ -51,6 +51,11 @@ func benchmarkMutationsForExpr(expr string) []string {
 	if strings.Contains(expr, "/voucher/lines/10/") {
 		return []string{"/voucher/lines/10/bench=true"}
 	}
+	if strings.Contains(expr, `/event="session_sync"`) ||
+		strings.Contains(expr, `/event="tabs_update"`) ||
+		strings.Contains(expr, "/lockd/key") {
+		return []string{"/processed=true"}
+	}
 	return []string{"/bench/touched=true"}
 }
 

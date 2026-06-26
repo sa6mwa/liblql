@@ -68,6 +68,7 @@ single_fixture="$fixture_dir/large_single_json.json"
 cli_ndjson_fixture="$fixture_dir/selection_ndjson.jsonl"
 cli_array_fixture="$fixture_dir/selection_array.json"
 cli_single_fixture="$fixture_dir/selection_single_json.json"
+lockd_ndjson_fixture="$fixture_dir/lockd_ndjson.jsonl"
 case_matrix="$fixture_dir/cases.tsv"
 go_counts_file="$fixture_dir/go-counts.txt"
 c_counts_file="$fixture_dir/c-counts.txt"
@@ -359,6 +360,28 @@ selection_record_json() {
     $((i + 1)) $((i % 5)) "$i" "$service" "$region"
 }
 
+lockd_record_json() {
+  i=$1
+  if [ -z "$record_blob" ]; then
+    record_blob=$(generate_blob)
+  fi
+  case $((i % 4)) in
+    0) event=session_sync ;;
+    1) event=tabs_update ;;
+    2) event=lock_request ;;
+    *) event=heartbeat ;;
+  esac
+  case $((i % 3)) in
+    0) op=write ;;
+    1) op=delete ;;
+    *) op=read ;;
+  esac
+  printf '{"event":"%s","op":"%s","session_id":"session-%d","lockd":{"key":"browser/session/%d","owner":"pid-%d","tab":{"id":"tab-%d","url":"https://example.test/%d","active":%s}},"timestamp":"2026-03-05T11:28:21Z","payload":"%s"}' \
+    "$event" "$op" "$i" "$i" $((1000 + i)) "$i" "$i" \
+    "$([ $((i % 2)) -eq 0 ] && printf true || printf false)" \
+    "$record_blob"
+}
+
 generate_fixtures() {
   i=0
   : > "$ndjson_fixture"
@@ -367,11 +390,14 @@ generate_fixtures() {
   : > "$cli_ndjson_fixture"
   : > "$cli_array_fixture"
   : > "$cli_single_fixture"
+  : > "$lockd_ndjson_fixture"
   while [ "$i" -lt "$count" ]; do
     record_json "$i" >> "$ndjson_fixture"
     printf '\n' >> "$ndjson_fixture"
     selection_record_json "$i" >> "$cli_ndjson_fixture"
     printf '\n' >> "$cli_ndjson_fixture"
+    lockd_record_json "$i" >> "$lockd_ndjson_fixture"
+    printf '\n' >> "$lockd_ndjson_fixture"
     i=$((i + 1))
   done
   printf '[' > "$array_fixture"
@@ -427,6 +453,7 @@ generate_fixture() {
   add_dataset_selector_cases "large_array" "$array_fixture" "$count"
   add_selection_selector_cases "selection_ndjson" "$cli_ndjson_fixture" "$count" ""
   add_selection_selector_cases "selection_array" "$cli_array_fixture" "$count" ""
+  add_lockd_selector_cases "lockd_ndjson" "$lockd_ndjson_fixture" "$count"
   printf '%s %s %s %s %s\n' "large_single_json" "$single_fixture" 1 \
     "records_status_open" '/records[]/status="open"' >> "$case_matrix"
   add_selection_selector_cases "selection_single_json" "$cli_single_fixture" 1 \
@@ -438,6 +465,7 @@ generate_fixture() {
         ($1 == "large_ndjson" && $4 == "eq_status_open") ||
         ($1 == "large_ndjson" && $4 == "numeric_path_amount") ||
         ($1 == "large_array" && $4 == "date_window") ||
+        ($1 == "lockd_ndjson" && $4 == "lockd_session_sync") ||
         ($1 == "selection_single_json" && $4 == "contains_service")
       ' "$case_matrix" > "$case_matrix.smoke"
       mv "$case_matrix.smoke" "$case_matrix"
@@ -490,6 +518,20 @@ add_selection_selector_cases() {
       "contains_any_service" "contains{field=$prefix/service,any=auth|search}"
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
       "icontains_any_service" "icontains{field=$prefix/service,any=AUTH|GATEWAY}"
+  } >> "$case_matrix"
+}
+
+add_lockd_selector_cases() {
+  dataset_name=$1
+  fixture_path=$2
+  candidates=$3
+  {
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "lockd_session_sync" '/event="session_sync"'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "lockd_tabs_update" '/event="tabs_update"'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "lockd_write_event" 'and.eq{field=/op,value=write},and.exists{field=/lockd/key}'
   } >> "$case_matrix"
 }
 
@@ -853,6 +895,7 @@ if [ "$check" -eq 1 ] && [ "$exit_status" -eq 0 ]; then
     [ -s "$cli_ndjson_fixture" ] || fixtures_ready=0
     [ -s "$cli_array_fixture" ] || fixtures_ready=0
     [ -s "$cli_single_fixture" ] || fixtures_ready=0
+    [ -s "$lockd_ndjson_fixture" ] || fixtures_ready=0
   fi
   if [ "$fixtures_ready" -ne 1 ]; then
     printf 'benchmark check failed: fixture was not generated\n' >&2

@@ -36,6 +36,10 @@ local function run_once(client, selector_arg)
   local mutation_plan
   if string.find(expr, "/voucher/lines/10/", 1, true) then
     mutation_arg = {"/voucher/lines/10/bench=true"}
+  elseif string.find(expr, '/event="session_sync"', 1, true) or
+      string.find(expr, '/event="tabs_update"', 1, true) or
+      string.find(expr, "/lockd/key", 1, true) then
+    mutation_arg = {"/processed=true"}
   end
   local function read_source()
     local chunk = source_file:read(1024)

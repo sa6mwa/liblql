@@ -132,12 +132,15 @@ Current implementation status:
   supported Go records to report timing.
 - the current executable dataset matrix covers NDJSON, top-level array, and
   single-root JSON object fixture shapes for both library-style and CLI-style
-  record forms, with all generated once and shared by Go, C, and Lua.
+  record forms, plus a lockd-shaped NDJSON fixture with session, tab, event,
+  operation, timestamp, and payload fields. All fixtures are generated once and
+  shared by Go, C, and Lua.
 - the current executable selector matrix covers equality, contains,
   `contains.any`, case-insensitive contains, timestamp comparison, date
   window, numeric range terms, and concrete numeric object-key/array-index path
-  traversal over record-stream fixtures, plus nested `/records[]/...`
-  selection over the single-root JSON fixture.
+  traversal over record-stream fixtures, lockd-style `/event="session_sync"`,
+  `/event="tabs_update"`, and `/lockd/key` existence terms, plus nested
+  `/records[]/...` selection over the single-root JSON fixture.
 - the current executable mode matrix covers `decision_only_selector`,
   `decision_only_plan`, `reuse_selector`, `reparse_selector_each_run`,
   `decision_only_source_selector`, `plus_value_selector`, `plus_value_plan`,
@@ -152,10 +155,12 @@ Current implementation status:
   Mutation benchmark records assert equivalent candidate and match counts while
   timing compact matches-only mutation to a discard sink on C and Go. Numeric
   path selector cases mutate `/voucher/lines/10/bench`, so the mutation
-  benchmark also exercises numeric object-key and array-index path writes. Lua
-  currently returns mutated output as a Lua string through its public facade, so
-  Lua mutation is included in the smoke parity matrix but not in the scalable
-  memory profile until the Lua facade exposes a streaming mutation output sink.
+  benchmark also exercises numeric object-key and array-index path writes.
+  Lockd selector cases mutate `/processed=true`, matching the Go lockd fixture
+  benchmark's observable mutation shape. Lua currently returns mutated output
+  as a Lua string through its public facade, so Lua mutation is included in the
+  smoke parity matrix but not in the scalable memory profile until the Lua
+  facade exposes a streaming mutation output sink.
   The current C plan benchmark reuses the parsed public `lql_selector` handle;
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
   The C native helper and Lua facade runner report `ns_per_op`; the schema

@@ -27,10 +27,17 @@ typedef struct bench_source {
 
 static const char *default_mutation_exprs[] = {"/bench/touched=true"};
 static const char *numeric_mutation_exprs[] = {"/voucher/lines/10/bench=true"};
+static const char *lockd_mutation_exprs[] = {"/processed=true"};
 
 static const char *const *mutation_exprs_for_selector(const char *expr) {
   if (expr != NULL && strstr(expr, "/voucher/lines/10/") != NULL) {
     return numeric_mutation_exprs;
+  }
+  if (expr != NULL &&
+      (strstr(expr, "/event=\"session_sync\"") != NULL ||
+       strstr(expr, "/event=\"tabs_update\"") != NULL ||
+       strstr(expr, "/lockd/key") != NULL)) {
+    return lockd_mutation_exprs;
   }
   return default_mutation_exprs;
 }
