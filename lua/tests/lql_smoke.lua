@@ -29,10 +29,21 @@ end
 
 local tmp_base = os.tmpname()
 local input_path = tmp_base .. ".jsonl"
+local tmp_dir, tmp_name = string.match(tmp_base, "^(.*)/(.*)$")
+if not tmp_dir then
+  tmp_dir = "."
+  tmp_name = tmp_base
+end
+local text_payload_name = tmp_name .. ".txt"
+local bin_payload_name = tmp_name .. ".bin"
+local text_payload_path = tmp_dir .. "/" .. text_payload_name
+local bin_payload_path = tmp_dir .. "/" .. bin_payload_name
 
 write_file(input_path,
            '{"status":"closed","id":"a","count":1}\n' ..
              '{"status":"open","id":"b","count":2,"state":{"old":true}}\n')
+write_file(text_payload_path, 'lua\n"payload"')
+write_file(bin_payload_path, string.char(0, 1, 2, 97))
 
 if os.getenv("LQL_REQUIRE_CORE") == "1" and not lql.has_core() then
   fail("direct lql.core module was not loaded")
@@ -200,6 +211,33 @@ mutated = assert_no_error(mutated, err, "mutate_json")
 assert_equal(mutated, '{"status":"open","state":{"status":"running"}}\n',
              "mutate_json output")
 
+mutated, err = client:mutate_json('/status="open"', '{"status":"open"}',
+                                 {
+                                   "textfile:/payload=" .. text_payload_name,
+                                   "base64file:/encoded=" .. bin_payload_name
+                                 },
+                                 {
+                                   matches_only = true,
+                                   enable_file_mutations = true,
+                                   file_value_base_dir = tmp_dir
+                                 })
+mutated = assert_no_error(mutated, err, "mutate_json file values")
+assert_equal(mutated,
+             '{"status":"open","payload":"lua\\n\\"payload\\"","encoded":"AAECYQ=="}\n',
+             "mutate_json file values output")
+
+mutated, err = client:mutate_file('/status="open"', input_path,
+                                 {"textfile:/payload=" .. text_payload_name},
+                                 {
+                                   matches_only = true,
+                                   enable_file_mutations = true,
+                                   file_value_base_dir = tmp_dir
+                                 })
+mutated = assert_no_error(mutated, err, "mutate_file file values")
+assert_equal(mutated,
+             '{"status":"open","id":"b","count":2,"state":{"old":true},"payload":"lua\\n\\"payload\\""}\n',
+             "mutate_file file values output")
+
 local _
 _, err = client:select_file('bad{', input_path)
 if not err or err.stderr == "" then
@@ -207,3 +245,5 @@ if not err or err.stderr == "" then
 end
 
 os.remove(input_path)
+os.remove(text_payload_path)
+os.remove(bin_payload_path)

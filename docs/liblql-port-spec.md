@@ -851,9 +851,11 @@ Current implementation is an early slice:
   receiver, with deterministic smoke tests for selector decisions, selection
   output, callback decision streams, callback-scoped seekable payload handles,
   callback-scoped payload streaming through `match.write_json(callback)`, file
-  and buffered-JSON projection, file and buffered-JSON mutation, query stop
-  reasons, candidate/match limit options, expired payload handles, callback
-  error propagation, and structured errors; the public API style gate rejects
+  and buffered-JSON projection, file and buffered-JSON mutation, relative
+  file-backed mutation values through explicit `enable_file_mutations` and
+  `file_value_base_dir` options, query stop reasons, candidate/match limit
+  options, expired payload handles, callback error propagation, and structured
+  errors; the public API style gate rejects
   Lua facade use of private liblql headers, `LQL_INTERNAL_SYMBOL`, or private
   `_impl` receiver implementation functions so Lua remains a public-header
   binding rather than a private in-process shortcut;

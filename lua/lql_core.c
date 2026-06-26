@@ -288,6 +288,21 @@ static void lua_lql_options_query(lua_State *L, int index,
   out->max_bytes_read = lua_lql_options_u64(L, index, "max_bytes_read");
 }
 
+static const char *lua_lql_options_string(lua_State *L, int index,
+                                          const char *key) {
+  const char *value;
+
+  value = NULL;
+  if (lua_istable(L, index)) {
+    lua_getfield(L, index, key);
+    if (!lua_isnil(L, -1)) {
+      value = luaL_checkstring(L, -1);
+    }
+    lua_pop(L, 1);
+  }
+  return value;
+}
+
 static void lua_lql_push_query_result(lua_State *L,
                                       const lql_query_result *result) {
   lua_newtable(L);
@@ -777,7 +792,9 @@ static int lua_lql_mutate_json(lua_State *L) {
                                    &matched, &error);
   }
   if (st == LQL_STATUS_OK) {
-    st = lua_lql_parse_mutation_plan(L, client->ctx, 4, 5, NULL, &plan, &error);
+    st = lua_lql_parse_mutation_plan(
+        L, client->ctx, 4, 5,
+        lua_lql_options_string(L, 5, "file_value_base_dir"), &plan, &error);
   }
   if (st == LQL_STATUS_OK && matched) {
     out = tmpfile();
@@ -1109,7 +1126,9 @@ static int lua_lql_mutate_file(lua_State *L) {
   st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
                                    &error);
   if (st == LQL_STATUS_OK) {
-    st = lua_lql_parse_mutation_plan(L, client->ctx, 4, 5, NULL, &plan, &error);
+    st = lua_lql_parse_mutation_plan(
+        L, client->ctx, 4, 5,
+        lua_lql_options_string(L, 5, "file_value_base_dir"), &plan, &error);
   }
   if (st == LQL_STATUS_OK) {
     input = fopen(path, "rb");
