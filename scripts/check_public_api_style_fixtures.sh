@@ -81,6 +81,7 @@ cat >"$tmp/src/lql_eval.c" <<'EOF'
 void *bad_null_receiver_allocator(void) { return lql_allocator_from_receiver(NULL); }
 void bad_lonejson_default_allocator(void) { runtime = lonejson_new(NULL, error); }
 void bad_core_private_operation_call(void) { lql_matches_json_impl(ctx, 0, 0, 0, 0, 0); }
+void bad_core_shared_operation_call(void) { (void)lql_project_spooled(0, 0, 0, 0, 0, 0); }
 static int lql_query_file_decisions_impl(void) { return 0; }
 EOF
 
@@ -149,6 +150,7 @@ expect_diagnostic "$out" "receiver-owned operations must not fall back to handle
 expect_diagnostic "$out" "lonejson runtimes must use receiver allocator bridge"
 expect_diagnostic "$out" "private receiver implementations must not be called with NULL receivers"
 expect_diagnostic "$out" "receiver methods must be file-local methods"
+expect_diagnostic "$out" "receiver operation internals must not be shared"
 expect_diagnostic "$out" "README documents forbidden operation/cleanup wrapper"
 expect_diagnostic "$out" "Lua facade must use public liblql APIs only"
 expect_diagnostic "$out" "clql must route execution through receiver methods"
