@@ -4198,6 +4198,18 @@ static void expect_mutation_error_api(void) {
       ++failures;
     }
 
+    memset(&result, 0x5a, sizeof(result));
+    lql_error_init(&error);
+    st = test_ctx->mutate_source_candidates_with_options(
+        test_ctx, NULL, plan, NULL, NULL, out, 1, 0, NULL, &result, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "plan, read, and out are required") != 0 ||
+        !query_result_is_zero(&result)) {
+      printf("source candidate mutation options NULL read mismatch: %s\n",
+             error.message);
+      ++failures;
+    }
+
     lql_error_init(&error);
     st = test_ctx->mutate_json(test_ctx, NULL, "{}", strlen("{}"), out, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||

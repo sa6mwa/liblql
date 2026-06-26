@@ -986,9 +986,10 @@ Current implementation status:
   selector, only matched candidates are written, mutation is applied directly to
   those candidates, result counters report all candidates seen and matched, stop
   options can halt after a match limit, and time-prefixed mutation values
-  normalize to UTC strings. Go request construction conflicts and Go
-  `OpenJSON`/inline payload-sink precedence remain API-shape-specific audit
-  items unless liblql grows an equivalent public surface;
+  normalize to UTC strings. The option-aware receiver method also preserves
+  liblql's invalid-argument diagnostics and zeroed result contract. Go request
+  construction conflicts and Go `OpenJSON`/inline payload-sink precedence are
+  API-shape-specific unless liblql grows an equivalent public surface;
 - the pinned Go oracle inventory is executable through
   `parity/oracle_inventory.tsv` and `TestOracleInventory`; it currently records
   all `pkt.systems/lql v0.17.1` test, benchmark, and example-bearing files and
