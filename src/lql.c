@@ -117,7 +117,7 @@ lql_status lql_new(lql **out, lql_error *error) {
   ctx->capabilities_get = receiver_capabilities_get;
   ctx->selector_parse = lql_selector_parse_impl;
   ctx->selector_parse_or = lql_selector_parse_or_impl;
-  ctx->selector_free = lql_selector_free_impl;
+  ctx->selector_destroy = lql_selector_destroy_impl;
   ctx->selector_is_empty = lql_selector_is_empty_impl;
   ctx->matches_json = lql_matches_json_impl;
   ctx->query_file_decisions = lql_query_file_decisions_impl;
@@ -135,7 +135,7 @@ lql_status lql_new(lql **out, lql_error *error) {
   ctx->payload_write_json = lql_payload_write_json_impl;
   ctx->payload_write_json_sink = lql_payload_write_json_sink_impl;
   ctx->projection_parse = lql_projection_parse_impl;
-  ctx->projection_free = lql_projection_free_impl;
+  ctx->projection_destroy = lql_projection_destroy_impl;
   ctx->project_file_range = lql_project_file_range_impl;
   ctx->project_source = lql_project_source_impl;
   ctx->project_json = lql_project_json_impl;
@@ -146,7 +146,7 @@ lql_status lql_new(lql **out, lql_error *error) {
   ctx->mutation_plan_parse_with_options =
       lql_mutation_plan_parse_with_options_impl;
   ctx->mutation_plan_count = lql_mutation_plan_count_impl;
-  ctx->mutation_plan_free = lql_mutation_plan_free_impl;
+  ctx->mutation_plan_destroy = lql_mutation_plan_destroy_impl;
   ctx->mutate_file_range_root_fields = lql_mutate_file_range_root_fields_impl;
   ctx->mutate_file_range_paths = lql_mutate_file_range_paths_impl;
   ctx->mutate_file_range_candidates = lql_mutate_file_range_candidates_impl;
@@ -328,7 +328,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_or_impl(lql *self,
   return lql_parse_selector_internal(expr, 1, out, error);
 }
 
-LQL_INTERNAL_SYMBOL void lql_selector_free_impl(lql *self,
+LQL_INTERNAL_SYMBOL void lql_selector_destroy_impl(lql *self,
                                                 lql_selector *selector) {
   (void)self;
   if (selector != NULL) {

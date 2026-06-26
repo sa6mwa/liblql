@@ -103,7 +103,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_or_impl(lql *self,
                                                           const char *expr,
                                                           lql_selector **out,
                                                           lql_error *error);
-LQL_INTERNAL_SYMBOL void lql_selector_free_impl(lql *self,
+LQL_INTERNAL_SYMBOL void lql_selector_destroy_impl(lql *self,
                                                 lql_selector *selector);
 LQL_INTERNAL_SYMBOL int
 lql_selector_is_empty_impl(const lql *self, const lql_selector *selector);
@@ -182,7 +182,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
 LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
     lql *self, const char *const *fields, size_t field_count,
     lql_projection **out, lql_error *error);
-LQL_INTERNAL_SYMBOL void lql_projection_free_impl(lql *self,
+LQL_INTERNAL_SYMBOL void lql_projection_destroy_impl(lql *self,
                                                   lql_projection *projection);
 LQL_INTERNAL_SYMBOL lql_status lql_project_file_range_impl(
     lql *self, const lql_projection *projection, FILE *file, lql_uint64 offset,
@@ -214,7 +214,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
     lql_error *error);
 LQL_INTERNAL_SYMBOL size_t
 lql_mutation_plan_count_impl(const lql *self, const lql_mutation_plan *plan);
-LQL_INTERNAL_SYMBOL void lql_mutation_plan_free_impl(lql *self,
+LQL_INTERNAL_SYMBOL void lql_mutation_plan_destroy_impl(lql *self,
                                                      lql_mutation_plan *plan);
 lql_status lql_mutate_file_range_root_fields_impl(lql *self,
                                                   const lql_mutation_plan *plan,

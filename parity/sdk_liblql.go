@@ -39,7 +39,7 @@ static int liblql_matches_json(const char *expr, const char *json, int or_mode,
 		return (int)status;
 	}
 	status = liblql_receiver()->matches_json(liblql_receiver(), selector, json, strlen(json), out_matched, &error);
-	liblql_receiver()->selector_free(liblql_receiver(), selector);
+	liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 	if (status != LQL_STATUS_OK) {
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, error.message, errbuf_len - 1u);
@@ -63,7 +63,7 @@ static int liblql_parse_selector(const char *expr, int or_mode, char *errbuf,
 	} else {
 		status = liblql_receiver()->selector_parse(liblql_receiver(), expr, &selector, &error);
 	}
-	liblql_receiver()->selector_free(liblql_receiver(), selector);
+	liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 	if (status != LQL_STATUS_OK && errbuf != NULL && errbuf_len > 0u) {
 		strncpy(errbuf, error.message, errbuf_len - 1u);
 		errbuf[errbuf_len - 1u] = '\0';
@@ -81,7 +81,7 @@ static int liblql_parse_projection(const char *const *fields,
 	lql_error_init(&error);
 	projection = NULL;
 	status = liblql_receiver()->projection_parse(liblql_receiver(), fields, field_count, &projection, &error);
-	liblql_receiver()->projection_free(liblql_receiver(), projection);
+	liblql_receiver()->projection_destroy(liblql_receiver(), projection);
 	if (status != LQL_STATUS_OK && errbuf != NULL && errbuf_len > 0u) {
 		strncpy(errbuf, error.message, errbuf_len - 1u);
 		errbuf[errbuf_len - 1u] = '\0';
@@ -114,7 +114,7 @@ static int liblql_parse_mutations(const char *const *exprs, size_t expr_count,
 		status = liblql_receiver()->mutation_plan_parse(liblql_receiver(), exprs, expr_count, &plan, &error);
 	}
 	if (status != LQL_STATUS_OK) {
-		liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+		liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, error.message, errbuf_len - 1u);
 			errbuf[errbuf_len - 1u] = '\0';
@@ -124,7 +124,7 @@ static int liblql_parse_mutations(const char *const *exprs, size_t expr_count,
 	if (out_count != NULL) {
 		*out_count = liblql_receiver()->mutation_plan_count(liblql_receiver(), plan);
 	}
-	liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+	liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
 	return 0;
 }
 
@@ -197,7 +197,7 @@ static int liblql_project_json_value(const char *const *fields,
 	}
 	tmp = tmpfile();
 	if (tmp == NULL) {
-		liblql_receiver()->projection_free(liblql_receiver(), projection);
+		liblql_receiver()->projection_destroy(liblql_receiver(), projection);
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
 			errbuf[errbuf_len - 1u] = '\0';
@@ -206,7 +206,7 @@ static int liblql_project_json_value(const char *const *fields,
 	}
 	status = liblql_receiver()->project_json(liblql_receiver(), projection, json, strlen(json), tmp, out_found,
 	                          &error);
-	liblql_receiver()->projection_free(liblql_receiver(), projection);
+	liblql_receiver()->projection_destroy(liblql_receiver(), projection);
 	if (status != LQL_STATUS_OK) {
 		fclose(tmp);
 		if (errbuf != NULL && errbuf_len > 0u) {
@@ -293,13 +293,13 @@ static int liblql_project_file_range_value(const char *const *fields,
 	}
 	if (liblql_prepare_range_input(prefix, json, suffix, &input, &offset, &size,
 	                               errbuf, errbuf_len) != 0) {
-		liblql_receiver()->projection_free(liblql_receiver(), projection);
+		liblql_receiver()->projection_destroy(liblql_receiver(), projection);
 		return -1;
 	}
 	tmp = tmpfile();
 	if (tmp == NULL) {
 		fclose(input);
-		liblql_receiver()->projection_free(liblql_receiver(), projection);
+		liblql_receiver()->projection_destroy(liblql_receiver(), projection);
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
 			errbuf[errbuf_len - 1u] = '\0';
@@ -309,7 +309,7 @@ static int liblql_project_file_range_value(const char *const *fields,
 	status = liblql_receiver()->project_file_range(liblql_receiver(), projection, input, (lql_uint64)offset,
 	                                (lql_uint64)size, tmp, out_found, &error);
 	fclose(input);
-	liblql_receiver()->projection_free(liblql_receiver(), projection);
+	liblql_receiver()->projection_destroy(liblql_receiver(), projection);
 	if (status != LQL_STATUS_OK) {
 		fclose(tmp);
 		if (errbuf != NULL && errbuf_len > 0u) {
@@ -360,7 +360,7 @@ static int liblql_mutate_json_value(const char *const *exprs,
 	}
 	tmp = tmpfile();
 	if (tmp == NULL) {
-		liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+		liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
 			errbuf[errbuf_len - 1u] = '\0';
@@ -368,7 +368,7 @@ static int liblql_mutate_json_value(const char *const *exprs,
 		return -1;
 	}
 	status = liblql_receiver()->mutate_json(liblql_receiver(), plan, json, strlen(json), tmp, &error);
-	liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+	liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
 	if (status != LQL_STATUS_OK) {
 		fclose(tmp);
 		if (errbuf != NULL && errbuf_len > 0u) {
@@ -449,7 +449,7 @@ static int liblql_project_source_value(const char *const *fields,
 	}
 	tmp = tmpfile();
 	if (tmp == NULL) {
-		liblql_receiver()->projection_free(liblql_receiver(), projection);
+		liblql_receiver()->projection_destroy(liblql_receiver(), projection);
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
 			errbuf[errbuf_len - 1u] = '\0';
@@ -462,7 +462,7 @@ static int liblql_project_source_value(const char *const *fields,
 	reader.chunk_size = chunk_size;
 	status = liblql_receiver()->project_source(liblql_receiver(), projection, liblql_read_source_chunk, &reader,
 	                            tmp, out_found, &error);
-	liblql_receiver()->projection_free(liblql_receiver(), projection);
+	liblql_receiver()->projection_destroy(liblql_receiver(), projection);
 	if (status != LQL_STATUS_OK) {
 		fclose(tmp);
 		if (errbuf != NULL && errbuf_len > 0u) {
@@ -504,7 +504,7 @@ static int liblql_mutate_source_value(const char *const *exprs,
 	}
 	tmp = tmpfile();
 	if (tmp == NULL) {
-		liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+		liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
 			errbuf[errbuf_len - 1u] = '\0';
@@ -517,7 +517,7 @@ static int liblql_mutate_source_value(const char *const *exprs,
 	reader.chunk_size = chunk_size;
 	status = liblql_receiver()->mutate_source_paths(liblql_receiver(), plan, liblql_read_source_chunk, &reader, tmp,
 	                                 &error);
-	liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+	liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
 	if (status != LQL_STATUS_OK) {
 		fclose(tmp);
 		if (errbuf != NULL && errbuf_len > 0u) {
@@ -564,7 +564,7 @@ static int liblql_mutate_source_candidates_value(
 	status = liblql_receiver()->mutation_plan_parse(liblql_receiver(), exprs,
 	                                                expr_count, &plan, &error);
 	if (status != LQL_STATUS_OK) {
-		liblql_receiver()->selector_free(liblql_receiver(), selector);
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, error.message, errbuf_len - 1u);
 			errbuf[errbuf_len - 1u] = '\0';
@@ -573,8 +573,8 @@ static int liblql_mutate_source_candidates_value(
 	}
 	tmp = tmpfile();
 	if (tmp == NULL) {
-		liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
-		liblql_receiver()->selector_free(liblql_receiver(), selector);
+		liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
 			errbuf[errbuf_len - 1u] = '\0';
@@ -588,8 +588,8 @@ static int liblql_mutate_source_candidates_value(
 	status = liblql_receiver()->mutate_source_candidates(
 	    liblql_receiver(), selector, plan, liblql_read_source_chunk, &reader,
 	    tmp, 1, matches_only, NULL, &error);
-	liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
-	liblql_receiver()->selector_free(liblql_receiver(), selector);
+	liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
+	liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 	if (status != LQL_STATUS_OK) {
 		fclose(tmp);
 		if (errbuf != NULL && errbuf_len > 0u) {
@@ -647,13 +647,13 @@ static int liblql_mutate_file_range_value(const char *const *exprs,
 	}
 	if (liblql_prepare_range_input(prefix, json, suffix, &input, &offset, &size,
 	                               errbuf, errbuf_len) != 0) {
-		liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+		liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
 		return -1;
 	}
 	tmp = tmpfile();
 	if (tmp == NULL) {
 		fclose(input);
-		liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+		liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
 			errbuf[errbuf_len - 1u] = '\0';
@@ -668,7 +668,7 @@ static int liblql_mutate_file_range_value(const char *const *exprs,
 		                                     (lql_uint64)size, tmp, &error);
 	}
 	fclose(input);
-	liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
+	liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
 	if (status != LQL_STATUS_OK) {
 		fclose(tmp);
 		if (errbuf != NULL && errbuf_len > 0u) {
@@ -718,7 +718,7 @@ static int liblql_mutate_file_range_candidates_value(
 	status = liblql_receiver()->mutation_plan_parse(liblql_receiver(), exprs,
 	                                                expr_count, &plan, &error);
 	if (status != LQL_STATUS_OK) {
-		liblql_receiver()->selector_free(liblql_receiver(), selector);
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, error.message, errbuf_len - 1u);
 			errbuf[errbuf_len - 1u] = '\0';
@@ -727,15 +727,15 @@ static int liblql_mutate_file_range_candidates_value(
 	}
 	if (liblql_prepare_range_input(prefix, json, suffix, &input, &offset, &size,
 	                               errbuf, errbuf_len) != 0) {
-		liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
-		liblql_receiver()->selector_free(liblql_receiver(), selector);
+		liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 		return -1;
 	}
 	tmp = tmpfile();
 	if (tmp == NULL) {
 		fclose(input);
-		liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
-		liblql_receiver()->selector_free(liblql_receiver(), selector);
+		liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
 			errbuf[errbuf_len - 1u] = '\0';
@@ -746,8 +746,8 @@ static int liblql_mutate_file_range_candidates_value(
 	    liblql_receiver(), selector, plan, input, (lql_uint64)offset,
 	    (lql_uint64)size, tmp, 1, matches_only, NULL, &error);
 	fclose(input);
-	liblql_receiver()->mutation_plan_free(liblql_receiver(), plan);
-	liblql_receiver()->selector_free(liblql_receiver(), selector);
+	liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
+	liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 	if (status != LQL_STATUS_OK) {
 		fclose(tmp);
 		if (errbuf != NULL && errbuf_len > 0u) {
@@ -1039,7 +1039,7 @@ static int liblql_stream_query(const char *expr, const char *json, int mode,
 	if (mode == 0) {
 		input = tmpfile();
 		if (input == NULL) {
-			liblql_receiver()->selector_free(liblql_receiver(), selector);
+			liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 			if (errbuf != NULL && errbuf_len > 0u) {
 				strncpy(errbuf, "failed to create temporary input", errbuf_len - 1u);
 				errbuf[errbuf_len - 1u] = '\0';
@@ -1049,7 +1049,7 @@ static int liblql_stream_query(const char *expr, const char *json, int mode,
 		if (fwrite(json, 1u, strlen(json), input) != strlen(json) ||
 		    fseek(input, 0L, SEEK_SET) != 0) {
 			fclose(input);
-			liblql_receiver()->selector_free(liblql_receiver(), selector);
+			liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 			if (errbuf != NULL && errbuf_len > 0u) {
 				strncpy(errbuf, "failed to prepare temporary input", errbuf_len - 1u);
 				errbuf[errbuf_len - 1u] = '\0';
@@ -1070,7 +1070,7 @@ static int liblql_stream_query(const char *expr, const char *json, int mode,
 	} else {
 		payload_out = tmpfile();
 		if (payload_out == NULL) {
-			liblql_receiver()->selector_free(liblql_receiver(), selector);
+			liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 			if (errbuf != NULL && errbuf_len > 0u) {
 				strncpy(errbuf, "failed to create temporary payload output",
 				        errbuf_len - 1u);
@@ -1083,7 +1083,7 @@ static int liblql_stream_query(const char *expr, const char *json, int mode,
 			input = tmpfile();
 			if (input == NULL) {
 				fclose(payload_out);
-				liblql_receiver()->selector_free(liblql_receiver(), selector);
+				liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 				if (errbuf != NULL && errbuf_len > 0u) {
 					strncpy(errbuf, "failed to create temporary input",
 					        errbuf_len - 1u);
@@ -1095,7 +1095,7 @@ static int liblql_stream_query(const char *expr, const char *json, int mode,
 			    fseek(input, 0L, SEEK_SET) != 0) {
 				fclose(input);
 				fclose(payload_out);
-				liblql_receiver()->selector_free(liblql_receiver(), selector);
+				liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 				if (errbuf != NULL && errbuf_len > 0u) {
 					strncpy(errbuf, "failed to prepare temporary input",
 					        errbuf_len - 1u);
@@ -1116,7 +1116,7 @@ static int liblql_stream_query(const char *expr, const char *json, int mode,
 			    liblql_collect_match, &state, &result, &error);
 		} else {
 			fclose(payload_out);
-			liblql_receiver()->selector_free(liblql_receiver(), selector);
+			liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 			if (errbuf != NULL && errbuf_len > 0u) {
 				strncpy(errbuf, "unsupported stream parity mode", errbuf_len - 1u);
 				errbuf[errbuf_len - 1u] = '\0';
@@ -1127,12 +1127,12 @@ static int liblql_stream_query(const char *expr, const char *json, int mode,
 		    liblql_read_tmp(payload_out, &summary->payload_json,
 		                    &summary->payload_len, errbuf, errbuf_len) != 0) {
 			fclose(payload_out);
-			liblql_receiver()->selector_free(liblql_receiver(), selector);
+			liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 			return -1;
 		}
 		fclose(payload_out);
 	}
-	liblql_receiver()->selector_free(liblql_receiver(), selector);
+	liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 	if (status != LQL_STATUS_OK) {
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, error.message, errbuf_len - 1u);

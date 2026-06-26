@@ -1487,7 +1487,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
   }
   token_list_cleanup(&tokens);
   if (st != LQL_STATUS_OK) {
-    lql_selector_free_impl(NULL, selector);
+    lql_selector_destroy_impl(NULL, selector);
     return st;
   }
   selector->hit_count = 0u;

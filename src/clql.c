@@ -940,7 +940,7 @@ int main(int argc, char **argv) {
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
       lql_dealloc(selector_expr_owned);
-      clql_ctx->projection_free(clql_ctx, projection);
+      clql_ctx->projection_destroy(clql_ctx, projection);
       free_projection_args(&fields);
       free_projection_args(&mutations);
       free_projection_args(&input_paths);
@@ -954,8 +954,8 @@ int main(int argc, char **argv) {
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
     lql_dealloc(selector_expr_owned);
-    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-    clql_ctx->projection_free(clql_ctx, projection);
+    clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+    clql_ctx->projection_destroy(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -964,9 +964,9 @@ int main(int argc, char **argv) {
   if (inline_mode && mutation_plan == NULL) {
     fprintf(stderr, "clql: inline mode requires mutation expressions\n");
     lql_dealloc(selector_expr_owned);
-    clql_ctx->selector_free(clql_ctx, selector);
-    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-    clql_ctx->projection_free(clql_ctx, projection);
+    clql_ctx->selector_destroy(clql_ctx, selector);
+    clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+    clql_ctx->projection_destroy(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -975,9 +975,9 @@ int main(int argc, char **argv) {
   if (inline_mode && input_paths.count == 0u) {
     fprintf(stderr, "clql: inline mode requires a file path\n");
     lql_dealloc(selector_expr_owned);
-    clql_ctx->selector_free(clql_ctx, selector);
-    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-    clql_ctx->projection_free(clql_ctx, projection);
+    clql_ctx->selector_destroy(clql_ctx, selector);
+    clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+    clql_ctx->projection_destroy(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -987,9 +987,9 @@ int main(int argc, char **argv) {
                       strcmp(input_path, "-") == 0)) {
     fprintf(stderr, "clql: inline mode requires a single JSON file\n");
     lql_dealloc(selector_expr_owned);
-    clql_ctx->selector_free(clql_ctx, selector);
-    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-    clql_ctx->projection_free(clql_ctx, projection);
+    clql_ctx->selector_destroy(clql_ctx, selector);
+    clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+    clql_ctx->projection_destroy(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -1005,9 +1005,9 @@ int main(int argc, char **argv) {
         if (st != LQL_STATUS_OK) {
           fprintf(stderr, "clql: %s\n", error.message);
           lql_dealloc(selector_expr_owned);
-          clql_ctx->selector_free(clql_ctx, selector);
-          clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-          clql_ctx->projection_free(clql_ctx, projection);
+          clql_ctx->selector_destroy(clql_ctx, selector);
+          clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+          clql_ctx->projection_destroy(clql_ctx, projection);
           free_projection_args(&fields);
           free_projection_args(&mutations);
           free_projection_args(&input_paths);
@@ -1023,9 +1023,9 @@ int main(int argc, char **argv) {
         close_input_path(input);
         close_input_path(range_source);
         lql_dealloc(selector_expr_owned);
-        clql_ctx->selector_free(clql_ctx, selector);
-        clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-        clql_ctx->projection_free(clql_ctx, projection);
+        clql_ctx->selector_destroy(clql_ctx, selector);
+        clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+        clql_ctx->projection_destroy(clql_ctx, projection);
         free_projection_args(&fields);
         free_projection_args(&mutations);
         free_projection_args(&input_paths);
@@ -1052,9 +1052,9 @@ int main(int argc, char **argv) {
       if (st != LQL_STATUS_OK) {
         fprintf(stderr, "clql: %s\n", error.message);
         lql_dealloc(selector_expr_owned);
-        clql_ctx->selector_free(clql_ctx, selector);
-        clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-        clql_ctx->projection_free(clql_ctx, projection);
+        clql_ctx->selector_destroy(clql_ctx, selector);
+        clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+        clql_ctx->projection_destroy(clql_ctx, projection);
         free_projection_args(&fields);
         free_projection_args(&mutations);
         free_projection_args(&input_paths);
@@ -1062,9 +1062,9 @@ int main(int argc, char **argv) {
       }
     }
     lql_dealloc(selector_expr_owned);
-    clql_ctx->selector_free(clql_ctx, selector);
-    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-    clql_ctx->projection_free(clql_ctx, projection);
+    clql_ctx->selector_destroy(clql_ctx, selector);
+    clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+    clql_ctx->projection_destroy(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -1078,9 +1078,9 @@ int main(int argc, char **argv) {
       lql_dealloc(selector_expr_owned);
       close_input_path(input);
       close_input_path(range_source);
-      clql_ctx->selector_free(clql_ctx, selector);
-      clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-      clql_ctx->projection_free(clql_ctx, projection);
+      clql_ctx->selector_destroy(clql_ctx, selector);
+      clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+      clql_ctx->projection_destroy(clql_ctx, projection);
       free_projection_args(&fields);
       free_projection_args(&mutations);
       free_projection_args(&input_paths);
@@ -1095,9 +1095,9 @@ int main(int argc, char **argv) {
       lql_dealloc(selector_expr_owned);
       close_input_path(input);
       close_input_path(range_source);
-      clql_ctx->selector_free(clql_ctx, selector);
-      clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-      clql_ctx->projection_free(clql_ctx, projection);
+      clql_ctx->selector_destroy(clql_ctx, selector);
+      clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+      clql_ctx->projection_destroy(clql_ctx, projection);
       free_projection_args(&fields);
       free_projection_args(&mutations);
       free_projection_args(&input_paths);
@@ -1142,9 +1142,9 @@ int main(int argc, char **argv) {
       inline_tmp_path = NULL;
     }
     lql_dealloc(selector_expr_owned);
-    clql_ctx->selector_free(clql_ctx, selector);
-    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-    clql_ctx->projection_free(clql_ctx, projection);
+    clql_ctx->selector_destroy(clql_ctx, selector);
+    clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+    clql_ctx->projection_destroy(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -1158,10 +1158,10 @@ int main(int argc, char **argv) {
   st = lql_eval_query_file_spooled_matches(selector, stdin, stdout, compact,
                                            projection, mutation_plan,
                                            matches_only, &result, &error);
-  clql_ctx->selector_free(clql_ctx, selector);
+  clql_ctx->selector_destroy(clql_ctx, selector);
   lql_dealloc(selector_expr_owned);
-  clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
-  clql_ctx->projection_free(clql_ctx, projection);
+  clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
+  clql_ctx->projection_destroy(clql_ctx, projection);
   free_projection_args(&fields);
   free_projection_args(&mutations);
   free_projection_args(&input_paths);

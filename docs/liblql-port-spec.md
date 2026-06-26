@@ -73,7 +73,7 @@ macros or static wrapper shims.
 
 The API should be handle-oriented and explicit about ownership:
 
-- parser/compiled selector handles are owned by the caller and freed with
+- parser/compiled selector handles are owned by the caller and destroyed with
   receiver cleanup methods;
 - result payload handles are valid only for documented callback lifetimes and
   must not imply retained candidate copies;
@@ -90,7 +90,7 @@ cleanup functions so downstream users do not cross allocator boundaries.
 
 The API should eventually expose these surfaces:
 
-- selector parse and free;
+- selector parse and receiver destroy;
 - reusable selector plan/compiled state;
 - selector evaluation over one arbitrary JSON value;
 - streaming query over arbitrary candidate streams;
@@ -545,7 +545,9 @@ Current implementation is an early slice:
   exported dynamic symbols; it also scans project-owned source trees for
   exact-name macro or static wrapper shims that recreate those removed
   operation functions and for static receiver-operation shims that should have
-  been folded into the receiver-compatible implementation functions;
+  been folded into the receiver-compatible implementation functions; receiver
+  cleanup fields named `*_free` are also rejected so cleanup stays on the
+  `*_destroy` receiver surface;
 - project-owned allocations have a central liblql allocator surface, and
   direct C runtime allocation calls are limited to the allocator
   implementation; `make test` enforces this by failing on direct
@@ -615,7 +617,7 @@ Current implementation is an early slice:
   installed and extracted trees;
 - the initial C mutation API exposes receiver methods
   `ctx->mutation_plan_parse()`, `ctx->mutation_plan_parse_with_options()`,
-  `ctx->mutation_plan_count()`, and `ctx->mutation_plan_free()` for CLI-style
+  `ctx->mutation_plan_count()`, and `ctx->mutation_plan_destroy()` for CLI-style
   mutation parse/plan validation;
   file-backed mutation values remain disabled by default and require explicit
   parse options;

@@ -9,6 +9,7 @@ forbidden='
 lql_selector_parse
 lql_selector_parse_or
 lql_selector_free
+lql_selector_destroy
 lql_selector_is_empty
 lql_matches_json
 lql_query_file_decisions
@@ -23,6 +24,7 @@ lql_payload_write_json
 lql_payload_write_json_sink
 lql_projection_parse
 lql_projection_free
+lql_projection_destroy
 lql_project_file_range
 lql_project_source
 lql_project_json
@@ -33,6 +35,7 @@ lql_mutation_plan_parse
 lql_mutation_plan_parse_with_options
 lql_mutation_plan_count
 lql_mutation_plan_free
+lql_mutation_plan_destroy
 lql_mutate_file_range_root_fields
 lql_mutate_file_range_paths
 lql_mutate_file_range_candidates
@@ -50,6 +53,11 @@ for symbol in $forbidden; do
     failed=1
   fi
 done
+
+if grep -Eq "^[[:space:]]*void[[:space:]]+\\(\\*[A-Za-z0-9_]+_free\\)[[:space:]]*\\(" "$header"; then
+  printf 'public API style: forbidden receiver cleanup field named *_free in %s\n' "$header" >&2
+  failed=1
+fi
 
 if [ -n "$shared" ] && [ -f "$shared" ]; then
   if command -v nm >/dev/null 2>&1; then

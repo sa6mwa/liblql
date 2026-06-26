@@ -490,7 +490,7 @@ static int lua_lql_matches_json(lua_State *L) {
     st = client->ctx->matches_json(client->ctx, selector, json, json_len,
                                    &matched, &error);
   }
-  client->ctx->selector_free(client->ctx, selector);
+  client->ctx->selector_destroy(client->ctx, selector);
   if (st != LQL_STATUS_OK) {
     return lua_lql_fail(L, &error);
   }
@@ -551,7 +551,7 @@ static int lua_lql_select_json(lua_State *L) {
       }
     }
   }
-  client->ctx->selector_free(client->ctx, selector);
+  client->ctx->selector_destroy(client->ctx, selector);
   if (st != LQL_STATUS_OK) {
     lql_dealloc(buffer.data);
     return lua_lql_fail(L, &error);
@@ -617,8 +617,8 @@ static int lua_lql_project_json(lua_State *L) {
       fclose(out);
     }
   }
-  client->ctx->projection_free(client->ctx, projection);
-  client->ctx->selector_free(client->ctx, selector);
+  client->ctx->projection_destroy(client->ctx, projection);
+  client->ctx->selector_destroy(client->ctx, selector);
   lql_dealloc(fields);
   if (st != LQL_STATUS_OK) {
     lql_dealloc(buffer.data);
@@ -685,8 +685,8 @@ static int lua_lql_mutate_json(lua_State *L) {
       lua_lql_set_error(&error, st, lql_status_string(st));
     }
   }
-  client->ctx->mutation_plan_free(client->ctx, plan);
-  client->ctx->selector_free(client->ctx, selector);
+  client->ctx->mutation_plan_destroy(client->ctx, plan);
+  client->ctx->selector_destroy(client->ctx, selector);
   if (st != LQL_STATUS_OK) {
     lql_dealloc(buffer.data);
     return lua_lql_fail(L, &error);
@@ -754,7 +754,7 @@ static int lua_lql_select_file(lua_State *L) {
   if (input != NULL) {
     fclose(input);
   }
-  client->ctx->selector_free(client->ctx, selector);
+  client->ctx->selector_destroy(client->ctx, selector);
   if (st != LQL_STATUS_OK) {
     lql_dealloc(buffer.data);
     return lua_lql_fail(L, &error);
@@ -810,7 +810,7 @@ static int lua_lql_query_file(lua_State *L) {
   if (input != NULL) {
     fclose(input);
   }
-  client->ctx->selector_free(client->ctx, selector);
+  client->ctx->selector_destroy(client->ctx, selector);
   if (st != LQL_STATUS_OK && st != LQL_STATUS_STOP) {
     return lua_lql_fail(L, &error);
   }
@@ -864,7 +864,7 @@ static int lua_lql_each_match_file(lua_State *L) {
   if (input != NULL) {
     fclose(input);
   }
-  client->ctx->selector_free(client->ctx, selector);
+  client->ctx->selector_destroy(client->ctx, selector);
   if (st != LQL_STATUS_OK && st != LQL_STATUS_STOP) {
     return lua_lql_fail(L, &error);
   }
@@ -943,8 +943,8 @@ static int lua_lql_project_file(lua_State *L) {
   if (input != NULL) {
     fclose(input);
   }
-  client->ctx->projection_free(client->ctx, projection);
-  client->ctx->selector_free(client->ctx, selector);
+  client->ctx->projection_destroy(client->ctx, projection);
+  client->ctx->selector_destroy(client->ctx, selector);
   lql_dealloc(fields);
   if (st != LQL_STATUS_OK) {
     lql_dealloc(buffer.data);
@@ -1020,8 +1020,8 @@ static int lua_lql_mutate_file(lua_State *L) {
   if (input != NULL) {
     fclose(input);
   }
-  client->ctx->mutation_plan_free(client->ctx, plan);
-  client->ctx->selector_free(client->ctx, selector);
+  client->ctx->mutation_plan_destroy(client->ctx, plan);
+  client->ctx->selector_destroy(client->ctx, selector);
   if (st != LQL_STATUS_OK) {
     lql_dealloc(buffer.data);
     return lua_lql_fail(L, &error);

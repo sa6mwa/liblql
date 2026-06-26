@@ -1052,7 +1052,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
       continue;
     }
     if (!split_expressions(exprs[i], &parts, error)) {
-      lql_mutation_plan_free_impl(NULL, plan);
+      lql_mutation_plan_destroy_impl(NULL, plan);
       return error != NULL && error->code != LQL_STATUS_OK
                  ? error->code
                  : LQL_STATUS_NO_MEMORY;
@@ -1060,7 +1060,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
     for (j = 0u; j < parts.count; ++j) {
       if (!parse_mutation_expr(parts.items[j], plan, options, error)) {
         string_list_cleanup(&parts);
-        lql_mutation_plan_free_impl(NULL, plan);
+        lql_mutation_plan_destroy_impl(NULL, plan);
         return error != NULL && error->code != LQL_STATUS_OK
                    ? error->code
                    : LQL_STATUS_NO_MEMORY;
@@ -1069,7 +1069,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
     string_list_cleanup(&parts);
   }
   if (plan->count == 0u) {
-    lql_mutation_plan_free_impl(NULL, plan);
+    lql_mutation_plan_destroy_impl(NULL, plan);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "no valid field mutations parsed");
     return LQL_STATUS_PARSE_ERROR;
@@ -1091,7 +1091,7 @@ lql_mutation_plan_count_impl(const lql *self, const lql_mutation_plan *plan) {
   return plan == NULL ? 0u : plan->count;
 }
 
-LQL_INTERNAL_SYMBOL void lql_mutation_plan_free_impl(lql *self,
+LQL_INTERNAL_SYMBOL void lql_mutation_plan_destroy_impl(lql *self,
                                                      lql_mutation_plan *plan) {
   size_t i;
   (void)self;

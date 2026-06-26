@@ -935,21 +935,21 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
   }
   for (i = 0u; i < field_count; ++i) {
     if (!parse_projection_path(fields[i], &path)) {
-      lql_projection_free_impl(NULL, projection);
+      lql_projection_destroy_impl(NULL, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "invalid or unsupported projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
     if (!add_path(projection, &path)) {
       projection_path_cleanup(&path);
-      lql_projection_free_impl(NULL, projection);
+      lql_projection_destroy_impl(NULL, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "conflicting projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
   }
   if (projection->path_count == 0u) {
-    lql_projection_free_impl(NULL, projection);
+    lql_projection_destroy_impl(NULL, projection);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "projection fields required");
     return LQL_STATUS_PARSE_ERROR;
   }
@@ -957,7 +957,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL void lql_projection_free_impl(lql *self,
+LQL_INTERNAL_SYMBOL void lql_projection_destroy_impl(lql *self,
                                                   lql_projection *projection) {
   size_t i;
   (void)self;

@@ -24,11 +24,11 @@ int main(void) {
   if (ctx->matches_json(ctx, selector, json, strlen(json), &matched, &error) !=
       LQL_STATUS_OK) {
     fprintf(stderr, "%s\n", error.message);
-    ctx->selector_free(ctx, selector);
+    ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
   }
-  ctx->selector_free(ctx, selector);
+  ctx->selector_destroy(ctx, selector);
   ctx->destroy(ctx);
   printf("%s\n", matched ? "match" : "no match");
   return matched ? 0 : 1;

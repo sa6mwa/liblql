@@ -166,7 +166,7 @@ struct lql {
                                lql_error *error);
   lql_status (*selector_parse_or)(lql *self, const char *expr,
                                   lql_selector **out, lql_error *error);
-  void (*selector_free)(lql *self, lql_selector *selector);
+  void (*selector_destroy)(lql *self, lql_selector *selector);
   int (*selector_is_empty)(const lql *self, const lql_selector *selector);
   lql_status (*matches_json)(lql *self, const lql_selector *selector,
                              const char *json, size_t json_len,
@@ -215,7 +215,7 @@ struct lql {
   lql_status (*projection_parse)(lql *self, const char *const *fields,
                                  size_t field_count, lql_projection **out,
                                  lql_error *error);
-  void (*projection_free)(lql *self, lql_projection *projection);
+  void (*projection_destroy)(lql *self, lql_projection *projection);
   lql_status (*project_file_range)(lql *self, const lql_projection *projection,
                                    FILE *file, lql_uint64 offset,
                                    lql_uint64 size, FILE *out, int *out_found,
@@ -241,7 +241,7 @@ struct lql {
       const lql_mutation_parse_options *options, lql_mutation_plan **out,
       lql_error *error);
   size_t (*mutation_plan_count)(const lql *self, const lql_mutation_plan *plan);
-  void (*mutation_plan_free)(lql *self, lql_mutation_plan *plan);
+  void (*mutation_plan_destroy)(lql *self, lql_mutation_plan *plan);
   lql_status (*mutate_file_range_root_fields)(lql *self,
                                               const lql_mutation_plan *plan,
                                               FILE *file, lql_uint64 offset,

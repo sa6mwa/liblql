@@ -401,12 +401,12 @@ int main(void) {
         !caps.mutation_file_range || !caps.mutation_source ||
         !caps.mutation_buffered_json) {
       fprintf(stderr, "capability query mismatch\n");
-      ctx->selector_free(ctx, selector);
+      ctx->selector_destroy(ctx, selector);
       ctx->destroy(ctx);
       return 1;
     }
   }
-  ctx->selector_free(ctx, selector);
+  ctx->selector_destroy(ctx, selector);
   ctx->destroy(ctx);
   return 0;
 }

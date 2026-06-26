@@ -163,7 +163,7 @@ int main(int argc, char **argv) {
   fixture = fopen(fixture_path, "rb");
   if (fixture == NULL) {
     fprintf(stderr, "lql_payload_bench: failed to open fixture\n");
-    ctx->selector_free(ctx, selector);
+    ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
   }
@@ -182,7 +182,7 @@ int main(int argc, char **argv) {
     if (sink == NULL) {
       fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
       fclose(fixture);
-      ctx->selector_free(ctx, selector);
+      ctx->selector_destroy(ctx, selector);
       ctx->destroy(ctx);
       return 1;
     }
@@ -196,7 +196,7 @@ int main(int argc, char **argv) {
     if (sink == NULL) {
       fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
       fclose(fixture);
-      ctx->selector_free(ctx, selector);
+      ctx->selector_destroy(ctx, selector);
       ctx->destroy(ctx);
       return 1;
     }
@@ -209,13 +209,13 @@ int main(int argc, char **argv) {
   } else {
     fprintf(stderr, "lql_payload_bench: unsupported mode: %s\n", mode);
     fclose(fixture);
-    ctx->selector_free(ctx, selector);
+    ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 2;
   }
   end = clock();
   fclose(fixture);
-  ctx->selector_free(ctx, selector);
+  ctx->selector_destroy(ctx, selector);
 
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "lql_payload_bench: query mode %s: %s\n", mode,

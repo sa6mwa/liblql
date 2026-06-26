@@ -36,7 +36,7 @@ static void expect_receiver_api(void) {
   }
   if (ctx->version == NULL || ctx->capabilities_get == NULL ||
       ctx->selector_parse == NULL || ctx->selector_parse_or == NULL ||
-      ctx->selector_free == NULL || ctx->selector_is_empty == NULL ||
+      ctx->selector_destroy == NULL || ctx->selector_is_empty == NULL ||
       ctx->matches_json == NULL || ctx->query_file_decisions == NULL ||
       ctx->query_file_decisions_with_options == NULL ||
       ctx->query_source_decisions == NULL ||
@@ -46,13 +46,13 @@ static void expect_receiver_api(void) {
       ctx->query_source_spooled_matches == NULL ||
       ctx->query_source_spooled_matches_with_options == NULL ||
       ctx->payload_write_json == NULL || ctx->payload_write_json_sink == NULL ||
-      ctx->projection_parse == NULL || ctx->projection_free == NULL ||
+      ctx->projection_parse == NULL || ctx->projection_destroy == NULL ||
       ctx->project_file_range == NULL || ctx->project_source == NULL ||
       ctx->project_json == NULL || ctx->compact_file_range == NULL ||
       ctx->compact_source == NULL || ctx->compact_json == NULL ||
       ctx->mutation_plan_parse == NULL ||
       ctx->mutation_plan_parse_with_options == NULL ||
-      ctx->mutation_plan_count == NULL || ctx->mutation_plan_free == NULL ||
+      ctx->mutation_plan_count == NULL || ctx->mutation_plan_destroy == NULL ||
       ctx->mutate_file_range_root_fields == NULL ||
       ctx->mutate_file_range_paths == NULL ||
       ctx->mutate_file_range_candidates == NULL ||
@@ -84,7 +84,7 @@ static void expect_receiver_api(void) {
       ++failures;
     }
   }
-  ctx->selector_free(ctx, selector);
+  ctx->selector_destroy(ctx, selector);
   ctx->destroy(ctx);
 }
 
@@ -154,10 +154,10 @@ static void expect_public_utility_api(void) {
       ++failures;
     }
   }
-  test_ctx->selector_free(test_ctx, selector);
-  test_ctx->selector_free(test_ctx, NULL);
-  test_ctx->projection_free(test_ctx, NULL);
-  test_ctx->mutation_plan_free(test_ctx, NULL);
+  test_ctx->selector_destroy(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, NULL);
+  test_ctx->projection_destroy(test_ctx, NULL);
+  test_ctx->mutation_plan_destroy(test_ctx, NULL);
 
   selector = NULL;
   lql_error_init(&error);
@@ -166,7 +166,7 @@ static void expect_public_utility_api(void) {
     printf("non-empty selector state mismatch: %s\n", error.message);
     ++failures;
   }
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
 
   matched = 1;
   lql_error_init(&error);
@@ -476,7 +476,7 @@ static void expect_output_state_contract_api(void) {
   source = tmpfile();
   if (source == NULL) {
     printf("callback failure tmpfile failed\n");
-    test_ctx->selector_free(test_ctx, selector);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
@@ -484,7 +484,7 @@ static void expect_output_state_contract_api(void) {
       fseek(source, 0L, SEEK_SET) != 0) {
     printf("callback failure stream setup failed\n");
     fclose(source);
-    test_ctx->selector_free(test_ctx, selector);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
@@ -613,7 +613,7 @@ static void expect_output_state_contract_api(void) {
     fclose(payload_seen_value.out);
   }
   fclose(source);
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
 }
 
 static lql_status record_payload(void *user, const lql_query_match *match) {
@@ -731,7 +731,7 @@ static void expect_match(const char *expr, const char *json, int want) {
     printf("match mismatch for %s: got %d want %d\n", expr, got, want);
     ++failures;
   }
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
 }
 
 static void expect_parse_error(const char *expr) {
@@ -744,7 +744,7 @@ static void expect_parse_error(const char *expr) {
   st = test_ctx->selector_parse(test_ctx, expr, &selector, &error);
   if (st == LQL_STATUS_OK) {
     printf("parse unexpectedly succeeded for %s\n", expr);
-    test_ctx->selector_free(test_ctx, selector);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
   }
 }
@@ -771,7 +771,7 @@ static void expect_match_or(const char *expr, const char *json, int want) {
     printf("or match mismatch for %s: got %d want %d\n", expr, got, want);
     ++failures;
   }
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
 }
 
 static void expect_stream_file(void) {
@@ -796,7 +796,7 @@ static void expect_stream_file(void) {
   fp = tmpfile();
   if (fp == NULL) {
     printf("tmpfile failed\n");
-    test_ctx->selector_free(test_ctx, selector);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
@@ -804,7 +804,7 @@ static void expect_stream_file(void) {
       fseek(fp, 0L, SEEK_SET) != 0) {
     printf("tmpfile write/seek failed\n");
     fclose(fp);
-    test_ctx->selector_free(test_ctx, selector);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
@@ -812,7 +812,7 @@ static void expect_stream_file(void) {
   st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
                                       &seen, &result, &error);
   fclose(fp);
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("stream query failed: %s\n", error.message);
     ++failures;
@@ -863,7 +863,7 @@ static void expect_source_stream(void) {
   st = test_ctx->query_source_decisions_with_options(
       test_ctx, selector, read_chunk, &reader, &options, record_decision, &seen,
       &result, &error);
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("source stream query failed: %s\n", error.message);
     ++failures;
@@ -929,7 +929,7 @@ static void expect_source_spooled_payload_api(void) {
   st = test_ctx->query_source_spooled_matches_with_options(
       test_ctx, selector, read_chunk, &reader, &options, record_spooled_payload,
       &seen, &result, &error);
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("source spooled payload query failed: %s\n", error.message);
     fclose(seen.out);
@@ -977,7 +977,7 @@ static void expect_source_spooled_payload_api(void) {
   st = test_ctx->query_source_spooled_matches_with_options(
       test_ctx, selector, read_chunk, &reader, &options,
       record_spooled_payload_sink, &sink, &result, &error);
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("source spooled payload sink query failed: %s\n", error.message);
     ++failures;
@@ -1009,7 +1009,7 @@ static void expect_stream_array_items(void) {
   fp = tmpfile();
   if (fp == NULL) {
     printf("array tmpfile failed\n");
-    test_ctx->selector_free(test_ctx, selector);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
@@ -1017,7 +1017,7 @@ static void expect_stream_array_items(void) {
       fseek(fp, 0L, SEEK_SET) != 0) {
     printf("array tmpfile write/seek failed\n");
     fclose(fp);
-    test_ctx->selector_free(test_ctx, selector);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
@@ -1025,7 +1025,7 @@ static void expect_stream_array_items(void) {
   st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
                                       &seen, &result, &error);
   fclose(fp);
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("array stream query failed: %s\n", error.message);
     ++failures;
@@ -1117,7 +1117,7 @@ static void expect_stream_stop_controls(void) {
 
 #undef RUN_STOP_CASE
 
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
 }
 
 static void expect_stream_error_api(void) {
@@ -1160,7 +1160,7 @@ static void expect_stream_error_api(void) {
   if (fwrite(malformed, 1u, strlen(malformed), source) != strlen(malformed) ||
       fseek(source, 0L, SEEK_SET) != 0) {
     printf("stream error malformed source setup failed\n");
-    test_ctx->selector_free(test_ctx, selector);
+    test_ctx->selector_destroy(test_ctx, selector);
     fclose(source);
     fclose(out);
     ++failures;
@@ -1219,7 +1219,7 @@ static void expect_stream_error_api(void) {
            error.message);
     ++failures;
   }
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
 
   memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
@@ -1505,7 +1505,7 @@ static void expect_stream_error_corpus_api(void) {
   for (i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
     expect_stream_malformed_doc(selector, cases[i].name, cases[i].doc);
   }
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
 }
 
 static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len) {
@@ -1588,7 +1588,7 @@ static void expect_seekable_payload_api(void) {
     printf("payload query failed: %s\n", error.message);
     fclose(fp);
     fclose(out);
-    test_ctx->selector_free(test_ctx, selector);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
@@ -1672,7 +1672,7 @@ static void expect_seekable_payload_api(void) {
     }
   }
 
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, selector);
   fclose(fp);
   fclose(out);
 }
@@ -1751,7 +1751,7 @@ static void expect_projection_api(void) {
     printf("projection output mismatch: %s\n", buf);
     ++failures;
   }
-  test_ctx->projection_free(test_ctx, projection);
+  test_ctx->projection_destroy(test_ctx, projection);
   fclose(out);
 
   out = tmpfile();
@@ -1773,7 +1773,7 @@ static void expect_projection_api(void) {
       ++failures;
     }
   }
-  test_ctx->projection_free(test_ctx, projection);
+  test_ctx->projection_destroy(test_ctx, projection);
   fclose(out);
 
   out = tmpfile();
@@ -1800,7 +1800,7 @@ static void expect_projection_api(void) {
       ++failures;
     }
   }
-  test_ctx->projection_free(test_ctx, projection);
+  test_ctx->projection_destroy(test_ctx, projection);
   fclose(out);
 
   invalid[0] = "/items/999999999999999999999999/sku";
@@ -1809,7 +1809,7 @@ static void expect_projection_api(void) {
   st = test_ctx->projection_parse(test_ctx, invalid, 1u, &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("oversized array projection path parsed\n");
-    test_ctx->projection_free(test_ctx, projection);
+    test_ctx->projection_destroy(test_ctx, projection);
     ++failures;
   }
   root[0] = "/";
@@ -1817,7 +1817,7 @@ static void expect_projection_api(void) {
   st = test_ctx->projection_parse(test_ctx, root, 1u, &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("root projection path parsed\n");
-    test_ctx->projection_free(test_ctx, projection);
+    test_ctx->projection_destroy(test_ctx, projection);
     ++failures;
   }
   index[0] = "/0/id";
@@ -1825,7 +1825,7 @@ static void expect_projection_api(void) {
   st = test_ctx->projection_parse(test_ctx, index, 1u, &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("leading index projection path parsed\n");
-    test_ctx->projection_free(test_ctx, projection);
+    test_ctx->projection_destroy(test_ctx, projection);
     ++failures;
   }
   conflict[0] = "/nested";
@@ -1834,7 +1834,7 @@ static void expect_projection_api(void) {
   st = test_ctx->projection_parse(test_ctx, conflict, 2u, &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("conflicting projection paths parsed\n");
-    test_ctx->projection_free(test_ctx, projection);
+    test_ctx->projection_destroy(test_ctx, projection);
     ++failures;
   }
 
@@ -1857,7 +1857,7 @@ static void expect_projection_api(void) {
       ++failures;
     }
   }
-  test_ctx->projection_free(test_ctx, projection);
+  test_ctx->projection_destroy(test_ctx, projection);
   if (out != NULL) {
     fclose(out);
   }
@@ -1900,7 +1900,7 @@ static void expect_projection_api(void) {
       ++failures;
     }
   }
-  test_ctx->projection_free(test_ctx, projection);
+  test_ctx->projection_destroy(test_ctx, projection);
   fclose(source);
   fclose(out);
 }
@@ -1952,7 +1952,7 @@ static void expect_buffered_projection_api(void) {
     printf("buffered projection output mismatch: %s\n", buf);
     ++failures;
   }
-  test_ctx->projection_free(test_ctx, projection);
+  test_ctx->projection_destroy(test_ctx, projection);
   fclose(out);
 
   out = tmpfile();
@@ -1978,7 +1978,7 @@ static void expect_buffered_projection_api(void) {
       ++failures;
     }
   }
-  test_ctx->projection_free(test_ctx, projection);
+  test_ctx->projection_destroy(test_ctx, projection);
   if (out != NULL) {
     fclose(out);
   }
@@ -2093,7 +2093,7 @@ static void expect_source_projection_api(void) {
     ++failures;
   }
 
-  test_ctx->projection_free(test_ctx, projection);
+  test_ctx->projection_destroy(test_ctx, projection);
   fclose(out);
 }
 
@@ -2142,7 +2142,7 @@ static void expect_projection_path_invariant_api(void) {
       ++failures;
     }
   }
-  test_ctx->projection_free(test_ctx, projection);
+  test_ctx->projection_destroy(test_ctx, projection);
   fclose(out);
 
   conflict_parent_first[0] = "/meta";
@@ -2153,7 +2153,7 @@ static void expect_projection_path_invariant_api(void) {
                                   &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("parent-first projection conflict parsed\n");
-    test_ctx->projection_free(test_ctx, projection);
+    test_ctx->projection_destroy(test_ctx, projection);
     ++failures;
   }
 
@@ -2165,7 +2165,7 @@ static void expect_projection_path_invariant_api(void) {
                                   &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("child-first projection conflict parsed\n");
-    test_ctx->projection_free(test_ctx, projection);
+    test_ctx->projection_destroy(test_ctx, projection);
     ++failures;
   }
 }
@@ -2196,7 +2196,7 @@ static void expect_projection_parse_error_corpus_api(void) {
            "error=%s\n",
            lql_status_string(st), error.message);
     ++failures;
-    test_ctx->projection_free(test_ctx, projection);
+    test_ctx->projection_destroy(test_ctx, projection);
   }
 
 #define EXPECT_PROJECTION_PARSE_ERROR(label, value)                            \
@@ -2211,7 +2211,7 @@ static void expect_projection_parse_error_corpus_api(void) {
              " status=%s error=%s\n",                                          \
              lql_status_string(st), error.message);                            \
       ++failures;                                                              \
-      test_ctx->projection_free(test_ctx, projection);                         \
+      test_ctx->projection_destroy(test_ctx, projection);                         \
     }                                                                          \
   } while (0)
 
@@ -2334,7 +2334,7 @@ static void expect_projection_compact_error_api(void) {
       }
     }
   }
-  test_ctx->projection_free(test_ctx, projection);
+  test_ctx->projection_destroy(test_ctx, projection);
 
   lql_error_init(&error);
   st = test_ctx->compact_file_range(test_ctx, NULL, 0u, 0u, out, &error);
@@ -2609,7 +2609,7 @@ static void expect_mutation_plan_api(void) {
            (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
     ++failures;
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
 
   wildcards[0] = "/items/*/status=ready";
   wildcards[1] = "/groups/.../sku=ok";
@@ -2625,7 +2625,7 @@ static void expect_mutation_plan_api(void) {
            (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
     ++failures;
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
 
   invalid_default[0] = "badexpr";
   invalid_default[1] = "/";
@@ -2645,7 +2645,7 @@ static void expect_mutation_plan_api(void) {
              invalid_default[i], lql_status_string(st), error.message);
       ++failures;
     }
-    test_ctx->mutation_plan_free(test_ctx, plan);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
   }
 
   blank = "";
@@ -2671,7 +2671,7 @@ static void expect_mutation_plan_api(void) {
            error.message);
     ++failures;
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
 
   options.file_value_base_dir = "/tmp";
   plan = NULL;
@@ -2686,7 +2686,7 @@ static void expect_mutation_plan_api(void) {
            (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
     ++failures;
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
 
   invalid_file_options[0] = "file:/payload++";
   invalid_file_options[1] = "file:rm:/payload=blob.txt";
@@ -2709,7 +2709,7 @@ static void expect_mutation_plan_api(void) {
              invalid_file_options[i], lql_status_string(st), error.message);
       ++failures;
     }
-    test_ctx->mutation_plan_free(test_ctx, plan);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
   }
 }
 
@@ -2741,7 +2741,7 @@ static void expect_mutation_error_api(void) {
     printf("NULL mutation plan count mismatch\n");
     ++failures;
   }
-  test_ctx->mutation_plan_free(test_ctx, NULL);
+  test_ctx->mutation_plan_destroy(test_ctx, NULL);
 
   expr = "/status=done";
   lql_error_init(&error);
@@ -2889,7 +2889,7 @@ static void expect_mutation_error_api(void) {
       }
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -2958,7 +2958,7 @@ static void expect_root_field_mutation_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(out);
 
   payload = fopen("lql-test-payload.txt", "wb");
@@ -3019,7 +3019,7 @@ static void expect_root_field_mutation_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(out);
   remove("lql-test-payload.txt");
   remove("lql-test-payload.bin");
@@ -3037,7 +3037,7 @@ static void expect_root_field_mutation_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -3102,7 +3102,7 @@ static void expect_path_mutation_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -3146,7 +3146,7 @@ static void expect_buffered_mutation_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(out);
 }
 
@@ -3231,7 +3231,7 @@ static void expect_source_mutation_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(out);
 }
 
@@ -3343,8 +3343,8 @@ static void expect_file_range_candidate_mutation_api(void) {
       }
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  test_ctx->selector_destroy(test_ctx, selector);
   fclose(source);
   if (out != NULL) {
     fclose(out);
@@ -3503,8 +3503,8 @@ static void expect_source_candidate_mutation_api(void) {
       }
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
-  test_ctx->selector_free(test_ctx, selector);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  test_ctx->selector_destroy(test_ctx, selector);
   if (out != NULL) {
     fclose(out);
   }
@@ -3550,7 +3550,7 @@ static void expect_mutation_quoted_value_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(out);
 }
 
@@ -3660,7 +3660,7 @@ static void expect_mutation_file_backed_value_api(void) {
     fclose(out);
   }
 
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   remove("lql-test-sdk-file-backed.txt");
   remove("lql-test-sdk-file-backed.bin");
 }
@@ -3714,7 +3714,7 @@ static void expect_mutation_shorthand_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(out);
 
   out = tmpfile();
@@ -3747,7 +3747,7 @@ static void expect_mutation_shorthand_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(out);
 }
 
@@ -3807,7 +3807,7 @@ static void expect_array_element_mutation_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -3872,7 +3872,7 @@ static void expect_wildcard_mutation_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -3936,7 +3936,7 @@ static void expect_recursive_mutation_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -4000,7 +4000,7 @@ static void expect_array_wildcard_value_mutation_api(void) {
       ++failures;
     }
   }
-  test_ctx->mutation_plan_free(test_ctx, plan);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
