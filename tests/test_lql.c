@@ -6406,6 +6406,10 @@ static void expect_selector_match_api(void) {
                "{\"status\":\"open\",\"progress\":72}", 1);
   expect_match("/status=\"open\",/progress>=50",
                "{\"status\":\"open\",\"progress\":4}", 0);
+  expect_match("/status=\"open\"\n/progress>=50",
+               "{\"status\":\"open\",\"progress\":72}", 1);
+  expect_match("/status=\"open\"\n/progress>=50",
+               "{\"status\":\"open\",\"progress\":4}", 0);
   expect_match(
       "and.eq{field=/status,value=open},and.range{field=/progress,gte=50}",
       "{\"status\":\"open\",\"progress\":72}", 1);
@@ -6594,6 +6598,16 @@ static void expect_selector_or_api(void) {
   expect_match_or("/status=\"open\",/progress>=50",
                   "{\"status\":\"closed\",\"progress\":72}", 1);
   expect_match_or("/status=\"open\",/progress>=50",
+                  "{\"status\":\"closed\",\"progress\":4}", 0);
+  expect_match_or("/status=\"open\"\n/progress>=50",
+                  "{\"status\":\"closed\",\"progress\":72}", 1);
+  expect_match_or("/status=\"open\"\n/progress>=50",
+                  "{\"status\":\"closed\",\"progress\":4}", 0);
+  expect_match_or("eq{field=/status,value=open},range{field=/progress,gte=50}",
+                  "{\"status\":\"open\",\"progress\":4}", 1);
+  expect_match_or("eq{field=/status,value=open},range{field=/progress,gte=50}",
+                  "{\"status\":\"closed\",\"progress\":72}", 1);
+  expect_match_or("eq{field=/status,value=open},range{field=/progress,gte=50}",
                   "{\"status\":\"closed\",\"progress\":4}", 0);
   expect_match("or.eq{field=/msg,value=warn},or.eq{field=/msg,value=timeout}",
                "{\"msg\":\"timeout\"}", 1);
