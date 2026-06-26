@@ -1186,6 +1186,40 @@ func TestCLQLEndOfOptionsCompatibility(t *testing.T) {
 	}
 }
 
+func TestCLQLInterspersedFlagOrderCompatibility(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.jsonl")
+	if err := os.WriteFile(inputPath, []byte(`{"id":"a","status":"open"}`+"\n"+`{"id":"b","status":"closed"}`), 0600); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+	run := func(name string, args ...string) []any {
+		t.Helper()
+		cmd := exec.Command(clql, args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s failed: %v out=%q", name, err, string(out))
+		}
+		values, err := decodeJSONValues(out)
+		if err != nil {
+			t.Fatalf("%s decode output: %v out=%q", name, err, string(out))
+		}
+		return values
+	}
+	before := run("selector before field", `/status="open"`, "-f", "/id", inputPath)
+	after := run("field before selector", "-f", "/id", `/status="open"`, inputPath)
+	want, err := decodeJSONValues([]byte(`{"id":"a"}`))
+	if err != nil {
+		t.Fatalf("decode expected interspersed output: %v", err)
+	}
+	if !reflect.DeepEqual(before, want) || !reflect.DeepEqual(after, want) {
+		t.Fatalf("interspersed flag output mismatch: before=%#v after=%#v want=%#v", before, after, want)
+	}
+}
+
 func TestCLQLMatchAllFileSelectionParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
