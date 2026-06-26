@@ -167,6 +167,8 @@ func TestSDKSelectorMatchesJSONParity(t *testing.T) {
 		{`and.or.0.eq{field=/status,value=open}`, `{"status":"closed"}`},
 		{`or.and.0.eq{field=/status,value=open}`, `{"status":"open"}`},
 		{`or.and.0.eq{field=/status,value=open}`, `{"status":"closed"}`},
+		{"/status=\"open\"\n/progress>=50", `{"status":"open","progress":72}`},
+		{"/status=\"open\"\n/progress>=50", `{"status":"open","progress":4}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.expr+"/"+tc.doc, func(t *testing.T) {
@@ -185,6 +187,37 @@ func TestSDKSelectorMatchesJSONParity(t *testing.T) {
 			}
 			if got != want {
 				t.Fatalf("liblql selector parity mismatch: got match=%v want=%v", got, want)
+			}
+		})
+	}
+}
+
+func TestSDKSelectorMatchesJSONOrParity(t *testing.T) {
+	cases := []sdkSelectorMatchCase{
+		{`/status="open",/progress>=50`, `{"status":"closed","progress":72}`},
+		{`/status="open",/progress>=50`, `{"status":"closed","progress":4}`},
+		{"/status=\"open\"\n/progress>=50", `{"status":"closed","progress":72}`},
+		{"/status=\"open\"\n/progress>=50", `{"status":"closed","progress":4}`},
+		{`eq{field=/status,value=open},range{field=/progress,gte=50}`, `{"status":"open","progress":4}`},
+		{`eq{field=/status,value=open},range{field=/progress,gte=50}`, `{"status":"closed","progress":72}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.expr+"/"+tc.doc, func(t *testing.T) {
+			var doc map[string]any
+			if err := json.Unmarshal([]byte(tc.doc), &doc); err != nil {
+				t.Fatal(err)
+			}
+			sel, err := lql.ParseSelectorStringOr(tc.expr)
+			if err != nil {
+				t.Fatalf("go parse OR: %v", err)
+			}
+			want := lql.Matches(sel, doc)
+			got, err := cMatchesJSON(tc.expr, tc.doc, true)
+			if err != nil {
+				t.Fatalf("liblql OR match: %v", err)
+			}
+			if got != want {
+				t.Fatalf("liblql selector OR parity mismatch: got match=%v want=%v", got, want)
 			}
 		})
 	}
@@ -733,6 +766,7 @@ func TestSDKMutationPlanParseParity(t *testing.T) {
 	cases := []struct {
 		name             string
 		mutations        []string
+		stringInput      bool
 		enableFileValues bool
 		baseDir          string
 	}{
@@ -756,6 +790,11 @@ func TestSDKMutationPlanParseParity(t *testing.T) {
 			},
 		},
 		{
+			name:        "single newline separated expression string",
+			mutations:   []string{"/state/status=ready\n/state/count=+2\nrm:/state/old"},
+			stringInput: true,
+		},
+		{
 			name:             "explicit file backed values",
 			mutations:        []string{`textfile:/payload=blob.txt`, `base64file:/encoded=blob.bin`},
 			enableFileValues: true,
@@ -772,7 +811,13 @@ func TestSDKMutationPlanParseParity(t *testing.T) {
 				EnableFileValues: tc.enableFileValues,
 				FileValueBaseDir: baseDir,
 			}
-			want, err := lql.ParseMutationsWithOptions(tc.mutations, time.Unix(1700000000, 0), opts)
+			var want []lql.Mutation
+			var err error
+			if tc.stringInput {
+				want, err = lql.ParseMutationsString(tc.mutations[0], time.Unix(1700000000, 0))
+			} else {
+				want, err = lql.ParseMutationsWithOptions(tc.mutations, time.Unix(1700000000, 0), opts)
+			}
 			if err != nil {
 				t.Fatalf("go mutation parse: %v", err)
 			}

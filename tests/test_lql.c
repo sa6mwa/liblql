@@ -3744,6 +3744,7 @@ static void expect_mutation_plan_api(void) {
   lql_status st;
   const char *valid[11];
   const char *wildcards[3];
+  const char *newline_separated;
   const char *file_backed[2];
   const char *invalid_default[8];
   const char *invalid_file_options[4];
@@ -3769,6 +3770,22 @@ static void expect_mutation_plan_api(void) {
     ++failures;
   } else if (test_ctx->mutation_plan_count(test_ctx, plan) != 12u) {
     printf("mutation plan count mismatch: %lu\n",
+           (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
+    ++failures;
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+
+  newline_separated = "/state/status=ready\n/state/count=+2\nrm:/state/old";
+  plan = NULL;
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, &newline_separated, 1u, &plan,
+                                     &error);
+  if (st != LQL_STATUS_OK) {
+    printf("newline-separated mutation plan parse failed: %s\n",
+           error.message);
+    ++failures;
+  } else if (test_ctx->mutation_plan_count(test_ctx, plan) != 3u) {
+    printf("newline-separated mutation plan count mismatch: %lu\n",
            (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
     ++failures;
   }

@@ -977,10 +977,12 @@ Current implementation status:
   malformed JSON input preserve the original input file rather than replacing
   it with a failed temp output;
 - Go-backed SDK parity tests now exist for public `liblql` selector
-  parse/evaluate and capability/trait inspection behavior, projection parser
-  failures, buffered, source-backed,
+  parse/evaluate behavior for AND and OR parser entry points, top-level
+  comma/newline selector separators, selector capability/trait inspection
+  behavior, projection parser failures, buffered, source-backed,
   and seekable file-range JSON projection including malformed JSON execution
-  errors, mutation plan parsing and parse failures, buffered, source-backed, and
+  errors, mutation plan parsing including comma/newline-separated expression
+  strings, mutation parse failures, buffered, source-backed, and
   seekable file-range JSON mutation including file-backed mutation values and
   explicit textfile invalid UTF-8/NUL rejection, escaped JSON Pointer mutation
   paths, numeric object/array segment behavior for selector evaluation and
