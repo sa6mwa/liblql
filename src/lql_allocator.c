@@ -45,3 +45,13 @@ static lql_allocator default_allocator = {NULL,           system_alloc,
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void) {
   return &default_allocator;
 }
+
+LQL_INTERNAL_SYMBOL lql_allocator *
+lql_allocator_from_receiver(const lql *self) {
+  const lql_impl *impl;
+  if (self == NULL || self->impl == NULL) {
+    return lql_allocator_default();
+  }
+  impl = (const lql_impl *)self->impl;
+  return impl->allocator == NULL ? lql_allocator_default() : impl->allocator;
+}

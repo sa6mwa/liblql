@@ -544,10 +544,13 @@ Current implementation is an early slice:
   warnings treated as errors, proving the declared C API remains usable from C
   and C++ consumers;
 - the public C API exposes an instantiatable receiver shell through `lql_new()`
-  and method-pointer dispatch; selector/query/projection/mutation operations
-  are implemented by receiver-compatible private functions and are not exported
-  as free-function wrappers; every installed receiver data or method field has
-  an ownership/error-behavior comment in `include/lql/lql.h`;
+  and method-pointer dispatch; each receiver owns private implementation state
+  carrying the internal allocator receiver used for receiver cleanup, and the
+  C-native receiver test fails if a constructed receiver does not populate that
+  private state; selector/query/projection/mutation operations are implemented
+  by receiver-compatible private functions and are not exported as
+  free-function wrappers; every installed receiver data or method field has an
+  ownership/error-behavior comment in `include/lql/lql.h`;
 - `make test` includes `lql.public-api-style`, which fails if removed
   selector/query/payload/projection/compact/mutation free-operation prototypes
   reappear in the installed header or, when a shared library is built, as

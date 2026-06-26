@@ -34,6 +34,10 @@ static void expect_receiver_api(void) {
     ++failures;
     return;
   }
+  if (ctx->impl == NULL) {
+    printf("receiver private implementation missing\n");
+    ++failures;
+  }
   if (ctx->version == NULL || ctx->capabilities_get == NULL ||
       ctx->selector_parse == NULL || ctx->selector_parse_or == NULL ||
       ctx->selector_destroy == NULL || ctx->selector_is_empty == NULL ||

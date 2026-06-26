@@ -12,6 +12,7 @@
 #endif
 
 typedef struct lql_allocator lql_allocator;
+typedef struct lql_impl lql_impl;
 
 struct lql_allocator {
   void *impl;
@@ -22,7 +23,12 @@ struct lql_allocator {
   char *(*strdup)(lql_allocator *self, const char *text);
 };
 
+struct lql_impl {
+  lql_allocator *allocator;
+};
+
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
+LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_from_receiver(const lql *self);
 
 typedef enum lql_node_kind {
   LQL_NODE_ALL = 0,
