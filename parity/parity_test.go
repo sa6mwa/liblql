@@ -843,15 +843,22 @@ func TestCLQLThemeFlagCompatibility(t *testing.T) {
 	if clql == "" {
 		t.Skip("CLQL_PATH not set")
 	}
-	cases := [][]string{
-		{"--theme", "default"},
-		{"--theme=default"},
-		{"-t", "default"},
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"long separate", []string{"-c", "--theme", "default"}},
+		{"long equals", []string{"-c", "--theme=default"}},
+		{"short separate", []string{"-c", "-t", "default"}},
+		{"short joined", []string{"-c", "-tdefault"}},
+		{"short equals", []string{"-c", "-t=default"}},
+		{"clustered short joined", []string{"-ctdefault"}},
+		{"clustered short equals", []string{"-ct=default"}},
 	}
-	for _, args := range cases {
-		args := args
-		t.Run(fmt.Sprint(args), func(t *testing.T) {
-			cmdArgs := append([]string{"-c"}, args...)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cmdArgs := append([]string{}, tc.args...)
 			cmdArgs = append(cmdArgs, `/status="open"`)
 			cmd := exec.Command(clql, cmdArgs...)
 			cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
