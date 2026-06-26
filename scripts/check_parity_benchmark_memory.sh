@@ -18,7 +18,7 @@ if [ ! -s "$log" ]; then
   exit 1
 fi
 
-args="--max-c-peak-rss-bytes $c_max --max-lua-peak-rss-bytes $lua_max"
+args="--forbid-unsupported --max-c-peak-rss-bytes $c_max --max-lua-peak-rss-bytes $lua_max"
 if [ "$require_lua_rss" = "1" ]; then
   args="$args --require-lua-peak-rss"
 fi

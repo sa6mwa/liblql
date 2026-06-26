@@ -62,6 +62,26 @@ expect_validator_failure "c-source-plus-value-seekable" "must use spooled payloa
 {"schema":"liblql.parity_benchmark.v1","impl":"c","dataset":"large_ndjson","selector":"eq_status_open","expr":"/status=\"open\"","mode":"plus_value_source_selector","submode":"warmup_included","bytes_per_iter":1,"candidates":1,"matches":1,"payloads":1,"payload_bytes":1,"payload_source_type":"seekable_range","fixture_sha256":"0000000000000000000000000000000000000000000000000000000000000000","ns_per_op":1,"peak_rss_bytes":1,"allocs_per_op":null,"unsupported":false,"unsupported_reason":""}
 JSONL
 
+log="$tmp/unsupported-report-only.jsonl"
+cat > "$log" <<'JSONL'
+{"schema":"liblql.parity_benchmark.v1","impl":"lua","dataset":"large_ndjson","selector":"eq_status_open","expr":"/status=\"open\"","mode":"decision_only_selector","submode":"warmup_included","bytes_per_iter":1,"candidates":0,"matches":0,"payloads":0,"payload_bytes":0,"payload_source_type":"none","fixture_sha256":"0000000000000000000000000000000000000000000000000000000000000000","ns_per_op":null,"peak_rss_bytes":null,"allocs_per_op":null,"unsupported":true,"unsupported_reason":"fixture report-only unsupported backend"}
+{"schema":"liblql.parity_benchmark.v1","impl":"lua","dataset":"large_ndjson","selector":"eq_status_open","expr":"/status=\"open\"","mode":"decision_only_selector","submode":"steady_state","bytes_per_iter":1,"candidates":0,"matches":0,"payloads":0,"payload_bytes":0,"payload_source_type":"none","fixture_sha256":"0000000000000000000000000000000000000000000000000000000000000000","ns_per_op":null,"peak_rss_bytes":null,"allocs_per_op":null,"unsupported":true,"unsupported_reason":"fixture report-only unsupported backend"}
+JSONL
+if ! (cd "$root/parity" && "$go_bin" run ./cmd/benchvalidate) < "$log" > "$tmp/unsupported-report-only.out" 2>&1; then
+  printf 'benchmark validator report-only unsupported fixture unexpectedly failed\n' >&2
+  cat "$tmp/unsupported-report-only.out" >&2
+  exit 1
+fi
+if (cd "$root/parity" && "$go_bin" run ./cmd/benchvalidate --forbid-unsupported) < "$log" > "$tmp/unsupported-strict.out" 2>&1; then
+  printf 'benchmark validator strict unsupported fixture unexpectedly passed\n' >&2
+  exit 1
+fi
+if ! grep -q "unsupported record forbidden" "$tmp/unsupported-strict.out"; then
+  printf 'benchmark validator strict unsupported fixture did not report forbidden unsupported record\n' >&2
+  cat "$tmp/unsupported-strict.out" >&2
+  exit 1
+fi
+
 log="$tmp/c-peak-rss-limit.jsonl"
 cat > "$log" <<'JSONL'
 {"schema":"liblql.parity_benchmark.v1","impl":"c","dataset":"large_ndjson","selector":"eq_status_open","expr":"/status=\"open\"","mode":"decision_only_selector","submode":"warmup_included","bytes_per_iter":1,"candidates":1,"matches":1,"payloads":0,"payload_bytes":0,"payload_source_type":"none","fixture_sha256":"0000000000000000000000000000000000000000000000000000000000000000","ns_per_op":1,"peak_rss_bytes":2,"allocs_per_op":null,"unsupported":false,"unsupported_reason":""}

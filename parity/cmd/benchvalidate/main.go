@@ -36,6 +36,7 @@ func main() {
 	flag.Int64Var(&opts.MaxCPeakRSSBytes, "max-c-peak-rss-bytes", 0, "fail supported C records whose peak_rss_bytes exceeds this value")
 	flag.Int64Var(&opts.MaxLuaPeakRSSBytes, "max-lua-peak-rss-bytes", 0, "fail supported Lua records whose peak_rss_bytes exceeds this value")
 	flag.BoolVar(&opts.RequireLuaPeakRSS, "require-lua-peak-rss", false, "fail supported Lua records that do not report peak_rss_bytes")
+	flag.BoolVar(&opts.ForbidUnsupported, "forbid-unsupported", false, "fail any benchmark record marked unsupported")
 	flag.Parse()
 	if err := validate(os.Stdin, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "benchvalidate: %v\n", err)
@@ -47,6 +48,7 @@ type validateOptions struct {
 	MaxCPeakRSSBytes   int64
 	MaxLuaPeakRSSBytes int64
 	RequireLuaPeakRSS  bool
+	ForbidUnsupported  bool
 }
 
 func validate(r io.Reader, opts validateOptions) error {
@@ -174,6 +176,9 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 		return fmt.Errorf("line %d: allocs_per_op must be non-negative or null", line)
 	}
 	if rec.Unsupported {
+		if opts.ForbidUnsupported {
+			return fmt.Errorf("line %d: unsupported record forbidden for claimed parity gate: %s/%s/%s/%s", line, rec.Impl, rec.Dataset, rec.Selector, rec.Mode)
+		}
 		if rec.UnsupportedReason == "" {
 			return fmt.Errorf("line %d: unsupported record needs a reason", line)
 		}

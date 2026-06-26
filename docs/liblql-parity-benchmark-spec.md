@@ -72,7 +72,10 @@ Current implementation status:
   also runs deterministic negative checks proving candidate-count, match-count,
   payload-count, payload-byte, peak-RSS-limit, and
   missing-required-implementation failures are detected and validates benchmark
-  JSON Lines records. It verifies
+  JSON Lines records. Claimed smoke and memory gates validate with
+  `benchvalidate --forbid-unsupported`, so explicit unsupported records are
+  accepted only by report-only schema validation and fail gates that require
+  Go/C/Lua coverage. It verifies
   deterministic fixture regeneration, every result record includes a SHA-256
   digest for its generated fixture, and every
   implementation/dataset/selector/mode tuple emits both `warmup_included` and
@@ -93,7 +96,8 @@ Current implementation status:
   oracle, validates supported C peak RSS against
   `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`, and validates supported Lua peak RSS
   against `LQL_BENCH_MAX_LUA_PEAK_RSS_BYTES` or the C ceiling when unset. The
-  profile requires host process RSS timing for Lua through GNU
+  profile forbids unsupported records and requires host process RSS timing for
+  Lua through GNU
   `/usr/bin/time -f/-o` or Darwin `/usr/bin/time -l`. It is configurable with
   `LQL_BENCH_MEMORY_COUNT`, `LQL_BENCH_MEMORY_BLOB_BYTES`, and
   `LQL_BENCH_MEMORY_MIN_BYTES`, so the same gate shape can be scaled toward the
@@ -149,7 +153,8 @@ Current implementation status:
   than `match.json()` materialization, and emits timed stable JSON Lines
   records.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
-  and fails on missing runners or counter divergence.
+  and fails on missing runners, strict-validation unsupported records, or
+  counter divergence.
 
 ## Source Benchmark To Mirror
 
