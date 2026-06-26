@@ -84,6 +84,20 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
       failed=1
     fi
   done
+
+  alloc_hits=$(
+    find "$source_root/src" "$source_root/tests" "$source_root/lua" \
+      "$source_root/examples" "$source_root/bench" \
+      -type f \( -name '*.c' -o -name '*.h' \) \
+      ! -path "$source_root/src/lql_allocator.c" \
+      -exec grep -HEn '(^|[^_[:alnum:]])(malloc|calloc|realloc|free|strdup)[[:space:]]*\(' {} + \
+      2>/dev/null || true
+  )
+  if [ -n "$alloc_hits" ]; then
+    printf 'public API style: direct C runtime allocation outside src/lql_allocator.c\n' >&2
+    printf '%s\n' "$alloc_hits" >&2
+    failed=1
+  fi
 fi
 
 exit "$failed"

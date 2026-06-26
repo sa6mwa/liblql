@@ -9,7 +9,6 @@
 
 #include <lql/version.h>
 
-#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 
@@ -364,14 +363,6 @@ char *lql_strdup(const char *text) {
   memcpy(out, text, len + 1u);
   return out;
 }
-
-void *lql_alloc(size_t size) { return malloc(size); }
-
-void *lql_calloc(size_t count, size_t size) { return calloc(count, size); }
-
-void *lql_realloc(void *ptr, size_t size) { return realloc(ptr, size); }
-
-void lql_dealloc(void *ptr) { free(ptr); }
 
 static const char *receiver_version(const lql *self) {
   (void)self;

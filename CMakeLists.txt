@@ -46,6 +46,7 @@ endfunction()
 
 add_library(lql_common OBJECT
   src/lql.c
+  src/lql_allocator.c
   src/lql_selector.c
   src/lql_eval.c
   src/lql_project.c

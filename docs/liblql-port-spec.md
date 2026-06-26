@@ -546,7 +546,9 @@ Current implementation is an early slice:
   operation functions;
 - project-owned allocations have a central liblql allocator surface, and
   direct C runtime allocation calls are limited to the allocator
-  implementation;
+  implementation; `make test` enforces this by failing on direct
+  `malloc`/`calloc`/`realloc`/`free`/`strdup` calls in project-owned C sources
+  outside `src/lql_allocator.c`;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through
