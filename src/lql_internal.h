@@ -232,6 +232,12 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_candidates_impl(
     lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
     FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
     int matches_only, lql_query_result *out_result, lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status
+lql_mutate_file_range_projected_candidates_impl(
+    lql *self, const lql_selector *selector, const lql_projection *projection,
+    const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
+    lql_uint64 size, FILE *out, int compact, int matches_only,
+    lql_query_result *out_result, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_paths_impl(
     lql *self, const lql_mutation_plan *plan, lql_read_fn read, void *read_user,
     FILE *out, lql_error *error);
@@ -239,6 +245,11 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_candidates_impl(
     lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
     lql_read_fn read, void *read_user, FILE *out, int compact, int matches_only,
     lql_query_result *out_result, lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_projected_candidates_impl(
+    lql *self, const lql_selector *selector, const lql_projection *projection,
+    const lql_mutation_plan *plan, lql_read_fn read, void *read_user, FILE *out,
+    int compact, int matches_only, lql_query_result *out_result,
+    lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status
 lql_mutate_json_impl(lql *self, const lql_mutation_plan *plan, const char *json,
                      size_t json_len, FILE *out, lql_error *error);

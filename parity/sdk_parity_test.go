@@ -459,6 +459,53 @@ func TestSDKMutationFileRangeCandidateStreamParity(t *testing.T) {
 	}
 }
 
+func TestSDKMutationProjectedCandidateStreamParity(t *testing.T) {
+	cases := []struct {
+		name        string
+		selector    string
+		fields      []string
+		doc         string
+		mutations   []string
+		matchesOnly bool
+	}{
+		{
+			name:     "preserve unmatched projected candidates",
+			selector: `/status=404`,
+			fields:   []string{`/uri`},
+			doc: `{"uri":"/a","status":404,"drop":true}
+{"uri":"/b","status":200,"drop":true}`,
+			mutations: []string{`/hello=world`},
+		},
+		{
+			name:        "matches only projected candidates",
+			selector:    `/status=404`,
+			fields:      []string{`/uri`},
+			doc:         `[{"uri":"/a","status":404,"drop":true},{"uri":"/b","status":200,"drop":true}]`,
+			mutations:   []string{`/hello=world`},
+			matchesOnly: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wantJSON, err := goQueryProjectMutateJSON(tc.selector, tc.fields, tc.mutations, tc.doc, tc.matchesOnly)
+			if err != nil {
+				t.Fatalf("go query project mutate stream: %v", err)
+			}
+			gotRangeJSON, err := cMutateFileRangeProjectedCandidates(tc.selector, tc.fields, tc.mutations, `{"outside":`, tc.doc, `}`, tc.matchesOnly)
+			if err != nil {
+				t.Fatalf("liblql file-range projected candidate mutate: %v", err)
+			}
+			assertDecodedJSONValuesParity(t, gotRangeJSON, wantJSON, "file-range projected candidate stream mutation")
+
+			gotSourceJSON, err := cMutateSourceProjectedCandidates(tc.selector, tc.fields, tc.mutations, tc.doc, tc.matchesOnly)
+			if err != nil {
+				t.Fatalf("liblql source projected candidate mutate: %v", err)
+			}
+			assertDecodedJSONValuesParity(t, gotSourceJSON, wantJSON, "source projected candidate stream mutation")
+		})
+	}
+}
+
 func TestSDKMutationRootFieldFileRangeParity(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -978,6 +1025,79 @@ func goQueryMutateJSON(selectorExpr string, mutations []string, doc string) ([]b
 		Writer:    &out,
 		Selector:  selector,
 		Mutations: parsed,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+func goQueryProjectMutateJSON(selectorExpr string, fields []string, mutations []string, doc string, matchesOnly bool) ([]byte, error) {
+	selector, err := lql.ParseSelectorString(selectorExpr)
+	if err != nil {
+		return nil, err
+	}
+	paths, err := lql.ParseProjectionPaths(fields)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := lql.NewProjectionPlan(paths)
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	err = lql.QueryStream(lql.QueryStreamRequest{
+		Reader:      bytes.NewBufferString(doc),
+		Selector:    selector,
+		Mode:        lql.QueryDecisionPlusValue,
+		IncludeJSON: true,
+		MatchedOnly: matchesOnly,
+		OnValue: func(value lql.QueryStreamValue) error {
+			var payload []byte
+			if value.JSON != nil {
+				payload = value.JSON
+			} else if value.OpenJSON != nil {
+				rc, err := value.OpenJSON()
+				if err != nil {
+					return err
+				}
+				defer rc.Close()
+				payload, err = io.ReadAll(rc)
+				if err != nil {
+					return err
+				}
+			}
+			var projected bytes.Buffer
+			result, err := lql.ProjectFields(lql.ProjectFieldsRequest{
+				Reader: bytes.NewReader(payload),
+				Writer: &projected,
+				Plan:   plan,
+			})
+			if err != nil || !result.Found {
+				return err
+			}
+			if value.Matched {
+				if err := lql.MutateStream(lql.MutateStreamRequest{
+					Reader:    bytes.NewReader(projected.Bytes()),
+					Writer:    &out,
+					Mutations: parsed,
+				}); err != nil {
+					return err
+				}
+			} else {
+				if _, err := out.Write(projected.Bytes()); err != nil {
+					return err
+				}
+			}
+			if err := out.WriteByte('\n'); err != nil {
+				return err
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		return nil, err

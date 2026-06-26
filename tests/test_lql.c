@@ -56,9 +56,11 @@ static void expect_receiver_api(void) {
       ctx->mutate_file_range_root_fields == NULL ||
       ctx->mutate_file_range_paths == NULL ||
       ctx->mutate_file_range_candidates == NULL ||
+      ctx->mutate_file_range_projected_candidates == NULL ||
       ctx->mutate_source_paths == NULL ||
-      ctx->mutate_source_candidates == NULL || ctx->mutate_json == NULL ||
-      ctx->destroy == NULL) {
+      ctx->mutate_source_candidates == NULL ||
+      ctx->mutate_source_projected_candidates == NULL ||
+      ctx->mutate_json == NULL || ctx->destroy == NULL) {
     printf("receiver method table missing required methods\n");
     ++failures;
   }
@@ -195,6 +197,8 @@ static void expect_version_api(void) {
       !caps.compact_buffered_json || !caps.mutation_parse ||
       !caps.mutation_file_range || !caps.mutation_file_range_candidates ||
       !caps.mutation_source || !caps.mutation_source_candidates ||
+      !caps.mutation_file_range_projected_candidates ||
+      !caps.mutation_source_projected_candidates ||
       !caps.mutation_buffered_json || !caps.mutation_file_values) {
     printf("capability query omitted an implemented public surface\n");
     ++failures;
@@ -3797,6 +3801,161 @@ static void expect_source_candidate_mutation_api(void) {
   }
 }
 
+static void expect_projected_candidate_mutation_api(void) {
+  FILE *source;
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_selector *selector;
+  lql_projection *projection;
+  lql_mutation_plan *plan;
+  lql_query_result result;
+  chunk_reader reader;
+  const char *selector_expr;
+  const char *fields[2];
+  const char *mutation;
+  char buf[512];
+  size_t len;
+  static const char doc[] =
+      "[{\"id\":\"a\",\"status\":\"open\",\"state\":{\"count\":1},"
+      "\"drop\":true},{\"id\":\"b\",\"status\":\"closed\",\"state\":{\"count\":"
+      "2},\"drop\":true}]";
+
+  source = tmpfile();
+  out = tmpfile();
+  if (source == NULL || out == NULL) {
+    printf("projected candidate mutation tmpfile failed\n");
+    if (source != NULL) {
+      fclose(source);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+  if (fwrite(doc, 1u, strlen(doc), source) != strlen(doc) ||
+      fflush(source) != 0 || fseek(source, 0L, SEEK_SET) != 0) {
+    printf("projected candidate mutation source setup failed\n");
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+
+  selector = NULL;
+  projection = NULL;
+  plan = NULL;
+  selector_expr = "/status=\"open\"";
+  fields[0] = "/id";
+  fields[1] = "/state";
+  mutation = "/state/count++";
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, selector_expr, &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("projected candidate selector parse failed: %s\n", error.message);
+    ++failures;
+  }
+  lql_error_init(&error);
+  st = test_ctx->projection_parse(test_ctx, fields, 2u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("projected candidate projection parse failed: %s\n", error.message);
+    ++failures;
+  }
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, &mutation, 1u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("projected candidate mutation parse failed: %s\n", error.message);
+    ++failures;
+  }
+
+  if (selector != NULL && projection != NULL && plan != NULL) {
+    memset(&result, 0, sizeof(result));
+    lql_error_init(&error);
+    st = test_ctx->mutate_file_range_projected_candidates(
+        test_ctx, selector, projection, plan, source, 0u,
+        (lql_uint64)strlen(doc), out, 1, 0, &result, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("file projected candidate mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (result.candidates_seen != 2u ||
+               result.candidates_matched != 1u || result.stopped_early ||
+               result.bytes_read == 0u) {
+      printf("file projected candidate result mismatch: seen=%lu matched=%lu "
+             "stopped=%d bytes=%lu\n",
+             (unsigned long)result.candidates_seen,
+             (unsigned long)result.candidates_matched, result.stopped_early,
+             (unsigned long)result.bytes_read);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n"
+                           "{\"id\":\"b\",\"state\":{\"count\":2}}\n") != 0) {
+      printf("file projected candidate output mismatch: %s\n", buf);
+      ++failures;
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source projected candidate tmpfile failed\n");
+      ++failures;
+    } else {
+      memset(&reader, 0, sizeof(reader));
+      memset(&result, 0, sizeof(result));
+      reader.data = doc;
+      reader.len = strlen(doc);
+      reader.chunk_size = 7u;
+      lql_error_init(&error);
+      st = test_ctx->mutate_source_projected_candidates(
+          test_ctx, selector, projection, plan, read_chunk, &reader, out, 1, 1,
+          &result, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source projected candidate mutation failed: %s\n",
+               error.message);
+        ++failures;
+      } else if (reader.calls <= 1) {
+        printf("source projected candidate mutation did not fragment reads\n");
+        ++failures;
+      } else if (result.candidates_seen != 2u ||
+                 result.candidates_matched != 1u || result.stopped_early) {
+        printf("source projected candidate result mismatch: seen=%lu "
+               "matched=%lu stopped=%d\n",
+               (unsigned long)result.candidates_seen,
+               (unsigned long)result.candidates_matched,
+               result.stopped_early);
+        ++failures;
+      } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                 strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") !=
+                     0) {
+        printf("source projected candidate output mismatch: %s\n", buf);
+        ++failures;
+      }
+    }
+
+    memset(&result, 0x5a, sizeof(result));
+    lql_error_init(&error);
+    st = test_ctx->mutate_file_range_projected_candidates(
+        test_ctx, selector, NULL, plan, source, 0u, (lql_uint64)strlen(doc),
+        out, 1, 0, &result, &error);
+    if (st != LQL_STATUS_INVALID_ARGUMENT ||
+        strcmp(error.message, "projection, plan, file, and out are required") !=
+            0 ||
+        !query_result_is_zero(&result)) {
+      printf("projected candidate NULL projection mismatch: %s\n",
+             error.message);
+      ++failures;
+    }
+  }
+
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  test_ctx->projection_destroy(test_ctx, projection);
+  test_ctx->selector_destroy(test_ctx, selector);
+  fclose(source);
+  if (out != NULL) {
+    fclose(out);
+  }
+}
+
 static void expect_mutation_quoted_value_api(void) {
   FILE *out;
   lql_error error;
@@ -4088,8 +4247,8 @@ static void expect_array_element_mutation_api(void) {
       ++failures;
     } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                strcmp(buf,
-                      "{\"items\":[\"ready\",3,null],\"other\":[\"done\"]}") !=
-                   0) {
+                      "{\"items\":{\"0\":\"ready\",\"1\":1},\"other\":{\"0\":"
+                      "\"done\"}}") != 0) {
       printf("array mutation output mismatch: %s\n", buf);
       ++failures;
     }
@@ -4369,6 +4528,8 @@ static void expect_sdk_contract_manifest(void) {
        expect_file_range_candidate_mutation_api},
       {"mutation", "callback-source candidate stream mutation",
        expect_source_candidate_mutation_api},
+      {"mutation", "projection-before-mutation candidate streams",
+       expect_projected_candidate_mutation_api},
       {"mutation", "quoted mutation value typing",
        expect_mutation_quoted_value_api},
       {"mutation", "file-backed mutation value execution",
@@ -4704,6 +4865,7 @@ int main(void) {
   expect_source_mutation_api();
   expect_file_range_candidate_mutation_api();
   expect_source_candidate_mutation_api();
+  expect_projected_candidate_mutation_api();
   expect_mutation_quoted_value_api();
   expect_mutation_file_backed_value_api();
   expect_mutation_shorthand_api();

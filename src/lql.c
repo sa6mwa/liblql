@@ -150,8 +150,12 @@ lql_status lql_new(lql **out, lql_error *error) {
   ctx->mutate_file_range_root_fields = lql_mutate_file_range_root_fields_impl;
   ctx->mutate_file_range_paths = lql_mutate_file_range_paths_impl;
   ctx->mutate_file_range_candidates = lql_mutate_file_range_candidates_impl;
+  ctx->mutate_file_range_projected_candidates =
+      lql_mutate_file_range_projected_candidates_impl;
   ctx->mutate_source_paths = lql_mutate_source_paths_impl;
   ctx->mutate_source_candidates = lql_mutate_source_candidates_impl;
+  ctx->mutate_source_projected_candidates =
+      lql_mutate_source_projected_candidates_impl;
   ctx->mutate_json = lql_mutate_json_impl;
   ctx->destroy = receiver_destroy;
   *out = ctx;
@@ -231,6 +235,8 @@ void lql_capabilities_get(lql_capabilities *out) {
   out->mutation_file_range_candidates = 1;
   out->mutation_source = 1;
   out->mutation_source_candidates = 1;
+  out->mutation_file_range_projected_candidates = 1;
+  out->mutation_source_projected_candidates = 1;
   out->mutation_buffered_json = 1;
   out->mutation_file_values = 1;
 }
@@ -276,6 +282,24 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_candidates_impl(
       out_result, error);
 }
 
+LQL_INTERNAL_SYMBOL lql_status
+lql_mutate_file_range_projected_candidates_impl(
+    lql *self, const lql_selector *selector, const lql_projection *projection,
+    const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
+    lql_uint64 size, FILE *out, int compact, int matches_only,
+    lql_query_result *out_result, lql_error *error) {
+  (void)self;
+  if (projection == NULL || plan == NULL || file == NULL || out == NULL) {
+    clear_query_result(out_result);
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection, plan, file, and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return lql_eval_query_file_range_spooled_matches(
+      selector, file, offset, size, out, compact, projection, plan,
+      matches_only, out_result, error);
+}
+
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_candidates_impl(
     lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
     lql_read_fn read, void *read_user, FILE *out, int compact, int matches_only,
@@ -290,6 +314,23 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_candidates_impl(
   return lql_eval_query_source_spooled_rewrite(selector, read, read_user, out,
                                                compact, NULL, plan,
                                                matches_only, out_result, error);
+}
+
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_projected_candidates_impl(
+    lql *self, const lql_selector *selector, const lql_projection *projection,
+    const lql_mutation_plan *plan, lql_read_fn read, void *read_user, FILE *out,
+    int compact, int matches_only, lql_query_result *out_result,
+    lql_error *error) {
+  (void)self;
+  if (projection == NULL || plan == NULL || read == NULL || out == NULL) {
+    clear_query_result(out_result);
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection, plan, read, and out are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return lql_eval_query_source_spooled_rewrite(
+      selector, read, read_user, out, compact, projection, plan, matches_only,
+      out_result, error);
 }
 
 static void receiver_destroy(lql *self) { lql_dealloc(self); }

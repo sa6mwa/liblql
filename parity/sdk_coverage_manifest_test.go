@@ -31,6 +31,7 @@ var sdkParityCoverageManifest = []sdkParityCoverageRequirement{
 	{"mutation", "public liblql source-backed mutation behavior matches Go mutation behavior for current mutation corpus", []string{"TestSDKMutationSourceParity"}},
 	{"mutation", "public liblql seekable file-range mutation behavior matches Go mutation behavior for current mutation corpus", []string{"TestSDKMutationFileRangeParity"}},
 	{"mutation", "public liblql seekable and callback-source candidate-stream mutation behavior matches Go mutation stream behavior for current top-level array corpus", []string{"TestSDKMutationFileRangeCandidateStreamParity"}},
+	{"mutation", "public liblql projected candidate-stream mutation behavior matches Go projection-before-mutation behavior", []string{"TestSDKMutationProjectedCandidateStreamParity"}},
 	{"mutation", "public liblql root-field seekable file-range mutation behavior matches Go mutation behavior for supported root-field corpus", []string{"TestSDKMutationRootFieldFileRangeParity"}},
 	{"mutation", "public liblql buffered and seekable file-range file-backed mutation values match Go mutation behavior", []string{"TestSDKMutationFileBackedValueParity"}},
 	{"mutation", "public liblql mutation plan parsing and expansion count match Go mutation parsing for current valid corpus", []string{"TestSDKMutationPlanParseParity"}},

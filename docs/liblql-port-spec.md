@@ -634,16 +634,21 @@ Current implementation is an early slice:
   array indexes and existing-position `*` object-child or `[]` array-element
   wildcards over seekable file ranges; existing object-member and array-element
   mutation positions also support `**` one-child and `...` recursive path
-  segments; concrete array element mutation preserves array shape and mutates
-  the matched element value in place for set, increment, and remove semantics;
+  segments; Go-compatible stream mutation treats concrete numeric descendant
+  paths under an existing array as object-key creation, so `/items/0=x`
+  rewrites `items` as an object member named `"0"` rather than preserving the
+  source array, while explicit `[]` wildcard mutation remains array traversal;
   supported set values include `time:` normalization to UTC RFC3339Nano strings
   and `file:/textfile:/base64file:` source-backed file values; public C
   execution is currently available for seekable file ranges,
   seekable candidate streams through `ctx->mutate_file_range_candidates()`,
+  projection-before-mutation seekable candidate streams through
+  `ctx->mutate_file_range_projected_candidates()`,
   caller-provided read callbacks through `ctx->mutate_source_paths()`,
   callback-source candidate streams through
-  `ctx->mutate_source_candidates()`, and explicitly caller-buffered JSON
-  values through `ctx->mutate_json()`;
+  `ctx->mutate_source_candidates()`, projection-before-mutation callback-source
+  candidate streams through `ctx->mutate_source_projected_candidates()`, and
+  explicitly caller-buffered JSON values through `ctx->mutate_json()`;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path, existing-position wildcard, and
   existing-position recursive mutations to matched candidates;

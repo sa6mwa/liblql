@@ -606,6 +606,95 @@ static int liblql_mutate_source_candidates_value(
 	return 0;
 }
 
+static int liblql_mutate_source_projected_candidates_value(
+    const char *selector_expr, const char *const *fields, size_t field_count,
+    const char *const *exprs, size_t expr_count, const char *json,
+    size_t chunk_size, int matches_only, char **out_json, size_t *out_len,
+    char *errbuf, size_t errbuf_len) {
+	lql_error error;
+	lql_selector *selector;
+	lql_projection *projection;
+	lql_mutation_plan *plan;
+	lql_status status;
+	liblql_source_reader reader;
+	FILE *tmp;
+
+	lql_error_init(&error);
+	selector = NULL;
+	projection = NULL;
+	plan = NULL;
+	*out_json = NULL;
+	*out_len = 0u;
+	if (selector_expr != NULL && selector_expr[0] != '\0') {
+		status = liblql_receiver()->selector_parse(liblql_receiver(), selector_expr,
+		                                           &selector, &error);
+		if (status != LQL_STATUS_OK) {
+			if (errbuf != NULL && errbuf_len > 0u) {
+				strncpy(errbuf, error.message, errbuf_len - 1u);
+				errbuf[errbuf_len - 1u] = '\0';
+			}
+			return (int)status;
+		}
+	}
+	status = liblql_receiver()->projection_parse(liblql_receiver(), fields,
+	                                             field_count, &projection,
+	                                             &error);
+	if (status != LQL_STATUS_OK) {
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	status = liblql_receiver()->mutation_plan_parse(liblql_receiver(), exprs,
+	                                                expr_count, &plan, &error);
+	if (status != LQL_STATUS_OK) {
+		liblql_receiver()->projection_destroy(liblql_receiver(), projection);
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	tmp = tmpfile();
+	if (tmp == NULL) {
+		liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
+		liblql_receiver()->projection_destroy(liblql_receiver(), projection);
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	memset(&reader, 0, sizeof(reader));
+	reader.data = json;
+	reader.len = strlen(json);
+	reader.chunk_size = chunk_size;
+	status = liblql_receiver()->mutate_source_projected_candidates(
+	    liblql_receiver(), selector, projection, plan, liblql_read_source_chunk,
+	    &reader, tmp, 1, matches_only, NULL, &error);
+	liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
+	liblql_receiver()->projection_destroy(liblql_receiver(), projection);
+	liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+	if (status != LQL_STATUS_OK) {
+		fclose(tmp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_read_tmp(tmp, out_json, out_len, errbuf, errbuf_len) != 0) {
+		fclose(tmp);
+		return -1;
+	}
+	fclose(tmp);
+	return 0;
+}
+
 static int liblql_mutate_file_range_value(const char *const *exprs,
                                           size_t expr_count,
                                           const char *prefix, const char *json,
@@ -747,6 +836,103 @@ static int liblql_mutate_file_range_candidates_value(
 	    (lql_uint64)size, tmp, 1, matches_only, NULL, &error);
 	fclose(input);
 	liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
+	liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+	if (status != LQL_STATUS_OK) {
+		fclose(tmp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_read_tmp(tmp, out_json, out_len, errbuf, errbuf_len) != 0) {
+		fclose(tmp);
+		return -1;
+	}
+	fclose(tmp);
+	return 0;
+}
+
+static int liblql_mutate_file_range_projected_candidates_value(
+    const char *selector_expr, const char *const *fields, size_t field_count,
+    const char *const *exprs, size_t expr_count, const char *prefix,
+    const char *json, const char *suffix, int matches_only, char **out_json,
+    size_t *out_len, char *errbuf, size_t errbuf_len) {
+	lql_error error;
+	lql_selector *selector;
+	lql_projection *projection;
+	lql_mutation_plan *plan;
+	lql_status status;
+	FILE *input;
+	FILE *tmp;
+	unsigned long long offset;
+	unsigned long long size;
+
+	lql_error_init(&error);
+	selector = NULL;
+	projection = NULL;
+	plan = NULL;
+	input = NULL;
+	*out_json = NULL;
+	*out_len = 0u;
+	if (selector_expr != NULL && selector_expr[0] != '\0') {
+		status = liblql_receiver()->selector_parse(liblql_receiver(), selector_expr,
+		                                           &selector, &error);
+		if (status != LQL_STATUS_OK) {
+			if (errbuf != NULL && errbuf_len > 0u) {
+				strncpy(errbuf, error.message, errbuf_len - 1u);
+				errbuf[errbuf_len - 1u] = '\0';
+			}
+			return (int)status;
+		}
+	}
+	status = liblql_receiver()->projection_parse(liblql_receiver(), fields,
+	                                             field_count, &projection,
+	                                             &error);
+	if (status != LQL_STATUS_OK) {
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	status = liblql_receiver()->mutation_plan_parse(liblql_receiver(), exprs,
+	                                                expr_count, &plan, &error);
+	if (status != LQL_STATUS_OK) {
+		liblql_receiver()->projection_destroy(liblql_receiver(), projection);
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_prepare_range_input(prefix, json, suffix, &input, &offset, &size,
+	                               errbuf, errbuf_len) != 0) {
+		liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
+		liblql_receiver()->projection_destroy(liblql_receiver(), projection);
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+		return -1;
+	}
+	tmp = tmpfile();
+	if (tmp == NULL) {
+		fclose(input);
+		liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
+		liblql_receiver()->projection_destroy(liblql_receiver(), projection);
+		liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "failed to create temporary output", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return -1;
+	}
+	status = liblql_receiver()->mutate_file_range_projected_candidates(
+	    liblql_receiver(), selector, projection, plan, input, (lql_uint64)offset,
+	    (lql_uint64)size, tmp, 1, matches_only, NULL, &error);
+	fclose(input);
+	liblql_receiver()->mutation_plan_destroy(liblql_receiver(), plan);
+	liblql_receiver()->projection_destroy(liblql_receiver(), projection);
 	liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 	if (status != LQL_STATUS_OK) {
 		fclose(tmp);
@@ -1359,6 +1545,35 @@ func cMutateFileRangeCandidates(selector string, mutations []string, prefix, doc
 	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
 }
 
+func cMutateFileRangeProjectedCandidates(selector string, fields []string, mutations []string, prefix, doc, suffix string, matchesOnly bool) ([]byte, error) {
+	cFields, freeFields := cStringArray(fields)
+	defer freeFields()
+	cExprs, freeExprs := cStringArray(mutations)
+	defer freeExprs()
+
+	cSelector := C.CString(selector)
+	cPrefix := C.CString(prefix)
+	cDoc := C.CString(doc)
+	cSuffix := C.CString(suffix)
+	defer C.free(unsafe.Pointer(cSelector))
+	defer C.free(unsafe.Pointer(cPrefix))
+	defer C.free(unsafe.Pointer(cDoc))
+	defer C.free(unsafe.Pointer(cSuffix))
+
+	var out *C.char
+	var outLen C.size_t
+	var errbuf [256]C.char
+	status := C.liblql_mutate_file_range_projected_candidates_value(cSelector,
+		cFields, C.size_t(len(fields)), cExprs, C.size_t(len(mutations)),
+		cPrefix, cDoc, cSuffix, cBool(matchesOnly), &out, &outLen,
+		&errbuf[0], C.size_t(len(errbuf)))
+	if status != 0 {
+		return nil, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
+}
+
 func cMutateSourceCandidates(selector string, mutations []string, doc string, matchesOnly bool) ([]byte, error) {
 	cExprs, freeExprs := cStringArray(mutations)
 	defer freeExprs()
@@ -1374,6 +1589,31 @@ func cMutateSourceCandidates(selector string, mutations []string, doc string, ma
 	status := C.liblql_mutate_source_candidates_value(cSelector, cExprs,
 		C.size_t(len(mutations)), cDoc, C.size_t(3), cBool(matchesOnly), &out,
 		&outLen, &errbuf[0], C.size_t(len(errbuf)))
+	if status != 0 {
+		return nil, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoBytes(unsafe.Pointer(out), C.int(outLen)), nil
+}
+
+func cMutateSourceProjectedCandidates(selector string, fields []string, mutations []string, doc string, matchesOnly bool) ([]byte, error) {
+	cFields, freeFields := cStringArray(fields)
+	defer freeFields()
+	cExprs, freeExprs := cStringArray(mutations)
+	defer freeExprs()
+
+	cSelector := C.CString(selector)
+	cDoc := C.CString(doc)
+	defer C.free(unsafe.Pointer(cSelector))
+	defer C.free(unsafe.Pointer(cDoc))
+
+	var out *C.char
+	var outLen C.size_t
+	var errbuf [256]C.char
+	status := C.liblql_mutate_source_projected_candidates_value(cSelector,
+		cFields, C.size_t(len(fields)), cExprs, C.size_t(len(mutations)),
+		cDoc, C.size_t(3), cBool(matchesOnly), &out, &outLen, &errbuf[0],
+		C.size_t(len(errbuf)))
 	if status != 0 {
 		return nil, sdkParityError(C.GoString(&errbuf[0]))
 	}

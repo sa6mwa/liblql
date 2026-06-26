@@ -139,6 +139,12 @@ typedef struct lql_capabilities {
   /* Mutation execution against callback-source candidate streams is available.
    */
   int mutation_source_candidates;
+  /* Projection-before-mutation execution against seekable candidate streams is
+     available. */
+  int mutation_file_range_projected_candidates;
+  /* Projection-before-mutation execution against callback-source candidate
+     streams is available. */
+  int mutation_source_projected_candidates;
   /* Mutation execution against caller-buffered JSON is available. */
   int mutation_buffered_json;
   /* Explicit opt-in file-backed mutation values are available. */
@@ -289,6 +295,12 @@ struct lql {
       lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
       FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
       int matches_only, lql_query_result *out_result, lql_error *error);
+  /* Projects, mutates matched projections, and writes a seekable candidate stream. */
+  lql_status (*mutate_file_range_projected_candidates)(
+      lql *self, const lql_selector *selector,
+      const lql_projection *projection, const lql_mutation_plan *plan,
+      FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
+      int matches_only, lql_query_result *out_result, lql_error *error);
   /* Mutates supported paths in one caller-provided source stream. */
   lql_status (*mutate_source_paths)(lql *self, const lql_mutation_plan *plan,
                                     lql_read_fn read, void *read_user,
@@ -296,6 +308,12 @@ struct lql {
   /* Mutates a callback-source candidate stream. */
   lql_status (*mutate_source_candidates)(
       lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
+      lql_read_fn read, void *read_user, FILE *out, int compact,
+      int matches_only, lql_query_result *out_result, lql_error *error);
+  /* Projects, mutates matched projections, and writes a source candidate stream. */
+  lql_status (*mutate_source_projected_candidates)(
+      lql *self, const lql_selector *selector,
+      const lql_projection *projection, const lql_mutation_plan *plan,
       lql_read_fn read, void *read_user, FILE *out, int compact,
       int matches_only, lql_query_result *out_result, lql_error *error);
   /* Mutates one caller-buffered JSON value to FILE out. */

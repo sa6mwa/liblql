@@ -1676,6 +1676,127 @@ static lonejson_status
 begin_array_value_mutation(mutation_stream_state *state,
                            const lonejson_value_path *path,
                            lonejson_error *error, int *matched);
+static lonejson_status
+write_missing_object_mutations(mutation_stream_state *state,
+                               const lonejson_value_path *path,
+                               lonejson_error *error);
+static lonejson_status write_synthetic_subtree(mutation_stream_state *state,
+                                               const mutation_item *anchor,
+                                               size_t depth,
+                                               lonejson_error *error);
+
+static int mutation_descends_from_virtual_object(
+    const mutation_item *item, const lonejson_value_path *parent,
+    const mutation_path_frame *frame, const char *key, size_t key_len) {
+  size_t i;
+  size_t depth;
+  lonejson_path_segment segment;
+  if (item == NULL || parent == NULL || frame == NULL ||
+      frame->segment_count != parent->segment_count) {
+    return 0;
+  }
+  depth = parent->segment_count + 1u;
+  if (item->path.segment_count <= depth) {
+    return 0;
+  }
+  for (i = 0u; i < parent->segment_count; ++i) {
+    if (!stream_path_segment_matches(item->path.segments[i],
+                                     &parent->segments[i],
+                                     frame->array_segments[i] ? 1 : 0)) {
+      return 0;
+    }
+  }
+  segment.data = key;
+  segment.len = key_len;
+  return stream_path_segment_matches(item->path.segments[parent->segment_count],
+                                     &segment, 0);
+}
+
+static int mutation_requires_missing_object_key_value(
+    mutation_stream_state *state, const lonejson_value_path *parent) {
+  size_t i;
+  size_t depth;
+  const mutation_item *item;
+  const mutation_path_frame *frame;
+  if (parent != NULL && parent->segment_count != 0u) {
+    frame = current_path_frame(state, parent);
+    for (i = 0u; i < state->plan->count; ++i) {
+      item = &state->plan->items[i];
+      if (state->applied[i] || item->kind == MUTATION_REMOVE ||
+          mutation_path_has_wildcard(&item->path) ||
+          !mutation_descends_from_object(item, parent, frame) ||
+          state->prefix_seen_depth[i] > parent->segment_count) {
+        continue;
+      }
+      return 1;
+    }
+  }
+  frame = current_path_frame(state, parent);
+  depth = parent == NULL ? 0u : parent->segment_count + 1u;
+  for (i = 0u; i < state->plan->count; ++i) {
+    item = &state->plan->items[i];
+    if (state->applied[i] || item->kind == MUTATION_REMOVE ||
+        mutation_path_has_wildcard(&item->path) ||
+        !mutation_descends_from_virtual_object(item, parent, frame,
+                                               state->key_buf,
+                                               state->key_len) ||
+        state->prefix_seen_depth[i] > depth) {
+      continue;
+    }
+    return 1;
+  }
+  return 0;
+}
+
+static lonejson_status write_missing_object_key_value(
+    mutation_stream_state *state, const lonejson_value_path *parent,
+    lonejson_error *error) {
+  size_t i;
+  size_t depth;
+  const mutation_item *item;
+  const mutation_path_frame *frame;
+  if (parent != NULL && parent->segment_count != 0u) {
+    if (lonejson_writer_begin_object(&state->writer, error) !=
+        LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (write_missing_object_mutations(state, parent, error) !=
+        LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (lonejson_writer_end_object(&state->writer, error) !=
+        LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    return LONEJSON_STATUS_OK;
+  }
+  frame = current_path_frame(state, parent);
+  depth = parent == NULL ? 0u : parent->segment_count + 1u;
+  if (lonejson_writer_begin_object(&state->writer, error) !=
+      LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  for (i = 0u; i < state->plan->count; ++i) {
+    item = &state->plan->items[i];
+    if (state->applied[i] || item->kind == MUTATION_REMOVE ||
+        mutation_path_has_wildcard(&item->path) ||
+        !mutation_descends_from_virtual_object(item, parent, frame,
+                                               state->key_buf,
+                                               state->key_len) ||
+        state->prefix_seen_depth[i] > depth) {
+      continue;
+    }
+    if (write_synthetic_subtree(state, item, depth, error) !=
+        LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+  }
+  if (lonejson_writer_end_object(&state->writer, error) !=
+      LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  return LONEJSON_STATUS_OK;
+}
 
 static lonejson_status mutation_object_begin(void *user,
                                              const lonejson_value_path *path,
@@ -1697,6 +1818,11 @@ static lonejson_status mutation_object_begin(void *user,
     ++state->source_depth;
     return lonejson_writer_begin_object(&state->writer, error);
   }
+  if (state->skipping) {
+    ++state->skip_depth;
+    ++state->source_depth;
+    return LONEJSON_STATUS_OK;
+  }
   if (begin_array_value_mutation(state, path, error, &matched_value) !=
       LONEJSON_STATUS_OK) {
     mutation_pop_path_frame(state);
@@ -1710,11 +1836,6 @@ static lonejson_status mutation_object_begin(void *user,
     if (state->skipping) {
       state->skip_depth = 1u;
     }
-    ++state->source_depth;
-    return LONEJSON_STATUS_OK;
-  }
-  if (state->skipping) {
-    ++state->skip_depth;
     ++state->source_depth;
     return LONEJSON_STATUS_OK;
   }
@@ -1907,6 +2028,11 @@ static lonejson_status mutation_array_begin(void *user,
     state->root_seen = 1;
     state->root_is_object = 0;
   }
+  if (state->source_depth != 0u && state->skipping) {
+    ++state->skip_depth;
+    ++state->source_depth;
+    return LONEJSON_STATUS_OK;
+  }
   if (state->source_depth != 0u &&
       begin_array_value_mutation(state, path, error, &matched_value) !=
           LONEJSON_STATUS_OK) {
@@ -1924,8 +2050,15 @@ static lonejson_status mutation_array_begin(void *user,
     ++state->source_depth;
     return LONEJSON_STATUS_OK;
   }
-  if (state->skipping) {
-    ++state->skip_depth;
+  if (state->source_depth != 0u && !state->skipping &&
+      mutation_requires_missing_object_key_value(state, path)) {
+    if (write_missing_object_key_value(state, path, error) !=
+        LONEJSON_STATUS_OK) {
+      mutation_pop_path_frame(state);
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    state->skipping = 1;
+    state->skip_depth = 1u;
     ++state->source_depth;
     return LONEJSON_STATUS_OK;
   }
