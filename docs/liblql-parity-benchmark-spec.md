@@ -77,7 +77,8 @@ Current implementation status:
   accepted only by report-only schema validation and fail gates that require
   Go/C/Lua coverage. It verifies
   deterministic fixture regeneration, every result record includes a SHA-256
-  digest for its generated fixture, and every
+  digest for its generated fixture, rejects impossible counter records such as
+  `matches > candidates`, and verifies every
   implementation/dataset/selector/mode tuple emits both `warmup_included` and
   `steady_state` records. The smoke gate also validates supported C records
   against `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`, defaulting to 128 MiB. It includes

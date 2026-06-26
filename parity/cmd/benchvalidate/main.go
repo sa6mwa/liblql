@@ -163,6 +163,9 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 		rec.Payloads < 0 || rec.PayloadBytes < 0 {
 		return fmt.Errorf("line %d: numeric counters must be non-negative", line)
 	}
+	if rec.Matches > rec.Candidates {
+		return fmt.Errorf("line %d: matches must not exceed candidates", line)
+	}
 	if rec.PayloadSourceType == "" {
 		return fmt.Errorf("line %d: payload_source_type is required", line)
 	}
