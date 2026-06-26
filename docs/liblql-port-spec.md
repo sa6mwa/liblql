@@ -686,7 +686,9 @@ Current implementation is an early slice:
   assertions; temporal `date` terms, datetime `range` bounds, and relative
   `date.since` macros are implemented; nested indexed `and.N` / `or.N`
   logical wrapper groups are parsed and evaluated recursively; shorthand
-  selectors tolerate whitespace around comparison operators;
+  selectors tolerate whitespace around comparison operators, and brace selector
+  assignments accept comma, newline, or whitespace-separated `key=value`
+  clauses;
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, and invalid selector invariants;
 - `clql` exists as a selector/projection/mutation compatibility CLI;

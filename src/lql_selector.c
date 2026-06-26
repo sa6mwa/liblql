@@ -130,6 +130,106 @@ static lql_status split_top(const char *expr, lql_token_list *out,
   return LQL_STATUS_OK;
 }
 
+static int selector_assignment_separator(const char *p) {
+  const char *q;
+  const char *key;
+
+  if (*p == ',' || *p == '\n') {
+    return 1;
+  }
+  if (!isspace((unsigned char)*p)) {
+    return 0;
+  }
+  q = p;
+  while (isspace((unsigned char)*q)) {
+    ++q;
+  }
+  key = q;
+  if (!((*q >= 'A' && *q <= 'Z') || (*q >= 'a' && *q <= 'z') || *q == '_')) {
+    return 0;
+  }
+  ++q;
+  while ((*q >= 'A' && *q <= 'Z') || (*q >= 'a' && *q <= 'z') ||
+         (*q >= '0' && *q <= '9') || *q == '_' || *q == '.') {
+    ++q;
+  }
+  while (isspace((unsigned char)*q)) {
+    ++q;
+  }
+  return q > key && *q == '=';
+}
+
+static lql_status split_assignments(const char *expr, lql_token_list *out,
+                                    lql_error *error) {
+  const char *start;
+  size_t depth;
+  int quote;
+  const char *p;
+  const char *next;
+  char *item;
+
+  memset(out, 0, sizeof(*out));
+  start = expr;
+  depth = 0u;
+  quote = 0;
+  for (p = expr; *p != '\0'; ++p) {
+    if (quote != 0) {
+      if (*p == quote) {
+        quote = 0;
+      } else if (*p == '\\' && p[1] != '\0') {
+        ++p;
+      }
+      continue;
+    }
+    if (*p == '"' || *p == '\'') {
+      quote = *p;
+    } else if (*p == '{') {
+      ++depth;
+    } else if (*p == '}') {
+      if (depth == 0u) {
+        lql_set_error(error, LQL_STATUS_PARSE_ERROR, "unexpected selector }");
+        return LQL_STATUS_PARSE_ERROR;
+      }
+      --depth;
+    } else if (depth == 0u && selector_assignment_separator(p)) {
+      item = trim_dup(start, (size_t)(p - start));
+      if (item == NULL) {
+        return LQL_STATUS_NO_MEMORY;
+      }
+      if (item[0] != '\0' && !token_list_push(out, item)) {
+        lql_dealloc(item);
+        return LQL_STATUS_NO_MEMORY;
+      }
+      if (item[0] == '\0') {
+        lql_dealloc(item);
+      }
+      next = p;
+      while (*next == ',' || isspace((unsigned char)*next)) {
+        ++next;
+      }
+      start = next;
+      p = next - 1;
+    }
+  }
+  if (quote != 0 || depth != 0u) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "unterminated selector expression");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  item = trim_dup(start, (size_t)(p - start));
+  if (item == NULL) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  if (item[0] != '\0' && !token_list_push(out, item)) {
+    lql_dealloc(item);
+    return LQL_STATUS_NO_MEMORY;
+  }
+  if (item[0] == '\0') {
+    lql_dealloc(item);
+  }
+  return LQL_STATUS_OK;
+}
+
 static char *unquote(char *value) {
   size_t len;
   char *out;
@@ -570,7 +670,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
   seen_after = NULL;
   seen_before = NULL;
   seen_since = NULL;
-  st = split_top(body, &parts, error);
+  st = split_assignments(body, &parts, error);
   if (st != LQL_STATUS_OK) {
     return 0;
   }

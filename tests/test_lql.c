@@ -3835,6 +3835,13 @@ static void expect_selector_match_api(void) {
   expect_match("/status=\"closed\"", "{\"status\":\"open\"}", 0);
   expect_match("eq{field=/status,field=/status,value=open,value=open}",
                "{\"status\":\"open\"}", 1);
+  expect_match("eq{field=/status value=open}", "{\"status\":\"open\"}", 1);
+  expect_match("and.eq{\nfield=/message\nvalue=\"hi, world\"},and.eq{field=/"
+               "status value=\"okili dokili\"}",
+               "{\"message\":\"hi, world\",\"status\":\"okili dokili\"}", 1);
+  expect_match("and.eq{\nfield=/message\nvalue=\"hi, world\"},and.eq{field=/"
+               "status value=\"okili dokili\"}",
+               "{\"message\":\"hi\",\"status\":\"okili dokili\"}", 0);
   expect_match("/progress>=50", "{\"progress\":72}", 1);
   expect_match(" /progress >= 50 ", "{\"progress\":72}", 1);
   expect_match("/progress<50", "{\"progress\":72}", 0);
