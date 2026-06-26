@@ -24,9 +24,21 @@ static lql_status selector_parse_or_method(lql *self, const char *expr,
 static void selector_destroy_method(lql *self, lql_selector *selector);
 static int selector_is_empty_method(const lql *self,
                                     const lql_selector *selector);
+static void selector_capabilities_get_method(
+    const lql *self, const lql_selector *selector,
+    lql_selector_capabilities *out);
+static void selector_execution_traits_get_method(
+    const lql *self, const lql_selector *selector,
+    lql_selector_execution_traits *out);
 static lql_status matches_json_method(lql *self, const lql_selector *selector,
                                       const char *json, size_t json_len,
                                       int *out_matched, lql_error *error);
+static void selector_capabilities_visit(lql_selector_capabilities *out,
+                                        const lql_node *node);
+static void selector_path_capabilities_visit(lql_selector_capabilities *out,
+                                             const char *path);
+static int selector_segment_is(const char *start, size_t len,
+                               const char *literal);
 
 lql_status lql_new(lql **out, lql_error *error) {
   return lql_new_with_allocator(out, lql_allocator_default(), error);
@@ -66,6 +78,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
   ctx->selector_parse_or = selector_parse_or_method;
   ctx->selector_destroy = selector_destroy_method;
   ctx->selector_is_empty = selector_is_empty_method;
+  ctx->selector_capabilities_get = selector_capabilities_get_method;
+  ctx->selector_execution_traits_get = selector_execution_traits_get_method;
   ctx->matches_json = matches_json_method;
   lql_eval_methods_install(ctx);
   lql_project_methods_install(ctx);
@@ -127,6 +141,7 @@ static void capabilities_fill(lql_capabilities *out) {
   }
   memset(out, 0, sizeof(*out));
   out->selector_parse = 1;
+  out->selector_inspection = 1;
   out->matches_json = 1;
   out->file_decision_stream = 1;
   out->source_decision_stream = 1;
@@ -227,6 +242,124 @@ static int
 selector_is_empty_method(const lql *self, const lql_selector *selector) {
   (void)self;
   return selector == NULL || selector->root.kind == LQL_NODE_ALL;
+}
+
+static int selector_segment_is(const char *start, size_t len,
+                               const char *literal) {
+  return strlen(literal) == len && memcmp(start, literal, len) == 0;
+}
+
+static void selector_path_capabilities_visit(lql_selector_capabilities *out,
+                                             const char *path) {
+  const char *segment;
+  const char *slash;
+  size_t len;
+
+  if (out == NULL || path == NULL || path[0] != '/') {
+    return;
+  }
+  segment = path + 1;
+  while (*segment != '\0') {
+    slash = strchr(segment, '/');
+    len = slash == NULL ? strlen(segment) : (size_t)(slash - segment);
+    if (selector_segment_is(segment, len, "*") ||
+        selector_segment_is(segment, len, "[]") ||
+        selector_segment_is(segment, len, "**") ||
+        selector_segment_is(segment, len, "...")) {
+      out->wildcard_path = 1;
+    }
+    if (selector_segment_is(segment, len, "**") ||
+        selector_segment_is(segment, len, "...")) {
+      out->recursive_path = 1;
+    }
+    if (slash == NULL) {
+      break;
+    }
+    segment = slash + 1;
+  }
+}
+
+static void selector_capabilities_visit(lql_selector_capabilities *out,
+                                        const lql_node *node) {
+  size_t i;
+
+  if (out == NULL || node == NULL) {
+    return;
+  }
+  selector_path_capabilities_visit(out, node->term.field);
+  switch (node->kind) {
+  case LQL_NODE_ALL:
+    break;
+  case LQL_NODE_AND:
+    out->and_ = 1;
+    break;
+  case LQL_NODE_OR:
+    out->or_ = 1;
+    break;
+  case LQL_NODE_NOT:
+    out->not_ = 1;
+    break;
+  case LQL_NODE_EQ:
+  case LQL_NODE_NE:
+    out->eq = 1;
+    break;
+  case LQL_NODE_CONTAINS:
+  case LQL_NODE_ICONTAINS:
+    out->contains = 1;
+    break;
+  case LQL_NODE_PREFIX:
+  case LQL_NODE_IPREFIX:
+    out->prefix = 1;
+    break;
+  case LQL_NODE_RANGE:
+    out->range = 1;
+    break;
+  case LQL_NODE_DATE:
+    out->date = 1;
+    break;
+  case LQL_NODE_IN:
+    out->in = 1;
+    break;
+  case LQL_NODE_EXISTS:
+    out->exists = 1;
+    break;
+  }
+  for (i = 0u; i < node->child_count; ++i) {
+    selector_capabilities_visit(out, &node->children[i]);
+  }
+}
+
+static void selector_capabilities_get_method(
+    const lql *self, const lql_selector *selector,
+    lql_selector_capabilities *out) {
+  (void)self;
+  if (out == NULL) {
+    return;
+  }
+  memset(out, 0, sizeof(*out));
+  if (selector == NULL || selector->root.kind == LQL_NODE_ALL) {
+    return;
+  }
+  selector_capabilities_visit(out, &selector->root);
+}
+
+static void selector_execution_traits_get_method(
+    const lql *self, const lql_selector *selector,
+    lql_selector_execution_traits *out) {
+  lql_selector_capabilities capabilities;
+
+  if (out == NULL) {
+    return;
+  }
+  memset(out, 0, sizeof(*out));
+  selector_capabilities_get_method(self, selector, &capabilities);
+  out->uses_contains_like = capabilities.contains || capabilities.prefix;
+  out->uses_recursive_path = capabilities.recursive_path;
+  out->uses_wildcard_path = capabilities.wildcard_path;
+  out->requires_object_root = !selector_is_empty_method(self, selector);
+  out->early_non_match_likely =
+      out->requires_object_root && !out->uses_contains_like &&
+      !out->uses_recursive_path;
 }
 
 static lql_status

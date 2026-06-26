@@ -20,6 +20,33 @@ type sdkSelectorMatchCase struct {
 	doc  string
 }
 
+func fromGoSelectorCapabilities(c lql.SelectorCapabilities) lqlSelectorCapabilities {
+	return lqlSelectorCapabilities{
+		and:           c.And,
+		or:            c.Or,
+		not:           c.Not,
+		eq:            c.Eq,
+		rng:           c.Range,
+		date:          c.Date,
+		in:            c.In,
+		prefix:        c.Prefix,
+		contains:      c.Contains,
+		exists:        c.Exists,
+		wildcardPath:  c.WildcardPath,
+		recursivePath: c.RecursivePath,
+	}
+}
+
+func fromGoSelectorExecutionTraits(t lql.SelectorExecutionTraits) lqlSelectorExecutionTraits {
+	return lqlSelectorExecutionTraits{
+		usesContainsLike:    t.UsesContainsLike,
+		usesRecursivePath:   t.UsesRecursivePath,
+		usesWildcardPath:    t.UsesWildcardPath,
+		requiresObjectRoot:  t.RequiresObjectRoot,
+		earlyNonMatchLikely: t.EarlyNonMatchLikely,
+	}
+}
+
 func TestSDKSelectorMatchesJSONParity(t *testing.T) {
 	cases := []sdkSelectorMatchCase{
 		{`/status="open"`, `{"status":"open"}`},
@@ -213,6 +240,45 @@ func TestSDKSelectorParseErrorParity(t *testing.T) {
 			}
 			if status, message := cParseSelector(expr, false); status == 0 {
 				t.Fatalf("liblql parse unexpectedly succeeded: %s", message)
+			}
+		})
+	}
+}
+
+func TestSDKSelectorInspectionParity(t *testing.T) {
+	cases := []struct {
+		name  string
+		expr  string
+		empty bool
+	}{
+		{name: "empty", empty: true},
+		{name: "families", expr: `and.eq{field=/status,value=open},and.range{field=/progress,gte=5},or.in{field=/env,any=prod|stage},not.eq{field=/state,value=disabled},exists{/meta/etag},icontains{field=/msg,value=timeout},iprefix{field=/service,value=auth}`},
+		{name: "path-complexity", expr: `/items[]/sku="A",/groups/**/sku="B",exists{/meta/.../etag}`},
+		{name: "traits-recursive", expr: `and.eq{field=/status,value=open},icontains{field=/msg,value=timeout},exists{/meta/**/etag}`},
+		{name: "match-all-string", expr: `icontains{f=/,v=""}`},
+		{name: "simple", expr: `/status="open"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sel lql.Selector
+			var err error
+			if !tc.empty {
+				sel, err = lql.ParseSelectorString(tc.expr)
+				if err != nil {
+					t.Fatalf("Go parse: %v", err)
+				}
+			}
+			wantCaps := fromGoSelectorCapabilities(lql.InspectSelectorCapabilities(sel))
+			wantTraits := fromGoSelectorExecutionTraits(lql.InspectSelectorExecutionTraits(sel))
+			got, err := cInspectSelector(tc.expr, tc.empty)
+			if err != nil {
+				t.Fatalf("C inspect: %v", err)
+			}
+			if !reflect.DeepEqual(got.capabilities, wantCaps) {
+				t.Fatalf("capabilities mismatch\ngot:  %+v\nwant: %+v", got.capabilities, wantCaps)
+			}
+			if !reflect.DeepEqual(got.traits, wantTraits) {
+				t.Fatalf("traits mismatch\ngot:  %+v\nwant: %+v", got.traits, wantTraits)
 			}
 		})
 	}

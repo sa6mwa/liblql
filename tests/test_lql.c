@@ -41,6 +41,8 @@ static void expect_receiver_api(void) {
   if (ctx->version == NULL || ctx->capabilities_get == NULL ||
       ctx->selector_parse == NULL || ctx->selector_parse_or == NULL ||
       ctx->selector_destroy == NULL || ctx->selector_is_empty == NULL ||
+      ctx->selector_capabilities_get == NULL ||
+      ctx->selector_execution_traits_get == NULL ||
       ctx->matches_json == NULL || ctx->query_file_decisions == NULL ||
       ctx->query_file_decisions_with_options == NULL ||
       ctx->query_source_decisions == NULL ||
@@ -70,7 +72,8 @@ static void expect_receiver_api(void) {
   }
   memset(&caps, 0, sizeof(caps));
   ctx->capabilities_get(ctx, &caps);
-  if (strcmp(ctx->version(ctx), LQL_VERSION) != 0 || !caps.selector_parse) {
+  if (strcmp(ctx->version(ctx), LQL_VERSION) != 0 || !caps.selector_parse ||
+      !caps.selector_inspection) {
     printf("receiver version/capability mismatch\n");
     ++failures;
   }
@@ -5086,6 +5089,7 @@ typedef struct sdk_contract_requirement {
 static void expect_selector_match_api(void);
 static void expect_selector_or_api(void);
 static void expect_selector_parse_error_api(void);
+static void expect_selector_inspection_api(void);
 
 static void expect_sdk_contract_manifest(void) {
   static const sdk_contract_requirement manifest[] = {
@@ -5108,6 +5112,8 @@ static void expect_sdk_contract_manifest(void) {
        "existence, and logical matching",
        expect_selector_match_api},
       {"selector", "OR parse/evaluation public API", expect_selector_or_api},
+      {"selector", "selector capability and execution-trait inspection",
+       expect_selector_inspection_api},
       {"selector", "parse-error invariants", expect_selector_parse_error_api},
       {"streaming", "seekable FILE decision streams", expect_stream_file},
       {"streaming", "mixed scalar and object candidate decision streams",
@@ -5194,7 +5200,7 @@ static void expect_sdk_contract_manifest(void) {
       ++selector_cases;
     }
   }
-  if (selector_cases != 3) {
+  if (selector_cases != 4) {
     printf("SDK contract manifest selector accounting mismatch: %d\n",
            selector_cases);
     ++failures;
@@ -5497,6 +5503,139 @@ static void expect_selector_parse_error_api(void) {
   expect_parse_error("/count>=");
 }
 
+static void expect_selector_inspection_api(void) {
+  lql_selector *selector;
+  lql_selector_capabilities caps;
+  lql_selector_execution_traits traits;
+  lql_error error;
+  lql_status st;
+  const char *families;
+  const char *paths;
+
+  memset(&caps, 1, sizeof(caps));
+  test_ctx->selector_capabilities_get(test_ctx, NULL, &caps);
+  if (caps.and_ || caps.or_ || caps.not_ || caps.eq || caps.range ||
+      caps.date || caps.in || caps.prefix || caps.contains || caps.exists ||
+      caps.wildcard_path || caps.recursive_path) {
+    printf("NULL selector capabilities should be empty\n");
+    ++failures;
+  }
+  memset(&traits, 1, sizeof(traits));
+  test_ctx->selector_execution_traits_get(test_ctx, NULL, &traits);
+  if (traits.uses_contains_like || traits.uses_recursive_path ||
+      traits.uses_wildcard_path || traits.requires_object_root ||
+      traits.early_non_match_likely) {
+    printf("NULL selector traits should be empty\n");
+    ++failures;
+  }
+  test_ctx->selector_capabilities_get(test_ctx, NULL, NULL);
+  test_ctx->selector_execution_traits_get(test_ctx, NULL, NULL);
+
+  families =
+      "and.eq{field=/status,value=open},"
+      "and.range{field=/progress,gte=5},"
+      "or.in{field=/env,any=prod|stage},"
+      "not.eq{field=/state,value=disabled},"
+      "exists{/meta/etag},"
+      "icontains{field=/msg,value=timeout},"
+      "iprefix{field=/service,value=auth}";
+  selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, families, &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("selector inspection families parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  memset(&caps, 0, sizeof(caps));
+  test_ctx->selector_capabilities_get(test_ctx, selector, &caps);
+  if (!caps.and_ || !caps.or_ || !caps.not_ || !caps.eq || !caps.range ||
+      caps.date || !caps.in || !caps.prefix || !caps.contains ||
+      !caps.exists || caps.wildcard_path || caps.recursive_path) {
+    printf("selector inspection family flags mismatch\n");
+    ++failures;
+  }
+  test_ctx->selector_destroy(test_ctx, selector);
+
+  paths = "/items[]/sku=\"A\",/groups/**/sku=\"B\",exists{/meta/.../etag}";
+  selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, paths, &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("selector inspection path parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  memset(&caps, 0, sizeof(caps));
+  test_ctx->selector_capabilities_get(test_ctx, selector, &caps);
+  if (!caps.eq || !caps.exists || !caps.wildcard_path ||
+      !caps.recursive_path) {
+    printf("selector inspection path flags mismatch\n");
+    ++failures;
+  }
+  test_ctx->selector_destroy(test_ctx, selector);
+
+  selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(
+      test_ctx,
+      "and.eq{field=/status,value=open},icontains{field=/msg,value=timeout},"
+      "exists{/meta/**/etag}",
+      &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("selector inspection traits parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  memset(&traits, 0, sizeof(traits));
+  test_ctx->selector_execution_traits_get(test_ctx, selector, &traits);
+  if (!traits.uses_contains_like || !traits.uses_recursive_path ||
+      !traits.uses_wildcard_path || !traits.requires_object_root ||
+      traits.early_non_match_likely) {
+    printf("selector execution traits recursive mismatch\n");
+    ++failures;
+  }
+  test_ctx->selector_destroy(test_ctx, selector);
+
+  selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, "icontains{f=/,v=\"\"}", &selector,
+                                &error);
+  if (st != LQL_STATUS_OK) {
+    printf("selector inspection match-all parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  memset(&traits, 0, sizeof(traits));
+  test_ctx->selector_execution_traits_get(test_ctx, selector, &traits);
+  if (traits.uses_contains_like || traits.uses_recursive_path ||
+      traits.uses_wildcard_path || traits.requires_object_root ||
+      traits.early_non_match_likely) {
+    printf("selector execution traits match-all mismatch\n");
+    ++failures;
+  }
+  test_ctx->selector_destroy(test_ctx, selector);
+
+  selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector,
+                                &error);
+  if (st != LQL_STATUS_OK) {
+    printf("selector inspection simple parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  memset(&traits, 0, sizeof(traits));
+  test_ctx->selector_execution_traits_get(test_ctx, selector, &traits);
+  if (traits.uses_contains_like || traits.uses_recursive_path ||
+      traits.uses_wildcard_path || !traits.requires_object_root ||
+      !traits.early_non_match_likely) {
+    printf("selector execution traits simple mismatch\n");
+    ++failures;
+  }
+  test_ctx->selector_destroy(test_ctx, selector);
+}
+
 int main(void) {
   lql_error error;
 
@@ -5512,6 +5651,7 @@ int main(void) {
   expect_handle_ownership_contract_api();
   expect_selector_match_api();
   expect_selector_or_api();
+  expect_selector_inspection_api();
   expect_selector_parse_error_api();
   expect_version_api();
   expect_stream_file();

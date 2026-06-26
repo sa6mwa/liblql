@@ -71,6 +71,74 @@ static int liblql_parse_selector(const char *expr, int or_mode, char *errbuf,
 	return (int)status;
 }
 
+typedef struct liblql_selector_inspection {
+	int and_;
+	int or_;
+	int not_;
+	int eq;
+	int range_;
+	int date;
+	int in;
+	int prefix;
+	int contains;
+	int exists;
+	int wildcard_path;
+	int recursive_path;
+	int uses_contains_like;
+	int uses_recursive_path;
+	int uses_wildcard_path;
+	int requires_object_root;
+	int early_non_match_likely;
+} liblql_selector_inspection;
+
+static int liblql_inspect_selector(const char *expr, int empty_selector,
+                                   liblql_selector_inspection *out,
+                                   char *errbuf, size_t errbuf_len) {
+	lql_error error;
+	lql_selector *selector;
+	lql_status status;
+	lql_selector_capabilities caps;
+	lql_selector_execution_traits traits;
+
+	if (out == NULL) {
+		return (int)LQL_STATUS_INVALID_ARGUMENT;
+	}
+	memset(out, 0, sizeof(*out));
+	selector = NULL;
+	if (!empty_selector) {
+		lql_error_init(&error);
+		status = liblql_receiver()->selector_parse(liblql_receiver(), expr, &selector, &error);
+		if (status != LQL_STATUS_OK) {
+			if (errbuf != NULL && errbuf_len > 0u) {
+				strncpy(errbuf, error.message, errbuf_len - 1u);
+				errbuf[errbuf_len - 1u] = '\0';
+			}
+			return (int)status;
+		}
+	}
+	liblql_receiver()->selector_capabilities_get(liblql_receiver(), selector, &caps);
+	liblql_receiver()->selector_execution_traits_get(liblql_receiver(), selector, &traits);
+	out->and_ = caps.and_;
+	out->or_ = caps.or_;
+	out->not_ = caps.not_;
+	out->eq = caps.eq;
+	out->range_ = caps.range;
+	out->date = caps.date;
+	out->in = caps.in;
+	out->prefix = caps.prefix;
+	out->contains = caps.contains;
+	out->exists = caps.exists;
+	out->wildcard_path = caps.wildcard_path;
+	out->recursive_path = caps.recursive_path;
+	out->uses_contains_like = traits.uses_contains_like;
+	out->uses_recursive_path = traits.uses_recursive_path;
+	out->uses_wildcard_path = traits.uses_wildcard_path;
+	out->requires_object_root = traits.requires_object_root;
+	out->early_non_match_likely = traits.early_non_match_likely;
+	liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+	return 0;
+}
+
 static int liblql_parse_projection(const char *const *fields,
                                    size_t field_count, char *errbuf,
                                    size_t errbuf_len) {
@@ -1348,6 +1416,34 @@ import (
 	"unsafe"
 )
 
+type cSelectorInspection struct {
+	capabilities lqlSelectorCapabilities
+	traits       lqlSelectorExecutionTraits
+}
+
+type lqlSelectorCapabilities struct {
+	and           bool
+	or            bool
+	not           bool
+	eq            bool
+	rng           bool
+	date          bool
+	in            bool
+	prefix        bool
+	contains      bool
+	exists        bool
+	wildcardPath  bool
+	recursivePath bool
+}
+
+type lqlSelectorExecutionTraits struct {
+	usesContainsLike    bool
+	usesRecursivePath   bool
+	usesWildcardPath    bool
+	requiresObjectRoot  bool
+	earlyNonMatchLikely bool
+}
+
 func cMatchesJSON(expr, doc string, orMode bool) (bool, error) {
 	cExpr := C.CString(expr)
 	cDoc := C.CString(doc)
@@ -1372,6 +1468,45 @@ func cParseSelector(expr string, orMode bool) (int, string) {
 	status := C.liblql_parse_selector(cExpr, cBool(orMode), &errbuf[0],
 		C.size_t(len(errbuf)))
 	return int(status), C.GoString(&errbuf[0])
+}
+
+func cInspectSelector(expr string, emptySelector bool) (cSelectorInspection, error) {
+	var cExpr *C.char
+	var raw C.liblql_selector_inspection
+	var errbuf [256]C.char
+	var out cSelectorInspection
+
+	if !emptySelector {
+		cExpr = C.CString(expr)
+		defer C.free(unsafe.Pointer(cExpr))
+	}
+	status := C.liblql_inspect_selector(cExpr, cBool(emptySelector), &raw,
+		&errbuf[0], C.size_t(len(errbuf)))
+	if status != 0 {
+		return out, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	out.capabilities = lqlSelectorCapabilities{
+		and:           raw.and_ != 0,
+		or:            raw.or_ != 0,
+		not:           raw.not_ != 0,
+		eq:            raw.eq != 0,
+		rng:           raw.range_ != 0,
+		date:          raw.date != 0,
+		in:            raw.in != 0,
+		prefix:        raw.prefix != 0,
+		contains:      raw.contains != 0,
+		exists:        raw.exists != 0,
+		wildcardPath:  raw.wildcard_path != 0,
+		recursivePath: raw.recursive_path != 0,
+	}
+	out.traits = lqlSelectorExecutionTraits{
+		usesContainsLike:    raw.uses_contains_like != 0,
+		usesRecursivePath:   raw.uses_recursive_path != 0,
+		usesWildcardPath:    raw.uses_wildcard_path != 0,
+		requiresObjectRoot:  raw.requires_object_root != 0,
+		earlyNonMatchLikely: raw.early_non_match_likely != 0,
+	}
+	return out, nil
 }
 
 func cParseProjection(fields []string) (int, string) {

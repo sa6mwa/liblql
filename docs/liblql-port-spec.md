@@ -66,7 +66,7 @@ instantiatable `lql *` with `lql_new()`, invoke operations as
 `ctx->operation(ctx, ...)`, and release it with `ctx->destroy(ctx)`. Selector,
 query, payload, projection, compact, mutation, and receiver cleanup operations
 are receiver methods only; standalone public functions are limited to
-construction, diagnostics, and version/capability helpers.
+construction and diagnostics.
 Project-owned code must also use receiver calls directly rather than recreating
 removed operation free functions or free-operation cleanup aliases through local
 macros or static wrapper shims.
@@ -92,13 +92,14 @@ allocator boundaries or depend on allocator wrapper functions.
 The API should eventually expose these surfaces:
 
 - selector parse and receiver destroy;
-- reusable selector plan/compiled state;
+- reusable selector plan/compiled state and receiver-based selector
+  capability/trait inspection;
 - selector evaluation over one arbitrary JSON value;
 - streaming query over arbitrary candidate streams;
 - projection path parse/plan and projection execution;
 - mutation parse/plan and mutation execution;
 - streaming mutation over arbitrary candidate streams;
-- version and capability query helpers.
+- receiver-based version and capability query methods.
 
 The API must name behavior precisely. Do not call an API streaming unless bytes
 or records flow producer-to-consumer without full-message materialization.
@@ -560,8 +561,8 @@ Current implementation status:
   selector/query/payload/projection/compact/mutation free-operation prototypes
   reappear in the installed header or, when a shared library is built, as
   exported dynamic symbols; for shared builds it also allowlists the complete
-  exported `lql_*` symbol set to construction, diagnostics, version, and
-  capability helpers only, including payload write/projection operations that
+  exported `lql_*` symbol set to construction and diagnostics only, including
+  payload write/projection operations that
   must remain receiver methods and must not gain standalone compatibility
   wrappers after the receiver refactor; it also scans project-owned source trees for
   exact-name macro or static wrapper shims that recreate those removed
@@ -645,6 +646,13 @@ Current implementation status:
   must call `ctx->version(ctx)` and `ctx->capabilities_get(ctx, ...)` so the
   documented and exercised product surface stays receiver-first after
   construction;
+- selector capability and execution-trait inspection is receiver-only through
+  `ctx->selector_capabilities_get(ctx, selector, ...)` and
+  `ctx->selector_execution_traits_get(ctx, selector, ...)`; the methods walk the
+  parsed selector handle without allocating, copying selector data, or
+  materializing JSON, and C contract tests cover feature-family flags,
+  wildcard/recursive path flags, empty/match-all simplification, null
+  out-parameter tolerance, and early-non-match trait behavior;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through
@@ -824,8 +832,9 @@ Current implementation status:
 - fast CTest now includes `lql.cli-smoke`, which asserts the stable
   `clql --version` format and the documented `clql --help` option surface;
 - C SDK contract tests cover the currently implemented public liblql selector,
-  streaming, projection, compacting, mutation, version, and capability
-  surfaces, including mutation plan parse success, expansion counts, default
+  selector inspection, streaming, projection, compacting, mutation, version,
+  and capability surfaces, including mutation plan parse success, expansion
+  counts, default
   and explicit file-backed parse options, file-backed mutation value execution
   over buffered, source-backed, and seekable file-range APIs, source-backed
   projection, compacting, and mutation over fragmented caller reads, source
@@ -871,7 +880,8 @@ Current implementation status:
   missing file path and invalid single-file input forms such as stdin or
   multiple files;
 - Go-backed SDK parity tests now exist for public `liblql` selector
-  parse/evaluate behavior, projection parser failures, buffered, source-backed,
+  parse/evaluate and capability/trait inspection behavior, projection parser
+  failures, buffered, source-backed,
   and seekable file-range JSON projection including malformed JSON execution
   errors, mutation plan parsing and parse failures, buffered, source-backed, and
   seekable file-range JSON mutation including file-backed mutation values and

@@ -99,6 +99,8 @@ typedef struct lql_query_result {
 typedef struct lql_capabilities {
   /* Selector parser entry points are available. */
   int selector_parse;
+  /* Selector capability and execution-trait inspection is available. */
+  int selector_inspection;
   /* In-memory whole-value match helper is available. */
   int matches_json;
   /* FILE * candidate decision streaming is available. */
@@ -153,6 +155,46 @@ typedef struct lql_capabilities {
   int mutation_file_values;
 } lql_capabilities;
 
+typedef struct lql_selector_capabilities {
+  /* Selector uses an AND composition. */
+  int and_;
+  /* Selector uses an OR composition. */
+  int or_;
+  /* Selector uses a negated clause. */
+  int not_;
+  /* Selector uses equality comparison. */
+  int eq;
+  /* Selector uses numeric range comparison. */
+  int range;
+  /* Selector uses temporal comparison. */
+  int date;
+  /* Selector uses set membership comparison. */
+  int in;
+  /* Selector uses prefix comparison. */
+  int prefix;
+  /* Selector uses substring comparison. */
+  int contains;
+  /* Selector uses path existence comparison. */
+  int exists;
+  /* Selector path includes wildcard array/member traversal. */
+  int wildcard_path;
+  /* Selector path includes recursive traversal. */
+  int recursive_path;
+} lql_selector_capabilities;
+
+typedef struct lql_selector_execution_traits {
+  /* Selector requires contains-like string matching. */
+  int uses_contains_like;
+  /* Selector requires recursive path traversal. */
+  int uses_recursive_path;
+  /* Selector requires wildcard path traversal. */
+  int uses_wildcard_path;
+  /* Selector requires an object-root candidate. */
+  int requires_object_root;
+  /* Selector is likely to reject non-matches before full traversal. */
+  int early_non_match_likely;
+} lql_selector_execution_traits;
+
 typedef lql_status (*lql_query_decision_fn)(void *user,
                                             const lql_query_decision *decision);
 typedef lql_status (*lql_query_match_fn)(void *user,
@@ -164,8 +206,7 @@ typedef lql_status (*lql_write_fn)(void *user, const void *data, size_t len);
 /* Instantiatable liblql receiver shell. Fields are initialized by lql_new().
    Mutable implementation state, if any, is kept behind impl. Use
    ctx->method(ctx, ...) for all handle operations and cleanup. Standalone
-   public functions are limited to construction, diagnostics, and
-   version/capability helpers. */
+   public functions are limited to construction and diagnostics. */
 struct lql {
   /* Private implementation pointer owned by the receiver. */
   void *impl;
@@ -183,6 +224,14 @@ struct lql {
   void (*selector_destroy)(lql *self, lql_selector *selector);
   /* Reports whether selector is NULL or matches all candidates. */
   int (*selector_is_empty)(const lql *self, const lql_selector *selector);
+  /* Writes selector feature-family capabilities to out; NULL out is accepted. */
+  void (*selector_capabilities_get)(
+      const lql *self, const lql_selector *selector,
+      lql_selector_capabilities *out);
+  /* Writes selector execution traits to out; NULL out is accepted. */
+  void (*selector_execution_traits_get)(
+      const lql *self, const lql_selector *selector,
+      lql_selector_execution_traits *out);
   /* Evaluates one caller-buffered JSON value against selector. */
   lql_status (*matches_json)(lql *self, const lql_selector *selector,
                              const char *json, size_t json_len,

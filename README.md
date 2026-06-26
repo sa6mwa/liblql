@@ -31,7 +31,9 @@ mutation through a temp-file rename.
 The public C API now exposes an instantiatable receiver shell through
 `lql_new()`, with examples and bindings using `ctx->method(ctx, ...)`.
 Selector/query/projection/mutation operations are not exported as free-function
-wrappers, and allocator wrapper functions are not part of the public API.
+wrappers. Selector capability and execution-trait inspection is exposed through
+receiver methods that inspect the parsed selector handle without allocation.
+Allocator wrapper functions are not part of the public API.
 Project-owned allocation is centralized through the internal liblql allocator
 surface, and `make test` rejects direct runtime allocator calls outside the
 allocator module.
