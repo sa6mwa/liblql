@@ -14,7 +14,7 @@ help:
 	  'make lua-test                run Lua facade smoke tests' \
 	  'make benchmarks             run local parity benchmark smoke' \
 	  'make bench-check            run deterministic benchmark smoke gate' \
-	  'make bench-memory-check     run scalable Go/C/Lua streaming memory gate' \
+	  'make bench-memory-check     run scalable streaming and C mutation memory gates' \
 	  'make bench-1g-check         run 1 GiB/128 MiB streaming memory gate' \
 	  'make benchmarks-parity      require Go/C/Lua benchmark implementations' \
 	  'make format                  clang-format project C sources' \

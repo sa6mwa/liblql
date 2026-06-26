@@ -817,6 +817,12 @@ selected_modes() {
         plus_value_source_selector \
         plus_value_openjson_selector
       ;;
+    mutation-memory)
+      printf '%s\n' \
+        mutate_file_selector \
+        mutate_file_plan \
+        mutate_source_selector
+      ;;
     *)
       printf 'unsupported benchmark mode profile: %s\n' "$mode_profile" >&2
       return 2

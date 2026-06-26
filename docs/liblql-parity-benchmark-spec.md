@@ -113,7 +113,13 @@ Current implementation status:
   `LQL_BENCH_MEMORY_COUNT`, `LQL_BENCH_MEMORY_BLOB_BYTES`, and
   `LQL_BENCH_MEMORY_MIN_BYTES`, so the same gate shape can be scaled toward the
   1 GiB/128 MiB requirement without changing the runner or weakening the normal
-  smoke gate.
+  smoke gate. The same target also runs a separate Go/C-only mutation memory
+  profile over the same generated fixture using `mutate_file_selector`,
+  `mutate_file_plan`, and `mutate_source_selector`. Lua is deliberately
+  excluded from this large mutation memory profile until the public Lua facade
+  has a streaming mutation output sink; the gate still compares C mutation
+  candidate/match counters against the Go oracle and applies the C RSS and
+  steady-state time ceilings.
 - `make bench-1g-check` is the explicit 1 GiB/128 MiB profile. It reuses the
   same Go/C/Lua large-memory runner and RSS validator as
   `make bench-memory-check`, but defaults to at least 1 GiB of generated NDJSON
