@@ -711,9 +711,10 @@ Current implementation is an early slice:
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, strict `in.any` value whitespace validation, and
   invalid selector invariants;
-- `clql` exists as a selector/projection/mutation compatibility CLI;
-  projection and mutation path behavior are still being expanded toward full
-  CLI parity;
+- `clql` exists as a selector/projection/mutation compatibility CLI with
+  manifest-checked Go-backed parity coverage for selector composition,
+  streaming selection, projection, mutation, inline/write modes, option
+  parsing, malformed JSON diagnostics, and file-backed mutation workflows;
 - fast CTest now includes `lql.cli-smoke`, which asserts the stable
   `clql --version` format and the documented `clql --help` option surface;
 - C SDK contract tests cover the currently implemented public liblql selector,
@@ -735,12 +736,9 @@ Current implementation is an early slice:
   contract. Handle-producing selector, projection, and mutation APIs also have
   C-only ownership contract tests for optional diagnostics, output-handle
   clearing on parse failure, empty-selector ownership, and `NULL` cleanup/count
-  behavior. This coverage is still too shallow for the final goal: the next C
-  test work should continue expanding the surface-by-surface API contract
-  matrix covering ownership, out-parameter state, callback error propagation,
-  partial I/O, cleanup after failures, and bounded-memory behavior;
-  an SDK coverage manifest now ties claimed C contract surfaces to C unit
-  functions;
+  behavior. An SDK coverage manifest ties claimed C contract surfaces to C
+  unit functions. Further C test work should be driven by newly claimed API
+  contracts or defects rather than by mechanically copying Go parity rows;
 - Go-backed parity tests exist for the current CLI surface and remain a
   transitional oracle for semantic convergence; they run under the explicit
   `make parity-test` target and broader gates, not the fast `make test`
@@ -851,6 +849,14 @@ Current implementation is an early slice:
   can be scaled with `LQL_BENCH_MEMORY_COUNT` and
   `LQL_BENCH_MEMORY_BLOB_BYTES`, moving the benchmark surface toward the final
   1 GiB/128 MiB proof without slowing the normal smoke gate;
+- current local lifecycle confidence has passed `make test-all`,
+  `make bench-check`, `make bench-memory-check`, `make package-verify`, and
+  `make release-matrix` on the available host/toolchain set. The release matrix
+  builds and verifies all Linux GNU/musl targets in the configured matrix and
+  reports Darwin as skipped when the local Darwin target compiler cannot link.
+  These gates are strong evidence for the current implementation state, but
+  they are not a substitute for a requirement-by-requirement completion audit
+  before claiming full LQL parity or final release readiness;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and
