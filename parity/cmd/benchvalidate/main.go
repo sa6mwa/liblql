@@ -214,6 +214,9 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 		if rec.PayloadSourceType == "none" {
 			return fmt.Errorf("line %d: plus-value payload source type is required", line)
 		}
+		if rec.Impl == "c" && rec.PayloadSourceType != "seekable_range" {
+			return fmt.Errorf("line %d: c/%s must use seekable_range payloads for fixture-backed plus-value benchmarks", line, rec.Mode)
+		}
 	}
 	return nil
 }
