@@ -1077,6 +1077,7 @@ static void expect_stream_mixed_scalar_candidates(void) {
   lql_query_result result;
   stream_seen seen;
   payload_seen payloads;
+  chunk_reader reader;
   lql_error error;
   lql_status st;
   char buf[128];
@@ -1129,6 +1130,38 @@ static void expect_stream_mixed_scalar_candidates(void) {
       seen.offsets[1] != (lql_uint64)4 || seen.sizes[1] != (lql_uint64)10 ||
       seen.offsets[2] != (lql_uint64)15 || seen.sizes[2] != (lql_uint64)3) {
     printf("mixed scalar stream ranges mismatch\n");
+    ++failures;
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&reader, 0, sizeof(reader));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 2u;
+  lql_error_init(&error);
+  st = test_ctx->query_source_decisions(test_ctx, selector, read_chunk,
+                                        &reader, record_decision, &seen,
+                                        &result, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("mixed scalar source stream query failed: %s\n", error.message);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (seen.calls != 3 || seen.matched != 1 ||
+      result.candidates_seen != (lql_uint64)3 ||
+      result.candidates_matched != (lql_uint64)1 ||
+      result.bytes_read != (lql_uint64)19) {
+    printf("mixed scalar source stream counts mismatch calls=%d matched=%d "
+           "bytes=%lu\n",
+           seen.calls, seen.matched, (unsigned long)result.bytes_read);
+    ++failures;
+  }
+  if (seen.offsets[0] != (lql_uint64)0 || seen.sizes[0] != (lql_uint64)3 ||
+      seen.offsets[1] != (lql_uint64)4 || seen.sizes[1] != (lql_uint64)10 ||
+      seen.offsets[2] != (lql_uint64)15 || seen.sizes[2] != (lql_uint64)3) {
+    printf("mixed scalar source stream ranges mismatch\n");
     ++failures;
   }
 

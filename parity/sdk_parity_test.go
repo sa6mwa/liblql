@@ -1049,6 +1049,11 @@ func TestSDKStreamingDecisionParity(t *testing.T) {
 			expr: `/id="x"`,
 			doc:  "\"x\"\n{\"id\":\"x\"}\n123\n",
 		},
+		{
+			name: "match-all string term over mixed scalar candidates",
+			expr: `icontains{f=/,v=""}`,
+			doc:  "\"x\"\n{\"id\":\"x\"}\n123\n",
+		},
 	}
 	for _, tc := range cases {
 		for _, mode := range []struct {

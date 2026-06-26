@@ -888,7 +888,10 @@ Current implementation status:
   callback-source query paths; callback-source decision and
   spooled match queries preserve partial result counters when a reader fails
   after an emitted candidate, matching the callback-source candidate mutation
-  contract. Handle-producing selector, projection, and mutation APIs also have
+  contract. Mixed scalar/object candidate-stream tests now cover both seekable
+  and callback-source decision streams so non-object candidates reject non-empty
+  selectors without being dropped from decision accounting.
+  Handle-producing selector, projection, and mutation APIs also have
   C-only ownership contract tests for optional diagnostics, output-handle
   clearing on parse failure, empty-selector ownership, and `NULL` cleanup/count
   behavior. An SDK coverage manifest ties claimed C contract surfaces to C
@@ -974,8 +977,9 @@ Current implementation status:
 - SDK streaming parity currently asserts candidate counts, match counts,
   consumed byte counts, stop state/reason, callback counts, seekable/spooled
   payload kinds, decoded matched payload JSON collected through the public
-  payload sink API, plus-value stop limits, and malformed JSON stream errors.
-  Full non-stopped streams report consumed input bytes, including
+  payload sink API, plus-value stop limits, match-all string terms over mixed
+  scalar/object candidate streams, and malformed JSON stream errors. Full
+  non-stopped streams report consumed input bytes, including
   trailing delimiters, while early-stop streams retain candidate-end accounting
   for stop decisions;
 - C SDK unit coverage is manifest-checked: every `expect_* (void)` SDK
