@@ -800,6 +800,37 @@ verify_checksums() {
   printf 'package-verify: verified %s\n' "$manifest"
 }
 
+expect_privacy_failure() {
+  name=$1
+  needle=$2
+  tmp_dir=$3
+  fixture="$tmp_dir/$name"
+  output="$tmp_dir/$name.out"
+
+  mkdir -p "$fixture"
+  printf '%s\n' "$needle" >"$fixture/leak.txt"
+  if (verify_no_local_paths "$name" "$fixture") >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly passed: %s\n' "$name" >&2
+    exit 1
+  fi
+  if ! grep -F 'package-verify: local path leak' "$output" >/dev/null; then
+    printf 'package privacy fixture did not report local path leak: %s\n' "$name" >&2
+    cat "$output" >&2
+    exit 1
+  fi
+}
+
+check_package_privacy_fixtures() {
+  tmp_dir="$ROOT_DIR/build/package-privacy-fixtures"
+
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
+  expect_privacy_failure repo-path "$ROOT_DIR" "$tmp_dir"
+  expect_privacy_failure home-path "$HOME" "$tmp_dir"
+  expect_privacy_failure repo-file-url "file://$ROOT_DIR" "$tmp_dir"
+  expect_privacy_failure home-file-url "file://$HOME" "$tmp_dir"
+}
+
 case "$TARGET" in
   package)
     package_all
@@ -825,6 +856,9 @@ case "$TARGET" in
     ;;
   package-verify|verify-release-archives|verify-release-privacy)
     verify_checksums
+    ;;
+  package-privacy-fixtures)
+    check_package_privacy_fixtures
     ;;
   release-matrix)
     MATRIX_MODE=1
