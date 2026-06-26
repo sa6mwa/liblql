@@ -2400,6 +2400,8 @@ static void expect_projection_compact_error_api(void) {
   lql_error error;
   lql_status st;
   int found;
+  char buf[16];
+  size_t len;
 
   out = tmpfile();
   source = tmpfile();
@@ -2535,12 +2537,25 @@ static void expect_projection_compact_error_api(void) {
     ++failures;
   }
 
+  fclose(out);
+  out = tmpfile();
+  if (out == NULL) {
+    printf("compact_source read-error tmpfile failed\n");
+    fclose(source);
+    ++failures;
+    return;
+  }
   lql_error_init(&error);
   st = test_ctx->compact_source(test_ctx, read_fail_once, NULL, out, &error);
   if (st != LQL_STATUS_JSON_ERROR ||
       strcmp(error.message, "compact source read failed") != 0) {
     printf("compact_source read error mismatch: %s\n", error.message);
     ++failures;
+  } else {
+    if (!read_tmpfile(out, buf, sizeof(buf), &len) || len != 0u) {
+      printf("compact_source read error wrote output: %s\n", buf);
+      ++failures;
+    }
   }
 
   lql_error_init(&error);
