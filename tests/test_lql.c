@@ -5115,6 +5115,82 @@ static void expect_projected_candidate_mutation_api(void) {
     fclose(out);
     out = tmpfile();
     if (out == NULL) {
+      printf("file projected candidate matches-only tmpfile failed\n");
+      ++failures;
+    } else {
+      if (fseek(source, 0L, SEEK_SET) != 0) {
+        printf("file projected candidate matches-only rewind failed\n");
+        ++failures;
+      } else {
+        memset(&result, 0, sizeof(result));
+        lql_error_init(&error);
+        st = test_ctx->mutate_file_range_projected_candidates(
+            test_ctx, selector, projection, plan, source, 0u,
+            (lql_uint64)strlen(doc), out, 1, 1, &result, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("file projected candidate matches-only mutation failed: %s\n",
+                 error.message);
+          ++failures;
+        } else if (result.candidates_seen != 2u ||
+                   result.candidates_matched != 1u || result.stopped_early ||
+                   result.bytes_read == 0u) {
+          printf("file projected candidate matches-only result mismatch: "
+                 "seen=%lu matched=%lu stopped=%d bytes=%lu\n",
+                 (unsigned long)result.candidates_seen,
+                 (unsigned long)result.candidates_matched,
+                 result.stopped_early, (unsigned long)result.bytes_read);
+          ++failures;
+        } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                   strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") !=
+                       0) {
+          printf("file projected candidate matches-only output mismatch: %s\n",
+                 buf);
+          ++failures;
+        }
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source projected candidate preserve tmpfile failed\n");
+      ++failures;
+    } else {
+      memset(&reader, 0, sizeof(reader));
+      memset(&result, 0, sizeof(result));
+      reader.data = doc;
+      reader.len = strlen(doc);
+      reader.chunk_size = 7u;
+      lql_error_init(&error);
+      st = test_ctx->mutate_source_projected_candidates(
+          test_ctx, selector, projection, plan, read_chunk, &reader, out, 1, 0,
+          &result, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source projected candidate preserve mutation failed: %s\n",
+               error.message);
+        ++failures;
+      } else if (reader.calls <= 1) {
+        printf("source projected candidate preserve did not fragment reads\n");
+        ++failures;
+      } else if (result.candidates_seen != 2u ||
+                 result.candidates_matched != 1u || result.stopped_early) {
+        printf("source projected candidate preserve result mismatch: seen=%lu "
+               "matched=%lu stopped=%d\n",
+               (unsigned long)result.candidates_seen,
+               (unsigned long)result.candidates_matched, result.stopped_early);
+        ++failures;
+      } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                 strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n"
+                             "{\"id\":\"b\",\"state\":{\"count\":2}}\n") != 0) {
+        printf("source projected candidate preserve output mismatch: %s\n",
+               buf);
+        ++failures;
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
       printf("source projected candidate tmpfile failed\n");
       ++failures;
     } else {

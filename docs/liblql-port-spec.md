@@ -913,6 +913,8 @@ Current implementation status:
   contract. Mixed scalar/object candidate-stream tests now cover both seekable
   and callback-source decision streams so non-object candidates reject non-empty
   selectors without being dropped from decision accounting.
+  Projection-before-mutation candidate-stream tests cover both seekable and
+  callback-source inputs in preserve-unmatched and matches-only modes.
   Handle-producing selector, projection, and mutation APIs also have
   C-only ownership contract tests for optional diagnostics, output-handle
   clearing on parse failure, empty-selector ownership, and `NULL` cleanup/count
