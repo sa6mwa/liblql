@@ -720,7 +720,10 @@ Current implementation is an early slice:
   callback-source query paths; callback-source decision and
   spooled match queries preserve partial result counters when a reader fails
   after an emitted candidate, matching the callback-source candidate mutation
-  contract. This coverage is still too shallow for the final goal: the next C
+  contract. Handle-producing selector, projection, and mutation APIs also have
+  C-only ownership contract tests for optional diagnostics, output-handle
+  clearing on parse failure, empty-selector ownership, and `NULL` cleanup/count
+  behavior. This coverage is still too shallow for the final goal: the next C
   test work should continue expanding the surface-by-surface API contract
   matrix covering ownership, out-parameter state, callback error propagation,
   partial I/O, cleanup after failures, and bounded-memory behavior;

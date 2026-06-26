@@ -605,6 +605,89 @@ static void expect_output_state_contract_api(void) {
   test_ctx->selector_destroy(test_ctx, selector);
 }
 
+static void expect_handle_ownership_contract_api(void) {
+  const char *field;
+  const char *mutation;
+  const char *null_mutation[1];
+  lql_selector *selector;
+  lql_projection *projection;
+  lql_mutation_plan *plan;
+  lql_error error;
+  lql_status st;
+
+  selector = (lql_selector *)1;
+  st = test_ctx->selector_parse_or(
+      test_ctx, "eq{field=/status,value=open,unknown=true}", &selector, NULL);
+  if (st != LQL_STATUS_PARSE_ERROR || selector != NULL) {
+    printf("selector_parse_or optional-error failure state mismatch: "
+           "status=%s out=%p\n",
+           lql_status_string(st), (void *)selector);
+    ++failures;
+  }
+
+  selector = (lql_selector *)1;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, NULL, &selector, &error);
+  if (st != LQL_STATUS_OK || selector == NULL ||
+      !test_ctx->selector_is_empty(test_ctx, selector)) {
+    printf("NULL selector expression ownership mismatch: status=%s error=%s\n",
+           lql_status_string(st), error.message);
+    ++failures;
+  }
+  test_ctx->selector_destroy(test_ctx, selector);
+  test_ctx->selector_destroy(test_ctx, NULL);
+
+  field = NULL;
+  projection = (lql_projection *)1;
+  st = test_ctx->projection_parse(test_ctx, &field, 1u, &projection, NULL);
+  if (st != LQL_STATUS_PARSE_ERROR || projection != NULL) {
+    printf("projection optional-error failure state mismatch: status=%s "
+           "out=%p\n",
+           lql_status_string(st), (void *)projection);
+    ++failures;
+  }
+
+  field = "/id";
+  projection = NULL;
+  lql_error_init(&error);
+  st = test_ctx->projection_parse(test_ctx, &field, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK || projection == NULL) {
+    printf("projection ownership parse mismatch: status=%s error=%s\n",
+           lql_status_string(st), error.message);
+    ++failures;
+  }
+  test_ctx->projection_destroy(test_ctx, projection);
+  test_ctx->projection_destroy(test_ctx, NULL);
+
+  null_mutation[0] = NULL;
+  plan = (lql_mutation_plan *)1;
+  st = test_ctx->mutation_plan_parse(test_ctx, null_mutation, 1u, &plan, NULL);
+  if (st != LQL_STATUS_PARSE_ERROR || plan != NULL) {
+    printf("mutation optional-error failure state mismatch: status=%s out=%p\n",
+           lql_status_string(st), (void *)plan);
+    ++failures;
+  }
+
+  mutation = "/status=closed";
+  plan = NULL;
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, &mutation, 1u, &plan, &error);
+  if (st != LQL_STATUS_OK || plan == NULL ||
+      test_ctx->mutation_plan_count(test_ctx, plan) != 1u) {
+    printf("mutation ownership parse mismatch: status=%s count=%lu error=%s\n",
+           lql_status_string(st),
+           (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan),
+           error.message);
+    ++failures;
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  if (test_ctx->mutation_plan_count(test_ctx, NULL) != 0u) {
+    printf("NULL mutation plan count ownership mismatch\n");
+    ++failures;
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, NULL);
+}
+
 static lql_status record_payload(void *user, const lql_query_match *match) {
   payload_seen *seen = (payload_seen *)user;
   lql_error error;
@@ -4054,6 +4137,9 @@ static void expect_sdk_contract_manifest(void) {
        "failure output state, callback diagnostics, and partial result "
        "propagation",
        expect_output_state_contract_api},
+      {"api-contract",
+       "handle ownership, optional diagnostics, and cleanup nullability",
+       expect_handle_ownership_contract_api},
       {"version", "version and capability public API", expect_version_api},
       {"selector",
        "scalar, string, numeric, temporal, path, wildcard, "
@@ -4410,6 +4496,7 @@ int main(void) {
   expect_receiver_api();
   expect_public_utility_api();
   expect_output_state_contract_api();
+  expect_handle_ownership_contract_api();
   expect_selector_match_api();
   expect_selector_or_api();
   expect_selector_parse_error_api();

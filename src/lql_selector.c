@@ -414,9 +414,9 @@ static int key_allowed_for_kind(lql_node_kind kind, const char *key) {
 }
 
 static void dispose_seen_key_values(char *field, char *value, char *any,
-                                 char *ignore_case, char *gt, char *gte,
-                                 char *lt, char *lte, char *after, char *before,
-                                 char *since) {
+                                    char *ignore_case, char *gt, char *gte,
+                                    char *lt, char *lte, char *after,
+                                    char *before, char *since) {
   lql_dealloc(field);
   lql_dealloc(value);
   lql_dealloc(any);
@@ -651,8 +651,8 @@ static int set_date_bound(lql_term *term, const char *slot, const char *decoded,
   return 1;
 }
 
-static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
-                            lql_error *error) {
+static lql_status parse_key_values(char *body, lql_node_kind kind,
+                                   lql_term *term, lql_error *error) {
   lql_token_list parts;
   size_t i;
   lql_status st;
@@ -691,9 +691,10 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
   seen_after = NULL;
   seen_before = NULL;
   seen_since = NULL;
+  st = LQL_STATUS_NO_MEMORY;
   st = split_assignments(body, &parts, error);
   if (st != LQL_STATUS_OK) {
-    return 0;
+    return st;
   }
   for (i = 0u; i < parts.count; ++i) {
     eq = strchr(parts.items[i], '=');
@@ -701,7 +702,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       token_list_cleanup(&parts);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector term requires key=value");
-      return 0;
+      return LQL_STATUS_PARSE_ERROR;
     }
     *eq = '\0';
     key = parts.items[i];
@@ -719,6 +720,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       ++val;
     }
     if (!key_allowed_for_kind(kind, key)) {
+      st = LQL_STATUS_PARSE_ERROR;
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector operator does not support key");
       goto fail;
@@ -730,6 +732,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     if (kind == LQL_NODE_IN && key_is_any(key) && value_had_leading_space &&
         raw_value[0] != '\0') {
       lql_dealloc(raw_value);
+      st = LQL_STATUS_PARSE_ERROR;
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector any values must not have surrounding whitespace");
       goto fail;
@@ -766,11 +769,13 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     }
     if (seen_slot == NULL) {
       lql_dealloc(raw_value);
+      st = LQL_STATUS_PARSE_ERROR;
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector operator does not support key");
       goto fail;
     }
     if (!remember_key_value(seen_slot, &raw_value, &skip_duplicate, error)) {
+      st = LQL_STATUS_PARSE_ERROR;
       goto fail;
     }
     if (skip_duplicate) {
@@ -791,6 +796,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     } else if (kind == LQL_NODE_DATE && key_is_value(key)) {
       if (!set_date_bound(term, "value", decoded, error)) {
         lql_dealloc(decoded);
+        st = LQL_STATUS_PARSE_ERROR;
         goto fail;
       }
       lql_dealloc(decoded);
@@ -805,18 +811,23 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
                                        : "since";
       if (!set_date_bound(term, date_slot, decoded, error)) {
         lql_dealloc(decoded);
+        st = LQL_STATUS_PARSE_ERROR;
         goto fail;
       }
       lql_dealloc(decoded);
     } else if (key_is_any(key)) {
       if (!parse_any_values(decoded, term, kind == LQL_NODE_IN, error)) {
         lql_dealloc(decoded);
+        st = error != NULL && error->code != LQL_STATUS_OK
+                 ? error->code
+                 : LQL_STATUS_PARSE_ERROR;
         goto fail;
       }
       lql_dealloc(decoded);
     } else if (key_is_ignore_case(key)) {
       if (!parse_bool_value(decoded, &term->ignore_case)) {
         lql_dealloc(decoded);
+        st = LQL_STATUS_PARSE_ERROR;
         lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                       "selector ignoreCase must be true/false/t/f");
         goto fail;
@@ -826,10 +837,12 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       if (kind == LQL_NODE_DATE) {
         if (!set_date_bound(term, key, decoded, error)) {
           lql_dealloc(decoded);
+          st = LQL_STATUS_PARSE_ERROR;
           goto fail;
         }
       } else if (!set_range_bound(term, key, decoded, error)) {
         lql_dealloc(decoded);
+        st = LQL_STATUS_PARSE_ERROR;
         goto fail;
       }
       lql_dealloc(decoded);
@@ -837,6 +850,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
   }
   token_list_cleanup(&parts);
   if (term->field == NULL) {
+    st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "selector field required");
     goto fail_after_tokens;
   }
@@ -844,16 +858,19 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       (seen_value != NULL || seen_after != NULL || seen_before != NULL ||
        seen_gt != NULL || seen_gte != NULL || seen_lt != NULL ||
        seen_lte != NULL)) {
+    st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "date selector since cannot be combined with other bounds");
     goto fail_after_tokens;
   }
   if (kind == LQL_NODE_DATE && seen_after != NULL && seen_gt != NULL) {
+    st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "date selector cannot combine after and gt");
     goto fail_after_tokens;
   }
   if (kind == LQL_NODE_DATE && seen_before != NULL && seen_lt != NULL) {
+    st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "date selector cannot combine before and lt");
     goto fail_after_tokens;
@@ -861,17 +878,20 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
   if (term->any_count != 0u) {
     if (kind != LQL_NODE_CONTAINS && kind != LQL_NODE_ICONTAINS &&
         kind != LQL_NODE_IN) {
+      st = LQL_STATUS_PARSE_ERROR;
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector operator does not support any");
       goto fail_after_tokens;
     }
     if (kind != LQL_NODE_IN && (term->value_set || term->value != NULL)) {
+      st = LQL_STATUS_PARSE_ERROR;
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector cannot set both value and any");
       goto fail_after_tokens;
     }
   }
   if (kind == LQL_NODE_IN && term->any_count == 0u) {
+    st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "in selector requires any values");
     goto fail_after_tokens;
@@ -880,6 +900,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       !term->has_range_lt && !term->has_range_lte && !term->has_temporal_gt &&
       !term->has_temporal_gte && !term->has_temporal_lt &&
       !term->has_temporal_lte) {
+    st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "range selector requires at least one bound");
     goto fail_after_tokens;
@@ -889,6 +910,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
        term->has_range_lte) &&
       (term->has_temporal_gt || term->has_temporal_gte ||
        term->has_temporal_lt || term->has_temporal_lte)) {
+    st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "range selector cannot mix numeric and datetime bounds");
     goto fail_after_tokens;
@@ -897,22 +919,23 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       !term->has_temporal_gt && !term->has_temporal_gte &&
       !term->has_temporal_lt && !term->has_temporal_lte &&
       term->since_macro == LQL_SINCE_NONE) {
+    st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "date selector requires at least one bound");
     goto fail_after_tokens;
   }
   dispose_seen_key_values(seen_field, seen_value, seen_any, seen_ignore_case,
-                       seen_gt, seen_gte, seen_lt, seen_lte, seen_after,
-                       seen_before, seen_since);
-  return 1;
+                          seen_gt, seen_gte, seen_lt, seen_lte, seen_after,
+                          seen_before, seen_since);
+  return LQL_STATUS_OK;
 
 fail:
   token_list_cleanup(&parts);
 fail_after_tokens:
   dispose_seen_key_values(seen_field, seen_value, seen_any, seen_ignore_case,
-                       seen_gt, seen_gte, seen_lt, seen_lte, seen_after,
-                       seen_before, seen_since);
-  return 0;
+                          seen_gt, seen_gte, seen_lt, seen_lte, seen_after,
+                          seen_before, seen_since);
+  return st;
 }
 
 static int string_term_is_match_all_alias(lql_node_kind kind,
@@ -1091,12 +1114,10 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       lql_dealloc(copy);
       return out->term.field == NULL ? LQL_STATUS_NO_MEMORY : LQL_STATUS_OK;
     }
-    if (!parse_key_values(body + 1, out->kind, &out->term, error)) {
+    st = parse_key_values(body + 1, out->kind, &out->term, error);
+    if (st != LQL_STATUS_OK) {
       lql_dealloc(copy);
-      if (error != NULL && error->code != LQL_STATUS_OK) {
-        return error->code;
-      }
-      return LQL_STATUS_NO_MEMORY;
+      return st;
     }
     if (string_term_is_match_all_alias(out->kind, &out->term)) {
       lql_node_cleanup(out);
