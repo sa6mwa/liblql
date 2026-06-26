@@ -1,9 +1,15 @@
-.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-lockd-perf-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version print-release-assets format clean clean-dist
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+INSTALL ?= install
+
+.PHONY: help deps-debug deps-release deps-cross build build-clql-static build-debug build-release install test test-debug parity-test test-all asan fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-lockd-perf-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version print-release-assets format clean clean-dist
 
 help:
 	@printf '%s\n' \
 	  'make deps-debug              fetch host lonejson SDK' \
-	  'make build                   configure and build debug preset' \
+	  'make build                   build static clql, preferring musl then GNU' \
+	  'make build-debug             configure and build debug preset' \
+	  'make install                 install built clql to $${PREFIX:-/usr/local}/bin' \
 	  'make test                    run fast C/API tests' \
 	  'make parity-test             run Go-backed parity tests' \
 	  'make test-all                run tests, fuzz smoke, sanitizers, and Lua smoke tests' \
@@ -36,7 +42,17 @@ deps-release:
 deps-cross:
 	@./scripts/deps.sh all
 
-build build-debug: deps-debug
+build: build-clql-static
+
+build-clql-static:
+	@./scripts/build_clql_static.sh
+
+install: build
+	@$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
+	@$(INSTALL) -m 0755 build/clql-static/clql "$(DESTDIR)$(BINDIR)/clql"
+	@printf 'installed %s\n' "$(DESTDIR)$(BINDIR)/clql"
+
+build-debug: deps-debug
 	@cmake --preset debug
 	@cmake --build --preset debug
 

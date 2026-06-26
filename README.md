@@ -67,6 +67,14 @@ make build
 make test
 ```
 
+`make build` produces an installable static `clql` at
+`build/clql-static/clql`. On Linux it selects the host architecture and tries a
+musl toolchain first, falling back to the host GNU compiler when static linking
+is available. `make build-debug` keeps the normal debug SDK build used by the
+test and parity targets. `make install` installs that `clql` to
+`/usr/local/bin` by default; use `PREFIX`, `BINDIR`, or `DESTDIR` to stage or
+change the destination.
+
 `make test` is the fast C/API contract test surface. These tests are the
 authority for public C behavior: ownership, callbacks, streaming,
 bounded-memory semantics, error handling, and observable results. Go-backed

@@ -8,6 +8,7 @@ include(CMakePackageConfigHelpers)
 option(LQL_BUILD_STATIC "Build static liblql" ON)
 option(LQL_BUILD_SHARED "Build shared liblql" ON)
 option(LQL_BUILD_BINARY "Build clql" ON)
+option(LQL_CLQL_STATIC_LINK "Link clql as a static executable where supported" OFF)
 option(LQL_BUILD_TESTS "Build tests" ON)
 option(LQL_BUILD_EXAMPLES "Build examples" ON)
 option(LQL_BUILD_LUA_MODULE "Build direct Lua C module when Lua headers exist" ON)
@@ -101,6 +102,9 @@ if(LQL_BUILD_BINARY)
     target_link_libraries(clql PRIVATE lql_common)
   endif()
   lql_apply_project_warnings(clql)
+  if(LQL_CLQL_STATIC_LINK AND LQL_TARGET_OS STREQUAL "linux")
+    target_link_options(clql PRIVATE -static)
+  endif()
   if(LQL_TARGET_OS STREQUAL "darwin")
     set_target_properties(clql PROPERTIES INSTALL_RPATH "@loader_path/../lib")
   else()
@@ -254,6 +258,18 @@ if(LQL_BUILD_TESTS)
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_script_modes.sh
       --fixtures)
   set_tests_properties(lql.script-modes-fixtures PROPERTIES
+    LABELS "unit;operability" TIMEOUT 5)
+  add_test(NAME lql.install-surface
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_make_install_target.sh
+      ${CMAKE_CURRENT_SOURCE_DIR}/Makefile
+      ${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_clql_static.sh
+      ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
+  set_tests_properties(lql.install-surface PROPERTIES
+    LABELS "unit;operability" TIMEOUT 5)
+  add_test(NAME lql.install-surface-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_make_install_target.sh
+      --fixtures)
+  set_tests_properties(lql.install-surface-fixtures PROPERTIES
     LABELS "unit;operability" TIMEOUT 5)
 
   add_test(NAME lql.cmake-presets
