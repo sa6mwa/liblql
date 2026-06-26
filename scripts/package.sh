@@ -643,6 +643,14 @@ verify_lua_source_archive() {
     printf 'package-verify: Lua source VERSION mismatch in %s\n' "$artifact" >&2
     exit 1
   fi
+  if ! grep -qx '#if LUA_VERSION_NUM != 505' "$root/lua/lql_core.c"; then
+    printf 'package-verify: Lua C module must enforce Lua 5.5 only in %s\n' "$artifact" >&2
+    exit 1
+  fi
+  if ! grep -Fqx '   "lua >= 5.5, < 5.6"' "$root/liblql.rockspec.in"; then
+    printf 'package-verify: Lua source rockspec template must require Lua 5.5 only in %s\n' "$artifact" >&2
+    exit 1
+  fi
   (cd "$root" && find . -type f | sed 's#^\./##' | LC_ALL=C sort) >"$tmp_dir/payload-files.txt"
   if ! cmp -s "$root/RELEASE_MANIFEST" "$tmp_dir/payload-files.txt"; then
     printf 'package-verify: Lua source archive payload does not match RELEASE_MANIFEST\n' >&2
@@ -664,6 +672,10 @@ verify_one_rockspec() {
   grep -qx "version = \"${version_value}-1\"" "$artifact"
   grep -q "url = \"https://github.com/sa6mwa/liblql/releases/download/v${version_value}/${PROJECT}-lua-${version_value}.tar.gz\"" "$artifact"
   grep -qx "   dir = \"${PROJECT}-lua-${version_value}\"" "$artifact"
+  if ! grep -Fqx '   "lua >= 5.5, < 5.6"' "$artifact"; then
+    printf 'package-verify: release rockspec must require Lua 5.5 only: %s\n' "$artifact" >&2
+    exit 1
+  fi
   if grep -q 'file://' "$artifact"; then
     printf 'package-verify: release rockspec contains local file URL: %s\n' "$artifact" >&2
     exit 1
@@ -928,6 +940,61 @@ check_package_manifest_fixtures() {
   DIST_DIR=$old_dist
 }
 
+check_lua_package_contract_fixtures() {
+  tmp_dir="$ROOT_DIR/build/package-lua-contract-fixtures"
+  version_value=$(version)
+  bad_rockspec="$tmp_dir/${PROJECT}-${version_value}-1.rockspec"
+  source_root="$tmp_dir/${PROJECT}-lua-${version_value}"
+  bad_source="$tmp_dir/${PROJECT}-lua-${version_value}.tar.gz"
+
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir" "$source_root/lua" "$source_root/lua/tests" \
+    "$source_root/lua/benchmarks" "$source_root/scripts"
+
+  cat >"$bad_rockspec" <<EOF
+package = "liblql"
+version = "${version_value}-1"
+
+source = {
+   url = "https://github.com/sa6mwa/liblql/releases/download/v${version_value}/${PROJECT}-lua-${version_value}.tar.gz",
+   dir = "${PROJECT}-lua-${version_value}"
+}
+
+dependencies = {
+   "lua >= 5.4"
+}
+EOF
+  if (verify_one_rockspec "$bad_rockspec") >/dev/null 2>&1; then
+    printf 'package Lua contract fixture unexpectedly accepted broad Lua dependency\n' >&2
+    exit 1
+  fi
+
+  printf '%s\n' "$version_value" >"$source_root/VERSION"
+  printf '%s\n' 'MIT' >"$source_root/LICENSE"
+  printf '%s\n' '# fixture' >"$source_root/README.md"
+  printf '%s\n' 'return require("lql.core")' >"$source_root/lua/lql.lua"
+  cat >"$source_root/lua/lql_core.c" <<'EOF'
+#include <lua.h>
+int luaopen_lql_core(lua_State *L) { (void)L; return 0; }
+EOF
+  printf '%s\n' '-- fixture' >"$source_root/lua/tests/lql_smoke.lua"
+  printf '%s\n' '-- fixture' >"$source_root/lua/tests/lql_core_smoke.lua"
+  printf '%s\n' '-- fixture' >"$source_root/lua/benchmarks/parity.lua"
+  cp "$ROOT_DIR/liblql.rockspec.in" "$source_root/liblql.rockspec.in"
+  cp "$ROOT_DIR/scripts/build_lua_rock.sh" "$source_root/scripts/build_lua_rock.sh"
+  cp "$ROOT_DIR/scripts/release_version.sh" "$source_root/scripts/release_version.sh"
+  cp "$ROOT_DIR/scripts/render_release_rockspec.sh" "$source_root/scripts/render_release_rockspec.sh"
+  cp "$ROOT_DIR/scripts/run_lua_tests.sh" "$source_root/scripts/run_lua_tests.sh"
+  cp "$ROOT_DIR/scripts/stage_lua_rock_sources.sh" "$source_root/scripts/stage_lua_rock_sources.sh"
+  (cd "$source_root" && find . -type f | sed 's#^\./##' | LC_ALL=C sort) \
+    >"$source_root/RELEASE_MANIFEST"
+  (cd "$tmp_dir" && tar -czf "$bad_source" "${PROJECT}-lua-${version_value}")
+  if (verify_lua_source_archive "$bad_source") >/dev/null 2>&1; then
+    printf 'package Lua contract fixture unexpectedly accepted missing Lua 5.5 source guard\n' >&2
+    exit 1
+  fi
+}
+
 case "$TARGET" in
   package)
     package_all
@@ -959,6 +1026,9 @@ case "$TARGET" in
     ;;
   package-manifest-fixtures)
     check_package_manifest_fixtures
+    ;;
+  package-lua-contract-fixtures)
+    check_lua_package_contract_fixtures
     ;;
   release-matrix)
     MATRIX_MODE=1

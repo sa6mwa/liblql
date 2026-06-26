@@ -992,6 +992,10 @@ Current implementation status:
   package. Package verification checks checksum coverage, layout, manifest
   exactness, absence of C SDK payloads, local path privacy, release-safe
   rockspec URLs, and the nested Lua source package inside the source rock;
+  package verification also rejects Lua release rockspecs that do not require
+  `lua >= 5.5, < 5.6` and Lua source packages whose C module lacks the
+  compile-time Lua 5.5 guard, with negative fixture coverage in
+  `lql.package-lua-contract-fixtures`;
 - source archive production exists with injected `VERSION`, `RELEASE_MANIFEST`,
   exact manifest verification, and extracted-tree configure/build/test smoke;
 - host `clql` archive production carries required lonejson runtime libraries
