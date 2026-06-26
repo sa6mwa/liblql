@@ -822,7 +822,10 @@ Current implementation is an early slice:
   callback-scoped payload streaming through `match.write_json(callback)`, file
   and buffered-JSON projection, file and buffered-JSON mutation, query stop
   reasons, candidate/match limit options, expired payload handles, callback
-  error propagation, and structured errors;
+  error propagation, and structured errors; the public API style gate rejects
+  Lua facade use of private liblql headers, `LQL_INTERNAL_SYMBOL`, or private
+  `_impl` receiver implementation functions so Lua remains a public-header
+  binding rather than a private in-process shortcut;
 - the parity benchmark surface now has Go, C, and Lua runners over the shared
   generated fixture matrix; the Lua runner loads `lua/lql.lua` and uses the
   direct `lql.core` module rather than shelling out to `clql`; Go helper

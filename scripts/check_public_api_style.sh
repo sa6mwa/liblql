@@ -158,6 +158,17 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     printf '%s\n' "$alloc_hits" >&2
     failed=1
   fi
+
+  lua_private_hits=$(
+    grep -REn \
+      'lql_internal\.h|LQL_INTERNAL_SYMBOL|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \
+      "$source_root/lua" 2>/dev/null || true
+  )
+  if [ -n "$lua_private_hits" ]; then
+    printf 'public API style: Lua facade must use public liblql APIs only\n' >&2
+    printf '%s\n' "$lua_private_hits" >&2
+    failed=1
+  fi
 fi
 
 exit "$failed"
