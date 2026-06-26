@@ -544,6 +544,11 @@ LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_sink_impl(
     return LQL_STATUS_UNSUPPORTED;
   }
   if (!seek_u64(payload->source, payload->offset)) {
+    if (fseeko(payload->source, current, SEEK_SET) != 0) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "failed to write seekable payload range");
+      return LQL_STATUS_JSON_ERROR;
+    }
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
                   "failed to write seekable payload range");
     return LQL_STATUS_JSON_ERROR;

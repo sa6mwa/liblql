@@ -2083,15 +2083,20 @@ static void expect_seekable_payload_api(void) {
   memset(&sink, 0, sizeof(sink));
   payload.offset = ~(lql_uint64)0;
   payload.size = 1u;
+  if (fseek(fp, 7L, SEEK_SET) != 0) {
+    printf("payload large-offset position setup failed\n");
+    ++failures;
+  }
   lql_error_init(&error);
   st = test_ctx->payload_write_json_sink(test_ctx, &payload, write_memory_sink,
                                          &sink, &error);
+  pos = ftell(fp);
   if (st != LQL_STATUS_JSON_ERROR ||
       strcmp(error.message, "failed to write seekable payload range") != 0 ||
-      sink.len != 0u) {
+      sink.len != 0u || pos != 7L) {
     printf("payload large-offset failure mismatch: status=%s len=%lu "
-           "error=%s\n",
-           lql_status_string(st), (unsigned long)sink.len, error.message);
+           "pos=%ld error=%s\n",
+           lql_status_string(st), (unsigned long)sink.len, pos, error.message);
     ++failures;
   }
 
