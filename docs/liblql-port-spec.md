@@ -708,9 +708,10 @@ Current implementation is an early slice:
   clearing, projection invalid-argument `out_found` state, and query callback
   failure status propagation. Decision and match callback failures now also
   assert actionable diagnostics and partial result-counter propagation for
-  seekable and callback-source query paths, and callback-source candidate
-  mutation asserts partial result counters when a reader fails after an emitted
-  candidate. This coverage is still too shallow for the final goal: the next C
+  seekable and callback-source query paths; callback-source decision and
+  spooled match queries preserve partial result counters when a reader fails
+  after an emitted candidate, matching the callback-source candidate mutation
+  contract. This coverage is still too shallow for the final goal: the next C
   test work should continue expanding the surface-by-surface API contract
   matrix covering ownership, out-parameter state, callback error propagation,
   partial I/O, cleanup after failures, and bounded-memory behavior;

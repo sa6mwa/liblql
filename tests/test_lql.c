@@ -395,6 +395,9 @@ static lql_status fail_match_callback(void *user, const lql_query_match *match) 
   return LQL_STATUS_UNSUPPORTED;
 }
 
+static lql_status record_spooled_payload(void *user,
+                                         const lql_query_match *match);
+
 static void expect_output_state_contract_api(void) {
   static const char stream[] = "{\"status\":\"open\"}\n";
   const char *bad_projection[1];
@@ -408,6 +411,7 @@ static void expect_output_state_contract_api(void) {
   stream_seen seen;
   payload_seen payload_seen_value;
   chunk_reader reader;
+  fail_after_reader fail_reader;
   lql_query_result result;
   int found;
 
@@ -544,6 +548,64 @@ static void expect_output_state_contract_api(void) {
            (unsigned long)result.candidates_matched, reader.calls,
            error.message);
     ++failures;
+  }
+
+  memset(&fail_reader, 0, sizeof(fail_reader));
+  memset(&seen, 0, sizeof(seen));
+  memset(&result, 0, sizeof(result));
+  fail_reader.data = stream;
+  fail_reader.len = strlen(stream);
+  fail_reader.chunk_size = 5u;
+  fail_reader.fail_offset = strlen(stream);
+  lql_error_init(&error);
+  st = test_ctx->query_source_decisions(
+      test_ctx, selector, read_until_offset_then_fail, &fail_reader,
+      record_decision, &seen, &result, &error);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message, "query source reader failed") != 0 ||
+      seen.calls != 1 || seen.matched != 1 ||
+      result.candidates_seen != 1u || result.candidates_matched != 1u ||
+      result.bytes_read != (lql_uint64)strlen(stream)) {
+    printf("source decision reader failure partial result mismatch: status=%s "
+           "calls=%d matched=%d seen=%lu result_matched=%lu bytes=%lu "
+           "error=%s\n",
+           lql_status_string(st), seen.calls, seen.matched,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched,
+           (unsigned long)result.bytes_read, error.message);
+    ++failures;
+  }
+
+  memset(&fail_reader, 0, sizeof(fail_reader));
+  memset(&payload_seen_value, 0, sizeof(payload_seen_value));
+  memset(&result, 0, sizeof(result));
+  fail_reader.data = stream;
+  fail_reader.len = strlen(stream);
+  fail_reader.chunk_size = 5u;
+  fail_reader.fail_offset = strlen(stream);
+  payload_seen_value.out = tmpfile();
+  if (payload_seen_value.out == NULL) {
+    printf("source spooled reader failure tmpfile failed\n");
+    ++failures;
+  } else {
+    lql_error_init(&error);
+    st = test_ctx->query_source_spooled_matches(
+        test_ctx, selector, read_until_offset_then_fail, &fail_reader,
+        record_spooled_payload, &payload_seen_value, &result, &error);
+    if (st != LQL_STATUS_JSON_ERROR ||
+        strcmp(error.message, "query source reader failed") != 0 ||
+        payload_seen_value.calls != 1 ||
+        result.candidates_seen != 1u || result.candidates_matched != 1u ||
+        result.bytes_read != (lql_uint64)strlen(stream)) {
+      printf("source spooled reader failure partial result mismatch: status=%s "
+             "calls=%d seen=%lu matched=%lu bytes=%lu error=%s\n",
+             lql_status_string(st), payload_seen_value.calls,
+             (unsigned long)result.candidates_seen,
+             (unsigned long)result.candidates_matched,
+             (unsigned long)result.bytes_read, error.message);
+      ++failures;
+    }
+    fclose(payload_seen_value.out);
   }
   fclose(source);
   test_ctx->selector_free(test_ctx, selector);

@@ -1350,6 +1350,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_decisions(
       return state.callback_status;
     }
     if (adapter.error_code != 0) {
+      if (out_result != NULL) {
+        *out_result = state.result;
+      }
       lql_set_error(error, LQL_STATUS_JSON_ERROR, "query source reader failed");
       return LQL_STATUS_JSON_ERROR;
     }
@@ -1420,6 +1423,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_matches(
       return state.callback_status;
     }
     if (adapter.error_code != 0) {
+      if (out_result != NULL) {
+        *out_result = state.result;
+      }
       lql_set_error(error, LQL_STATUS_JSON_ERROR, "query source reader failed");
       return LQL_STATUS_JSON_ERROR;
     }
