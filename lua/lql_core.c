@@ -17,15 +17,70 @@ typedef struct lua_lql_buffer {
   size_t cap;
 } lua_lql_buffer;
 
+typedef struct lua_lql_client {
+  lql *ctx;
+} lua_lql_client;
+
 typedef struct lua_lql_file_state {
+  lql *ctx;
   FILE *source;
   FILE *out;
   int compact;
   int matches_only;
+  lua_State *lua;
+  int callback_ref;
   const lql_projection *projection;
   const lql_mutation_plan *mutation_plan;
   lql_error *error;
 } lua_lql_file_state;
+
+typedef struct lua_lql_payload_handle {
+  lql *ctx;
+  int active;
+  lql_payload payload;
+} lua_lql_payload_handle;
+
+#define LUA_LQL_CLIENT "lql.client"
+
+static int lua_lql_fail(lua_State *L, const lql_error *error);
+
+static lua_lql_client *lua_lql_check_client(lua_State *L, int index) {
+  lua_lql_client *client;
+
+  client = (lua_lql_client *)luaL_checkudata(L, index, LUA_LQL_CLIENT);
+  luaL_argcheck(L, client != NULL && client->ctx != NULL, index,
+                "closed lql client");
+  return client;
+}
+
+static int lua_lql_client_gc(lua_State *L) {
+  lua_lql_client *client;
+
+  client = (lua_lql_client *)luaL_checkudata(L, 1, LUA_LQL_CLIENT);
+  if (client != NULL && client->ctx != NULL) {
+    client->ctx->destroy(client->ctx);
+    client->ctx = NULL;
+  }
+  return 0;
+}
+
+static int lua_lql_new_client(lua_State *L) {
+  lua_lql_client *client;
+  lql_error error;
+  lql_status st;
+
+  client = (lua_lql_client *)lua_newuserdatauv(L, sizeof(*client), 0);
+  client->ctx = NULL;
+  luaL_getmetatable(L, LUA_LQL_CLIENT);
+  lua_setmetatable(L, -2);
+  lql_error_init(&error);
+  st = lql_new(&client->ctx, &error);
+  if (st != LQL_STATUS_OK) {
+    lua_pop(L, 1);
+    return lua_lql_fail(L, &error);
+  }
+  return 1;
+}
 
 static void lua_lql_set_error(lql_error *error, lql_status status,
                               const char *message) {
@@ -79,7 +134,7 @@ static lql_status lua_lql_write_buffer(void *user, const void *data,
       }
       next_cap *= 2u;
     }
-    next = (char *)realloc(buffer->data, next_cap);
+    next = (char *)lql_realloc(buffer->data, next_cap);
     if (next == NULL) {
       return LQL_STATUS_NO_MEMORY;
     }
@@ -125,7 +180,7 @@ static int lua_lql_fields(lua_State *L, int index, const char ***out_fields,
   count = (size_t)lua_rawlen(L, index);
   fields = NULL;
   if (count > 0u) {
-    fields = (const char **)malloc(sizeof(fields[0]) * count);
+    fields = (const char **)lql_alloc(sizeof(fields[0]) * count);
     if (fields == NULL) {
       return 0;
     }
@@ -157,6 +212,60 @@ static int lua_lql_options_bool(lua_State *L, int index, const char *key) {
   return value;
 }
 
+static lql_uint64 lua_lql_options_u64(lua_State *L, int index,
+                                      const char *key) {
+  lua_Integer value;
+
+  value = 0;
+  if (lua_istable(L, index)) {
+    lua_getfield(L, index, key);
+    if (!lua_isnil(L, -1)) {
+      value = luaL_checkinteger(L, -1);
+      if (value < 0) {
+        value = 0;
+      }
+    }
+    lua_pop(L, 1);
+  }
+  return (lql_uint64)value;
+}
+
+static void lua_lql_options_query(lua_State *L, int index,
+                                  lql_query_options *out) {
+  memset(out, 0, sizeof(*out));
+  out->max_matches = lua_lql_options_u64(L, index, "max_matches");
+  out->max_candidates = lua_lql_options_u64(L, index, "max_candidates");
+  out->max_bytes_read = lua_lql_options_u64(L, index, "max_bytes_read");
+}
+
+static void lua_lql_push_query_result(lua_State *L,
+                                      const lql_query_result *result) {
+  lua_newtable(L);
+  lua_pushinteger(L, (lua_Integer)result->candidates_seen);
+  lua_setfield(L, -2, "candidates_seen");
+  lua_pushinteger(L, (lua_Integer)result->candidates_matched);
+  lua_setfield(L, -2, "candidates_matched");
+  lua_pushinteger(L, (lua_Integer)result->bytes_read);
+  lua_setfield(L, -2, "bytes_read");
+  lua_pushboolean(L, result->stopped_early);
+  lua_setfield(L, -2, "stopped_early");
+  lua_pushinteger(L, (lua_Integer)result->stop_reason);
+  lua_setfield(L, -2, "stop_reason");
+}
+
+static void lua_lql_push_decision(lua_State *L,
+                                  const lql_query_decision *decision) {
+  lua_newtable(L);
+  lua_pushboolean(L, decision->matched);
+  lua_setfield(L, -2, "matched");
+  lua_pushinteger(L, (lua_Integer)decision->index);
+  lua_setfield(L, -2, "index");
+  lua_pushinteger(L, (lua_Integer)decision->offset);
+  lua_setfield(L, -2, "offset");
+  lua_pushinteger(L, (lua_Integer)decision->size);
+  lua_setfield(L, -2, "size");
+}
+
 static lql_status lua_lql_finish_candidate(FILE *out) {
   if (fputc('\n', out) == EOF) {
     return LQL_STATUS_JSON_ERROR;
@@ -164,15 +273,112 @@ static lql_status lua_lql_finish_candidate(FILE *out) {
   return LQL_STATUS_OK;
 }
 
+static int lua_lql_payload_json(lua_State *L) {
+  lua_lql_payload_handle *handle;
+  lua_lql_buffer buffer;
+  lql_error error;
+  lql_status st;
+  FILE *out;
+
+  handle = (lua_lql_payload_handle *)lua_touserdata(L, lua_upvalueindex(1));
+  if (handle == NULL || !handle->active) {
+    lql_error_init(&error);
+    lua_lql_set_error(&error, LQL_STATUS_INVALID_ARGUMENT,
+                      "payload handle is no longer active");
+    return lua_lql_fail(L, &error);
+  }
+  out = tmpfile();
+  memset(&buffer, 0, sizeof(buffer));
+  lql_error_init(&error);
+  if (out == NULL) {
+    lua_lql_set_error(&error, LQL_STATUS_JSON_ERROR,
+                      "failed to create Lua payload file");
+    return lua_lql_fail(L, &error);
+  }
+  st = handle->ctx->payload_write_json(handle->ctx, &handle->payload, out,
+                                       &error);
+  if (st == LQL_STATUS_OK) {
+    st = lua_lql_file_to_buffer(out, &buffer);
+  }
+  fclose(out);
+  if (st != LQL_STATUS_OK) {
+    lql_dealloc(buffer.data);
+    return lua_lql_fail(L, &error);
+  }
+  lua_pushlstring(L, buffer.data != NULL ? buffer.data : "", buffer.len);
+  lql_dealloc(buffer.data);
+  return 1;
+}
+
+static lql_status lua_lql_call_decision(lua_lql_file_state *state,
+                                        const lql_query_decision *decision) {
+  lua_State *L;
+  int ok;
+  int keep_going;
+
+  L = state->lua;
+  lua_rawgeti(L, LUA_REGISTRYINDEX, state->callback_ref);
+  lua_lql_push_decision(L, decision);
+  ok = lua_pcall(L, 1, 1, 0);
+  if (ok != LUA_OK) {
+    lua_lql_set_error(state->error, LQL_STATUS_INVALID_ARGUMENT,
+                      lua_tostring(L, -1));
+    lua_pop(L, 1);
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  keep_going = lua_isnoneornil(L, -1) || lua_toboolean(L, -1);
+  lua_pop(L, 1);
+  return keep_going ? LQL_STATUS_OK : LQL_STATUS_STOP;
+}
+
+static lql_status
+lua_lql_on_query_file_decision(void *user, const lql_query_decision *decision) {
+  return lua_lql_call_decision((lua_lql_file_state *)user, decision);
+}
+
+static lql_status lua_lql_on_each_match_file(void *user,
+                                             const lql_query_match *match) {
+  lua_lql_file_state *state;
+  lua_lql_payload_handle *handle;
+  lua_State *L;
+  int ok;
+  int keep_going;
+
+  state = (lua_lql_file_state *)user;
+  L = state->lua;
+  lua_rawgeti(L, LUA_REGISTRYINDEX, state->callback_ref);
+  lua_lql_push_decision(L, &match->decision);
+  handle = (lua_lql_payload_handle *)lua_newuserdatauv(L, sizeof(*handle), 0);
+  memset(handle, 0, sizeof(*handle));
+  handle->active = 1;
+  handle->ctx = state->ctx;
+  handle->payload = match->payload;
+  lua_pushcclosure(L, lua_lql_payload_json, 1);
+  lua_setfield(L, -2, "json");
+  ok = lua_pcall(L, 1, 1, 0);
+  handle->active = 0;
+  if (ok != LUA_OK) {
+    lua_lql_set_error(state->error, LQL_STATUS_INVALID_ARGUMENT,
+                      lua_tostring(L, -1));
+    lua_pop(L, 1);
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  keep_going = lua_isnoneornil(L, -1) || lua_toboolean(L, -1);
+  lua_pop(L, 1);
+  return keep_going ? LQL_STATUS_OK : LQL_STATUS_STOP;
+}
+
 static lql_status lua_lql_write_file_payload(lua_lql_file_state *state,
                                              const lql_payload *payload) {
   lql_status st;
 
   if (state->compact) {
-    st = lql_compact_file_range(state->source, payload->offset, payload->size,
-                                state->out, state->error);
+    st = state->ctx->compact_file_range(state->ctx, state->source,
+                                        payload->offset, payload->size,
+                                        state->out, state->error);
   } else {
-    st = lql_payload_write_json(payload, state->out, state->error);
+    st = state->ctx->payload_write_json(state->ctx, payload, state->out,
+                                        state->error);
   }
   if (st == LQL_STATUS_OK) {
     st = lua_lql_finish_candidate(state->out);
@@ -196,9 +402,9 @@ static lql_status lua_lql_on_project_file(void *user,
 
   state = (lua_lql_file_state *)user;
   found = 0;
-  st = lql_project_file_range(state->projection, state->source,
-                              match->payload.offset, match->payload.size,
-                              state->out, &found, state->error);
+  st = state->ctx->project_file_range(
+      state->ctx, state->projection, state->source, match->payload.offset,
+      match->payload.size, state->out, &found, state->error);
   if (st == LQL_STATUS_OK && found) {
     st = lua_lql_finish_candidate(state->out);
   }
@@ -219,9 +425,9 @@ static lql_status lua_lql_on_mutate_file(void *user,
   payload.size = decision->size;
   payload.source = state->source;
   if (decision->matched) {
-    st = lql_mutate_file_range_paths(state->mutation_plan, state->source,
-                                     decision->offset, decision->size,
-                                     state->out, state->error);
+    st = state->ctx->mutate_file_range_paths(
+        state->ctx, state->mutation_plan, state->source, decision->offset,
+        decision->size, state->out, state->error);
     if (st == LQL_STATUS_OK) {
       st = lua_lql_finish_candidate(state->out);
     }
@@ -233,8 +439,8 @@ static lql_status lua_lql_on_mutate_file(void *user,
   return lua_lql_write_file_payload(state, &payload);
 }
 
-static lql_status lua_lql_parse_mutation_plan(lua_State *L, int expr_index,
-                                              int options_index,
+static lql_status lua_lql_parse_mutation_plan(lua_State *L, lql *ctx,
+                                              int expr_index, int options_index,
                                               const char *base_dir,
                                               lql_mutation_plan **out,
                                               lql_error *error) {
@@ -253,16 +459,17 @@ static lql_status lua_lql_parse_mutation_plan(lua_State *L, int expr_index,
     memset(&options, 0, sizeof(options));
     options.enable_file_values = 1;
     options.file_value_base_dir = base_dir;
-    st = lql_mutation_plan_parse_with_options(mutations, mutation_count,
-                                              &options, out, error);
+    st = ctx->mutation_plan_parse_with_options(ctx, mutations, mutation_count,
+                                               &options, out, error);
   } else {
-    st = lql_mutation_plan_parse(mutations, mutation_count, out, error);
+    st = ctx->mutation_plan_parse(ctx, mutations, mutation_count, out, error);
   }
-  free(mutations);
+  lql_dealloc(mutations);
   return st;
 }
 
 static int lua_lql_matches_json(lua_State *L) {
+  lua_lql_client *client;
   const char *selector_expr;
   const char *json;
   size_t json_len;
@@ -271,16 +478,19 @@ static int lua_lql_matches_json(lua_State *L) {
   lql_status st;
   int matched;
 
-  selector_expr = luaL_checkstring(L, 1);
-  json = luaL_checklstring(L, 2, &json_len);
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  json = luaL_checklstring(L, 3, &json_len);
   selector = NULL;
   matched = 0;
   lql_error_init(&error);
-  st = lql_selector_parse(selector_expr, &selector, &error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
   if (st == LQL_STATUS_OK) {
-    st = lql_matches_json(selector, json, json_len, &matched, &error);
+    st = client->ctx->matches_json(client->ctx, selector, json, json_len,
+                                   &matched, &error);
   }
-  lql_selector_free(selector);
+  client->ctx->selector_free(client->ctx, selector);
   if (st != LQL_STATUS_OK) {
     return lua_lql_fail(L, &error);
   }
@@ -289,6 +499,7 @@ static int lua_lql_matches_json(lua_State *L) {
 }
 
 static int lua_lql_select_json(lua_State *L) {
+  lua_lql_client *client;
   const char *selector_expr;
   const char *json;
   size_t json_len;
@@ -300,16 +511,19 @@ static int lua_lql_select_json(lua_State *L) {
   FILE *out;
   lua_lql_buffer buffer;
 
-  selector_expr = luaL_checkstring(L, 1);
-  json = luaL_checklstring(L, 2, &json_len);
-  compact = lua_lql_options_bool(L, 3, "compact");
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  json = luaL_checklstring(L, 3, &json_len);
+  compact = lua_lql_options_bool(L, 4, "compact");
   selector = NULL;
   matched = 0;
   memset(&buffer, 0, sizeof(buffer));
   lql_error_init(&error);
-  st = lql_selector_parse(selector_expr, &selector, &error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
   if (st == LQL_STATUS_OK) {
-    st = lql_matches_json(selector, json, json_len, &matched, &error);
+    st = client->ctx->matches_json(client->ctx, selector, json, json_len,
+                                   &matched, &error);
   }
   if (st == LQL_STATUS_OK && matched) {
     if (compact) {
@@ -319,7 +533,8 @@ static int lua_lql_select_json(lua_State *L) {
                           "failed to create Lua output file");
         st = LQL_STATUS_JSON_ERROR;
       } else {
-        st = lql_compact_json(json, json_len, out, &error);
+        st =
+            client->ctx->compact_json(client->ctx, json, json_len, out, &error);
         if (st == LQL_STATUS_OK) {
           fputc('\n', out);
           st = lua_lql_file_to_buffer(out, &buffer);
@@ -336,17 +551,18 @@ static int lua_lql_select_json(lua_State *L) {
       }
     }
   }
-  lql_selector_free(selector);
+  client->ctx->selector_free(client->ctx, selector);
   if (st != LQL_STATUS_OK) {
-    free(buffer.data);
+    lql_dealloc(buffer.data);
     return lua_lql_fail(L, &error);
   }
   lua_pushlstring(L, buffer.data != NULL ? buffer.data : "", buffer.len);
-  free(buffer.data);
+  lql_dealloc(buffer.data);
   return 1;
 }
 
 static int lua_lql_project_json(lua_State *L) {
+  lua_lql_client *client;
   const char *selector_expr;
   const char *json;
   const char **fields;
@@ -361,11 +577,12 @@ static int lua_lql_project_json(lua_State *L) {
   FILE *out;
   lua_lql_buffer buffer;
 
-  selector_expr = luaL_checkstring(L, 1);
-  json = luaL_checklstring(L, 2, &json_len);
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  json = luaL_checklstring(L, 3, &json_len);
   fields = NULL;
   field_count = 0u;
-  if (!lua_lql_fields(L, 3, &fields, &field_count)) {
+  if (!lua_lql_fields(L, 4, &fields, &field_count)) {
     return luaL_error(L, "out of memory");
   }
   selector = NULL;
@@ -374,12 +591,15 @@ static int lua_lql_project_json(lua_State *L) {
   found = 0;
   memset(&buffer, 0, sizeof(buffer));
   lql_error_init(&error);
-  st = lql_selector_parse(selector_expr, &selector, &error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
   if (st == LQL_STATUS_OK) {
-    st = lql_matches_json(selector, json, json_len, &matched, &error);
+    st = client->ctx->matches_json(client->ctx, selector, json, json_len,
+                                   &matched, &error);
   }
   if (st == LQL_STATUS_OK && matched) {
-    st = lql_projection_parse(fields, field_count, &projection, &error);
+    st = client->ctx->projection_parse(client->ctx, fields, field_count,
+                                       &projection, &error);
   }
   if (st == LQL_STATUS_OK && matched) {
     out = tmpfile();
@@ -388,7 +608,8 @@ static int lua_lql_project_json(lua_State *L) {
                         "failed to create Lua output file");
       st = LQL_STATUS_JSON_ERROR;
     } else {
-      st = lql_project_json(projection, json, json_len, out, &found, &error);
+      st = client->ctx->project_json(client->ctx, projection, json, json_len,
+                                     out, &found, &error);
       if (st == LQL_STATUS_OK && found) {
         fputc('\n', out);
         st = lua_lql_file_to_buffer(out, &buffer);
@@ -396,19 +617,20 @@ static int lua_lql_project_json(lua_State *L) {
       fclose(out);
     }
   }
-  lql_projection_free(projection);
-  lql_selector_free(selector);
-  free(fields);
+  client->ctx->projection_free(client->ctx, projection);
+  client->ctx->selector_free(client->ctx, selector);
+  lql_dealloc(fields);
   if (st != LQL_STATUS_OK) {
-    free(buffer.data);
+    lql_dealloc(buffer.data);
     return lua_lql_fail(L, &error);
   }
   lua_pushlstring(L, buffer.data != NULL ? buffer.data : "", buffer.len);
-  free(buffer.data);
+  lql_dealloc(buffer.data);
   return 1;
 }
 
 static int lua_lql_mutate_json(lua_State *L) {
+  lua_lql_client *client;
   const char *selector_expr;
   const char *json;
   size_t json_len;
@@ -421,20 +643,23 @@ static int lua_lql_mutate_json(lua_State *L) {
   FILE *out;
   lua_lql_buffer buffer;
 
-  selector_expr = luaL_checkstring(L, 1);
-  json = luaL_checklstring(L, 2, &json_len);
-  matches_only = lua_lql_options_bool(L, 4, "matches_only");
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  json = luaL_checklstring(L, 3, &json_len);
+  matches_only = lua_lql_options_bool(L, 5, "matches_only");
   selector = NULL;
   plan = NULL;
   matched = 0;
   memset(&buffer, 0, sizeof(buffer));
   lql_error_init(&error);
-  st = lql_selector_parse(selector_expr, &selector, &error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
   if (st == LQL_STATUS_OK) {
-    st = lql_matches_json(selector, json, json_len, &matched, &error);
+    st = client->ctx->matches_json(client->ctx, selector, json, json_len,
+                                   &matched, &error);
   }
   if (st == LQL_STATUS_OK) {
-    st = lua_lql_parse_mutation_plan(L, 3, 4, NULL, &plan, &error);
+    st = lua_lql_parse_mutation_plan(L, client->ctx, 4, 5, NULL, &plan, &error);
   }
   if (st == LQL_STATUS_OK && matched) {
     out = tmpfile();
@@ -443,7 +668,8 @@ static int lua_lql_mutate_json(lua_State *L) {
                         "failed to create Lua output file");
       st = LQL_STATUS_JSON_ERROR;
     } else {
-      st = lql_mutate_json(plan, json, json_len, out, &error);
+      st = client->ctx->mutate_json(client->ctx, plan, json, json_len, out,
+                                    &error);
       if (st == LQL_STATUS_OK) {
         fputc('\n', out);
         st = lua_lql_file_to_buffer(out, &buffer);
@@ -459,18 +685,19 @@ static int lua_lql_mutate_json(lua_State *L) {
       lua_lql_set_error(&error, st, lql_status_string(st));
     }
   }
-  lql_mutation_plan_free(plan);
-  lql_selector_free(selector);
+  client->ctx->mutation_plan_free(client->ctx, plan);
+  client->ctx->selector_free(client->ctx, selector);
   if (st != LQL_STATUS_OK) {
-    free(buffer.data);
+    lql_dealloc(buffer.data);
     return lua_lql_fail(L, &error);
   }
   lua_pushlstring(L, buffer.data != NULL ? buffer.data : "", buffer.len);
-  free(buffer.data);
+  lql_dealloc(buffer.data);
   return 1;
 }
 
 static int lua_lql_select_file(lua_State *L) {
+  lua_lql_client *client;
   const char *selector_expr;
   const char *path;
   lql_selector *selector;
@@ -481,15 +708,17 @@ static int lua_lql_select_file(lua_State *L) {
   lua_lql_buffer buffer;
   lua_lql_file_state state;
 
-  selector_expr = luaL_checkstring(L, 1);
-  path = luaL_checkstring(L, 2);
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  path = luaL_checkstring(L, 3);
   selector = NULL;
   input = NULL;
   out = NULL;
   memset(&buffer, 0, sizeof(buffer));
   memset(&state, 0, sizeof(state));
   lql_error_init(&error);
-  st = lql_selector_parse(selector_expr, &selector, &error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
   if (st == LQL_STATUS_OK) {
     input = fopen(path, "rb");
     if (input == NULL) {
@@ -507,12 +736,14 @@ static int lua_lql_select_file(lua_State *L) {
     }
   }
   if (st == LQL_STATUS_OK) {
+    state.ctx = client->ctx;
     state.source = input;
     state.out = out;
-    state.compact = lua_lql_options_bool(L, 3, "compact");
+    state.compact = lua_lql_options_bool(L, 4, "compact");
     state.error = &error;
-    st = lql_query_file_matches(selector, input, lua_lql_on_select_file, &state,
-                                NULL, &error);
+    st = client->ctx->query_file_matches(client->ctx, selector, input,
+                                         lua_lql_on_select_file, &state, NULL,
+                                         &error);
   }
   if (st == LQL_STATUS_OK) {
     st = lua_lql_file_to_buffer(out, &buffer);
@@ -523,17 +754,126 @@ static int lua_lql_select_file(lua_State *L) {
   if (input != NULL) {
     fclose(input);
   }
-  lql_selector_free(selector);
+  client->ctx->selector_free(client->ctx, selector);
   if (st != LQL_STATUS_OK) {
-    free(buffer.data);
+    lql_dealloc(buffer.data);
     return lua_lql_fail(L, &error);
   }
   lua_pushlstring(L, buffer.data != NULL ? buffer.data : "", buffer.len);
-  free(buffer.data);
+  lql_dealloc(buffer.data);
+  return 1;
+}
+
+static int lua_lql_query_file(lua_State *L) {
+  lua_lql_client *client;
+  const char *selector_expr;
+  const char *path;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  FILE *input;
+  lql_query_options options;
+  lql_query_result result;
+  lua_lql_file_state state;
+
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  path = luaL_checkstring(L, 3);
+  luaL_checktype(L, 4, LUA_TFUNCTION);
+  selector = NULL;
+  input = NULL;
+  memset(&state, 0, sizeof(state));
+  memset(&result, 0, sizeof(result));
+  lua_lql_options_query(L, 5, &options);
+  lql_error_init(&error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
+  if (st == LQL_STATUS_OK) {
+    input = fopen(path, "rb");
+    if (input == NULL) {
+      lua_lql_set_error(&error, LQL_STATUS_JSON_ERROR,
+                        "failed to open Lua input file");
+      st = LQL_STATUS_JSON_ERROR;
+    }
+  }
+  if (st == LQL_STATUS_OK) {
+    lua_pushvalue(L, 4);
+    state.callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    state.ctx = client->ctx;
+    state.lua = L;
+    state.error = &error;
+    st = client->ctx->query_file_decisions_with_options(
+        client->ctx, selector, input, &options, lua_lql_on_query_file_decision,
+        &state, &result, &error);
+    luaL_unref(L, LUA_REGISTRYINDEX, state.callback_ref);
+  }
+  if (input != NULL) {
+    fclose(input);
+  }
+  client->ctx->selector_free(client->ctx, selector);
+  if (st != LQL_STATUS_OK && st != LQL_STATUS_STOP) {
+    return lua_lql_fail(L, &error);
+  }
+  lua_lql_push_query_result(L, &result);
+  return 1;
+}
+
+static int lua_lql_each_match_file(lua_State *L) {
+  lua_lql_client *client;
+  const char *selector_expr;
+  const char *path;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  FILE *input;
+  lql_query_options options;
+  lql_query_result result;
+  lua_lql_file_state state;
+
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  path = luaL_checkstring(L, 3);
+  luaL_checktype(L, 4, LUA_TFUNCTION);
+  selector = NULL;
+  input = NULL;
+  memset(&state, 0, sizeof(state));
+  memset(&result, 0, sizeof(result));
+  lua_lql_options_query(L, 5, &options);
+  lql_error_init(&error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
+  if (st == LQL_STATUS_OK) {
+    input = fopen(path, "rb");
+    if (input == NULL) {
+      lua_lql_set_error(&error, LQL_STATUS_JSON_ERROR,
+                        "failed to open Lua input file");
+      st = LQL_STATUS_JSON_ERROR;
+    }
+  }
+  if (st == LQL_STATUS_OK) {
+    lua_pushvalue(L, 4);
+    state.callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    state.ctx = client->ctx;
+    state.lua = L;
+    state.error = &error;
+    st = client->ctx->query_file_matches_with_options(
+        client->ctx, selector, input, &options, lua_lql_on_each_match_file,
+        &state, &result, &error);
+    luaL_unref(L, LUA_REGISTRYINDEX, state.callback_ref);
+  }
+  if (input != NULL) {
+    fclose(input);
+  }
+  client->ctx->selector_free(client->ctx, selector);
+  if (st != LQL_STATUS_OK && st != LQL_STATUS_STOP) {
+    return lua_lql_fail(L, &error);
+  }
+  lua_lql_push_query_result(L, &result);
   return 1;
 }
 
 static int lua_lql_project_file(lua_State *L) {
+  lua_lql_client *client;
   const char *selector_expr;
   const char *path;
   const char **fields;
@@ -547,11 +887,12 @@ static int lua_lql_project_file(lua_State *L) {
   lua_lql_buffer buffer;
   lua_lql_file_state state;
 
-  selector_expr = luaL_checkstring(L, 1);
-  path = luaL_checkstring(L, 2);
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  path = luaL_checkstring(L, 3);
   fields = NULL;
   field_count = 0u;
-  if (!lua_lql_fields(L, 3, &fields, &field_count)) {
+  if (!lua_lql_fields(L, 4, &fields, &field_count)) {
     return luaL_error(L, "out of memory");
   }
   selector = NULL;
@@ -561,9 +902,11 @@ static int lua_lql_project_file(lua_State *L) {
   memset(&buffer, 0, sizeof(buffer));
   memset(&state, 0, sizeof(state));
   lql_error_init(&error);
-  st = lql_selector_parse(selector_expr, &selector, &error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
   if (st == LQL_STATUS_OK) {
-    st = lql_projection_parse(fields, field_count, &projection, &error);
+    st = client->ctx->projection_parse(client->ctx, fields, field_count,
+                                       &projection, &error);
   }
   if (st == LQL_STATUS_OK) {
     input = fopen(path, "rb");
@@ -582,12 +925,14 @@ static int lua_lql_project_file(lua_State *L) {
     }
   }
   if (st == LQL_STATUS_OK) {
+    state.ctx = client->ctx;
     state.source = input;
     state.out = out;
     state.projection = projection;
     state.error = &error;
-    st = lql_query_file_matches(selector, input, lua_lql_on_project_file,
-                                &state, NULL, &error);
+    st = client->ctx->query_file_matches(client->ctx, selector, input,
+                                         lua_lql_on_project_file, &state, NULL,
+                                         &error);
   }
   if (st == LQL_STATUS_OK) {
     st = lua_lql_file_to_buffer(out, &buffer);
@@ -598,19 +943,20 @@ static int lua_lql_project_file(lua_State *L) {
   if (input != NULL) {
     fclose(input);
   }
-  lql_projection_free(projection);
-  lql_selector_free(selector);
-  free(fields);
+  client->ctx->projection_free(client->ctx, projection);
+  client->ctx->selector_free(client->ctx, selector);
+  lql_dealloc(fields);
   if (st != LQL_STATUS_OK) {
-    free(buffer.data);
+    lql_dealloc(buffer.data);
     return lua_lql_fail(L, &error);
   }
   lua_pushlstring(L, buffer.data != NULL ? buffer.data : "", buffer.len);
-  free(buffer.data);
+  lql_dealloc(buffer.data);
   return 1;
 }
 
 static int lua_lql_mutate_file(lua_State *L) {
+  lua_lql_client *client;
   const char *selector_expr;
   const char *path;
   lql_selector *selector;
@@ -622,8 +968,9 @@ static int lua_lql_mutate_file(lua_State *L) {
   lua_lql_buffer buffer;
   lua_lql_file_state state;
 
-  selector_expr = luaL_checkstring(L, 1);
-  path = luaL_checkstring(L, 2);
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  path = luaL_checkstring(L, 3);
   selector = NULL;
   plan = NULL;
   input = NULL;
@@ -631,9 +978,10 @@ static int lua_lql_mutate_file(lua_State *L) {
   memset(&buffer, 0, sizeof(buffer));
   memset(&state, 0, sizeof(state));
   lql_error_init(&error);
-  st = lql_selector_parse(selector_expr, &selector, &error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
   if (st == LQL_STATUS_OK) {
-    st = lua_lql_parse_mutation_plan(L, 3, 4, NULL, &plan, &error);
+    st = lua_lql_parse_mutation_plan(L, client->ctx, 4, 5, NULL, &plan, &error);
   }
   if (st == LQL_STATUS_OK) {
     input = fopen(path, "rb");
@@ -652,14 +1000,16 @@ static int lua_lql_mutate_file(lua_State *L) {
     }
   }
   if (st == LQL_STATUS_OK) {
+    state.ctx = client->ctx;
     state.source = input;
     state.out = out;
-    state.compact = lua_lql_options_bool(L, 4, "compact");
-    state.matches_only = lua_lql_options_bool(L, 4, "matches_only");
+    state.compact = lua_lql_options_bool(L, 5, "compact");
+    state.matches_only = lua_lql_options_bool(L, 5, "matches_only");
     state.mutation_plan = plan;
     state.error = &error;
-    st = lql_query_file_decisions(selector, input, lua_lql_on_mutate_file,
-                                  &state, NULL, &error);
+    st = client->ctx->query_file_decisions(client->ctx, selector, input,
+                                           lua_lql_on_mutate_file, &state, NULL,
+                                           &error);
   }
   if (st == LQL_STATUS_OK) {
     st = lua_lql_file_to_buffer(out, &buffer);
@@ -670,28 +1020,43 @@ static int lua_lql_mutate_file(lua_State *L) {
   if (input != NULL) {
     fclose(input);
   }
-  lql_mutation_plan_free(plan);
-  lql_selector_free(selector);
+  client->ctx->mutation_plan_free(client->ctx, plan);
+  client->ctx->selector_free(client->ctx, selector);
   if (st != LQL_STATUS_OK) {
-    free(buffer.data);
+    lql_dealloc(buffer.data);
     return lua_lql_fail(L, &error);
   }
   lua_pushlstring(L, buffer.data != NULL ? buffer.data : "", buffer.len);
-  free(buffer.data);
+  lql_dealloc(buffer.data);
   return 1;
 }
 
-static const luaL_Reg lua_lql_functions[] = {
+static const luaL_Reg lua_lql_client_methods[] = {
     {"matches_json", lua_lql_matches_json},
     {"select_json", lua_lql_select_json},
     {"select_file", lua_lql_select_file},
+    {"query_file", lua_lql_query_file},
+    {"each_match_file", lua_lql_each_match_file},
     {"project_json", lua_lql_project_json},
     {"project_file", lua_lql_project_file},
     {"mutate_json", lua_lql_mutate_json},
     {"mutate_file", lua_lql_mutate_file},
     {NULL, NULL}};
 
+static const luaL_Reg lua_lql_client_meta[] = {{"__gc", lua_lql_client_gc},
+                                               {NULL, NULL}};
+
+static const luaL_Reg lua_lql_functions[] = {{"new", lua_lql_new_client},
+                                             {NULL, NULL}};
+
 int luaopen_lql_core(lua_State *L) {
+  luaL_newmetatable(L, LUA_LQL_CLIENT);
+  luaL_setfuncs(L, lua_lql_client_meta, 0);
+  lua_newtable(L);
+  luaL_setfuncs(L, lua_lql_client_methods, 0);
+  lua_setfield(L, -2, "__index");
+  lua_pop(L, 1);
+
   luaL_newlib(L, lua_lql_functions);
   return 1;
 }

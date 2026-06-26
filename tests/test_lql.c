@@ -5,8 +5,166 @@
 #include <string.h>
 
 static int failures = 0;
+static lql *test_ctx = NULL;
 
 static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len);
+
+static void expect_receiver_api(void) {
+  lql *ctx;
+  lql_selector *selector;
+  lql_capabilities caps;
+  lql_error error;
+  int matched;
+  lql_status st;
+
+  lql_error_init(&error);
+  st = lql_new(NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "out lql required") != 0) {
+    printf("receiver constructor invalid argument mismatch: %s\n",
+           error.message);
+    ++failures;
+  }
+
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new(&ctx, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("receiver constructor mismatch: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  if (ctx->version == NULL || ctx->selector_parse == NULL ||
+      ctx->matches_json == NULL || ctx->query_file_decisions == NULL ||
+      ctx->projection_parse == NULL || ctx->mutation_plan_parse == NULL ||
+      ctx->destroy == NULL) {
+    printf("receiver method table missing required methods\n");
+    ++failures;
+  }
+  memset(&caps, 0, sizeof(caps));
+  ctx->capabilities_get(ctx, &caps);
+  if (strcmp(ctx->version(ctx), LQL_VERSION) != 0 || !caps.selector_parse) {
+    printf("receiver version/capability mismatch\n");
+    ++failures;
+  }
+
+  selector = NULL;
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("receiver selector parse mismatch: %s\n", error.message);
+    ++failures;
+  } else {
+    matched = 0;
+    st = ctx->matches_json(ctx, selector, "{\"status\":\"open\"}",
+                           strlen("{\"status\":\"open\"}"), &matched, &error);
+    if (st != LQL_STATUS_OK || !matched) {
+      printf("receiver matches_json mismatch: %s\n", error.message);
+      ++failures;
+    }
+  }
+  ctx->selector_free(ctx, selector);
+  ctx->destroy(ctx);
+  lql_destroy(NULL);
+}
+
+#define lql_selector_parse(expr, out, error)                                   \
+  test_ctx->selector_parse(test_ctx, (expr), (out), (error))
+#define lql_selector_parse_or(expr, out, error)                                \
+  test_ctx->selector_parse_or(test_ctx, (expr), (out), (error))
+#define lql_selector_free(selector)                                            \
+  test_ctx->selector_free(test_ctx, (selector))
+#define lql_selector_is_empty(selector)                                        \
+  test_ctx->selector_is_empty(test_ctx, (selector))
+#define lql_matches_json(selector, json, json_len, out_matched, error)         \
+  test_ctx->matches_json(test_ctx, (selector), (json), (json_len),             \
+                         (out_matched), (error))
+#define lql_query_file_decisions(selector, file, on_decision, user,            \
+                                 out_result, error)                            \
+  test_ctx->query_file_decisions(test_ctx, (selector), (file), (on_decision),  \
+                                 (user), (out_result), (error))
+#define lql_query_file_decisions_with_options(                                 \
+    selector, file, options, on_decision, user, out_result, error)             \
+  test_ctx->query_file_decisions_with_options(test_ctx, (selector), (file),    \
+                                              (options), (on_decision),        \
+                                              (user), (out_result), (error))
+#define lql_query_source_decisions(selector, read, read_user, on_decision,     \
+                                   user, out_result, error)                    \
+  test_ctx->query_source_decisions(test_ctx, (selector), (read), (read_user),  \
+                                   (on_decision), (user), (out_result),        \
+                                   (error))
+#define lql_query_source_decisions_with_options(                               \
+    selector, read, read_user, options, on_decision, user, out_result, error)  \
+  test_ctx->query_source_decisions_with_options(                               \
+      test_ctx, (selector), (read), (read_user), (options), (on_decision),     \
+      (user), (out_result), (error))
+#define lql_query_source_spooled_matches(selector, read, read_user, on_match,  \
+                                         user, out_result, error)              \
+  test_ctx->query_source_spooled_matches(test_ctx, (selector), (read),         \
+                                         (read_user), (on_match), (user),      \
+                                         (out_result), (error))
+#define lql_query_source_spooled_matches_with_options(                         \
+    selector, read, read_user, options, on_match, user, out_result, error)     \
+  test_ctx->query_source_spooled_matches_with_options(                         \
+      test_ctx, (selector), (read), (read_user), (options), (on_match),        \
+      (user), (out_result), (error))
+#define lql_query_file_matches(selector, file, on_match, user, out_result,     \
+                               error)                                          \
+  test_ctx->query_file_matches(test_ctx, (selector), (file), (on_match),       \
+                               (user), (out_result), (error))
+#define lql_query_file_matches_with_options(selector, file, options, on_match, \
+                                            user, out_result, error)           \
+  test_ctx->query_file_matches_with_options(test_ctx, (selector), (file),      \
+                                            (options), (on_match), (user),     \
+                                            (out_result), (error))
+#define lql_payload_write_json(payload, out, error)                            \
+  test_ctx->payload_write_json(test_ctx, (payload), (out), (error))
+#define lql_payload_write_json_sink(payload, write, write_user, error)         \
+  test_ctx->payload_write_json_sink(test_ctx, (payload), (write),              \
+                                    (write_user), (error))
+#define lql_projection_parse(fields, field_count, out, error)                  \
+  test_ctx->projection_parse(test_ctx, (fields), (field_count), (out), (error))
+#define lql_projection_free(projection)                                        \
+  test_ctx->projection_free(test_ctx, (projection))
+#define lql_project_file_range(projection, file, offset, size, out, out_found, \
+                               error)                                          \
+  test_ctx->project_file_range(test_ctx, (projection), (file), (offset),       \
+                               (size), (out), (out_found), (error))
+#define lql_project_source(projection, read, read_user, out, out_found, error) \
+  test_ctx->project_source(test_ctx, (projection), (read), (read_user), (out), \
+                           (out_found), (error))
+#define lql_project_json(projection, json, json_len, out, out_found, error)    \
+  test_ctx->project_json(test_ctx, (projection), (json), (json_len), (out),    \
+                         (out_found), (error))
+#define lql_compact_file_range(file, offset, size, out, error)                 \
+  test_ctx->compact_file_range(test_ctx, (file), (offset), (size), (out),      \
+                               (error))
+#define lql_compact_source(read, read_user, out, error)                        \
+  test_ctx->compact_source(test_ctx, (read), (read_user), (out), (error))
+#define lql_compact_json(json, json_len, out, error)                           \
+  test_ctx->compact_json(test_ctx, (json), (json_len), (out), (error))
+#define lql_mutation_plan_parse(exprs, expr_count, out, error)                 \
+  test_ctx->mutation_plan_parse(test_ctx, (exprs), (expr_count), (out), (error))
+#define lql_mutation_plan_parse_with_options(exprs, expr_count, options, out,  \
+                                             error)                            \
+  test_ctx->mutation_plan_parse_with_options(test_ctx, (exprs), (expr_count),  \
+                                             (options), (out), (error))
+#define lql_mutation_plan_count(plan)                                          \
+  test_ctx->mutation_plan_count(test_ctx, (plan))
+#define lql_mutation_plan_free(plan)                                           \
+  test_ctx->mutation_plan_free(test_ctx, (plan))
+#define lql_mutate_file_range_root_fields(plan, file, offset, size, out,       \
+                                          error)                               \
+  test_ctx->mutate_file_range_root_fields(test_ctx, (plan), (file), (offset),  \
+                                          (size), (out), (error))
+#define lql_mutate_file_range_paths(plan, file, offset, size, out, error)      \
+  test_ctx->mutate_file_range_paths(test_ctx, (plan), (file), (offset),        \
+                                    (size), (out), (error))
+#define lql_mutate_source_paths(plan, read, read_user, out, error)             \
+  test_ctx->mutate_source_paths(test_ctx, (plan), (read), (read_user), (out),  \
+                                (error))
+#define lql_mutate_json(plan, json, json_len, out, error)                      \
+  test_ctx->mutate_json(test_ctx, (plan), (json), (json_len), (out), (error))
 
 static void expect_public_utility_api(void) {
   lql_error error;
@@ -3236,6 +3394,8 @@ static void expect_selector_parse_error_api(void);
 
 static void expect_sdk_contract_manifest(void) {
   static const sdk_contract_requirement manifest[] = {
+      {"receiver", "instantiatable receiver object and method table",
+       expect_receiver_api},
       {"utility",
        "status, error, ownership, selector emptiness, and invalid "
        "argument helpers",
@@ -3519,7 +3679,15 @@ static void expect_selector_parse_error_api(void) {
 }
 
 int main(void) {
+  lql_error error;
+
+  lql_error_init(&error);
+  if (lql_new(&test_ctx, &error) != LQL_STATUS_OK || test_ctx == NULL) {
+    printf("test receiver setup failed: %s\n", error.message);
+    return 1;
+  }
   expect_sdk_contract_manifest();
+  expect_receiver_api();
   expect_public_utility_api();
   expect_selector_match_api();
   expect_selector_or_api();
@@ -3554,5 +3722,7 @@ int main(void) {
   expect_wildcard_mutation_api();
   expect_recursive_mutation_api();
   expect_array_wildcard_value_mutation_api();
+  test_ctx->destroy(test_ctx);
+  test_ctx = NULL;
   return failures == 0 ? 0 : 1;
 }

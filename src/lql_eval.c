@@ -27,10 +27,10 @@ typedef struct eval_doc {
 } eval_doc;
 
 static void free_doc(eval_doc *doc) {
-  free(doc->hits);
-  free(doc->val_buf);
-  free(doc->container_types);
-  free(doc->container_depths);
+  lql_dealloc(doc->hits);
+  lql_dealloc(doc->val_buf);
+  lql_dealloc(doc->container_types);
+  lql_dealloc(doc->container_depths);
   memset(doc, 0, sizeof(*doc));
 }
 
@@ -38,7 +38,7 @@ static int init_doc(eval_doc *doc, const lql_selector *selector) {
   memset(doc, 0, sizeof(*doc));
   doc->selector = selector;
   if (selector != NULL && selector->hit_count != 0u) {
-    doc->hits = (unsigned char *)calloc(selector->hit_count, 1u);
+    doc->hits = (unsigned char *)lql_calloc(selector->hit_count, 1u);
     if (doc->hits == NULL) {
       return 0;
     }
@@ -50,7 +50,7 @@ static void reset_doc(eval_doc *doc) {
   if (doc->selector != NULL && doc->selector->hit_count != 0u) {
     memset(doc->hits, 0, doc->selector->hit_count);
   }
-  free(doc->val_buf);
+  lql_dealloc(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   doc->container_count = 0u;
@@ -59,7 +59,7 @@ static void reset_doc(eval_doc *doc) {
 
 static int append_buf(char **buf, size_t *len, const char *data, size_t n) {
   char *next;
-  next = (char *)realloc(*buf, *len + n + 1u);
+  next = (char *)lql_realloc(*buf, *len + n + 1u);
   if (next == NULL) {
     return 0;
   }
@@ -77,13 +77,14 @@ push_container(eval_doc *doc, const lonejson_value_path *path, int type) {
   size_t next_cap;
   if (doc->container_count == doc->container_cap) {
     next_cap = doc->container_cap == 0u ? 8u : doc->container_cap * 2u;
-    next_types = (int *)realloc(doc->container_types, sizeof(int) * next_cap);
+    next_types =
+        (int *)lql_realloc(doc->container_types, sizeof(int) * next_cap);
     if (next_types == NULL) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
     doc->container_types = next_types;
     next_depths =
-        (size_t *)realloc(doc->container_depths, sizeof(size_t) * next_cap);
+        (size_t *)lql_realloc(doc->container_depths, sizeof(size_t) * next_cap);
     if (next_depths == NULL) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
@@ -506,7 +507,7 @@ static lonejson_status on_string_begin(void *user,
   eval_doc *doc = (eval_doc *)user;
   (void)path;
   (void)error;
-  free(doc->val_buf);
+  lql_dealloc(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -533,7 +534,7 @@ static lonejson_status on_string_end(void *user,
     doc->root_kind = 's';
   }
   observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 0, 0);
-  free(doc->val_buf);
+  lql_dealloc(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -561,7 +562,7 @@ static lonejson_status on_number_end(void *user,
     doc->root_kind = 'n';
   }
   observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 1, 0);
-  free(doc->val_buf);
+  lql_dealloc(doc->val_buf);
   doc->val_buf = NULL;
   doc->val_len = 0u;
   return LONEJSON_STATUS_OK;
@@ -791,8 +792,8 @@ static lql_status eval_project_then_maybe_mutate_spooled(
                     "failed to size projection temp file");
       st = LQL_STATUS_JSON_ERROR;
     } else if (matched && mutation_plan != NULL) {
-      st = lql_mutate_file_range_paths(mutation_plan, projected_file, 0u,
-                                       projected_size, out, error);
+      st = lql_mutate_file_range_paths_impl(mutation_plan, projected_file, 0u,
+                                            projected_size, out, error);
     } else if (!eval_seek_u64(projected_file, 0u) ||
                !eval_copy_range(projected_file, out, projected_size)) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR,
@@ -1197,9 +1198,11 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
-lql_status lql_eval_selector(const lql_selector *selector, const char *json,
-                             size_t json_len, int *out_matched,
-                             lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status lql_eval_selector(const lql_selector *selector,
+                                                 const char *json,
+                                                 size_t json_len,
+                                                 int *out_matched,
+                                                 lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
@@ -1231,11 +1234,10 @@ lql_status lql_eval_selector(const lql_selector *selector, const char *json,
   return LQL_STATUS_OK;
 }
 
-lql_status
-lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
-                              const lql_query_options *query_options,
-                              lql_query_decision_fn on_decision, void *user,
-                              lql_query_result *out_result, lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
+    const lql_selector *selector, FILE *file,
+    const lql_query_options *query_options, lql_query_decision_fn on_decision,
+    void *user, lql_query_result *out_result, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
@@ -1289,7 +1291,7 @@ lql_eval_query_file_decisions(const lql_selector *selector, FILE *file,
   return LQL_STATUS_OK;
 }
 
-lql_status lql_eval_query_source_decisions(
+LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_decisions(
     const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *query_options, lql_query_decision_fn on_decision,
     void *user, lql_query_result *out_result, lql_error *error) {
@@ -1356,7 +1358,7 @@ lql_status lql_eval_query_source_decisions(
   return LQL_STATUS_OK;
 }
 
-lql_status lql_eval_query_source_spooled_matches(
+LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_matches(
     const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *query_options, lql_query_match_fn on_match,
     void *user, lql_query_result *out_result, lql_error *error) {
@@ -1423,7 +1425,7 @@ lql_status lql_eval_query_source_spooled_matches(
   return LQL_STATUS_OK;
 }
 
-lql_status lql_eval_query_file_range_spooled_matches(
+LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_range_spooled_matches(
     const lql_selector *selector, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, int compact, const lql_projection *projection,
     const lql_mutation_plan *mutation_plan, int matches_only,
@@ -1510,7 +1512,7 @@ lql_status lql_eval_query_file_range_spooled_matches(
   return LQL_STATUS_OK;
 }
 
-lql_status lql_eval_query_file_spooled_matches(
+LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_spooled_matches(
     const lql_selector *selector, FILE *file, FILE *out, int compact,
     const lql_projection *projection, const lql_mutation_plan *mutation_plan,
     int matches_only, lql_query_result *out_result, lql_error *error) {

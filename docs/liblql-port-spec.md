@@ -61,6 +61,14 @@ hide an alternate JSON implementation inside liblql.
 
 The public API is C89-compatible and installed under `include/lql/`.
 
+The primary public C API is receiver-function based. Callers create an
+instantiatable `lql *` with `lql_new()`, invoke operations as
+`ctx->operation(ctx, ...)`, and release it with `ctx->destroy(ctx)` or
+`lql_destroy(ctx)`. Selector, query, payload, projection, compact, and mutation
+operations are receiver methods only; standalone public functions are limited
+to construction, diagnostics, version/capability helpers, and
+allocator/cleanup utilities.
+
 The API should be handle-oriented and explicit about ownership:
 
 - parser/compiled selector handles are owned by the caller and freed with
@@ -70,6 +78,13 @@ The API should be handle-oriented and explicit about ownership:
 - all project-allocated strings or buffers are released through liblql cleanup
   functions;
 - error messages are actionable and available through explicit error objects.
+
+All liblql-owned allocation must pass through the central liblql allocator
+surface (`lql_alloc()`, `lql_calloc()`, `lql_realloc()`, `lql_dealloc()`, and
+public cleanup helpers such as `lql_free()`). Production code must not use
+direct `malloc`, `calloc`, `realloc`, or `free` outside the allocator
+implementation. Publicly returned memory must be released by liblql-owned
+cleanup functions so downstream users do not cross allocator boundaries.
 
 The API should eventually expose these surfaces:
 
@@ -290,6 +305,11 @@ it must load a direct C module that depends on the public liblql SDK surface.
 The module must not use private liblql headers, private lonejson APIs, or
 symbol interposition tricks, and it must be safe to load in a process that
 already links liblql and other Lua bindings.
+
+The Lua facade must expose a real liblql client object. `lql.new()` owns a
+public `lql *` receiver created through `lql_new()`, and method calls dispatch
+through that receiver. Lua must not emulate the client with a table of
+module-level wrappers, and it must not depend on `clql`.
 
 ## Verification Requirements
 
@@ -513,6 +533,12 @@ Current implementation is an early slice:
 - lifecycle scaffold exists;
 - lonejson `v0.35.0` binary archive acquisition from GitHub release assets
   exists;
+- the public C API exposes an instantiatable receiver shell through `lql_new()`
+  and method-pointer dispatch; selector/query/projection/mutation operations
+  are not exported as free-function wrappers;
+- project-owned allocations have a central liblql allocator surface, and
+  direct C runtime allocation calls are limited to the allocator
+  implementation;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through
@@ -524,16 +550,16 @@ Current implementation is an early slice:
   stop-control behavior over caller-provided read callbacks with no candidate
   payload capture;
 - callback-source matched-candidate query streams expose callback-scoped
-  `LQL_PAYLOAD_SPOOLED` payload handles and `lql_payload_write_json()` support
-  plus `lql_payload_write_json_sink()` support for non-seekable plus-value
-  access without retaining payloads after the match callback returns;
+  `LQL_PAYLOAD_SPOOLED` payload handles and receiver payload writer support for
+  non-seekable plus-value access without retaining payloads after the match
+  callback returns;
 - matched-candidate `FILE *` query streams expose callback-scoped
   `LQL_PAYLOAD_SEEKABLE_RANGE` payload handles, with
-  `lql_payload_write_json()` and `lql_payload_write_json_sink()` preserving the
+  `ctx->payload_write_json()` and `ctx->payload_write_json_sink()` preserving the
   parser source position while rereading the matched candidate range; this path
   still uses candidate `CAPTURE_NONE` and does not retain candidate JSON;
 - seekable and spooled payload handles can be written to caller-managed sink
-  callbacks through `lql_payload_write_json_sink()` without requiring a
+  callbacks through `ctx->payload_write_json_sink()` without requiring a
   `FILE *`;
 - selection-mode `clql -M/--matches-only` matches Go CLI behavior by writing
   matched JSON candidates and returning success even when no candidates match;
@@ -562,26 +588,28 @@ Current implementation is an early slice:
 - `clql -f/--field selector data.json` supports root, nested object-field,
   array-index, and escaped JSON Pointer projection on seekable file inputs
   using the public projection API, lonejson path visiting, and writer output;
-- the initial C projection API exposes `lql_projection_parse()` and
-  `lql_project_file_range()` for object and array-index paths over seekable
-  file ranges, `lql_project_source()` for caller-provided read callbacks, plus
-  `lql_project_json()` for explicitly caller-buffered JSON values;
-- the initial C compact API exposes `lql_compact_file_range()` for streaming
-  seekable ranges, `lql_compact_source()` for caller-provided read callbacks,
-  and `lql_compact_json()` for explicitly buffered JSON values;
+- the initial C projection API exposes receiver methods
+  `ctx->projection_parse()` and `ctx->project_file_range()` for object and
+  array-index paths over seekable file ranges, `ctx->project_source()` for
+  caller-provided read callbacks, plus `ctx->project_json()` for explicitly
+  caller-buffered JSON values;
+- the initial C compact API exposes `ctx->compact_file_range()` for streaming
+  seekable ranges, `ctx->compact_source()` for caller-provided read callbacks,
+  and `ctx->compact_json()` for explicitly buffered JSON values;
 - the public C API exposes `lql_version()` and installs generated
   `lql/version.h` version macros, plus `lql_capabilities_get()` for the
   currently implemented public API surfaces, with package and source-archive
   verification proving the generated header and capability query build from
   installed and extracted trees;
-- the initial C mutation API exposes `lql_mutation_plan_parse()`,
-  `lql_mutation_plan_parse_with_options()`, `lql_mutation_plan_count()`, and
-  `lql_mutation_plan_free()` for CLI-style mutation parse/plan validation;
+- the initial C mutation API exposes receiver methods
+  `ctx->mutation_plan_parse()`, `ctx->mutation_plan_parse_with_options()`,
+  `ctx->mutation_plan_count()`, and `ctx->mutation_plan_free()` for CLI-style
+  mutation parse/plan validation;
   file-backed mutation values remain disabled by default and require explicit
   parse options;
 - mutation execution APIs expose
-  `lql_mutate_file_range_root_fields()` for bounded source-backed rewrites of
-  root object fields and `lql_mutate_file_range_paths()` for bounded
+  `ctx->mutate_file_range_root_fields()` for bounded source-backed rewrites of
+  root object fields and `ctx->mutate_file_range_paths()` for bounded
   source-backed rewrites of concrete object/member paths with optional concrete
   array indexes and existing-position `*` object-child or `[]` array-element
   wildcards over seekable file ranges; existing object-member and array-element
@@ -592,8 +620,8 @@ Current implementation is an early slice:
   segments; supported set values include `time:` normalization to UTC
   RFC3339Nano strings and `file:/textfile:/base64file:` source-backed file
   values; public C execution is currently available for seekable file ranges,
-  caller-provided read callbacks through `lql_mutate_source_paths()`, and
-  explicitly caller-buffered JSON values through `lql_mutate_json()`;
+  caller-provided read callbacks through `ctx->mutate_source_paths()`, and
+  explicitly caller-buffered JSON values through `ctx->mutate_json()`;
 - `clql -m/--mutate` emits all seekable file candidates in mutation mode,
   applies supported concrete-path, existing-position wildcard, and
   existing-position recursive mutations to matched candidates;
@@ -687,18 +715,17 @@ Current implementation is an early slice:
   mutation plan parsing and parse failures, buffered and seekable file-range
   JSON mutation including file-backed mutation values and malformed JSON
   execution errors, compact serialization, compact error behavior, and current
-  streaming query behavior through the C API, comparing
-  `lql_selector_parse()`, `lql_selector_parse_or()`, `lql_matches_json()`,
-  `lql_project_json()`, `lql_project_source()`, `lql_project_file_range()`,
-  `lql_mutation_plan_parse()`,
-  `lql_mutation_plan_parse_with_options()`, `lql_mutation_plan_count()`,
-  `lql_mutate_json()`, `lql_mutate_file_range_root_fields()`,
-  `lql_mutate_file_range_paths()`, `lql_mutate_source_paths()`,
-  `lql_compact_json()`, `lql_compact_source()`,
-  `lql_compact_file_range()`,
-  `lql_query_file_decisions()`, `lql_query_source_decisions()`,
-  `lql_query_file_matches()`, and
-  `lql_query_source_spooled_matches()` against the pinned Go library or
+  streaming query behavior through the receiver C API, comparing
+  `ctx->selector_parse()`, `ctx->selector_parse_or()`,
+  `ctx->matches_json()`, `ctx->project_json()`, `ctx->project_source()`,
+  `ctx->project_file_range()`, `ctx->mutation_plan_parse()`,
+  `ctx->mutation_plan_parse_with_options()`, `ctx->mutation_plan_count()`,
+  `ctx->mutate_json()`, `ctx->mutate_file_range_root_fields()`,
+  `ctx->mutate_file_range_paths()`, `ctx->mutate_source_paths()`,
+  `ctx->compact_json()`, `ctx->compact_source()`,
+  `ctx->compact_file_range()`, `ctx->query_file_decisions()`,
+  `ctx->query_source_decisions()`, `ctx->query_file_matches()`, and
+  `ctx->query_source_spooled_matches()` against the pinned Go library or
   standard compact JSON behavior over the current selector, projection
   success/error, mutation success/error, compact success/error, and stream
   corpora; this is behavioral oracle coverage, not C SDK unit coverage and not
@@ -733,10 +760,12 @@ Current implementation is an early slice:
   ASan-instrumented shared liblql with the ASan runtime first; project-owned C
   unit tests remain the sanitizer authority for SDK behavior;
 - the Lua tree includes a Lua 5.5 facade over a direct `lql.core` C module
-  linked against shared liblql and implemented through public liblql headers,
-  with deterministic smoke tests for selector decisions, selection output,
+  linked against shared liblql and implemented through public liblql headers;
+  `lql.new()` returns a C-owned client userdata backed by a public `lql *`
+  receiver, with deterministic smoke tests for selector decisions, selection
+  output, callback decision streams, callback-scoped seekable payload handles,
   file and buffered-JSON projection, file and buffered-JSON mutation, and
-  structured errors; Lua streaming/spooled handle coverage is still incomplete;
+  structured errors;
 - the parity benchmark surface now has Go, C, and Lua runners over the shared
   generated fixture matrix; the Lua runner loads `lua/lql.lua` and uses the
   direct `lql.core` module rather than shelling out to `clql`; Go helper records

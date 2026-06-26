@@ -34,6 +34,7 @@ typedef struct lql_error {
 typedef struct lql_selector lql_selector;
 typedef struct lql_projection lql_projection;
 typedef struct lql_mutation_plan lql_mutation_plan;
+typedef struct lql lql;
 
 typedef struct lql_query_decision {
   int matched;
@@ -147,6 +148,120 @@ typedef lql_read_result (*lql_read_fn)(void *user, unsigned char *buffer,
                                        size_t capacity);
 typedef lql_status (*lql_write_fn)(void *user, const void *data, size_t len);
 
+/* Instantiatable liblql receiver shell. Fields are initialized by lql_new().
+   Mutable implementation state, if any, is kept behind impl. Prefer
+   ctx->method(ctx, ...) for handle operations. Standalone public functions are
+   limited to construction, diagnostics, version/capability helpers, and
+   allocator/cleanup utilities. */
+struct lql {
+  void *impl;
+  const char *(*version)(const lql *self);
+  void (*capabilities_get)(const lql *self, lql_capabilities *out);
+  lql_status (*selector_parse)(lql *self, const char *expr, lql_selector **out,
+                               lql_error *error);
+  lql_status (*selector_parse_or)(lql *self, const char *expr,
+                                  lql_selector **out, lql_error *error);
+  void (*selector_free)(lql *self, lql_selector *selector);
+  int (*selector_is_empty)(const lql *self, const lql_selector *selector);
+  lql_status (*matches_json)(lql *self, const lql_selector *selector,
+                             const char *json, size_t json_len,
+                             int *out_matched, lql_error *error);
+  lql_status (*query_file_decisions)(lql *self, const lql_selector *selector,
+                                     FILE *file,
+                                     lql_query_decision_fn on_decision,
+                                     void *user, lql_query_result *out_result,
+                                     lql_error *error);
+  lql_status (*query_file_decisions_with_options)(
+      lql *self, const lql_selector *selector, FILE *file,
+      const lql_query_options *options, lql_query_decision_fn on_decision,
+      void *user, lql_query_result *out_result, lql_error *error);
+  lql_status (*query_source_decisions)(lql *self, const lql_selector *selector,
+                                       lql_read_fn read, void *read_user,
+                                       lql_query_decision_fn on_decision,
+                                       void *user, lql_query_result *out_result,
+                                       lql_error *error);
+  lql_status (*query_source_decisions_with_options)(
+      lql *self, const lql_selector *selector, lql_read_fn read,
+      void *read_user, const lql_query_options *options,
+      lql_query_decision_fn on_decision, void *user,
+      lql_query_result *out_result, lql_error *error);
+  lql_status (*query_file_matches)(lql *self, const lql_selector *selector,
+                                   FILE *file, lql_query_match_fn on_match,
+                                   void *user, lql_query_result *out_result,
+                                   lql_error *error);
+  lql_status (*query_file_matches_with_options)(
+      lql *self, const lql_selector *selector, FILE *file,
+      const lql_query_options *options, lql_query_match_fn on_match, void *user,
+      lql_query_result *out_result, lql_error *error);
+  lql_status (*query_source_spooled_matches)(
+      lql *self, const lql_selector *selector, lql_read_fn read,
+      void *read_user, lql_query_match_fn on_match, void *user,
+      lql_query_result *out_result, lql_error *error);
+  lql_status (*query_source_spooled_matches_with_options)(
+      lql *self, const lql_selector *selector, lql_read_fn read,
+      void *read_user, const lql_query_options *options,
+      lql_query_match_fn on_match, void *user, lql_query_result *out_result,
+      lql_error *error);
+  lql_status (*payload_write_json)(lql *self, const lql_payload *payload,
+                                   FILE *out, lql_error *error);
+  lql_status (*payload_write_json_sink)(lql *self, const lql_payload *payload,
+                                        lql_write_fn write, void *write_user,
+                                        lql_error *error);
+  lql_status (*projection_parse)(lql *self, const char *const *fields,
+                                 size_t field_count, lql_projection **out,
+                                 lql_error *error);
+  void (*projection_free)(lql *self, lql_projection *projection);
+  lql_status (*project_file_range)(lql *self, const lql_projection *projection,
+                                   FILE *file, lql_uint64 offset,
+                                   lql_uint64 size, FILE *out, int *out_found,
+                                   lql_error *error);
+  lql_status (*project_source)(lql *self, const lql_projection *projection,
+                               lql_read_fn read, void *read_user, FILE *out,
+                               int *out_found, lql_error *error);
+  lql_status (*project_json)(lql *self, const lql_projection *projection,
+                             const char *json, size_t json_len, FILE *out,
+                             int *out_found, lql_error *error);
+  lql_status (*compact_file_range)(lql *self, FILE *file, lql_uint64 offset,
+                                   lql_uint64 size, FILE *out,
+                                   lql_error *error);
+  lql_status (*compact_source)(lql *self, lql_read_fn read, void *read_user,
+                               FILE *out, lql_error *error);
+  lql_status (*compact_json)(lql *self, const char *json, size_t json_len,
+                             FILE *out, lql_error *error);
+  lql_status (*mutation_plan_parse)(lql *self, const char *const *exprs,
+                                    size_t expr_count, lql_mutation_plan **out,
+                                    lql_error *error);
+  lql_status (*mutation_plan_parse_with_options)(
+      lql *self, const char *const *exprs, size_t expr_count,
+      const lql_mutation_parse_options *options, lql_mutation_plan **out,
+      lql_error *error);
+  size_t (*mutation_plan_count)(const lql *self, const lql_mutation_plan *plan);
+  void (*mutation_plan_free)(lql *self, lql_mutation_plan *plan);
+  lql_status (*mutate_file_range_root_fields)(lql *self,
+                                              const lql_mutation_plan *plan,
+                                              FILE *file, lql_uint64 offset,
+                                              lql_uint64 size, FILE *out,
+                                              lql_error *error);
+  lql_status (*mutate_file_range_paths)(lql *self,
+                                        const lql_mutation_plan *plan,
+                                        FILE *file, lql_uint64 offset,
+                                        lql_uint64 size, FILE *out,
+                                        lql_error *error);
+  lql_status (*mutate_source_paths)(lql *self, const lql_mutation_plan *plan,
+                                    lql_read_fn read, void *read_user,
+                                    FILE *out, lql_error *error);
+  lql_status (*mutate_json)(lql *self, const lql_mutation_plan *plan,
+                            const char *json, size_t json_len, FILE *out,
+                            lql_error *error);
+  void (*destroy)(lql *self);
+};
+
+/* Allocates and initializes a liblql receiver. On failure, *out is NULL when
+   out is non-NULL and error receives an actionable diagnostic. */
+lql_status lql_new(lql **out, lql_error *error);
+/* Destroys a liblql receiver. NULL is accepted. */
+void lql_destroy(lql *ctx);
+
 void lql_error_init(lql_error *error);
 const char *lql_status_string(lql_status status);
 /* Returns the resolved liblql semantic version string. */
@@ -154,162 +269,15 @@ const char *lql_version(void);
 /* Writes the supported public API capability set to out. NULL is accepted. */
 void lql_capabilities_get(lql_capabilities *out);
 
-lql_status lql_selector_parse(const char *expr, lql_selector **out,
-                              lql_error *error);
-lql_status lql_selector_parse_or(const char *expr, lql_selector **out,
-                                 lql_error *error);
-void lql_selector_free(lql_selector *selector);
-int lql_selector_is_empty(const lql_selector *selector);
-
-lql_status lql_matches_json(const lql_selector *selector, const char *json,
-                            size_t json_len, int *out_matched,
-                            lql_error *error);
-lql_status lql_query_file_decisions(const lql_selector *selector, FILE *file,
-                                    lql_query_decision_fn on_decision,
-                                    void *user, lql_query_result *out_result,
-                                    lql_error *error);
-lql_status lql_query_file_decisions_with_options(
-    const lql_selector *selector, FILE *file, const lql_query_options *options,
-    lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
-    lql_error *error);
-/* Streams candidate decisions from a caller-provided source callback.
-   This is a no-capture decision stream: callback decisions receive candidate
-   offsets and byte sizes, but no payload handle is exposed for source readers.
- */
-lql_status lql_query_source_decisions(const lql_selector *selector,
-                                      lql_read_fn read, void *read_user,
-                                      lql_query_decision_fn on_decision,
-                                      void *user, lql_query_result *out_result,
-                                      lql_error *error);
-lql_status lql_query_source_decisions_with_options(
-    const lql_selector *selector, lql_read_fn read, void *read_user,
-    const lql_query_options *options, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error);
-/* Calls on_match for each matched candidate in a caller-provided source
-   callback stream. Match payloads are callback-scoped spooled handles; liblql
-   does not retain payloads after on_match returns. */
-lql_status lql_query_source_spooled_matches(const lql_selector *selector,
-                                            lql_read_fn read, void *read_user,
-                                            lql_query_match_fn on_match,
-                                            void *user,
-                                            lql_query_result *out_result,
-                                            lql_error *error);
-lql_status lql_query_source_spooled_matches_with_options(
-    const lql_selector *selector, lql_read_fn read, void *read_user,
-    const lql_query_options *options, lql_query_match_fn on_match, void *user,
-    lql_query_result *out_result, lql_error *error);
-/* Calls on_match for each matched candidate in a seekable FILE * stream.
-   Match payloads are callback-scoped seekable ranges; liblql does not capture
-   or retain candidate JSON. */
-lql_status lql_query_file_matches(const lql_selector *selector, FILE *file,
-                                  lql_query_match_fn on_match, void *user,
-                                  lql_query_result *out_result,
-                                  lql_error *error);
-lql_status lql_query_file_matches_with_options(
-    const lql_selector *selector, FILE *file, const lql_query_options *options,
-    lql_query_match_fn on_match, void *user, lql_query_result *out_result,
-    lql_error *error);
-/* Writes a callback-scoped payload to out. Seekable range payloads preserve the
-   source FILE * position; spooled payload handles are valid only for the active
-   match callback. */
-lql_status lql_payload_write_json(const lql_payload *payload, FILE *out,
-                                  lql_error *error);
-/* Writes a callback-scoped payload to a caller-managed sink callback. The sink
-   receives bounded chunks and must return LQL_STATUS_OK to continue. */
-lql_status lql_payload_write_json_sink(const lql_payload *payload,
-                                       lql_write_fn write, void *write_user,
-                                       lql_error *error);
-
-/* Parses JSON Pointer projection fields into a caller-owned projection handle.
-   The root path is rejected, and paths must not start with an array index. */
-lql_status lql_projection_parse(const char *const *fields, size_t field_count,
-                                lql_projection **out, lql_error *error);
-/* Frees a projection handle. NULL is accepted. */
-void lql_projection_free(lql_projection *projection);
-/* Projects one seekable file range to out. Missing fields write no bytes and
-   set out_found to 0; selected values are streamed to out as they are visited.
- */
-lql_status lql_project_file_range(const lql_projection *projection, FILE *file,
-                                  lql_uint64 offset, lql_uint64 size, FILE *out,
-                                  int *out_found, lql_error *error);
-/* Projects one JSON value read from a caller-provided source callback to out.
-   This streams the source through lonejson and never materializes the document.
-   The read callback follows the same contract as source query APIs:
-   bytes_read must not exceed capacity, eof marks source completion, and
-   non-zero error_code aborts with LQL_STATUS_JSON_ERROR. */
-lql_status lql_project_source(const lql_projection *projection,
-                              lql_read_fn read, void *read_user, FILE *out,
-                              int *out_found, lql_error *error);
-/* Projects one caller-buffered JSON value to out. This is an explicitly
-   buffered helper; use source-backed APIs for large values that must not be
-   materialized by the caller. */
-lql_status lql_project_json(const lql_projection *projection, const char *json,
-                            size_t json_len, FILE *out, int *out_found,
-                            lql_error *error);
-/* Compacts one seekable file range to out by streaming it through lonejson.
-   The caller owns file positioning before and after the call. */
-lql_status lql_compact_file_range(FILE *file, lql_uint64 offset,
-                                  lql_uint64 size, FILE *out, lql_error *error);
-/* Compacts one JSON value read from a caller-provided source callback to out.
-   This streams the source through lonejson and never materializes the document.
-   The read callback follows the same contract as source query APIs:
-   bytes_read must not exceed capacity, eof marks source completion, and
-   non-zero error_code aborts with LQL_STATUS_JSON_ERROR. */
-lql_status lql_compact_source(lql_read_fn read, void *read_user, FILE *out,
-                              lql_error *error);
-/* Compacts one in-memory JSON value to out. */
-lql_status lql_compact_json(const char *json, size_t json_len, FILE *out,
-                            lql_error *error);
-/* Parses CLI-style mutation expressions into a caller-owned mutation plan.
-   This validates the mutation language only; execution is a separate API. */
-lql_status lql_mutation_plan_parse(const char *const *exprs, size_t expr_count,
-                                   lql_mutation_plan **out, lql_error *error);
-/* Parses mutation expressions with explicit opt-in behavior for local
-   file-backed mutation values. Relative file-backed value paths require
-   file_value_base_dir when enable_file_values is non-zero. */
-lql_status
-lql_mutation_plan_parse_with_options(const char *const *exprs,
-                                     size_t expr_count,
-                                     const lql_mutation_parse_options *options,
-                                     lql_mutation_plan **out, lql_error *error);
-/* Returns the number of parsed mutation operations in a plan. */
-size_t lql_mutation_plan_count(const lql_mutation_plan *plan);
-/* Frees a mutation plan. NULL is accepted. */
-void lql_mutation_plan_free(lql_mutation_plan *plan);
-/* Applies supported root-object field mutations to one seekable file range.
-   This is a streaming rewrite for root object fields only; unsupported plans
-   return LQL_STATUS_UNSUPPORTED rather than materializing the document. */
-lql_status lql_mutate_file_range_root_fields(const lql_mutation_plan *plan,
-                                             FILE *file, lql_uint64 offset,
-                                             lql_uint64 size, FILE *out,
-                                             lql_error *error);
-/* Applies supported concrete-path mutations to one seekable file range.
-   This streams the source through lonejson and never materializes the document.
-   Supported paths are concrete object/member paths with optional concrete array
-   indexes plus existing-position `*` object-child and `[]` array-element
-   wildcards. Existing object-member and array-element mutation positions also
-   support `**` one-child and `...` recursive path segments. File-backed values
-   stream from source-backed paths. */
-lql_status lql_mutate_file_range_paths(const lql_mutation_plan *plan,
-                                       FILE *file, lql_uint64 offset,
-                                       lql_uint64 size, FILE *out,
-                                       lql_error *error);
-/* Applies supported concrete-path mutations to one JSON value read from a
-   caller-provided source callback. This streams the source through lonejson and
-   never materializes the document. The read callback follows the same contract
-   as source query APIs: bytes_read must not exceed capacity, eof marks source
-   completion, and non-zero error_code aborts with LQL_STATUS_JSON_ERROR. */
-lql_status lql_mutate_source_paths(const lql_mutation_plan *plan,
-                                   lql_read_fn read, void *read_user, FILE *out,
-                                   lql_error *error);
-/* Applies supported concrete-path mutations to one caller-buffered JSON value.
-   This is an explicitly buffered helper; use file/source-backed APIs for large
-   values that must not be materialized by the caller. */
-lql_status lql_mutate_json(const lql_mutation_plan *plan, const char *json,
-                           size_t json_len, FILE *out, lql_error *error);
-
-char *lql_strdup(const char *text);
+/* Project-owned allocation helpers. liblql-owned returned memory must be
+   released through lql_dealloc(), lql_free(), or the documented type-specific
+   cleanup function rather than through the C runtime directly. */
+void *lql_alloc(size_t size);
+void *lql_calloc(size_t count, size_t size);
+void *lql_realloc(void *ptr, size_t size);
+void lql_dealloc(void *ptr);
 void lql_free(void *ptr);
+char *lql_strdup(const char *text);
 
 #ifdef __cplusplus
 }

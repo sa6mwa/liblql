@@ -13,6 +13,7 @@
 #include <time.h>
 
 typedef struct payload_counts {
+  lql *ctx;
   lql_uint64 payloads;
   lql_uint64 payload_bytes;
   FILE *sink;
@@ -87,7 +88,8 @@ static lql_status count_payload(void *user, const lql_query_match *match) {
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   lql_error_init(&error);
-  st = lql_payload_write_json(&match->payload, counts->sink, &error);
+  st = counts->ctx->payload_write_json(counts->ctx, &match->payload,
+                                       counts->sink, &error);
   if (st != LQL_STATUS_OK) {
     return st;
   }
@@ -109,7 +111,8 @@ static lql_status count_spooled_payload(void *user,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   lql_error_init(&error);
-  st = lql_payload_write_json(&match->payload, counts->sink, &error);
+  st = counts->ctx->payload_write_json(counts->ctx, &match->payload,
+                                       counts->sink, &error);
   if (st != LQL_STATUS_OK) {
     return st;
   }
@@ -124,6 +127,7 @@ int main(int argc, char **argv) {
   const char *fixture_path;
   FILE *fixture;
   FILE *sink;
+  lql *ctx;
   lql_selector *selector;
   lql_query_result result;
   lql_error error;
@@ -142,38 +146,48 @@ int main(int argc, char **argv) {
   fixture_path = argv[3];
 
   lql_error_init(&error);
+  ctx = NULL;
   selector = NULL;
-  st = lql_selector_parse(expr, &selector, &error);
+  st = lql_new(&ctx, &error);
+  if (st != LQL_STATUS_OK) {
+    fprintf(stderr, "lql_payload_bench: create lql: %s\n", error.message);
+    return 1;
+  }
+  st = ctx->selector_parse(ctx, expr, &selector, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "lql_payload_bench: parse selector: %s\n", error.message);
+    ctx->destroy(ctx);
     return 1;
   }
 
   fixture = fopen(fixture_path, "rb");
   if (fixture == NULL) {
     fprintf(stderr, "lql_payload_bench: failed to open fixture\n");
-    lql_selector_free(selector);
+    ctx->selector_free(ctx, selector);
+    ctx->destroy(ctx);
     return 1;
   }
 
   memset(&counts, 0, sizeof(counts));
+  counts.ctx = ctx;
   memset(&result, 0, sizeof(result));
   start = clock();
   if (strcmp(mode, "decision_only_plan") == 0) {
-    st = lql_query_file_decisions(selector, fixture, observe_decision, NULL,
-                                  &result, &error);
+    st = ctx->query_file_decisions(ctx, selector, fixture, observe_decision,
+                                   NULL, &result, &error);
   } else if (strcmp(mode, "plus_value_selector") == 0 ||
              strcmp(mode, "plus_value_plan") == 0) {
     sink = fopen("/dev/null", "wb");
     if (sink == NULL) {
       fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
       fclose(fixture);
-      lql_selector_free(selector);
+      ctx->selector_free(ctx, selector);
+      ctx->destroy(ctx);
       return 1;
     }
     counts.sink = sink;
-    st = lql_query_file_matches(selector, fixture, count_payload, &counts,
-                                &result, &error);
+    st = ctx->query_file_matches(ctx, selector, fixture, count_payload, &counts,
+                                 &result, &error);
     fclose(sink);
   } else if (strcmp(mode, "plus_value_openjson_selector") == 0 ||
              strcmp(mode, "plus_value_openjson_plan") == 0) {
@@ -181,28 +195,31 @@ int main(int argc, char **argv) {
     if (sink == NULL) {
       fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
       fclose(fixture);
-      lql_selector_free(selector);
+      ctx->selector_free(ctx, selector);
+      ctx->destroy(ctx);
       return 1;
     }
     counts.sink = sink;
     reader.file = fixture;
-    st = lql_query_source_spooled_matches(selector, read_file_chunk, &reader,
-                                          count_spooled_payload, &counts,
-                                          &result, &error);
+    st = ctx->query_source_spooled_matches(ctx, selector, read_file_chunk,
+                                           &reader, count_spooled_payload,
+                                           &counts, &result, &error);
     fclose(sink);
   } else {
     fprintf(stderr, "lql_payload_bench: unsupported mode: %s\n", mode);
     fclose(fixture);
-    lql_selector_free(selector);
+    ctx->selector_free(ctx, selector);
+    ctx->destroy(ctx);
     return 2;
   }
   end = clock();
   fclose(fixture);
-  lql_selector_free(selector);
+  ctx->selector_free(ctx, selector);
 
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "lql_payload_bench: query mode %s: %s\n", mode,
             error.message);
+    ctx->destroy(ctx);
     return 1;
   }
 
@@ -217,5 +234,6 @@ int main(int argc, char **argv) {
   fputs(" elapsed_ns=", stdout);
   print_u64(elapsed_ns(start, end));
   fputc('\n', stdout);
+  ctx->destroy(ctx);
   return 0;
 }

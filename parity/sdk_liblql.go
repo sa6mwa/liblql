@@ -7,6 +7,90 @@ package parity
 #include <string.h>
 #include <lql/lql.h>
 
+static lql *liblql_receiver(void) {
+	static lql *ctx = NULL;
+	lql_error error;
+	if (ctx == NULL) {
+		lql_error_init(&error);
+		(void)lql_new(&ctx, &error);
+	}
+	return ctx;
+}
+
+#define lql_selector_parse(expr, out, error) \
+	liblql_receiver()->selector_parse(liblql_receiver(), (expr), (out), (error))
+#define lql_selector_parse_or(expr, out, error) \
+	liblql_receiver()->selector_parse_or(liblql_receiver(), (expr), (out), (error))
+#define lql_selector_free(selector) \
+	liblql_receiver()->selector_free(liblql_receiver(), (selector))
+#define lql_matches_json(selector, json, json_len, out_matched, error) \
+	liblql_receiver()->matches_json(liblql_receiver(), (selector), (json), \
+	                                (json_len), (out_matched), (error))
+#define lql_projection_parse(fields, field_count, out, error) \
+	liblql_receiver()->projection_parse(liblql_receiver(), (fields), \
+	                                    (field_count), (out), (error))
+#define lql_projection_free(projection) \
+	liblql_receiver()->projection_free(liblql_receiver(), (projection))
+#define lql_project_json(projection, json, json_len, out, out_found, error) \
+	liblql_receiver()->project_json(liblql_receiver(), (projection), (json), \
+	                                (json_len), (out), (out_found), (error))
+#define lql_project_file_range(projection, file, offset, size, out, out_found, error) \
+	liblql_receiver()->project_file_range(liblql_receiver(), (projection), (file), \
+	                                      (offset), (size), (out), (out_found), (error))
+#define lql_project_source(projection, read, read_user, out, out_found, error) \
+	liblql_receiver()->project_source(liblql_receiver(), (projection), (read), \
+	                                  (read_user), (out), (out_found), (error))
+#define lql_mutation_plan_parse(exprs, expr_count, out, error) \
+	liblql_receiver()->mutation_plan_parse(liblql_receiver(), (exprs), \
+	                                       (expr_count), (out), (error))
+#define lql_mutation_plan_parse_with_options(exprs, expr_count, options, out, error) \
+	liblql_receiver()->mutation_plan_parse_with_options( \
+	    liblql_receiver(), (exprs), (expr_count), (options), (out), (error))
+#define lql_mutation_plan_count(plan) \
+	liblql_receiver()->mutation_plan_count(liblql_receiver(), (plan))
+#define lql_mutation_plan_free(plan) \
+	liblql_receiver()->mutation_plan_free(liblql_receiver(), (plan))
+#define lql_mutate_json(plan, json, json_len, out, error) \
+	liblql_receiver()->mutate_json(liblql_receiver(), (plan), (json), \
+	                               (json_len), (out), (error))
+#define lql_mutate_source_paths(plan, read, read_user, out, error) \
+	liblql_receiver()->mutate_source_paths(liblql_receiver(), (plan), (read), \
+	                                       (read_user), (out), (error))
+#define lql_mutate_file_range_root_fields(plan, file, offset, size, out, error) \
+	liblql_receiver()->mutate_file_range_root_fields( \
+	    liblql_receiver(), (plan), (file), (offset), (size), (out), (error))
+#define lql_mutate_file_range_paths(plan, file, offset, size, out, error) \
+	liblql_receiver()->mutate_file_range_paths(liblql_receiver(), (plan), \
+	                                           (file), (offset), (size), (out), (error))
+#define lql_compact_json(json, json_len, out, error) \
+	liblql_receiver()->compact_json(liblql_receiver(), (json), (json_len), \
+	                                (out), (error))
+#define lql_compact_source(read, read_user, out, error) \
+	liblql_receiver()->compact_source(liblql_receiver(), (read), (read_user), \
+	                                  (out), (error))
+#define lql_compact_file_range(file, offset, size, out, error) \
+	liblql_receiver()->compact_file_range(liblql_receiver(), (file), (offset), \
+	                                      (size), (out), (error))
+#define lql_payload_write_json_sink(payload, write, write_user, error) \
+	liblql_receiver()->payload_write_json_sink(liblql_receiver(), (payload), \
+	                                           (write), (write_user), (error))
+#define lql_query_file_decisions_with_options(selector, file, options, on_decision, user, out_result, error) \
+	liblql_receiver()->query_file_decisions_with_options( \
+	    liblql_receiver(), (selector), (file), (options), (on_decision), \
+	    (user), (out_result), (error))
+#define lql_query_source_decisions_with_options(selector, read, read_user, options, on_decision, user, out_result, error) \
+	liblql_receiver()->query_source_decisions_with_options( \
+	    liblql_receiver(), (selector), (read), (read_user), (options), \
+	    (on_decision), (user), (out_result), (error))
+#define lql_query_file_matches_with_options(selector, file, options, on_match, user, out_result, error) \
+	liblql_receiver()->query_file_matches_with_options( \
+	    liblql_receiver(), (selector), (file), (options), (on_match), \
+	    (user), (out_result), (error))
+#define lql_query_source_spooled_matches_with_options(selector, read, read_user, options, on_match, user, out_result, error) \
+	liblql_receiver()->query_source_spooled_matches_with_options( \
+	    liblql_receiver(), (selector), (read), (read_user), (options), \
+	    (on_match), (user), (out_result), (error))
+
 static int liblql_matches_json(const char *expr, const char *json, int or_mode,
                                int *out_matched, char *errbuf,
                                size_t errbuf_len) {

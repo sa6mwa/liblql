@@ -101,7 +101,8 @@ static int current_utc_seconds(lql_int64 *out) {
   return 1;
 }
 
-int lql_parse_temporal_literal(const char *raw, lql_temporal *out) {
+LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
+                                                   lql_temporal *out) {
   const char *p;
   int y;
   int mo;
@@ -191,7 +192,8 @@ int lql_parse_temporal_literal(const char *raw, lql_temporal *out) {
   return 1;
 }
 
-int lql_temporal_compare(const lql_temporal *left, const lql_temporal *right) {
+LQL_INTERNAL_SYMBOL int lql_temporal_compare(const lql_temporal *left,
+                                             const lql_temporal *right) {
   if (left->seconds < right->seconds) {
     return -1;
   }
@@ -207,7 +209,8 @@ int lql_temporal_compare(const lql_temporal *left, const lql_temporal *right) {
   return 0;
 }
 
-int lql_temporal_equal(const lql_temporal *left, const lql_temporal *right) {
+LQL_INTERNAL_SYMBOL int lql_temporal_equal(const lql_temporal *left,
+                                           const lql_temporal *right) {
   if (left->date_only || right->date_only) {
     return left->year == right->year && left->month == right->month &&
            left->day == right->day;
@@ -215,8 +218,9 @@ int lql_temporal_equal(const lql_temporal *left, const lql_temporal *right) {
   return lql_temporal_compare(left, right) == 0;
 }
 
-int lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
-                                     size_t buf_len) {
+LQL_INTERNAL_SYMBOL int
+lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
+                                 size_t buf_len) {
   lql_int64 days;
   lql_int64 rem;
   int y;
@@ -256,7 +260,7 @@ int lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
   return 1;
 }
 
-int lql_temporal_now(lql_temporal *out) {
+LQL_INTERNAL_SYMBOL int lql_temporal_now(lql_temporal *out) {
   lql_int64 seconds;
   if (out == NULL || !current_utc_seconds(&seconds)) {
     return 0;
@@ -265,7 +269,7 @@ int lql_temporal_now(lql_temporal *out) {
   return 1;
 }
 
-int lql_temporal_today(lql_temporal *out) {
+LQL_INTERNAL_SYMBOL int lql_temporal_today(lql_temporal *out) {
   lql_int64 seconds;
   if (out == NULL || !current_utc_seconds(&seconds)) {
     return 0;
@@ -274,7 +278,7 @@ int lql_temporal_today(lql_temporal *out) {
   return 1;
 }
 
-int lql_temporal_yesterday(lql_temporal *out) {
+LQL_INTERNAL_SYMBOL int lql_temporal_yesterday(lql_temporal *out) {
   lql_int64 seconds;
   if (out == NULL || !current_utc_seconds(&seconds)) {
     return 0;

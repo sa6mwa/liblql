@@ -56,6 +56,48 @@ assert_equal(selected,
              '{"status":"open","id":"b","count":2,"state":{"old":true}}\n',
              "select_file output")
 
+local decisions = {}
+local result
+result, err = client:query_file('/status="open"', input_path, function(decision)
+  decisions[#decisions + 1] = {
+    matched = decision.matched,
+    index = decision.index,
+    offset = decision.offset,
+    size = decision.size
+  }
+end)
+result = assert_no_error(result, err, "query_file")
+assert_equal(result.candidates_seen, 2, "query_file candidates")
+assert_equal(result.candidates_matched, 1, "query_file matches")
+assert_equal(decisions[1].matched, false, "query_file first decision")
+assert_equal(decisions[2].matched, true, "query_file second decision")
+
+local stopped
+stopped, err = client:query_file('/status="open"', input_path, function(_)
+  return false
+end)
+stopped = assert_no_error(stopped, err, "query_file stop")
+assert_equal(stopped.stopped_early, true, "query_file stop flag")
+
+local payloads = {}
+local retained_payload
+result, err = client:each_match_file('/status="open"', input_path,
+                                    function(match)
+  retained_payload = match
+  payloads[#payloads + 1] = assert_no_error(match.json(), nil,
+                                            "each_match_file payload")
+end)
+result = assert_no_error(result, err, "each_match_file")
+assert_equal(result.candidates_seen, 2, "each_match_file candidates")
+assert_equal(result.candidates_matched, 1, "each_match_file matches")
+assert_equal(payloads[1],
+             '{"status":"open","id":"b","count":2,"state":{"old":true}}',
+             "each_match_file payload")
+local late_payload, late_err = retained_payload.json()
+if late_payload ~= nil or not late_err or late_err.stderr == "" then
+  fail("expected expired payload handle error")
+end
+
 local projected
 projected, err = client:project_file('/status="open"', input_path,
                                     {"/id", "/count"})

@@ -12,7 +12,7 @@ typedef struct lql_token_list {
 
 static char *lql_strndup_local(const char *src, size_t len) {
   char *out;
-  out = (char *)malloc(len + 1u);
+  out = (char *)lql_alloc(len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -35,16 +35,16 @@ static char *trim_dup(const char *src, size_t len) {
 static void token_list_cleanup(lql_token_list *list) {
   size_t i;
   for (i = 0u; i < list->count; ++i) {
-    free(list->items[i]);
+    lql_dealloc(list->items[i]);
   }
-  free(list->items);
+  lql_dealloc(list->items);
   list->items = NULL;
   list->count = 0u;
 }
 
 static int token_list_push(lql_token_list *list, char *item) {
   char **next;
-  next = (char **)realloc(list->items, sizeof(char *) * (list->count + 1u));
+  next = (char **)lql_realloc(list->items, sizeof(char *) * (list->count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -55,7 +55,8 @@ static int token_list_push(lql_token_list *list, char *item) {
 
 static int term_any_push(lql_term *term, char *item) {
   char **next;
-  next = (char **)realloc(term->any, sizeof(char *) * (term->any_count + 1u));
+  next =
+      (char **)lql_realloc(term->any, sizeof(char *) * (term->any_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -101,11 +102,11 @@ static lql_status split_top(const char *expr, lql_token_list *out,
         return LQL_STATUS_NO_MEMORY;
       }
       if (item[0] != '\0' && !token_list_push(out, item)) {
-        free(item);
+        lql_dealloc(item);
         return LQL_STATUS_NO_MEMORY;
       }
       if (item[0] == '\0') {
-        free(item);
+        lql_dealloc(item);
       }
       start = p + 1;
     }
@@ -120,11 +121,11 @@ static lql_status split_top(const char *expr, lql_token_list *out,
     return LQL_STATUS_NO_MEMORY;
   }
   if (item[0] != '\0' && !token_list_push(out, item)) {
-    free(item);
+    lql_dealloc(item);
     return LQL_STATUS_NO_MEMORY;
   }
   if (item[0] == '\0') {
-    free(item);
+    lql_dealloc(item);
   }
   return LQL_STATUS_OK;
 }
@@ -163,7 +164,7 @@ static int append_text(char **buf, size_t *len, size_t *cap, const char *text,
     while (*len + n + 1u > next_cap) {
       next_cap *= 2u;
     }
-    next = (char *)realloc(*buf, next_cap);
+    next = (char *)lql_realloc(*buf, next_cap);
     if (next == NULL) {
       return 0;
     }
@@ -220,18 +221,18 @@ static char *normalize_field_path(const char *field) {
     }
     if (out_len > 1u) {
       if (!append_text(&out, &out_len, &out_cap, "/", 1u)) {
-        free(out);
+        lql_dealloc(out);
         return NULL;
       }
     }
     if (!append_text(&out, &out_len, &out_cap, seg,
                      count == 0u ? len : base_len)) {
-      free(out);
+      lql_dealloc(out);
       return NULL;
     }
     for (i = 0u; i < count; ++i) {
       if (!append_text(&out, &out_len, &out_cap, "/[]", 3u)) {
-        free(out);
+        lql_dealloc(out);
         return NULL;
       }
     }
@@ -316,17 +317,17 @@ static void free_seen_key_values(char *field, char *value, char *any,
                                  char *ignore_case, char *gt, char *gte,
                                  char *lt, char *lte, char *after, char *before,
                                  char *since) {
-  free(field);
-  free(value);
-  free(any);
-  free(ignore_case);
-  free(gt);
-  free(gte);
-  free(lt);
-  free(lte);
-  free(after);
-  free(before);
-  free(since);
+  lql_dealloc(field);
+  lql_dealloc(value);
+  lql_dealloc(any);
+  lql_dealloc(ignore_case);
+  lql_dealloc(gt);
+  lql_dealloc(gte);
+  lql_dealloc(lt);
+  lql_dealloc(lte);
+  lql_dealloc(after);
+  lql_dealloc(before);
+  lql_dealloc(since);
 }
 
 static int remember_key_value(char **slot, char **raw_value, int *skip,
@@ -338,12 +339,12 @@ static int remember_key_value(char **slot, char **raw_value, int *skip,
     return 1;
   }
   if (strcmp(*slot, *raw_value) == 0) {
-    free(*raw_value);
+    lql_dealloc(*raw_value);
     *raw_value = NULL;
     *skip = 1;
     return 1;
   }
-  free(*raw_value);
+  lql_dealloc(*raw_value);
   *raw_value = NULL;
   lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                 "selector expression has duplicate key");
@@ -398,11 +399,11 @@ static int parse_any_values(char *decoded, lql_term *term, lql_error *error) {
     }
     if (item[0] != '\0') {
       if (!term_any_push(term, item)) {
-        free(item);
+        lql_dealloc(item);
         return 0;
       }
     } else {
-      free(item);
+      lql_dealloc(item);
     }
     cursor = bar == NULL ? NULL : bar + 1;
   }
@@ -635,7 +636,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       seen_slot = &seen_since;
     }
     if (seen_slot == NULL) {
-      free(raw_value);
+      lql_dealloc(raw_value);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector operator does not support key");
       goto fail;
@@ -652,20 +653,20 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     }
     if (key_is_field(key)) {
       normalized = normalize_field_path(decoded);
-      free(decoded);
+      lql_dealloc(decoded);
       if (normalized == NULL) {
         goto fail;
       }
-      free(term->field);
+      lql_dealloc(term->field);
       term->field = normalized;
     } else if (kind == LQL_NODE_DATE && key_is_value(key)) {
       if (!set_date_bound(term, "value", decoded, error)) {
-        free(decoded);
+        lql_dealloc(decoded);
         goto fail;
       }
-      free(decoded);
+      lql_dealloc(decoded);
     } else if (key_is_value(key)) {
-      free(term->value);
+      lql_dealloc(term->value);
       term->value = decoded;
       term->value_set = 1;
     } else if (kind == LQL_NODE_DATE &&
@@ -674,35 +675,35 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
                   : key_is_before(key) ? "lt"
                                        : "since";
       if (!set_date_bound(term, date_slot, decoded, error)) {
-        free(decoded);
+        lql_dealloc(decoded);
         goto fail;
       }
-      free(decoded);
+      lql_dealloc(decoded);
     } else if (key_is_any(key)) {
       if (!parse_any_values(decoded, term, error)) {
-        free(decoded);
+        lql_dealloc(decoded);
         goto fail;
       }
-      free(decoded);
+      lql_dealloc(decoded);
     } else if (key_is_ignore_case(key)) {
       if (!parse_bool_value(decoded, &term->ignore_case)) {
-        free(decoded);
+        lql_dealloc(decoded);
         lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                       "selector ignoreCase must be true/false/t/f");
         goto fail;
       }
-      free(decoded);
+      lql_dealloc(decoded);
     } else if (key_is_range_bound(key)) {
       if (kind == LQL_NODE_DATE) {
         if (!set_date_bound(term, key, decoded, error)) {
-          free(decoded);
+          lql_dealloc(decoded);
           goto fail;
         }
       } else if (!set_range_bound(term, key, decoded, error)) {
-        free(decoded);
+        lql_dealloc(decoded);
         goto fail;
       }
-      free(decoded);
+      lql_dealloc(decoded);
     }
   }
   token_list_cleanup(&parts);
@@ -830,7 +831,7 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
   if (strcmp(copy, "/") == 0 || strcmp(copy, ".") == 0 ||
       strcmp(copy, "{}") == 0) {
     out->kind = LQL_NODE_ALL;
-    free(copy);
+    lql_dealloc(copy);
     return LQL_STATUS_OK;
   }
   if (strncmp(copy, "and.", 4u) == 0 || strncmp(copy, "or.", 3u) == 0 ||
@@ -840,21 +841,21 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     *dot = '\0';
     st = parse_one(dot + 1, &child, error);
     if (st != LQL_STATUS_OK) {
-      free(copy);
+      lql_dealloc(copy);
       return st;
     }
     out->kind = strcmp(name, "and") == 0  ? LQL_NODE_AND
                 : strcmp(name, "or") == 0 ? LQL_NODE_OR
                                           : LQL_NODE_NOT;
-    out->children = (lql_node *)calloc(1u, sizeof(lql_node));
+    out->children = (lql_node *)lql_calloc(1u, sizeof(lql_node));
     if (out->children == NULL) {
       lql_node_cleanup(&child);
-      free(copy);
+      lql_dealloc(copy);
       return LQL_STATUS_NO_MEMORY;
     }
     out->children[0] = child;
     out->child_count = 1u;
-    free(copy);
+    lql_dealloc(copy);
     return LQL_STATUS_OK;
   }
 
@@ -887,7 +888,7 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     out->term.value = unquote(value);
     out->term.value_set = 1;
     if (out->term.field == NULL || out->term.value == NULL) {
-      free(copy);
+      lql_dealloc(copy);
       return LQL_STATUS_NO_MEMORY;
     }
     if (op0 == '!') {
@@ -895,10 +896,10 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       child.kind = LQL_NODE_EQ;
       child.term = out->term;
       memset(&out->term, 0, sizeof(out->term));
-      out->children = (lql_node *)calloc(1u, sizeof(lql_node));
+      out->children = (lql_node *)lql_calloc(1u, sizeof(lql_node));
       if (out->children == NULL) {
         lql_node_cleanup(&child);
-        free(copy);
+        lql_dealloc(copy);
         return LQL_STATUS_NO_MEMORY;
       }
       out->kind = LQL_NODE_NOT;
@@ -915,7 +916,7 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       if (bound_key != NULL) {
         if (!set_range_bound(&out->term, bound_key, out->term.value, error)) {
           lql_node_cleanup(out);
-          free(copy);
+          lql_dealloc(copy);
           return error != NULL && error->code != LQL_STATUS_OK
                      ? error->code
                      : LQL_STATUS_PARSE_ERROR;
@@ -927,7 +928,7 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     } else {
       out->kind = LQL_NODE_EQ;
     }
-    free(copy);
+    lql_dealloc(copy);
     return LQL_STATUS_OK;
   }
 
@@ -939,18 +940,18 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
     out->kind = kind_from_name(copy);
     if (out->kind == LQL_NODE_ALL) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR, "unknown selector operator");
-      free(copy);
+      lql_dealloc(copy);
       return LQL_STATUS_PARSE_ERROR;
     }
     if (out->kind == LQL_NODE_EXISTS) {
       value = unquote(body + 1);
       out->term.field = value == NULL ? NULL : normalize_field_path(value);
-      free(value);
-      free(copy);
+      lql_dealloc(value);
+      lql_dealloc(copy);
       return out->term.field == NULL ? LQL_STATUS_NO_MEMORY : LQL_STATUS_OK;
     }
     if (!parse_key_values(body + 1, out->kind, &out->term, error)) {
-      free(copy);
+      lql_dealloc(copy);
       if (error != NULL && error->code != LQL_STATUS_OK) {
         return error->code;
       }
@@ -960,12 +961,12 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       lql_node_cleanup(out);
       out->kind = LQL_NODE_ALL;
     }
-    free(copy);
+    lql_dealloc(copy);
     return LQL_STATUS_OK;
   }
 
   lql_set_error(error, LQL_STATUS_PARSE_ERROR, "invalid selector expression");
-  free(copy);
+  lql_dealloc(copy);
   return LQL_STATUS_PARSE_ERROR;
 }
 
@@ -1004,8 +1005,8 @@ static void assign_hit_indexes(lql_node *node, size_t *next) {
 
 static int append_node(lql_node *parent, lql_node *child) {
   lql_node *next;
-  next = (lql_node *)realloc(parent->children,
-                             sizeof(lql_node) * (parent->child_count + 1u));
+  next = (lql_node *)lql_realloc(parent->children,
+                                 sizeof(lql_node) * (parent->child_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -1028,10 +1029,10 @@ static void indexed_groups_cleanup(indexed_group *groups, size_t count) {
     return;
   }
   for (i = 0u; i < count; ++i) {
-    free(groups[i].index);
+    lql_dealloc(groups[i].index);
     lql_node_cleanup(&groups[i].node);
   }
-  free(groups);
+  lql_dealloc(groups);
 }
 
 static int parse_indexed_wrapper(const char *token, lql_node_kind *wrapper,
@@ -1057,7 +1058,7 @@ static int parse_indexed_wrapper(const char *token, lql_node_kind *wrapper,
     return 0;
   }
   len = (size_t)(p - idx);
-  copy = (char *)malloc(len + 1u);
+  copy = (char *)lql_alloc(len + 1u);
   if (copy == NULL) {
     return -1;
   }
@@ -1107,8 +1108,8 @@ static int append_indexed_group(indexed_group **groups, size_t *count,
   indexed_group *next;
   group = find_indexed_group(*groups, *count, wrapper, *index);
   if (group == NULL) {
-    next = (indexed_group *)realloc(*groups,
-                                    sizeof(indexed_group) * (*count + 1u));
+    next = (indexed_group *)lql_realloc(*groups,
+                                        sizeof(indexed_group) * (*count + 1u));
     if (next == NULL) {
       return 0;
     }
@@ -1129,8 +1130,10 @@ static int append_indexed_group(indexed_group **groups, size_t *count,
   return append_node(&group->node, child);
 }
 
-lql_status lql_parse_selector_internal(const char *expr, int or_mode,
-                                       lql_selector **out, lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
+                                                           int or_mode,
+                                                           lql_selector **out,
+                                                           lql_error *error) {
   lql_token_list tokens;
   lql_selector *selector;
   lql_node node;
@@ -1150,7 +1153,7 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
   }
   *out = NULL;
   if (expr == NULL || *expr == '\0') {
-    selector = (lql_selector *)calloc(1u, sizeof(*selector));
+    selector = (lql_selector *)lql_calloc(1u, sizeof(*selector));
     if (selector == NULL) {
       return LQL_STATUS_NO_MEMORY;
     }
@@ -1162,7 +1165,7 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
   if (st != LQL_STATUS_OK) {
     return st;
   }
-  selector = (lql_selector *)calloc(1u, sizeof(*selector));
+  selector = (lql_selector *)lql_calloc(1u, sizeof(*selector));
   if (selector == NULL) {
     token_list_cleanup(&tokens);
     return LQL_STATUS_NO_MEMORY;
@@ -1178,7 +1181,7 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
       break;
     case 1:
       st = parse_one(rest, &selector->root, error);
-      free(index);
+      lql_dealloc(index);
       break;
     default:
       st = parse_one(tokens.items[0], &selector->root, error);
@@ -1217,7 +1220,7 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
             st = LQL_STATUS_PARSE_ERROR;
           }
         }
-        free(index);
+        lql_dealloc(index);
         continue;
       default:
         st = parse_one(tokens.items[i], &node, error);
@@ -1232,7 +1235,7 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
           st = LQL_STATUS_NO_MEMORY;
           break;
         }
-        free(node.children);
+        lql_dealloc(node.children);
         node.children = NULL;
         node.child_count = 0u;
       } else if (!append_node(&selector->root, &node)) {
@@ -1261,7 +1264,7 @@ lql_status lql_parse_selector_internal(const char *expr, int or_mode,
   }
   token_list_cleanup(&tokens);
   if (st != LQL_STATUS_OK) {
-    lql_selector_free(selector);
+    lql_selector_free_impl(selector);
     return st;
   }
   selector->hit_count = 0u;

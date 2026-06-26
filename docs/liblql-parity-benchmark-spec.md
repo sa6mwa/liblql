@@ -111,8 +111,8 @@ Current implementation status:
   `contains.any`, service `icontains.any`, and nested `/records[]/...`
   equivalents over the CLI-style single-root JSON fixture.
 - `make benchmarks-lua` loads `lua/lql.lua`, which uses the direct Lua 5.5
-  `lql.core` C module over public liblql APIs and emits stable JSON Lines
-  records.
+  `lql.core` C module over public liblql APIs, creates a receiver-backed
+  client with `lql.new()`, and emits stable JSON Lines records.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
   and fails on missing runners or counter divergence.
 
@@ -382,7 +382,7 @@ The Lua implementation lives in this repository and must be benchmarked through
 the repository's Lua facade, not by shelling out to Go or `clql` and not by
 calling C private test helpers directly. The Lua benchmark runner must go
 through `lua/lql.lua`, which loads the direct Lua 5.5 `lql.core` C module over
-public liblql APIs.
+public liblql APIs and creates a real `lql *` receiver-backed client.
 
 Lua benchmark entry points should support:
 

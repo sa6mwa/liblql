@@ -26,6 +26,11 @@ materialization, to caller-provided read callbacks through
 `lql_mutate_source_paths()`, or to explicitly caller-buffered JSON values
 through `lql_mutate_json()`. `clql` also supports seekable-file inline/write
 mutation through a temp-file rename.
+The public C API now exposes an instantiatable receiver shell through
+`lql_new()`, with examples and bindings using `ctx->method(ctx, ...)`.
+Selector/query/projection/mutation operations are not exported as free-function
+wrappers. Project-owned allocation is centralized through the liblql allocator
+surface.
 The same supported streaming mutation subset can run over non-seekable stdin
 through callback-scoped spooled candidate payloads.
 `clql -m -f` composes mutation and projection in Go-compatible order by
@@ -40,13 +45,14 @@ verified locally, including extracted SDK consumer smokes; the source archive
 is produced and verified through an extracted-tree build/test smoke. The full
 host `clql` archive carries the lonejson runtime libraries it needs and is
 verified with an extracted `--version` smoke. The Lua tree now includes a Lua
-5.5 facade backed by a direct `lql.core` C module over public liblql APIs, and
-the parity benchmark surface has Go, C, and Lua runners over shared generated
-fixtures.
+5.5 facade backed by a direct `lql.core` C module over public liblql APIs;
+`lql.new()` returns a C-owned client userdata backed by a public `lql *`
+receiver and covers callback decision streams plus callback-scoped seekable
+payload handles. The parity benchmark surface has Go, C, and Lua runners over
+shared generated fixtures.
 The standalone Lua source package, rendered release rockspec, and LuaRocks
-source rock are produced and verified locally. Full Lua streaming/spooled
-handle coverage, full cross-target release matrix, and full `clql` parity are
-still active porting work.
+source rock are produced and verified locally. Full cross-target release
+matrix and full `clql` parity are still active porting work.
 
 ```sh
 make deps-debug

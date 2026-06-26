@@ -249,13 +249,20 @@ write_consumer_source() {
 
 int main(void) {
   const char *expr = "contains{f=/status,v=open}";
+  lql *ctx = NULL;
   lql_selector *selector = NULL;
   lql_error error;
   lql_status status;
   lql_error_init(&error);
-  status = lql_selector_parse(expr, &selector, &error);
+  status = lql_new(&ctx, &error);
+  if (status != LQL_STATUS_OK) {
+    fprintf(stderr, "create failed: %s\n", error.message);
+    return 1;
+  }
+  status = ctx->selector_parse(ctx, expr, &selector, &error);
   if (status != LQL_STATUS_OK) {
     fprintf(stderr, "parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
     return 1;
   }
   if (strcmp(lql_version(), LQL_VERSION) != 0) {
@@ -273,10 +280,13 @@ int main(void) {
         !caps.mutation_file_range || !caps.mutation_source ||
         !caps.mutation_buffered_json) {
       fprintf(stderr, "capability query mismatch\n");
+      ctx->selector_free(ctx, selector);
+      ctx->destroy(ctx);
       return 1;
     }
   }
-  lql_selector_free(selector);
+  ctx->selector_free(ctx, selector);
+  ctx->destroy(ctx);
   return 0;
 }
 EOF
