@@ -41,6 +41,7 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"projection", "non-object root projection errors", []string{"TestCLQLProjectionNonObjectRootParity"}},
 	{"mutation", "parse-error invariants", []string{"TestCLQLMutationParseErrorParity"}},
 	{"mutation", "explicit file-backed mutation values", []string{"TestCLQLEnableFileMutationsStreamsExplicitFileBackedValues"}},
+	{"mutation", "explicit textfile mutation value validation", []string{"TestCLQLFileBackedTextValidationParity"}},
 	{"mutation", "stdin file-backed mutation values", []string{"TestCLQLStdinFileBackedMutationParity"}},
 	{"mutation", "home-expanded file-backed mutation paths", []string{"TestCLQLFileBackedMutationExpandsHomeParity"}},
 	{"mutation", "match-all file mutation", []string{"TestCLQLMatchAllMutationFileParity"}},

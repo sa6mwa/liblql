@@ -1408,6 +1408,61 @@ func TestCLQLEnableFileMutationsStreamsExplicitFileBackedValues(t *testing.T) {
 	}
 }
 
+func TestCLQLFileBackedTextValidationParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []struct {
+		name   string
+		file   string
+		body   []byte
+		needle string
+	}{
+		{name: "invalid UTF-8", file: "invalid.txt", body: []byte{'h', 'i', 0xff}, needle: "UTF"},
+		{name: "NUL byte", file: "nul.txt", body: []byte{'h', 'i', 0x00, 'x'}, needle: "NUL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, tc.file)
+			mutation := `textfile:/payload=` + path
+			if err := os.WriteFile(path, tc.body, 0600); err != nil {
+				t.Fatalf("write text payload: %v", err)
+			}
+			parsed, err := lql.ParseMutationsWithOptions(
+				[]string{mutation},
+				time.Unix(1700000000, 0),
+				lql.ParseMutationsOptions{EnableFileValues: true},
+			)
+			if err != nil {
+				t.Fatalf("go parse textfile mutation: %v", err)
+			}
+			var goOut bytes.Buffer
+			if err := lql.MutateStream(lql.MutateStreamRequest{
+				Reader:    bytes.NewBufferString(`{}`),
+				Writer:    &goOut,
+				Mutations: parsed,
+			}); err == nil {
+				t.Fatalf("go mutation unexpectedly accepted %s textfile", tc.name)
+			}
+
+			cmd := exec.Command(clql, "-F", "-c", "-m", mutation, `contains{f=/}`)
+			cmd.Stdin = bytes.NewBufferString(`{}`)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("clql unexpectedly accepted %s textfile: out=%q", tc.name, string(out))
+			}
+			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+				t.Fatalf("clql textfile validation exit mismatch: err=%v out=%q", err, string(out))
+			}
+			if !bytes.Contains(out, []byte(tc.needle)) {
+				t.Fatalf("clql textfile validation diagnostic missing %q: out=%q", tc.needle, string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLStdinFileBackedMutationParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
