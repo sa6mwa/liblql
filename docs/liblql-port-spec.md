@@ -536,6 +536,10 @@ Current implementation is an early slice:
 - lifecycle scaffold exists;
 - lonejson `v0.35.0` binary archive acquisition from GitHub release assets
   exists;
+- `make test` includes repository-boundary checks that fail if committed
+  repository files reference the adjacent Go source checkout through
+  `../lql`-style paths or workstation-local checkout paths; parity remains
+  routed through the pinned `parity/` Go module;
 - the public C API exposes an instantiatable receiver shell through `lql_new()`
   and method-pointer dispatch; selector/query/projection/mutation operations
   are implemented by receiver-compatible private functions and are not exported

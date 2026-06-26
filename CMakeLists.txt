@@ -176,6 +176,17 @@ if(LQL_BUILD_TESTS)
   set_tests_properties(lql.release-surface PROPERTIES
     LABELS "unit;packaging" TIMEOUT 5)
 
+  add_test(NAME lql.repository-boundaries
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_repository_boundaries.sh
+      ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(lql.repository-boundaries PROPERTIES
+    LABELS "unit;api" TIMEOUT 5)
+  add_test(NAME lql.repository-boundary-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_repository_boundaries.sh
+      --fixtures)
+  set_tests_properties(lql.repository-boundary-fixtures PROPERTIES
+    LABELS "unit;api" TIMEOUT 5)
+
   add_test(NAME lql.package-privacy-fixtures
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package.sh
       package-privacy-fixtures)
