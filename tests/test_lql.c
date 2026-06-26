@@ -2718,6 +2718,7 @@ static void expect_mutation_error_api(void) {
   FILE *source;
   FILE *out;
   lql_mutation_plan *plan;
+  lql_query_result result;
   lql_error error;
   lql_status st;
   const char *expr;
@@ -2805,20 +2806,24 @@ static void expect_mutation_error_api(void) {
       ++failures;
     }
 
+    memset(&result, 0x5a, sizeof(result));
     lql_error_init(&error);
     st = test_ctx->mutate_file_range_candidates(
-        test_ctx, NULL, NULL, source, 0u, 2u, out, 1, 0, NULL, &error);
+        test_ctx, NULL, NULL, source, 0u, 2u, out, 1, 0, &result, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
-        strcmp(error.message, "plan, file, and out are required") != 0) {
+        strcmp(error.message, "plan, file, and out are required") != 0 ||
+        !query_result_is_zero(&result)) {
       printf("candidate mutation NULL plan mismatch: %s\n", error.message);
       ++failures;
     }
 
+    memset(&result, 0x5a, sizeof(result));
     lql_error_init(&error);
     st = test_ctx->mutate_source_candidates(test_ctx, NULL, NULL, read_chunk,
-                                            NULL, out, 1, 0, NULL, &error);
+                                            NULL, out, 1, 0, &result, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
-        strcmp(error.message, "plan, read, and out are required") != 0) {
+        strcmp(error.message, "plan, read, and out are required") != 0 ||
+        !query_result_is_zero(&result)) {
       printf("source candidate mutation NULL plan mismatch: %s\n",
              error.message);
       ++failures;

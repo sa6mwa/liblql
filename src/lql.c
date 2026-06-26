@@ -266,6 +266,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_candidates_impl(
     int matches_only, lql_query_result *out_result, lql_error *error) {
   (void)self;
   if (plan == NULL || file == NULL || out == NULL) {
+    clear_query_result(out_result);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "plan, file, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
@@ -281,6 +282,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_candidates_impl(
     lql_query_result *out_result, lql_error *error) {
   (void)self;
   if (plan == NULL || read == NULL || out == NULL) {
+    clear_query_result(out_result);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "plan, read, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
