@@ -235,7 +235,7 @@ void lql_capabilities_get(lql_capabilities *out) {
   out->mutation_file_values = 1;
 }
 
-char *lql_strdup(const char *text) {
+LQL_INTERNAL_SYMBOL char *lql_strdup(const char *text) {
   size_t len;
   char *out;
   if (text == NULL) {

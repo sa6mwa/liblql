@@ -91,7 +91,6 @@ static void expect_receiver_api(void) {
 static void expect_public_utility_api(void) {
   lql_error error;
   lql_selector *selector;
-  char *copy;
   int matched;
   lql_status st;
 
@@ -113,18 +112,6 @@ static void expect_public_utility_api(void) {
     printf("status string mapping mismatch\n");
     ++failures;
   }
-
-  copy = lql_strdup("hello");
-  if (copy == NULL || strcmp(copy, "hello") != 0) {
-    printf("lql_strdup copy mismatch\n");
-    ++failures;
-  }
-  lql_dealloc(copy);
-  if (lql_strdup(NULL) != NULL) {
-    printf("lql_strdup NULL mismatch\n");
-    ++failures;
-  }
-  lql_dealloc(NULL);
 
   lql_error_init(&error);
   st = test_ctx->selector_parse(test_ctx, "/status=open", NULL, &error);

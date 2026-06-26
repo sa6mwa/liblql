@@ -156,8 +156,8 @@ typedef lql_status (*lql_write_fn)(void *user, const void *data, size_t len);
 /* Instantiatable liblql receiver shell. Fields are initialized by lql_new().
    Mutable implementation state, if any, is kept behind impl. Use
    ctx->method(ctx, ...) for all handle operations and cleanup. Standalone
-   public functions are limited to construction, diagnostics,
-   version/capability helpers, and allocator utilities. */
+   public functions are limited to construction, diagnostics, and
+   version/capability helpers. */
 struct lql {
   void *impl;
   const char *(*version)(const lql *self);
@@ -278,15 +278,6 @@ const char *lql_status_string(lql_status status);
 const char *lql_version(void);
 /* Writes the supported public API capability set to out. NULL is accepted. */
 void lql_capabilities_get(lql_capabilities *out);
-
-/* Project-owned allocation helpers. liblql-owned returned memory must be
-   released through lql_dealloc() or the documented receiver cleanup method
-   rather than through the C runtime directly. */
-void *lql_alloc(size_t size);
-void *lql_calloc(size_t count, size_t size);
-void *lql_realloc(void *ptr, size_t size);
-void lql_dealloc(void *ptr);
-char *lql_strdup(const char *text);
 
 #ifdef __cplusplus
 }

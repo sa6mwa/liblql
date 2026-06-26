@@ -11,6 +11,12 @@
 #define LQL_INTERNAL_SYMBOL
 #endif
 
+LQL_INTERNAL_SYMBOL void *lql_alloc(size_t size);
+LQL_INTERNAL_SYMBOL void *lql_calloc(size_t count, size_t size);
+LQL_INTERNAL_SYMBOL void *lql_realloc(void *ptr, size_t size);
+LQL_INTERNAL_SYMBOL void lql_dealloc(void *ptr);
+LQL_INTERNAL_SYMBOL char *lql_strdup(const char *text);
+
 typedef enum lql_node_kind {
   LQL_NODE_ALL = 0,
   LQL_NODE_AND,

@@ -66,7 +66,7 @@ instantiatable `lql *` with `lql_new()`, invoke operations as
 `ctx->operation(ctx, ...)`, and release it with `ctx->destroy(ctx)`. Selector,
 query, payload, projection, compact, mutation, and receiver cleanup operations
 are receiver methods only; standalone public functions are limited to
-construction, diagnostics, version/capability helpers, and allocator utilities.
+construction, diagnostics, and version/capability helpers.
 Project-owned code must also use receiver calls directly rather than recreating
 removed operation free functions or free-operation cleanup aliases through local
 macros or static wrapper shims.
@@ -77,16 +77,15 @@ The API should be handle-oriented and explicit about ownership:
   receiver cleanup methods;
 - result payload handles are valid only for documented callback lifetimes and
   must not imply retained candidate copies;
-- all project-allocated strings or buffers are released through
-  `lql_dealloc()`;
 - error messages are actionable and available through explicit error objects.
 
-All liblql-owned allocation must pass through the central liblql allocator
-surface (`lql_alloc()`, `lql_calloc()`, `lql_realloc()`, and
-`lql_dealloc()`) or receiver cleanup methods. Production code must not use
+All liblql-owned allocation must pass through the internal central liblql
+allocator surface or receiver cleanup methods. Production code must not use
 direct `malloc`, `calloc`, `realloc`, or `free` outside the allocator
-implementation. Publicly returned memory must be released by liblql-owned
-cleanup functions so downstream users do not cross allocator boundaries.
+implementation. Public APIs must avoid returning liblql-owned heap memory
+unless they also provide an ownership-specific receiver cleanup method, so
+downstream users do not cross allocator boundaries or depend on allocator
+wrapper functions.
 
 The API should eventually expose these surfaces:
 
@@ -546,9 +545,11 @@ Current implementation is an early slice:
   exact-name macro or static wrapper shims that recreate those removed
   operation functions and for static receiver-operation shims that should have
   been folded into the receiver-compatible implementation functions; receiver
-  cleanup fields named `*_free` are also rejected so cleanup stays on the
-  `*_destroy` receiver surface;
-- project-owned allocations have a central liblql allocator surface, and
+  cleanup fields named `*_free` and public allocator wrapper prototypes are
+  also rejected so cleanup stays on the `*_destroy` receiver surface and the
+  allocator boundary stays internal;
+- project-owned allocations have an internal central liblql allocator surface,
+  and
   direct C runtime allocation calls are limited to the allocator
   implementation; `make test` enforces this by failing on direct
   `malloc`/`calloc`/`realloc`/`free`/`strdup` calls in project-owned C sources

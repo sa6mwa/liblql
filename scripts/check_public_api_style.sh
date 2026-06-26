@@ -44,6 +44,11 @@ lql_mutate_source_candidates
 lql_mutate_json
 lql_destroy
 lql_free
+lql_alloc
+lql_calloc
+lql_realloc
+lql_dealloc
+lql_strdup
 '
 
 failed=0
