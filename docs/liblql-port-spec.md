@@ -849,8 +849,11 @@ Current implementation is an early slice:
   Go/C/Lua streaming profile that generates at least 16 MiB of NDJSON by
   default, compares C and Lua counters against Go, requires Lua peak RSS, and
   can be scaled with `LQL_BENCH_MEMORY_COUNT` and
-  `LQL_BENCH_MEMORY_BLOB_BYTES`, moving the benchmark surface toward the final
-  1 GiB/128 MiB proof without slowing the normal smoke gate;
+  `LQL_BENCH_MEMORY_BLOB_BYTES`; `make bench-1g-check` is the explicit
+  1 GiB/128 MiB profile over the same runner and validator, defaults to at
+  least 1 GiB of generated NDJSON, and is included in
+  `make prerelease-hardening` rather than normal `make release` because it is
+  intentionally expensive;
 - current local lifecycle confidence has passed `make test-all`,
   `make bench-check`, `make bench-memory-check`, `make package-verify`, and
   `make release-matrix` on the available host/toolchain set. The release matrix

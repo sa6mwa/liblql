@@ -2,7 +2,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-log="$root/build/bench-memory-check.jsonl"
+log=${LQL_BENCH_MEMORY_LOG:-$root/build/bench-memory-check.jsonl}
 min_bytes=${LQL_BENCH_MEMORY_MIN_BYTES:-16777216}
 count=${LQL_BENCH_MEMORY_COUNT:-4096}
 blob_bytes=${LQL_BENCH_MEMORY_BLOB_BYTES:-4096}

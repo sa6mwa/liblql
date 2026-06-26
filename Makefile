@@ -1,4 +1,4 @@
-.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan lua-rock lua-env lua-test bench benchmarks bench-check bench-memory-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan lua-rock lua-env lua-test bench benchmarks bench-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -14,6 +14,7 @@ help:
 	  'make benchmarks             run local parity benchmark smoke' \
 	  'make bench-check            run deterministic benchmark smoke gate' \
 	  'make bench-memory-check     run scalable Go/C/Lua streaming memory gate' \
+	  'make bench-1g-check         run 1 GiB/128 MiB streaming memory gate' \
 	  'make benchmarks-parity      require Go/C/Lua benchmark implementations' \
 	  'make format                  clang-format project C sources' \
 	  'make package                 build host package artifacts' \
@@ -79,6 +80,9 @@ bench-check: build-debug
 bench-memory-check: build-debug
 	@./scripts/check_parity_benchmark_large_memory.sh
 
+bench-1g-check: build-debug
+	@./scripts/check_parity_benchmark_1g_memory.sh
+
 benchmarks-go:
 	@./scripts/run_parity_benchmarks.sh --impl go --format json
 
@@ -98,7 +102,7 @@ finalize-slice: format test
 
 prerelease: format test-all bench-check package-verify
 
-prerelease-hardening: prerelease release-matrix
+prerelease-hardening: prerelease bench-1g-check release-matrix
 
 release:
 	@./scripts/release_gate.sh

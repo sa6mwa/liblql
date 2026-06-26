@@ -96,6 +96,14 @@ Current implementation status:
   `LQL_BENCH_MEMORY_MIN_BYTES`, so the same gate shape can be scaled toward the
   1 GiB/128 MiB requirement without changing the runner or weakening the normal
   smoke gate.
+- `make bench-1g-check` is the explicit 1 GiB/128 MiB profile. It reuses the
+  same Go/C/Lua large-memory runner and RSS validator as
+  `make bench-memory-check`, but defaults to at least 1 GiB of generated NDJSON
+  input and writes `build/bench-1g-check.jsonl`. It is configurable with
+  `LQL_BENCH_1G_COUNT`, `LQL_BENCH_1G_BLOB_BYTES`, `LQL_BENCH_1G_MIN_BYTES`,
+  and `LQL_BENCH_1G_LOG` for local reproduction or reduced-size wiring checks.
+  Because this is intentionally expensive, it is part of
+  `make prerelease-hardening` rather than the normal `make release` gate.
 - `make benchmarks-c` exercises the public liblql API for decision-only output
   and matched-only seekable plus-value payload access over a shared generated
   fixture.
@@ -517,3 +525,5 @@ Add tests or smoke gates proving:
 - `make benchmarks-parity` fails if any required implementation is missing;
 - `make bench-check` runs a small deterministic matrix suitable for local
   confidence.
+- `make bench-1g-check` runs the explicit 1 GiB/128 MiB memory profile, with
+  reduced-size overrides available only for checking target wiring.

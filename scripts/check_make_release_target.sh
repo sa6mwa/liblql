@@ -21,6 +21,14 @@ if ! grep -F 'make release' "$makefile" >/dev/null; then
   printf 'release surface: make help must advertise make release\n' >&2
   exit 1
 fi
+if ! grep -F 'make bench-1g-check' "$makefile" >/dev/null; then
+  printf 'release surface: make help must advertise make bench-1g-check\n' >&2
+  exit 1
+fi
+if ! grep -Eq '^prerelease-hardening:.*bench-1g-check' "$makefile"; then
+  printf 'release surface: prerelease-hardening must include bench-1g-check\n' >&2
+  exit 1
+fi
 
 for required in 'scripts/clean.sh' 'test-all' 'bench-check' \
   'bench-memory-check' 'release-matrix'; do
