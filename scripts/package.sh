@@ -132,9 +132,11 @@ package_one() {
   reset_build_dir_if_compiler_changed "$build_dir" "$cc"
   (cd "$ROOT_DIR" && CC="$cc" cmake --preset "$preset")
   (cd "$ROOT_DIR" && cmake --build --preset "$preset")
+  discover_package_tools "$target_id"
   rm -rf "$work_dir"
   mkdir -p "$install_root"
-  cmake --install "$build_dir" --prefix "$install_root" --strip
+  cmake --install "$build_dir" --prefix "$install_root"
+  strip_installed_artifacts "$target_id" "$install_root" "$LQL_TOOL_STRIP"
 
   cp -R "$install_root" "$lib_root"
   rm -rf "$lib_root/bin"
@@ -433,6 +435,39 @@ discover_package_tools() {
   if [ -x "$ROOT_DIR/scripts/discover_target_tools.sh" ]; then
     eval "$("$ROOT_DIR/scripts/discover_target_tools.sh" "$build_dir" "$target_id")"
   fi
+}
+
+strip_installed_artifacts() {
+  target_id=$1
+  root=$2
+  strip_tool=$3
+  list="${TMPDIR:-/tmp}/lql-package-strip-files.$$"
+
+  {
+    find "$root/bin" -type f 2>/dev/null || true
+    find "$root/lib" -type f \( -name '*.so' -o -name '*.so.*' -o \
+      -name '*.dylib' -o -name '*.dylib.*' \) 2>/dev/null || true
+  } >"$list"
+
+  if [ ! -s "$list" ]; then
+    rm -f "$list"
+    return
+  fi
+
+  if [ -z "$strip_tool" ] || ! command -v "$strip_tool" >/dev/null 2>&1; then
+    rm -f "$list"
+    printf 'package: target strip unavailable for %s\n' "$target_id" >&2
+    exit 1
+  fi
+
+  while IFS= read -r file; do
+    "$strip_tool" "$file" >/dev/null 2>&1 || {
+      rm -f "$list"
+      printf 'package: target strip failed for %s: %s\n' "$target_id" "$file" >&2
+      exit 1
+    }
+  done <"$list"
+  rm -f "$list"
 }
 
 verify_dependency_manifest() {
@@ -1028,6 +1063,43 @@ expect_readelf_tool_failure() {
   fi
 }
 
+expect_strip_tool_generation() {
+  tmp_dir=$1
+  fixture="$tmp_dir/strip-generation"
+  output="$tmp_dir/strip-generation.out"
+  strip_log="$tmp_dir/strip-generation.log"
+  fake_strip="$tmp_dir/fake-strip"
+
+  mkdir -p "$fixture/bin" "$fixture/lib"
+  printf 'fake executable\n' >"$fixture/bin/clql"
+  printf 'fake shared library\n' >"$fixture/lib/liblql.so.0.0.0"
+
+  if (strip_installed_artifacts x86_64-linux-gnu "$fixture" \
+    "$tmp_dir/no-strip") >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly accepted missing strip\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'package: target strip unavailable for x86_64-linux-gnu' \
+    "$output" >/dev/null; then
+    printf 'package privacy fixture did not report missing target strip\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+
+  cat >"$fake_strip" <<EOF
+#!/bin/sh
+printf '%s\n' "\$1" >>"$strip_log"
+EOF
+  chmod +x "$fake_strip"
+  strip_installed_artifacts x86_64-linux-gnu "$fixture" "$fake_strip"
+  if ! grep -Fx "$fixture/bin/clql" "$strip_log" >/dev/null ||
+     ! grep -Fx "$fixture/lib/liblql.so.0.0.0" "$strip_log" >/dev/null; then
+    printf 'package privacy fixture did not invoke target strip for installed artifacts\n' >&2
+    cat "$strip_log" >&2
+    exit 1
+  fi
+}
+
 check_package_privacy_fixtures() {
   tmp_dir="$ROOT_DIR/build/package-privacy-fixtures"
 
@@ -1040,6 +1112,7 @@ check_package_privacy_fixtures() {
   expect_runtime_path_failure "$tmp_dir"
   expect_target_file_tool_failure "$tmp_dir"
   expect_readelf_tool_failure "$tmp_dir"
+  expect_strip_tool_generation "$tmp_dir"
 }
 
 check_package_manifest_fixtures() {

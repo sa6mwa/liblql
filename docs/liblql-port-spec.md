@@ -1018,7 +1018,11 @@ Current implementation status:
   `lql.target-tools-fixtures` covers configured CMake cache tools,
   target-prefixed compiler siblings, unprefixed compiler siblings, `PATH`
   fallback, and refusal to accept known host Darwin inspection tools for
-  cross-built artifacts;
+  cross-built artifacts; package generation installs without CMake's ambient
+  `--strip` shortcut and strips project-owned installed binaries/shared
+  libraries with the discovered target strip tool, with negative fixture
+  coverage for missing strip and positive fixture coverage proving the selected
+  strip is invoked;
   checksum manifest fixture coverage proves release-looking tarball, rockspec,
   and source-rock artifacts under `dist/` cannot be left out of the upload
   manifest;
