@@ -233,6 +233,17 @@ if(LQL_BUILD_TESTS)
   set_tests_properties(lql.clean-fixtures PROPERTIES
     LABELS "unit;operability" TIMEOUT 5)
 
+  add_test(NAME lql.cmake-presets
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_cmake_presets.sh
+      ${CMAKE_CURRENT_SOURCE_DIR}/CMakePresets.json)
+  set_tests_properties(lql.cmake-presets PROPERTIES
+    LABELS "unit;operability" TIMEOUT 5)
+  add_test(NAME lql.cmake-presets-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_cmake_presets.sh
+      --fixtures)
+  set_tests_properties(lql.cmake-presets-fixtures PROPERTIES
+    LABELS "unit;operability" TIMEOUT 5)
+
   add_test(NAME lql.package-privacy-fixtures
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package.sh
       package-privacy-fixtures)

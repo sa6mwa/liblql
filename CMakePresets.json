@@ -12,6 +12,7 @@
       }
     },
     {"name": "debug", "inherits": "base", "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "LQL_TARGET_ID": "x86_64-linux-gnu"}},
+    {"name": "debug-lua", "inherits": "debug", "cacheVariables": {"LQL_BUILD_LUA_MODULE": "ON"}},
     {"name": "asan", "inherits": "debug", "cacheVariables": {"CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer"}},
     {"name": "release-base", "hidden": true, "inherits": "base", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "LQL_BUILD_TESTS": "OFF", "LQL_BUILD_EXAMPLES": "OFF", "LQL_BUILD_LUA_MODULE": "OFF"}},
     {"name": "x86_64-linux-gnu-release", "inherits": "release-base", "cacheVariables": {"LQL_TARGET_ID": "x86_64-linux-gnu", "LQL_TARGET_ARCH": "x86_64", "LQL_TARGET_OS": "linux", "LQL_TARGET_LIBC": "gnu"}},
@@ -24,6 +25,7 @@
   ],
   "buildPresets": [
     {"name": "debug", "configurePreset": "debug"},
+    {"name": "debug-lua", "configurePreset": "debug-lua"},
     {"name": "asan", "configurePreset": "asan"},
     {"name": "x86_64-linux-gnu-release", "configurePreset": "x86_64-linux-gnu-release"},
     {"name": "x86_64-linux-musl-release", "configurePreset": "x86_64-linux-musl-release"},

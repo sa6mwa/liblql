@@ -979,6 +979,12 @@ Current implementation status:
 - `make clean` removes generated `build/`, `dist/`, dependency cache, top-level
   Lua module output, and Lua object files while preserving Lua source files;
   `lql.clean-fixtures` proves this generated-state cleanup contract;
+- `lql.cmake-presets` verifies required debug, debug-lua, sanitizer, and
+  release target presets, base dependency-mode defaults, release target
+  identity variables, build preset mirrors, and debug/asan test presets;
+  `lql.cmake-presets-fixtures` proves missing Lua presets, wrong dependency
+  defaults, wrong release target identity, and missing release build presets
+  are rejected;
 - `make release` is the final local release gate. It cleans generated state,
   runs the full local test gate, benchmark smoke gate, scalable memory
   benchmark gate, release target matrix, package verification, and checksum
