@@ -75,6 +75,10 @@ The API should be handle-oriented and explicit about ownership:
 
 - parser/compiled selector handles are owned by the caller and destroyed with
   receiver cleanup methods;
+- selector, projection, and mutation plan handles are receiver-owned child
+  objects: they do not store allocator pointers or provide a fallback cleanup
+  domain, and callers must destroy them through the same `lql *` receiver API
+  family that created them;
 - result payload handles are valid only for documented callback lifetimes and
   must not imply retained candidate copies;
 - error messages are actionable and available through explicit error objects.
@@ -611,18 +615,18 @@ Current implementation status:
   in core sources, and `lql.handle-allocator` asserts that receiver-backed JSON
   evaluation performs its transient runtime allocations through the counting
   receiver allocator and returns to the prior outstanding allocation count;
-- selector, projection, and mutation plan ownership is allocator-consistent:
-  receiver parse methods pass the receiver allocator into handle parsers,
-  produced `lql_selector`, `lql_projection`, and `lql_mutation_plan` handles
-  remember that allocator, and handle cleanup destroys persistent parse state
-  with the same allocator; selector eval scratch buffers use the selector
-  allocator, projection visitor scratch buffers use the projection allocator,
-  and mutation runtime scratch buffers use the mutation plan allocator; the
-  public API style gate rejects direct `lql_allocator_default()` calls in
-  `src/lql_selector.c`, `src/lql_project.c`, `src/lql_eval.c`, and
-  `src/lql_mutation.c` so library core code cannot bypass receiver/handle
-  allocator boundaries; `lql.handle-allocator` constructs real receivers with
-  a counting internal allocator rather than fabricating private `lql` state,
+- selector, projection, and mutation plan ownership is receiver-consistent:
+  receiver parse methods pass the receiver allocator into handle parsers, but
+  produced `lql_selector`, `lql_projection`, and `lql_mutation_plan` handles do
+  not store allocator pointers or fallback cleanup domains; persistent parse
+  state and runtime scratch buffers are cleaned up through the active receiver
+  allocator supplied by the calling method. The public API style gate rejects
+  direct `lql_allocator_default()` calls in `src/lql_selector.c`,
+  `src/lql_project.c`, `src/lql_eval.c`, and `src/lql_mutation.c`, and also
+  rejects allocator fields inside receiver-owned child handle structs, so
+  library core code cannot bypass receiver allocator ownership by making child
+  handles self-owning. `lql.handle-allocator` constructs real receivers with a
+  counting internal allocator rather than fabricating private `lql` state,
   exercises successful and failed selector, projection, and mutation parses
   plus selector eval, projection runtime, and mutation runtime through receiver
   method dispatch, proves projection of a large unselected scalar does not

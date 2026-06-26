@@ -43,7 +43,6 @@ typedef struct mutation_item {
 } mutation_item;
 
 struct lql_mutation_plan {
-  lql_allocator *allocator;
   mutation_item *items;
   size_t count;
 };
@@ -101,10 +100,6 @@ typedef struct string_list {
   size_t count;
 } string_list;
 
-static lql_allocator *mutation_plan_allocator(const lql_mutation_plan *plan) {
-  return plan->allocator;
-}
-
 static void mutation_path_cleanup(lql_allocator *allocator,
                                   mutation_path *path) {
   size_t i;
@@ -130,13 +125,12 @@ static void mutation_item_cleanup(lql_allocator *allocator,
   memset(item, 0, sizeof(*item));
 }
 
-static void mutation_plan_cleanup_items(lql_mutation_plan *plan) {
-  lql_allocator *allocator;
+static void mutation_plan_cleanup_items(lql_allocator *allocator,
+                                        lql_mutation_plan *plan) {
   size_t i;
   if (plan == NULL) {
     return;
   }
-  allocator = mutation_plan_allocator(plan);
   for (i = 0u; i < plan->count; ++i) {
     mutation_item_cleanup(allocator, &plan->items[i]);
   }
@@ -678,10 +672,9 @@ static int split_path(lql_allocator *allocator, const char *raw,
   return 1;
 }
 
-static int append_item(lql_mutation_plan *plan, mutation_item *item) {
+static int append_item(lql_allocator *allocator, lql_mutation_plan *plan,
+                       mutation_item *item) {
   mutation_item *next;
-  lql_allocator *allocator;
-  allocator = mutation_plan_allocator(plan);
   next = (mutation_item *)allocator->realloc(
       allocator, plan->items, sizeof(plan->items[0]) * (plan->count + 1u));
   if (next == NULL) {
@@ -813,11 +806,10 @@ static int parse_brace_mutation(lql_allocator *allocator, const char *expr,
     return -1;
   }
   memset(&nested, 0, sizeof(nested));
-  nested.allocator = allocator;
   for (i = 0u; i < parts.count; ++i) {
     if (!parse_mutation_expr(allocator, parts.items[i], &nested, options,
                              error)) {
-      mutation_plan_cleanup_items(&nested);
+      mutation_plan_cleanup_items(allocator, &nested);
       string_list_cleanup(allocator, &parts);
       mutation_path_cleanup(allocator, &prefix);
       return -1;
@@ -825,8 +817,8 @@ static int parse_brace_mutation(lql_allocator *allocator, const char *expr,
   }
   for (i = 0u; i < nested.count; ++i) {
     if (!prepend_path(allocator, &nested.items[i], &prefix) ||
-        !append_item(plan, &nested.items[i])) {
-      mutation_plan_cleanup_items(&nested);
+        !append_item(allocator, plan, &nested.items[i])) {
+      mutation_plan_cleanup_items(allocator, &nested);
       string_list_cleanup(allocator, &parts);
       mutation_path_cleanup(allocator, &prefix);
       return -1;
@@ -949,7 +941,7 @@ static int parse_mutation_expr(lql_allocator *allocator, const char *raw,
     }
     item.kind = MUTATION_REMOVE;
     if (!split_path(allocator, expr, &item.path, error) ||
-        !append_item(plan, &item)) {
+        !append_item(allocator, plan, &item)) {
       mutation_item_cleanup(allocator, &item);
       allocator->destroy(allocator, expr);
       return 0;
@@ -976,7 +968,7 @@ static int parse_mutation_expr(lql_allocator *allocator, const char *raw,
     item.kind = MUTATION_INCREMENT;
     item.delta = delta;
     if (!split_path(allocator, expr, &item.path, error) ||
-        !append_item(plan, &item)) {
+        !append_item(allocator, plan, &item)) {
       mutation_item_cleanup(allocator, &item);
       allocator->destroy(allocator, expr);
       return 0;
@@ -1020,7 +1012,7 @@ static int parse_mutation_expr(lql_allocator *allocator, const char *raw,
       return 0;
     }
     if (!split_path(allocator, path_text, &item.path, error) ||
-        !append_item(plan, &item)) {
+        !append_item(allocator, plan, &item)) {
       mutation_item_cleanup(allocator, &item);
       allocator->destroy(allocator, expr);
       return 0;
@@ -1046,7 +1038,7 @@ static int parse_mutation_expr(lql_allocator *allocator, const char *raw,
     return 0;
   }
   if (!split_path(allocator, path_text, &item.path, error) ||
-      !append_item(plan, &item)) {
+      !append_item(allocator, plan, &item)) {
     mutation_item_cleanup(allocator, &item);
     allocator->destroy(allocator, expr);
     return 0;
@@ -1079,7 +1071,6 @@ static lql_status mutation_plan_parse_with_options_method(
   if (plan == NULL) {
     return LQL_STATUS_NO_MEMORY;
   }
-  plan->allocator = allocator;
   for (i = 0u; i < expr_count; ++i) {
     if (exprs[i] == NULL) {
       continue;
@@ -1128,7 +1119,6 @@ mutation_plan_count_method(const lql *self, const lql_mutation_plan *plan) {
 static void
 mutation_plan_destroy_method(lql *self, lql_mutation_plan *plan) {
   lql_allocator *allocator;
-  size_t i;
   if (plan == NULL) {
     return;
   }
@@ -1136,10 +1126,7 @@ mutation_plan_destroy_method(lql *self, lql_mutation_plan *plan) {
   if (allocator == NULL) {
     return;
   }
-  for (i = 0u; i < plan->count; ++i) {
-    mutation_item_cleanup(allocator, &plan->items[i]);
-  }
-  allocator->destroy(allocator, plan->items);
+  mutation_plan_cleanup_items(allocator, plan);
   allocator->destroy(allocator, plan);
 }
 

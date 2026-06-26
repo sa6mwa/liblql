@@ -309,6 +309,35 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  child_handle_allocator_hits=$(
+    for file in "$source_root/src/lql_internal.h" "$source_root/src/lql_project.c" \
+      "$source_root/src/lql_mutation.c"; do
+      [ -f "$file" ] || continue
+      awk '
+        /^[[:space:]]*struct[[:space:]]+lql_selector[[:space:]]*\{/ {
+          in_handle = 1
+        }
+        /^[[:space:]]*struct[[:space:]]+lql_projection[[:space:]]*\{/ {
+          in_handle = 1
+        }
+        /^[[:space:]]*struct[[:space:]]+lql_mutation_plan[[:space:]]*\{/ {
+          in_handle = 1
+        }
+        in_handle && /lql_allocator[[:space:]]+\*allocator[[:space:]]*;/ {
+          print FILENAME ":" FNR ":" $0
+        }
+        in_handle && /^[[:space:]]*};/ {
+          in_handle = 0
+        }
+      ' "$file"
+    done || true
+  )
+  if [ -n "$child_handle_allocator_hits" ]; then
+    printf 'public API style: receiver-owned child handles must not store allocators\n' >&2
+    printf '%s\n' "$child_handle_allocator_hits" >&2
+    failed=1
+  fi
+
   lonejson_default_allocator_hits=$(
     grep -En 'lonejson_new[[:space:]]*\([[:space:]]*NULL[[:space:]]*,' \
       "$source_root/src/lql_selector.c" \

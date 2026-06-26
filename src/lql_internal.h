@@ -111,7 +111,6 @@ typedef struct lql_node {
 } lql_node;
 
 struct lql_selector {
-  lql_allocator *allocator;
   lql_node root;
   size_t hit_count;
 };

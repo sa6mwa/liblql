@@ -114,8 +114,8 @@ static int expect_selector_success_uses_allocator(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  if (selector->allocator != &counter.api || counter.alloc_count == 0u) {
-    printf("selector allocator was not recorded or used\n");
+  if (counter.alloc_count == 0u) {
+    printf("selector allocator was not used\n");
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;

@@ -1522,7 +1522,6 @@ lql_parse_selector_internal(lql *self, const char *expr, int or_mode,
     if (selector == NULL) {
       return LQL_STATUS_NO_MEMORY;
     }
-    selector->allocator = allocator;
     selector->root.kind = LQL_NODE_ALL;
     *out = selector;
     return LQL_STATUS_OK;
@@ -1537,7 +1536,6 @@ lql_parse_selector_internal(lql *self, const char *expr, int or_mode,
     token_list_cleanup(ctx, &tokens);
     return LQL_STATUS_NO_MEMORY;
   }
-  selector->allocator = allocator;
   if (tokens.count == 0u) {
     selector->root.kind = LQL_NODE_ALL;
   } else if (tokens.count == 1u) {

@@ -60,7 +60,6 @@ typedef struct projection_state {
 } projection_state;
 
 struct lql_projection {
-  lql_allocator *allocator;
   projection_path *paths;
   size_t path_count;
 };
@@ -361,11 +360,10 @@ static int projection_paths_have_container_conflict(const projection_path *a,
   return 0;
 }
 
-static int add_path(lql_projection *projection, projection_path *path) {
+static int add_path(lql_allocator *allocator, lql_projection *projection,
+                    projection_path *path) {
   projection_path *next;
-  lql_allocator *allocator;
   size_t i;
-  allocator = projection->allocator;
   if (path->segment_count == 0u) {
     return 1;
   }
@@ -956,7 +954,6 @@ static lql_status projection_parse_method(
   if (projection == NULL) {
     return LQL_STATUS_NO_MEMORY;
   }
-  projection->allocator = allocator;
   for (i = 0u; i < field_count; ++i) {
     if (!parse_projection_path(allocator, fields[i], &path)) {
       self->projection_destroy(self, projection);
@@ -964,7 +961,7 @@ static lql_status projection_parse_method(
                     "invalid or unsupported projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
-    if (!add_path(projection, &path)) {
+    if (!add_path(allocator, projection, &path)) {
       projection_path_cleanup(allocator, &path);
       self->projection_destroy(self, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
