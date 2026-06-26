@@ -1019,6 +1019,9 @@ Current implementation status:
   contract through `client:matches_json()`, so the Lua facade proves this
   behavior through public liblql receiver calls rather than relying on `clql` or
   Go parity fixtures;
+- Lua direct-core smoke tests assert projection field normalization through
+  `client:project_json()`, including whitespace trimming, blank-field elision,
+  duplicate-field idempotence, and structured blank-only field-set errors;
 - C SDK mutation tests assert explicit file-backed text values reject invalid
   UTF-8 and NUL bytes at execution time with actionable diagnostics instead of
   writing invalid JSON string content;

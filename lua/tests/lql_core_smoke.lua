@@ -98,6 +98,23 @@ projected = assert_no_error(projected, err, "core project_json")
 assert_equal(projected, '{"id":"b","count":2}\n',
              "core project_json output")
 
+projected, err = client:project_json('/status="open"',
+                                    '{"status":"open","id":"trimmed",' ..
+                                      '"meta":{"trace":7,"drop":true}}',
+                                    {" /id ", "", "/meta/trace", "/id"})
+projected = assert_no_error(projected, err,
+                            "core project_json normalized fields")
+assert_equal(projected, '{"id":"trimmed","meta":{"trace":7}}\n',
+             "core project_json normalized fields output")
+
+local blank_projection, blank_projection_err =
+  client:project_json('/status="open"', '{"status":"open","id":"x"}',
+                      {"  ", "\t"})
+if blank_projection ~= nil or not blank_projection_err or
+    (blank_projection_err.stderr or "") == "" then
+  fail("expected structured core blank projection field error")
+end
+
 local mutated
 mutated, err = client:mutate_json('/status="open"',
                                  '{"status":"open","state":{"old":true}}',
