@@ -711,9 +711,10 @@ Current implementation is an early slice:
   and explicit file-backed parse options, file-backed mutation value execution
   over buffered and seekable file-range APIs, source-backed projection,
   compacting, and mutation over fragmented caller reads, source callback read
-  failures, mutation parse-error invariants, parser failure output-handle
-  clearing, projection invalid-argument `out_found` state, and query callback
-  failure status propagation. Query and candidate-stream mutation
+  failures with empty failed-output state, mutation parse-error invariants,
+  parser failure output-handle clearing, projection invalid-argument
+  `out_found` state, and query callback failure status propagation. Query and
+  candidate-stream mutation
   invalid-argument failures now also assert a safe zeroed `lql_query_result`
   output state. Decision and match callback failures now assert actionable
   diagnostics and partial result-counter propagation for seekable and

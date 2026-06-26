@@ -3378,12 +3378,23 @@ static void expect_source_mutation_api(void) {
       printf("source mutation NULL out mismatch: %s\n", error.message);
       ++failures;
     }
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source mutation read-failure tmpfile failed\n");
+      ++failures;
+      test_ctx->mutation_plan_destroy(test_ctx, plan);
+      return;
+    }
     lql_error_init(&error);
     st = test_ctx->mutate_source_paths(test_ctx, plan, read_fail_once, NULL,
                                        out, &error);
     if (st != LQL_STATUS_JSON_ERROR ||
         strcmp(error.message, "mutation source read failed") != 0) {
       printf("source mutation read error mismatch: %s\n", error.message);
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) || len != 0u) {
+      printf("source mutation read error wrote output: %s\n", buf);
       ++failures;
     }
   }
