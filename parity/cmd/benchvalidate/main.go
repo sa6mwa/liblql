@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -31,13 +32,20 @@ type record struct {
 }
 
 func main() {
-	if err := validate(os.Stdin); err != nil {
+	var opts validateOptions
+	flag.Int64Var(&opts.MaxCPeakRSSBytes, "max-c-peak-rss-bytes", 0, "fail supported C records whose peak_rss_bytes exceeds this value")
+	flag.Parse()
+	if err := validate(os.Stdin, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "benchvalidate: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func validate(r io.Reader) error {
+type validateOptions struct {
+	MaxCPeakRSSBytes int64
+}
+
+func validate(r io.Reader, opts validateOptions) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	line := 0
@@ -60,7 +68,7 @@ func validate(r io.Reader) error {
 		if err := json.Unmarshal(text, &rec); err != nil {
 			return fmt.Errorf("line %d: invalid record shape: %w", line, err)
 		}
-		if err := validateRecord(line, rec); err != nil {
+		if err := validateRecord(line, rec, opts); err != nil {
 			return err
 		}
 		key := fmt.Sprintf("%s\x00%s\x00%s\x00%s", rec.Impl, rec.Dataset, rec.Selector, rec.Mode)
@@ -117,7 +125,7 @@ func requireKeys(line int, raw map[string]json.RawMessage) error {
 	return nil
 }
 
-func validateRecord(line int, rec record) error {
+func validateRecord(line int, rec record, opts validateOptions) error {
 	if rec.Schema != "liblql.parity_benchmark.v1" {
 		return fmt.Errorf("line %d: unsupported schema %q", line, rec.Schema)
 	}
@@ -177,6 +185,10 @@ func validateRecord(line int, rec record) error {
 		}
 		if *rec.PeakRSSBytes == 0 {
 			return fmt.Errorf("line %d: %s/%s records must report positive peak_rss_bytes", line, rec.Impl, rec.Mode)
+		}
+		if rec.Impl == "c" && opts.MaxCPeakRSSBytes > 0 &&
+			*rec.PeakRSSBytes > opts.MaxCPeakRSSBytes {
+			return fmt.Errorf("line %d: c/%s peak_rss_bytes %d exceeds max %d", line, rec.Mode, *rec.PeakRSSBytes, opts.MaxCPeakRSSBytes)
 		}
 	}
 	if isDecisionOnlyMode(rec.Mode) {

@@ -821,7 +821,10 @@ Current implementation is an early slice:
   `ns_per_op`, Lua plus-value benchmark modes count bytes through
   `match.write_json(callback)` instead of `match.json()` materialization, while
   Go and C helper records also report OS `getrusage` peak RSS as
-  `peak_rss_bytes` for the benchmark schema;
+  `peak_rss_bytes` for the benchmark schema; `make bench-check` enforces a
+  supported-C smoke RSS ceiling through `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`
+  defaulting to 128 MiB, which proves memory-gate wiring but is not yet the
+  final large-fixture proof;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and

@@ -71,6 +71,7 @@ bench-check: build-debug
 	@LQL_BENCH_SUITE=smoke ./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --check --require go,c,lua > build/bench-check.jsonl
 	@./scripts/check_parity_benchmark_failures.sh
 	@./scripts/check_parity_benchmark_fixtures.sh
+	@./scripts/check_parity_benchmark_memory.sh build/bench-check.jsonl
 	@./scripts/check_parity_benchmark_schema.sh
 
 benchmarks-go:
