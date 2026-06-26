@@ -150,7 +150,8 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 		"reuse_selector", "reparse_selector_each_run",
 		"decision_only_source_selector", "plus_value_plan",
 		"plus_value_source_selector", "plus_value_openjson_selector",
-		"plus_value_openjson_plan":
+		"plus_value_openjson_plan", "mutate_file_selector",
+		"mutate_file_plan", "mutate_source_selector":
 	default:
 		return fmt.Errorf("line %d: unsupported mode %q", line, rec.Mode)
 	}
@@ -246,6 +247,11 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 			return fmt.Errorf("line %d: c/%s must use seekable_range payloads for fixture-backed plus-value benchmarks", line, rec.Mode)
 		}
 	}
+	if isMutationMode(rec.Mode) {
+		if rec.Payloads != 0 || rec.PayloadBytes != 0 || rec.PayloadSourceType != "none" {
+			return fmt.Errorf("line %d: mutation records must not report query payloads", line)
+		}
+	}
 	return nil
 }
 
@@ -261,9 +267,16 @@ func isPlusValueMode(mode string) bool {
 		mode == "plus_value_openjson_selector" || mode == "plus_value_openjson_plan"
 }
 
+func isMutationMode(mode string) bool {
+	return mode == "mutate_file_selector" ||
+		mode == "mutate_file_plan" ||
+		mode == "mutate_source_selector"
+}
+
 func isSourceMode(mode string) bool {
 	return mode == "decision_only_source_selector" ||
-		mode == "plus_value_source_selector"
+		mode == "plus_value_source_selector" ||
+		mode == "mutate_source_selector"
 }
 
 func isPayloadSourceType(value string) bool {

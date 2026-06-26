@@ -30,13 +30,29 @@ local function run_once(client, selector_arg)
   local matches = 0
   local result
   local err
+  local mutated
   local source_file
+  local mutation_arg = {"/bench/touched=true"}
+  local mutation_plan
   local function read_source()
     local chunk = source_file:read(1024)
     if not chunk or #chunk == 0 then
       return nil
     end
     return chunk
+  end
+  local function count_lines(text)
+    local count = 0
+    local pos = 1
+    while true do
+      local next_pos = string.find(text, "\n", pos, true)
+      if not next_pos then
+        break
+      end
+      count = count + 1
+      pos = next_pos + 1
+    end
+    return count
   end
   if mode == "plus_value_selector" or mode == "plus_value_plan" or
       mode == "plus_value_openjson_selector" or
@@ -50,6 +66,30 @@ local function run_once(client, selector_arg)
       end
       payloads = payloads + 1
     end)
+  elseif mode == "mutate_file_selector" or mode == "mutate_file_plan" then
+    if mode == "mutate_file_plan" then
+      mutation_plan, err = client:mutation_plan_parse(mutation_arg)
+      if err then
+        die(err.stderr or "mutation plan parse failed")
+      end
+      mutation_arg = mutation_plan
+    end
+    mutated, err = client:mutate_file(selector_arg, fixture, mutation_arg,
+                                      {compact = true, matches_only = true})
+    if err then
+      die(err.stderr or "mutate_file failed")
+    end
+    matches = count_lines(mutated)
+  elseif mode == "mutate_source_selector" then
+    source_file = assert(io.open(fixture, "rb"))
+    mutated, err = client:mutate_source(selector_arg, read_source,
+                                        mutation_arg,
+                                        {compact = true, matches_only = true})
+    source_file:close()
+    if err then
+      die(err.stderr or "mutate_source failed")
+    end
+    matches = count_lines(mutated)
   elseif mode == "plus_value_source_selector" then
     source_file = assert(io.open(fixture, "rb"))
     result, err = client:each_match_source(expr, read_source, function(match)

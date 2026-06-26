@@ -1,3 +1,10 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
+
 #include "lql/lql.h"
 
 #include <lauxlib.h>
@@ -6,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 #if LUA_VERSION_NUM != 505
 #error "liblql Lua bindings support Lua 5.5 only"
@@ -461,6 +469,35 @@ static int lua_lql_fail(lua_State *L, const lql_error *error) {
   lua_pushnil(L);
   lua_lql_push_error(L, error);
   return 2;
+}
+
+static lql_status lua_lql_file_size(FILE *file, lql_uint64 *out_size,
+                                    lql_error *error) {
+  off_t size;
+
+  if (file == NULL || out_size == NULL) {
+    lua_lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                      "invalid Lua file size arguments");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (fseeko(file, (off_t)0, SEEK_END) != 0) {
+    lua_lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                      "failed to seek Lua input file");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  size = ftello(file);
+  if (size < (off_t)0) {
+    lua_lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                      "failed to tell Lua input file size");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (fseeko(file, (off_t)0, SEEK_SET) != 0) {
+    lua_lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                      "failed to rewind Lua input file");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  *out_size = (lql_uint64)size;
+  return LQL_STATUS_OK;
 }
 
 static void lua_lql_record_callback_error(lua_State *L,
@@ -961,34 +998,6 @@ static lql_status lua_lql_on_project_payload(void *user,
     return LQL_STATUS_JSON_ERROR;
   }
   return st;
-}
-
-static lql_status lua_lql_on_mutate_file(void *user,
-                                         const lql_query_decision *decision) {
-  lua_lql_file_state *state;
-  lql_payload payload;
-  lql_status st;
-
-  state = (lua_lql_file_state *)user;
-  memset(&payload, 0, sizeof(payload));
-  payload.kind = LQL_PAYLOAD_SEEKABLE_RANGE;
-  payload.index = decision->index;
-  payload.offset = decision->offset;
-  payload.size = decision->size;
-  payload.source = state->source;
-  if (decision->matched) {
-    st = state->ctx->mutate_file_range_paths(
-        state->ctx, state->mutation_plan, state->source, decision->offset,
-        decision->size, state->out, state->error);
-    if (st == LQL_STATUS_OK) {
-      st = lua_lql_finish_candidate(state->out);
-    }
-    return st;
-  }
-  if (state->matches_only) {
-    return LQL_STATUS_OK;
-  }
-  return lua_lql_write_file_payload(state, &payload);
 }
 
 static lql_status lua_lql_parse_mutation_plan(lua_State *L, lql *ctx,
@@ -2076,10 +2085,11 @@ static int lua_lql_mutate_file(lua_State *L) {
   lql_error error;
   lql_status st;
   lql_query_options options;
+  lql_query_result result;
   FILE *input;
   FILE *out;
   lua_lql_buffer buffer;
-  lua_lql_file_state state;
+  lql_uint64 input_size;
   int selector_owned;
   int plan_owned;
 
@@ -2091,9 +2101,10 @@ static int lua_lql_mutate_file(lua_State *L) {
   plan_owned = 0;
   input = NULL;
   out = NULL;
+  input_size = 0u;
   lua_lql_options_query(L, 5, &options);
   lua_lql_buffer_init(&buffer, L);
-  memset(&state, 0, sizeof(state));
+  memset(&result, 0, sizeof(result));
   lql_error_init(&error);
   st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
   if (st == LQL_STATUS_OK) {
@@ -2118,16 +2129,13 @@ static int lua_lql_mutate_file(lua_State *L) {
     }
   }
   if (st == LQL_STATUS_OK) {
-    state.ctx = client->ctx;
-    state.source = input;
-    state.out = out;
-    state.compact = lua_lql_options_bool(L, 5, "compact");
-    state.matches_only = lua_lql_options_bool(L, 5, "matches_only");
-    state.mutation_plan = plan;
-    state.error = &error;
-    st = client->ctx->query_file_decisions_with_options(
-        client->ctx, selector, input, &options, lua_lql_on_mutate_file, &state,
-        NULL, &error);
+    st = lua_lql_file_size(input, &input_size, &error);
+  }
+  if (st == LQL_STATUS_OK) {
+    st = client->ctx->mutate_file_range_candidates_with_options(
+        client->ctx, selector, plan, input, 0u, input_size, out,
+        lua_lql_options_bool(L, 5, "compact"),
+        lua_lql_options_bool(L, 5, "matches_only"), &options, &result, &error);
   }
   if (st == LQL_STATUS_OK) {
     st = lua_lql_file_to_buffer(out, &buffer);

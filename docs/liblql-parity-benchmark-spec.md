@@ -87,7 +87,13 @@ Current implementation status:
   128 MiB. It includes
   direct callback-source decision and plus-value selector modes so Go, C, and
   Lua exercise non-seekable source readers and callback-scoped spooled payload
-  access through their public SDK surfaces. This proves
+  access through their public SDK surfaces. It also runs file-backed and
+  callback-source mutation modes with compact matches-only output. C writes
+  mutated candidates to `/dev/null` through public liblql receiver methods;
+  Go writes through the pinned `QueryMutateStreamWithResult` path; Lua uses
+  the public Lua facade over liblql. Mutation benchmark records compare
+  candidate and match counts but deliberately leave query payload counters at
+  zero because mutated output is not a query payload. This proves
   the RSS gate wiring and catches obvious materialization regressions in the
   smoke matrix; it is not the final large-fixture memory proof. The smoke gate
   is explicit and is not part of `make test-all`; `make prerelease` runs it
@@ -95,9 +101,10 @@ Current implementation status:
 - `make bench-memory-check` runs a separate scalable Go/C/Lua streaming memory
   profile over a generated NDJSON fixture. By default it generates at least
   16 MiB of input using bounded per-record padding, runs
-  `decision_only_selector`, `plus_value_selector`, and
-  `plus_value_openjson_selector`, compares C and Lua counters against the Go
-  oracle, validates supported C peak RSS against
+  `decision_only_selector`, `reuse_selector`, `reparse_selector_each_run`,
+  `decision_only_source_selector`, `plus_value_selector`,
+  `plus_value_source_selector`, and `plus_value_openjson_selector`, compares C
+  and Lua counters against the Go oracle, validates supported C peak RSS against
   `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`, and validates supported Lua peak RSS
   against `LQL_BENCH_MAX_LUA_PEAK_RSS_BYTES` or the C ceiling when unset. The
   profile forbids unsupported records and requires host process RSS timing for
@@ -132,13 +139,20 @@ Current implementation status:
   `/records[]/...` selection over the single-root JSON fixture.
 - the current executable mode matrix covers `decision_only_selector`,
   `decision_only_plan`, `reuse_selector`, `reparse_selector_each_run`,
-  `plus_value_selector`, `plus_value_plan`, `plus_value_openjson_selector`,
-  and `plus_value_openjson_plan`.
+  `decision_only_source_selector`, `plus_value_selector`, `plus_value_plan`,
+  `plus_value_source_selector`, `plus_value_openjson_selector`,
+  `plus_value_openjson_plan`, `mutate_file_selector`, `mutate_file_plan`, and
+  `mutate_source_selector`.
   Plus-value records assert equivalent payload counts and payload byte totals,
   while C exposes `seekable_range` payloads for seekable fixture files,
   including current open-read benchmark modes, without retaining candidate JSON
   after callback scope. Spool payloads remain reserved for non-seekable
   callback-source open-read modes.
+  Mutation benchmark records assert equivalent candidate and match counts while
+  timing compact matches-only mutation to a discard sink on C and Go. Lua
+  currently returns mutated output as a Lua string through its public facade, so
+  Lua mutation is included in the smoke parity matrix but not in the scalable
+  memory profile until the Lua facade exposes a streaming mutation output sink.
   The current C plan benchmark reuses the parsed public `lql_selector` handle;
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
   The C native helper and Lua facade runner report `ns_per_op`; the schema
@@ -159,7 +173,9 @@ Current implementation status:
   `steady_state`,
   counts plus-value payload bytes through `match.write_json(callback)` rather
   than `match.json()` materialization, and emits timed stable JSON Lines
-  records.
+  records. Lua `mutate_file` uses liblql's native seekable candidate mutation
+  receiver path rather than re-querying and mutating with the same `FILE *`;
+  this keeps the parser stream position stable on larger fixtures.
 - `make benchmarks-parity` requires Go, C, and Lua benchmark implementations
   and fails on missing runners, strict-validation unsupported records, or
   counter divergence.

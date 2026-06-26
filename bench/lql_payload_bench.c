@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/types.h>
 #include <time.h>
 
 typedef struct payload_counts {
@@ -23,6 +24,8 @@ typedef struct payload_counts {
 typedef struct bench_source {
   FILE *file;
 } bench_source;
+
+static const char *mutation_exprs[] = {"/bench/touched=true"};
 
 static lql_status observe_decision(void *user,
                                    const lql_query_decision *decision) {
@@ -94,6 +97,26 @@ static lql_uint64 peak_rss_bytes(void) {
 #endif
 }
 
+static lql_status seek_end_size(FILE *file, lql_uint64 *out_size) {
+  off_t size;
+
+  if (file == NULL || out_size == NULL) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (fseeko(file, (off_t)0, SEEK_END) != 0) {
+    return LQL_STATUS_JSON_ERROR;
+  }
+  size = ftello(file);
+  if (size < (off_t)0) {
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (fseeko(file, (off_t)0, SEEK_SET) != 0) {
+    return LQL_STATUS_JSON_ERROR;
+  }
+  *out_size = (lql_uint64)size;
+  return LQL_STATUS_OK;
+}
+
 static lql_status count_payload(void *user, const lql_query_match *match) {
   payload_counts *counts;
   lql_status st;
@@ -147,10 +170,12 @@ int main(int argc, char **argv) {
   lql *ctx;
   lql_selector *selector;
   lql_query_result result;
+  lql_mutation_plan *mutation_plan;
   lql_error error;
   lql_status st;
   payload_counts counts;
   bench_source source;
+  lql_uint64 fixture_size;
   clock_t start;
   clock_t end;
 
@@ -165,6 +190,7 @@ int main(int argc, char **argv) {
   lql_error_init(&error);
   ctx = NULL;
   selector = NULL;
+  mutation_plan = NULL;
   st = lql_new(&ctx, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "lql_payload_bench: create lql: %s\n", error.message);
@@ -182,6 +208,14 @@ int main(int argc, char **argv) {
   fixture = fopen(fixture_path, "rb");
   if (fixture == NULL) {
     fprintf(stderr, "lql_payload_bench: failed to open fixture\n");
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  st = seek_end_size(fixture, &fixture_size);
+  if (st != LQL_STATUS_OK) {
+    fprintf(stderr, "lql_payload_bench: failed to determine fixture size\n");
+    fclose(fixture);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
@@ -249,6 +283,41 @@ int main(int argc, char **argv) {
     st = ctx->query_file_matches(ctx, selector, fixture, count_payload, &counts,
                                  &result, &error);
     fclose(sink);
+  } else if (strcmp(mode, "mutate_file_selector") == 0 ||
+             strcmp(mode, "mutate_file_plan") == 0) {
+    sink = fopen("/dev/null", "wb");
+    if (sink == NULL) {
+      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
+      fclose(fixture);
+      ctx->selector_destroy(ctx, selector);
+      ctx->destroy(ctx);
+      return 1;
+    }
+    st = ctx->mutation_plan_parse(ctx, mutation_exprs, 1u, &mutation_plan,
+                                  &error);
+    if (st == LQL_STATUS_OK) {
+      st = ctx->mutate_file_range_candidates(ctx, selector, mutation_plan,
+                                             fixture, 0u, fixture_size, sink,
+                                             1, 1, &result, &error);
+    }
+    fclose(sink);
+  } else if (strcmp(mode, "mutate_source_selector") == 0) {
+    sink = fopen("/dev/null", "wb");
+    if (sink == NULL) {
+      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
+      fclose(fixture);
+      ctx->selector_destroy(ctx, selector);
+      ctx->destroy(ctx);
+      return 1;
+    }
+    st = ctx->mutation_plan_parse(ctx, mutation_exprs, 1u, &mutation_plan,
+                                  &error);
+    if (st == LQL_STATUS_OK) {
+      st = ctx->mutate_source_candidates(ctx, selector, mutation_plan,
+                                         read_bench_source, &source, sink, 1, 1,
+                                         &result, &error);
+    }
+    fclose(sink);
   } else {
     fprintf(stderr, "lql_payload_bench: unsupported mode: %s\n", mode);
     fclose(fixture);
@@ -258,6 +327,7 @@ int main(int argc, char **argv) {
   }
   end = clock();
   fclose(fixture);
+  ctx->mutation_plan_destroy(ctx, mutation_plan);
   ctx->selector_destroy(ctx, selector);
 
   if (st != LQL_STATUS_OK) {

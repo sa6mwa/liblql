@@ -42,6 +42,8 @@ type readerOnly struct {
 	reader io.Reader
 }
 
+var benchmarkMutations = []string{"/bench/touched=true"}
+
 func (r readerOnly) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
@@ -100,15 +102,15 @@ func main() {
 		payloadSourceType = "callback_payload"
 	}
 	if submode == "steady_state" {
-		if _, _, _, err := runQuery(file, sel, expr, mode); err != nil {
-			fmt.Fprintf(os.Stderr, "lqlbench: warmup query stream: %v\n", err)
+		if _, _, _, err := runBenchmark(file, sel, expr, mode); err != nil {
+			fmt.Fprintf(os.Stderr, "lqlbench: warmup stream: %v\n", err)
 			os.Exit(1)
 		}
 	}
 	start := time.Now()
-	result, payloads, payloadBytes, err := runQuery(file, sel, expr, mode)
+	result, payloads, payloadBytes, err := runBenchmark(file, sel, expr, mode)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "lqlbench: query stream: %v\n", err)
+		fmt.Fprintf(os.Stderr, "lqlbench: stream: %v\n", err)
 		os.Exit(1)
 	}
 	nsPerOp := time.Since(start).Nanoseconds()
@@ -140,6 +142,13 @@ func main() {
 	}
 }
 
+func runBenchmark(file *os.File, sel lql.Selector, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
+	if isMutationMode(mode) {
+		return runMutation(file, sel, expr, mode)
+	}
+	return runQuery(file, sel, expr, mode)
+}
+
 func peakRSSBytes() *int64 {
 	var usage syscall.Rusage
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &usage); err != nil {
@@ -153,6 +162,48 @@ func peakRSSBytes() *int64 {
 		value *= 1024
 	}
 	return &value
+}
+
+func runMutation(file *os.File, sel lql.Selector, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
+	if _, err := file.Seek(0, 0); err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	parsed, err := lql.ParseMutations(benchmarkMutations, time.Unix(1700000000, 0))
+	if err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	request := lql.QueryMutateStreamRequest{
+		Ctx:          context.Background(),
+		Reader:       file,
+		Writer:       io.Discard,
+		Selector:     sel,
+		Mutations:    parsed,
+		MutateMode:   lql.MutateModeAuto,
+		MaxMatches:   0,
+		MaxBytesRead: 0,
+	}
+	if mode == "mutate_source_selector" {
+		request.Reader = readerOnly{reader: file}
+	}
+	if mode == "mutate_file_plan" {
+		plan, err := lql.NewQueryStreamPlan(sel)
+		if err != nil {
+			return lql.QueryStreamResult{}, 0, 0, err
+		}
+		mutatePlan, err := lql.NewMutateStreamPlan(parsed)
+		if err != nil {
+			return lql.QueryStreamResult{}, 0, 0, err
+		}
+		request.Selector = lql.Selector{}
+		request.QueryPlan = plan
+		request.Mutations = nil
+		request.MutatePlan = mutatePlan
+	}
+	result, err := lql.QueryMutateStreamWithResult(request)
+	if err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	return result.Query, 0, 0, nil
 }
 
 func runQuery(file *os.File, sel lql.Selector, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
@@ -225,12 +276,21 @@ func isSupportedMode(mode string) bool {
 		mode == "plus_value_plan" ||
 		mode == "plus_value_source_selector" ||
 		mode == "plus_value_openjson_selector" ||
-		mode == "plus_value_openjson_plan"
+		mode == "plus_value_openjson_plan" ||
+		mode == "mutate_file_selector" ||
+		mode == "mutate_file_plan" ||
+		mode == "mutate_source_selector"
 }
 
 func isPlanMode(mode string) bool {
 	return mode == "decision_only_plan" || mode == "plus_value_plan" ||
 		mode == "plus_value_openjson_plan"
+}
+
+func isMutationMode(mode string) bool {
+	return mode == "mutate_file_selector" ||
+		mode == "mutate_file_plan" ||
+		mode == "mutate_source_selector"
 }
 
 func isPlusValueMode(mode string) bool {
@@ -241,7 +301,8 @@ func isPlusValueMode(mode string) bool {
 
 func isSourceMode(mode string) bool {
 	return mode == "decision_only_source_selector" ||
-		mode == "plus_value_source_selector"
+		mode == "plus_value_source_selector" ||
+		mode == "mutate_source_selector"
 }
 
 func sha256File(file *os.File) (string, error) {

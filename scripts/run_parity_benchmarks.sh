@@ -222,6 +222,15 @@ emit_unsupported_impl() {
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
       "plus_value_openjson_plan" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "mutate_file_selector" 0 0 0 0 0 "none" null null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "mutate_file_plan" 0 0 0 0 0 "none" null null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "mutate_source_selector" 0 0 0 0 0 "none" null null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
   done < "$case_matrix"
 }
 
@@ -703,7 +712,10 @@ selected_modes() {
         plus_value_plan \
         plus_value_source_selector \
         plus_value_openjson_selector \
-        plus_value_openjson_plan
+        plus_value_openjson_plan \
+        mutate_file_selector \
+        mutate_file_plan \
+        mutate_source_selector
       ;;
     memory)
       printf '%s\n' \
