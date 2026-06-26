@@ -5,6 +5,14 @@ header=${1:?usage: check_public_api_style.sh HEADER [SHARED_LIBRARY] [SOURCE_ROO
 shared=${2:-}
 source_root=${3:-}
 
+allowed_exports='
+lql_capabilities_get
+lql_error_init
+lql_new
+lql_status_string
+lql_version
+'
+
 forbidden='
 lql_selector_parse
 lql_selector_parse_or
@@ -99,6 +107,17 @@ if [ -n "$shared" ] && [ -f "$shared" ]; then
     for symbol in $forbidden; do
       if printf '%s\n' "$symbols" | grep -Eq "^_?${symbol}$"; then
         printf 'public API style: forbidden exported operation/cleanup symbol in %s: %s\n' "$shared" "$symbol" >&2
+        failed=1
+      fi
+    done
+    exported_lql=$(
+      printf '%s\n' "$symbols" |
+        sed -n 's/^_\(lql_.*\)$/\1/p; /^lql_/p' |
+        sort -u
+    )
+    for symbol in $exported_lql; do
+      if ! printf '%s\n' "$allowed_exports" | grep -Fxq "$symbol"; then
+        printf 'public API style: unexpected exported liblql symbol in %s: %s\n' "$shared" "$symbol" >&2
         failed=1
       fi
     done

@@ -542,7 +542,9 @@ Current implementation is an early slice:
 - `make test` includes `lql.public-api-style`, which fails if removed
   selector/query/payload/projection/compact/mutation free-operation prototypes
   reappear in the installed header or, when a shared library is built, as
-  exported dynamic symbols; it also scans project-owned source trees for
+  exported dynamic symbols; for shared builds it also allowlists the complete
+  exported `lql_*` symbol set to construction, diagnostics, version, and
+  capability helpers only; it also scans project-owned source trees for
   exact-name macro or static wrapper shims that recreate those removed
   operation functions and for static receiver-operation shims that should have
   been folded into the receiver-compatible implementation functions; receiver
