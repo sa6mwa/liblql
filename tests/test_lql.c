@@ -8,6 +8,34 @@ static int failures = 0;
 static lql *test_ctx = NULL;
 
 static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len);
+static int append_literal(char *buf, size_t cap, size_t *pos,
+                          const char *text);
+static int append_repeated(char *buf, size_t cap, size_t *pos, char ch,
+                           size_t count);
+
+static int append_literal(char *buf, size_t cap, size_t *pos,
+                          const char *text) {
+  size_t len;
+  len = strlen(text);
+  if (*pos + len >= cap) {
+    return 0;
+  }
+  memcpy(buf + *pos, text, len);
+  *pos += len;
+  buf[*pos] = '\0';
+  return 1;
+}
+
+static int append_repeated(char *buf, size_t cap, size_t *pos, char ch,
+                           size_t count) {
+  if (*pos + count >= cap) {
+    return 0;
+  }
+  memset(buf + *pos, ch, count);
+  *pos += count;
+  buf[*pos] = '\0';
+  return 1;
+}
 
 static void expect_receiver_api(void) {
   lql *ctx;
@@ -5356,6 +5384,119 @@ static void expect_source_candidate_mutation_api(void) {
       }
       test_ctx->mutation_plan_destroy(test_ctx, event_plan);
       test_ctx->selector_destroy(test_ctx, event_selector);
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source candidate mutation lockd handoff tmpfile failed\n");
+      ++failures;
+    } else {
+      lql_selector *lockd_selector;
+      lql_mutation_plan *lockd_plan;
+      const char *lockd_mutations[2];
+      char lockd_doc[7200];
+      size_t pos;
+      unsigned int processed_count;
+      char *cursor;
+      lockd_selector = NULL;
+      lockd_plan = NULL;
+      lockd_mutations[0] = "/processed=true";
+      lockd_mutations[1] = "time:/processed_at=2023-11-14T22:13:20Z";
+      pos = 0u;
+      lockd_doc[0] = '\0';
+      if (!append_literal(lockd_doc, sizeof(lockd_doc),
+                          &pos,
+                          "{\"event\":\"tabs_update\",\"component\":\"host\","
+                          "\"blob\":\"") ||
+          !append_repeated(lockd_doc, sizeof(lockd_doc), &pos, 'x', 2048u) ||
+          !append_literal(lockd_doc, sizeof(lockd_doc),
+                          &pos,
+                          "\"}\n{\"event\":\"noop\",\"component\":\"host\","
+                          "\"blob\":\"") ||
+          !append_repeated(lockd_doc, sizeof(lockd_doc), &pos, 'y', 1024u) ||
+          !append_literal(lockd_doc, sizeof(lockd_doc),
+                          &pos,
+                          "\"}\n{\"event\":\"tabs_update\",\"component\":"
+                          "\"host\",\"blob\":\"") ||
+          !append_repeated(lockd_doc, sizeof(lockd_doc), &pos, 'z', 1536u) ||
+          !append_literal(lockd_doc, sizeof(lockd_doc),
+                          &pos,
+                          "\"}\n{\"event\":\"tabs_update\",\"component\":"
+                          "\"host\",\"blob\":\"") ||
+          !append_repeated(lockd_doc, sizeof(lockd_doc), &pos, 'w', 1536u) ||
+          !append_literal(lockd_doc, sizeof(lockd_doc), &pos, "\"}")) {
+        printf("source candidate mutation lockd fixture build failed\n");
+        ++failures;
+      }
+      lql_error_init(&error);
+      st = test_ctx->selector_parse(test_ctx, "/event=\"tabs_update\"",
+                                    &lockd_selector, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation lockd selector failed: %s\n",
+               error.message);
+        ++failures;
+      }
+      lql_error_init(&error);
+      st = test_ctx->mutation_plan_parse(test_ctx, lockd_mutations, 2u,
+                                         &lockd_plan, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation lockd plan failed: %s\n",
+               error.message);
+        ++failures;
+      }
+      if (lockd_selector != NULL && lockd_plan != NULL && pos > 0u) {
+        memset(&reader, 0, sizeof(reader));
+        reader.data = lockd_doc;
+        reader.len = pos;
+        reader.chunk_size = 13u;
+        memset(&options, 0, sizeof(options));
+        options.max_matches = 2u;
+        memset(&result, 0, sizeof(result));
+        lql_error_init(&error);
+        st = test_ctx->mutate_source_candidates_with_options(
+            test_ctx, lockd_selector, lockd_plan, read_chunk, &reader, out, 1,
+            1, &options, &result, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("source candidate mutation lockd handoff failed: %s\n",
+                 error.message);
+          ++failures;
+        } else if (reader.calls <= 1 || result.candidates_seen != 3u ||
+                   result.candidates_matched != 2u ||
+                   !result.stopped_early ||
+                   result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT ||
+                   result.bytes_read == 0u) {
+          printf("source candidate mutation lockd result mismatch: seen=%lu "
+                 "matched=%lu stopped=%d reason=%d bytes=%lu reads=%d\n",
+                 (unsigned long)result.candidates_seen,
+                 (unsigned long)result.candidates_matched,
+                 result.stopped_early, (int)result.stop_reason,
+                 (unsigned long)result.bytes_read, reader.calls);
+          ++failures;
+        } else if (!read_tmpfile(out, lockd_doc, sizeof(lockd_doc), &len)) {
+          printf("source candidate mutation lockd output read failed\n");
+          ++failures;
+        } else {
+          processed_count = 0u;
+          cursor = lockd_doc;
+          while ((cursor = strstr(cursor, "\"processed\":true")) != NULL) {
+            ++processed_count;
+            cursor += strlen("\"processed\":true");
+          }
+          if (processed_count != 2u ||
+              strstr(lockd_doc, "\"event\":\"noop\"") != NULL ||
+              strstr(lockd_doc, "\"processed_at\":"
+                               "\"2023-11-14T22:13:20Z\"") == NULL ||
+              strstr(lockd_doc, "\"blob\":\"xxxxxxxx") == NULL ||
+              strstr(lockd_doc, "\"blob\":\"zzzzzzzz") == NULL ||
+              strstr(lockd_doc, "\"blob\":\"wwwwwwww") != NULL) {
+            printf("source candidate mutation lockd output mismatch\n");
+            ++failures;
+          }
+        }
+      }
+      test_ctx->mutation_plan_destroy(test_ctx, lockd_plan);
+      test_ctx->selector_destroy(test_ctx, lockd_selector);
     }
 
     fclose(out);

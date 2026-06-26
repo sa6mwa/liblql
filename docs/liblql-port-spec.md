@@ -990,6 +990,12 @@ Current implementation status:
   liblql's invalid-argument diagnostics and zeroed result contract. Go request
   construction conflicts and Go `OpenJSON`/inline payload-sink precedence are
   API-shape-specific unless liblql grows an equivalent public surface;
+- Lockd-shaped local JSON engine handoff coverage now uses large fragmented
+  callback-source candidates with selector-gated mutation, matches-only output,
+  a two-match stop limit, and timestamp mutation. This covers liblql's public
+  equivalent of the Go lockd stream integration tests without adopting the Go
+  reusable payload-sink factory or its temp-file spill assertion as public C
+  API;
 - the pinned Go oracle inventory is executable through
   `parity/oracle_inventory.tsv` and `TestOracleInventory`; it currently records
   all `pkt.systems/lql v0.17.1` test, benchmark, and example-bearing files and
