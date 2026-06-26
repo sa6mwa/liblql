@@ -4454,6 +4454,7 @@ static void expect_mutation_file_backed_value_api(void) {
   lql_mutation_plan *plan;
   lql_mutation_parse_options options;
   const char *exprs[4];
+  chunk_reader reader;
   char buf[512];
   size_t len;
   static const char expected[] =
@@ -4549,6 +4550,34 @@ static void expect_mutation_file_backed_value_api(void) {
   }
   if (out != NULL) {
     fclose(out);
+  }
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("SDK file-backed source output tmpfile failed\n");
+    ++failures;
+  } else {
+    memset(&reader, 0, sizeof(reader));
+    reader.data = "{}";
+    reader.len = strlen("{}");
+    reader.chunk_size = 1u;
+    lql_error_init(&error);
+    st = test_ctx->mutate_source_paths(test_ctx, plan, read_chunk, &reader, out,
+                                       &error);
+    if (st != LQL_STATUS_OK) {
+      printf("SDK file-backed source mutation failed: %s\n", error.message);
+      ++failures;
+    } else if (reader.calls <= 1) {
+      printf("SDK file-backed source mutation did not consume fragmented "
+             "reads\n");
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf, expected) != 0) {
+      printf("SDK file-backed source output mismatch: %s\n", buf);
+      ++failures;
+    }
+    fclose(out);
+    out = NULL;
   }
 
   test_ctx->mutation_plan_destroy(test_ctx, plan);

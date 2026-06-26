@@ -743,9 +743,10 @@ Current implementation is an early slice:
   streaming, projection, compacting, mutation, version, and capability
   surfaces, including mutation plan parse success, expansion counts, default
   and explicit file-backed parse options, file-backed mutation value execution
-  over buffered and seekable file-range APIs, source-backed projection,
-  compacting, and mutation over fragmented caller reads, source callback read
-  failures with empty failed-output state, mutation parse-error invariants,
+  over buffered, source-backed, and seekable file-range APIs, source-backed
+  projection, compacting, and mutation over fragmented caller reads, source
+  callback read failures with empty failed-output state, mutation parse-error
+  invariants,
   parser failure output-handle clearing, projection invalid-argument
   `out_found` state, and query callback failure status propagation. Query and
   candidate-stream mutation
