@@ -5271,6 +5271,84 @@ static void expect_source_candidate_mutation_api(void) {
     fclose(out);
     out = tmpfile();
     if (out == NULL) {
+      printf("source candidate mutation query-mutate tmpfile failed\n");
+      ++failures;
+    } else {
+      lql_selector *event_selector;
+      lql_mutation_plan *event_plan;
+      const char *event_mutations[2];
+      static const char event_doc[] =
+          "{\"event\":\"tabs_update\",\"component\":\"host\",\"id\":1}\n"
+          "{\"event\":\"noop\",\"component\":\"host\",\"id\":2}\n"
+          "{\"event\":\"tabs_update\",\"component\":\"host\",\"id\":3}\n"
+          "{\"event\":\"tabs_update\",\"component\":\"host\",\"id\":4}";
+      event_selector = NULL;
+      event_plan = NULL;
+      event_mutations[0] = "/processed=true";
+      event_mutations[1] = "time:/processed_at=2023-11-14T22:13:20Z";
+      lql_error_init(&error);
+      st = test_ctx->selector_parse(test_ctx, "/event=\"tabs_update\"",
+                                    &event_selector, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation query-mutate selector failed: %s\n",
+               error.message);
+        ++failures;
+      }
+      lql_error_init(&error);
+      st = test_ctx->mutation_plan_parse(test_ctx, event_mutations, 2u,
+                                         &event_plan, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation query-mutate plan failed: %s\n",
+               error.message);
+        ++failures;
+      }
+      if (event_selector != NULL && event_plan != NULL) {
+        memset(&reader, 0, sizeof(reader));
+        reader.data = event_doc;
+        reader.len = strlen(event_doc);
+        reader.chunk_size = 7u;
+        memset(&result, 0, sizeof(result));
+        lql_error_init(&error);
+        st = test_ctx->mutate_source_candidates(
+            test_ctx, event_selector, event_plan, read_chunk, &reader, out, 1,
+            1, &result, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("source candidate mutation query-mutate failed: %s\n",
+                 error.message);
+          ++failures;
+        } else if (reader.calls <= 1 || result.candidates_seen != 4u ||
+                   result.candidates_matched != 3u ||
+                   result.stopped_early || result.bytes_read == 0u) {
+          printf("source candidate mutation query-mutate result mismatch: "
+                 "seen=%lu matched=%lu stopped=%d bytes=%lu reads=%d\n",
+                 (unsigned long)result.candidates_seen,
+                 (unsigned long)result.candidates_matched,
+                 result.stopped_early, (unsigned long)result.bytes_read,
+                 reader.calls);
+          ++failures;
+        } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                   strcmp(buf,
+                          "{\"event\":\"tabs_update\",\"component\":\"host\","
+                          "\"id\":1,\"processed\":true,\"processed_at\":"
+                          "\"2023-11-14T22:13:20Z\"}\n"
+                          "{\"event\":\"tabs_update\",\"component\":\"host\","
+                          "\"id\":3,\"processed\":true,\"processed_at\":"
+                          "\"2023-11-14T22:13:20Z\"}\n"
+                          "{\"event\":\"tabs_update\",\"component\":\"host\","
+                          "\"id\":4,\"processed\":true,\"processed_at\":"
+                          "\"2023-11-14T22:13:20Z\"}\n") != 0) {
+          printf("source candidate mutation query-mutate output mismatch: %s\n",
+                 buf);
+          ++failures;
+        }
+      }
+      test_ctx->mutation_plan_destroy(test_ctx, event_plan);
+      test_ctx->selector_destroy(test_ctx, event_selector);
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
       printf("source candidate mutation match-all tmpfile failed\n");
       ++failures;
     } else {

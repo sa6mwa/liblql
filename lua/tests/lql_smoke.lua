@@ -767,6 +767,28 @@ assert_equal(mutated,
              "mutate_source max_matches output")
 
 source_chunks = {
+  '{"event":"tabs_update","component":"host","id":1}\n',
+  '{"event":"noop","component":"host","id":2}\n',
+  '{"event":"tabs_update","component":"host","id":3}\n',
+  '{"event":"tabs_update","component":"host","id":4}'
+}
+source_index = 1
+mutated, err = client:mutate_source('/event="tabs_update"', function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end, {
+  "/processed=true",
+  "time:/processed_at=2023-11-14T22:13:20Z"
+}, {matches_only = true})
+mutated = assert_no_error(mutated, err, "mutate_source query-mutate handoff")
+assert_equal(mutated,
+             '{"event":"tabs_update","component":"host","id":1,"processed":true,"processed_at":"2023-11-14T22:13:20Z"}\n' ..
+             '{"event":"tabs_update","component":"host","id":3,"processed":true,"processed_at":"2023-11-14T22:13:20Z"}\n' ..
+             '{"event":"tabs_update","component":"host","id":4,"processed":true,"processed_at":"2023-11-14T22:13:20Z"}\n',
+             "mutate_source query-mutate handoff output")
+
+source_chunks = {
   '{"status":"closed","id":"mp1"}\n',
   '{"status":"open","id":"mp2","state":{"old":true}}\n'
 }

@@ -981,6 +981,14 @@ Current implementation status:
   mechanical duplication of Go rows into C tests. Their coverage manifests
   reject missing tests, duplicate test-function entries, and duplicate
   `surface/requirement` keys;
+- C SDK and Lua facade tests now cover the public liblql equivalent of Go's
+  fused query-mutate stream path: a fragmented callback source is filtered by a
+  selector, only matched candidates are written, mutation is applied directly to
+  those candidates, result counters report all candidates seen and matched, stop
+  options can halt after a match limit, and time-prefixed mutation values
+  normalize to UTC strings. Go request construction conflicts and Go
+  `OpenJSON`/inline payload-sink precedence remain API-shape-specific audit
+  items unless liblql grows an equivalent public surface;
 - the pinned Go oracle inventory is executable through
   `parity/oracle_inventory.tsv` and `TestOracleInventory`; it currently records
   all `pkt.systems/lql v0.17.1` test, benchmark, and example-bearing files and
