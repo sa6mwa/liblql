@@ -816,7 +816,8 @@ Current implementation is an early slice:
   generated fixture matrix; the Lua runner loads `lua/lql.lua` and uses the
   direct `lql.core` module rather than shelling out to `clql`; Go helper
   records, C native helper records, and Lua facade runner records now report
-  `ns_per_op`;
+  `ns_per_op`, while Go and C helper records also report OS `getrusage` peak
+  RSS as `peak_rss_bytes` for the benchmark schema;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and

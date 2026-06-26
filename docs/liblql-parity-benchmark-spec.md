@@ -102,7 +102,12 @@ Current implementation status:
   The current C plan benchmark reuses the parsed public `lql_selector` handle;
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
   The C native helper and Lua facade runner report `ns_per_op`; the schema
-  validator requires timing for all supported Go, C, and Lua records.
+  validator requires timing for all supported Go, C, and Lua records. The C
+  native helper and Go helper report OS `getrusage` peak RSS as
+  `peak_rss_bytes`; the validator requires positive peak RSS for supported C
+  and Go records. Lua records currently set `peak_rss_bytes` to `null` because
+  the Lua facade runner does not yet own an external process RSS measurement
+  path.
 - the current executable CLI-style selector matrix covers grouped
   equality/range, service contains, service case-insensitive contains, service
   `contains.any`, service `icontains.any`, and nested `/records[]/...`
@@ -326,6 +331,7 @@ Each implementation and mode must report:
 - payload bytes read when payload mode opens/reads payloads;
 - payload source type: seekable range, callback sink, or spool;
 - elapsed time or ns/op;
+- OS-reported peak resident set size in bytes when available;
 - allocations or allocator counters when available;
 - unsupported reason, if applicable.
 
@@ -364,7 +370,10 @@ Each record should be self-contained. Example shape:
   "matches": 5000,
   "payloads": 0,
   "payload_bytes": 0,
+  "payload_source_type": "none",
+  "fixture_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
   "ns_per_op": 1234567,
+  "peak_rss_bytes": 3145728,
   "allocs_per_op": null,
   "unsupported": false,
   "unsupported_reason": ""

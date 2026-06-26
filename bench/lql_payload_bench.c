@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <time.h>
 
 typedef struct payload_counts {
@@ -74,6 +75,19 @@ static lql_uint64 elapsed_ns(clock_t start, clock_t end) {
   }
   seconds = (double)(end - start) / (double)CLOCKS_PER_SEC;
   return (lql_uint64)(seconds * 1000000000.0);
+}
+
+static lql_uint64 peak_rss_bytes(void) {
+  struct rusage usage;
+
+  if (getrusage(RUSAGE_SELF, &usage) != 0 || usage.ru_maxrss < 0) {
+    return 0u;
+  }
+#ifdef __APPLE__
+  return (lql_uint64)usage.ru_maxrss;
+#else
+  return (lql_uint64)usage.ru_maxrss * 1024u;
+#endif
 }
 
 static lql_status count_payload(void *user, const lql_query_match *match) {
@@ -234,6 +248,8 @@ int main(int argc, char **argv) {
   print_u64(counts.payload_bytes);
   fputs(" elapsed_ns=", stdout);
   print_u64(elapsed_ns(start, end));
+  fputs(" peak_rss_bytes=", stdout);
+  print_u64(peak_rss_bytes());
   fputc('\n', stdout);
   ctx->destroy(ctx);
   return 0;

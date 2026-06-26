@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
+	"syscall"
 	"time"
 
 	"pkt.systems/lql"
@@ -30,6 +32,7 @@ type record struct {
 	PayloadSourceType string `json:"payload_source_type"`
 	FixtureSHA256     string `json:"fixture_sha256"`
 	NsPerOp           *int64 `json:"ns_per_op"`
+	PeakRSSBytes      *int64 `json:"peak_rss_bytes"`
 	AllocsPerOp       *int64 `json:"allocs_per_op"`
 	Unsupported       bool   `json:"unsupported"`
 	UnsupportedReason string `json:"unsupported_reason"`
@@ -114,6 +117,7 @@ func main() {
 		PayloadSourceType: payloadSourceType,
 		FixtureSHA256:     fixtureSHA256,
 		NsPerOp:           &nsPerOp,
+		PeakRSSBytes:      peakRSSBytes(),
 		Unsupported:       false,
 		UnsupportedReason: "",
 	}
@@ -122,6 +126,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "lqlbench: encode record: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func peakRSSBytes() *int64 {
+	var usage syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &usage); err != nil {
+		return nil
+	}
+	value := usage.Maxrss
+	if value < 0 {
+		return nil
+	}
+	if runtime.GOOS != "darwin" {
+		value *= 1024
+	}
+	return &value
 }
 
 func runQuery(file *os.File, sel lql.Selector, mode string) (lql.QueryStreamResult, int64, int64, error) {

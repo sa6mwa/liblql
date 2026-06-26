@@ -99,10 +99,11 @@ emit_record() {
   payload_bytes=${11}
   payload_source_type=${12}
   ns_per_op=${13}
-  unsupported=${14}
-  reason=${15}
-  fixture_sha256=${16}
-  printf '{"schema":"liblql.parity_benchmark.v1","impl":"%s","dataset":"%s","selector":"%s","expr":"%s","mode":"%s","submode":"%s","bytes_per_iter":%s,"candidates":%s,"matches":%s,"payloads":%s,"payload_bytes":%s,"payload_source_type":"%s","fixture_sha256":"%s","ns_per_op":%s,"allocs_per_op":null,"unsupported":%s,"unsupported_reason":"%s"}\n' \
+  peak_rss_bytes=${14}
+  unsupported=${15}
+  reason=${16}
+  fixture_sha256=${17}
+  printf '{"schema":"liblql.parity_benchmark.v1","impl":"%s","dataset":"%s","selector":"%s","expr":"%s","mode":"%s","submode":"%s","bytes_per_iter":%s,"candidates":%s,"matches":%s,"payloads":%s,"payload_bytes":%s,"payload_source_type":"%s","fixture_sha256":"%s","ns_per_op":%s,"peak_rss_bytes":%s,"allocs_per_op":null,"unsupported":%s,"unsupported_reason":"%s"}\n' \
     "$(json_string "$impl")" \
     "$(json_string "$dataset")" \
     "$(json_string "$selector")" \
@@ -117,6 +118,7 @@ emit_record() {
     "$(json_string "$payload_source_type")" \
     "$(json_string "$fixture_sha256")" \
     "$ns_per_op" \
+    "$peak_rss_bytes" \
     "$unsupported" \
     "$(json_string "$reason")"
 }
@@ -134,16 +136,17 @@ emit_submode_records() {
   payload_bytes=${10}
   payload_source_type=${11}
   ns_per_op=${12}
-  unsupported=${13}
-  reason=${14}
-  fixture_sha256=${15}
+  peak_rss_bytes=${13}
+  unsupported=${14}
+  reason=${15}
+  fixture_sha256=${16}
   emit_record "$impl" "$dataset" "$selector" "$expr" "$mode" \
     "warmup_included" "$bytes" "$candidates" "$matches" "$payloads" \
-    "$payload_bytes" "$payload_source_type" "$ns_per_op" "$unsupported" \
+    "$payload_bytes" "$payload_source_type" "$ns_per_op" "$peak_rss_bytes" "$unsupported" \
     "$reason" "$fixture_sha256"
   emit_record "$impl" "$dataset" "$selector" "$expr" "$mode" \
     "steady_state" "$bytes" "$candidates" "$matches" "$payloads" \
-    "$payload_bytes" "$payload_source_type" "$ns_per_op" "$unsupported" \
+    "$payload_bytes" "$payload_source_type" "$ns_per_op" "$peak_rss_bytes" "$unsupported" \
     "$reason" "$fixture_sha256"
 }
 
@@ -153,22 +156,22 @@ emit_unsupported_impl() {
   while read dataset_name fixture_path candidates selector_name expr; do
     : "$candidates"
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "decision_only_selector" 0 0 0 0 0 "none" null true "$reason" \
+      "decision_only_selector" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "decision_only_plan" 0 0 0 0 0 "none" null true "$reason" \
+      "decision_only_plan" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "plus_value_selector" 0 0 0 0 0 "none" null true "$reason" \
+      "plus_value_selector" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "plus_value_plan" 0 0 0 0 0 "none" null true "$reason" \
+      "plus_value_plan" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "plus_value_openjson_selector" 0 0 0 0 0 "none" null true "$reason" \
+      "plus_value_openjson_selector" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
-      "plus_value_openjson_plan" 0 0 0 0 0 "none" null true "$reason" \
+      "plus_value_openjson_plan" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
   done < "$case_matrix"
 }
@@ -424,7 +427,7 @@ run_c() {
   printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
     "decision_only_selector" "steady_state" "$candidates" "$matches" 0 0 >> "$c_counts_file"
   emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
-    "decision_only_selector" "$bytes" "$candidates" "$matches" 0 0 "none" null false "" "$fixture_sha"
+    "decision_only_selector" "$bytes" "$candidates" "$matches" 0 0 "none" null null false "" "$fixture_sha"
 }
 
 run_c_native_mode() {
@@ -437,7 +440,7 @@ run_c_native_mode() {
   bytes=$(wc -c < "$fixture_path" | tr -d ' ')
   if [ ! -x "$payload_bench" ]; then
     emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
-      "$mode" 0 0 0 0 0 "none" null true \
+      "$mode" 0 0 0 0 0 "none" null null true \
       "lql_payload_bench binary not found; run make build-debug or set LQL_PAYLOAD_BENCH_PATH" \
       "$(file_sha256 "$fixture_path")"
     return 1
@@ -449,9 +452,10 @@ run_c_native_mode() {
   c_payloads=$(kv_field payloads "$record")
   c_payload_bytes=$(kv_field payload_bytes "$record")
   c_elapsed_ns=$(kv_field elapsed_ns "$record")
+  c_peak_rss_bytes=$(kv_field peak_rss_bytes "$record")
   if [ -z "$c_candidates" ] || [ -z "$c_matches" ] ||
     [ -z "$c_payloads" ] || [ -z "$c_payload_bytes" ] ||
-    [ -z "$c_elapsed_ns" ]; then
+    [ -z "$c_elapsed_ns" ] || [ -z "$c_peak_rss_bytes" ]; then
     printf 'C payload benchmark emitted an invalid record: %s\n' "$record" >&2
     return 1
   fi
@@ -476,8 +480,8 @@ run_c_native_mode() {
   esac
   emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
     "$mode" "$bytes" "$c_candidates" \
-    "$c_matches" "$c_payloads" "$c_payload_bytes" "$payload_source_type" "$c_elapsed_ns" false \
-    "" "$fixture_sha"
+    "$c_matches" "$c_payloads" "$c_payload_bytes" "$payload_source_type" \
+    "$c_elapsed_ns" "$c_peak_rss_bytes" false "" "$fixture_sha"
 }
 
 run_go_mode() {
@@ -562,7 +566,7 @@ run_lua_mode() {
     emit_record "lua" "$dataset_name" "$selector_name" "$expr" \
       "$mode" "$submode" "$bytes" "$lua_candidates" "$lua_matches" \
       "$lua_payloads" "$lua_payload_bytes" "$payload_source_type" \
-      "$lua_elapsed_ns" false "" "$fixture_sha"
+      "$lua_elapsed_ns" null false "" "$fixture_sha"
   done
 }
 

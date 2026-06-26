@@ -24,6 +24,7 @@ type record struct {
 	PayloadSourceType string `json:"payload_source_type"`
 	FixtureSHA256     string `json:"fixture_sha256"`
 	NsPerOp           *int64 `json:"ns_per_op"`
+	PeakRSSBytes      *int64 `json:"peak_rss_bytes"`
 	AllocsPerOp       *int64 `json:"allocs_per_op"`
 	Unsupported       bool   `json:"unsupported"`
 	UnsupportedReason string `json:"unsupported_reason"`
@@ -100,6 +101,7 @@ func requireKeys(line int, raw map[string]json.RawMessage) error {
 		"payload_source_type",
 		"fixture_sha256",
 		"ns_per_op",
+		"peak_rss_bytes",
 		"allocs_per_op",
 		"unsupported",
 		"unsupported_reason",
@@ -151,6 +153,9 @@ func validateRecord(line int, rec record) error {
 	if rec.NsPerOp != nil && *rec.NsPerOp < 0 {
 		return fmt.Errorf("line %d: ns_per_op must be non-negative or null", line)
 	}
+	if rec.PeakRSSBytes != nil && *rec.PeakRSSBytes < 0 {
+		return fmt.Errorf("line %d: peak_rss_bytes must be non-negative or null", line)
+	}
 	if rec.AllocsPerOp != nil && *rec.AllocsPerOp < 0 {
 		return fmt.Errorf("line %d: allocs_per_op must be non-negative or null", line)
 	}
@@ -165,6 +170,14 @@ func validateRecord(line int, rec record) error {
 	}
 	if requiresTiming(rec) && rec.NsPerOp == nil {
 		return fmt.Errorf("line %d: %s/%s records must report ns_per_op", line, rec.Impl, rec.Mode)
+	}
+	if requiresPeakRSS(rec) {
+		if rec.PeakRSSBytes == nil {
+			return fmt.Errorf("line %d: %s/%s records must report peak_rss_bytes", line, rec.Impl, rec.Mode)
+		}
+		if *rec.PeakRSSBytes == 0 {
+			return fmt.Errorf("line %d: %s/%s records must report positive peak_rss_bytes", line, rec.Impl, rec.Mode)
+		}
 	}
 	if isDecisionOnlyMode(rec.Mode) {
 		if rec.Payloads != 0 || rec.PayloadBytes != 0 || rec.PayloadSourceType != "none" {
@@ -205,6 +218,10 @@ func requiresTiming(rec record) bool {
 		return true
 	}
 	return false
+}
+
+func requiresPeakRSS(rec record) bool {
+	return rec.Impl == "go" || rec.Impl == "c"
 }
 
 func isSHA256Hex(value string) bool {

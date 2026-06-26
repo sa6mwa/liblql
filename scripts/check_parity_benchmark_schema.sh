@@ -24,3 +24,9 @@ if ! grep -E '"unsupported":false,"unsupported_reason":""' "$log" | \
   printf 'benchmark schema check did not find any timed supported records\n' >&2
   exit 1
 fi
+
+if ! grep -E '"unsupported":false,"unsupported_reason":""' "$log" | \
+  grep -E '"peak_rss_bytes":[1-9][0-9]*' >/dev/null; then
+  printf 'benchmark schema check did not find any supported peak RSS records\n' >&2
+  exit 1
+fi
