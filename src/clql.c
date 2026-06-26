@@ -148,7 +148,7 @@ project_then_maybe_mutate_range(lql *ctx, const lql_projection *projection,
   return st;
 }
 
-static void free_projection_args(projection_args *args) {
+static void destroy_projection_args(projection_args *args) {
   if (args == NULL) {
     return;
   }
@@ -667,9 +667,9 @@ int main(int argc, char **argv) {
     if (end_options) {
       if (!add_projection_arg(&positionals, argv[i])) {
         fprintf(stderr, "clql: failed to record positional argument\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
       continue;
@@ -680,16 +680,16 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
       printf("clql %s\n", lql_version());
-      free_projection_args(&fields);
-      free_projection_args(&mutations);
-      free_projection_args(&positionals);
+      destroy_projection_args(&fields);
+      destroy_projection_args(&mutations);
+      destroy_projection_args(&positionals);
       return 0;
     }
     if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
       usage(stdout);
-      free_projection_args(&fields);
-      free_projection_args(&mutations);
-      free_projection_args(&positionals);
+      destroy_projection_args(&fields);
+      destroy_projection_args(&mutations);
+      destroy_projection_args(&positionals);
       return 0;
     }
     {
@@ -702,24 +702,24 @@ int main(int argc, char **argv) {
           &show_version, &cluster_error);
       if (cluster_status < 0) {
         fprintf(stderr, "clql: %s\n", cluster_error);
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
       if (cluster_status > 0) {
         if (show_help) {
           usage(stdout);
-          free_projection_args(&fields);
-          free_projection_args(&mutations);
-          free_projection_args(&positionals);
+          destroy_projection_args(&fields);
+          destroy_projection_args(&mutations);
+          destroy_projection_args(&positionals);
           return 0;
         }
         if (show_version) {
           printf("clql %s\n", lql_version());
-          free_projection_args(&fields);
-          free_projection_args(&mutations);
-          free_projection_args(&positionals);
+          destroy_projection_args(&fields);
+          destroy_projection_args(&mutations);
+          destroy_projection_args(&positionals);
           return 0;
         }
         continue;
@@ -731,9 +731,9 @@ int main(int argc, char **argv) {
       int matched;
       if (!parse_long_bool_option(argv[i], "--or", &or_mode, &matched)) {
         fprintf(stderr, "clql: invalid boolean value for --or\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     } else if (strcmp(argv[i], "--matches-only") == 0 ||
@@ -744,9 +744,9 @@ int main(int argc, char **argv) {
       if (!parse_long_bool_option(argv[i], "--matches-only", &matches_only,
                                   &matched)) {
         fprintf(stderr, "clql: invalid boolean value for --matches-only\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     } else if (strcmp(argv[i], "--compact") == 0 ||
@@ -756,9 +756,9 @@ int main(int argc, char **argv) {
       int matched;
       if (!parse_long_bool_option(argv[i], "--compact", &compact, &matched)) {
         fprintf(stderr, "clql: invalid boolean value for --compact\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     } else if (strcmp(argv[i], "--inline") == 0 || strcmp(argv[i], "-i") == 0 ||
@@ -769,18 +769,18 @@ int main(int argc, char **argv) {
       if (!parse_long_bool_option(argv[i], "--inline", &inline_mode,
                                   &matched)) {
         fprintf(stderr, "clql: invalid boolean value for --inline\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     } else if (strncmp(argv[i], "--write=", 8u) == 0) {
       int matched;
       if (!parse_long_bool_option(argv[i], "--write", &inline_mode, &matched)) {
         fprintf(stderr, "clql: invalid boolean value for --write\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     } else if (strcmp(argv[i], "--enable-file-mutations") == 0 ||
@@ -792,17 +792,17 @@ int main(int argc, char **argv) {
                                   &enable_file_mutations, &matched)) {
         fprintf(stderr,
                 "clql: invalid boolean value for --enable-file-mutations\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     } else if (strcmp(argv[i], "--theme") == 0 || strcmp(argv[i], "-t") == 0) {
       if (i + 1 >= argc) {
         fprintf(stderr, "clql: theme option requires an argument\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
       ++i;
@@ -812,56 +812,56 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--mutate") == 0 || strcmp(argv[i], "-m") == 0) {
       if (i + 1 >= argc || !add_projection_arg(&mutations, argv[++i])) {
         fprintf(stderr, "clql: failed to record mutation expression\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     } else if (strncmp(argv[i], "--mutate=", 9u) == 0) {
       if (!add_projection_arg(&mutations, argv[i] + 9u)) {
         fprintf(stderr, "clql: failed to record mutation expression\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     } else if (strcmp(argv[i], "--field") == 0 || strcmp(argv[i], "-f") == 0) {
       if (i + 1 >= argc || !add_projection_arg(&fields, argv[++i])) {
         fprintf(stderr, "clql: failed to record field path\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     } else if (strncmp(argv[i], "--field=", 8u) == 0) {
       if (!add_projection_arg(&fields, argv[i] + 8u)) {
         fprintf(stderr, "clql: failed to record field path\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     } else if (strcmp(argv[i], "-") == 0) {
       if (!add_projection_arg(&positionals, argv[i])) {
         fprintf(stderr, "clql: failed to record positional argument\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     } else if (argv[i][0] == '-') {
       fprintf(stderr, "clql: unknown option %s\n", argv[i]);
       usage(stderr);
-      free_projection_args(&fields);
-      free_projection_args(&mutations);
-      free_projection_args(&positionals);
+      destroy_projection_args(&fields);
+      destroy_projection_args(&mutations);
+      destroy_projection_args(&positionals);
       return 2;
     } else {
       if (!add_projection_arg(&positionals, argv[i])) {
         fprintf(stderr, "clql: failed to record positional argument\n");
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&positionals);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&positionals);
         return 2;
       }
     }
@@ -890,31 +890,31 @@ int main(int argc, char **argv) {
   }
   if (selector_expr_owned == NULL) {
     fprintf(stderr, "clql: failed to build selector expression\n");
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    free_projection_args(&positionals);
-    free_projection_args(&input_paths);
+    destroy_projection_args(&fields);
+    destroy_projection_args(&mutations);
+    destroy_projection_args(&positionals);
+    destroy_projection_args(&input_paths);
     return 2;
   }
   selector_expr = selector_expr_owned;
   if (argc == 1) {
     usage(stderr);
     lql_dealloc(selector_expr_owned);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    free_projection_args(&positionals);
-    free_projection_args(&input_paths);
+    destroy_projection_args(&fields);
+    destroy_projection_args(&mutations);
+    destroy_projection_args(&positionals);
+    destroy_projection_args(&input_paths);
     return 2;
   }
-  free_projection_args(&positionals);
+  destroy_projection_args(&positionals);
   lql_error_init(&error);
   st = lql_new(&clql_ctx, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
     lql_dealloc(selector_expr_owned);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    free_projection_args(&input_paths);
+    destroy_projection_args(&fields);
+    destroy_projection_args(&mutations);
+    destroy_projection_args(&input_paths);
     return 1;
   }
   (void)atexit(destroy_clql_ctx);
@@ -924,9 +924,9 @@ int main(int argc, char **argv) {
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
       lql_dealloc(selector_expr_owned);
-      free_projection_args(&fields);
-      free_projection_args(&mutations);
-      free_projection_args(&input_paths);
+      destroy_projection_args(&fields);
+      destroy_projection_args(&mutations);
+      destroy_projection_args(&input_paths);
       return 2;
     }
   }
@@ -941,9 +941,9 @@ int main(int argc, char **argv) {
       fprintf(stderr, "clql: %s\n", error.message);
       lql_dealloc(selector_expr_owned);
       clql_ctx->projection_destroy(clql_ctx, projection);
-      free_projection_args(&fields);
-      free_projection_args(&mutations);
-      free_projection_args(&input_paths);
+      destroy_projection_args(&fields);
+      destroy_projection_args(&mutations);
+      destroy_projection_args(&input_paths);
       return 2;
     }
   }
@@ -956,9 +956,9 @@ int main(int argc, char **argv) {
     lql_dealloc(selector_expr_owned);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    free_projection_args(&input_paths);
+    destroy_projection_args(&fields);
+    destroy_projection_args(&mutations);
+    destroy_projection_args(&input_paths);
     return 2;
   }
   if (inline_mode && mutation_plan == NULL) {
@@ -967,9 +967,9 @@ int main(int argc, char **argv) {
     clql_ctx->selector_destroy(clql_ctx, selector);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    free_projection_args(&input_paths);
+    destroy_projection_args(&fields);
+    destroy_projection_args(&mutations);
+    destroy_projection_args(&input_paths);
     return 2;
   }
   if (inline_mode && input_paths.count == 0u) {
@@ -978,9 +978,9 @@ int main(int argc, char **argv) {
     clql_ctx->selector_destroy(clql_ctx, selector);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    free_projection_args(&input_paths);
+    destroy_projection_args(&fields);
+    destroy_projection_args(&mutations);
+    destroy_projection_args(&input_paths);
     return 2;
   }
   if (inline_mode && (input_paths.count != 1u || input_path == NULL ||
@@ -990,9 +990,9 @@ int main(int argc, char **argv) {
     clql_ctx->selector_destroy(clql_ctx, selector);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    free_projection_args(&input_paths);
+    destroy_projection_args(&fields);
+    destroy_projection_args(&mutations);
+    destroy_projection_args(&input_paths);
     return 2;
   }
   if (mutation_plan != NULL && !inline_mode && input_paths.count > 1u) {
@@ -1008,9 +1008,9 @@ int main(int argc, char **argv) {
           clql_ctx->selector_destroy(clql_ctx, selector);
           clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
           clql_ctx->projection_destroy(clql_ctx, projection);
-          free_projection_args(&fields);
-          free_projection_args(&mutations);
-          free_projection_args(&input_paths);
+          destroy_projection_args(&fields);
+          destroy_projection_args(&mutations);
+          destroy_projection_args(&input_paths);
           return 1;
         }
         continue;
@@ -1026,9 +1026,9 @@ int main(int argc, char **argv) {
         clql_ctx->selector_destroy(clql_ctx, selector);
         clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
         clql_ctx->projection_destroy(clql_ctx, projection);
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&input_paths);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&input_paths);
         return 1;
       }
       memset(&ranges, 0, sizeof(ranges));
@@ -1055,9 +1055,9 @@ int main(int argc, char **argv) {
         clql_ctx->selector_destroy(clql_ctx, selector);
         clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
         clql_ctx->projection_destroy(clql_ctx, projection);
-        free_projection_args(&fields);
-        free_projection_args(&mutations);
-        free_projection_args(&input_paths);
+        destroy_projection_args(&fields);
+        destroy_projection_args(&mutations);
+        destroy_projection_args(&input_paths);
         return 1;
       }
     }
@@ -1065,9 +1065,9 @@ int main(int argc, char **argv) {
     clql_ctx->selector_destroy(clql_ctx, selector);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    free_projection_args(&input_paths);
+    destroy_projection_args(&fields);
+    destroy_projection_args(&mutations);
+    destroy_projection_args(&input_paths);
     return 0;
   }
   if (input_path != NULL && strcmp(input_path, "-") != 0) {
@@ -1081,9 +1081,9 @@ int main(int argc, char **argv) {
       clql_ctx->selector_destroy(clql_ctx, selector);
       clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
       clql_ctx->projection_destroy(clql_ctx, projection);
-      free_projection_args(&fields);
-      free_projection_args(&mutations);
-      free_projection_args(&input_paths);
+      destroy_projection_args(&fields);
+      destroy_projection_args(&mutations);
+      destroy_projection_args(&input_paths);
       return 1;
     }
     memset(&ranges, 0, sizeof(ranges));
@@ -1098,9 +1098,9 @@ int main(int argc, char **argv) {
       clql_ctx->selector_destroy(clql_ctx, selector);
       clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
       clql_ctx->projection_destroy(clql_ctx, projection);
-      free_projection_args(&fields);
-      free_projection_args(&mutations);
-      free_projection_args(&input_paths);
+      destroy_projection_args(&fields);
+      destroy_projection_args(&mutations);
+      destroy_projection_args(&input_paths);
       return 1;
     }
     ranges.source = range_source;
@@ -1145,9 +1145,9 @@ int main(int argc, char **argv) {
     clql_ctx->selector_destroy(clql_ctx, selector);
     clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
     clql_ctx->projection_destroy(clql_ctx, projection);
-    free_projection_args(&fields);
-    free_projection_args(&mutations);
-    free_projection_args(&input_paths);
+    destroy_projection_args(&fields);
+    destroy_projection_args(&mutations);
+    destroy_projection_args(&input_paths);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
       return 1;
@@ -1162,9 +1162,9 @@ int main(int argc, char **argv) {
   lql_dealloc(selector_expr_owned);
   clql_ctx->mutation_plan_destroy(clql_ctx, mutation_plan);
   clql_ctx->projection_destroy(clql_ctx, projection);
-  free_projection_args(&fields);
-  free_projection_args(&mutations);
-  free_projection_args(&input_paths);
+  destroy_projection_args(&fields);
+  destroy_projection_args(&mutations);
+  destroy_projection_args(&input_paths);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
     return 1;

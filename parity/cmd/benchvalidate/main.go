@@ -34,6 +34,8 @@ type record struct {
 func main() {
 	var opts validateOptions
 	flag.Int64Var(&opts.MaxCPeakRSSBytes, "max-c-peak-rss-bytes", 0, "fail supported C records whose peak_rss_bytes exceeds this value")
+	flag.Int64Var(&opts.MaxLuaPeakRSSBytes, "max-lua-peak-rss-bytes", 0, "fail supported Lua records whose peak_rss_bytes exceeds this value")
+	flag.BoolVar(&opts.RequireLuaPeakRSS, "require-lua-peak-rss", false, "fail supported Lua records that do not report peak_rss_bytes")
 	flag.Parse()
 	if err := validate(os.Stdin, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "benchvalidate: %v\n", err)
@@ -42,7 +44,9 @@ func main() {
 }
 
 type validateOptions struct {
-	MaxCPeakRSSBytes int64
+	MaxCPeakRSSBytes   int64
+	MaxLuaPeakRSSBytes int64
+	RequireLuaPeakRSS  bool
 }
 
 func validate(r io.Reader, opts validateOptions) error {
@@ -179,7 +183,7 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 	if requiresTiming(rec) && rec.NsPerOp == nil {
 		return fmt.Errorf("line %d: %s/%s records must report ns_per_op", line, rec.Impl, rec.Mode)
 	}
-	if requiresPeakRSS(rec) {
+	if requiresPeakRSS(rec, opts) {
 		if rec.PeakRSSBytes == nil {
 			return fmt.Errorf("line %d: %s/%s records must report peak_rss_bytes", line, rec.Impl, rec.Mode)
 		}
@@ -189,6 +193,10 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 		if rec.Impl == "c" && opts.MaxCPeakRSSBytes > 0 &&
 			*rec.PeakRSSBytes > opts.MaxCPeakRSSBytes {
 			return fmt.Errorf("line %d: c/%s peak_rss_bytes %d exceeds max %d", line, rec.Mode, *rec.PeakRSSBytes, opts.MaxCPeakRSSBytes)
+		}
+		if rec.Impl == "lua" && opts.MaxLuaPeakRSSBytes > 0 &&
+			*rec.PeakRSSBytes > opts.MaxLuaPeakRSSBytes {
+			return fmt.Errorf("line %d: lua/%s peak_rss_bytes %d exceeds max %d", line, rec.Mode, *rec.PeakRSSBytes, opts.MaxLuaPeakRSSBytes)
 		}
 	}
 	if isDecisionOnlyMode(rec.Mode) {
@@ -232,8 +240,8 @@ func requiresTiming(rec record) bool {
 	return false
 }
 
-func requiresPeakRSS(rec record) bool {
-	return rec.Impl == "go" || rec.Impl == "c"
+func requiresPeakRSS(rec record, opts validateOptions) bool {
+	return rec.Impl == "go" || rec.Impl == "c" || (rec.Impl == "lua" && opts.RequireLuaPeakRSS)
 }
 
 func isSHA256Hex(value string) bool {

@@ -26,7 +26,7 @@ typedef struct eval_doc {
   char root_kind;
 } eval_doc;
 
-static void free_doc(eval_doc *doc) {
+static void destroy_doc(eval_doc *doc) {
   lql_dealloc(doc->hits);
   lql_dealloc(doc->val_buf);
   lql_dealloc(doc->container_types);
@@ -968,7 +968,7 @@ static lonejson_status write_spooled_array_candidates(
   options.candidate_user = &state;
   st = lonejson_visit_candidates_reader(runtime, eval_spooled_read, &cursor,
                                         &options, &lj_error);
-  free_doc(&state.doc);
+  destroy_doc(&state.doc);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
     if (state.mutation_error.code != LQL_STATUS_OK) {
@@ -1223,7 +1223,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_selector(const lql_selector *selector,
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    free_doc(&doc);
+    destroy_doc(&doc);
     return LQL_STATUS_JSON_ERROR;
   }
   init_eval_visitor(&visitor);
@@ -1231,13 +1231,13 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_selector(const lql_selector *selector,
                                         &lj_error);
   if (st != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    free_doc(&doc);
+    destroy_doc(&doc);
     lonejson_free(runtime);
     return LQL_STATUS_JSON_ERROR;
   }
   *out_matched = selector == NULL || selector->root.kind == LQL_NODE_ALL ||
                  eval_node(&selector->root, &doc);
-  free_doc(&doc);
+  destroy_doc(&doc);
   lonejson_free(runtime);
   return LQL_STATUS_OK;
 }
@@ -1267,7 +1267,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    free_doc(&state.doc);
+    destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
   init_eval_visitor(&visitor);
@@ -1281,7 +1281,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
   st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
   query_finish_file_bytes(&state.result, file);
   if (st != LONEJSON_STATUS_OK) {
-    free_doc(&state.doc);
+    destroy_doc(&state.doc);
     lonejson_free(runtime);
     if (state.callback_status != LQL_STATUS_OK) {
       if (out_result != NULL) {
@@ -1294,7 +1294,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
-  free_doc(&state.doc);
+  destroy_doc(&state.doc);
   lonejson_free(runtime);
   if (out_result != NULL) {
     *out_result = state.result;
@@ -1328,7 +1328,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_decisions(
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    free_doc(&state.doc);
+    destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
   adapter.read = read;
@@ -1347,7 +1347,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_decisions(
                                         &options, &lj_error);
   query_finish_source_bytes(&state.result, &adapter);
   if (st != LONEJSON_STATUS_OK) {
-    free_doc(&state.doc);
+    destroy_doc(&state.doc);
     lonejson_free(runtime);
     if (state.callback_status != LQL_STATUS_OK) {
       if (out_result != NULL) {
@@ -1367,7 +1367,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_decisions(
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
-  free_doc(&state.doc);
+  destroy_doc(&state.doc);
   lonejson_free(runtime);
   if (out_result != NULL) {
     *out_result = state.result;
@@ -1401,7 +1401,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_matches(
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    free_doc(&state.doc);
+    destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
   adapter.read = read;
@@ -1420,7 +1420,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_matches(
                                         &options, &lj_error);
   query_finish_source_bytes(&state.result, &adapter);
   if (st != LONEJSON_STATUS_OK) {
-    free_doc(&state.doc);
+    destroy_doc(&state.doc);
     lonejson_free(runtime);
     if (state.callback_status != LQL_STATUS_OK) {
       if (out_result != NULL) {
@@ -1440,7 +1440,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_matches(
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
-  free_doc(&state.doc);
+  destroy_doc(&state.doc);
   lonejson_free(runtime);
   if (out_result != NULL) {
     *out_result = state.result;
@@ -1486,7 +1486,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_range_spooled_matches(
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    free_doc(&state.doc);
+    destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
   if (compact) {
@@ -1494,7 +1494,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_range_spooled_matches(
     if (state.compact_runtime == NULL) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
       lonejson_free(runtime);
-      free_doc(&state.doc);
+      destroy_doc(&state.doc);
       return LQL_STATUS_JSON_ERROR;
     }
   }
@@ -1513,7 +1513,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_range_spooled_matches(
   if (state.compact_runtime != NULL) {
     lonejson_free(state.compact_runtime);
   }
-  free_doc(&state.doc);
+  destroy_doc(&state.doc);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
     if (state.mutation_error.code != LQL_STATUS_OK) {
@@ -1567,7 +1567,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_spooled_matches(
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    free_doc(&state.doc);
+    destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
   if (compact) {
@@ -1575,7 +1575,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_spooled_matches(
     if (state.compact_runtime == NULL) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
       lonejson_free(runtime);
-      free_doc(&state.doc);
+      destroy_doc(&state.doc);
       return LQL_STATUS_JSON_ERROR;
     }
   }
@@ -1591,7 +1591,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_spooled_matches(
   if (state.compact_runtime != NULL) {
     lonejson_free(state.compact_runtime);
   }
-  free_doc(&state.doc);
+  destroy_doc(&state.doc);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
     if (state.mutation_error.code != LQL_STATUS_OK) {
@@ -1650,7 +1650,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
   runtime = lonejson_new(NULL, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    free_doc(&state.doc);
+    destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
   if (compact) {
@@ -1658,7 +1658,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
     if (state.compact_runtime == NULL) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
       lonejson_free(runtime);
-      free_doc(&state.doc);
+      destroy_doc(&state.doc);
       return LQL_STATUS_JSON_ERROR;
     }
   }
@@ -1681,7 +1681,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_rewrite(
     }
     *out_result = state.result;
   }
-  free_doc(&state.doc);
+  destroy_doc(&state.doc);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
     if (state.mutation_error.code != LQL_STATUS_OK) {

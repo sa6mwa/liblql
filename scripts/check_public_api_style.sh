@@ -110,6 +110,19 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  free_helper_hits=$(
+    grep -REn \
+      '^[[:space:]]*static[[:space:]][^(;]*[[:space:]*]([A-Za-z0-9_]+_free|free_[A-Za-z0-9_]+)[[:space:]]*\(' \
+      "$source_root/src" "$source_root/tests" "$source_root/parity" \
+      "$source_root/lua" "$source_root/examples" "$source_root/bench" \
+      2>/dev/null || true
+  )
+  if [ -n "$free_helper_hits" ]; then
+    printf 'public API style: forbidden project-owned free cleanup helper\n' >&2
+    printf '%s\n' "$free_helper_hits" >&2
+    failed=1
+  fi
+
   alloc_hits=$(
     find "$source_root/src" "$source_root/tests" "$source_root/lua" \
       "$source_root/examples" "$source_root/bench" \

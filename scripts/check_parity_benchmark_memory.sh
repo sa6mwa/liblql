@@ -4,7 +4,9 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 go_bin="${GO:-go}"
 log=${1:-}
-max=${LQL_BENCH_MAX_C_PEAK_RSS_BYTES:-134217728}
+c_max=${LQL_BENCH_MAX_C_PEAK_RSS_BYTES:-134217728}
+lua_max=${LQL_BENCH_MAX_LUA_PEAK_RSS_BYTES:-$c_max}
+require_lua_rss=${LQL_BENCH_REQUIRE_LUA_RSS:-0}
 
 if [ -z "$log" ]; then
   printf 'usage: check_parity_benchmark_memory.sh BENCHMARK_JSONL\n' >&2
@@ -16,4 +18,9 @@ if [ ! -s "$log" ]; then
   exit 1
 fi
 
-(cd "$root/parity" && "$go_bin" run ./cmd/benchvalidate --max-c-peak-rss-bytes "$max") < "$log"
+args="--max-c-peak-rss-bytes $c_max --max-lua-peak-rss-bytes $lua_max"
+if [ "$require_lua_rss" = "1" ]; then
+  args="$args --require-lua-peak-rss"
+fi
+
+(cd "$root/parity" && "$go_bin" run ./cmd/benchvalidate $args) < "$log"

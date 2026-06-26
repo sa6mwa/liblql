@@ -82,15 +82,20 @@ Current implementation status:
   smoke matrix; it is not the final large-fixture memory proof. The smoke gate
   is explicit and is not part of `make test-all`; `make prerelease` runs it
   after the normal test gate.
-- `make bench-memory-check` runs a separate scalable C streaming memory profile
-  over a generated NDJSON fixture. By default it generates at least 16 MiB of
-  input using bounded per-record padding, runs `decision_only_selector`,
-  `plus_value_selector`, and `plus_value_openjson_selector`, and validates
-  supported C peak RSS against `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`. The profile is
-  configurable with `LQL_BENCH_MEMORY_COUNT`,
-  `LQL_BENCH_MEMORY_BLOB_BYTES`, and `LQL_BENCH_MEMORY_MIN_BYTES`, so the same
-  gate shape can be scaled toward the 1 GiB/128 MiB requirement without changing
-  the runner or weakening the normal smoke gate.
+- `make bench-memory-check` runs a separate scalable Go/C/Lua streaming memory
+  profile over a generated NDJSON fixture. By default it generates at least
+  16 MiB of input using bounded per-record padding, runs
+  `decision_only_selector`, `plus_value_selector`, and
+  `plus_value_openjson_selector`, compares C and Lua counters against the Go
+  oracle, validates supported C peak RSS against
+  `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`, and validates supported Lua peak RSS
+  against `LQL_BENCH_MAX_LUA_PEAK_RSS_BYTES` or the C ceiling when unset. The
+  profile requires host process RSS timing for Lua through GNU
+  `/usr/bin/time -f/-o` or Darwin `/usr/bin/time -l`. It is configurable with
+  `LQL_BENCH_MEMORY_COUNT`, `LQL_BENCH_MEMORY_BLOB_BYTES`, and
+  `LQL_BENCH_MEMORY_MIN_BYTES`, so the same gate shape can be scaled toward the
+  1 GiB/128 MiB requirement without changing the runner or weakening the normal
+  smoke gate.
 - `make benchmarks-c` exercises the public liblql API for decision-only output
   and matched-only seekable plus-value payload access over a shared generated
   fixture.
@@ -118,10 +123,9 @@ Current implementation status:
   The C native helper and Lua facade runner report `ns_per_op`; the schema
   validator requires timing for all supported Go, C, and Lua records. The C
   native helper and Go helper report OS `getrusage` peak RSS as
-  `peak_rss_bytes`; the validator requires positive peak RSS for supported C
-  and Go records. Lua records currently set `peak_rss_bytes` to `null` because
-  the Lua facade runner does not yet own an external process RSS measurement
-  path.
+  `peak_rss_bytes`; the Lua facade runner records process peak RSS through the
+  host `time` command when available. The memory profile requires positive
+  `peak_rss_bytes` for supported Lua records.
 - the current executable CLI-style selector matrix covers grouped
   equality/range, service contains, service case-insensitive contains, service
   `contains.any`, service `icontains.any`, and nested `/records[]/...`
@@ -468,10 +472,10 @@ Suggested staged gates:
 - C library plus-value/open-read modes must prove callback-scoped payload
   access without candidate retention and must have a documented C-native
   baseline distinct from CLI-mediated `clql` timing;
-- Lua may be report-only until Lua streaming/spooled handle APIs are complete;
-  the current direct module covers buffered and seekable-file workflows through
-  public liblql but does not yet define final Lua streaming performance
-  expectations.
+- Lua memory is gated for the current direct-module seekable-file benchmark
+  workflows. Lua streaming/spooled handle APIs may add more benchmark modes
+  later, but existing Lua-supported modes must keep bounded memory and must not
+  materialize complete candidates or result sets to satisfy the benchmark.
 
 Any performance gate must print actionable diagnostics with dataset, selector,
 mode, observed value, baseline/threshold, and reproduction command.

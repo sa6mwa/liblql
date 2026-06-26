@@ -59,6 +59,8 @@ go_bin="${GO:-go}"
 go_bench="${LQL_GO_BENCH_PATH:-$root/build/bench-tools/lqlbench}"
 go_bench_ready=0
 lua_bin="${LUA:-lua}"
+time_bin="${LQL_BENCH_TIME:-/usr/bin/time}"
+require_lua_rss="${LQL_BENCH_REQUIRE_LUA_RSS:-0}"
 mkdir -p "$fixture_dir"
 ndjson_fixture="$fixture_dir/large_ndjson.jsonl"
 array_fixture="$fixture_dir/large_array.json"
@@ -78,6 +80,38 @@ record_blob=""
 
 json_string() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+detect_time_mode() {
+  time_probe="$fixture_dir/time-probe.$$"
+  if "$time_bin" -f 'peak_rss_kb=%M' -o "$time_probe" true >/dev/null 2>&1; then
+    rm -f "$time_probe"
+    printf 'gnu\n'
+    return 0
+  fi
+  if "$time_bin" -l true >"$time_probe" 2>&1; then
+    rm -f "$time_probe"
+    printf 'darwin\n'
+    return 0
+  fi
+  rm -f "$time_probe"
+  printf 'none\n'
+}
+
+parse_time_peak_rss_bytes() {
+  mode=$1
+  file=$2
+  case "$mode" in
+    gnu)
+      awk -F= '/^peak_rss_kb=/{ printf "%d\n", $2 * 1024 }' "$file"
+      ;;
+    darwin)
+      awk '/maximum resident set size/{ printf "%d\n", $1 }' "$file"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 file_sha256() {
@@ -562,17 +596,66 @@ run_lua_mode() {
     emit_unsupported_impl "lua" "lql.core module not found; run make build-debug"
     return 1
   fi
+  lua_time_mode=$(detect_time_mode)
+  if [ "$require_lua_rss" = "1" ] && [ "$lua_time_mode" = "none" ]; then
+    printf 'Lua benchmark RSS is required, but %s does not support GNU -f/-o or Darwin -l time output\n' "$time_bin" >&2
+    return 1
+  fi
   payload_source_type=none
   case "$mode" in
     plus_value_*) payload_source_type=lua_liblql ;;
   esac
   for submode in warmup_included steady_state; do
-    record=$(LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
-      LUA_CPATH="$root/build/debug/?.so;$root/build/debug/?/core.so;;" \
-      LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
-      DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
-      "$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
-      "$fixture_path" "$candidates" "$submode")
+    safe_tag=$(printf '%s-%s-%s-%s' "$dataset_name" "$selector_name" "$mode" "$submode" |
+      sed 's/[^A-Za-z0-9_.-]/_/g')
+    lua_out="$fixture_dir/lua-$safe_tag.out"
+    lua_time="$fixture_dir/lua-$safe_tag.time"
+    lua_peak_rss_bytes=null
+    if [ "$lua_time_mode" = "gnu" ]; then
+      if ! "$time_bin" -f 'peak_rss_kb=%M' -o "$lua_time" \
+        env \
+        LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
+        LUA_CPATH="$root/build/debug/?.so;$root/build/debug/?/core.so;;" \
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+        DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+        "$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
+        "$fixture_path" "$candidates" "$submode" > "$lua_out"; then
+        cat "$lua_out" >&2
+        cat "$lua_time" >&2
+        return 1
+      fi
+      lua_peak_rss_bytes=$(parse_time_peak_rss_bytes "$lua_time_mode" "$lua_time")
+    elif [ "$lua_time_mode" = "darwin" ]; then
+      if ! "$time_bin" -l \
+        env \
+        LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
+        LUA_CPATH="$root/build/debug/?.so;$root/build/debug/?/core.so;;" \
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+        DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+        "$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
+        "$fixture_path" "$candidates" "$submode" > "$lua_out" 2> "$lua_time"; then
+        cat "$lua_out" >&2
+        cat "$lua_time" >&2
+        return 1
+      fi
+      lua_peak_rss_bytes=$(parse_time_peak_rss_bytes "$lua_time_mode" "$lua_time")
+    else
+      if ! env \
+        LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
+        LUA_CPATH="$root/build/debug/?.so;$root/build/debug/?/core.so;;" \
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+        DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-}:$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib" \
+        "$lua_bin" "$root/lua/benchmarks/parity.lua" "$mode" "$expr" \
+        "$fixture_path" "$candidates" "$submode" > "$lua_out"; then
+        cat "$lua_out" >&2
+        return 1
+      fi
+    fi
+    if [ -z "$lua_peak_rss_bytes" ]; then
+      printf 'Lua benchmark RSS parser produced no value for %s\n' "$lua_time" >&2
+      return 1
+    fi
+    record=$(cat "$lua_out")
     lua_candidates=$(kv_field candidates "$record")
     lua_matches=$(kv_field matches "$record")
     lua_payloads=$(kv_field payloads "$record")
@@ -590,7 +673,7 @@ run_lua_mode() {
     emit_record "lua" "$dataset_name" "$selector_name" "$expr" \
       "$mode" "$submode" "$bytes" "$lua_candidates" "$lua_matches" \
       "$lua_payloads" "$lua_payload_bytes" "$payload_source_type" \
-      "$lua_elapsed_ns" null false "" "$fixture_sha"
+      "$lua_elapsed_ns" "$lua_peak_rss_bytes" false "" "$fixture_sha"
   done
 }
 
@@ -714,9 +797,19 @@ if [ "$exit_status" -eq 0 ] && is_selected lua; then
 fi
 
 if [ "$check" -eq 1 ] && [ "$exit_status" -eq 0 ]; then
-  if [ ! -s "$ndjson_fixture" ] || [ ! -s "$array_fixture" ] ||
-    [ ! -s "$single_fixture" ] || [ ! -s "$cli_ndjson_fixture" ] ||
-    [ ! -s "$cli_array_fixture" ] || [ ! -s "$cli_single_fixture" ]; then
+  if [ "$suite" = "memory" ]; then
+    fixtures_ready=1
+    [ -s "$ndjson_fixture" ] || fixtures_ready=0
+  else
+    fixtures_ready=1
+    [ -s "$ndjson_fixture" ] || fixtures_ready=0
+    [ -s "$array_fixture" ] || fixtures_ready=0
+    [ -s "$single_fixture" ] || fixtures_ready=0
+    [ -s "$cli_ndjson_fixture" ] || fixtures_ready=0
+    [ -s "$cli_array_fixture" ] || fixtures_ready=0
+    [ -s "$cli_single_fixture" ] || fixtures_ready=0
+  fi
+  if [ "$fixtures_ready" -ne 1 ]; then
     printf 'benchmark check failed: fixture was not generated\n' >&2
     exit_status=1
   else

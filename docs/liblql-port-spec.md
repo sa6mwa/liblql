@@ -445,9 +445,9 @@ Performance gates must therefore validate two things separately:
 Initial benchmark gates may be behavioral while surfaces are incomplete. Once a
 surface is claimed, the benchmark should move to a documented C-native
 threshold, baseline, or speedup floor for that specific public path.
-CLI-mediated and Lua facade benchmarks may remain report-only where process
-startup or the temporary facade dominates the measurement, but public liblql
-benchmark paths should not.
+CLI-mediated and Lua facade timing may remain report-only where process startup
+or facade overhead dominates the measurement, but claimed public liblql and Lua
+memory behavior must be gated rather than treated as report-only.
 
 ## Packaging Requirements
 
@@ -545,9 +545,10 @@ Current implementation is an early slice:
   exact-name macro or static wrapper shims that recreate those removed
   operation functions and for static receiver-operation shims that should have
   been folded into the receiver-compatible implementation functions; receiver
-  cleanup fields named `*_free` and public allocator wrapper prototypes are
-  also rejected so cleanup stays on the `*_destroy` receiver surface and the
-  allocator boundary stays internal;
+  cleanup fields named `*_free`, project-owned cleanup helpers named
+  `free_*`/`*_free`, and public allocator wrapper prototypes are also rejected
+  so cleanup stays on the `*_destroy` receiver surface and the allocator
+  boundary stays internal;
 - project-owned allocations have an internal central liblql allocator surface,
   and
   direct C runtime allocation calls are limited to the allocator
@@ -821,11 +822,13 @@ Current implementation is an early slice:
   `ns_per_op`, Lua plus-value benchmark modes count bytes through
   `match.write_json(callback)` instead of `match.json()` materialization, while
   Go and C helper records also report OS `getrusage` peak RSS as
-  `peak_rss_bytes` for the benchmark schema; `make bench-check` enforces a
+  `peak_rss_bytes` for the benchmark schema and Lua records report process peak
+  RSS when host `time` support is available; `make bench-check` enforces a
   supported-C smoke RSS ceiling through `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`
-  defaulting to 128 MiB; `make bench-memory-check` adds a separate scalable C
-  streaming profile that generates at least 16 MiB of NDJSON by default and can
-  be scaled with `LQL_BENCH_MEMORY_COUNT` and
+  defaulting to 128 MiB; `make bench-memory-check` adds a separate scalable
+  Go/C/Lua streaming profile that generates at least 16 MiB of NDJSON by
+  default, compares C and Lua counters against Go, requires Lua peak RSS, and
+  can be scaled with `LQL_BENCH_MEMORY_COUNT` and
   `LQL_BENCH_MEMORY_BLOB_BYTES`, moving the benchmark surface toward the final
   1 GiB/128 MiB proof without slowing the normal smoke gate;
 - host `liblql` and `clql` package archive production exists through

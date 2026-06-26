@@ -413,7 +413,7 @@ static int key_allowed_for_kind(lql_node_kind kind, const char *key) {
   }
 }
 
-static void free_seen_key_values(char *field, char *value, char *any,
+static void dispose_seen_key_values(char *field, char *value, char *any,
                                  char *ignore_case, char *gt, char *gte,
                                  char *lt, char *lte, char *after, char *before,
                                  char *since) {
@@ -901,7 +901,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
                   "date selector requires at least one bound");
     goto fail_after_tokens;
   }
-  free_seen_key_values(seen_field, seen_value, seen_any, seen_ignore_case,
+  dispose_seen_key_values(seen_field, seen_value, seen_any, seen_ignore_case,
                        seen_gt, seen_gte, seen_lt, seen_lte, seen_after,
                        seen_before, seen_since);
   return 1;
@@ -909,7 +909,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
 fail:
   token_list_cleanup(&parts);
 fail_after_tokens:
-  free_seen_key_values(seen_field, seen_value, seen_any, seen_ignore_case,
+  dispose_seen_key_values(seen_field, seen_value, seen_any, seen_ignore_case,
                        seen_gt, seen_gte, seen_lt, seen_lte, seen_after,
                        seen_before, seen_since);
   return 0;

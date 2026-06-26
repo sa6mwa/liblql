@@ -13,7 +13,7 @@ help:
 	  'make lua-test                run Lua facade smoke tests' \
 	  'make benchmarks             run local parity benchmark smoke' \
 	  'make bench-check            run deterministic benchmark smoke gate' \
-	  'make bench-memory-check     run scalable C streaming memory gate' \
+	  'make bench-memory-check     run scalable Go/C/Lua streaming memory gate' \
 	  'make benchmarks-parity      require Go/C/Lua benchmark implementations' \
 	  'make format                  clang-format project C sources' \
 	  'make package                 build host package artifacts' \
