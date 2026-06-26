@@ -1213,6 +1213,14 @@ Current implementation status:
   original subtree; C SDK tests also assert recursive wildcard and array
   wildcard mutation behavior through the caller-buffered `ctx->mutate_json()`
   surface, not only through seekable file-range mutation;
+- the randomized Go mutation parity row is covered in C by deterministic
+  mutation invariants rather than by a random loop: root set/remove/increment,
+  nested path creation, object-member and array-element wildcards, recursive
+  descendants, numeric object/array path segments, array value replacement,
+  and ordered wildcard error precedence are all asserted through public C
+  mutation APIs. The Go random oracle remains useful during development, but
+  C unit coverage should stay falsifiable and stable rather than depending on
+  pseudo-random corpus generation;
 - C SDK selector tests assert omitted-value string selectors
   (`contains`/`icontains`/`prefix`/`iprefix`) act as path-existence assertions
   across object, array, and null values, including wildcard path variants, while
