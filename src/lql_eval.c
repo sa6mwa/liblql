@@ -800,6 +800,7 @@ static void init_eval_visitor(lonejson_path_value_visitor *visitor) {
 typedef struct query_stream_state {
   lql *receiver;
   FILE *file;
+  lonejson *capture_runtime;
   lql_uint64 offset_base;
   lql_uint64 index_base;
   const lql_selector *selector;
@@ -809,6 +810,10 @@ typedef struct query_stream_state {
   lql_query_result result;
   lql_status callback_status;
   eval_doc doc;
+  lonejson_spooled array_spool;
+  int array_spool_initialized;
+  unsigned char pending_payload_prefix[32];
+  size_t pending_payload_prefix_len;
 } query_stream_state;
 
 typedef struct source_reader_adapter {
@@ -1083,6 +1088,68 @@ static void query_stop(query_stream_state *state,
   state->result.stop_reason = reason;
 }
 
+static void query_stream_state_cleanup_capture(query_stream_state *state) {
+  if (state != NULL && state->array_spool_initialized) {
+    state->array_spool.cleanup(&state->array_spool);
+    state->array_spool_initialized = 0;
+  }
+}
+
+static lonejson_status query_source_decision_payload_sink(
+    void *user, const void *data, size_t len, lonejson_error *error) {
+  query_stream_state *state;
+  size_t copy_len;
+  lonejson_status st;
+
+  state = (query_stream_state *)user;
+  if (state == NULL || len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->doc.root_kind == '[') {
+    if (!state->array_spool_initialized) {
+      if (state->capture_runtime == NULL) {
+        if (error != NULL) {
+          error->code = LONEJSON_STATUS_INTERNAL_ERROR;
+          strcpy(error->message, "source decision spool runtime missing");
+        }
+        return LONEJSON_STATUS_INTERNAL_ERROR;
+      }
+      lonejson_spooled_init(state->capture_runtime, &state->array_spool);
+      state->array_spool_initialized = 1;
+      if (state->pending_payload_prefix_len != 0u) {
+        st = state->array_spool.append(
+            &state->array_spool, state->pending_payload_prefix,
+            state->pending_payload_prefix_len, error);
+        if (st != LONEJSON_STATUS_OK) {
+          state->callback_status = LQL_STATUS_JSON_ERROR;
+          return st;
+        }
+        state->pending_payload_prefix_len = 0u;
+      }
+    }
+    st = state->array_spool.append(&state->array_spool, data, len, error);
+    if (st != LONEJSON_STATUS_OK) {
+      state->callback_status = LQL_STATUS_JSON_ERROR;
+    }
+    return st;
+  }
+  if (state->doc.root_kind != '\0') {
+    state->pending_payload_prefix_len = 0u;
+    return LONEJSON_STATUS_OK;
+  }
+  copy_len = sizeof(state->pending_payload_prefix) -
+             state->pending_payload_prefix_len;
+  if (copy_len > len) {
+    copy_len = len;
+  }
+  if (copy_len != 0u) {
+    memcpy(state->pending_payload_prefix + state->pending_payload_prefix_len,
+           data, copy_len);
+    state->pending_payload_prefix_len += copy_len;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_candidate_callback_result
 on_candidate_begin(void *user, const lonejson_candidate_info *candidate,
                    lonejson_error *error) {
@@ -1090,6 +1157,10 @@ on_candidate_begin(void *user, const lonejson_candidate_info *candidate,
   (void)candidate;
   (void)error;
   reset_doc(&state->doc);
+  if (state->array_spool_initialized) {
+    state->array_spool.reset(&state->array_spool);
+  }
+  state->pending_payload_prefix_len = 0u;
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
@@ -1147,8 +1218,8 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
     return LONEJSON_CANDIDATE_CONTINUE;
   }
   if (state->doc.root_kind == '[' && state->receiver != NULL &&
-      candidate->payload_spool != NULL) {
-    nested_reader.cursor = *candidate->payload_spool;
+      state->array_spool_initialized) {
+    nested_reader.cursor = state->array_spool;
     nested_reader.cursor.read_offset = 0u;
     nested_options = query_remaining_options(&state->options, &state->result);
     memset(&nested_result, 0, sizeof(nested_result));
@@ -2130,13 +2201,16 @@ static lql_status execute_query_source_decisions_with_base(
     destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
+  state.capture_runtime = runtime;
   adapter.read = read;
   adapter.user = read_user;
   adapter.error_code = 0;
   adapter.total_read = 0u;
   init_eval_visitor(&visitor);
   options = lonejson_default_candidate_stream_options();
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SINK;
+  options.payload_sink = query_source_decision_payload_sink;
+  options.payload_sink_user = &state;
   options.path_visitor = &visitor;
   options.visitor_user = &state.doc;
   options.candidate_begin = on_candidate_begin;
@@ -2149,6 +2223,7 @@ static lql_status execute_query_source_decisions_with_base(
     query_finish_source_bytes(&state.result, &adapter);
   }
   if (st != LONEJSON_STATUS_OK) {
+    query_stream_state_cleanup_capture(&state);
     destroy_doc(&state.doc);
     lonejson_free(runtime);
     if (out_result != NULL) {
@@ -2156,7 +2231,9 @@ static lql_status execute_query_source_decisions_with_base(
     }
     if (state.callback_status != LQL_STATUS_OK) {
       lql_set_error(error, state.callback_status,
-                    "query decision callback failed");
+                    state.callback_status == LQL_STATUS_JSON_ERROR
+                        ? "query source payload capture failed"
+                        : "query decision callback failed");
       return state.callback_status;
     }
     if (adapter.error_code != 0) {
@@ -2166,6 +2243,7 @@ static lql_status execute_query_source_decisions_with_base(
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
+  query_stream_state_cleanup_capture(&state);
   destroy_doc(&state.doc);
   lonejson_free(runtime);
   if (out_result != NULL) {

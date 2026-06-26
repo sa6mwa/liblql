@@ -276,9 +276,10 @@ therefore a library/API concern rather than a JSON parser workaround:
 - matched seekable candidates expose callback-scoped seekable range payloads;
 - seekable decision-only and seekable plus-value paths use lonejson
   `CAPTURE_NONE`;
-- callback-source decision streams use callback-scoped spooled replay for
-  nested top-level array candidates because non-seekable sources cannot be
-  rewound by offset;
+- callback-source decision streams discard ordinary candidate payload bytes as
+  they are parsed and use callback-scoped spooled replay only for nested
+  top-level array candidates because non-seekable sources cannot be rewound by
+  offset;
 - non-seekable plus-value paths use callback-scoped spooled handles and caller
   sinks rather than contiguous candidate materialization.
 
@@ -948,8 +949,9 @@ Current implementation status:
   Projection-before-mutation candidate-stream tests cover both seekable and
   callback-source inputs in preserve-unmatched and matches-only modes.
   C-native streaming tests also cover recursive flattening of nested
-  top-level array candidates for seekable decision streams, seekable range
-  payload streams, and callback-source spooled match payloads.
+  top-level array candidates for seekable decision streams, callback-source
+  decision streams, seekable range payload streams, and callback-source spooled
+  match payloads.
   Handle-producing selector, projection, and mutation APIs also have
   C-only ownership contract tests for optional diagnostics, output-handle
   clearing on parse failure, empty-selector ownership, and `NULL` cleanup/count
