@@ -958,6 +958,24 @@ static void expect_match_or(const char *expr, const char *json, int want) {
   test_ctx->selector_destroy(test_ctx, selector);
 }
 
+static void expect_selector_equivalent_forms(const char *name,
+                                             const char *const *exprs,
+                                             size_t expr_count,
+                                             const char *matching_json,
+                                             const char *rejecting_json) {
+  size_t i;
+
+  if (expr_count == 0u) {
+    printf("selector equivalence case %s has no expressions\n", name);
+    ++failures;
+    return;
+  }
+  for (i = 0u; i < expr_count; ++i) {
+    expect_match(exprs[i], matching_json, 1);
+    expect_match(exprs[i], rejecting_json, 0);
+  }
+}
+
 static void expect_stream_file(void) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n";
@@ -5620,6 +5638,7 @@ typedef struct sdk_contract_surface_count {
 } sdk_contract_surface_count;
 
 static void expect_selector_match_api(void);
+static void expect_selector_parse_equivalence_api(void);
 static void expect_selector_or_api(void);
 static void expect_selector_parse_error_api(void);
 static void expect_selector_inspection_api(void);
@@ -5644,6 +5663,8 @@ static void expect_sdk_contract_manifest(void) {
        "scalar, string, numeric, temporal, path, wildcard, "
        "existence, and logical matching",
        expect_selector_match_api},
+      {"selector", "parse-equivalence invariants",
+       expect_selector_parse_equivalence_api},
       {"selector", "OR parse/evaluation public API", expect_selector_or_api},
       {"selector", "selector capability and execution-trait inspection",
        expect_selector_inspection_api},
@@ -5721,7 +5742,7 @@ static void expect_sdk_contract_manifest(void) {
   };
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 4}, {"streaming", 11},
+      {"version", 1},      {"selector", 5}, {"streaming", 11},
       {"projection", 6},   {"compact", 2},  {"mutation", 18},
   };
   size_t i;
@@ -5980,6 +6001,79 @@ static void expect_selector_match_api(void) {
                1);
   expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"closed\"}",
                0);
+}
+
+static void expect_selector_parse_equivalence_api(void) {
+  {
+    static const char *const exprs[] = {
+        "eq{field=/status,value=open}", "eq{value=open,field=/status}",
+        "eq{f=/status,v=open}", " /status = \"open\" "};
+    expect_selector_equivalent_forms("eq aliases", exprs,
+                                     sizeof(exprs) / sizeof(exprs[0]),
+                                     "{\"status\":\"open\"}",
+                                     "{\"status\":\"closed\"}");
+  }
+  {
+    static const char *const exprs[] = {
+        "contains{field=/msg,any=timeout|error}",
+        "contains{any=timeout|error,field=/msg}",
+        "contains{f=/msg,a=timeout|error}",
+        "contains{ field=/msg,\nany=timeout|error }"};
+    expect_selector_equivalent_forms("contains any aliases", exprs,
+                                     sizeof(exprs) / sizeof(exprs[0]),
+                                     "{\"msg\":\"upstream timeout\"}",
+                                     "{\"msg\":\"healthy\"}");
+  }
+  {
+    static const char *const exprs[] = {
+        "in{field=/env,any=prod|stage}", "in{any=prod|stage,field=/env}",
+        "in{f=/env,a=prod|stage}", "in{field=/env,any=\"prod|stage\"}"};
+    expect_selector_equivalent_forms("in any aliases", exprs,
+                                     sizeof(exprs) / sizeof(exprs[0]),
+                                     "{\"env\":\"stage\"}",
+                                     "{\"env\":\"dev\"}");
+  }
+  {
+    static const char *const exprs[] = {
+        "range{field=/timestamp,gte=2026-03-05T10:28:21Z,"
+        "lt=2026-03-05T10:30:00Z}",
+        "range{lt=2026-03-05T10:30:00Z,field=/timestamp,"
+        "gte=2026-03-05T10:28:21Z}",
+        "range{ field=/timestamp, gte=2026-03-05T10:28:21Z, "
+        "lt=2026-03-05T10:30:00Z }"};
+    expect_selector_equivalent_forms(
+        "range assignment order", exprs, sizeof(exprs) / sizeof(exprs[0]),
+        "{\"timestamp\":\"2026-03-05T10:29:00Z\"}",
+        "{\"timestamp\":\"2026-03-05T10:30:00Z\"}");
+  }
+  {
+    static const char *const exprs[] = {
+        "date{field=/timestamp,after=2025-01-01,before=2025-01-03}",
+        "date{before=2025-01-03,field=/timestamp,after=2025-01-01}",
+        "date{f=/timestamp,a=2025-01-01,b=2025-01-03}"};
+    expect_selector_equivalent_forms(
+        "date aliases", exprs, sizeof(exprs) / sizeof(exprs[0]),
+        "{\"timestamp\":\"2025-01-02T06:00:00Z\"}",
+        "{\"timestamp\":\"2025-01-03T00:00:00Z\"}");
+  }
+  {
+    static const char *const exprs[] = {
+        "eq{field=/status,value=open},in{field=/env,any=prod|stage}",
+        "eq{field=/status,value=open}\nin{field=/env,any=prod|stage}",
+        " eq{field=/status,value=open},\n in{field=/env,any=prod|stage} "};
+    expect_selector_equivalent_forms(
+        "multiline implicit and", exprs, sizeof(exprs) / sizeof(exprs[0]),
+        "{\"status\":\"open\",\"env\":\"prod\"}",
+        "{\"status\":\"open\",\"env\":\"dev\"}");
+  }
+  {
+    static const char *const exprs[] = {
+        "and.0.or.0.not.eq{field=/status,value=closed}",
+        "and.0.or.0.not.eq{value=closed,field=/status}"};
+    expect_selector_equivalent_forms(
+        "nested wrapper aliases", exprs, sizeof(exprs) / sizeof(exprs[0]),
+        "{\"status\":\"open\"}", "{\"status\":\"closed\"}");
+  }
 }
 
 static void expect_selector_or_api(void) {
@@ -6262,6 +6356,7 @@ int main(void) {
   expect_output_state_contract_api();
   expect_handle_ownership_contract_api();
   expect_selector_match_api();
+  expect_selector_parse_equivalence_api();
   expect_selector_or_api();
   expect_selector_inspection_api();
   expect_selector_parse_error_api();

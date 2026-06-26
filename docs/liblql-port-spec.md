@@ -864,6 +864,10 @@ Current implementation status:
   invalid selector invariants; C-native parser tests exercise those invalid
   expression classes through both public selector parser entry points,
   `ctx->selector_parse()` and `ctx->selector_parse_or()`;
+- C-native selector parser contract tests now assert observable equivalence for
+  alias spellings, assignment ordering, quoted `in.any` values, whitespace and
+  multiline separators, shorthand comparison spacing, and nested wrapper
+  aliases by evaluating each accepted form against matching and rejecting JSON;
 - `clql` exists as a selector/projection/mutation compatibility CLI with
   manifest-checked Go-backed parity coverage for selector composition,
   streaming selection, projection, mutation, inline/write modes, option
