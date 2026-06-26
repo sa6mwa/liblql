@@ -39,3 +39,24 @@ do
       ;;
   esac
 done
+
+theme_input='{"status":"open"}'
+theme_expected='{"status":"open"}'
+for theme_args in \
+  '-c --theme default' \
+  '-c --theme=default' \
+  '-c -t default' \
+  '-c -tdefault' \
+  '-c -t=default' \
+  '-ctdefault' \
+  '-ct=default'
+do
+  # shellcheck disable=SC2086
+  theme_out=$(printf '%s' "$theme_input" | "$clql" $theme_args '/status="open"')
+  if [ "$theme_out" != "$theme_expected" ]; then
+    printf 'clql smoke: theme compatibility output mismatch for %s: %s\n' \
+      "$theme_args" "$theme_out" >&2
+    printf 'clql smoke: expected: %s\n' "$theme_expected" >&2
+    exit 1
+  fi
+done
