@@ -427,6 +427,31 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     printf '%s\n' "$lua_private_hits" >&2
     failed=1
   fi
+
+  if [ -f "$source_root/parity/sdk_liblql.go" ]; then
+    parity_receiver_hits=$(
+      awk '
+        /^static int liblql_(read_tmp|prepare_range_input)[[:space:]]*\(/ {
+          next
+        }
+        /^static int liblql_[A-Za-z0-9_]+[[:space:]]*\(/ {
+          line = $0
+          start = FNR
+          while (line !~ /\)/ && getline > 0) {
+            line = line " " $0
+          }
+          if (line !~ /^static int liblql_[^(]+[[:space:]]*\([[:space:]]*lql[[:space:]]+\*ctx[[:space:],]/) {
+            print FILENAME ":" start ":" line
+          }
+        }
+      ' "$source_root/parity/sdk_liblql.go" 2>/dev/null || true
+    )
+    if [ -n "$parity_receiver_hits" ]; then
+      printf 'public API style: parity C operation helpers must receive lql *ctx first\n' >&2
+      printf '%s\n' "$parity_receiver_hits" >&2
+      failed=1
+    fi
+  fi
 fi
 
 exit "$failed"

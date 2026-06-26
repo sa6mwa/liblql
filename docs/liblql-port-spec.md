@@ -577,6 +577,14 @@ Current implementation status:
   public allocator-free wrappers, receiver `*_free` fields, static cleanup
   wrappers, direct runtime allocation, old allocator wrapper calls, and
   `LQL_ALLOCATOR_*` macro wrapper calls;
+- Go-backed SDK parity remains an oracle harness, not an alternate C SDK
+  surface: C helpers in `parity/sdk_liblql.go` that perform liblql operations
+  must receive `lql *ctx` as their first argument and dispatch through
+  `ctx->method(ctx, ...)`; the only free helper exceptions are local utilities
+  that do not operate on a receiver, such as temporary file readback and test
+  input preparation. `lql.public-api-style-fixtures` includes a negative
+  parity helper that omits the receiver argument and proves the style gate fails
+  closed;
 - project-owned allocations have an internal central liblql allocator receiver
   surface, the old `lql_alloc`/`lql_calloc`/`lql_realloc`/`lql_dealloc`/
   `lql_strdup` wrapper layer and the private `LQL_ALLOCATOR_*` macro wrapper

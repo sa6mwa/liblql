@@ -129,6 +129,11 @@ void test_private_operation(void) { (void)lql_mutate_json_impl(0, 0, 0, 0, 0, 0)
 void test_private_spooled_operation(void) { (void)lql_project_spooled(0, 0, 0, 0, 0, 0); }
 EOF
 
+cat >"$tmp/parity/sdk_liblql.go" <<'EOF'
+static int liblql_matches_json(const char *expr) { return expr != 0; }
+static int liblql_read_tmp(void *tmp) { return tmp != 0; }
+EOF
+
 out="$tmp/batched-negative.out"
 if sh "$checker" "$header" "" "$tmp" >"$out" 2>&1; then
   printf 'public API fixture: expected batched negative tree to fail\n' >&2
@@ -157,6 +162,7 @@ expect_diagnostic "$out" "clql must route execution through receiver methods"
 expect_diagnostic "$out" "clql glue allocation must not depend on liblql receiver ownership"
 expect_diagnostic "$out" "project-owned consumers must query version/capabilities through the receiver"
 expect_diagnostic "$out" "tests and examples must exercise operations through receiver methods"
+expect_diagnostic "$out" "parity C operation helpers must receive lql \*ctx first"
 
 rm -rf "$tmp/src" "$tmp/tests" "$tmp/parity" "$tmp/lua" "$tmp/examples" \
   "$tmp/bench"
