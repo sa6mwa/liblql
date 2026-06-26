@@ -220,6 +220,16 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  selector_default_allocator_hits=$(
+    grep -En 'lql_allocator_default[[:space:]]*\(' \
+      "$source_root/src/lql_selector.c" 2>/dev/null || true
+  )
+  if [ -n "$selector_default_allocator_hits" ]; then
+    printf 'public API style: selector parser must use the receiver parser allocator\n' >&2
+    printf '%s\n' "$selector_default_allocator_hits" >&2
+    failed=1
+  fi
+
   lua_private_hits=$(
     grep -REn \
       'lql_internal\.h|LQL_INTERNAL_SYMBOL|lql_[A-Za-z0-9_]+_impl[[:space:]]*\(' \

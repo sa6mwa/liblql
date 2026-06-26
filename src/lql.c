@@ -344,22 +344,25 @@ static void receiver_destroy(lql *self) {
   allocator->destroy(allocator, self);
 }
 
-LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_node *node) {
+LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_allocator *allocator,
+                                          lql_node *node) {
   size_t i;
   if (node == NULL) {
     return;
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), node->term.field);
-  lql_allocator_default()->destroy(lql_allocator_default(), node->term.value);
+  if (allocator == NULL) {
+    allocator = lql_allocator_default();
+  }
+  allocator->destroy(allocator, node->term.field);
+  allocator->destroy(allocator, node->term.value);
   for (i = 0u; i < node->term.any_count; ++i) {
-    lql_allocator_default()->destroy(lql_allocator_default(),
-                                     node->term.any[i]);
+    allocator->destroy(allocator, node->term.any[i]);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), node->term.any);
+  allocator->destroy(allocator, node->term.any);
   for (i = 0u; i < node->child_count; ++i) {
-    lql_node_cleanup(&node->children[i]);
+    lql_node_cleanup(allocator, &node->children[i]);
   }
-  lql_allocator_default()->destroy(lql_allocator_default(), node->children);
+  allocator->destroy(allocator, node->children);
   memset(node, 0, sizeof(*node));
 }
 
@@ -367,24 +370,26 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_impl(lql *self,
                                                        const char *expr,
                                                        lql_selector **out,
                                                        lql_error *error) {
-  (void)self;
-  return lql_parse_selector_internal(expr, 0, out, error);
+  return lql_parse_selector_internal(lql_allocator_from_receiver(self), expr, 0,
+                                     out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_or_impl(lql *self,
                                                           const char *expr,
                                                           lql_selector **out,
                                                           lql_error *error) {
-  (void)self;
-  return lql_parse_selector_internal(expr, 1, out, error);
+  return lql_parse_selector_internal(lql_allocator_from_receiver(self), expr, 1,
+                                     out, error);
 }
 
 LQL_INTERNAL_SYMBOL void lql_selector_destroy_impl(lql *self,
                                                    lql_selector *selector) {
-  (void)self;
   if (selector != NULL) {
-    lql_node_cleanup(&selector->root);
-    lql_allocator_default()->destroy(lql_allocator_default(), selector);
+    lql_allocator *allocator;
+    allocator = selector->allocator != NULL ? selector->allocator
+                                            : lql_allocator_from_receiver(self);
+    lql_node_cleanup(allocator, &selector->root);
+    allocator->destroy(allocator, selector);
   }
 }
 

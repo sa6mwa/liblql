@@ -581,6 +581,15 @@ Current implementation is an early slice:
   allocator wrapper calls, allocator macro wrapper calls, or direct
   `malloc`/`calloc`/`realloc`/`free`/`strdup` calls in project-owned C sources
   outside `src/lql_allocator.c`;
+- selector parse-tree ownership is allocator-consistent: receiver selector
+  parse methods pass the receiver allocator into the selector parser, produced
+  `lql_selector` handles remember that allocator, and selector/node cleanup
+  destroys the parse tree with the same allocator; the public API style gate
+  rejects direct `lql_allocator_default()` calls in `src/lql_selector.c` so the
+  parser cannot bypass the receiver allocator boundary, and
+  `lql.selector-allocator` exercises successful and failed selector parses
+  through a counting internal allocator to prove no selector parse allocation
+  escapes that allocator on cleanup;
 - decision-only candidate streaming over `FILE *` uses lonejson candidate
   streams with `CAPTURE_NONE` and 64-bit candidate ranges;
 - seekable `FILE *` range rereads reject offsets that cannot round-trip through

@@ -103,17 +103,18 @@ typedef struct lql_node {
 } lql_node;
 
 struct lql_selector {
+  lql_allocator *allocator;
   lql_node root;
   size_t hit_count;
 };
 
 LQL_INTERNAL_SYMBOL void lql_set_error(lql_error *error, lql_status status,
                                        const char *message);
-LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_node *node);
-LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
-                                                           int or_mode,
-                                                           lql_selector **out,
-                                                           lql_error *error);
+LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_allocator *allocator,
+                                          lql_node *node);
+LQL_INTERNAL_SYMBOL lql_status
+lql_parse_selector_internal(lql_allocator *allocator, const char *expr,
+                            int or_mode, lql_selector **out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_impl(lql *self,
                                                        const char *expr,
                                                        lql_selector **out,
