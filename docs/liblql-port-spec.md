@@ -193,7 +193,10 @@ Required mutation features:
 
 File-backed mutation values are opt-in and must be explicit in the API and CLI.
 They must stream through lonejson source/sink behavior rather than reading
-entire files into hidden buffers.
+entire files into hidden buffers. Explicit `textfile:` values are text-only:
+they must reject invalid UTF-8 and NUL bytes instead of silently emitting an
+invalid JSON string. `file:` auto mode may classify non-text payloads as
+base64-backed values.
 
 ## Streaming Query Scope
 
@@ -763,7 +766,9 @@ Current implementation status:
   rewrites `items` as an object member named `"0"` rather than preserving the
   source array, while explicit `[]` wildcard mutation remains array traversal;
   supported set values include `time:` normalization to UTC RFC3339Nano strings
-  and `file:/textfile:/base64file:` source-backed file values; public C
+  and `file:/textfile:/base64file:` source-backed file values; explicit
+  `textfile:` execution rejects invalid UTF-8 and NUL bytes while `file:` auto
+  mode can classify those payloads as base64-backed values; public C
   execution is currently available for seekable file ranges,
   seekable candidate streams through `ctx->mutate_file_range_candidates()`,
   projection-before-mutation seekable candidate streams through
@@ -913,14 +918,14 @@ Current implementation status:
   failures, buffered, source-backed,
   and seekable file-range JSON projection including malformed JSON execution
   errors, mutation plan parsing and parse failures, buffered, source-backed, and
-  seekable file-range JSON mutation including file-backed mutation values,
-  escaped JSON Pointer mutation paths, numeric object/array segment behavior
-  for selector evaluation and mutation, wildcard and recursive mutation paths,
-  array wildcard value mutation, mutation execution errors where a later parent
-  replacement must not mask an earlier wildcard increment type error, and
-  malformed JSON execution errors, compact serialization, compact error
-  behavior, and current streaming query behavior through the receiver C API,
-  comparing
+  seekable file-range JSON mutation including file-backed mutation values and
+  explicit textfile invalid UTF-8/NUL rejection, escaped JSON Pointer mutation
+  paths, numeric object/array segment behavior for selector evaluation and
+  mutation, wildcard and recursive mutation paths, array wildcard value
+  mutation, mutation execution errors where a later parent replacement must not
+  mask an earlier wildcard increment type error, and malformed JSON execution
+  errors, compact serialization, compact error behavior, and current streaming
+  query behavior through the receiver C API, comparing
   `ctx->selector_parse()`, `ctx->selector_parse_or()`,
   `ctx->matches_json()`, `ctx->project_json()`, `ctx->project_source()`,
   `ctx->project_file_range()`, `ctx->mutation_plan_parse()`,
@@ -973,6 +978,9 @@ Current implementation status:
   wildcard increment that matches a non-numeric descendant is still evaluated
   and reported when a later parent replacement would otherwise skip the
   original subtree;
+- C SDK mutation tests assert explicit file-backed text values reject invalid
+  UTF-8 and NUL bytes at execution time with actionable diagnostics instead of
+  writing invalid JSON string content;
 - bounded fuzz smoke coverage exists through `lql.fuzz-smoke` and
   `make fuzz-smoke`, exercising public selector parse/evaluate, projection,
   compaction, mutation, callback-source decision streams, and callback-source

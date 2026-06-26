@@ -4930,6 +4930,101 @@ static void expect_mutation_file_backed_value_api(void) {
   remove("lql-test-sdk-file-backed.bin");
 }
 
+static int write_bytes_file(const char *path, const unsigned char *data,
+                            size_t len) {
+  FILE *file;
+  file = fopen(path, "wb");
+  if (file == NULL) {
+    return 0;
+  }
+  if (fwrite(data, 1u, len, file) != len || fclose(file) != 0) {
+    remove(path);
+    return 0;
+  }
+  return 1;
+}
+
+static void expect_mutation_file_backed_text_validation_api(void) {
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_mutation_plan *plan;
+  lql_mutation_parse_options options;
+  const char *expr;
+  static const unsigned char invalid_utf8[] = {'h', 'i', 0xffu};
+  static const unsigned char nul_text[] = {'h', 'i', 0u, 'x'};
+
+  if (!write_bytes_file("lql-test-invalid-utf8.txt", invalid_utf8,
+                        sizeof(invalid_utf8)) ||
+      !write_bytes_file("lql-test-nul-text.txt", nul_text, sizeof(nul_text))) {
+    printf("file-backed text validation payload write failed\n");
+    ++failures;
+    remove("lql-test-invalid-utf8.txt");
+    remove("lql-test-nul-text.txt");
+    return;
+  }
+  memset(&options, 0, sizeof(options));
+  options.enable_file_values = 1;
+  options.file_value_base_dir = ".";
+
+  expr = "textfile:/payload=lql-test-invalid-utf8.txt";
+  plan = NULL;
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse_with_options(test_ctx, &expr, 1u,
+                                                  &options, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("invalid UTF-8 textfile mutation parse failed: %s\n",
+           error.message);
+    ++failures;
+  } else {
+    out = tmpfile();
+    if (out == NULL) {
+      printf("invalid UTF-8 textfile mutation tmpfile failed\n");
+      ++failures;
+    } else {
+      lql_error_init(&error);
+      st = test_ctx->mutate_json(test_ctx, plan, "{}", strlen("{}"), out,
+                                 &error);
+      if (st == LQL_STATUS_OK || strstr(error.message, "UTF") == NULL) {
+        printf("invalid UTF-8 textfile mutation mismatch: status=%s error=%s\n",
+               lql_status_string(st), error.message);
+        ++failures;
+      }
+      fclose(out);
+    }
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+
+  expr = "textfile:/payload=lql-test-nul-text.txt";
+  plan = NULL;
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse_with_options(test_ctx, &expr, 1u,
+                                                  &options, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("NUL textfile mutation parse failed: %s\n", error.message);
+    ++failures;
+  } else {
+    out = tmpfile();
+    if (out == NULL) {
+      printf("NUL textfile mutation tmpfile failed\n");
+      ++failures;
+    } else {
+      lql_error_init(&error);
+      st = test_ctx->mutate_json(test_ctx, plan, "{}", strlen("{}"), out,
+                                 &error);
+      if (st == LQL_STATUS_OK || strstr(error.message, "NUL") == NULL) {
+        printf("NUL textfile mutation mismatch: status=%s error=%s\n",
+               lql_status_string(st), error.message);
+        ++failures;
+      }
+      fclose(out);
+    }
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  remove("lql-test-invalid-utf8.txt");
+  remove("lql-test-nul-text.txt");
+}
+
 static void expect_mutation_shorthand_api(void) {
   FILE *out;
   lql_error error;
@@ -5405,6 +5500,8 @@ static void expect_sdk_contract_manifest(void) {
        expect_mutation_quoted_value_api},
       {"mutation", "file-backed mutation value execution",
        expect_mutation_file_backed_value_api},
+      {"mutation", "file-backed text mutation value validation",
+       expect_mutation_file_backed_text_validation_api},
       {"mutation", "brace shorthand and escaped JSON Pointer mutation",
        expect_mutation_shorthand_api},
       {"mutation", "concrete array element mutation",
@@ -5420,7 +5517,7 @@ static void expect_sdk_contract_manifest(void) {
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
       {"version", 1},      {"selector", 4}, {"streaming", 11},
-      {"projection", 6},   {"compact", 2},  {"mutation", 17},
+      {"projection", 6},   {"compact", 2},  {"mutation", 18},
   };
   size_t i;
   size_t j;
@@ -5981,6 +6078,7 @@ int main(void) {
   expect_projected_candidate_mutation_api();
   expect_mutation_quoted_value_api();
   expect_mutation_file_backed_value_api();
+  expect_mutation_file_backed_text_validation_api();
   expect_mutation_shorthand_api();
   expect_array_element_mutation_api();
   expect_wildcard_mutation_api();

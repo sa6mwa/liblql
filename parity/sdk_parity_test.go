@@ -686,6 +686,43 @@ func TestSDKMutationFileBackedValueParity(t *testing.T) {
 	assertDecodedJSONValuesParity(t, gotRange, wantJSON, "file-range file-backed mutation")
 }
 
+func TestSDKMutationFileBackedTextValidationParity(t *testing.T) {
+	cases := []struct {
+		name     string
+		fileName string
+		payload  []byte
+	}{
+		{name: "invalid UTF-8", fileName: "invalid.txt", payload: []byte{'h', 'i', 0xff}},
+		{name: "NUL byte", fileName: "nul.txt", payload: []byte{'h', 'i', 0x00, 'x'}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, tc.fileName)
+			if err := os.WriteFile(path, tc.payload, 0600); err != nil {
+				t.Fatalf("write text payload: %v", err)
+			}
+			mutations := []string{`textfile:/payload=` + tc.fileName}
+			opts := lql.ParseMutationsOptions{
+				EnableFileValues: true,
+				FileValueBaseDir: dir,
+			}
+			if _, err := goMutateJSONWithOptions(mutations, `{}`, opts); err == nil {
+				t.Fatalf("go mutation unexpectedly accepted %s textfile", tc.name)
+			}
+			if _, err := cMutateJSONWithOptions(mutations, `{}`, true, dir); err == nil {
+				t.Fatalf("liblql buffered mutation unexpectedly accepted %s textfile", tc.name)
+			}
+			if _, err := cMutateSourceWithOptions(mutations, `{}`, true, dir); err == nil {
+				t.Fatalf("liblql source mutation unexpectedly accepted %s textfile", tc.name)
+			}
+			if _, err := cMutateFileRangeWithOptions(mutations, `{"outside":`, `{}`, `}`, true, dir); err == nil {
+				t.Fatalf("liblql file-range mutation unexpectedly accepted %s textfile", tc.name)
+			}
+		})
+	}
+}
+
 func TestSDKMutationPlanParseParity(t *testing.T) {
 	cases := []struct {
 		name             string

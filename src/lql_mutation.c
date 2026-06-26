@@ -1499,7 +1499,8 @@ static void set_lonejson_error(lonejson_error *error, lonejson_status status,
   error->message[len] = '\0';
 }
 
-static int inspect_file_textlike(const char *path, lonejson_error *error) {
+static int inspect_file_textlike(const char *path, lonejson_error *error,
+                                 int report_text_error) {
   FILE *file;
   unsigned char buf[8192];
   size_t got;
@@ -1521,6 +1522,10 @@ static int inspect_file_textlike(const char *path, lonejson_error *error) {
     for (i = 0u; i < got; ++i) {
       b = (unsigned int)buf[i];
       if (b == 0u) {
+        if (report_text_error) {
+          set_lonejson_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                             "file-backed text mutation contains NUL byte");
+        }
         fclose(file);
         return 0;
       }
@@ -1556,11 +1561,21 @@ static int inspect_file_textlike(const char *path, lonejson_error *error) {
           min_next = 0x80u;
           max_next = 0x8Fu;
         } else {
+          if (report_text_error) {
+            set_lonejson_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                               "file-backed text mutation contains invalid "
+                               "UTF-8");
+          }
           fclose(file);
           return 0;
         }
       } else {
         if (b < min_next || b > max_next) {
+          if (report_text_error) {
+            set_lonejson_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                               "file-backed text mutation contains invalid "
+                               "UTF-8");
+          }
           fclose(file);
           return 0;
         }
@@ -1577,6 +1592,10 @@ static int inspect_file_textlike(const char *path, lonejson_error *error) {
     return -1;
   }
   fclose(file);
+  if (expected != 0u && report_text_error) {
+    set_lonejson_error(error, LONEJSON_STATUS_CALLBACK_FAILED,
+                       "file-backed text mutation contains invalid UTF-8");
+  }
   return expected == 0u ? 1 : 0;
 }
 
@@ -1595,11 +1614,19 @@ static lonejson_status write_mutation_set_value(lql_allocator *allocator,
   int textlike;
   file_mode = item->file_mode;
   if (file_mode == MUTATION_FILE_AUTO) {
-    textlike = inspect_file_textlike(item->file_path, error);
+    textlike = inspect_file_textlike(item->file_path, error, 0);
     if (textlike < 0) {
       return LONEJSON_STATUS_IO_ERROR;
     }
     file_mode = textlike ? MUTATION_FILE_TEXT : MUTATION_FILE_BASE64;
+  } else if (file_mode == MUTATION_FILE_TEXT) {
+    textlike = inspect_file_textlike(item->file_path, error, 1);
+    if (textlike < 0) {
+      return LONEJSON_STATUS_IO_ERROR;
+    }
+    if (!textlike) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
   }
   if (file_mode == MUTATION_FILE_TEXT || file_mode == MUTATION_FILE_BASE64) {
     lonejson_source_init(&source);
