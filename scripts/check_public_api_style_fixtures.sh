@@ -115,6 +115,7 @@ EOF
 cat >"$tmp/src/lql_mutation.c" <<'EOF'
 static void mutation_plan_cleanup_items(lql_allocator *allocator, void *plan) { (void)allocator; (void)plan; }
 static int parse_mutation_expr(lql *self, lql_allocator *allocator, const char *expr, void *plan) { (void)self; (void)allocator; (void)expr; (void)plan; return 0; }
+static char *resolve_file_value_path(lql_allocator *allocator, const char *raw) { (void)allocator; return (char *)raw; }
 EOF
 
 printf '%s\n' 'stale cleanup surface is `lql_dealloc()`' >"$tmp/README.md"

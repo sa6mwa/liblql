@@ -629,9 +629,11 @@ Current implementation status:
   style-gated to take the owning `lql *self` rather than an allocator-first
   parameter, so nested handle cleanup cannot accidentally detach from receiver
   ownership while still using the same central allocator implementation.
-  Projection and mutation parser boundary helpers are likewise style-gated to
-  derive allocation from `lql *self`, so method-level parser control flow does
-  not preserve allocator-passed mini-entry-points alongside the receiver API.
+  Projection parser boundary helpers are likewise style-gated to derive
+  allocation from `lql *self`, and mutation expression parser helpers are
+  style-gated to receive a `mutation_parse_context` built by the receiver
+  method, so method-level parser control flow does not preserve
+  allocator-passed mini-entry-points alongside the receiver API.
   `lql.handle-allocator` constructs real receivers with a
   counting internal allocator rather than fabricating private `lql` state,
   exercises successful and failed selector, projection, and mutation parses

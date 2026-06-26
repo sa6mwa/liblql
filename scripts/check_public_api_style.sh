@@ -352,7 +352,7 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
 
   receiver_parser_allocator_hits=$(
     grep -REn \
-      '^[[:space:]]*static[[:space:]]+int[[:space:]]+(parse_projection_path|add_path|split_path|parse_mutation_expr|parse_brace_mutation)[[:space:]]*\([^)]*lql_allocator[[:space:]]+\*' \
+      '^[[:space:]]*static[[:space:]][^(;]*[[:space:]*](parse_projection_path|add_path|split_path|parse_mutation_expr|parse_brace_mutation|trimmed_dup_range|mutation_unquote|join_paths|resolve_file_value_path|split_expressions|decode_path_segment|path_add_segment|expand_and_add_segment|append_item|prepend_path|parse_set_value)[[:space:]]*\([^)]*lql_allocator[[:space:]]+\*' \
       "$source_root/src/lql_project.c" \
       "$source_root/src/lql_mutation.c" 2>/dev/null || true
   )

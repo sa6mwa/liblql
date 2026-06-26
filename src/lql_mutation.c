@@ -100,6 +100,13 @@ typedef struct string_list {
   size_t count;
 } string_list;
 
+typedef struct mutation_parse_context {
+  lql *self;
+  lql_allocator *allocator;
+  const lql_mutation_parse_options *options;
+  lql_error *error;
+} mutation_parse_context;
+
 static void mutation_path_cleanup(lql *self, mutation_path *path) {
   lql_allocator *allocator;
   size_t i;
@@ -151,15 +158,16 @@ static void mutation_plan_cleanup_items(lql *self, lql_mutation_plan *plan) {
   plan->count = 0u;
 }
 
-static void string_list_cleanup(lql_allocator *allocator, string_list *list) {
+static void string_list_cleanup(mutation_parse_context *ctx,
+                                string_list *list) {
   size_t i;
   if (list == NULL) {
     return;
   }
   for (i = 0u; i < list->count; ++i) {
-    allocator->destroy(allocator, list->items[i]);
+    ctx->allocator->destroy(ctx->allocator, list->items[i]);
   }
-  allocator->destroy(allocator, list->items);
+  ctx->allocator->destroy(ctx->allocator, list->items);
   list->items = NULL;
   list->count = 0u;
 }
@@ -181,8 +189,8 @@ static size_t trimmed_len(const char *start) {
   return (size_t)(end - start);
 }
 
-static char *trimmed_dup_range(lql_allocator *allocator, const char *start,
-                               size_t len) {
+static char *trimmed_dup_range_alloc(lql_allocator *allocator,
+                                     const char *start, size_t len) {
   const char *end;
   char *out;
   start = skip_space(start);
@@ -201,6 +209,11 @@ static char *trimmed_dup_range(lql_allocator *allocator, const char *start,
   return out;
 }
 
+static char *trimmed_dup_range(mutation_parse_context *ctx, const char *start,
+                               size_t len) {
+  return trimmed_dup_range_alloc(ctx->allocator, start, len);
+}
+
 static int has_prefix(const char *s, const char *prefix) {
   return strncmp(s, prefix, strlen(prefix)) == 0;
 }
@@ -213,7 +226,7 @@ static int has_suffix(const char *s, const char *suffix) {
   return slen >= plen && strcmp(s + slen - plen, suffix) == 0;
 }
 
-static char *mutation_unquote(lql_allocator *allocator, char *value) {
+static char *mutation_unquote(mutation_parse_context *ctx, char *value) {
   size_t len;
   char *out;
   char *r;
@@ -221,7 +234,7 @@ static char *mutation_unquote(lql_allocator *allocator, char *value) {
   len = strlen(value);
   if (len >= 2u && ((value[0] == '"' && value[len - 1u] == '"') ||
                     (value[0] == '\'' && value[len - 1u] == '\''))) {
-    out = (char *)allocator->alloc(allocator, len - 1u);
+    out = (char *)ctx->allocator->alloc(ctx->allocator, len - 1u);
     if (out == NULL) {
       return NULL;
     }
@@ -234,7 +247,7 @@ static char *mutation_unquote(lql_allocator *allocator, char *value) {
       *w++ = *r++;
     }
     *w = '\0';
-    allocator->destroy(allocator, value);
+    ctx->allocator->destroy(ctx->allocator, value);
     return out;
   }
   return value;
@@ -244,7 +257,7 @@ static int path_is_absolute(const char *path) {
   return path != NULL && path[0] == '/';
 }
 
-static char *join_paths(lql_allocator *allocator, const char *base,
+static char *join_paths(mutation_parse_context *ctx, const char *base,
                         const char *path) {
   size_t base_len;
   size_t path_len;
@@ -253,8 +266,8 @@ static char *join_paths(lql_allocator *allocator, const char *base,
   base_len = strlen(base);
   path_len = strlen(path);
   need_sep = base_len != 0u && base[base_len - 1u] != '/';
-  out = (char *)allocator->alloc(allocator, base_len + (need_sep ? 1u : 0u) +
-                                                path_len + 1u);
+  out = (char *)ctx->allocator->alloc(
+      ctx->allocator, base_len + (need_sep ? 1u : 0u) + path_len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -266,55 +279,54 @@ static char *join_paths(lql_allocator *allocator, const char *base,
   return out;
 }
 
-static char *resolve_file_value_path(lql_allocator *allocator, const char *raw,
-                                     const lql_mutation_parse_options *options,
-                                     lql_error *error) {
+static char *resolve_file_value_path(mutation_parse_context *ctx,
+                                     const char *raw) {
   char *path;
   const char *home;
   char *expanded;
-  path = trimmed_dup_range(allocator, raw, strlen(raw));
+  path = trimmed_dup_range(ctx, raw, strlen(raw));
   if (path == NULL) {
     return NULL;
   }
-  path = mutation_unquote(allocator, path);
+  path = mutation_unquote(ctx, path);
   if (path == NULL) {
     return NULL;
   }
   if (path[0] == '\0') {
-    allocator->destroy(allocator, path);
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+    ctx->allocator->destroy(ctx->allocator, path);
+    lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                   "file-backed mutation missing file path");
     return NULL;
   }
   if (strcmp(path, "~") == 0 || has_prefix(path, "~/")) {
     home = getenv("HOME");
     if (home == NULL || home[0] == '\0') {
-      allocator->destroy(allocator, path);
-      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+      ctx->allocator->destroy(ctx->allocator, path);
+      lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                     "failed to resolve home for file-backed mutation");
       return NULL;
     }
     if (strcmp(path, "~") == 0) {
-      expanded = allocator->strdup(allocator, home);
+      expanded = ctx->allocator->strdup(ctx->allocator, home);
     } else {
-      expanded = join_paths(allocator, home, path + 2u);
+      expanded = join_paths(ctx, home, path + 2u);
     }
-    allocator->destroy(allocator, path);
+    ctx->allocator->destroy(ctx->allocator, path);
     return expanded;
   }
   if (path_is_absolute(path)) {
     return path;
   }
-  if (options == NULL || options->file_value_base_dir == NULL ||
-      options->file_value_base_dir[0] == '\0') {
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+  if (ctx->options == NULL || ctx->options->file_value_base_dir == NULL ||
+      ctx->options->file_value_base_dir[0] == '\0') {
+    lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                   "relative file-backed mutation path requires file value base "
                   "dir");
-    allocator->destroy(allocator, path);
+    ctx->allocator->destroy(ctx->allocator, path);
     return NULL;
   }
-  expanded = join_paths(allocator, options->file_value_base_dir, path);
-  allocator->destroy(allocator, path);
+  expanded = join_paths(ctx, ctx->options->file_value_base_dir, path);
+  ctx->allocator->destroy(ctx->allocator, path);
   return expanded;
 }
 
@@ -469,11 +481,11 @@ static int append_buf(lql_allocator *allocator, char **buf, size_t *len,
   return 1;
 }
 
-static int add_string(lql_allocator *allocator, string_list *list,
+static int add_string(mutation_parse_context *ctx, string_list *list,
                       char *value) {
   char **next;
-  next = (char **)allocator->realloc(
-      allocator, list->items, sizeof(list->items[0]) * (list->count + 1u));
+  next = (char **)ctx->allocator->realloc(
+      ctx->allocator, list->items, sizeof(list->items[0]) * (list->count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -482,8 +494,8 @@ static int add_string(lql_allocator *allocator, string_list *list,
   return 1;
 }
 
-static int split_expressions(lql_allocator *allocator, const char *input,
-                             string_list *out, lql_error *error) {
+static int split_expressions(mutation_parse_context *ctx, const char *input,
+                             string_list *out) {
   const char *chunk;
   const char *p;
   int depth;
@@ -517,60 +529,60 @@ static int split_expressions(lql_allocator *allocator, const char *input,
       ++depth;
     } else if (*p == '}' && !in_quote) {
       if (depth == 0) {
-        lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+        lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                       "unexpected closing brace");
-        string_list_cleanup(allocator, out);
+        string_list_cleanup(ctx, out);
         return 0;
       }
       --depth;
     } else if ((*p == ',' || *p == '\n') && !in_quote && depth == 0) {
-      item = trimmed_dup_range(allocator, chunk, (size_t)(p - chunk));
+      item = trimmed_dup_range(ctx, chunk, (size_t)(p - chunk));
       if (item == NULL) {
-        string_list_cleanup(allocator, out);
+        string_list_cleanup(ctx, out);
         return 0;
       }
-      if (item[0] != '\0' && !add_string(allocator, out, item)) {
-        allocator->destroy(allocator, item);
-        string_list_cleanup(allocator, out);
+      if (item[0] != '\0' && !add_string(ctx, out, item)) {
+        ctx->allocator->destroy(ctx->allocator, item);
+        string_list_cleanup(ctx, out);
         return 0;
       }
       if (item[0] == '\0') {
-        allocator->destroy(allocator, item);
+        ctx->allocator->destroy(ctx->allocator, item);
       }
       chunk = p + 1;
     }
     ++p;
   }
   if (in_quote) {
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+    lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                   "unterminated quote in mutation expression");
-    string_list_cleanup(allocator, out);
+    string_list_cleanup(ctx, out);
     return 0;
   }
   if (depth != 0) {
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+    lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                   "unterminated brace in mutation expression");
-    string_list_cleanup(allocator, out);
+    string_list_cleanup(ctx, out);
     return 0;
   }
   len = trimmed_len(chunk);
   if (len != 0u) {
-    item = trimmed_dup_range(allocator, chunk, strlen(chunk));
-    if (item == NULL || !add_string(allocator, out, item)) {
-      allocator->destroy(allocator, item);
-      string_list_cleanup(allocator, out);
+    item = trimmed_dup_range(ctx, chunk, strlen(chunk));
+    if (item == NULL || !add_string(ctx, out, item)) {
+      ctx->allocator->destroy(ctx->allocator, item);
+      string_list_cleanup(ctx, out);
       return 0;
     }
   }
   return 1;
 }
 
-static char *decode_path_segment(lql_allocator *allocator, const char *src,
+static char *decode_path_segment(mutation_parse_context *ctx, const char *src,
                                  size_t len) {
   char *out;
   size_t i;
   size_t j;
-  out = (char *)allocator->alloc(allocator, len + 1u);
+  out = (char *)ctx->allocator->alloc(ctx->allocator, len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -595,12 +607,12 @@ static char *decode_path_segment(lql_allocator *allocator, const char *src,
   return out;
 }
 
-static int path_add_segment(lql_allocator *allocator, mutation_path *path,
+static int path_add_segment(mutation_parse_context *ctx, mutation_path *path,
                             char *segment) {
   char **next;
-  next = (char **)allocator->realloc(allocator, path->segments,
-                                     sizeof(path->segments[0]) *
-                                         (path->segment_count + 1u));
+  next = (char **)ctx->allocator->realloc(
+      ctx->allocator, path->segments,
+      sizeof(path->segments[0]) * (path->segment_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -609,8 +621,8 @@ static int path_add_segment(lql_allocator *allocator, mutation_path *path,
   return 1;
 }
 
-static int expand_and_add_segment(lql_allocator *allocator, mutation_path *path,
-                                  char *segment) {
+static int expand_and_add_segment(mutation_parse_context *ctx,
+                                  mutation_path *path, char *segment) {
   size_t len;
   char *base;
   char *wild;
@@ -618,28 +630,27 @@ static int expand_and_add_segment(lql_allocator *allocator, mutation_path *path,
   if (len > 2u && strcmp(segment, "[]") != 0 &&
       strcmp(segment + len - 2u, "[]") == 0) {
     segment[len - 2u] = '\0';
-    base = allocator->strdup(allocator, segment);
+    base = ctx->allocator->strdup(ctx->allocator, segment);
     segment[len - 2u] = '[';
     if (base == NULL) {
-      allocator->destroy(allocator, segment);
+      ctx->allocator->destroy(ctx->allocator, segment);
       return 0;
     }
-    wild = allocator->strdup(allocator, "[]");
+    wild = ctx->allocator->strdup(ctx->allocator, "[]");
     if (wild == NULL) {
-      allocator->destroy(allocator, base);
-      allocator->destroy(allocator, segment);
+      ctx->allocator->destroy(ctx->allocator, base);
+      ctx->allocator->destroy(ctx->allocator, segment);
       return 0;
     }
-    allocator->destroy(allocator, segment);
-    return path_add_segment(allocator, path, base) &&
-           path_add_segment(allocator, path, wild);
+    ctx->allocator->destroy(ctx->allocator, segment);
+    return path_add_segment(ctx, path, base) &&
+           path_add_segment(ctx, path, wild);
   }
-  return path_add_segment(allocator, path, segment);
+  return path_add_segment(ctx, path, segment);
 }
 
-static int split_path(lql *self, const char *raw, mutation_path *out,
-                      lql_error *error) {
-  lql_allocator *allocator;
+static int split_path(mutation_parse_context *ctx, const char *raw,
+                      mutation_path *out) {
   const char *path;
   const char *seg;
   const char *slash;
@@ -647,18 +658,14 @@ static int split_path(lql *self, const char *raw, mutation_path *out,
   size_t len;
 
   memset(out, 0, sizeof(*out));
-  allocator = lql_allocator_from_receiver(self);
-  if (allocator == NULL) {
-    return 0;
-  }
   path = skip_space(raw);
   len = trimmed_len(path);
   if (len == 0u) {
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR, "path empty");
+    lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR, "path empty");
     return 0;
   }
   if (path[0] != '/') {
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+    lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                   "mutation path must start with '/'");
     return 0;
   }
@@ -668,10 +675,10 @@ static int split_path(lql *self, const char *raw, mutation_path *out,
     if (slash == NULL) {
       slash = path + len;
     }
-    decoded = decode_path_segment(allocator, seg, (size_t)(slash - seg));
-    if (decoded == NULL || !expand_and_add_segment(allocator, out, decoded)) {
-      allocator->destroy(allocator, decoded);
-      mutation_path_cleanup(self, out);
+    decoded = decode_path_segment(ctx, seg, (size_t)(slash - seg));
+    if (decoded == NULL || !expand_and_add_segment(ctx, out, decoded)) {
+      ctx->allocator->destroy(ctx->allocator, decoded);
+      mutation_path_cleanup(ctx->self, out);
       return 0;
     }
     if (slash == path + len) {
@@ -681,19 +688,20 @@ static int split_path(lql *self, const char *raw, mutation_path *out,
   }
   if (out->segment_count == 0u ||
       (out->segment_count == 1u && out->segments[0][0] == '\0')) {
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+    lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                   "mutation path refers to document root");
-    mutation_path_cleanup(self, out);
+    mutation_path_cleanup(ctx->self, out);
     return 0;
   }
   return 1;
 }
 
-static int append_item(lql_allocator *allocator, lql_mutation_plan *plan,
+static int append_item(mutation_parse_context *ctx, lql_mutation_plan *plan,
                        mutation_item *item) {
   mutation_item *next;
-  next = (mutation_item *)allocator->realloc(
-      allocator, plan->items, sizeof(plan->items[0]) * (plan->count + 1u));
+  next = (mutation_item *)ctx->allocator->realloc(
+      ctx->allocator, plan->items,
+      sizeof(plan->items[0]) * (plan->count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -703,18 +711,19 @@ static int append_item(lql_allocator *allocator, lql_mutation_plan *plan,
   return 1;
 }
 
-static int prepend_path(lql_allocator *allocator, mutation_item *item,
+static int prepend_path(mutation_parse_context *ctx, mutation_item *item,
                         const mutation_path *prefix) {
   char **segments;
   size_t i;
   size_t count;
   count = prefix->segment_count + item->path.segment_count;
-  segments = (char **)allocator->calloc(allocator, count, sizeof(segments[0]));
+  segments =
+      (char **)ctx->allocator->calloc(ctx->allocator, count, sizeof(segments[0]));
   if (segments == NULL) {
     return 0;
   }
   for (i = 0u; i < prefix->segment_count; ++i) {
-    segments[i] = allocator->strdup(allocator, prefix->segments[i]);
+    segments[i] = ctx->allocator->strdup(ctx->allocator, prefix->segments[i]);
     if (segments[i] == NULL) {
       goto fail;
     }
@@ -723,15 +732,15 @@ static int prepend_path(lql_allocator *allocator, mutation_item *item,
     segments[prefix->segment_count + i] = item->path.segments[i];
     item->path.segments[i] = NULL;
   }
-  allocator->destroy(allocator, item->path.segments);
+  ctx->allocator->destroy(ctx->allocator, item->path.segments);
   item->path.segments = segments;
   item->path.segment_count = count;
   return 1;
 fail:
   for (i = 0u; i < count; ++i) {
-    allocator->destroy(allocator, segments[i]);
+    ctx->allocator->destroy(ctx->allocator, segments[i]);
   }
-  allocator->destroy(allocator, segments);
+  ctx->allocator->destroy(ctx->allocator, segments);
   return 0;
 }
 
@@ -754,7 +763,7 @@ static int parse_number_slice(lql_allocator *allocator, const char *s,
                               size_t len, double *out) {
   char *copy;
   int ok;
-  copy = trimmed_dup_range(allocator, s, len);
+  copy = trimmed_dup_range_alloc(allocator, s, len);
   if (copy == NULL) {
     return 0;
   }
@@ -765,16 +774,11 @@ static int parse_number_slice(lql_allocator *allocator, const char *s,
 
 static const char *unquoted_value(const char *value, size_t *out_len);
 
-static int parse_mutation_expr(lql *self, const char *expr,
-                               lql_mutation_plan *plan,
-                               const lql_mutation_parse_options *options,
-                               lql_error *error);
+static int parse_mutation_expr(mutation_parse_context *ctx, const char *expr,
+                               lql_mutation_plan *plan);
 
-static int parse_brace_mutation(lql *self, const char *expr,
-                                lql_mutation_plan *plan,
-                                const lql_mutation_parse_options *options,
-                                lql_error *error) {
-  lql_allocator *allocator;
+static int parse_brace_mutation(mutation_parse_context *ctx, const char *expr,
+                                lql_mutation_plan *plan) {
   const char *open;
   size_t len;
   char *prefix_text;
@@ -784,10 +788,6 @@ static int parse_brace_mutation(lql *self, const char *expr,
   lql_mutation_plan nested;
   size_t i;
 
-  allocator = lql_allocator_from_receiver(self);
-  if (allocator == NULL) {
-    return -1;
-  }
   len = strlen(expr);
   if (len == 0u || expr[len - 1u] != '}') {
     return 0;
@@ -796,63 +796,63 @@ static int parse_brace_mutation(lql *self, const char *expr,
   if (open == NULL || open == expr) {
     return 0;
   }
-  prefix_text = trimmed_dup_range(allocator, expr, (size_t)(open - expr));
+  prefix_text = trimmed_dup_range(ctx, expr, (size_t)(open - expr));
   if (prefix_text == NULL) {
     return -1;
   }
   if (strchr(prefix_text, '=') != NULL) {
-    allocator->destroy(allocator, prefix_text);
+    ctx->allocator->destroy(ctx->allocator, prefix_text);
     return 0;
   }
-  if (!split_path(self, prefix_text, &prefix, error)) {
-    allocator->destroy(allocator, prefix_text);
+  if (!split_path(ctx, prefix_text, &prefix)) {
+    ctx->allocator->destroy(ctx->allocator, prefix_text);
     return -1;
   }
-  allocator->destroy(allocator, prefix_text);
+  ctx->allocator->destroy(ctx->allocator, prefix_text);
   body =
-      trimmed_dup_range(allocator, open + 1, len - (size_t)(open - expr) - 2u);
+      trimmed_dup_range(ctx, open + 1, len - (size_t)(open - expr) - 2u);
   if (body == NULL) {
-    mutation_path_cleanup(self, &prefix);
+    mutation_path_cleanup(ctx->self, &prefix);
     return -1;
   }
-  if (!split_expressions(allocator, body, &parts, error)) {
-    allocator->destroy(allocator, body);
-    mutation_path_cleanup(self, &prefix);
+  if (!split_expressions(ctx, body, &parts)) {
+    ctx->allocator->destroy(ctx->allocator, body);
+    mutation_path_cleanup(ctx->self, &prefix);
     return -1;
   }
-  allocator->destroy(allocator, body);
+  ctx->allocator->destroy(ctx->allocator, body);
   if (parts.count == 0u) {
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR, "brace mutation empty");
-    string_list_cleanup(allocator, &parts);
-    mutation_path_cleanup(self, &prefix);
+    lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR, "brace mutation empty");
+    string_list_cleanup(ctx, &parts);
+    mutation_path_cleanup(ctx->self, &prefix);
     return -1;
   }
   memset(&nested, 0, sizeof(nested));
   for (i = 0u; i < parts.count; ++i) {
-    if (!parse_mutation_expr(self, parts.items[i], &nested, options, error)) {
-      mutation_plan_cleanup_items(self, &nested);
-      string_list_cleanup(allocator, &parts);
-      mutation_path_cleanup(self, &prefix);
+    if (!parse_mutation_expr(ctx, parts.items[i], &nested)) {
+      mutation_plan_cleanup_items(ctx->self, &nested);
+      string_list_cleanup(ctx, &parts);
+      mutation_path_cleanup(ctx->self, &prefix);
       return -1;
     }
   }
   for (i = 0u; i < nested.count; ++i) {
-    if (!prepend_path(allocator, &nested.items[i], &prefix) ||
-        !append_item(allocator, plan, &nested.items[i])) {
-      mutation_plan_cleanup_items(self, &nested);
-      string_list_cleanup(allocator, &parts);
-      mutation_path_cleanup(self, &prefix);
+    if (!prepend_path(ctx, &nested.items[i], &prefix) ||
+        !append_item(ctx, plan, &nested.items[i])) {
+      mutation_plan_cleanup_items(ctx->self, &nested);
+      string_list_cleanup(ctx, &parts);
+      mutation_path_cleanup(ctx->self, &prefix);
       return -1;
     }
   }
-  allocator->destroy(allocator, nested.items);
-  string_list_cleanup(allocator, &parts);
-  mutation_path_cleanup(self, &prefix);
+  ctx->allocator->destroy(ctx->allocator, nested.items);
+  string_list_cleanup(ctx, &parts);
+  mutation_path_cleanup(ctx->self, &prefix);
   return 1;
 }
 
-static int parse_set_value(lql_allocator *allocator, char *value, int time_mode,
-                           mutation_item *item, lql_error *error) {
+static int parse_set_value(mutation_parse_context *ctx, char *value,
+                           int time_mode, mutation_item *item) {
   lql_temporal temporal;
   const char *text;
   size_t len;
@@ -860,35 +860,35 @@ static int parse_set_value(lql_allocator *allocator, char *value, int time_mode,
   char *copy;
   if (time_mode) {
     text = unquoted_value(value, &len);
-    copy = trimmed_dup_range(allocator, text, len);
+    copy = trimmed_dup_range(ctx, text, len);
     if (copy == NULL) {
       return 0;
     }
     if (ascii_equal_ignore_case(copy, "NOW")) {
       if (!lql_temporal_now(&temporal)) {
-        allocator->destroy(allocator, copy);
-        lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+        ctx->allocator->destroy(ctx->allocator, copy);
+        lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                       "failed to resolve current time");
         return 0;
       }
     } else if (!time_literal_has_zone(copy) ||
                !lql_parse_temporal_literal(copy, &temporal) ||
                temporal.date_only) {
-      allocator->destroy(allocator, copy);
-      lql_set_error(error, LQL_STATUS_PARSE_ERROR, "invalid time literal");
+      ctx->allocator->destroy(ctx->allocator, copy);
+      lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR, "invalid time literal");
       return 0;
     }
-    allocator->destroy(allocator, copy);
+    ctx->allocator->destroy(ctx->allocator, copy);
     if (!lql_temporal_format_rfc3339_nano(&temporal, normalized,
                                           sizeof(normalized))) {
-      lql_set_error(error, LQL_STATUS_PARSE_ERROR, "invalid time literal");
+      lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR, "invalid time literal");
       return 0;
     }
-    item->value = allocator->strdup(allocator, normalized);
+    item->value = ctx->allocator->strdup(ctx->allocator, normalized);
     if (item->value == NULL) {
       return 0;
     }
-    allocator->destroy(allocator, value);
+    ctx->allocator->destroy(ctx->allocator, value);
     item->time_value = 1;
     return 1;
   }
@@ -896,11 +896,8 @@ static int parse_set_value(lql_allocator *allocator, char *value, int time_mode,
   return 1;
 }
 
-static int parse_mutation_expr(lql *self, const char *raw,
-                               lql_mutation_plan *plan,
-                               const lql_mutation_parse_options *options,
-                               lql_error *error) {
-  lql_allocator *allocator;
+static int parse_mutation_expr(mutation_parse_context *ctx, const char *raw,
+                               lql_mutation_plan *plan) {
   char *expr;
   char *eq;
   char *path_text;
@@ -913,11 +910,7 @@ static int parse_mutation_expr(lql *self, const char *raw,
   double delta;
   size_t len;
 
-  allocator = lql_allocator_from_receiver(self);
-  if (allocator == NULL) {
-    return 0;
-  }
-  expr = trimmed_dup_range(allocator, raw, strlen(raw));
+  expr = trimmed_dup_range(ctx, raw, strlen(raw));
   if (expr == NULL) {
     return 0;
   }
@@ -949,9 +942,9 @@ static int parse_mutation_expr(lql *self, const char *raw,
   }
   if (has_prefix(expr, "time:")) {
     if (file_mode != MUTATION_FILE_NONE || remove_mode) {
-      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+      lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                     "time-prefixed mutation has invalid prefix combination");
-      allocator->destroy(allocator, expr);
+      ctx->allocator->destroy(ctx->allocator, expr);
       return 0;
     }
     time_mode = 1;
@@ -960,32 +953,31 @@ static int parse_mutation_expr(lql *self, const char *raw,
   memset(&item, 0, sizeof(item));
   if (remove_mode) {
     if (file_mode != MUTATION_FILE_NONE) {
-      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+      lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                     "file-backed mutation has invalid prefix combination");
-      allocator->destroy(allocator, expr);
+      ctx->allocator->destroy(ctx->allocator, expr);
       return 0;
     }
     item.kind = MUTATION_REMOVE;
-    if (!split_path(self, expr, &item.path, error) ||
-        !append_item(allocator, plan, &item)) {
-      mutation_item_cleanup(self, &item);
-      allocator->destroy(allocator, expr);
+    if (!split_path(ctx, expr, &item.path) || !append_item(ctx, plan, &item)) {
+      mutation_item_cleanup(ctx->self, &item);
+      ctx->allocator->destroy(ctx->allocator, expr);
       return 0;
     }
-    allocator->destroy(allocator, expr);
+    ctx->allocator->destroy(ctx->allocator, expr);
     return 1;
   }
   if (has_suffix(expr, "++") || has_suffix(expr, "--")) {
     if (file_mode != MUTATION_FILE_NONE) {
-      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+      lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                     "file-backed mutation does not support increment");
-      allocator->destroy(allocator, expr);
+      ctx->allocator->destroy(ctx->allocator, expr);
       return 0;
     }
     if (time_mode) {
-      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+      lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                     "time-prefixed mutation does not support increment");
-      allocator->destroy(allocator, expr);
+      ctx->allocator->destroy(ctx->allocator, expr);
       return 0;
     }
     len = strlen(expr);
@@ -993,83 +985,82 @@ static int parse_mutation_expr(lql *self, const char *raw,
     expr[len - 2u] = '\0';
     item.kind = MUTATION_INCREMENT;
     item.delta = delta;
-    if (!split_path(self, expr, &item.path, error) ||
-        !append_item(allocator, plan, &item)) {
-      mutation_item_cleanup(self, &item);
-      allocator->destroy(allocator, expr);
+    if (!split_path(ctx, expr, &item.path) || !append_item(ctx, plan, &item)) {
+      mutation_item_cleanup(ctx->self, &item);
+      ctx->allocator->destroy(ctx->allocator, expr);
       return 0;
     }
-    allocator->destroy(allocator, expr);
+    ctx->allocator->destroy(ctx->allocator, expr);
     return 1;
   }
-  brace_result = parse_brace_mutation(self, expr, plan, options, error);
+  brace_result = parse_brace_mutation(ctx, expr, plan);
   if (brace_result != 0) {
-    allocator->destroy(allocator, expr);
+    ctx->allocator->destroy(ctx->allocator, expr);
     return brace_result > 0;
   }
   eq = strchr(expr, '=');
   if (eq == NULL) {
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+    lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                   "invalid mutation, expected key=value");
-    allocator->destroy(allocator, expr);
+    ctx->allocator->destroy(ctx->allocator, expr);
     return 0;
   }
   *eq = '\0';
   path_text = expr;
-  value = trimmed_dup_range(allocator, eq + 1, strlen(eq + 1));
+  value = trimmed_dup_range(ctx, eq + 1, strlen(eq + 1));
   if (value == NULL) {
-    allocator->destroy(allocator, expr);
+    ctx->allocator->destroy(ctx->allocator, expr);
     return 0;
   }
   item.kind = MUTATION_SET;
   if (file_mode != MUTATION_FILE_NONE) {
-    if (options == NULL || !options->enable_file_values) {
-      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+    if (ctx->options == NULL || !ctx->options->enable_file_values) {
+      lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                     "file-backed mutations are disabled");
-      allocator->destroy(allocator, value);
-      allocator->destroy(allocator, expr);
+      ctx->allocator->destroy(ctx->allocator, value);
+      ctx->allocator->destroy(ctx->allocator, expr);
       return 0;
     }
     item.file_mode = file_mode;
-    item.file_path = resolve_file_value_path(allocator, value, options, error);
-    allocator->destroy(allocator, value);
+    item.file_path = resolve_file_value_path(ctx, value);
+    ctx->allocator->destroy(ctx->allocator, value);
     if (item.file_path == NULL) {
-      allocator->destroy(allocator, expr);
+      ctx->allocator->destroy(ctx->allocator, expr);
       return 0;
     }
-    if (!split_path(self, path_text, &item.path, error) ||
-        !append_item(allocator, plan, &item)) {
-      mutation_item_cleanup(self, &item);
-      allocator->destroy(allocator, expr);
+    if (!split_path(ctx, path_text, &item.path) ||
+        !append_item(ctx, plan, &item)) {
+      mutation_item_cleanup(ctx->self, &item);
+      ctx->allocator->destroy(ctx->allocator, expr);
       return 0;
     }
-    allocator->destroy(allocator, expr);
+    ctx->allocator->destroy(ctx->allocator, expr);
     return 1;
   }
   if (!time_mode && (value[0] == '+' || value[0] == '-') &&
       parse_number(value, &delta)) {
     if (delta == 0.0) {
-      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+      lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
                     "increment mutation requires non-zero delta");
-      allocator->destroy(allocator, value);
-      allocator->destroy(allocator, expr);
+      ctx->allocator->destroy(ctx->allocator, value);
+      ctx->allocator->destroy(ctx->allocator, expr);
       return 0;
     }
     item.kind = MUTATION_INCREMENT;
     item.delta = delta;
-    allocator->destroy(allocator, value);
-  } else if (!parse_set_value(allocator, value, time_mode, &item, error)) {
-    allocator->destroy(allocator, value);
-    allocator->destroy(allocator, expr);
+    ctx->allocator->destroy(ctx->allocator, value);
+  } else if (!parse_set_value(ctx, value, time_mode, &item)) {
+    ctx->allocator->destroy(ctx->allocator, value);
+    ctx->allocator->destroy(ctx->allocator, expr);
     return 0;
   }
-  if (!split_path(self, path_text, &item.path, error) ||
-      !append_item(allocator, plan, &item)) {
-    mutation_item_cleanup(self, &item);
-    allocator->destroy(allocator, expr);
+  if (!split_path(ctx, path_text, &item.path) ||
+      !append_item(ctx, plan, &item)) {
+    mutation_item_cleanup(ctx->self, &item);
+    ctx->allocator->destroy(ctx->allocator, expr);
     return 0;
   }
-  allocator->destroy(allocator, expr);
+  ctx->allocator->destroy(ctx->allocator, expr);
   return 1;
 }
 
@@ -1079,6 +1070,7 @@ static lql_status mutation_plan_parse_with_options_method(
     lql_error *error) {
   lql_allocator *allocator;
   lql_mutation_plan *plan;
+  mutation_parse_context parse_ctx;
   string_list parts;
   size_t i;
   size_t j;
@@ -1093,6 +1085,15 @@ static lql_status mutation_plan_parse_with_options_method(
     return LQL_STATUS_PARSE_ERROR;
   }
   allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "lql receiver allocator required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  parse_ctx.self = self;
+  parse_ctx.allocator = allocator;
+  parse_ctx.options = options;
+  parse_ctx.error = error;
   plan = (lql_mutation_plan *)allocator->calloc(allocator, 1u, sizeof(*plan));
   if (plan == NULL) {
     return LQL_STATUS_NO_MEMORY;
@@ -1101,22 +1102,22 @@ static lql_status mutation_plan_parse_with_options_method(
     if (exprs[i] == NULL) {
       continue;
     }
-    if (!split_expressions(allocator, exprs[i], &parts, error)) {
+    if (!split_expressions(&parse_ctx, exprs[i], &parts)) {
       self->mutation_plan_destroy(self, plan);
       return error != NULL && error->code != LQL_STATUS_OK
                  ? error->code
                  : LQL_STATUS_NO_MEMORY;
     }
     for (j = 0u; j < parts.count; ++j) {
-      if (!parse_mutation_expr(self, parts.items[j], plan, options, error)) {
-        string_list_cleanup(allocator, &parts);
+      if (!parse_mutation_expr(&parse_ctx, parts.items[j], plan)) {
+        string_list_cleanup(&parse_ctx, &parts);
         self->mutation_plan_destroy(self, plan);
         return error != NULL && error->code != LQL_STATUS_OK
                    ? error->code
                    : LQL_STATUS_NO_MEMORY;
       }
     }
-    string_list_cleanup(allocator, &parts);
+    string_list_cleanup(&parse_ctx, &parts);
   }
   if (plan->count == 0u) {
     self->mutation_plan_destroy(self, plan);

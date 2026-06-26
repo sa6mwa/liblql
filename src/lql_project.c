@@ -35,6 +35,11 @@ typedef struct projection_path {
   size_t segment_count;
 } projection_path;
 
+typedef struct projection_parse_context {
+  lql *self;
+  lql_allocator *allocator;
+} projection_parse_context;
+
 typedef struct projection_state {
   lql_allocator *allocator;
   const lql_projection *projection;
@@ -191,12 +196,12 @@ static char path_container_kind(const projection_path *path, size_t index) {
   return 'o';
 }
 
-static int add_segment(lql_allocator *allocator, projection_path *path,
+static int add_segment(projection_parse_context *ctx, projection_path *path,
                        char *segment) {
   char **next;
-  next = (char **)allocator->realloc(allocator, path->segments,
-                                     sizeof(path->segments[0]) *
-                                         (path->segment_count + 1u));
+  next = (char **)ctx->allocator->realloc(
+      ctx->allocator, path->segments,
+      sizeof(path->segments[0]) * (path->segment_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -205,12 +210,12 @@ static int add_segment(lql_allocator *allocator, projection_path *path,
   return 1;
 }
 
-static char *decode_path_segment(lql_allocator *allocator, const char *src,
+static char *decode_path_segment(projection_parse_context *ctx, const char *src,
                                  size_t len) {
   char *out;
   size_t i;
   size_t j;
-  out = (char *)allocator->alloc(allocator, len + 1u);
+  out = (char *)ctx->allocator->alloc(ctx->allocator, len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -253,19 +258,14 @@ static void projection_path_cleanup(lql *self, projection_path *path) {
   path->segment_count = 0u;
 }
 
-static int parse_projection_path(lql *self, const char *raw,
+static int parse_projection_path(projection_parse_context *ctx, const char *raw,
                                  projection_path *out) {
-  lql_allocator *allocator;
   const char *start;
   const char *end;
   const char *seg;
   char *decoded;
   size_t len;
   memset(out, 0, sizeof(*out));
-  allocator = lql_allocator_from_receiver(self);
-  if (allocator == NULL) {
-    return 0;
-  }
   if (raw == NULL) {
     return 0;
   }
@@ -292,27 +292,27 @@ static int parse_projection_path(lql *self, const char *raw,
       ++slash;
     }
     len = (size_t)(slash - seg);
-    decoded = decode_path_segment(allocator, seg, len);
+    decoded = decode_path_segment(ctx, seg, len);
     if (decoded == NULL) {
-      projection_path_cleanup(self, out);
+      projection_path_cleanup(ctx->self, out);
       return 0;
     }
     if (out->segment_count == 0u && segment_is_array_index(decoded)) {
-      allocator->destroy(allocator, decoded);
-      projection_path_cleanup(self, out);
+      ctx->allocator->destroy(ctx->allocator, decoded);
+      projection_path_cleanup(ctx->self, out);
       return 0;
     }
     if (segment_is_array_index(decoded)) {
       size_t index;
       if (!parse_array_index(decoded, &index)) {
-        allocator->destroy(allocator, decoded);
-        projection_path_cleanup(self, out);
+        ctx->allocator->destroy(ctx->allocator, decoded);
+        projection_path_cleanup(ctx->self, out);
         return 0;
       }
     }
-    if (!add_segment(allocator, out, decoded)) {
-      allocator->destroy(allocator, decoded);
-      projection_path_cleanup(self, out);
+    if (!add_segment(ctx, out, decoded)) {
+      ctx->allocator->destroy(ctx->allocator, decoded);
+      projection_path_cleanup(ctx->self, out);
       return 0;
     }
     if (slash == end) {
@@ -369,21 +369,16 @@ static int projection_paths_have_container_conflict(const projection_path *a,
   return 0;
 }
 
-static int add_path(lql *self, lql_projection *projection,
+static int add_path(projection_parse_context *ctx, lql_projection *projection,
                     projection_path *path) {
-  lql_allocator *allocator;
   projection_path *next;
   size_t i;
-  allocator = lql_allocator_from_receiver(self);
-  if (allocator == NULL) {
-    return 0;
-  }
   if (path->segment_count == 0u) {
     return 1;
   }
   for (i = 0u; i < projection->path_count; ++i) {
     if (projection_paths_equal(&projection->paths[i], path)) {
-      projection_path_cleanup(self, path);
+      projection_path_cleanup(ctx->self, path);
       return 1;
     }
     if (projection_path_is_prefix(&projection->paths[i], path) ||
@@ -394,8 +389,8 @@ static int add_path(lql *self, lql_projection *projection,
       return 0;
     }
   }
-  next = (projection_path *)allocator->realloc(
-      allocator, projection->paths,
+  next = (projection_path *)ctx->allocator->realloc(
+      ctx->allocator, projection->paths,
       sizeof(projection->paths[0]) * (projection->path_count + 1u));
   if (next == NULL) {
     return 0;
@@ -949,6 +944,7 @@ static lql_status projection_parse_method(
     lql *self, const char *const *fields, size_t field_count,
     lql_projection **out, lql_error *error) {
   lql_allocator *allocator;
+  projection_parse_context parse_ctx;
   lql_projection *projection;
   projection_path path;
   size_t i;
@@ -963,19 +959,26 @@ static lql_status projection_parse_method(
     return LQL_STATUS_PARSE_ERROR;
   }
   allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "lql receiver allocator required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  parse_ctx.self = self;
+  parse_ctx.allocator = allocator;
   projection =
       (lql_projection *)allocator->calloc(allocator, 1u, sizeof(*projection));
   if (projection == NULL) {
     return LQL_STATUS_NO_MEMORY;
   }
   for (i = 0u; i < field_count; ++i) {
-    if (!parse_projection_path(self, fields[i], &path)) {
+    if (!parse_projection_path(&parse_ctx, fields[i], &path)) {
       self->projection_destroy(self, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "invalid or unsupported projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
-    if (!add_path(self, projection, &path)) {
+    if (!add_path(&parse_ctx, projection, &path)) {
       projection_path_cleanup(self, &path);
       self->projection_destroy(self, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
