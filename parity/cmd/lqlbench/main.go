@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -42,10 +43,15 @@ type readerOnly struct {
 	reader io.Reader
 }
 
-var benchmarkMutations = []string{"/bench/touched=true"}
-
 func (r readerOnly) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
+}
+
+func benchmarkMutationsForExpr(expr string) []string {
+	if strings.Contains(expr, "/voucher/lines/10/") {
+		return []string{"/voucher/lines/10/bench=true"}
+	}
+	return []string{"/bench/touched=true"}
 }
 
 func main() {
@@ -168,7 +174,7 @@ func runMutation(file *os.File, sel lql.Selector, expr string, mode string) (lql
 	if _, err := file.Seek(0, 0); err != nil {
 		return lql.QueryStreamResult{}, 0, 0, err
 	}
-	parsed, err := lql.ParseMutations(benchmarkMutations, time.Unix(1700000000, 0))
+	parsed, err := lql.ParseMutations(benchmarkMutationsForExpr(expr), time.Unix(1700000000, 0))
 	if err != nil {
 		return lql.QueryStreamResult{}, 0, 0, err
 	}

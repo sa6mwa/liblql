@@ -25,7 +25,15 @@ typedef struct bench_source {
   FILE *file;
 } bench_source;
 
-static const char *mutation_exprs[] = {"/bench/touched=true"};
+static const char *default_mutation_exprs[] = {"/bench/touched=true"};
+static const char *numeric_mutation_exprs[] = {"/voucher/lines/10/bench=true"};
+
+static const char *const *mutation_exprs_for_selector(const char *expr) {
+  if (expr != NULL && strstr(expr, "/voucher/lines/10/") != NULL) {
+    return numeric_mutation_exprs;
+  }
+  return default_mutation_exprs;
+}
 
 static lql_status observe_decision(void *user,
                                    const lql_query_decision *decision) {
@@ -176,6 +184,7 @@ int main(int argc, char **argv) {
   payload_counts counts;
   bench_source source;
   lql_uint64 fixture_size;
+  const char *const *mutation_exprs;
   clock_t start;
   clock_t end;
 
@@ -186,6 +195,7 @@ int main(int argc, char **argv) {
   mode = argv[1];
   expr = argv[2];
   fixture_path = argv[3];
+  mutation_exprs = mutation_exprs_for_selector(expr);
 
   lql_error_init(&error);
   ctx = NULL;

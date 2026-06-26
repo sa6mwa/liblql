@@ -135,8 +135,9 @@ Current implementation status:
   record forms, with all generated once and shared by Go, C, and Lua.
 - the current executable selector matrix covers equality, contains,
   `contains.any`, case-insensitive contains, timestamp comparison, date
-  window, and numeric range terms over record-stream fixtures, plus nested
-  `/records[]/...` selection over the single-root JSON fixture.
+  window, numeric range terms, and concrete numeric object-key/array-index path
+  traversal over record-stream fixtures, plus nested `/records[]/...`
+  selection over the single-root JSON fixture.
 - the current executable mode matrix covers `decision_only_selector`,
   `decision_only_plan`, `reuse_selector`, `reparse_selector_each_run`,
   `decision_only_source_selector`, `plus_value_selector`, `plus_value_plan`,
@@ -149,7 +150,9 @@ Current implementation status:
   after callback scope. Spool payloads remain reserved for non-seekable
   callback-source open-read modes.
   Mutation benchmark records assert equivalent candidate and match counts while
-  timing compact matches-only mutation to a discard sink on C and Go. Lua
+  timing compact matches-only mutation to a discard sink on C and Go. Numeric
+  path selector cases mutate `/voucher/lines/10/bench`, so the mutation
+  benchmark also exercises numeric object-key and array-index path writes. Lua
   currently returns mutated output as a Lua string through its public facade, so
   Lua mutation is included in the smoke parity matrix but not in the scalable
   memory profile until the Lua facade exposes a streaming mutation output sink.

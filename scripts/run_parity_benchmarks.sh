@@ -308,6 +308,7 @@ generate_blob() {
 
 record_json() {
   i=$1
+  numeric_amount=$((i % 200))
   if [ -z "$record_blob" ]; then
     record_blob=$(generate_blob)
   fi
@@ -322,8 +323,16 @@ record_json() {
   else
     timestamp="2026-03-05T11:29:41.265+01:00"
   fi
-  printf '{"id":"id-%d","status":"%s","metrics":{"retries":%d,"qps":%d},"timestamp":"%s","blob":"%s"}' \
-    "$i" "$status" $((i % 7)) $((i + 1)) "$timestamp" "$record_blob"
+  if [ $((i % 2)) -eq 0 ]; then
+    voucher=$(printf '"voucher":{"lines":{"10":{"amount":%d,"status":"%s"}}}' \
+      "$numeric_amount" "$status")
+  else
+    voucher=$(printf '"voucher":{"lines":[{"amount":0},{"amount":1},{"amount":2},{"amount":3},{"amount":4},{"amount":5},{"amount":6},{"amount":7},{"amount":8},{"amount":9},{"amount":%d,"status":"%s"}]}' \
+      "$numeric_amount" "$status")
+  fi
+  printf '{"id":"id-%d","status":"%s","metrics":{"retries":%d,"qps":%d},%s,"timestamp":"%s","blob":"%s"}' \
+    "$i" "$status" $((i % 7)) $((i + 1)) "$voucher" "$timestamp" \
+    "$record_blob"
 }
 
 selection_record_json() {
@@ -427,6 +436,7 @@ generate_fixture() {
     smoke)
       awk '
         ($1 == "large_ndjson" && $4 == "eq_status_open") ||
+        ($1 == "large_ndjson" && $4 == "numeric_path_amount") ||
         ($1 == "large_array" && $4 == "date_window") ||
         ($1 == "selection_single_json" && $4 == "contains_service")
       ' "$case_matrix" > "$case_matrix.smoke"
@@ -459,6 +469,8 @@ add_dataset_selector_cases() {
       "date_window" 'date{field=/timestamp,after=2026-03-05T10:28:21Z,before=2026-03-05T10:29:50Z}'
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
       "range_qps" 'range{field=/metrics/qps,gte=100,lte=130}'
+    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
+      "numeric_path_amount" '/voucher/lines/10/amount>=100'
   } >> "$case_matrix"
 }
 

@@ -34,6 +34,9 @@ local function run_once(client, selector_arg)
   local source_file
   local mutation_arg = {"/bench/touched=true"}
   local mutation_plan
+  if string.find(expr, "/voucher/lines/10/", 1, true) then
+    mutation_arg = {"/voucher/lines/10/bench=true"}
+  end
   local function read_source()
     local chunk = source_file:read(1024)
     if not chunk or #chunk == 0 then
