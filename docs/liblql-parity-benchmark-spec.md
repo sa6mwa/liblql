@@ -115,9 +115,10 @@ Current implementation status:
   `decision_only_plan`, `plus_value_selector`, `plus_value_plan`,
   `plus_value_openjson_selector`, and `plus_value_openjson_plan`.
   Plus-value records assert equivalent payload counts and payload byte totals,
-  while C exposes `seekable_range` payloads for seekable fixture files and
-  `spool` payloads for callback-source open-read modes without retaining
-  candidate JSON after callback scope.
+  while C exposes `seekable_range` payloads for seekable fixture files,
+  including current open-read benchmark modes, without retaining candidate JSON
+  after callback scope. Spool payloads remain reserved for non-seekable
+  callback-source open-read modes.
   The current C plan benchmark reuses the parsed public `lql_selector` handle;
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
   The C native helper and Lua facade runner report `ns_per_op`; the schema

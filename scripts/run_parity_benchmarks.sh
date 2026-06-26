@@ -533,7 +533,6 @@ run_c_native_mode() {
     "$c_payload_bytes" >> "$c_counts_file"
   payload_source_type=none
   case "$mode" in
-    plus_value_openjson_*) payload_source_type=spool ;;
     plus_value_*) payload_source_type=seekable_range ;;
   esac
   emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
