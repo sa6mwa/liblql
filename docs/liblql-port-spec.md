@@ -1012,7 +1012,13 @@ Current implementation status:
   fails on repository paths, `$HOME`, absolute local `file://` URLs, and
   absolute ELF RPATH/RUNPATH entries when host tooling can create the fixture,
   and fails closed when `file(1)` or Linux ELF `readelf` inspection is
-  unavailable for binary artifact verification;
+  unavailable for binary artifact verification; package verification now uses
+  `scripts/discover_target_tools.sh` to resolve target inspection tools from
+  the configured release build directory before ambient `PATH`, and
+  `lql.target-tools-fixtures` covers configured CMake cache tools,
+  target-prefixed compiler siblings, unprefixed compiler siblings, `PATH`
+  fallback, and refusal to accept known host Darwin inspection tools for
+  cross-built artifacts;
   checksum manifest fixture coverage proves release-looking tarball, rockspec,
   and source-rock artifacts under `dist/` cannot be left out of the upload
   manifest;

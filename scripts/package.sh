@@ -351,7 +351,7 @@ verify_no_local_paths() {
 verify_elf_runtime_paths() {
   artifact=$1
   root=$2
-  readelf_tool=${LQL_READELF:-readelf}
+  readelf_tool=${3:-${LQL_READELF:-readelf}}
   failed=0
   case "$(basename "$artifact")" in
     *apple-darwin*) return ;;
@@ -389,11 +389,12 @@ verify_target_file() {
   artifact=$1
   target_id=$2
   file_path=$3
-  if ! command -v file >/dev/null 2>&1; then
+  file_tool=${4:-${LQL_FILE:-file}}
+  if ! command -v "$file_tool" >/dev/null 2>&1; then
     printf 'package-verify: file(1) unavailable for target file check: %s\n' "$file_path" >&2
     exit 1
   fi
-  desc=$(file -L "$file_path")
+  desc=$("$file_tool" -L "$file_path")
   case "$target_id" in
     x86_64-linux-gnu|x86_64-linux-musl)
       expected='x86-64'
@@ -416,6 +417,21 @@ verify_target_file() {
     printf '  target=%s\n  file=%s\n  got=%s\n  want-substring=%s\n' \
       "$target_id" "$file_path" "$desc" "$expected" >&2
     exit 1
+  fi
+}
+
+discover_package_tools() {
+  target_id=$1
+  build_dir="$ROOT_DIR/build/${target_id}-release"
+  LQL_TOOL_CC=''
+  LQL_TOOL_FILE=''
+  LQL_TOOL_READELF=''
+  LQL_TOOL_OTOOL=''
+  LQL_TOOL_STRIP=''
+  LQL_TOOL_INSTALL_NAME_TOOL=''
+  LQL_TOOL_TARGET_PREFIX=''
+  if [ -x "$ROOT_DIR/scripts/discover_target_tools.sh" ]; then
+    eval "$("$ROOT_DIR/scripts/discover_target_tools.sh" "$build_dir" "$target_id")"
   fi
 }
 
@@ -801,14 +817,17 @@ verify_one_archive() {
       ;;
     ${PROJECT}-${version_value}-*)
       target_id=${expected#${PROJECT}-${version_value}-}
+      discover_package_tools "$target_id"
       test -f "$root/include/lql/lql.h"
       test -f "$root/include/lql/version.h"
       test -f "$root/lib/liblql.a"
       if [ -f "$root/lib/liblql.so" ]; then
-        verify_target_file "$artifact" "$target_id" "$root/lib/liblql.so"
+        verify_target_file "$artifact" "$target_id" "$root/lib/liblql.so" \
+          "$LQL_TOOL_FILE"
       fi
       if [ -f "$root/lib/liblql.dylib" ]; then
-        verify_target_file "$artifact" "$target_id" "$root/lib/liblql.dylib"
+        verify_target_file "$artifact" "$target_id" "$root/lib/liblql.dylib" \
+          "$LQL_TOOL_FILE"
       fi
       test -f "$root/lib/cmake/liblql/liblqlConfig.cmake"
       test -f "$root/lib/cmake/liblql/liblqlConfigVersion.cmake"
@@ -824,8 +843,10 @@ verify_one_archive() {
       ;;
     ${CLI_PROJECT}-${version_value}-*)
       target_id=${expected#${CLI_PROJECT}-${version_value}-}
+      discover_package_tools "$target_id"
       test -x "$root/bin/clql"
-      verify_target_file "$artifact" "$target_id" "$root/bin/clql"
+      verify_target_file "$artifact" "$target_id" "$root/bin/clql" \
+        "$LQL_TOOL_FILE"
       test -d "$root/lib"
       test -f "$root/share/doc/clql/LICENSE"
       test -f "$root/share/doc/clql/README.md"
@@ -846,7 +867,7 @@ verify_one_archive() {
   esac
 
   verify_no_local_paths "$artifact" "$root"
-  verify_elf_runtime_paths "$artifact" "$root"
+  verify_elf_runtime_paths "$artifact" "$root" "$LQL_TOOL_READELF"
   case "$expected" in
     ${PROJECT}-${version_value}-*) verify_host_consumers "$artifact" "$root" "$target_id" ;;
   esac
@@ -965,8 +986,8 @@ expect_target_file_tool_failure() {
 
   mkdir -p "$fixture" "$tmp_dir/no-file-bin"
   printf 'not-a-real-binary\n' >"$fixture/liblql.so"
-  if (PATH="$tmp_dir/no-file-bin" verify_target_file \
-    target-file-tool x86_64-linux-gnu "$fixture/liblql.so") \
+  if (verify_target_file target-file-tool x86_64-linux-gnu \
+    "$fixture/liblql.so" "$tmp_dir/no-file-bin/file") \
     >"$output" 2>&1; then
     printf 'package privacy fixture unexpectedly accepted missing file(1)\n' >&2
     exit 1
@@ -986,8 +1007,8 @@ expect_readelf_tool_failure() {
 
   mkdir -p "$fixture" "$tmp_dir/no-readelf-bin"
   printf 'not-a-real-elf\n' >"$fixture/liblql.so"
-  if (LQL_READELF="$tmp_dir/no-readelf-bin/readelf" verify_elf_runtime_paths \
-    liblql-0.0.0-x86_64-linux-gnu.tar.gz "$fixture") \
+  if (verify_elf_runtime_paths liblql-0.0.0-x86_64-linux-gnu.tar.gz \
+    "$fixture" "$tmp_dir/no-readelf-bin/readelf") \
     >"$output" 2>&1; then
     printf 'package privacy fixture unexpectedly accepted missing readelf\n' >&2
     exit 1
@@ -998,8 +1019,8 @@ expect_readelf_tool_failure() {
     cat "$output" >&2
     exit 1
   fi
-  if ! (LQL_READELF="$tmp_dir/no-readelf-bin/readelf" verify_elf_runtime_paths \
-    liblql-0.0.0-arm64-apple-darwin.tar.gz "$fixture") \
+  if ! (verify_elf_runtime_paths liblql-0.0.0-arm64-apple-darwin.tar.gz \
+    "$fixture" "$tmp_dir/no-readelf-bin/readelf") \
     >"$output" 2>&1; then
     printf 'package privacy fixture unexpectedly required readelf for Darwin artifact\n' >&2
     cat "$output" >&2
