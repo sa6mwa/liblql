@@ -47,6 +47,13 @@ sed '$d' "$header" >"$tmp/header.clean"
 mv "$tmp/header.clean" "$header"
 
 cat >>"$header" <<'EOF'
+void lql_dealloc(void *ptr);
+EOF
+run_expect_fail "public allocator free wrapper"
+sed '$d' "$header" >"$tmp/header.clean"
+mv "$tmp/header.clean" "$header"
+
+cat >>"$header" <<'EOF'
 #define lql_matches_json(self, selector, json, json_len, out, error) \
   (self)->matches_json((self), (selector), (json), (json_len), (out), (error))
 EOF
@@ -76,6 +83,12 @@ void *bad_alloc(void) { return malloc(1); }
 EOF
 run_expect_fail "direct runtime allocation"
 rm -f "$tmp/src/alloc.c"
+
+cat >"$tmp/src/alloc_wrapper.c" <<'EOF'
+void *bad_alloc_wrapper(void) { return lql_alloc(1); }
+EOF
+run_expect_fail "liblql allocator wrapper call"
+rm -f "$tmp/src/alloc_wrapper.c"
 
 cat >"$tmp/lua/private.c" <<'EOF'
 #include "lql_internal.h"

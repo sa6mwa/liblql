@@ -553,7 +553,10 @@ Current implementation is an early slice:
   `free_*`/`*_free`, and public allocator wrapper prototypes are also rejected
   so cleanup stays on the `*_destroy` receiver surface and the allocator
   boundary stays internal; the same style gate rejects undocumented public
-  receiver fields so the installed SDK surface remains self-describing;
+  receiver fields so the installed SDK surface remains self-describing; the
+  style fixture suite includes negative cases for public cleanup wrappers,
+  public allocator-free wrappers, receiver `*_free` fields, static cleanup
+  wrappers, direct runtime allocation, and old allocator wrapper calls;
 - project-owned allocations have an internal central liblql allocator receiver
   surface, the old `lql_alloc`/`lql_calloc`/`lql_realloc`/`lql_dealloc`/
   `lql_strdup` wrapper layer has been removed, and direct C runtime allocation
