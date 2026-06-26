@@ -5211,6 +5211,11 @@ typedef struct sdk_contract_requirement {
   sdk_contract_test_fn test;
 } sdk_contract_requirement;
 
+typedef struct sdk_contract_surface_count {
+  const char *surface;
+  int expected;
+} sdk_contract_surface_count;
+
 static void expect_selector_match_api(void);
 static void expect_selector_or_api(void);
 static void expect_selector_parse_error_api(void);
@@ -5305,10 +5310,15 @@ static void expect_sdk_contract_manifest(void) {
       {"mutation", "array wildcard value mutation",
        expect_array_wildcard_value_mutation_api},
   };
+  static const sdk_contract_surface_count surface_counts[] = {
+      {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
+      {"version", 1},      {"selector", 4}, {"streaming", 10},
+      {"projection", 6},   {"compact", 2},  {"mutation", 16},
+  };
   size_t i;
-  int selector_cases;
+  size_t j;
+  int count;
 
-  selector_cases = 0;
   for (i = 0u; i < sizeof(manifest) / sizeof(manifest[0]); ++i) {
     if (manifest[i].surface == NULL || manifest[i].surface[0] == '\0' ||
         manifest[i].requirement == NULL || manifest[i].requirement[0] == '\0') {
@@ -5321,14 +5331,19 @@ static void expect_sdk_contract_manifest(void) {
              manifest[i].surface, manifest[i].requirement);
       ++failures;
     }
-    if (strcmp(manifest[i].surface, "selector") == 0) {
-      ++selector_cases;
-    }
   }
-  if (selector_cases != 4) {
-    printf("SDK contract manifest selector accounting mismatch: %d\n",
-           selector_cases);
-    ++failures;
+  for (i = 0u; i < sizeof(surface_counts) / sizeof(surface_counts[0]); ++i) {
+    count = 0;
+    for (j = 0u; j < sizeof(manifest) / sizeof(manifest[0]); ++j) {
+      if (strcmp(manifest[j].surface, surface_counts[i].surface) == 0) {
+        ++count;
+      }
+    }
+    if (count != surface_counts[i].expected) {
+      printf("SDK contract manifest %s accounting mismatch: %d\n",
+             surface_counts[i].surface, count);
+      ++failures;
+    }
   }
 }
 
