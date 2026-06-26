@@ -619,8 +619,10 @@ Current implementation status:
   a counting internal allocator rather than fabricating private `lql` state,
   exercises successful and failed selector, projection, and mutation parses
   plus selector eval, projection runtime, and mutation runtime through receiver
-  method dispatch, and proves handle allocations, runtime scratch buffers, and
-  receiver-owned allocations return to zero outstanding allocations on cleanup;
+  method dispatch, proves projection of a large unselected scalar does not
+  allocate in proportion to that scalar's byte length, and proves handle
+  allocations, runtime scratch buffers, and receiver-owned allocations return
+  to zero outstanding allocations on cleanup;
 - the public API style gate rejects selector/query/payload/projection/compact/
   mutation `_impl`, `lql_eval_selector`, `lql_eval_query_*`,
   `lql_project_spooled`, `lql_mutate_spooled_paths`, and

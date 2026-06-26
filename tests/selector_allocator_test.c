@@ -383,6 +383,153 @@ static int expect_projection_success_uses_allocator(void) {
   return 0;
 }
 
+static int make_blob_doc(char *buf, size_t capacity, size_t blob_len) {
+  const char *prefix;
+  const char *suffix;
+  size_t prefix_len;
+  size_t suffix_len;
+
+  prefix = "{\"id\":\"a\",\"blob\":\"";
+  suffix = "\"}";
+  prefix_len = strlen(prefix);
+  suffix_len = strlen(suffix);
+  if (capacity <= prefix_len + blob_len + suffix_len) {
+    return 0;
+  }
+  memcpy(buf, prefix, prefix_len);
+  memset(buf + prefix_len, 'x', blob_len);
+  memcpy(buf + prefix_len + blob_len, suffix, suffix_len + 1u);
+  return 1;
+}
+
+static int project_blob_doc(lql *ctx, lql_projection *projection,
+                            const char *json, counting_allocator *counter,
+                            size_t *out_delta) {
+  lql_error error;
+  lql_status st;
+  FILE *out;
+  int found;
+  char output[32];
+  size_t before;
+  size_t nread;
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("projection blob tmpfile failed\n");
+    return 1;
+  }
+  found = 0;
+  before = counter->alloc_count;
+  lql_error_init(&error);
+  st = ctx->project_json(ctx, projection, json, strlen(json), out, &found,
+                         &error);
+  if (st != LQL_STATUS_OK || !found) {
+    printf("projection blob project failed: %s\n", error.message);
+    fclose(out);
+    return 1;
+  }
+  if (fseek(out, 0L, SEEK_SET) != 0) {
+    printf("projection blob output seek failed\n");
+    fclose(out);
+    return 1;
+  }
+  memset(output, 0, sizeof(output));
+  nread = fread(output, 1u, sizeof(output) - 1u, out);
+  fclose(out);
+  if (nread != strlen("{\"id\":\"a\"}") ||
+      memcmp(output, "{\"id\":\"a\"}", strlen("{\"id\":\"a\"}")) != 0) {
+    printf("projection blob output mismatch: %s\n", output);
+    return 1;
+  }
+  *out_delta = counter->alloc_count - before;
+  return 0;
+}
+
+static int expect_projection_unselected_large_blob_allocation_stable(void) {
+  counting_allocator counter;
+  lql *ctx;
+  lql_projection *projection;
+  const char *fields[1];
+  lql_error error;
+  lql_status st;
+  size_t outstanding_after_parse;
+  size_t small_delta;
+  size_t large_delta;
+  char small_doc[128];
+  char large_doc[10064];
+
+  if (!make_blob_doc(small_doc, sizeof(small_doc), 32u) ||
+      !make_blob_doc(large_doc, sizeof(large_doc), 9800u)) {
+    printf("projection blob fixture construction failed\n");
+    return 1;
+  }
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("projection blob receiver failed: %s\n", error.message);
+    return 1;
+  }
+  fields[0] = "/id";
+  projection = NULL;
+  lql_error_init(&error);
+  st = ctx->projection_parse(ctx, fields, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK || projection == NULL) {
+    printf("projection blob parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  outstanding_after_parse = counter.outstanding;
+  if (project_blob_doc(ctx, projection, small_doc, &counter, &small_delta) !=
+      0) {
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.outstanding != outstanding_after_parse) {
+    printf("projection small blob cleanup imbalance: before=%lu after=%lu\n",
+           (unsigned long)outstanding_after_parse,
+           (unsigned long)counter.outstanding);
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (project_blob_doc(ctx, projection, large_doc, &counter, &large_delta) !=
+      0) {
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.outstanding != outstanding_after_parse) {
+    printf("projection large blob cleanup imbalance: before=%lu after=%lu\n",
+           (unsigned long)outstanding_after_parse,
+           (unsigned long)counter.outstanding);
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (large_delta > small_delta + 1u) {
+    printf("projection unselected blob allocation grew with input: small=%lu "
+           "large=%lu\n",
+           (unsigned long)small_delta, (unsigned long)large_delta);
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  ctx->projection_destroy(ctx, projection);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("projection blob allocator cleanup imbalance: outstanding=%lu "
+           "destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
 static int expect_projection_parse_failure_cleans_allocator(void) {
   counting_allocator counter;
   lql *ctx;
@@ -428,6 +575,7 @@ int main(void) {
   failures += expect_selector_success_uses_allocator();
   failures += expect_selector_parse_failure_cleans_allocator();
   failures += expect_projection_success_uses_allocator();
+  failures += expect_projection_unselected_large_blob_allocation_stable();
   failures += expect_projection_parse_failure_cleans_allocator();
   failures += expect_mutation_success_uses_allocator();
   failures += expect_mutation_parse_failure_cleans_allocator();
