@@ -51,6 +51,8 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 fixture_dir="${LQL_BENCH_FIXTURE_DIR:-$root/build/bench-fixtures}"
 count="${LQL_BENCH_NDJSON_COUNT:-128}"
 suite="${LQL_BENCH_SUITE:-full}"
+mode_profile="${LQL_BENCH_MODE_PROFILE:-all}"
+record_blob_size="${LQL_BENCH_RECORD_BLOB_BYTES:-16}"
 clql="${CLQL_PATH:-$root/build/debug/clql}"
 payload_bench="${LQL_PAYLOAD_BENCH_PATH:-$root/build/debug/lql_payload_bench}"
 go_bin="${GO:-go}"
@@ -72,6 +74,7 @@ inject_candidate_mismatch="${LQL_BENCH_INJECT_CANDIDATE_MISMATCH:-0}"
 inject_match_mismatch="${LQL_BENCH_INJECT_MATCH_MISMATCH:-0}"
 inject_payload_mismatch="${LQL_BENCH_INJECT_PAYLOAD_MISMATCH:-0}"
 inject_payload_byte_mismatch="${LQL_BENCH_INJECT_PAYLOAD_BYTE_MISMATCH:-0}"
+record_blob=""
 
 json_string() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -244,8 +247,15 @@ fault_count() {
   fi
 }
 
+generate_blob() {
+  awk -v n="$record_blob_size" 'BEGIN { for (i = 0; i < n; ++i) printf "x" }'
+}
+
 record_json() {
   i=$1
+  if [ -z "$record_blob" ]; then
+    record_blob=$(generate_blob)
+  fi
   case $((i % 4)) in
     0) status=new ;;
     1) status=open ;;
@@ -257,8 +267,8 @@ record_json() {
   else
     timestamp="2026-03-05T11:29:41.265+01:00"
   fi
-  printf '{"id":"id-%d","status":"%s","metrics":{"retries":%d,"qps":%d},"timestamp":"%s","blob":"xxxxxxxxxxxxxxxx"}' \
-    "$i" "$status" $((i % 7)) $((i + 1)) "$timestamp"
+  printf '{"id":"id-%d","status":"%s","metrics":{"retries":%d,"qps":%d},"timestamp":"%s","blob":"%s"}' \
+    "$i" "$status" $((i % 7)) $((i + 1)) "$timestamp" "$record_blob"
 }
 
 selection_record_json() {
@@ -334,6 +344,19 @@ generate_fixture() {
   : > "$go_counts_file"
   : > "$c_counts_file"
   : > "$lua_counts_file"
+  if [ "$suite" = "memory" ]; then
+    : > "$ndjson_fixture"
+    i=0
+    while [ "$i" -lt "$count" ]; do
+      record_json "$i" >> "$ndjson_fixture"
+      printf '\n' >> "$ndjson_fixture"
+      i=$((i + 1))
+    done
+    : > "$case_matrix"
+    printf '%s %s %s %s %s\n' "large_ndjson" "$ndjson_fixture" "$count" \
+      "eq_status_open" '/status="open"' >> "$case_matrix"
+    return 0
+  fi
   generate_fixtures
   : > "$case_matrix"
   add_dataset_selector_cases "large_ndjson" "$ndjson_fixture" "$count"
@@ -354,6 +377,7 @@ generate_fixture() {
       ' "$case_matrix" > "$case_matrix.smoke"
       mv "$case_matrix.smoke" "$case_matrix"
       ;;
+    memory) ;;
     *)
       printf 'unsupported benchmark suite: %s\n' "$suite" >&2
       return 2
@@ -570,51 +594,51 @@ run_lua_mode() {
   done
 }
 
+selected_modes() {
+  case "$mode_profile" in
+    all)
+      printf '%s\n' \
+        decision_only_selector \
+        decision_only_plan \
+        plus_value_selector \
+        plus_value_plan \
+        plus_value_openjson_selector \
+        plus_value_openjson_plan
+      ;;
+    memory)
+      printf '%s\n' \
+        decision_only_selector \
+        plus_value_selector \
+        plus_value_openjson_selector
+      ;;
+    *)
+      printf 'unsupported benchmark mode profile: %s\n' "$mode_profile" >&2
+      return 2
+      ;;
+  esac
+}
+
 run_matrix_for_impl() {
   impl=$1
   while read dataset_name fixture_path candidates selector_name expr; do
     case "$impl" in
       go)
-        run_go_mode decision_only_selector "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_go_mode decision_only_plan "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_go_mode plus_value_selector "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_go_mode plus_value_plan "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_go_mode plus_value_openjson_selector "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_go_mode plus_value_openjson_plan "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
+        for mode in $(selected_modes); do
+          run_go_mode "$mode" "$dataset_name" "$fixture_path" "$candidates" \
+            "$selector_name" "$expr" || return 1
+        done
         ;;
       c)
-        run_c_native_mode decision_only_selector "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_c_native_mode decision_only_plan "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_c_native_mode plus_value_selector "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_c_native_mode plus_value_plan "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_c_native_mode plus_value_openjson_selector "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_c_native_mode plus_value_openjson_plan "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
+        for mode in $(selected_modes); do
+          run_c_native_mode "$mode" "$dataset_name" "$fixture_path" \
+            "$candidates" "$selector_name" "$expr" || return 1
+        done
         ;;
       lua)
-        run_lua_mode decision_only_selector "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_lua_mode decision_only_plan "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_lua_mode plus_value_selector "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_lua_mode plus_value_plan "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_lua_mode plus_value_openjson_selector "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-        run_lua_mode plus_value_openjson_plan "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
+        for mode in $(selected_modes); do
+          run_lua_mode "$mode" "$dataset_name" "$fixture_path" "$candidates" \
+            "$selector_name" "$expr" || return 1
+        done
         ;;
       *)
         return 2

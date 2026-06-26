@@ -823,8 +823,11 @@ Current implementation is an early slice:
   Go and C helper records also report OS `getrusage` peak RSS as
   `peak_rss_bytes` for the benchmark schema; `make bench-check` enforces a
   supported-C smoke RSS ceiling through `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`
-  defaulting to 128 MiB, which proves memory-gate wiring but is not yet the
-  final large-fixture proof;
+  defaulting to 128 MiB; `make bench-memory-check` adds a separate scalable C
+  streaming profile that generates at least 16 MiB of NDJSON by default and can
+  be scaled with `LQL_BENCH_MEMORY_COUNT` and
+  `LQL_BENCH_MEMORY_BLOB_BYTES`, moving the benchmark surface toward the final
+  1 GiB/128 MiB proof without slowing the normal smoke gate;
 - host `liblql` and `clql` package archive production exists through
   `scripts/package.sh`, with checksum, layout, privacy, and ELF runtime-path
   verification plus extracted host direct, CMake `find_package`, and

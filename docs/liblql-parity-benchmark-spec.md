@@ -82,6 +82,15 @@ Current implementation status:
   smoke matrix; it is not the final large-fixture memory proof. The smoke gate
   is explicit and is not part of `make test-all`; `make prerelease` runs it
   after the normal test gate.
+- `make bench-memory-check` runs a separate scalable C streaming memory profile
+  over a generated NDJSON fixture. By default it generates at least 16 MiB of
+  input using bounded per-record padding, runs `decision_only_selector`,
+  `plus_value_selector`, and `plus_value_openjson_selector`, and validates
+  supported C peak RSS against `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`. The profile is
+  configurable with `LQL_BENCH_MEMORY_COUNT`,
+  `LQL_BENCH_MEMORY_BLOB_BYTES`, and `LQL_BENCH_MEMORY_MIN_BYTES`, so the same
+  gate shape can be scaled toward the 1 GiB/128 MiB requirement without changing
+  the runner or weakening the normal smoke gate.
 - `make benchmarks-c` exercises the public liblql API for decision-only output
   and matched-only seekable plus-value payload access over a shared generated
   fixture.

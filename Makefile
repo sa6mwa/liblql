@@ -1,4 +1,4 @@
-.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan lua-rock lua-env lua-test bench benchmarks bench-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan lua-rock lua-env lua-test bench benchmarks bench-check bench-memory-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -13,6 +13,7 @@ help:
 	  'make lua-test                run Lua facade smoke tests' \
 	  'make benchmarks             run local parity benchmark smoke' \
 	  'make bench-check            run deterministic benchmark smoke gate' \
+	  'make bench-memory-check     run scalable C streaming memory gate' \
 	  'make benchmarks-parity      require Go/C/Lua benchmark implementations' \
 	  'make format                  clang-format project C sources' \
 	  'make package                 build host package artifacts' \
@@ -73,6 +74,9 @@ bench-check: build-debug
 	@./scripts/check_parity_benchmark_fixtures.sh
 	@./scripts/check_parity_benchmark_memory.sh build/bench-check.jsonl
 	@./scripts/check_parity_benchmark_schema.sh
+
+bench-memory-check: build-debug
+	@./scripts/check_parity_benchmark_large_memory.sh
 
 benchmarks-go:
 	@./scripts/run_parity_benchmarks.sh --impl go --format json
