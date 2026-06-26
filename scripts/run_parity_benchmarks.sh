@@ -199,6 +199,12 @@ emit_unsupported_impl() {
       "decision_only_plan" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "reuse_selector" 0 0 0 0 0 "none" null null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "reparse_selector_each_run" 0 0 0 0 0 "none" null null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
       "decision_only_source_selector" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
@@ -690,6 +696,8 @@ selected_modes() {
       printf '%s\n' \
         decision_only_selector \
         decision_only_plan \
+        reuse_selector \
+        reparse_selector_each_run \
         decision_only_source_selector \
         plus_value_selector \
         plus_value_plan \
@@ -700,6 +708,8 @@ selected_modes() {
     memory)
       printf '%s\n' \
         decision_only_selector \
+        reuse_selector \
+        reparse_selector_each_run \
         decision_only_source_selector \
         plus_value_selector \
         plus_value_source_selector \

@@ -24,8 +24,7 @@ if submode ~= "warmup_included" and submode ~= "steady_state" then
   die("unsupported submode: " .. submode)
 end
 
-local function run_once()
-  local client = lql.new()
+local function run_once(client, selector_arg)
   local payloads = 0
   local payload_bytes = 0
   local matches = 0
@@ -65,18 +64,33 @@ local function run_once()
     end)
     source_file:close()
   elseif mode ~= "decision_only_selector" and mode ~= "decision_only_plan" then
-    if mode ~= "decision_only_source_selector" then
+    if mode ~= "decision_only_source_selector" and
+        mode ~= "reuse_selector" and
+        mode ~= "reparse_selector_each_run" then
       die("unsupported mode: " .. mode)
     end
     source_file = assert(io.open(fixture, "rb"))
-    result, err = client:query_source(expr, read_source, function(decision)
-      if decision.matched then
-        matches = matches + 1
-      end
-    end)
-    source_file:close()
+    if mode == "decision_only_source_selector" then
+      result, err = client:query_source(selector_arg, read_source,
+                                        function(decision)
+        if decision.matched then
+          matches = matches + 1
+        end
+      end)
+    else
+      source_file:close()
+      source_file = nil
+      result, err = client:query_file(selector_arg, fixture, function(decision)
+        if decision.matched then
+          matches = matches + 1
+        end
+      end)
+    end
+    if source_file then
+      source_file:close()
+    end
   else
-    result, err = client:query_file(expr, fixture, function(decision)
+    result, err = client:query_file(selector_arg, fixture, function(decision)
       if decision.matched then
         matches = matches + 1
       end
@@ -92,16 +106,25 @@ local function run_once()
 end
 
 local ok, message = pcall(function()
+  local client = lql.new()
+  local selector_arg = expr
   local matches
   local payloads
   local payload_bytes
   local start
   local elapsed_ns
+  if mode == "reuse_selector" then
+    local selector, selector_err = client:selector_parse(expr)
+    if selector_err then
+      die(selector_err.stderr or "selector parse failed")
+    end
+    selector_arg = selector
+  end
   if submode == "steady_state" then
-    run_once()
+    run_once(client, selector_arg)
   end
   start = os.clock()
-  matches, payloads, payload_bytes = run_once()
+  matches, payloads, payload_bytes = run_once(client, selector_arg)
   elapsed_ns = math.floor(((os.clock() - start) * 1000000000) + 0.5)
   io.write("candidates=", candidates, " matches=", matches, " payloads=",
            payloads, " payload_bytes=", payload_bytes, " elapsed_ns=",

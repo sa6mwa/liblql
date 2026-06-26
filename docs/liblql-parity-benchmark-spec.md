@@ -127,8 +127,9 @@ Current implementation status:
   window, and numeric range terms over record-stream fixtures, plus nested
   `/records[]/...` selection over the single-root JSON fixture.
 - the current executable mode matrix covers `decision_only_selector`,
-  `decision_only_plan`, `plus_value_selector`, `plus_value_plan`,
-  `plus_value_openjson_selector`, and `plus_value_openjson_plan`.
+  `decision_only_plan`, `reuse_selector`, `reparse_selector_each_run`,
+  `plus_value_selector`, `plus_value_plan`, `plus_value_openjson_selector`,
+  and `plus_value_openjson_plan`.
   Plus-value records assert equivalent payload counts and payload byte totals,
   while C exposes `seekable_range` payloads for seekable fixture files,
   including current open-read benchmark modes, without retaining candidate JSON
@@ -148,7 +149,10 @@ Current implementation status:
   equivalents over the CLI-style single-root JSON fixture.
 - `make benchmarks-lua` loads `lua/lql.lua`, which uses the direct Lua 5.5
   `lql.core` C module over public liblql APIs, creates a receiver-backed
-  client with `lql.new()`, performs an untimed warmup pass for `steady_state`,
+  client with `lql.new()`, reuses parsed selector userdata for
+  `reuse_selector`, reparses expression strings for
+  `reparse_selector_each_run`, performs an untimed warmup pass for
+  `steady_state`,
   counts plus-value payload bytes through `match.write_json(callback)` rather
   than `match.json()` materialization, and emits timed stable JSON Lines
   records.

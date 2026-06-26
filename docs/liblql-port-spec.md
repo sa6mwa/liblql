@@ -946,9 +946,10 @@ Current implementation status:
   linked against shared liblql and implemented through public liblql headers;
   `lql.new()` returns a C-owned client userdata backed by a public `lql *`
   receiver, with deterministic smoke tests for selector decisions, selection
-  output, file-backed callback decision streams, Lua callback-backed source
-  decision streams, Lua callback-source selection, callback-scoped seekable
-  payload handles, callback-scoped source-spooled payload handles,
+  output, parsed selector userdata reuse over the public receiver surface,
+  file-backed callback decision streams, Lua callback-backed source decision
+  streams, Lua callback-source selection, callback-scoped seekable payload
+  handles, callback-scoped source-spooled payload handles,
   callback-scoped payload streaming through `match.write_json(callback)`, file,
   buffered-JSON, and Lua callback-source projection, file, buffered-JSON, and
   Lua callback-source mutation, relative file-backed mutation values through
@@ -970,6 +971,8 @@ Current implementation status:
   records, C native helper records, and Lua facade runner records now report
   `ns_per_op`, Lua plus-value benchmark modes count bytes through
   `match.write_json(callback)` instead of `match.json()` materialization, while
+  selector parse-cost modes distinguish parsed selector reuse from reparsing
+  expression strings on every timed run across Go, C, and Lua, and while
   Go and C helper records also report OS `getrusage` peak RSS as
   `peak_rss_bytes` for the benchmark schema and Lua records report process peak
   RSS when host `time` support is available; `make bench-check` enforces a

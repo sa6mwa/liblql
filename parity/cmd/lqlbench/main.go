@@ -70,10 +70,14 @@ func main() {
 		os.Exit(2)
 	}
 
-	sel, err := lql.ParseSelectorString(expr)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "lqlbench: parse selector: %v\n", err)
-		os.Exit(1)
+	var sel lql.Selector
+	if mode != "reparse_selector_each_run" {
+		var err error
+		sel, err = lql.ParseSelectorString(expr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "lqlbench: parse selector: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	file, err := os.Open(fixture)
 	if err != nil {
@@ -96,13 +100,13 @@ func main() {
 		payloadSourceType = "callback_payload"
 	}
 	if submode == "steady_state" {
-		if _, _, _, err := runQuery(file, sel, mode); err != nil {
+		if _, _, _, err := runQuery(file, sel, expr, mode); err != nil {
 			fmt.Fprintf(os.Stderr, "lqlbench: warmup query stream: %v\n", err)
 			os.Exit(1)
 		}
 	}
 	start := time.Now()
-	result, payloads, payloadBytes, err := runQuery(file, sel, mode)
+	result, payloads, payloadBytes, err := runQuery(file, sel, expr, mode)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "lqlbench: query stream: %v\n", err)
 		os.Exit(1)
@@ -151,9 +155,16 @@ func peakRSSBytes() *int64 {
 	return &value
 }
 
-func runQuery(file *os.File, sel lql.Selector, mode string) (lql.QueryStreamResult, int64, int64, error) {
+func runQuery(file *os.File, sel lql.Selector, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
 	if _, err := file.Seek(0, 0); err != nil {
 		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	if mode == "reparse_selector_each_run" {
+		parsed, err := lql.ParseSelectorString(expr)
+		if err != nil {
+			return lql.QueryStreamResult{}, 0, 0, err
+		}
+		sel = parsed
 	}
 	payloads := int64(0)
 	payloadBytes := int64(0)
@@ -207,6 +218,8 @@ func runQuery(file *os.File, sel lql.Selector, mode string) (lql.QueryStreamResu
 func isSupportedMode(mode string) bool {
 	return mode == "decision_only_selector" ||
 		mode == "decision_only_plan" ||
+		mode == "reuse_selector" ||
+		mode == "reparse_selector_each_run" ||
 		mode == "decision_only_source_selector" ||
 		mode == "plus_value_selector" ||
 		mode == "plus_value_plan" ||

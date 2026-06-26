@@ -50,10 +50,26 @@ if os.getenv("LQL_REQUIRE_CORE") == "1" and not lql.has_core() then
 end
 
 local client = lql.new()
+local open_selector, selector_err =
+  client:selector_parse('/status="open"')
+open_selector = assert_no_error(open_selector, selector_err,
+                                "selector_parse open")
+
+local invalid_selector, invalid_selector_err =
+  client:selector_parse('eq{field=/status,value=open,foo=bar}')
+if invalid_selector ~= nil or not invalid_selector_err or
+    invalid_selector_err.status ~= 3 or
+    (invalid_selector_err.stderr or "") == "" then
+  fail("expected structured selector_parse error")
+end
 
 local matched, err = client:matches_json('/status="open"', '{"status":"open"}')
 matched = assert_no_error(matched, err, "matches_json open")
 assert_equal(matched, true, "matches_json open")
+
+matched, err = client:matches_json(open_selector, '{"status":"open"}')
+matched = assert_no_error(matched, err, "matches_json parsed selector open")
+assert_equal(matched, true, "matches_json parsed selector open")
 
 matched, err = client:matches_json('/status="open"', '{"status":"closed"}')
 matched = assert_no_error(matched, err, "matches_json closed")
@@ -82,6 +98,16 @@ assert_equal(result.candidates_seen, 2, "query_file candidates")
 assert_equal(result.candidates_matched, 1, "query_file matches")
 assert_equal(decisions[1].matched, false, "query_file first decision")
 assert_equal(decisions[2].matched, true, "query_file second decision")
+
+local parsed_decisions = {}
+result, err = client:query_file(open_selector, input_path, function(decision)
+  parsed_decisions[#parsed_decisions + 1] = decision
+end)
+result = assert_no_error(result, err, "query_file parsed selector")
+assert_equal(result.candidates_seen, 2, "query_file parsed selector candidates")
+assert_equal(result.candidates_matched, 1, "query_file parsed selector matches")
+assert_equal(parsed_decisions[2].matched, true,
+             "query_file parsed selector second match")
 
 local stopped
 stopped, err = client:query_file('/status="open"', input_path, function(_)

@@ -145,6 +145,7 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 	}
 	switch rec.Mode {
 	case "decision_only_selector", "decision_only_plan", "plus_value_selector",
+		"reuse_selector", "reparse_selector_each_run",
 		"decision_only_source_selector", "plus_value_plan",
 		"plus_value_source_selector", "plus_value_openjson_selector",
 		"plus_value_openjson_plan":
@@ -235,6 +236,7 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 
 func isDecisionOnlyMode(mode string) bool {
 	return mode == "decision_only_selector" || mode == "decision_only_plan" ||
+		mode == "reuse_selector" || mode == "reparse_selector_each_run" ||
 		mode == "decision_only_source_selector"
 }
 

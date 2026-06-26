@@ -170,11 +170,13 @@ int main(int argc, char **argv) {
     fprintf(stderr, "lql_payload_bench: create lql: %s\n", error.message);
     return 1;
   }
-  st = ctx->selector_parse(ctx, expr, &selector, &error);
-  if (st != LQL_STATUS_OK) {
-    fprintf(stderr, "lql_payload_bench: parse selector: %s\n", error.message);
-    ctx->destroy(ctx);
-    return 1;
+  if (strcmp(mode, "reparse_selector_each_run") != 0) {
+    st = ctx->selector_parse(ctx, expr, &selector, &error);
+    if (st != LQL_STATUS_OK) {
+      fprintf(stderr, "lql_payload_bench: parse selector: %s\n", error.message);
+      ctx->destroy(ctx);
+      return 1;
+    }
   }
 
   fixture = fopen(fixture_path, "rb");
@@ -191,8 +193,15 @@ int main(int argc, char **argv) {
   source.file = fixture;
   memset(&result, 0, sizeof(result));
   start = clock();
-  if (strcmp(mode, "decision_only_selector") == 0 ||
-      strcmp(mode, "decision_only_plan") == 0) {
+  if (strcmp(mode, "reparse_selector_each_run") == 0) {
+    st = ctx->selector_parse(ctx, expr, &selector, &error);
+    if (st == LQL_STATUS_OK) {
+      st = ctx->query_file_decisions(ctx, selector, fixture, observe_decision,
+                                     NULL, &result, &error);
+    }
+  } else if (strcmp(mode, "decision_only_selector") == 0 ||
+             strcmp(mode, "decision_only_plan") == 0 ||
+             strcmp(mode, "reuse_selector") == 0) {
     st = ctx->query_file_decisions(ctx, selector, fixture, observe_decision,
                                    NULL, &result, &error);
   } else if (strcmp(mode, "decision_only_source_selector") == 0) {
