@@ -23,6 +23,16 @@ check_release_surface() {
     printf 'release surface: make help must advertise make release\n' >&2
     exit 1
   fi
+  if ! grep -F 'make print-release-assets' "$makefile" >/dev/null; then
+    printf 'release surface: make help must advertise make print-release-assets\n' >&2
+    exit 1
+  fi
+  if ! grep -Eq '^print-release-assets:' "$makefile" ||
+     ! grep -F './scripts/package.sh print-release-assets' "$makefile" \
+       >/dev/null; then
+    printf 'release surface: print-release-assets must use checksum manifest helper\n' >&2
+    exit 1
+  fi
   if ! grep -F 'make bench-1g-check' "$makefile" >/dev/null; then
     printf 'release surface: make help must advertise make bench-1g-check\n' >&2
     exit 1
@@ -83,10 +93,12 @@ if [ "${1:-}" = "--fixtures" ]; then
 
   cat >"$makefile" <<'EOF'
 help:
-	@printf '%s\n' 'make release' 'make bench-1g-check'
+	@printf '%s\n' 'make release' 'make bench-1g-check' 'make print-release-assets'
 prerelease-hardening: prerelease bench-1g-check release-matrix
 release:
 	@./scripts/release_gate.sh
+print-release-assets:
+	@./scripts/package.sh print-release-assets
 EOF
   cat >"$release_script" <<'EOF'
 #!/bin/sh

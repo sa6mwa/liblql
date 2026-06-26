@@ -1,4 +1,4 @@
-.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-lockd-perf-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-debug build-release test test-debug parity-test test-all asan fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-lockd-perf-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version print-release-assets format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -24,6 +24,7 @@ help:
 	  'make package-verify          verify generated packages' \
 	  'make release-matrix          build release target matrix where toolchains exist' \
 	  'make release                 clean, test, benchmark, package, and verify release artifacts' \
+	  'make print-release-assets    print checksum-listed release upload assets' \
 	  'make clean                   remove generated build/dist/cache/Lua state'
 
 deps-debug:
@@ -120,6 +121,9 @@ release:
 
 print-release-version:
 	@./scripts/release_version.sh
+
+print-release-assets:
+	@./scripts/package.sh print-release-assets
 
 format:
 	@clang-format -i include/lql/*.h src/*.c src/*.h tests/*.c examples/*.c bench/*.c lua/*.c
