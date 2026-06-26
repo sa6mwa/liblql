@@ -936,7 +936,10 @@ Current implementation status:
   propagation, and structured errors; the public API style gate rejects
   Lua facade use of private liblql headers, `LQL_INTERNAL_SYMBOL`, or private
   `_impl` receiver implementation functions so Lua remains a public-header
-  binding rather than a private in-process shortcut;
+  binding rather than a private in-process shortcut; CMake verifies Lua headers
+  are Lua 5.5 before enabling the direct module, Lua CTest smoke uses only a
+  Lua 5.5 executable, and `lql.lua-runtime-fixtures` proves the standalone Lua
+  test runner rejects non-5.5 runtimes with an actionable error;
 - the parity benchmark surface now has Go, C, and Lua runners over the shared
   generated fixture matrix; the Lua runner loads `lua/lql.lua` and uses the
   direct `lql.core` module rather than shelling out to `clql`; Go helper

@@ -115,6 +115,19 @@ if(LQL_BUILD_LUA_MODULE)
   find_path(LQL_LUA_INCLUDE_DIR lua.h
     PATH_SUFFIXES lua5.5 lua)
   if(LQL_LUA_INCLUDE_DIR)
+    file(STRINGS "${LQL_LUA_INCLUDE_DIR}/lua.h" LQL_LUA_VERSION_55_NUM
+      REGEX "^[ \t]*#define[ \t]+LUA_VERSION_NUM[ \t]+505[ \t]*$")
+    file(STRINGS "${LQL_LUA_INCLUDE_DIR}/lua.h" LQL_LUA_VERSION_55_MAJOR
+      REGEX "^[ \t]*#define[ \t]+LUA_VERSION_MAJOR_N[ \t]+5[ \t]*$")
+    file(STRINGS "${LQL_LUA_INCLUDE_DIR}/lua.h" LQL_LUA_VERSION_55_MINOR
+      REGEX "^[ \t]*#define[ \t]+LUA_VERSION_MINOR_N[ \t]+5[ \t]*$")
+    if(NOT LQL_LUA_VERSION_55_NUM AND
+       NOT (LQL_LUA_VERSION_55_MAJOR AND LQL_LUA_VERSION_55_MINOR))
+      message(STATUS "Lua headers at ${LQL_LUA_INCLUDE_DIR} are not Lua 5.5; direct Lua C module disabled")
+      set(LQL_LUA_INCLUDE_DIR "")
+    endif()
+  endif()
+  if(LQL_LUA_INCLUDE_DIR)
     if(TARGET lql_shared)
       set(LQL_LUA_LINK_TARGET lql_shared)
     else()
@@ -265,8 +278,20 @@ if(LQL_BUILD_TESTS)
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/parity)
     set_tests_properties(lql.sdk-parity PROPERTIES LABELS "parity;api;local" TIMEOUT 60)
   endif()
-  find_program(LUA_EXECUTABLE lua)
-  if(LUA_EXECUTABLE AND TARGET lql_lua_core AND NOT LQL_SANITIZER_BUILD)
+  find_program(LUA_EXECUTABLE NAMES lua5.5 lua)
+  set(LQL_LUA_EXECUTABLE_IS_55 OFF)
+  if(LUA_EXECUTABLE)
+    execute_process(COMMAND ${LUA_EXECUTABLE} -e "print(_VERSION)"
+      OUTPUT_VARIABLE LQL_LUA_VERSION_OUTPUT
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(LQL_LUA_VERSION_OUTPUT STREQUAL "Lua 5.5")
+      set(LQL_LUA_EXECUTABLE_IS_55 ON)
+    else()
+      message(STATUS "Lua executable ${LUA_EXECUTABLE} is not Lua 5.5; Lua CTest smoke disabled")
+    endif()
+  endif()
+  if(LUA_EXECUTABLE AND LQL_LUA_EXECUTABLE_IS_55 AND TARGET lql_lua_core AND NOT LQL_SANITIZER_BUILD)
     add_test(NAME lql.lua-core
       COMMAND ${CMAKE_COMMAND} -E env
         "LUA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/lua/?.lua$<SEMICOLON>${CMAKE_CURRENT_SOURCE_DIR}/lua/?/init.lua$<SEMICOLON>$<SEMICOLON>"
@@ -277,6 +302,10 @@ if(LQL_BUILD_TESTS)
         ${LUA_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/lua/tests/lql_core_smoke.lua)
     set_tests_properties(lql.lua-core PROPERTIES LABELS "unit;api;lua" TIMEOUT 5)
   endif()
+  add_test(NAME lql.lua-runtime-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_lua_runtime_fixtures.sh)
+  set_tests_properties(lql.lua-runtime-fixtures PROPERTIES
+    LABELS "unit;api;lua" TIMEOUT 5)
   if(TARGET lql_match_example)
     add_test(NAME lql.example-match COMMAND lql_match_example)
     set_tests_properties(lql.example-match PROPERTIES
