@@ -103,8 +103,9 @@ Current implementation status:
   16 MiB of input using bounded per-record padding, runs
   `decision_only_selector`, `reuse_selector`, `reparse_selector_each_run`,
   `decision_only_source_selector`, `plus_value_selector`,
-  `plus_value_source_selector`, and `plus_value_openjson_selector`, compares C
-  and Lua counters against the Go oracle, validates supported C peak RSS against
+  `plus_value_source_selector`, and `plus_value_openjson_selector` over equality
+  and large-blob `contains`/`icontains` selector cases, compares C and Lua
+  counters against the Go oracle, validates supported C peak RSS against
   `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`, and validates supported Lua peak RSS
   against `LQL_BENCH_MAX_LUA_PEAK_RSS_BYTES` or the C ceiling when unset. The
   profile forbids unsupported records and requires host process RSS timing for

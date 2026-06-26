@@ -467,6 +467,10 @@ generate_fixture() {
     : > "$case_matrix"
     printf '%s %s %s %s %s\n' "large_ndjson" "$ndjson_fixture" "$count" \
       "eq_status_open" '/status="open"' >> "$case_matrix"
+    printf '%s %s %s %s %s\n' "large_ndjson" "$ndjson_fixture" "$count" \
+      "contains_blob" 'contains{field=/blob,value=xxxx}' >> "$case_matrix"
+    printf '%s %s %s %s %s\n' "large_ndjson" "$ndjson_fixture" "$count" \
+      "icontains_blob" 'icontains{field=/blob,value=XXXX}' >> "$case_matrix"
     return 0
   fi
   generate_fixtures
