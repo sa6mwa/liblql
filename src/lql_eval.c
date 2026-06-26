@@ -1617,7 +1617,6 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
   st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
-  query_finish_file_bytes(&state.result, file);
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
     lonejson_free(runtime);
@@ -1632,6 +1631,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_file_decisions(
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
+  query_finish_file_bytes(&state.result, file);
   destroy_doc(&state.doc);
   lonejson_free(runtime);
   if (out_result != NULL) {
@@ -1683,7 +1683,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_decisions(
   options.candidate_user = &state;
   st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
                                         &options, &lj_error);
-  query_finish_source_bytes(&state.result, &adapter);
+  if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||
+      state.callback_status != LQL_STATUS_OK) {
+    query_finish_source_bytes(&state.result, &adapter);
+  }
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
     lonejson_free(runtime);
@@ -1753,7 +1756,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_eval_query_source_spooled_matches(
   options.candidate_user = &state;
   st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
                                         &options, &lj_error);
-  query_finish_source_bytes(&state.result, &adapter);
+  if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||
+      state.callback_status != LQL_STATUS_OK) {
+    query_finish_source_bytes(&state.result, &adapter);
+  }
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
     lonejson_free(runtime);

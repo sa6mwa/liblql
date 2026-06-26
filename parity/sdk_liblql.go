@@ -1396,9 +1396,17 @@ static int liblql_stream_query(const char *expr, const char *json, int mode,
 			liblql_receiver()->selector_destroy(liblql_receiver(), selector);
 			return -1;
 		}
+		if (status != LQL_STATUS_OK &&
+		    liblql_read_tmp(payload_out, &summary->payload_json,
+		                    &summary->payload_len, errbuf, errbuf_len) != 0) {
+			fclose(payload_out);
+			liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+			return -1;
+		}
 		fclose(payload_out);
 	}
 	liblql_receiver()->selector_destroy(liblql_receiver(), selector);
+	liblql_copy_query_result(summary, &result);
 	if (status != LQL_STATUS_OK) {
 		if (errbuf != NULL && errbuf_len > 0u) {
 			strncpy(errbuf, error.message, errbuf_len - 1u);
@@ -1406,7 +1414,6 @@ static int liblql_stream_query(const char *expr, const char *json, int mode,
 		}
 		return (int)status;
 	}
-	liblql_copy_query_result(summary, &result);
 	return 0;
 }
 */
@@ -1892,11 +1899,8 @@ func cStreamQuery(expr, doc string, mode int, maxMatches, maxCandidates, maxByte
 		&errbuf[0],
 		C.size_t(len(errbuf)),
 	)
-	if status != 0 {
-		return cStreamSummary{}, sdkParityError(C.GoString(&errbuf[0]))
-	}
 	defer C.free(unsafe.Pointer(summary.payload_json))
-	return cStreamSummary{
+	out := cStreamSummary{
 		CandidatesSeen:    int64(summary.candidates_seen),
 		CandidatesMatched: int64(summary.candidates_matched),
 		BytesRead:         int64(summary.bytes_read),
@@ -1907,7 +1911,11 @@ func cStreamQuery(expr, doc string, mode int, maxMatches, maxCandidates, maxByte
 		SeekablePayloads:  int(summary.seekable_payloads),
 		SpooledPayloads:   int(summary.spooled_payloads),
 		PayloadJSON:       C.GoBytes(unsafe.Pointer(summary.payload_json), C.int(summary.payload_len)),
-	}, nil
+	}
+	if status != 0 {
+		return out, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	return out, nil
 }
 
 func cStringArray(values []string) (**C.char, func()) {

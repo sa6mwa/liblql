@@ -1154,12 +1154,15 @@ func TestSDKStreamingErrorParity(t *testing.T) {
 			{name: "source decisions", id: 3},
 		} {
 			t.Run(tc.name+"/"+mode.name, func(t *testing.T) {
-				if _, err := goStreamQuery(`/status="open"`, tc.doc, mode.id, 0, 0, 0, false); err == nil {
+				want, err := goStreamQuery(`/status="open"`, tc.doc, mode.id, 0, 0, 0, false)
+				if err == nil {
 					t.Fatalf("go stream unexpectedly accepted malformed JSON: %q", tc.doc)
 				}
-				if _, err := cStreamQuery(`/status="open"`, tc.doc, mode.id, 0, 0, 0, false); err == nil {
+				got, err := cStreamQuery(`/status="open"`, tc.doc, mode.id, 0, 0, 0, false)
+				if err == nil {
 					t.Fatalf("liblql stream unexpectedly accepted malformed JSON: %q", tc.doc)
 				}
+				assertStreamSummaryParity(t, got, want)
 			})
 		}
 	}
@@ -1359,14 +1362,14 @@ func goStreamQuery(expr, doc string, mode int, maxMatches, maxCandidates, maxByt
 		}
 	}
 	result, err := lql.QueryStreamWithResult(req)
-	if err != nil {
-		return cStreamSummary{}, err
-	}
 	summary.CandidatesSeen = result.CandidatesSeen
 	summary.CandidatesMatched = result.CandidatesMatched
 	summary.BytesRead = result.BytesRead
 	summary.StoppedEarly = result.StoppedEarly
 	summary.StopReason = goStopReasonCode(result.StopReason)
+	if err != nil {
+		return summary, err
+	}
 	return summary, nil
 }
 
