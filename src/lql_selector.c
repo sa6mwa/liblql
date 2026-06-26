@@ -1021,6 +1021,9 @@ typedef struct indexed_group {
   lql_node_kind wrapper;
   char *index;
   lql_node node;
+  lql_node or_group;
+  struct indexed_group *groups;
+  size_t group_count;
 } indexed_group;
 
 static void indexed_groups_cleanup(indexed_group *groups, size_t count) {
@@ -1031,6 +1034,8 @@ static void indexed_groups_cleanup(indexed_group *groups, size_t count) {
   for (i = 0u; i < count; ++i) {
     lql_dealloc(groups[i].index);
     lql_node_cleanup(&groups[i].node);
+    lql_node_cleanup(&groups[i].or_group);
+    indexed_groups_cleanup(groups[i].groups, groups[i].group_count);
   }
   lql_dealloc(groups);
 }
@@ -1081,16 +1086,16 @@ static indexed_group *find_indexed_group(indexed_group *groups, size_t count,
   return NULL;
 }
 
-static int indexed_group_conflicts(const indexed_group *group,
+static int node_conflicts_with_child(const lql_node *node,
                                    const lql_node *child) {
   size_t i;
   const lql_node *current;
-  if (group == NULL || child == NULL || child->kind != LQL_NODE_EQ ||
+  if (node == NULL || child == NULL || child->kind != LQL_NODE_EQ ||
       child->term.field == NULL) {
     return 0;
   }
-  for (i = 0u; i < group->node.child_count; ++i) {
-    current = &group->node.children[i];
+  for (i = 0u; i < node->child_count; ++i) {
+    current = &node->children[i];
     if (current->kind == LQL_NODE_EQ && current->term.field != NULL &&
         strcmp(current->term.field, child->term.field) == 0 &&
         strcmp(current->term.value == NULL ? "" : current->term.value,
@@ -1101,9 +1106,9 @@ static int indexed_group_conflicts(const indexed_group *group,
   return 0;
 }
 
-static int append_indexed_group(indexed_group **groups, size_t *count,
-                                lql_node_kind wrapper, char **index,
-                                lql_node *child, lql_error *error) {
+static indexed_group *ensure_indexed_group(indexed_group **groups,
+                                           size_t *count,
+                                           lql_node_kind wrapper, char **index) {
   indexed_group *group;
   indexed_group *next;
   group = find_indexed_group(*groups, *count, wrapper, *index);
@@ -1122,12 +1127,103 @@ static int append_indexed_group(indexed_group **groups, size_t *count,
     group->node.kind = LQL_NODE_AND;
     ++*count;
   }
-  if (indexed_group_conflicts(group, child)) {
+  return group;
+}
+
+static lql_status append_plain_group_node(indexed_group *group, lql_node *child,
+                                          lql_error *error) {
+  if (child->kind == LQL_NODE_OR && child->child_count == 1u) {
+    if (group->or_group.kind == LQL_NODE_ALL) {
+      group->or_group.kind = LQL_NODE_OR;
+    }
+    if (!append_node(&group->or_group, &child->children[0])) {
+      return LQL_STATUS_NO_MEMORY;
+    }
+    lql_dealloc(child->children);
+    child->children = NULL;
+    child->child_count = 0u;
+    return LQL_STATUS_OK;
+  }
+  if (node_conflicts_with_child(&group->node, child)) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "selector expression has conflicting indexed clauses");
-    return -1;
+    return LQL_STATUS_PARSE_ERROR;
   }
-  return append_node(&group->node, child);
+  if (!append_node(&group->node, child)) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status append_token_to_group(indexed_group *group, const char *token,
+                                        lql_error *error) {
+  lql_node_kind wrapper;
+  indexed_group *child_group;
+  const char *rest;
+  char *index;
+  lql_node child;
+  lql_status st;
+  int wrapper_status;
+
+  index = NULL;
+  rest = NULL;
+  wrapper_status = parse_indexed_wrapper(token, &wrapper, &index, &rest);
+  if (wrapper_status < 0) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  if (wrapper_status > 0) {
+    child_group =
+        ensure_indexed_group(&group->groups, &group->group_count, wrapper,
+                             &index);
+    lql_dealloc(index);
+    if (child_group == NULL) {
+      return LQL_STATUS_NO_MEMORY;
+    }
+    return append_token_to_group(child_group, rest, error);
+  }
+
+  memset(&child, 0, sizeof(child));
+  st = parse_one(token, &child, error);
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  st = append_plain_group_node(group, &child, error);
+  if (st != LQL_STATUS_OK) {
+    lql_node_cleanup(&child);
+  }
+  return st;
+}
+
+static lql_status finalize_indexed_group(indexed_group *group,
+                                         int root_or_mode) {
+  size_t i;
+  lql_status st;
+
+  if (group->or_group.kind == LQL_NODE_ALL) {
+    group->or_group.kind = LQL_NODE_OR;
+  }
+  for (i = 0u; i < group->group_count; ++i) {
+    st = finalize_indexed_group(&group->groups[i], 0);
+    if (st != LQL_STATUS_OK) {
+      return st;
+    }
+    if (!root_or_mode && group->groups[i].wrapper == LQL_NODE_OR) {
+      if (!append_node(&group->or_group, &group->groups[i].node)) {
+        return LQL_STATUS_NO_MEMORY;
+      }
+    } else if (!append_node(&group->node, &group->groups[i].node)) {
+      return LQL_STATUS_NO_MEMORY;
+    }
+  }
+  if (group->or_group.child_count != 0u) {
+    if (!append_node(&group->node, &group->or_group)) {
+      return LQL_STATUS_NO_MEMORY;
+    }
+  }
+  indexed_groups_cleanup(group->groups, group->group_count);
+  group->groups = NULL;
+  group->group_count = 0u;
+  return LQL_STATUS_OK;
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
@@ -1136,15 +1232,12 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
                                                            lql_error *error) {
   lql_token_list tokens;
   lql_selector *selector;
-  lql_node node;
-  lql_node or_group;
-  indexed_group *groups;
+  indexed_group root_group;
   lql_node_kind wrapper;
   char *index;
   const char *rest;
+  int wrapper_status;
   size_t i;
-  size_t group_count;
-  int append_status;
   lql_status st;
 
   if (out == NULL) {
@@ -1175,92 +1268,42 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
   } else if (tokens.count == 1u) {
     index = NULL;
     rest = NULL;
-    switch (parse_indexed_wrapper(tokens.items[0], &wrapper, &index, &rest)) {
-    case -1:
+    wrapper_status =
+        parse_indexed_wrapper(tokens.items[0], &wrapper, &index, &rest);
+    if (wrapper_status < 0) {
       st = LQL_STATUS_NO_MEMORY;
-      break;
-    case 1:
-      st = parse_one(rest, &selector->root, error);
-      lql_dealloc(index);
-      break;
-    default:
+    } else if (wrapper_status == 0) {
       st = parse_one(tokens.items[0], &selector->root, error);
-      break;
+    } else {
+      memset(&root_group, 0, sizeof(root_group));
+      root_group.node.kind = or_mode ? LQL_NODE_OR : LQL_NODE_AND;
+      st = append_token_to_group(&root_group, tokens.items[0], error);
+      if (st == LQL_STATUS_OK) {
+        st = finalize_indexed_group(&root_group, or_mode);
+      }
+      if (st == LQL_STATUS_OK) {
+        selector->root = root_group.node;
+        memset(&root_group.node, 0, sizeof(root_group.node));
+      }
+      lql_node_cleanup(&root_group.node);
+      indexed_groups_cleanup(root_group.groups, root_group.group_count);
     }
+    lql_dealloc(index);
   } else {
-    groups = NULL;
-    group_count = 0u;
-    memset(&or_group, 0, sizeof(or_group));
-    or_group.kind = LQL_NODE_OR;
-    selector->root.kind = or_mode ? LQL_NODE_OR : LQL_NODE_AND;
+    memset(&root_group, 0, sizeof(root_group));
+    root_group.node.kind = or_mode ? LQL_NODE_OR : LQL_NODE_AND;
     for (i = 0u; i < tokens.count && st == LQL_STATUS_OK; ++i) {
-      memset(&node, 0, sizeof(node));
-      index = NULL;
-      rest = NULL;
-      switch (parse_indexed_wrapper(tokens.items[i], &wrapper, &index, &rest)) {
-      case -1:
-        st = LQL_STATUS_NO_MEMORY;
-        break;
-      case 1:
-        st = parse_one(rest, &node, error);
-        if (st == LQL_STATUS_OK) {
-          append_status = append_indexed_group(&groups, &group_count, wrapper,
-                                               &index, &node, error);
-          if (append_status != 1) {
-            if (append_status < 0) {
-              st = LQL_STATUS_PARSE_ERROR;
-            } else {
-              st = LQL_STATUS_NO_MEMORY;
-            }
-            lql_node_cleanup(&node);
-          }
-        }
-        if (st == LQL_STATUS_PARSE_ERROR) {
-          if (error != NULL && error->code != LQL_STATUS_PARSE_ERROR) {
-            st = LQL_STATUS_PARSE_ERROR;
-          }
-        }
-        lql_dealloc(index);
-        continue;
-      default:
-        st = parse_one(tokens.items[i], &node, error);
-        break;
-      }
-      if (st != LQL_STATUS_OK) {
-        break;
-      }
-      if (!or_mode && node.kind == LQL_NODE_OR && node.child_count == 1u) {
-        if (!append_node(&or_group, &node.children[0])) {
-          lql_node_cleanup(&node);
-          st = LQL_STATUS_NO_MEMORY;
-          break;
-        }
-        lql_dealloc(node.children);
-        node.children = NULL;
-        node.child_count = 0u;
-      } else if (!append_node(&selector->root, &node)) {
-        lql_node_cleanup(&node);
-        st = LQL_STATUS_NO_MEMORY;
-        break;
-      }
+      st = append_token_to_group(&root_group, tokens.items[i], error);
     }
-    for (i = 0u; i < group_count && st == LQL_STATUS_OK; ++i) {
-      if (!or_mode && groups[i].wrapper == LQL_NODE_OR) {
-        if (!append_node(&or_group, &groups[i].node)) {
-          st = LQL_STATUS_NO_MEMORY;
-        }
-      } else if (!append_node(&selector->root, &groups[i].node)) {
-        st = LQL_STATUS_NO_MEMORY;
-      }
+    if (st == LQL_STATUS_OK) {
+      st = finalize_indexed_group(&root_group, or_mode);
     }
-    if (st == LQL_STATUS_OK && !or_mode && or_group.child_count != 0u &&
-        !append_node(&selector->root, &or_group)) {
-      st = LQL_STATUS_NO_MEMORY;
+    if (st == LQL_STATUS_OK) {
+      selector->root = root_group.node;
+      memset(&root_group.node, 0, sizeof(root_group.node));
     }
-    if (or_group.child_count != 0u) {
-      lql_node_cleanup(&or_group);
-    }
-    indexed_groups_cleanup(groups, group_count);
+    lql_node_cleanup(&root_group.node);
+    indexed_groups_cleanup(root_group.groups, root_group.group_count);
   }
   token_list_cleanup(&tokens);
   if (st != LQL_STATUS_OK) {

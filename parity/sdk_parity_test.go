@@ -92,6 +92,12 @@ func TestSDKSelectorMatchesJSONParity(t *testing.T) {
 		{`or.0.eq{field=/status,value=open},or.0.range{field=/progress,gte=50}`, `{"status":"closed","progress":72}`},
 		{`not.eq{field=/status,value=closed}`, `{"status":"open"}`},
 		{`not.eq{field=/status,value=closed}`, `{"status":"closed"}`},
+		{`and.0.or.0.not.eq{field=/status,value=closed}`, `{"status":"open"}`},
+		{`and.0.or.0.not.eq{field=/status,value=closed}`, `{"status":"closed"}`},
+		{`and.0.eq{field=/status,value=open},and.1.or.0.in{field=/env,any=prod|stage},and.1.or.1.exists{/meta/etag}`, `{"status":"open","env":"dev","meta":{"etag":"x"}}`},
+		{`and.0.eq{field=/status,value=open},and.1.or.0.in{field=/env,any=prod|stage},and.1.or.1.exists{/meta/etag}`, `{"status":"open","env":"dev","meta":{}}`},
+		{`or.0.eq{field=/status,value=open},or.1.and.0.range{field=/progress,gte=10},or.1.and.0.exists{/meta/etag}`, `{"status":"closed","progress":11,"meta":{"etag":"x"}}`},
+		{`or.0.eq{field=/status,value=open},or.1.and.0.range{field=/progress,gte=10},or.1.and.0.exists{/meta/etag}`, `{"status":"closed","progress":11,"meta":{}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.expr+"/"+tc.doc, func(t *testing.T) {

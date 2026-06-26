@@ -684,7 +684,8 @@ Current implementation is an early slice:
   bracket-sugar array paths, string-term `ignoreCase`/`ic` flags, and
   multi-bound numeric ranges, with omitted string-term values treated as path
   assertions; temporal `date` terms, datetime `range` bounds, and relative
-  `date.since` macros are implemented;
+  `date.since` macros are implemented; nested indexed `and.N` / `or.N`
+  logical wrapper groups are parsed and evaluated recursively;
 - selector parse-error parity tests cover supported-term key validation,
   duplicate-key validation, and invalid selector invariants;
 - `clql` exists as a selector/projection/mutation compatibility CLI;

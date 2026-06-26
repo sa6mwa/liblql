@@ -3986,6 +3986,24 @@ static void expect_selector_or_api(void) {
   expect_match(
       "or.0.eq{field=/status,value=open},or.0.range{field=/progress,gte=50}",
       "{\"status\":\"closed\",\"progress\":72}", 0);
+  expect_match("and.0.or.0.not.eq{field=/status,value=closed}",
+               "{\"status\":\"open\"}", 1);
+  expect_match("and.0.or.0.not.eq{field=/status,value=closed}",
+               "{\"status\":\"closed\"}", 0);
+  expect_match("and.0.eq{field=/status,value=open},and.1.or.0.in{field=/env,"
+               "any=prod|stage},and.1.or.1.exists{/meta/etag}",
+               "{\"status\":\"open\",\"env\":\"dev\",\"meta\":{\"etag\":\"x\"}}",
+               1);
+  expect_match("and.0.eq{field=/status,value=open},and.1.or.0.in{field=/env,"
+               "any=prod|stage},and.1.or.1.exists{/meta/etag}",
+               "{\"status\":\"open\",\"env\":\"dev\",\"meta\":{}}", 0);
+  expect_match("or.0.eq{field=/status,value=open},or.1.and.0.range{field=/"
+               "progress,gte=10},or.1.and.0.exists{/meta/etag}",
+               "{\"status\":\"closed\",\"progress\":11,\"meta\":{\"etag\":\"x\"}}",
+               1);
+  expect_match("or.0.eq{field=/status,value=open},or.1.and.0.range{field=/"
+               "progress,gte=10},or.1.and.0.exists{/meta/etag}",
+               "{\"status\":\"closed\",\"progress\":11,\"meta\":{}}", 0);
 }
 
 static void expect_selector_parse_error_api(void) {
