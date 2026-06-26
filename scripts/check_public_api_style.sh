@@ -389,6 +389,17 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  cli_private_allocator_hits=$(
+    grep -En \
+      'lql_internal\.h|lql_allocator_from_receiver[[:space:]]*\(' \
+      "$source_root/src/clql.c" 2>/dev/null || true
+  )
+  if [ -n "$cli_private_allocator_hits" ]; then
+    printf 'public API style: clql glue allocation must use receiver memory methods\n' >&2
+    printf '%s\n' "$cli_private_allocator_hits" >&2
+    failed=1
+  fi
+
   consumer_global_query_hits=$(
     grep -REn \
       'lql_(version|capabilities_get)[[:space:]]*\(' \
