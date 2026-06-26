@@ -89,15 +89,16 @@ as out of scope by the engineer:
    selection, a lightweight `vX.Y.Z` tag on `HEAD`, clean tagged `make release`,
    and checksum-listed upload selection from the tagged artifact set.
 
-3. Full LQL parity is not claimed by the repository.
-   The spec still says full `clql` parity is active porting work and warns not
-   to claim full LQL parity until verification proves it. Current parity
-   manifests are broad and green, and the executable
-   `parity/oracle_inventory.tsv` now classifies every test, benchmark, and
-   example-bearing file in the pinned Go `pkt.systems/lql v0.17.1` module. A
-   final completion claim still requires driving the inventory's `partial` and
-   `gap` rows to `covered` or a deliberately justified `not-applicable` status,
-   with C SDK, CLI, Lua, benchmark, or release-gate evidence as appropriate.
+3. Full LQL parity is claimed only for the current public C/Lua/CLI contract.
+   The executable `parity/oracle_inventory.tsv` classifies every test,
+   benchmark, and example-bearing file in the pinned Go `pkt.systems/lql
+   v0.17.1` module. Rows are either covered by C SDK, CLI, Lua, benchmark, or
+   release-gate evidence, or deliberately marked not-applicable for Go-only API
+   shapes. The one known unsupported Go behavior that would require new parser
+   support is documented as `docs/lonejson-cr-stream-framing.md`: a
+   non-seekable source containing root-array items followed by additional
+   top-level values in the same stream. liblql must not emulate that by
+   materializing the root array or source.
 
 4. Release publication is not done.
    No release branch squash, tag push, or GitHub release creation has been
@@ -110,8 +111,8 @@ The next non-cosmetic work should be one of:
 
 - provision or point the repository at a working `arm64-apple-darwin` toolchain
   and run `make release-matrix` plus `make release`;
-- burn down `parity/oracle_inventory.tsv` rows marked `partial` or `gap`,
-  converting missing behavior into C-native implementation and product tests or
-  documenting intentional non-applicability for Go-only API shape;
+- implement the future lonejson streaming framing CR if that input shape is
+  accepted into the dependency, then wire it into liblql callback-source
+  streams with C-native tests;
 - start the formal release flow with release authority, version selection, and
   tagged clean `make release`.
