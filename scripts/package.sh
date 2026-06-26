@@ -820,6 +820,43 @@ expect_privacy_failure() {
   fi
 }
 
+expect_runtime_path_failure() {
+  tmp_dir=$1
+  cc=${CC:-cc}
+  fixture="$tmp_dir/elf-rpath"
+  output="$tmp_dir/elf-rpath.out"
+
+  if ! command -v readelf >/dev/null 2>&1; then
+    printf 'package privacy fixture: skipping ELF runtime path check; readelf unavailable\n'
+    return
+  fi
+  if ! command -v "$cc" >/dev/null 2>&1; then
+    printf 'package privacy fixture: skipping ELF runtime path check; compiler unavailable: %s\n' "$cc"
+    return
+  fi
+
+  mkdir -p "$fixture"
+  cat >"$fixture/smoke.c" <<'EOF'
+int main(void) {
+  return 0;
+}
+EOF
+  if ! "$cc" "$fixture/smoke.c" -Wl,-rpath,/tmp/liblql-package-rpath-fixture \
+    -o "$fixture/smoke" >/dev/null 2>&1; then
+    printf 'package privacy fixture: skipping ELF runtime path check; compiler cannot create RUNPATH fixture\n'
+    return
+  fi
+  if (verify_elf_runtime_paths elf-rpath "$fixture") >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly accepted absolute runtime path\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'package-verify: non-relocatable runtime path' "$output" >/dev/null; then
+    printf 'package privacy fixture did not report non-relocatable runtime path\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+}
+
 check_package_privacy_fixtures() {
   tmp_dir="$ROOT_DIR/build/package-privacy-fixtures"
 
@@ -829,6 +866,7 @@ check_package_privacy_fixtures() {
   expect_privacy_failure home-path "$HOME" "$tmp_dir"
   expect_privacy_failure repo-file-url "file://$ROOT_DIR" "$tmp_dir"
   expect_privacy_failure home-file-url "file://$HOME" "$tmp_dir"
+  expect_runtime_path_failure "$tmp_dir"
 }
 
 case "$TARGET" in

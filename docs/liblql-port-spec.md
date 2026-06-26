@@ -878,7 +878,8 @@ Current implementation is an early slice:
   verification, artifact-local lonejson dependency provenance manifests, and
   extracted host direct, CMake `find_package`, and pkg-config consumer smokes;
   fast CTest includes package privacy negative fixtures proving the verifier
-  fails on repository paths, `$HOME`, and absolute local `file://` URLs;
+  fails on repository paths, `$HOME`, absolute local `file://` URLs, and
+  absolute ELF RPATH/RUNPATH entries when host tooling can create the fixture;
 - standalone Lua source package production now writes
   `dist/liblql-lua-<version>.tar.gz` with `VERSION`, exact
   `RELEASE_MANIFEST`, Lua sources, tests, benchmark runner, rockspec template,
