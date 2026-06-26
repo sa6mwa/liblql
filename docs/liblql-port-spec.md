@@ -536,6 +536,10 @@ Current implementation is an early slice:
 - the public C API exposes an instantiatable receiver shell through `lql_new()`
   and method-pointer dispatch; selector/query/projection/mutation operations
   are not exported as free-function wrappers;
+- `make test` includes `lql.public-api-style`, which fails if removed
+  selector/query/payload/projection/compact/mutation free-operation prototypes
+  reappear in the installed header or, when a shared library is built, as
+  exported dynamic symbols;
 - project-owned allocations have a central liblql allocator surface, and
   direct C runtime allocation calls are limited to the allocator
   implementation;
@@ -678,11 +682,13 @@ Current implementation is an early slice:
   and explicit file-backed parse options, file-backed mutation value execution
   over buffered and seekable file-range APIs, source-backed projection,
   compacting, and mutation over fragmented caller reads, source callback read
-  failures, and mutation parse-error invariants. This coverage is still too
-  shallow for the final goal: the next C test work should build a
-  surface-by-surface API contract matrix covering ownership, out-parameter
-  state, callback error propagation, partial I/O, cleanup after failures, and
-  bounded-memory behavior;
+  failures, mutation parse-error invariants, parser failure output-handle
+  clearing, projection invalid-argument `out_found` state, and query callback
+  failure status propagation. This coverage is still too shallow for the final
+  goal: the next C test work should continue expanding the surface-by-surface
+  API contract matrix covering ownership, out-parameter state, callback error
+  propagation, partial I/O, cleanup after failures, and bounded-memory
+  behavior;
   an SDK coverage manifest now ties claimed C contract surfaces to C unit
   functions;
 - Go-backed parity tests exist for the current CLI surface and remain a

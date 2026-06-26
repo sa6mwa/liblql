@@ -147,6 +147,17 @@ if(LQL_BUILD_TESTS)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lql.c)
   set_tests_properties(lql.sdk-manifest PROPERTIES LABELS "unit;api" TIMEOUT 5)
 
+  if(TARGET lql_shared)
+    set(LQL_PUBLIC_API_STYLE_SHARED $<TARGET_FILE:lql_shared>)
+  else()
+    set(LQL_PUBLIC_API_STYLE_SHARED "")
+  endif()
+  add_test(NAME lql.public-api-style
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_public_api_style.sh
+      ${CMAKE_CURRENT_SOURCE_DIR}/include/lql/lql.h
+      ${LQL_PUBLIC_API_STYLE_SHARED})
+  set_tests_properties(lql.public-api-style PROPERTIES LABELS "unit;api" TIMEOUT 5)
+
   set(LQL_HEADER_SMOKE_WARNINGS)
   if(LQL_PROJECT_WARNINGS)
     set(LQL_HEADER_SMOKE_WARNINGS ${LQL_PROJECT_WARNINGS})

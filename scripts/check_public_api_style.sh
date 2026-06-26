@@ -1,0 +1,64 @@
+#!/bin/sh
+set -eu
+
+header=${1:?usage: check_public_api_style.sh HEADER [SHARED_LIBRARY]}
+shared=${2:-}
+
+forbidden='
+lql_selector_parse
+lql_selector_parse_or
+lql_selector_free
+lql_selector_is_empty
+lql_matches_json
+lql_query_file_decisions
+lql_query_file_decisions_with_options
+lql_query_source_decisions
+lql_query_source_decisions_with_options
+lql_query_source_spooled_matches
+lql_query_source_spooled_matches_with_options
+lql_query_file_matches
+lql_query_file_matches_with_options
+lql_payload_write_json
+lql_payload_write_json_sink
+lql_projection_parse
+lql_projection_free
+lql_project_file_range
+lql_project_source
+lql_project_json
+lql_compact_file_range
+lql_compact_source
+lql_compact_json
+lql_mutation_plan_parse
+lql_mutation_plan_parse_with_options
+lql_mutation_plan_count
+lql_mutation_plan_free
+lql_mutate_file_range_root_fields
+lql_mutate_file_range_paths
+lql_mutate_source_paths
+lql_mutate_json
+'
+
+failed=0
+for symbol in $forbidden; do
+  if grep -Eq "^[[:space:]]*([_A-Za-z][_A-Za-z0-9]*[[:space:]]+)+${symbol}[[:space:]]*\\(" "$header"; then
+    printf 'public API style: forbidden free-operation prototype in %s: %s\n' "$header" "$symbol" >&2
+    failed=1
+  fi
+done
+
+if [ -n "$shared" ] && [ -f "$shared" ]; then
+  if command -v nm >/dev/null 2>&1; then
+    symbols=$(nm -D --defined-only "$shared" 2>/dev/null | awk '{print $3}' || true)
+    if [ -z "$symbols" ]; then
+      symbols=$(nm -gU "$shared" 2>/dev/null | awk '{print $3}' || true)
+    fi
+    for symbol in $forbidden; do
+      if printf '%s\n' "$symbols" | grep -Eq "^_?${symbol}$"; then
+        printf 'public API style: forbidden exported operation symbol in %s: %s\n' "$shared" "$symbol" >&2
+        failed=1
+      fi
+    done
+  fi
+fi
+
+exit "$failed"

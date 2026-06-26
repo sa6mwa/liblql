@@ -396,6 +396,112 @@ static lql_status record_decision(void *user,
   return LQL_STATUS_OK;
 }
 
+static lql_status fail_decision_callback(void *user,
+                                         const lql_query_decision *decision) {
+  stream_seen *seen = (stream_seen *)user;
+  if (seen != NULL) {
+    ++seen->calls;
+    if (decision->matched) {
+      ++seen->matched;
+    }
+  }
+  return LQL_STATUS_UNSUPPORTED;
+}
+
+static void expect_output_state_contract_api(void) {
+  static const char stream[] = "{\"status\":\"open\"}\n";
+  const char *bad_projection[1];
+  const char *bad_mutation[1];
+  FILE *source;
+  lql_selector *selector;
+  lql_projection *projection;
+  lql_mutation_plan *plan;
+  lql_error error;
+  lql_status st;
+  stream_seen seen;
+  lql_query_result result;
+  int found;
+
+  selector = (lql_selector *)1;
+  lql_error_init(&error);
+  st = lql_selector_parse("eq{field=/status,value=open,foo=bar}", &selector,
+                          &error);
+  if (st != LQL_STATUS_PARSE_ERROR || selector != NULL) {
+    printf("selector parse failure output state mismatch: status=%s out=%p\n",
+           lql_status_string(st), (void *)selector);
+    ++failures;
+  }
+
+  bad_projection[0] = "missing-leading-slash";
+  projection = (lql_projection *)1;
+  lql_error_init(&error);
+  st = lql_projection_parse(bad_projection, 1u, &projection, &error);
+  if (st != LQL_STATUS_PARSE_ERROR || projection != NULL) {
+    printf("projection parse failure output state mismatch: status=%s out=%p\n",
+           lql_status_string(st), (void *)projection);
+    ++failures;
+  }
+
+  bad_mutation[0] = "rm:";
+  plan = (lql_mutation_plan *)1;
+  lql_error_init(&error);
+  st = lql_mutation_plan_parse(bad_mutation, 1u, &plan, &error);
+  if (st != LQL_STATUS_PARSE_ERROR || plan != NULL) {
+    printf("mutation parse failure output state mismatch: status=%s out=%p\n",
+           lql_status_string(st), (void *)plan);
+    ++failures;
+  }
+
+  found = 7;
+  lql_error_init(&error);
+  st = lql_project_json(NULL, "{}", strlen("{}"), NULL, &found, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT || found != 0) {
+    printf("projection invalid argument found-state mismatch: status=%s "
+           "found=%d\n",
+           lql_status_string(st), found);
+    ++failures;
+  }
+
+  selector = NULL;
+  lql_error_init(&error);
+  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("callback failure selector parse mismatch: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  source = tmpfile();
+  if (source == NULL) {
+    printf("callback failure tmpfile failed\n");
+    lql_selector_free(selector);
+    ++failures;
+    return;
+  }
+  if (fwrite(stream, 1u, strlen(stream), source) != strlen(stream) ||
+      fseek(source, 0L, SEEK_SET) != 0) {
+    printf("callback failure stream setup failed\n");
+    fclose(source);
+    lql_selector_free(selector);
+    ++failures;
+    return;
+  }
+  memset(&seen, 0, sizeof(seen));
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = lql_query_file_decisions(selector, source, fail_decision_callback, &seen,
+                                &result, &error);
+  if (st != LQL_STATUS_UNSUPPORTED ||
+      strcmp(error.message, "query decision callback failed") != 0 ||
+      seen.calls != 1 || seen.matched != 1) {
+    printf("decision callback failure propagation mismatch: status=%s calls=%d "
+           "matched=%d error=%s\n",
+           lql_status_string(st), seen.calls, seen.matched, error.message);
+    ++failures;
+  }
+  fclose(source);
+  lql_selector_free(selector);
+}
+
 static lql_status record_payload(void *user, const lql_query_match *match) {
   payload_seen *seen = (payload_seen *)user;
   lql_error error;
@@ -3400,6 +3506,8 @@ static void expect_sdk_contract_manifest(void) {
        "status, error, ownership, selector emptiness, and invalid "
        "argument helpers",
        expect_public_utility_api},
+      {"api-contract", "failure output state and callback status propagation",
+       expect_output_state_contract_api},
       {"version", "version and capability public API", expect_version_api},
       {"selector",
        "scalar, string, numeric, temporal, path, wildcard, "
@@ -3689,6 +3797,7 @@ int main(void) {
   expect_sdk_contract_manifest();
   expect_receiver_api();
   expect_public_utility_api();
+  expect_output_state_contract_api();
   expect_selector_match_api();
   expect_selector_or_api();
   expect_selector_parse_error_api();
