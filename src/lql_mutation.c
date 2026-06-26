@@ -1025,13 +1025,14 @@ static int parse_mutation_expr(const char *raw, lql_mutation_plan *plan,
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
-    const char *const *exprs, size_t expr_count,
+    lql *self, const char *const *exprs, size_t expr_count,
     const lql_mutation_parse_options *options, lql_mutation_plan **out,
     lql_error *error) {
   lql_mutation_plan *plan;
   string_list parts;
   size_t i;
   size_t j;
+  (void)self;
 
   if (out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "out is required");
@@ -1051,7 +1052,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
       continue;
     }
     if (!split_expressions(exprs[i], &parts, error)) {
-      lql_mutation_plan_free_impl(plan);
+      lql_mutation_plan_free_impl(NULL, plan);
       return error != NULL && error->code != LQL_STATUS_OK
                  ? error->code
                  : LQL_STATUS_NO_MEMORY;
@@ -1059,7 +1060,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
     for (j = 0u; j < parts.count; ++j) {
       if (!parse_mutation_expr(parts.items[j], plan, options, error)) {
         string_list_cleanup(&parts);
-        lql_mutation_plan_free_impl(plan);
+        lql_mutation_plan_free_impl(NULL, plan);
         return error != NULL && error->code != LQL_STATUS_OK
                    ? error->code
                    : LQL_STATUS_NO_MEMORY;
@@ -1068,7 +1069,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
     string_list_cleanup(&parts);
   }
   if (plan->count == 0u) {
-    lql_mutation_plan_free_impl(plan);
+    lql_mutation_plan_free_impl(NULL, plan);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "no valid field mutations parsed");
     return LQL_STATUS_PARSE_ERROR;
@@ -1077,20 +1078,23 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_with_options_impl(
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL lql_status
-lql_mutation_plan_parse_impl(const char *const *exprs, size_t expr_count,
-                             lql_mutation_plan **out, lql_error *error) {
-  return lql_mutation_plan_parse_with_options_impl(exprs, expr_count, NULL, out,
-                                                   error);
+LQL_INTERNAL_SYMBOL lql_status lql_mutation_plan_parse_impl(
+    lql *self, const char *const *exprs, size_t expr_count,
+    lql_mutation_plan **out, lql_error *error) {
+  return lql_mutation_plan_parse_with_options_impl(self, exprs, expr_count,
+                                                   NULL, out, error);
 }
 
 LQL_INTERNAL_SYMBOL size_t
-lql_mutation_plan_count_impl(const lql_mutation_plan *plan) {
+lql_mutation_plan_count_impl(const lql *self, const lql_mutation_plan *plan) {
+  (void)self;
   return plan == NULL ? 0u : plan->count;
 }
 
-LQL_INTERNAL_SYMBOL void lql_mutation_plan_free_impl(lql_mutation_plan *plan) {
+LQL_INTERNAL_SYMBOL void lql_mutation_plan_free_impl(lql *self,
+                                                     lql_mutation_plan *plan) {
   size_t i;
+  (void)self;
   if (plan == NULL) {
     return;
   }
@@ -2428,8 +2432,9 @@ mutate_file_range_with_supported_plan(const lql_mutation_plan *plan, FILE *file,
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_root_fields_impl(
-    const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
+    lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, lql_error *error) {
+  (void)self;
   if (plan == NULL || file == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "plan, file, and out are required");
@@ -2445,8 +2450,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_root_fields_impl(
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_paths_impl(
-    const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
+    lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, lql_error *error) {
+  (void)self;
   if (plan == NULL || file == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "plan, file, and out are required");
@@ -2461,11 +2467,12 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_paths_impl(
                                                error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status
-lql_mutate_source_paths_impl(const lql_mutation_plan *plan, lql_read_fn read,
-                             void *read_user, FILE *out, lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_paths_impl(
+    lql *self, const lql_mutation_plan *plan, lql_read_fn read, void *read_user,
+    FILE *out, lql_error *error) {
   mutation_source_reader reader;
   lql_status st;
+  (void)self;
 
   if (plan == NULL || read == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -2489,9 +2496,10 @@ lql_mutate_source_paths_impl(const lql_mutation_plan *plan, lql_read_fn read,
 }
 
 LQL_INTERNAL_SYMBOL lql_status
-lql_mutate_json_impl(const lql_mutation_plan *plan, const char *json,
+lql_mutate_json_impl(lql *self, const lql_mutation_plan *plan, const char *json,
                      size_t json_len, FILE *out, lql_error *error) {
   buffer_reader reader;
+  (void)self;
 
   if (plan == NULL || json == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,

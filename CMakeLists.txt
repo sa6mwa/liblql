@@ -197,7 +197,7 @@ if(LQL_BUILD_TESTS)
     set_tests_properties(lql.sdk-parity PROPERTIES LABELS "parity;api;local" TIMEOUT 60)
   endif()
   find_program(LUA_EXECUTABLE lua)
-  if(LUA_EXECUTABLE AND TARGET lql_lua_core)
+  if(LUA_EXECUTABLE AND TARGET lql_lua_core AND NOT LQL_SANITIZER_BUILD)
     add_test(NAME lql.lua-core
       COMMAND ${CMAKE_COMMAND} -E env
         "LUA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/lua/?.lua$<SEMICOLON>${CMAKE_CURRENT_SOURCE_DIR}/lua/?/init.lua$<SEMICOLON>$<SEMICOLON>"

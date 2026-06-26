@@ -800,8 +800,8 @@ static lql_status eval_project_then_maybe_mutate_spooled(
                     "failed to size projection temp file");
       st = LQL_STATUS_JSON_ERROR;
     } else if (matched && mutation_plan != NULL) {
-      st = lql_mutate_file_range_paths_impl(mutation_plan, projected_file, 0u,
-                                            projected_size, out, error);
+      st = lql_mutate_file_range_paths_impl(NULL, mutation_plan, projected_file,
+                                            0u, projected_size, out, error);
     } else if (!eval_seek_u64(projected_file, 0u) ||
                !eval_copy_range(projected_file, out, projected_size)) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR,

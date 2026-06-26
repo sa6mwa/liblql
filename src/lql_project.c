@@ -912,12 +912,13 @@ static void init_projection_visitor(lonejson_path_value_visitor *visitor) {
   visitor->null_value = on_null;
 }
 
-LQL_INTERNAL_SYMBOL lql_status
-lql_projection_parse_impl(const char *const *fields, size_t field_count,
-                          lql_projection **out, lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_impl(
+    lql *self, const char *const *fields, size_t field_count,
+    lql_projection **out, lql_error *error) {
   lql_projection *projection;
   projection_path path;
   size_t i;
+  (void)self;
   if (out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "out projection required");
@@ -934,21 +935,21 @@ lql_projection_parse_impl(const char *const *fields, size_t field_count,
   }
   for (i = 0u; i < field_count; ++i) {
     if (!parse_projection_path(fields[i], &path)) {
-      lql_projection_free_impl(projection);
+      lql_projection_free_impl(NULL, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "invalid or unsupported projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
     if (!add_path(projection, &path)) {
       projection_path_cleanup(&path);
-      lql_projection_free_impl(projection);
+      lql_projection_free_impl(NULL, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "conflicting projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
   }
   if (projection->path_count == 0u) {
-    lql_projection_free_impl(projection);
+    lql_projection_free_impl(NULL, projection);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "projection fields required");
     return LQL_STATUS_PARSE_ERROR;
   }
@@ -956,8 +957,10 @@ lql_projection_parse_impl(const char *const *fields, size_t field_count,
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL void lql_projection_free_impl(lql_projection *projection) {
+LQL_INTERNAL_SYMBOL void lql_projection_free_impl(lql *self,
+                                                  lql_projection *projection) {
   size_t i;
+  (void)self;
   if (projection == NULL) {
     return;
   }
@@ -1038,9 +1041,10 @@ static lql_status lql_project_reader(const lql_projection *projection,
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_project_file_range_impl(
-    const lql_projection *projection, FILE *file, lql_uint64 offset,
+    lql *self, const lql_projection *projection, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, int *out_found, lql_error *error) {
   limited_file_reader reader;
+  (void)self;
   if (out_found != NULL) {
     *out_found = 0;
   }
@@ -1061,10 +1065,11 @@ LQL_INTERNAL_SYMBOL lql_status lql_project_file_range_impl(
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_project_source_impl(
-    const lql_projection *projection, lql_read_fn read, void *read_user,
-    FILE *out, int *out_found, lql_error *error) {
+    lql *self, const lql_projection *projection, lql_read_fn read,
+    void *read_user, FILE *out, int *out_found, lql_error *error) {
   projection_source_reader reader;
   lql_status st;
+  (void)self;
 
   if (out_found != NULL) {
     *out_found = 0;
@@ -1087,9 +1092,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_project_source_impl(
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_project_json_impl(
-    const lql_projection *projection, const char *json, size_t json_len,
-    FILE *out, int *out_found, lql_error *error) {
+    lql *self, const lql_projection *projection, const char *json,
+    size_t json_len, FILE *out, int *out_found, lql_error *error) {
   buffer_reader reader;
+  (void)self;
 
   if (out_found != NULL) {
     *out_found = 0;
@@ -1151,12 +1157,11 @@ static lql_status compact_reader(lonejson_reader_fn read, void *read_user,
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_compact_file_range_impl(FILE *file,
-                                                           lql_uint64 offset,
-                                                           lql_uint64 size,
-                                                           FILE *out,
-                                                           lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status
+lql_compact_file_range_impl(lql *self, FILE *file, lql_uint64 offset,
+                            lql_uint64 size, FILE *out, lql_error *error) {
   limited_file_reader reader;
+  (void)self;
 
   if (file == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -1173,12 +1178,11 @@ LQL_INTERNAL_SYMBOL lql_status lql_compact_file_range_impl(FILE *file,
   return compact_reader(limited_read, &reader, out, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_compact_source_impl(lql_read_fn read,
-                                                       void *read_user,
-                                                       FILE *out,
-                                                       lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status lql_compact_source_impl(
+    lql *self, lql_read_fn read, void *read_user, FILE *out, lql_error *error) {
   projection_source_reader reader;
   lql_status st;
+  (void)self;
 
   if (read == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -1195,13 +1199,15 @@ LQL_INTERNAL_SYMBOL lql_status lql_compact_source_impl(lql_read_fn read,
   return st;
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_compact_json_impl(const char *json,
+LQL_INTERNAL_SYMBOL lql_status lql_compact_json_impl(lql *self,
+                                                     const char *json,
                                                      size_t json_len, FILE *out,
                                                      lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_writer writer;
   lonejson_status st;
+  (void)self;
 
   if (json == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,

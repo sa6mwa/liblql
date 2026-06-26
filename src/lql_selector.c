@@ -1251,7 +1251,7 @@ static int parse_simple_wrapper(const char *token, lql_node_kind *wrapper,
 }
 
 static int node_conflicts_with_child(const lql_node *node,
-                                   const lql_node *child) {
+                                     const lql_node *child) {
   size_t i;
   const lql_node *current;
   if (node == NULL || child == NULL || child->kind != LQL_NODE_EQ ||
@@ -1271,8 +1271,8 @@ static int node_conflicts_with_child(const lql_node *node,
 }
 
 static indexed_group *ensure_indexed_group(indexed_group **groups,
-                                           size_t *count,
-                                           lql_node_kind wrapper, char **index) {
+                                           size_t *count, lql_node_kind wrapper,
+                                           char **index) {
   indexed_group *group;
   indexed_group *next;
   group = find_indexed_group(*groups, *count, wrapper, *index);
@@ -1336,9 +1336,8 @@ static lql_status append_token_to_group(indexed_group *group, const char *token,
     return LQL_STATUS_NO_MEMORY;
   }
   if (wrapper_status > 0) {
-    child_group =
-        ensure_indexed_group(&group->groups, &group->group_count, wrapper,
-                             &index);
+    child_group = ensure_indexed_group(&group->groups, &group->group_count,
+                                       wrapper, &index);
     lql_dealloc(index);
     if (child_group == NULL) {
       return LQL_STATUS_NO_MEMORY;
@@ -1452,8 +1451,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
         parse_indexed_wrapper(tokens.items[0], &wrapper, &index, &rest);
     if (wrapper_status < 0) {
       st = LQL_STATUS_NO_MEMORY;
-    } else if (wrapper_status == 0 && !parse_simple_wrapper(tokens.items[0],
-                                                            &wrapper, &rest)) {
+    } else if (wrapper_status == 0 &&
+               !parse_simple_wrapper(tokens.items[0], &wrapper, &rest)) {
       st = parse_one(tokens.items[0], &selector->root, error);
     } else {
       memset(&root_group, 0, sizeof(root_group));
@@ -1488,7 +1487,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(const char *expr,
   }
   token_list_cleanup(&tokens);
   if (st != LQL_STATUS_OK) {
-    lql_selector_free_impl(selector);
+    lql_selector_free_impl(NULL, selector);
     return st;
   }
   selector->hit_count = 0u;

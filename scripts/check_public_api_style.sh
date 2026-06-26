@@ -86,6 +86,17 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     fi
   done
 
+  receiver_wrapper_hits=$(
+    grep -REn \
+      '^[[:space:]]*static[[:space:]][^(;]*[[:space:]*]receiver_(selector|matches|query|payload|projection|project|compact|mutation|mutate)_' \
+      "$source_root/src" 2>/dev/null || true
+  )
+  if [ -n "$receiver_wrapper_hits" ]; then
+    printf 'public API style: forbidden static receiver operation wrapper\n' >&2
+    printf '%s\n' "$receiver_wrapper_hits" >&2
+    failed=1
+  fi
+
   alloc_hits=$(
     find "$source_root/src" "$source_root/tests" "$source_root/lua" \
       "$source_root/examples" "$source_root/bench" \

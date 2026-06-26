@@ -45,12 +45,12 @@ static void expect_receiver_api(void) {
       ctx->query_file_matches_with_options == NULL ||
       ctx->query_source_spooled_matches == NULL ||
       ctx->query_source_spooled_matches_with_options == NULL ||
-      ctx->payload_write_json == NULL ||
-      ctx->payload_write_json_sink == NULL || ctx->projection_parse == NULL ||
-      ctx->projection_free == NULL || ctx->project_file_range == NULL ||
-      ctx->project_source == NULL || ctx->project_json == NULL ||
-      ctx->compact_file_range == NULL || ctx->compact_source == NULL ||
-      ctx->compact_json == NULL || ctx->mutation_plan_parse == NULL ||
+      ctx->payload_write_json == NULL || ctx->payload_write_json_sink == NULL ||
+      ctx->projection_parse == NULL || ctx->projection_free == NULL ||
+      ctx->project_file_range == NULL || ctx->project_source == NULL ||
+      ctx->project_json == NULL || ctx->compact_file_range == NULL ||
+      ctx->compact_source == NULL || ctx->compact_json == NULL ||
+      ctx->mutation_plan_parse == NULL ||
       ctx->mutation_plan_parse_with_options == NULL ||
       ctx->mutation_plan_count == NULL || ctx->mutation_plan_free == NULL ||
       ctx->mutate_file_range_root_fields == NULL ||
@@ -389,7 +389,8 @@ static lql_status fail_decision_callback(void *user,
   return LQL_STATUS_UNSUPPORTED;
 }
 
-static lql_status fail_match_callback(void *user, const lql_query_match *match) {
+static lql_status fail_match_callback(void *user,
+                                      const lql_query_match *match) {
   payload_seen *seen = (payload_seen *)user;
   if (seen != NULL) {
     if (seen->calls < 4) {
@@ -495,8 +496,8 @@ static void expect_output_state_contract_api(void) {
                                       &error);
   if (st != LQL_STATUS_UNSUPPORTED ||
       strcmp(error.message, "query decision callback failed") != 0 ||
-      seen.calls != 1 || seen.matched != 1 ||
-      result.candidates_seen != 1u || result.candidates_matched != 1u) {
+      seen.calls != 1 || seen.matched != 1 || result.candidates_seen != 1u ||
+      result.candidates_matched != 1u) {
     printf("decision callback failure propagation mismatch: status=%s calls=%d "
            "matched=%d seen=%lu result_matched=%lu error=%s\n",
            lql_status_string(st), seen.calls, seen.matched,
@@ -517,8 +518,7 @@ static void expect_output_state_contract_api(void) {
                                       &result, &error);
     if (st != LQL_STATUS_UNSUPPORTED ||
         strcmp(error.message, "query match callback failed") != 0 ||
-        payload_seen_value.calls != 1 ||
-        payload_seen_value.offsets[0] != 0u ||
+        payload_seen_value.calls != 1 || payload_seen_value.offsets[0] != 0u ||
         payload_seen_value.sizes[0] != (lql_uint64)strlen(stream) - 1u ||
         result.candidates_seen != 1u || result.candidates_matched != 1u) {
       printf("seekable match callback failure mismatch: status=%s calls=%d "
@@ -542,8 +542,7 @@ static void expect_output_state_contract_api(void) {
       &payload_seen_value, &result, &error);
   if (st != LQL_STATUS_UNSUPPORTED ||
       strcmp(error.message, "query match callback failed") != 0 ||
-      payload_seen_value.calls != 1 ||
-      payload_seen_value.offsets[0] != 0u ||
+      payload_seen_value.calls != 1 || payload_seen_value.offsets[0] != 0u ||
       payload_seen_value.sizes[0] != (lql_uint64)strlen(stream) - 1u ||
       result.candidates_seen != 1u || result.candidates_matched != 0u ||
       reader.calls <= 1) {
@@ -569,8 +568,8 @@ static void expect_output_state_contract_api(void) {
       record_decision, &seen, &result, &error);
   if (st != LQL_STATUS_JSON_ERROR ||
       strcmp(error.message, "query source reader failed") != 0 ||
-      seen.calls != 1 || seen.matched != 1 ||
-      result.candidates_seen != 1u || result.candidates_matched != 1u ||
+      seen.calls != 1 || seen.matched != 1 || result.candidates_seen != 1u ||
+      result.candidates_matched != 1u ||
       result.bytes_read != (lql_uint64)strlen(stream)) {
     printf("source decision reader failure partial result mismatch: status=%s "
            "calls=%d matched=%d seen=%lu result_matched=%lu bytes=%lu "
@@ -600,8 +599,8 @@ static void expect_output_state_contract_api(void) {
         record_spooled_payload, &payload_seen_value, &result, &error);
     if (st != LQL_STATUS_JSON_ERROR ||
         strcmp(error.message, "query source reader failed") != 0 ||
-        payload_seen_value.calls != 1 ||
-        result.candidates_seen != 1u || result.candidates_matched != 1u ||
+        payload_seen_value.calls != 1 || result.candidates_seen != 1u ||
+        result.candidates_matched != 1u ||
         result.bytes_read != (lql_uint64)strlen(stream)) {
       printf("source spooled reader failure partial result mismatch: status=%s "
              "calls=%d seen=%lu matched=%lu bytes=%lu error=%s\n",
@@ -1315,8 +1314,8 @@ static void expect_stream_error_api(void) {
 
   memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
-  st = test_ctx->query_file_matches(test_ctx, NULL, source, NULL, NULL,
-                                    &result, &error);
+  st = test_ctx->query_file_matches(test_ctx, NULL, source, NULL, NULL, &result,
+                                    &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "file and on_match are required") != 0 ||
       !query_result_is_zero(&result)) {
@@ -2816,8 +2815,8 @@ static void expect_mutation_error_api(void) {
     }
 
     lql_error_init(&error);
-    st = test_ctx->mutate_source_candidates(
-        test_ctx, NULL, NULL, read_chunk, NULL, out, 1, 0, NULL, &error);
+    st = test_ctx->mutate_source_candidates(test_ctx, NULL, NULL, read_chunk,
+                                            NULL, out, 1, 0, NULL, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
         strcmp(error.message, "plan, read, and out are required") != 0) {
       printf("source candidate mutation NULL plan mismatch: %s\n",
@@ -2948,9 +2947,8 @@ static void expect_root_field_mutation_api(void) {
       printf("root mutation failed: %s\n", error.message);
       ++failures;
     } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
-               strcmp(buf,
-                      "{\"status\":\"done\",\"count\":0,\"score\":3,"
-                      "\"missing\":\"value\",\"quoted_number\":2}") != 0) {
+               strcmp(buf, "{\"status\":\"done\",\"count\":0,\"score\":3,"
+                           "\"missing\":\"value\",\"quoted_number\":2}") != 0) {
       printf("root mutation output mismatch: %s\n", buf);
       ++failures;
     }
@@ -3244,8 +3242,8 @@ static void expect_file_range_candidate_mutation_api(void) {
   const char *mutation;
   char buf[512];
   size_t len;
-  static const char doc[] =
-      "[{\"id\":\"a\",\"status\":\"open\"},{\"id\":\"b\",\"status\":\"closed\"}]";
+  static const char doc[] = "[{\"id\":\"a\",\"status\":\"open\"},{\"id\":\"b\","
+                            "\"status\":\"closed\"}]";
 
   source = tmpfile();
   out = tmpfile();
@@ -3294,8 +3292,9 @@ static void expect_file_range_candidate_mutation_api(void) {
     if (st != LQL_STATUS_OK) {
       printf("candidate mutation failed: %s\n", error.message);
       ++failures;
-    } else if (result.candidates_seen != 2u || result.candidates_matched != 1u ||
-               result.stopped_early || result.bytes_read == 0u) {
+    } else if (result.candidates_seen != 2u ||
+               result.candidates_matched != 1u || result.stopped_early ||
+               result.bytes_read == 0u) {
       printf("candidate mutation result mismatch: seen=%lu matched=%lu "
              "stopped=%d bytes=%lu\n",
              (unsigned long)result.candidates_seen,
@@ -3360,8 +3359,8 @@ static void expect_source_candidate_mutation_api(void) {
   const char *mutation;
   char buf[512];
   size_t len;
-  static const char doc[] =
-      "[{\"id\":\"a\",\"status\":\"open\"},{\"id\":\"b\",\"status\":\"closed\"}]";
+  static const char doc[] = "[{\"id\":\"a\",\"status\":\"open\"},{\"id\":\"b\","
+                            "\"status\":\"closed\"}]";
 
   out = tmpfile();
   if (out == NULL) {
@@ -3393,9 +3392,9 @@ static void expect_source_candidate_mutation_api(void) {
     reader.chunk_size = 5u;
     memset(&result, 0, sizeof(result));
     lql_error_init(&error);
-    st = test_ctx->mutate_source_candidates(
-        test_ctx, selector, plan, read_chunk, &reader, out, 1, 0, &result,
-        &error);
+    st =
+        test_ctx->mutate_source_candidates(test_ctx, selector, plan, read_chunk,
+                                           &reader, out, 1, 0, &result, &error);
     if (st != LQL_STATUS_OK) {
       printf("source candidate mutation failed: %s\n", error.message);
       ++failures;
@@ -3430,9 +3429,9 @@ static void expect_source_candidate_mutation_api(void) {
       reader.chunk_size = 4u;
       memset(&result, 0, sizeof(result));
       lql_error_init(&error);
-      st = test_ctx->mutate_source_candidates(
-          test_ctx, selector, plan, read_chunk, &reader, out, 1, 1, &result,
-          &error);
+      st = test_ctx->mutate_source_candidates(test_ctx, selector, plan,
+                                              read_chunk, &reader, out, 1, 1,
+                                              &result, &error);
       if (st != LQL_STATUS_OK) {
         printf("source candidate mutation matches-only failed: %s\n",
                error.message);
@@ -3456,9 +3455,9 @@ static void expect_source_candidate_mutation_api(void) {
       ++failures;
     } else {
       lql_error_init(&error);
-      st = test_ctx->mutate_source_candidates(
-          test_ctx, selector, plan, read_fail_once, NULL, out, 1, 0, NULL,
-          &error);
+      st = test_ctx->mutate_source_candidates(test_ctx, selector, plan,
+                                              read_fail_once, NULL, out, 1, 0,
+                                              NULL, &error);
       if (st != LQL_STATUS_JSON_ERROR ||
           strcmp(error.message, "source read failed") != 0) {
         printf("source candidate mutation read error mismatch: %s\n",
@@ -3478,8 +3477,7 @@ static void expect_source_candidate_mutation_api(void) {
       fail_reader.data = doc;
       fail_reader.len = strlen(doc);
       fail_reader.chunk_size = 6u;
-      fail_reader.fail_offset =
-          strlen("{\"id\":\"a\",\"status\":\"open\"},");
+      fail_reader.fail_offset = strlen("{\"id\":\"a\",\"status\":\"open\"},");
       lql_error_init(&error);
       st = test_ctx->mutate_source_candidates(
           test_ctx, selector, plan, read_until_offset_then_fail, &fail_reader,
@@ -4192,22 +4190,16 @@ static void expect_selector_match_api(void) {
                0);
   expect_match("contains{field=/metadata,value=\"\"}",
                "{\"metadata\":{\"etag\":\"x\"}}", 0);
-  expect_match("contains{f=/hello/world}",
-               "{\"hello\":{\"world\":null}}", 1);
-  expect_match("icontains{f=/hello/world}",
-               "{\"hello\":{\"world\":null}}", 1);
-  expect_match("prefix{f=/hello/world}",
-               "{\"hello\":{\"world\":null}}", 1);
-  expect_match("iprefix{f=/hello/world}",
-               "{\"hello\":{\"world\":null}}", 1);
-  expect_match("exists{/hello/world}",
-               "{\"hello\":{\"world\":null}}", 0);
-  expect_match("/hello/world=\"\"",
-               "{\"hello\":{\"world\":null}}", 0);
+  expect_match("contains{f=/hello/world}", "{\"hello\":{\"world\":null}}", 1);
+  expect_match("icontains{f=/hello/world}", "{\"hello\":{\"world\":null}}", 1);
+  expect_match("prefix{f=/hello/world}", "{\"hello\":{\"world\":null}}", 1);
+  expect_match("iprefix{f=/hello/world}", "{\"hello\":{\"world\":null}}", 1);
+  expect_match("exists{/hello/world}", "{\"hello\":{\"world\":null}}", 0);
+  expect_match("/hello/world=\"\"", "{\"hello\":{\"world\":null}}", 0);
   expect_match("contains{f=/hello/world,v=\"\"}",
                "{\"hello\":{\"world\":null}}", 0);
-  expect_match("prefix{f=/hello/world,v=\"\"}",
-               "{\"hello\":{\"world\":null}}", 0);
+  expect_match("prefix{f=/hello/world,v=\"\"}", "{\"hello\":{\"world\":null}}",
+               0);
   expect_match("in{f=/hello/world,any=null|\"\"}",
                "{\"hello\":{\"world\":null}}", 0);
   expect_match("contains{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
@@ -4319,26 +4311,26 @@ static void expect_selector_or_api(void) {
   expect_match("or.0.and.0.or.0.eq{field=/status,value=open},or.0.and.0."
                "or.0.range{field=/progress,gte=10}",
                "{\"status\":\"closed\",\"progress\":12}", 0);
-  expect_match("and.0.eq{field=/status,value=open},and.1.or.0.in{field=/env,"
-               "any=prod|stage},and.1.or.1.exists{/meta/etag}",
-               "{\"status\":\"open\",\"env\":\"dev\",\"meta\":{\"etag\":\"x\"}}",
-               1);
+  expect_match(
+      "and.0.eq{field=/status,value=open},and.1.or.0.in{field=/env,"
+      "any=prod|stage},and.1.or.1.exists{/meta/etag}",
+      "{\"status\":\"open\",\"env\":\"dev\",\"meta\":{\"etag\":\"x\"}}", 1);
   expect_match("and.0.eq{field=/status,value=open},and.1.or.0.in{field=/env,"
                "any=prod|stage},and.1.or.1.exists{/meta/etag}",
                "{\"status\":\"open\",\"env\":\"dev\",\"meta\":{}}", 0);
-  expect_match("or.0.eq{field=/status,value=open},or.1.and.0.range{field=/"
-               "progress,gte=10},or.1.and.0.exists{/meta/etag}",
-               "{\"status\":\"closed\",\"progress\":11,\"meta\":{\"etag\":\"x\"}}",
-               1);
+  expect_match(
+      "or.0.eq{field=/status,value=open},or.1.and.0.range{field=/"
+      "progress,gte=10},or.1.and.0.exists{/meta/etag}",
+      "{\"status\":\"closed\",\"progress\":11,\"meta\":{\"etag\":\"x\"}}", 1);
   expect_match("or.0.eq{field=/status,value=open},or.1.and.0.range{field=/"
                "progress,gte=10},or.1.and.0.exists{/meta/etag}",
                "{\"status\":\"closed\",\"progress\":11,\"meta\":{}}", 0);
-  expect_match("and.or.0.eq{field=/status,value=open}",
-               "{\"status\":\"open\"}", 1);
+  expect_match("and.or.0.eq{field=/status,value=open}", "{\"status\":\"open\"}",
+               1);
   expect_match("and.or.0.eq{field=/status,value=open}",
                "{\"status\":\"closed\"}", 0);
-  expect_match("or.and.0.eq{field=/status,value=open}",
-               "{\"status\":\"open\"}", 1);
+  expect_match("or.and.0.eq{field=/status,value=open}", "{\"status\":\"open\"}",
+               1);
   expect_match("or.and.0.eq{field=/status,value=open}",
                "{\"status\":\"closed\"}", 0);
 }

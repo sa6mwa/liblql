@@ -26,125 +26,6 @@ typedef struct lql_payload_sink_adapter {
 
 static const char *receiver_version(const lql *self);
 static void receiver_capabilities_get(const lql *self, lql_capabilities *out);
-static lql_status receiver_selector_parse(lql *self, const char *expr,
-                                          lql_selector **out, lql_error *error);
-static lql_status receiver_selector_parse_or(lql *self, const char *expr,
-                                             lql_selector **out,
-                                             lql_error *error);
-static void receiver_selector_free(lql *self, lql_selector *selector);
-static int receiver_selector_is_empty(const lql *self,
-                                      const lql_selector *selector);
-static lql_status receiver_matches_json(lql *self, const lql_selector *selector,
-                                        const char *json, size_t json_len,
-                                        int *out_matched, lql_error *error);
-static lql_status
-receiver_query_file_decisions(lql *self, const lql_selector *selector,
-                              FILE *file, lql_query_decision_fn on_decision,
-                              void *user, lql_query_result *out_result,
-                              lql_error *error);
-static lql_status receiver_query_file_decisions_with_options(
-    lql *self, const lql_selector *selector, FILE *file,
-    const lql_query_options *options, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error);
-static lql_status
-receiver_query_source_decisions(lql *self, const lql_selector *selector,
-                                lql_read_fn read, void *read_user,
-                                lql_query_decision_fn on_decision, void *user,
-                                lql_query_result *out_result, lql_error *error);
-static lql_status receiver_query_source_decisions_with_options(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    const lql_query_options *options, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error);
-static lql_status
-receiver_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
-                            lql_query_match_fn on_match, void *user,
-                            lql_query_result *out_result, lql_error *error);
-static lql_status receiver_query_file_matches_with_options(
-    lql *self, const lql_selector *selector, FILE *file,
-    const lql_query_options *options, lql_query_match_fn on_match, void *user,
-    lql_query_result *out_result, lql_error *error);
-static lql_status receiver_query_source_spooled_matches(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    lql_query_match_fn on_match, void *user, lql_query_result *out_result,
-    lql_error *error);
-static lql_status receiver_query_source_spooled_matches_with_options(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    const lql_query_options *options, lql_query_match_fn on_match, void *user,
-    lql_query_result *out_result, lql_error *error);
-static lql_status receiver_payload_write_json(lql *self,
-                                              const lql_payload *payload,
-                                              FILE *out, lql_error *error);
-static lql_status receiver_payload_write_json_sink(lql *self,
-                                                   const lql_payload *payload,
-                                                   lql_write_fn write,
-                                                   void *write_user,
-                                                   lql_error *error);
-static lql_status receiver_projection_parse(lql *self,
-                                            const char *const *fields,
-                                            size_t field_count,
-                                            lql_projection **out,
-                                            lql_error *error);
-static void receiver_projection_free(lql *self, lql_projection *projection);
-static lql_status receiver_project_file_range(lql *self,
-                                              const lql_projection *projection,
-                                              FILE *file, lql_uint64 offset,
-                                              lql_uint64 size, FILE *out,
-                                              int *out_found, lql_error *error);
-static lql_status receiver_project_source(lql *self,
-                                          const lql_projection *projection,
-                                          lql_read_fn read, void *read_user,
-                                          FILE *out, int *out_found,
-                                          lql_error *error);
-static lql_status receiver_project_json(lql *self,
-                                        const lql_projection *projection,
-                                        const char *json, size_t json_len,
-                                        FILE *out, int *out_found,
-                                        lql_error *error);
-static lql_status receiver_compact_file_range(lql *self, FILE *file,
-                                              lql_uint64 offset,
-                                              lql_uint64 size, FILE *out,
-                                              lql_error *error);
-static lql_status receiver_compact_source(lql *self, lql_read_fn read,
-                                          void *read_user, FILE *out,
-                                          lql_error *error);
-static lql_status receiver_compact_json(lql *self, const char *json,
-                                        size_t json_len, FILE *out,
-                                        lql_error *error);
-static lql_status receiver_mutation_plan_parse(lql *self,
-                                               const char *const *exprs,
-                                               size_t expr_count,
-                                               lql_mutation_plan **out,
-                                               lql_error *error);
-static lql_status receiver_mutation_plan_parse_with_options(
-    lql *self, const char *const *exprs, size_t expr_count,
-    const lql_mutation_parse_options *options, lql_mutation_plan **out,
-    lql_error *error);
-static size_t receiver_mutation_plan_count(const lql *self,
-                                           const lql_mutation_plan *plan);
-static void receiver_mutation_plan_free(lql *self, lql_mutation_plan *plan);
-static lql_status receiver_mutate_file_range_root_fields(
-    lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, lql_error *error);
-static lql_status
-receiver_mutate_file_range_paths(lql *self, const lql_mutation_plan *plan,
-                                 FILE *file, lql_uint64 offset, lql_uint64 size,
-                                 FILE *out, lql_error *error);
-static lql_status receiver_mutate_file_range_candidates(
-    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
-    FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
-    int matches_only, lql_query_result *out_result, lql_error *error);
-static lql_status receiver_mutate_source_paths(lql *self,
-                                               const lql_mutation_plan *plan,
-                                               lql_read_fn read,
-                                               void *read_user, FILE *out,
-                                               lql_error *error);
-static lql_status receiver_mutate_source_candidates(
-    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
-    lql_read_fn read, void *read_user, FILE *out, int compact,
-    int matches_only, lql_query_result *out_result, lql_error *error);
-static lql_status receiver_mutate_json(lql *self, const lql_mutation_plan *plan,
-                                       const char *json, size_t json_len,
-                                       FILE *out, lql_error *error);
 static void receiver_destroy(lql *self);
 
 static int seek_u64(FILE *file, lql_uint64 offset) {
@@ -234,44 +115,44 @@ lql_status lql_new(lql **out, lql_error *error) {
   }
   ctx->version = receiver_version;
   ctx->capabilities_get = receiver_capabilities_get;
-  ctx->selector_parse = receiver_selector_parse;
-  ctx->selector_parse_or = receiver_selector_parse_or;
-  ctx->selector_free = receiver_selector_free;
-  ctx->selector_is_empty = receiver_selector_is_empty;
-  ctx->matches_json = receiver_matches_json;
-  ctx->query_file_decisions = receiver_query_file_decisions;
+  ctx->selector_parse = lql_selector_parse_impl;
+  ctx->selector_parse_or = lql_selector_parse_or_impl;
+  ctx->selector_free = lql_selector_free_impl;
+  ctx->selector_is_empty = lql_selector_is_empty_impl;
+  ctx->matches_json = lql_matches_json_impl;
+  ctx->query_file_decisions = lql_query_file_decisions_impl;
   ctx->query_file_decisions_with_options =
-      receiver_query_file_decisions_with_options;
-  ctx->query_source_decisions = receiver_query_source_decisions;
+      lql_query_file_decisions_with_options_impl;
+  ctx->query_source_decisions = lql_query_source_decisions_impl;
   ctx->query_source_decisions_with_options =
-      receiver_query_source_decisions_with_options;
-  ctx->query_file_matches = receiver_query_file_matches;
+      lql_query_source_decisions_with_options_impl;
+  ctx->query_file_matches = lql_query_file_matches_impl;
   ctx->query_file_matches_with_options =
-      receiver_query_file_matches_with_options;
-  ctx->query_source_spooled_matches = receiver_query_source_spooled_matches;
+      lql_query_file_matches_with_options_impl;
+  ctx->query_source_spooled_matches = lql_query_source_spooled_matches_impl;
   ctx->query_source_spooled_matches_with_options =
-      receiver_query_source_spooled_matches_with_options;
-  ctx->payload_write_json = receiver_payload_write_json;
-  ctx->payload_write_json_sink = receiver_payload_write_json_sink;
-  ctx->projection_parse = receiver_projection_parse;
-  ctx->projection_free = receiver_projection_free;
-  ctx->project_file_range = receiver_project_file_range;
-  ctx->project_source = receiver_project_source;
-  ctx->project_json = receiver_project_json;
-  ctx->compact_file_range = receiver_compact_file_range;
-  ctx->compact_source = receiver_compact_source;
-  ctx->compact_json = receiver_compact_json;
-  ctx->mutation_plan_parse = receiver_mutation_plan_parse;
+      lql_query_source_spooled_matches_with_options_impl;
+  ctx->payload_write_json = lql_payload_write_json_impl;
+  ctx->payload_write_json_sink = lql_payload_write_json_sink_impl;
+  ctx->projection_parse = lql_projection_parse_impl;
+  ctx->projection_free = lql_projection_free_impl;
+  ctx->project_file_range = lql_project_file_range_impl;
+  ctx->project_source = lql_project_source_impl;
+  ctx->project_json = lql_project_json_impl;
+  ctx->compact_file_range = lql_compact_file_range_impl;
+  ctx->compact_source = lql_compact_source_impl;
+  ctx->compact_json = lql_compact_json_impl;
+  ctx->mutation_plan_parse = lql_mutation_plan_parse_impl;
   ctx->mutation_plan_parse_with_options =
-      receiver_mutation_plan_parse_with_options;
-  ctx->mutation_plan_count = receiver_mutation_plan_count;
-  ctx->mutation_plan_free = receiver_mutation_plan_free;
-  ctx->mutate_file_range_root_fields = receiver_mutate_file_range_root_fields;
-  ctx->mutate_file_range_paths = receiver_mutate_file_range_paths;
-  ctx->mutate_file_range_candidates = receiver_mutate_file_range_candidates;
-  ctx->mutate_source_paths = receiver_mutate_source_paths;
-  ctx->mutate_source_candidates = receiver_mutate_source_candidates;
-  ctx->mutate_json = receiver_mutate_json;
+      lql_mutation_plan_parse_with_options_impl;
+  ctx->mutation_plan_count = lql_mutation_plan_count_impl;
+  ctx->mutation_plan_free = lql_mutation_plan_free_impl;
+  ctx->mutate_file_range_root_fields = lql_mutate_file_range_root_fields_impl;
+  ctx->mutate_file_range_paths = lql_mutate_file_range_paths_impl;
+  ctx->mutate_file_range_candidates = lql_mutate_file_range_candidates_impl;
+  ctx->mutate_source_paths = lql_mutate_source_paths_impl;
+  ctx->mutate_source_candidates = lql_mutate_source_candidates_impl;
+  ctx->mutate_json = lql_mutate_json_impl;
   ctx->destroy = receiver_destroy;
   *out = ctx;
   return LQL_STATUS_OK;
@@ -379,238 +260,7 @@ static void receiver_capabilities_get(const lql *self, lql_capabilities *out) {
   lql_capabilities_get(out);
 }
 
-static lql_status receiver_selector_parse(lql *self, const char *expr,
-                                          lql_selector **out,
-                                          lql_error *error) {
-  (void)self;
-  return lql_selector_parse_impl(expr, out, error);
-}
-
-static lql_status receiver_selector_parse_or(lql *self, const char *expr,
-                                             lql_selector **out,
-                                             lql_error *error) {
-  (void)self;
-  return lql_selector_parse_or_impl(expr, out, error);
-}
-
-static void receiver_selector_free(lql *self, lql_selector *selector) {
-  (void)self;
-  lql_selector_free_impl(selector);
-}
-
-static int receiver_selector_is_empty(const lql *self,
-                                      const lql_selector *selector) {
-  (void)self;
-  return lql_selector_is_empty_impl(selector);
-}
-
-static lql_status receiver_matches_json(lql *self, const lql_selector *selector,
-                                        const char *json, size_t json_len,
-                                        int *out_matched, lql_error *error) {
-  (void)self;
-  return lql_matches_json_impl(selector, json, json_len, out_matched, error);
-}
-
-static lql_status
-receiver_query_file_decisions(lql *self, const lql_selector *selector,
-                              FILE *file, lql_query_decision_fn on_decision,
-                              void *user, lql_query_result *out_result,
-                              lql_error *error) {
-  (void)self;
-  return lql_query_file_decisions_impl(selector, file, on_decision, user,
-                                       out_result, error);
-}
-
-static lql_status receiver_query_file_decisions_with_options(
-    lql *self, const lql_selector *selector, FILE *file,
-    const lql_query_options *options, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error) {
-  (void)self;
-  return lql_query_file_decisions_with_options_impl(
-      selector, file, options, on_decision, user, out_result, error);
-}
-
-static lql_status receiver_query_source_decisions(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
-    lql_error *error) {
-  (void)self;
-  return lql_query_source_decisions_impl(selector, read, read_user, on_decision,
-                                         user, out_result, error);
-}
-
-static lql_status receiver_query_source_decisions_with_options(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    const lql_query_options *options, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error) {
-  (void)self;
-  return lql_query_source_decisions_with_options_impl(
-      selector, read, read_user, options, on_decision, user, out_result, error);
-}
-
-static lql_status
-receiver_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
-                            lql_query_match_fn on_match, void *user,
-                            lql_query_result *out_result, lql_error *error) {
-  (void)self;
-  return lql_query_file_matches_impl(selector, file, on_match, user, out_result,
-                                     error);
-}
-
-static lql_status receiver_query_file_matches_with_options(
-    lql *self, const lql_selector *selector, FILE *file,
-    const lql_query_options *options, lql_query_match_fn on_match, void *user,
-    lql_query_result *out_result, lql_error *error) {
-  (void)self;
-  return lql_query_file_matches_with_options_impl(
-      selector, file, options, on_match, user, out_result, error);
-}
-
-static lql_status receiver_query_source_spooled_matches(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    lql_query_match_fn on_match, void *user, lql_query_result *out_result,
-    lql_error *error) {
-  (void)self;
-  return lql_query_source_spooled_matches_impl(
-      selector, read, read_user, on_match, user, out_result, error);
-}
-
-static lql_status receiver_query_source_spooled_matches_with_options(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    const lql_query_options *options, lql_query_match_fn on_match, void *user,
-    lql_query_result *out_result, lql_error *error) {
-  (void)self;
-  return lql_query_source_spooled_matches_with_options_impl(
-      selector, read, read_user, options, on_match, user, out_result, error);
-}
-
-static lql_status receiver_payload_write_json(lql *self,
-                                              const lql_payload *payload,
-                                              FILE *out, lql_error *error) {
-  (void)self;
-  return lql_payload_write_json_impl(payload, out, error);
-}
-
-static lql_status receiver_payload_write_json_sink(lql *self,
-                                                   const lql_payload *payload,
-                                                   lql_write_fn write,
-                                                   void *write_user,
-                                                   lql_error *error) {
-  (void)self;
-  return lql_payload_write_json_sink_impl(payload, write, write_user, error);
-}
-
-static lql_status receiver_projection_parse(lql *self,
-                                            const char *const *fields,
-                                            size_t field_count,
-                                            lql_projection **out,
-                                            lql_error *error) {
-  (void)self;
-  return lql_projection_parse_impl(fields, field_count, out, error);
-}
-
-static void receiver_projection_free(lql *self, lql_projection *projection) {
-  (void)self;
-  lql_projection_free_impl(projection);
-}
-
-static lql_status
-receiver_project_file_range(lql *self, const lql_projection *projection,
-                            FILE *file, lql_uint64 offset, lql_uint64 size,
-                            FILE *out, int *out_found, lql_error *error) {
-  (void)self;
-  return lql_project_file_range_impl(projection, file, offset, size, out,
-                                     out_found, error);
-}
-
-static lql_status receiver_project_source(lql *self,
-                                          const lql_projection *projection,
-                                          lql_read_fn read, void *read_user,
-                                          FILE *out, int *out_found,
-                                          lql_error *error) {
-  (void)self;
-  return lql_project_source_impl(projection, read, read_user, out, out_found,
-                                 error);
-}
-
-static lql_status receiver_project_json(lql *self,
-                                        const lql_projection *projection,
-                                        const char *json, size_t json_len,
-                                        FILE *out, int *out_found,
-                                        lql_error *error) {
-  (void)self;
-  return lql_project_json_impl(projection, json, json_len, out, out_found,
-                               error);
-}
-
-static lql_status receiver_compact_file_range(lql *self, FILE *file,
-                                              lql_uint64 offset,
-                                              lql_uint64 size, FILE *out,
-                                              lql_error *error) {
-  (void)self;
-  return lql_compact_file_range_impl(file, offset, size, out, error);
-}
-
-static lql_status receiver_compact_source(lql *self, lql_read_fn read,
-                                          void *read_user, FILE *out,
-                                          lql_error *error) {
-  (void)self;
-  return lql_compact_source_impl(read, read_user, out, error);
-}
-
-static lql_status receiver_compact_json(lql *self, const char *json,
-                                        size_t json_len, FILE *out,
-                                        lql_error *error) {
-  (void)self;
-  return lql_compact_json_impl(json, json_len, out, error);
-}
-
-static lql_status receiver_mutation_plan_parse(lql *self,
-                                               const char *const *exprs,
-                                               size_t expr_count,
-                                               lql_mutation_plan **out,
-                                               lql_error *error) {
-  (void)self;
-  return lql_mutation_plan_parse_impl(exprs, expr_count, out, error);
-}
-
-static lql_status receiver_mutation_plan_parse_with_options(
-    lql *self, const char *const *exprs, size_t expr_count,
-    const lql_mutation_parse_options *options, lql_mutation_plan **out,
-    lql_error *error) {
-  (void)self;
-  return lql_mutation_plan_parse_with_options_impl(exprs, expr_count, options,
-                                                   out, error);
-}
-
-static size_t receiver_mutation_plan_count(const lql *self,
-                                           const lql_mutation_plan *plan) {
-  (void)self;
-  return lql_mutation_plan_count_impl(plan);
-}
-
-static void receiver_mutation_plan_free(lql *self, lql_mutation_plan *plan) {
-  (void)self;
-  lql_mutation_plan_free_impl(plan);
-}
-
-static lql_status receiver_mutate_file_range_root_fields(
-    lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, lql_error *error) {
-  (void)self;
-  return lql_mutate_file_range_root_fields_impl(plan, file, offset, size, out,
-                                                error);
-}
-
-static lql_status
-receiver_mutate_file_range_paths(lql *self, const lql_mutation_plan *plan,
-                                 FILE *file, lql_uint64 offset, lql_uint64 size,
-                                 FILE *out, lql_error *error) {
-  (void)self;
-  return lql_mutate_file_range_paths_impl(plan, file, offset, size, out, error);
-}
-
-static lql_status receiver_mutate_file_range_candidates(
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_file_range_candidates_impl(
     lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
     FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
     int matches_only, lql_query_result *out_result, lql_error *error) {
@@ -625,19 +275,10 @@ static lql_status receiver_mutate_file_range_candidates(
       out_result, error);
 }
 
-static lql_status receiver_mutate_source_paths(lql *self,
-                                               const lql_mutation_plan *plan,
-                                               lql_read_fn read,
-                                               void *read_user, FILE *out,
-                                               lql_error *error) {
-  (void)self;
-  return lql_mutate_source_paths_impl(plan, read, read_user, out, error);
-}
-
-static lql_status receiver_mutate_source_candidates(
+LQL_INTERNAL_SYMBOL lql_status lql_mutate_source_candidates_impl(
     lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
-    lql_read_fn read, void *read_user, FILE *out, int compact,
-    int matches_only, lql_query_result *out_result, lql_error *error) {
+    lql_read_fn read, void *read_user, FILE *out, int compact, int matches_only,
+    lql_query_result *out_result, lql_error *error) {
   (void)self;
   if (plan == NULL || read == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -647,13 +288,6 @@ static lql_status receiver_mutate_source_candidates(
   return lql_eval_query_source_spooled_rewrite(selector, read, read_user, out,
                                                compact, NULL, plan,
                                                matches_only, out_result, error);
-}
-
-static lql_status receiver_mutate_json(lql *self, const lql_mutation_plan *plan,
-                                       const char *json, size_t json_len,
-                                       FILE *out, lql_error *error) {
-  (void)self;
-  return lql_mutate_json_impl(plan, json, json_len, out, error);
 }
 
 static void receiver_destroy(lql *self) { lql_dealloc(self); }
@@ -676,19 +310,25 @@ LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql_node *node) {
   memset(node, 0, sizeof(*node));
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_impl(const char *expr,
+LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_impl(lql *self,
+                                                       const char *expr,
                                                        lql_selector **out,
                                                        lql_error *error) {
+  (void)self;
   return lql_parse_selector_internal(expr, 0, out, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_or_impl(const char *expr,
+LQL_INTERNAL_SYMBOL lql_status lql_selector_parse_or_impl(lql *self,
+                                                          const char *expr,
                                                           lql_selector **out,
                                                           lql_error *error) {
+  (void)self;
   return lql_parse_selector_internal(expr, 1, out, error);
 }
 
-LQL_INTERNAL_SYMBOL void lql_selector_free_impl(lql_selector *selector) {
+LQL_INTERNAL_SYMBOL void lql_selector_free_impl(lql *self,
+                                                lql_selector *selector) {
+  (void)self;
   if (selector != NULL) {
     lql_node_cleanup(&selector->root);
     lql_dealloc(selector);
@@ -696,13 +336,15 @@ LQL_INTERNAL_SYMBOL void lql_selector_free_impl(lql_selector *selector) {
 }
 
 LQL_INTERNAL_SYMBOL int
-lql_selector_is_empty_impl(const lql_selector *selector) {
+lql_selector_is_empty_impl(const lql *self, const lql_selector *selector) {
+  (void)self;
   return selector == NULL || selector->root.kind == LQL_NODE_ALL;
 }
 
 LQL_INTERNAL_SYMBOL lql_status
-lql_matches_json_impl(const lql_selector *selector, const char *json,
+lql_matches_json_impl(lql *self, const lql_selector *selector, const char *json,
                       size_t json_len, int *out_matched, lql_error *error) {
+  (void)self;
   if (out_matched == NULL || json == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "json and out_matched are required");
@@ -716,16 +358,18 @@ lql_matches_json_impl(const lql_selector *selector, const char *json,
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_query_file_decisions_impl(
-    const lql_selector *selector, FILE *file, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error) {
+    lql *self, const lql_selector *selector, FILE *file,
+    lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
+    lql_error *error) {
   return lql_query_file_decisions_with_options_impl(
-      selector, file, NULL, on_decision, user, out_result, error);
+      self, selector, file, NULL, on_decision, user, out_result, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_query_file_decisions_with_options_impl(
-    const lql_selector *selector, FILE *file, const lql_query_options *options,
-    lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
-    lql_error *error) {
+    lql *self, const lql_selector *selector, FILE *file,
+    const lql_query_options *options, lql_query_decision_fn on_decision,
+    void *user, lql_query_result *out_result, lql_error *error) {
+  (void)self;
   if (file == NULL || on_decision == NULL) {
     clear_query_result(out_result);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -737,17 +381,19 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_file_decisions_with_options_impl(
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_query_source_decisions_impl(
-    const lql_selector *selector, lql_read_fn read, void *read_user,
+    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
     lql_error *error) {
   return lql_query_source_decisions_with_options_impl(
-      selector, read, read_user, NULL, on_decision, user, out_result, error);
+      self, selector, read, read_user, NULL, on_decision, user, out_result,
+      error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_query_source_decisions_with_options_impl(
-    const lql_selector *selector, lql_read_fn read, void *read_user,
+    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *options, lql_query_decision_fn on_decision,
     void *user, lql_query_result *out_result, lql_error *error) {
+  (void)self;
   if (read == NULL || on_decision == NULL) {
     clear_query_result(out_result);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -759,18 +405,19 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_source_decisions_with_options_impl(
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_query_source_spooled_matches_impl(
-    const lql_selector *selector, lql_read_fn read, void *read_user,
+    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     lql_query_match_fn on_match, void *user, lql_query_result *out_result,
     lql_error *error) {
   return lql_query_source_spooled_matches_with_options_impl(
-      selector, read, read_user, NULL, on_match, user, out_result, error);
+      self, selector, read, read_user, NULL, on_match, user, out_result, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status
 lql_query_source_spooled_matches_with_options_impl(
-    const lql_selector *selector, lql_read_fn read, void *read_user,
+    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *options, lql_query_match_fn on_match, void *user,
     lql_query_result *out_result, lql_error *error) {
+  (void)self;
   if (read == NULL || on_match == NULL) {
     clear_query_result(out_result);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -781,17 +428,18 @@ lql_query_source_spooled_matches_with_options_impl(
       selector, read, read_user, options, on_match, user, out_result, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status lql_query_file_matches_impl(
-    const lql_selector *selector, FILE *file, lql_query_match_fn on_match,
-    void *user, lql_query_result *out_result, lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status
+lql_query_file_matches_impl(lql *self, const lql_selector *selector, FILE *file,
+                            lql_query_match_fn on_match, void *user,
+                            lql_query_result *out_result, lql_error *error) {
   return lql_query_file_matches_with_options_impl(
-      selector, file, NULL, on_match, user, out_result, error);
+      self, selector, file, NULL, on_match, user, out_result, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_query_file_matches_with_options_impl(
-    const lql_selector *selector, FILE *file, const lql_query_options *options,
-    lql_query_match_fn on_match, void *user, lql_query_result *out_result,
-    lql_error *error) {
+    lql *self, const lql_selector *selector, FILE *file,
+    const lql_query_options *options, lql_query_match_fn on_match, void *user,
+    lql_query_result *out_result, lql_error *error) {
   lql_match_adapter adapter;
   lql_status st;
   if (file == NULL || on_match == NULL) {
@@ -803,8 +451,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_file_matches_with_options_impl(
   adapter.file = file;
   adapter.on_match = on_match;
   adapter.user = user;
-  st = lql_query_file_decisions_with_options_impl(
-      selector, file, options, on_match_decision, &adapter, out_result, error);
+  st = lql_query_file_decisions_with_options_impl(self, selector, file, options,
+                                                  on_match_decision, &adapter,
+                                                  out_result, error);
   if (st != LQL_STATUS_OK && error != NULL &&
       strcmp(error->message, "query decision callback failed") == 0) {
     lql_set_error(error, st, "query match callback failed");
@@ -813,22 +462,23 @@ LQL_INTERNAL_SYMBOL lql_status lql_query_file_matches_with_options_impl(
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_impl(
-    const lql_payload *payload, FILE *out, lql_error *error) {
+    lql *self, const lql_payload *payload, FILE *out, lql_error *error) {
   if (payload == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "payload and output file are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return lql_payload_write_json_sink_impl(payload, payload_file_write, out,
-                                          error);
+  return lql_payload_write_json_sink_impl(self, payload, payload_file_write,
+                                          out, error);
 }
 
-LQL_INTERNAL_SYMBOL lql_status
-lql_payload_write_json_sink_impl(const lql_payload *payload, lql_write_fn write,
-                                 void *write_user, lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status lql_payload_write_json_sink_impl(
+    lql *self, const lql_payload *payload, lql_write_fn write, void *write_user,
+    lql_error *error) {
   lql_payload_sink_adapter adapter;
   off_t current;
   lql_status copy_status;
+  (void)self;
   if (payload == NULL || write == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "payload and write callback are required");

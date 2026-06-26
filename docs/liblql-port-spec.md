@@ -537,13 +537,15 @@ Current implementation is an early slice:
   exists;
 - the public C API exposes an instantiatable receiver shell through `lql_new()`
   and method-pointer dispatch; selector/query/projection/mutation operations
-  are not exported as free-function wrappers;
+  are implemented by receiver-compatible private functions and are not exported
+  as free-function wrappers;
 - `make test` includes `lql.public-api-style`, which fails if removed
   selector/query/payload/projection/compact/mutation free-operation prototypes
   reappear in the installed header or, when a shared library is built, as
   exported dynamic symbols; it also scans project-owned source trees for
   exact-name macro or static wrapper shims that recreate those removed
-  operation functions;
+  operation functions and for static receiver-operation shims that should have
+  been folded into the receiver-compatible implementation functions;
 - project-owned allocations have a central liblql allocator surface, and
   direct C runtime allocation calls are limited to the allocator
   implementation; `make test` enforces this by failing on direct
@@ -797,6 +799,10 @@ Current implementation is an early slice:
   presets because the cgo test process cannot reliably load an
   ASan-instrumented shared liblql with the ASan runtime first; project-owned C
   unit tests remain the sanitizer authority for SDK behavior;
+- the Lua host smoke test is also excluded from sanitizer CTest presets because
+  the system Lua executable loads before the ASan runtime; non-sanitizer
+  `make test`, `make lua-test`, package verification, and release Lua artifact
+  checks remain the Lua facade authorities;
 - the Lua tree includes a Lua 5.5 facade over a direct `lql.core` C module
   linked against shared liblql and implemented through public liblql headers;
   `lql.new()` returns a C-owned client userdata backed by a public `lql *`
