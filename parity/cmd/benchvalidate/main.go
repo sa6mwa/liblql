@@ -151,7 +151,8 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 		"decision_only_source_selector", "plus_value_plan",
 		"plus_value_source_selector", "plus_value_openjson_selector",
 		"plus_value_openjson_plan", "mutate_file_selector",
-		"mutate_file_plan", "mutate_source_selector":
+		"mutate_file_plan", "mutate_source_selector",
+		"project_file_selector", "project_source_selector":
 	default:
 		return fmt.Errorf("line %d: unsupported mode %q", line, rec.Mode)
 	}
@@ -252,6 +253,20 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 			return fmt.Errorf("line %d: mutation records must not report query payloads", line)
 		}
 	}
+	if isProjectionMode(rec.Mode) {
+		if rec.Payloads > rec.Matches {
+			return fmt.Errorf("line %d: projection payload count must not exceed matches", line)
+		}
+		if rec.Matches != 0 && rec.Payloads == 0 {
+			return fmt.Errorf("line %d: projection records with matches must report projected payloads", line)
+		}
+		if rec.Payloads != 0 && rec.PayloadBytes <= 0 {
+			return fmt.Errorf("line %d: projection payload bytes are required", line)
+		}
+		if rec.PayloadSourceType != "projection" {
+			return fmt.Errorf("line %d: projection records must use projection payload source type", line)
+		}
+	}
 	return nil
 }
 
@@ -273,6 +288,11 @@ func isMutationMode(mode string) bool {
 		mode == "mutate_source_selector"
 }
 
+func isProjectionMode(mode string) bool {
+	return mode == "project_file_selector" ||
+		mode == "project_source_selector"
+}
+
 func isSourceMode(mode string) bool {
 	return mode == "decision_only_source_selector" ||
 		mode == "plus_value_source_selector" ||
@@ -282,7 +302,7 @@ func isSourceMode(mode string) bool {
 func isPayloadSourceType(value string) bool {
 	switch value {
 	case "none", "seekable_range", "spooled", "callback_payload",
-		"lua_liblql":
+		"lua_liblql", "projection":
 		return true
 	default:
 		return false

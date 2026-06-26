@@ -120,7 +120,11 @@ Current implementation status:
   excluded from this large mutation memory profile until the public Lua facade
   has a streaming mutation output sink; the gate still compares C mutation
   candidate/match counters against the Go oracle and applies the C RSS and
-  steady-state time ceilings.
+  steady-state time ceilings. It also runs a Go/C-only projection memory
+  profile with `project_file_selector` and `project_source_selector`, projecting
+  `/id` from matched candidates while large `/blob` fields remain unselected.
+  That profile gates seekable and callback-source payload projection RSS/time
+  without materializing whole candidates.
 - `make bench-1g-check` is the explicit 1 GiB/128 MiB profile. It reuses the
   same Go/C/Lua large-memory runner and RSS validator as
   `make bench-memory-check`, but defaults to at least 1 GiB of generated NDJSON
@@ -156,7 +160,8 @@ Current implementation status:
   `decision_only_source_selector`, `plus_value_selector`, `plus_value_plan`,
   `plus_value_source_selector`, `plus_value_openjson_selector`,
   `plus_value_openjson_plan`, `mutate_file_selector`, `mutate_file_plan`, and
-  `mutate_source_selector`.
+  `mutate_source_selector`; the scalable memory gate additionally covers
+  `project_file_selector` and `project_source_selector`.
   Plus-value records assert equivalent payload counts and payload byte totals,
   while C exposes `seekable_range` payloads for seekable fixture files,
   including current open-read benchmark modes, without retaining candidate JSON

@@ -910,6 +910,29 @@ record_spooled_payload_projection(void *user, const lql_query_match *match) {
   return LQL_STATUS_STOP;
 }
 
+static lql_status
+record_seekable_payload_projection(void *user, const lql_query_match *match) {
+  projected_payload_seen *seen = (projected_payload_seen *)user;
+  lql_error error;
+  lql_status st;
+  int found;
+
+  if (!match->decision.matched ||
+      match->payload.kind != LQL_PAYLOAD_SEEKABLE_RANGE ||
+      match->payload.source == NULL || seen->projection == NULL) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  found = 0;
+  lql_error_init(&error);
+  st = test_ctx->payload_project_json(
+      test_ctx, &match->payload, seen->projection, seen->out, &found, &error);
+  if (st != LQL_STATUS_OK || !found) {
+    return st == LQL_STATUS_OK ? LQL_STATUS_INVALID_ARGUMENT : st;
+  }
+  ++seen->calls;
+  return LQL_STATUS_OK;
+}
+
 static void expect_match(const char *expr, const char *json, int want) {
   lql_selector *selector;
   lql_error error;
@@ -2774,27 +2797,35 @@ static void expect_seekable_payload_api(void) {
       "{\"status\":\"open\",\"id\":3}\n";
   FILE *fp;
   FILE *out;
+  FILE *project_out;
   lql_selector *selector;
+  lql_projection *projection;
   lql_query_result result;
   payload_seen seen;
+  projected_payload_seen projected;
   memory_sink sink;
   lql_query_options options;
   lql_payload payload;
   lql_error error;
   lql_status st;
+  static const char *projection_fields[] = {"/id"};
   char buf[128];
   size_t len;
   long pos;
 
   fp = tmpfile();
   out = tmpfile();
-  if (fp == NULL || out == NULL) {
+  project_out = tmpfile();
+  if (fp == NULL || out == NULL || project_out == NULL) {
     printf("payload tmpfile failed\n");
     if (fp != NULL) {
       fclose(fp);
     }
     if (out != NULL) {
       fclose(out);
+    }
+    if (project_out != NULL) {
+      fclose(project_out);
     }
     ++failures;
     return;
@@ -2804,17 +2835,31 @@ static void expect_seekable_payload_api(void) {
     printf("payload input write failed\n");
     fclose(fp);
     fclose(out);
+    fclose(project_out);
     ++failures;
     return;
   }
   lql_error_init(&error);
   selector = NULL;
+  projection = NULL;
   st =
       test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("payload parse failed: %s\n", error.message);
     fclose(fp);
     fclose(out);
+    fclose(project_out);
+    ++failures;
+    return;
+  }
+  st = test_ctx->projection_parse(test_ctx, projection_fields, 1u, &projection,
+                                  &error);
+  if (st != LQL_STATUS_OK) {
+    printf("payload projection parse failed: %s\n", error.message);
+    fclose(fp);
+    fclose(out);
+    fclose(project_out);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
@@ -2827,6 +2872,8 @@ static void expect_seekable_payload_api(void) {
     printf("payload query failed: %s\n", error.message);
     fclose(fp);
     fclose(out);
+    fclose(project_out);
+    test_ctx->projection_destroy(test_ctx, projection);
     test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
@@ -2867,6 +2914,34 @@ static void expect_seekable_payload_api(void) {
     } else if (strcmp(sink.data, "{\"status\":\"open\",\"id\":1}"
                                  "{\"status\":\"open\",\"id\":3}") != 0) {
       printf("payload sink output mismatch: %s\n", sink.data);
+      ++failures;
+    }
+  }
+
+  if (fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("payload projection rewind failed\n");
+    ++failures;
+  } else {
+    memset(&projected, 0, sizeof(projected));
+    memset(&result, 0, sizeof(result));
+    projected.out = project_out;
+    projected.projection = projection;
+    lql_error_init(&error);
+    st = test_ctx->query_file_matches(
+        test_ctx, selector, fp, record_seekable_payload_projection, &projected,
+        &result, &error);
+    if (st != LQL_STATUS_OK || projected.calls != 2 ||
+        result.candidates_seen != (lql_uint64)3 ||
+        result.candidates_matched != (lql_uint64)2) {
+      printf("payload projection query mismatch: status=%s calls=%d seen=%lu "
+             "matched=%lu error=%s\n",
+             lql_status_string(st), projected.calls,
+             (unsigned long)result.candidates_seen,
+             (unsigned long)result.candidates_matched, error.message);
+      ++failures;
+    } else if (!read_tmpfile(project_out, buf, sizeof(buf), &len) ||
+               strcmp(buf, "{\"id\":1}{\"id\":3}") != 0) {
+      printf("payload projection output mismatch: %s\n", buf);
       ++failures;
     }
   }
@@ -3048,9 +3123,11 @@ static void expect_seekable_payload_api(void) {
     }
   }
 
+  test_ctx->projection_destroy(test_ctx, projection);
   test_ctx->selector_destroy(test_ctx, selector);
   fclose(fp);
   fclose(out);
+  fclose(project_out);
 }
 
 static void expect_projection_api(void) {

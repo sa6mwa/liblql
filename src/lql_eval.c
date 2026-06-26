@@ -1956,6 +1956,8 @@ static lql_status payload_write_json_sink_method(
 static lql_status payload_project_json_method(
     lql *self, const lql_payload *payload, const lql_projection *projection,
     FILE *out, int *out_found, lql_error *error) {
+  off_t current;
+  lql_status st;
   if (out_found != NULL) {
     *out_found = 0;
   }
@@ -1965,9 +1967,21 @@ static lql_status payload_project_json_method(
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   if (payload->kind == LQL_PAYLOAD_SEEKABLE_RANGE && payload->source != NULL) {
-    return self->project_file_range(self, projection, payload->source,
-                                    payload->offset, payload->size, out,
-                                    out_found, error);
+    current = ftello(payload->source);
+    if (current < (off_t)0) {
+      lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                    "failed to record source position");
+      return LQL_STATUS_UNSUPPORTED;
+    }
+    st = self->project_file_range(self, projection, payload->source,
+                                  payload->offset, payload->size, out,
+                                  out_found, error);
+    if (fseeko(payload->source, current, SEEK_SET) != 0) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "failed to project seekable payload range");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    return st;
   }
   if (payload->kind == LQL_PAYLOAD_SPOOLED && payload->spooled != NULL) {
     spooled_source_reader reader;

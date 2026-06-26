@@ -233,6 +233,12 @@ emit_unsupported_impl() {
     emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
       "mutate_source_selector" 0 0 0 0 0 "none" null null true "$reason" \
       "$(file_sha256 "$fixture_path")"
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "project_file_selector" 0 0 0 0 0 "none" null null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
+    emit_submode_records "$impl" "$dataset_name" "$selector_name" "$expr" \
+      "project_source_selector" 0 0 0 0 0 "none" null null true "$reason" \
+      "$(file_sha256 "$fixture_path")"
   done < "$case_matrix"
 }
 
@@ -650,6 +656,7 @@ run_c_native_mode() {
   case "$mode" in
     plus_value_source_selector) payload_source_type=spooled ;;
     plus_value_*) payload_source_type=seekable_range ;;
+    project_*) payload_source_type=projection ;;
   esac
   emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
     "$mode" "$bytes" "$c_candidates" \
@@ -826,6 +833,11 @@ selected_modes() {
         mutate_file_selector \
         mutate_file_plan \
         mutate_source_selector
+      ;;
+    projection-memory)
+      printf '%s\n' \
+        project_file_selector \
+        project_source_selector
       ;;
     *)
       printf 'unsupported benchmark mode profile: %s\n' "$mode_profile" >&2

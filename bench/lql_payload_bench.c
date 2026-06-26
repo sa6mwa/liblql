@@ -19,6 +19,7 @@ typedef struct payload_counts {
   lql_uint64 payloads;
   lql_uint64 payload_bytes;
   FILE *sink;
+  const lql_projection *projection;
 } payload_counts;
 
 typedef struct bench_source {
@@ -176,6 +177,41 @@ static lql_status count_spooled_payload(void *user,
   return LQL_STATUS_OK;
 }
 
+static lql_status count_projected_payload(void *user,
+                                          const lql_query_match *match) {
+  payload_counts *counts;
+  lql_status st;
+  lql_error error;
+  int found;
+  lql_uint64 before;
+  lql_uint64 after;
+  long pos;
+
+  counts = (payload_counts *)user;
+  if (counts == NULL || counts->projection == NULL || counts->sink == NULL) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  lql_error_init(&error);
+  found = 0;
+  pos = ftell(counts->sink);
+  before = pos >= 0L ? (lql_uint64)pos : 0u;
+  st = counts->ctx->payload_project_json(counts->ctx, &match->payload,
+                                         counts->projection, counts->sink,
+                                         &found, &error);
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  pos = ftell(counts->sink);
+  after = pos >= 0L ? (lql_uint64)pos : before;
+  if (found) {
+    counts->payloads++;
+    if (after >= before) {
+      counts->payload_bytes += after - before;
+    }
+  }
+  return LQL_STATUS_OK;
+}
+
 int main(int argc, char **argv) {
   const char *mode;
   const char *expr;
@@ -184,6 +220,7 @@ int main(int argc, char **argv) {
   FILE *sink;
   lql *ctx;
   lql_selector *selector;
+  lql_projection *projection;
   lql_query_result result;
   lql_mutation_plan *mutation_plan;
   lql_error error;
@@ -207,6 +244,7 @@ int main(int argc, char **argv) {
   lql_error_init(&error);
   ctx = NULL;
   selector = NULL;
+  projection = NULL;
   mutation_plan = NULL;
   st = lql_new(&ctx, &error);
   if (st != LQL_STATUS_OK) {
@@ -217,6 +255,18 @@ int main(int argc, char **argv) {
     st = ctx->selector_parse(ctx, expr, &selector, &error);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "lql_payload_bench: parse selector: %s\n", error.message);
+      ctx->destroy(ctx);
+      return 1;
+    }
+  }
+  if (strcmp(mode, "project_file_selector") == 0 ||
+      strcmp(mode, "project_source_selector") == 0) {
+    static const char *projection_fields[] = {"/id"};
+    st = ctx->projection_parse(ctx, projection_fields, 1u, &projection, &error);
+    if (st != LQL_STATUS_OK) {
+      fprintf(stderr, "lql_payload_bench: parse projection: %s\n",
+              error.message);
+      ctx->selector_destroy(ctx, selector);
       ctx->destroy(ctx);
       return 1;
     }
@@ -240,6 +290,7 @@ int main(int argc, char **argv) {
 
   memset(&counts, 0, sizeof(counts));
   counts.ctx = ctx;
+  counts.projection = projection;
   memset(&source, 0, sizeof(source));
   source.file = fixture;
   memset(&result, 0, sizeof(result));
@@ -300,6 +351,35 @@ int main(int argc, char **argv) {
     st = ctx->query_file_matches(ctx, selector, fixture, count_payload, &counts,
                                  &result, &error);
     fclose(sink);
+  } else if (strcmp(mode, "project_file_selector") == 0) {
+    sink = tmpfile();
+    if (sink == NULL) {
+      fprintf(stderr, "lql_payload_bench: failed to create projection sink\n");
+      fclose(fixture);
+      ctx->projection_destroy(ctx, projection);
+      ctx->selector_destroy(ctx, selector);
+      ctx->destroy(ctx);
+      return 1;
+    }
+    counts.sink = sink;
+    st = ctx->query_file_matches(ctx, selector, fixture, count_projected_payload,
+                                 &counts, &result, &error);
+    fclose(sink);
+  } else if (strcmp(mode, "project_source_selector") == 0) {
+    sink = tmpfile();
+    if (sink == NULL) {
+      fprintf(stderr, "lql_payload_bench: failed to create projection sink\n");
+      fclose(fixture);
+      ctx->projection_destroy(ctx, projection);
+      ctx->selector_destroy(ctx, selector);
+      ctx->destroy(ctx);
+      return 1;
+    }
+    counts.sink = sink;
+    st = ctx->query_source_spooled_matches(ctx, selector, read_bench_source,
+                                           &source, count_projected_payload,
+                                           &counts, &result, &error);
+    fclose(sink);
   } else if (strcmp(mode, "mutate_file_selector") == 0 ||
              strcmp(mode, "mutate_file_plan") == 0) {
     sink = fopen("/dev/null", "wb");
@@ -345,6 +425,7 @@ int main(int argc, char **argv) {
   end = clock();
   fclose(fixture);
   ctx->mutation_plan_destroy(ctx, mutation_plan);
+  ctx->projection_destroy(ctx, projection);
   ctx->selector_destroy(ctx, selector);
 
   if (st != LQL_STATUS_OK) {

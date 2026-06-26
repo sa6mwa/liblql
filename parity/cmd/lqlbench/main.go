@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -111,6 +112,8 @@ func main() {
 	payloadSourceType := "none"
 	if isPlusValueMode(mode) {
 		payloadSourceType = "callback_payload"
+	} else if isProjectionMode(mode) {
+		payloadSourceType = "projection"
 	}
 	if submode == "steady_state" {
 		if _, _, _, err := runBenchmark(file, sel, expr, mode); err != nil {
@@ -156,6 +159,9 @@ func main() {
 func runBenchmark(file *os.File, sel lql.Selector, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
 	if isMutationMode(mode) {
 		return runMutation(file, sel, expr, mode)
+	}
+	if isProjectionMode(mode) {
+		return runProjection(file, sel, mode)
 	}
 	return runQuery(file, sel, expr, mode)
 }
@@ -215,6 +221,67 @@ func runMutation(file *os.File, sel lql.Selector, expr string, mode string) (lql
 		return lql.QueryStreamResult{}, 0, 0, err
 	}
 	return result.Query, 0, 0, nil
+}
+
+func runProjection(file *os.File, sel lql.Selector, mode string) (lql.QueryStreamResult, int64, int64, error) {
+	if _, err := file.Seek(0, 0); err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	paths, err := lql.ParseProjectionPaths([]string{"/id"})
+	if err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	plan, err := lql.NewProjectionPlan(paths)
+	if err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	payloads := int64(0)
+	payloadBytes := int64(0)
+	request := lql.QueryStreamRequest{
+		Ctx:           context.Background(),
+		Reader:        file,
+		Selector:      sel,
+		Mode:          lql.QueryDecisionPlusValue,
+		MatchedOnly:   true,
+		CapturePolicy: lql.QueryCaptureMatchesOnlyBestEffort,
+		OnValue: func(value lql.QueryStreamValue) error {
+			var reader io.Reader
+			var closer io.Closer
+			if value.JSON != nil {
+				reader = bytes.NewReader(value.JSON)
+			} else if value.OpenJSON != nil {
+				rc, err := value.OpenJSON()
+				if err != nil {
+					return err
+				}
+				reader = rc
+				closer = rc
+			} else {
+				return fmt.Errorf("missing projection payload reader")
+			}
+			if closer != nil {
+				defer closer.Close()
+			}
+			result, err := lql.ProjectFields(lql.ProjectFieldsRequest{
+				Reader: reader,
+				Writer: io.Discard,
+				Plan:   plan,
+			})
+			if err != nil {
+				return err
+			}
+			if result.Found {
+				payloads++
+				payloadBytes += result.Size
+			}
+			return nil
+		},
+	}
+	if mode == "project_source_selector" {
+		request.Reader = readerOnly{reader: file}
+	}
+	result, err := lql.QueryStreamWithResult(request)
+	return result, payloads, payloadBytes, err
 }
 
 func runQuery(file *os.File, sel lql.Selector, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
@@ -290,7 +357,9 @@ func isSupportedMode(mode string) bool {
 		mode == "plus_value_openjson_plan" ||
 		mode == "mutate_file_selector" ||
 		mode == "mutate_file_plan" ||
-		mode == "mutate_source_selector"
+		mode == "mutate_source_selector" ||
+		mode == "project_file_selector" ||
+		mode == "project_source_selector"
 }
 
 func isPlanMode(mode string) bool {
@@ -304,6 +373,11 @@ func isMutationMode(mode string) bool {
 		mode == "mutate_source_selector"
 }
 
+func isProjectionMode(mode string) bool {
+	return mode == "project_file_selector" ||
+		mode == "project_source_selector"
+}
+
 func isPlusValueMode(mode string) bool {
 	return mode == "plus_value_selector" || mode == "plus_value_plan" ||
 		mode == "plus_value_source_selector" ||
@@ -313,7 +387,8 @@ func isPlusValueMode(mode string) bool {
 func isSourceMode(mode string) bool {
 	return mode == "decision_only_source_selector" ||
 		mode == "plus_value_source_selector" ||
-		mode == "mutate_source_selector"
+		mode == "mutate_source_selector" ||
+		mode == "project_source_selector"
 }
 
 func sha256File(file *os.File) (string, error) {
