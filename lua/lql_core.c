@@ -197,6 +197,32 @@ static int lua_lql_selector_parse(lua_State *L) {
   return 1;
 }
 
+static int lua_lql_selector_parse_or(lua_State *L) {
+  lua_lql_client *client;
+  lua_lql_selector_handle *handle;
+  const char *selector_expr;
+  lql_error error;
+  lql_status st;
+
+  client = lua_lql_check_client(L, 1);
+  selector_expr = luaL_checkstring(L, 2);
+  handle = (lua_lql_selector_handle *)lua_newuserdatauv(L, sizeof(*handle), 1);
+  handle->ctx = client->ctx;
+  handle->selector = NULL;
+  luaL_getmetatable(L, LUA_LQL_SELECTOR);
+  lua_setmetatable(L, -2);
+  lua_pushvalue(L, 1);
+  lua_setiuservalue(L, -2, 1);
+  lql_error_init(&error);
+  st = client->ctx->selector_parse_or(client->ctx, selector_expr,
+                                      &handle->selector, &error);
+  if (st != LQL_STATUS_OK) {
+    lua_pop(L, 1);
+    return lua_lql_fail(L, &error);
+  }
+  return 1;
+}
+
 static void lua_lql_push_bool_field(lua_State *L, const char *name, int value) {
   lua_pushboolean(L, value ? 1 : 0);
   lua_setfield(L, -2, name);
@@ -1867,6 +1893,7 @@ static const luaL_Reg lua_lql_client_methods[] = {
     {"version", lua_client_version},
     {"capabilities", lua_client_capabilities_get},
     {"selector_parse", lua_lql_selector_parse},
+    {"selector_parse_or", lua_lql_selector_parse_or},
     {"selector_capabilities", lua_lql_selector_capabilities_get},
     {"selector_execution_traits", lua_lql_selector_execution_traits_get},
     {"matches_json", lua_lql_matches_json},

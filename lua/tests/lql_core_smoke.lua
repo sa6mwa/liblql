@@ -30,6 +30,28 @@ end
 
 local client = lql.new({core = true})
 
+local or_selector, or_selector_err =
+  client:selector_parse_or('/status="open",/progress>=50')
+or_selector = assert_no_error(or_selector, or_selector_err,
+                              "core selector_parse_or")
+
+local or_capabilities
+or_capabilities, err = client:selector_capabilities(or_selector)
+or_capabilities = assert_no_error(or_capabilities, err,
+                                  "core selector_parse_or capabilities")
+assert_equal(or_capabilities["or"], true,
+             "core selector_parse_or capabilities or")
+assert_equal(or_capabilities.eq, true, "core selector_parse_or capabilities eq")
+assert_equal(or_capabilities.range, true,
+             "core selector_parse_or capabilities range")
+
+local bad_or_selector, bad_or_selector_err =
+  client:selector_parse_or('eq{field=/status,value=open},nonsense')
+if bad_or_selector ~= nil or not bad_or_selector_err or
+    (bad_or_selector_err.stderr or "") == "" then
+  fail("expected structured core selector_parse_or error")
+end
+
 local matched, err = client:matches_json('/status="open"', '{"status":"open"}')
 matched = assert_no_error(matched, err, "core matches_json open")
 assert_equal(matched, true, "core matches_json open")
@@ -37,6 +59,16 @@ assert_equal(matched, true, "core matches_json open")
 matched, err = client:matches_json('/status="open"', '{"status":"closed"}')
 matched = assert_no_error(matched, err, "core matches_json closed")
 assert_equal(matched, false, "core matches_json closed")
+
+matched, err = client:matches_json(or_selector,
+                                  '{"status":"closed","progress":72}')
+matched = assert_no_error(matched, err, "core matches_json parsed OR range")
+assert_equal(matched, true, "core matches_json parsed OR range")
+
+matched, err = client:matches_json(or_selector,
+                                  '{"status":"closed","progress":10}')
+matched = assert_no_error(matched, err, "core matches_json parsed OR miss")
+assert_equal(matched, false, "core matches_json parsed OR miss")
 
 local object_doc =
   '{"hello":{"world":{"nested":true}},"arrays":[{"id":1}]}'

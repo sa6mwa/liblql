@@ -97,6 +97,11 @@ local open_selector, selector_err =
 open_selector = assert_no_error(open_selector, selector_err,
                                 "selector_parse open")
 
+local or_selector, or_selector_err =
+  client:selector_parse_or('/status="open",/progress>=50')
+or_selector = assert_no_error(or_selector, or_selector_err,
+                              "selector_parse_or")
+
 local invalid_selector, invalid_selector_err =
   client:selector_parse('eq{field=/status,value=open,foo=bar}')
 if invalid_selector ~= nil or not invalid_selector_err or
@@ -162,6 +167,11 @@ assert_equal(matched, true, "matches_json open")
 matched, err = client:matches_json(open_selector, '{"status":"open"}')
 matched = assert_no_error(matched, err, "matches_json parsed selector open")
 assert_equal(matched, true, "matches_json parsed selector open")
+
+matched, err = client:matches_json(or_selector,
+                                  '{"status":"closed","progress":72}')
+matched = assert_no_error(matched, err, "matches_json parsed selector OR")
+assert_equal(matched, true, "matches_json parsed selector OR")
 
 matched, err = client:matches_json('/status="open"', '{"status":"closed"}')
 matched = assert_no_error(matched, err, "matches_json closed")
