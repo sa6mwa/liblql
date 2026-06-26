@@ -919,7 +919,9 @@ Current implementation status:
   restriction;
 - CLI inline mutation input rejection matches the Go CLI distinction between
   missing file path and invalid single-file input forms such as stdin or
-  multiple files;
+  multiple files; inline and write-mode execution failures for empty or
+  malformed JSON input preserve the original input file rather than replacing
+  it with a failed temp output;
 - Go-backed SDK parity tests now exist for public `liblql` selector
   parse/evaluate and capability/trait inspection behavior, projection parser
   failures, buffered, source-backed,

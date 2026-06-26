@@ -68,6 +68,7 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"mutation", "stdin mutation matches-only output", []string{"TestCLQLStdinMutationMatchesOnlyParity"}},
 	{"mutation", "inline and write mutation modes", []string{"TestCLQLInlineMutationParity"}},
 	{"mutation", "inline mutation input rejection", []string{"TestCLQLInlineMutationRejectsInvalidInputs"}},
+	{"mutation", "inline mutation execution errors preserve input files", []string{"TestCLQLInlineMutationExecutionErrors"}},
 }
 
 func TestCLQLParityCoverageManifest(t *testing.T) {

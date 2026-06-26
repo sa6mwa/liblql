@@ -2832,6 +2832,58 @@ func TestCLQLInlineMutationRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestCLQLInlineMutationExecutionErrors(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []struct {
+		name   string
+		body   string
+		needle string
+	}{
+		{name: "empty input", body: "", needle: "no JSON input"},
+		{name: "invalid JSON", body: `{"id":`, needle: "json"},
+	}
+	for _, flag := range []string{"-i", "-w"} {
+		flag := flag
+		for _, tc := range cases {
+			tc := tc
+			t.Run(flag+"/"+tc.name, func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "input.json")
+				if err := os.WriteFile(path, []byte(tc.body), 0600); err != nil {
+					t.Fatalf("write input: %v", err)
+				}
+				cmd := exec.Command(
+					clql,
+					"-c",
+					flag,
+					"-m", "/status=done",
+					`contains{f=/}`,
+					path,
+				)
+				out, err := cmd.CombinedOutput()
+				if err == nil {
+					t.Fatalf("inline execution unexpectedly succeeded: out=%q", string(out))
+				}
+				if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+					t.Fatalf("inline execution exit mismatch: err=%v out=%q", err, string(out))
+				}
+				if !bytes.Contains(bytes.ToLower(out), bytes.ToLower([]byte(tc.needle))) {
+					t.Fatalf("inline execution diagnostic mismatch: want %q out=%q", tc.needle, string(out))
+				}
+				got, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("read input after failure: %v", err)
+				}
+				if string(got) != tc.body {
+					t.Fatalf("inline failure changed input file: got=%q want=%q", string(got), tc.body)
+				}
+			})
+		}
+	}
+}
+
 func TestCLQLSelectorParseErrorParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
