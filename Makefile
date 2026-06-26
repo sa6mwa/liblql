@@ -23,7 +23,7 @@ help:
 	  'make package-verify          verify generated packages' \
 	  'make release-matrix          build release target matrix where toolchains exist' \
 	  'make release                 clean, test, benchmark, package, and verify release artifacts' \
-	  'make clean                   remove generated build/dist/cache state'
+	  'make clean                   remove generated build/dist/cache/Lua state'
 
 deps-debug:
 	@./scripts/deps.sh x86_64-linux-gnu

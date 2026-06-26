@@ -976,6 +976,9 @@ Current implementation status:
   These gates are strong evidence for the current implementation state, but
   they are not a substitute for a requirement-by-requirement completion audit
   before claiming full LQL parity or final release readiness;
+- `make clean` removes generated `build/`, `dist/`, dependency cache, top-level
+  Lua module output, and Lua object files while preserving Lua source files;
+  `lql.clean-fixtures` proves this generated-state cleanup contract;
 - `make release` is the final local release gate. It cleans generated state,
   runs the full local test gate, benchmark smoke gate, scalable memory
   benchmark gate, release target matrix, package verification, and checksum

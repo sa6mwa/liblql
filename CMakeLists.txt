@@ -228,6 +228,11 @@ if(LQL_BUILD_TESTS)
   set_tests_properties(lql.repository-boundary-fixtures PROPERTIES
     LABELS "unit;api" TIMEOUT 5)
 
+  add_test(NAME lql.clean-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/clean.sh --fixtures)
+  set_tests_properties(lql.clean-fixtures PROPERTIES
+    LABELS "unit;operability" TIMEOUT 5)
+
   add_test(NAME lql.package-privacy-fixtures
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package.sh
       package-privacy-fixtures)
