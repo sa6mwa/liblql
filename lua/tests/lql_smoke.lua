@@ -78,6 +78,26 @@ stopped, err = client:query_file('/status="open"', input_path, function(_)
 end)
 stopped = assert_no_error(stopped, err, "query_file stop")
 assert_equal(stopped.stopped_early, true, "query_file stop flag")
+assert_equal(stopped.stop_reason, 4, "query_file callback stop reason")
+
+local limited = assert_no_error(client:query_file('/status="open"', input_path,
+                                                 function(_) end,
+                                                 {max_candidates = 1}),
+                                nil, "query_file max_candidates")
+assert_equal(limited.candidates_seen, 1, "query_file max_candidates count")
+assert_equal(limited.stopped_early, true, "query_file max_candidates stop flag")
+assert_equal(limited.stop_reason, 2, "query_file max_candidates stop reason")
+
+local callback_error_result, callback_error
+callback_error_result, callback_error =
+  client:query_file('/status="open"', input_path, function(_)
+    error("decision callback failed")
+  end)
+if callback_error_result ~= nil or not callback_error or
+    not string.find(callback_error.stderr or "", "decision callback failed", 1,
+                    true) then
+  fail("expected structured query_file callback error")
+end
 
 local payloads = {}
 local retained_payload
@@ -96,6 +116,30 @@ assert_equal(payloads[1],
 local late_payload, late_err = retained_payload.json()
 if late_payload ~= nil or not late_err or late_err.stderr == "" then
   fail("expected expired payload handle error")
+end
+
+local match_limited_count = 0
+local match_limited = assert_no_error(
+  client:each_match_file('contains{field=/id}', input_path, function(_)
+    match_limited_count = match_limited_count + 1
+  end, {max_matches = 1}), nil, "each_match_file max_matches")
+assert_equal(match_limited_count, 1, "each_match_file max_matches callbacks")
+assert_equal(match_limited.candidates_matched, 1,
+             "each_match_file max_matches matched")
+assert_equal(match_limited.stopped_early, true,
+             "each_match_file max_matches stop flag")
+assert_equal(match_limited.stop_reason, 1,
+             "each_match_file max_matches stop reason")
+
+local match_callback_result, match_callback_error
+match_callback_result, match_callback_error =
+  client:each_match_file('/status="open"', input_path, function(_)
+    error("match callback failed")
+  end)
+if match_callback_result ~= nil or not match_callback_error or
+    not string.find(match_callback_error.stderr or "", "match callback failed",
+                    1, true) then
+  fail("expected structured each_match_file callback error")
 end
 
 local projected

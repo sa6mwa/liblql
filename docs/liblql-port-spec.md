@@ -810,8 +810,9 @@ Current implementation is an early slice:
   `lql.new()` returns a C-owned client userdata backed by a public `lql *`
   receiver, with deterministic smoke tests for selector decisions, selection
   output, callback decision streams, callback-scoped seekable payload handles,
-  file and buffered-JSON projection, file and buffered-JSON mutation, and
-  structured errors;
+  file and buffered-JSON projection, file and buffered-JSON mutation, query
+  stop reasons, candidate/match limit options, expired payload handles,
+  callback error propagation, and structured errors;
 - the parity benchmark surface now has Go, C, and Lua runners over the shared
   generated fixture matrix; the Lua runner loads `lua/lql.lua` and uses the
   direct `lql.core` module rather than shelling out to `clql`; Go helper
