@@ -19,8 +19,12 @@ EOF
 
   cat >"$fixture_test" <<'EOF'
 static void expect_alpha_api(void) {
+  lql *ctx = 0;
+  ctx->alpha(ctx);
 }
 static void expect_destroy_api(void) {
+  lql *ctx = 0;
+  ctx->destroy(ctx);
 }
 static void expect_sdk_contract_manifest(void) {
   static const int manifest[] = {
@@ -30,9 +34,6 @@ static void expect_sdk_contract_manifest(void) {
   (void)manifest;
 }
 int main(void) {
-  lql *ctx = 0;
-  ctx->alpha(ctx);
-  ctx->destroy(ctx);
   expect_alpha_api();
   expect_destroy_api();
   return 0;
@@ -68,8 +69,12 @@ struct lql {
 EOF
   cat >"$fixture_test" <<'EOF'
 static void expect_alpha_api(void) {
+  lql *ctx = 0;
+  ctx->alpha(ctx);
 }
 static void expect_destroy_api(void) {
+  lql *ctx = 0;
+  ctx->destroy(ctx);
 }
 static void expect_extra_api(void) {
 }
@@ -81,9 +86,6 @@ static void expect_sdk_contract_manifest(void) {
   (void)manifest;
 }
 int main(void) {
-  lql *ctx = 0;
-  ctx->alpha(ctx);
-  ctx->destroy(ctx);
   expect_alpha_api();
   expect_destroy_api();
   expect_extra_api();
@@ -97,8 +99,12 @@ EOF
 
   cat >"$fixture_test" <<'EOF'
 static void expect_alpha_api(void) {
+  lql *ctx = 0;
+  ctx->alpha(ctx);
 }
 static void expect_destroy_api(void) {
+  lql *ctx = 0;
+  ctx->destroy(ctx);
 }
 static void expect_sdk_contract_manifest(void) {
   static const int manifest[] = {
@@ -109,9 +115,6 @@ static void expect_sdk_contract_manifest(void) {
   (void)manifest;
 }
 int main(void) {
-  lql *ctx = 0;
-  ctx->alpha(ctx);
-  ctx->destroy(ctx);
   expect_alpha_api();
   expect_destroy_api();
   return 0;
@@ -124,8 +127,38 @@ EOF
 
   cat >"$fixture_test" <<'EOF'
 static void expect_alpha_api(void) {
+  lql *ctx = 0;
+  ctx->alpha(ctx);
 }
 static void expect_destroy_api(void) {
+  lql *ctx = 0;
+  ctx->destroy(ctx);
+}
+static void expect_sdk_contract_manifest(void) {
+  static const int manifest[] = {
+      (int)(long)expect_alpha_api,
+      (int)(long)expect_destroy_api,
+  };
+  (void)manifest;
+}
+int main(void) {
+  expect_alpha_api();
+  expect_alpha_api();
+  expect_destroy_api();
+  return 0;
+}
+EOF
+  if sh "$0" "$fixture_test" "$fixture_header" >/dev/null 2>&1; then
+    printf 'SDK unit manifest fixture: expected duplicate main call to fail\n' >&2
+    exit 1
+  fi
+
+  cat >"$fixture_test" <<'EOF'
+static void expect_alpha_api(void) {
+}
+static void expect_destroy_api(void) {
+  lql *ctx = 0;
+  ctx->destroy(ctx);
 }
 static void expect_sdk_contract_manifest(void) {
   static const int manifest[] = {
@@ -137,15 +170,13 @@ static void expect_sdk_contract_manifest(void) {
 int main(void) {
   lql *ctx = 0;
   ctx->alpha(ctx);
-  ctx->destroy(ctx);
-  expect_alpha_api();
   expect_alpha_api();
   expect_destroy_api();
   return 0;
 }
 EOF
   if sh "$0" "$fixture_test" "$fixture_header" >/dev/null 2>&1; then
-    printf 'SDK unit manifest fixture: expected duplicate main call to fail\n' >&2
+    printf 'SDK unit manifest fixture: expected receiver call outside SDK unit to fail\n' >&2
     exit 1
   fi
 
@@ -179,6 +210,7 @@ main_file=$tmp_dir/main
 main_all_file=$tmp_dir/main-all
 methods_file=$tmp_dir/receiver-methods
 missing_methods_file=$tmp_dir/missing-receiver-methods
+unit_method_calls_file=$tmp_dir/unit-method-calls
 
 sed -n 's/^static void \(expect_[A-Za-z0-9_]*\)(void) {$/\1/p' "$test_file" |
   grep -v '^expect_sdk_contract_manifest$' |
@@ -259,15 +291,33 @@ if [ -n "$header_file" ]; then
     }
   ' "$header_file" | sort -u > "$methods_file"
 
+  awk '
+    /^static void expect_[A-Za-z0-9_]*\(void\) \{$/ {
+      in_unit = ($0 !~ /expect_sdk_contract_manifest/)
+      next
+    }
+    in_unit && /^}/ { in_unit = 0; next }
+    in_unit {
+      line = $0
+      while (match(line, /->[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(/)) {
+        call = substr(line, RSTART, RLENGTH)
+        sub(/^->[[:space:]]*/, "", call)
+        sub(/[[:space:]]*\($/, "", call)
+        print call
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }
+  ' "$test_file" | sort -u > "$unit_method_calls_file"
+
   : > "$missing_methods_file"
   while IFS= read -r method; do
-    if ! grep -Eq -- "->[[:space:]]*${method}[[:space:]]*\\(" "$test_file"; then
+    if ! grep -Fxq "$method" "$unit_method_calls_file"; then
       printf '%s\n' "$method" >> "$missing_methods_file"
     fi
   done < "$methods_file"
 
   if [ -s "$missing_methods_file" ]; then
-    printf 'SDK unit manifest check: receiver methods lack C-side method-call coverage\n' >&2
+    printf 'SDK unit manifest check: receiver methods lack C-side SDK unit method-call coverage\n' >&2
     cat "$missing_methods_file" >&2
     exit 1
   fi
