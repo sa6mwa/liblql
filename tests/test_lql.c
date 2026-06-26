@@ -68,104 +68,6 @@ static void expect_receiver_api(void) {
   lql_destroy(NULL);
 }
 
-#define lql_selector_parse(expr, out, error)                                   \
-  test_ctx->selector_parse(test_ctx, (expr), (out), (error))
-#define lql_selector_parse_or(expr, out, error)                                \
-  test_ctx->selector_parse_or(test_ctx, (expr), (out), (error))
-#define lql_selector_free(selector)                                            \
-  test_ctx->selector_free(test_ctx, (selector))
-#define lql_selector_is_empty(selector)                                        \
-  test_ctx->selector_is_empty(test_ctx, (selector))
-#define lql_matches_json(selector, json, json_len, out_matched, error)         \
-  test_ctx->matches_json(test_ctx, (selector), (json), (json_len),             \
-                         (out_matched), (error))
-#define lql_query_file_decisions(selector, file, on_decision, user,            \
-                                 out_result, error)                            \
-  test_ctx->query_file_decisions(test_ctx, (selector), (file), (on_decision),  \
-                                 (user), (out_result), (error))
-#define lql_query_file_decisions_with_options(                                 \
-    selector, file, options, on_decision, user, out_result, error)             \
-  test_ctx->query_file_decisions_with_options(test_ctx, (selector), (file),    \
-                                              (options), (on_decision),        \
-                                              (user), (out_result), (error))
-#define lql_query_source_decisions(selector, read, read_user, on_decision,     \
-                                   user, out_result, error)                    \
-  test_ctx->query_source_decisions(test_ctx, (selector), (read), (read_user),  \
-                                   (on_decision), (user), (out_result),        \
-                                   (error))
-#define lql_query_source_decisions_with_options(                               \
-    selector, read, read_user, options, on_decision, user, out_result, error)  \
-  test_ctx->query_source_decisions_with_options(                               \
-      test_ctx, (selector), (read), (read_user), (options), (on_decision),     \
-      (user), (out_result), (error))
-#define lql_query_source_spooled_matches(selector, read, read_user, on_match,  \
-                                         user, out_result, error)              \
-  test_ctx->query_source_spooled_matches(test_ctx, (selector), (read),         \
-                                         (read_user), (on_match), (user),      \
-                                         (out_result), (error))
-#define lql_query_source_spooled_matches_with_options(                         \
-    selector, read, read_user, options, on_match, user, out_result, error)     \
-  test_ctx->query_source_spooled_matches_with_options(                         \
-      test_ctx, (selector), (read), (read_user), (options), (on_match),        \
-      (user), (out_result), (error))
-#define lql_query_file_matches(selector, file, on_match, user, out_result,     \
-                               error)                                          \
-  test_ctx->query_file_matches(test_ctx, (selector), (file), (on_match),       \
-                               (user), (out_result), (error))
-#define lql_query_file_matches_with_options(selector, file, options, on_match, \
-                                            user, out_result, error)           \
-  test_ctx->query_file_matches_with_options(test_ctx, (selector), (file),      \
-                                            (options), (on_match), (user),     \
-                                            (out_result), (error))
-#define lql_payload_write_json(payload, out, error)                            \
-  test_ctx->payload_write_json(test_ctx, (payload), (out), (error))
-#define lql_payload_write_json_sink(payload, write, write_user, error)         \
-  test_ctx->payload_write_json_sink(test_ctx, (payload), (write),              \
-                                    (write_user), (error))
-#define lql_projection_parse(fields, field_count, out, error)                  \
-  test_ctx->projection_parse(test_ctx, (fields), (field_count), (out), (error))
-#define lql_projection_free(projection)                                        \
-  test_ctx->projection_free(test_ctx, (projection))
-#define lql_project_file_range(projection, file, offset, size, out, out_found, \
-                               error)                                          \
-  test_ctx->project_file_range(test_ctx, (projection), (file), (offset),       \
-                               (size), (out), (out_found), (error))
-#define lql_project_source(projection, read, read_user, out, out_found, error) \
-  test_ctx->project_source(test_ctx, (projection), (read), (read_user), (out), \
-                           (out_found), (error))
-#define lql_project_json(projection, json, json_len, out, out_found, error)    \
-  test_ctx->project_json(test_ctx, (projection), (json), (json_len), (out),    \
-                         (out_found), (error))
-#define lql_compact_file_range(file, offset, size, out, error)                 \
-  test_ctx->compact_file_range(test_ctx, (file), (offset), (size), (out),      \
-                               (error))
-#define lql_compact_source(read, read_user, out, error)                        \
-  test_ctx->compact_source(test_ctx, (read), (read_user), (out), (error))
-#define lql_compact_json(json, json_len, out, error)                           \
-  test_ctx->compact_json(test_ctx, (json), (json_len), (out), (error))
-#define lql_mutation_plan_parse(exprs, expr_count, out, error)                 \
-  test_ctx->mutation_plan_parse(test_ctx, (exprs), (expr_count), (out), (error))
-#define lql_mutation_plan_parse_with_options(exprs, expr_count, options, out,  \
-                                             error)                            \
-  test_ctx->mutation_plan_parse_with_options(test_ctx, (exprs), (expr_count),  \
-                                             (options), (out), (error))
-#define lql_mutation_plan_count(plan)                                          \
-  test_ctx->mutation_plan_count(test_ctx, (plan))
-#define lql_mutation_plan_free(plan)                                           \
-  test_ctx->mutation_plan_free(test_ctx, (plan))
-#define lql_mutate_file_range_root_fields(plan, file, offset, size, out,       \
-                                          error)                               \
-  test_ctx->mutate_file_range_root_fields(test_ctx, (plan), (file), (offset),  \
-                                          (size), (out), (error))
-#define lql_mutate_file_range_paths(plan, file, offset, size, out, error)      \
-  test_ctx->mutate_file_range_paths(test_ctx, (plan), (file), (offset),        \
-                                    (size), (out), (error))
-#define lql_mutate_source_paths(plan, read, read_user, out, error)             \
-  test_ctx->mutate_source_paths(test_ctx, (plan), (read), (read_user), (out),  \
-                                (error))
-#define lql_mutate_json(plan, json, json_len, out, error)                      \
-  test_ctx->mutate_json(test_ctx, (plan), (json), (json_len), (out), (error))
-
 static void expect_public_utility_api(void) {
   lql_error error;
   lql_selector *selector;
@@ -205,53 +107,54 @@ static void expect_public_utility_api(void) {
   lql_free(NULL);
 
   lql_error_init(&error);
-  st = lql_selector_parse("/status=open", NULL, &error);
+  st = test_ctx->selector_parse(test_ctx, "/status=open", NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "out selector required") != 0) {
     printf("selector parse NULL out mismatch: %s\n", error.message);
     ++failures;
   }
 
-  if (!lql_selector_is_empty(NULL)) {
+  if (!test_ctx->selector_is_empty(test_ctx, NULL)) {
     printf("NULL selector should be empty\n");
     ++failures;
   }
   selector = NULL;
   lql_error_init(&error);
-  st = lql_selector_parse("", &selector, &error);
-  if (st != LQL_STATUS_OK || !lql_selector_is_empty(selector)) {
+  st = test_ctx->selector_parse(test_ctx, "", &selector, &error);
+  if (st != LQL_STATUS_OK || !test_ctx->selector_is_empty(test_ctx, selector)) {
     printf("empty selector parse mismatch: %s\n", error.message);
     ++failures;
   } else {
     matched = 0;
-    st = lql_matches_json(selector, "{\"anything\":true}",
-                          strlen("{\"anything\":true}"), &matched, &error);
+    st =
+        test_ctx->matches_json(test_ctx, selector, "{\"anything\":true}",
+                               strlen("{\"anything\":true}"), &matched, &error);
     if (st != LQL_STATUS_OK || !matched) {
       printf("empty selector match-all mismatch: %s\n", error.message);
       ++failures;
     }
   }
-  lql_selector_free(selector);
+  test_ctx->selector_free(test_ctx, selector);
 
   selector = NULL;
   lql_error_init(&error);
-  st = lql_selector_parse("/status=open", &selector, &error);
-  if (st != LQL_STATUS_OK || lql_selector_is_empty(selector)) {
+  st = test_ctx->selector_parse(test_ctx, "/status=open", &selector, &error);
+  if (st != LQL_STATUS_OK || test_ctx->selector_is_empty(test_ctx, selector)) {
     printf("non-empty selector state mismatch: %s\n", error.message);
     ++failures;
   }
-  lql_selector_free(selector);
+  test_ctx->selector_free(test_ctx, selector);
 
   matched = 1;
   lql_error_init(&error);
-  st = lql_matches_json(NULL, NULL, 0u, &matched, &error);
+  st = test_ctx->matches_json(test_ctx, NULL, NULL, 0u, &matched, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "json and out_matched are required") != 0) {
     printf("matches_json invalid json mismatch: %s\n", error.message);
     ++failures;
   }
   lql_error_init(&error);
-  st = lql_matches_json(NULL, "{}", strlen("{}"), NULL, &error);
+  st = test_ctx->matches_json(test_ctx, NULL, "{}", strlen("{}"), NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "json and out_matched are required") != 0) {
     printf("matches_json invalid out mismatch: %s\n", error.message);
@@ -424,8 +327,8 @@ static void expect_output_state_contract_api(void) {
 
   selector = (lql_selector *)1;
   lql_error_init(&error);
-  st = lql_selector_parse("eq{field=/status,value=open,foo=bar}", &selector,
-                          &error);
+  st = test_ctx->selector_parse(
+      test_ctx, "eq{field=/status,value=open,foo=bar}", &selector, &error);
   if (st != LQL_STATUS_PARSE_ERROR || selector != NULL) {
     printf("selector parse failure output state mismatch: status=%s out=%p\n",
            lql_status_string(st), (void *)selector);
@@ -435,7 +338,8 @@ static void expect_output_state_contract_api(void) {
   bad_projection[0] = "missing-leading-slash";
   projection = (lql_projection *)1;
   lql_error_init(&error);
-  st = lql_projection_parse(bad_projection, 1u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, bad_projection, 1u, &projection,
+                                  &error);
   if (st != LQL_STATUS_PARSE_ERROR || projection != NULL) {
     printf("projection parse failure output state mismatch: status=%s out=%p\n",
            lql_status_string(st), (void *)projection);
@@ -445,7 +349,7 @@ static void expect_output_state_contract_api(void) {
   bad_mutation[0] = "rm:";
   plan = (lql_mutation_plan *)1;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(bad_mutation, 1u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, bad_mutation, 1u, &plan, &error);
   if (st != LQL_STATUS_PARSE_ERROR || plan != NULL) {
     printf("mutation parse failure output state mismatch: status=%s out=%p\n",
            lql_status_string(st), (void *)plan);
@@ -454,7 +358,8 @@ static void expect_output_state_contract_api(void) {
 
   found = 7;
   lql_error_init(&error);
-  st = lql_project_json(NULL, "{}", strlen("{}"), NULL, &found, &error);
+  st = test_ctx->project_json(test_ctx, NULL, "{}", strlen("{}"), NULL, &found,
+                              &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT || found != 0) {
     printf("projection invalid argument found-state mismatch: status=%s "
            "found=%d\n",
@@ -464,7 +369,8 @@ static void expect_output_state_contract_api(void) {
 
   selector = NULL;
   lql_error_init(&error);
-  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("callback failure selector parse mismatch: %s\n", error.message);
     ++failures;
@@ -473,7 +379,7 @@ static void expect_output_state_contract_api(void) {
   source = tmpfile();
   if (source == NULL) {
     printf("callback failure tmpfile failed\n");
-    lql_selector_free(selector);
+    test_ctx->selector_free(test_ctx, selector);
     ++failures;
     return;
   }
@@ -481,15 +387,16 @@ static void expect_output_state_contract_api(void) {
       fseek(source, 0L, SEEK_SET) != 0) {
     printf("callback failure stream setup failed\n");
     fclose(source);
-    lql_selector_free(selector);
+    test_ctx->selector_free(test_ctx, selector);
     ++failures;
     return;
   }
   memset(&seen, 0, sizeof(seen));
   memset(&result, 0, sizeof(result));
   lql_error_init(&error);
-  st = lql_query_file_decisions(selector, source, fail_decision_callback, &seen,
-                                &result, &error);
+  st = test_ctx->query_file_decisions(test_ctx, selector, source,
+                                      fail_decision_callback, &seen, &result,
+                                      &error);
   if (st != LQL_STATUS_UNSUPPORTED ||
       strcmp(error.message, "query decision callback failed") != 0 ||
       seen.calls != 1 || seen.matched != 1) {
@@ -499,7 +406,7 @@ static void expect_output_state_contract_api(void) {
     ++failures;
   }
   fclose(source);
-  lql_selector_free(selector);
+  test_ctx->selector_free(test_ctx, selector);
 }
 
 static lql_status record_payload(void *user, const lql_query_match *match) {
@@ -520,7 +427,8 @@ static lql_status record_payload(void *user, const lql_query_match *match) {
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   lql_error_init(&error);
-  st = lql_payload_write_json(&match->payload, seen->out, &error);
+  st = test_ctx->payload_write_json(test_ctx, &match->payload, seen->out,
+                                    &error);
   if (st != LQL_STATUS_OK) {
     return st;
   }
@@ -543,8 +451,8 @@ static lql_status record_payload_sink(void *user,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   lql_error_init(&error);
-  st = lql_payload_write_json_sink(&match->payload, write_memory_sink, sink,
-                                   &error);
+  st = test_ctx->payload_write_json_sink(test_ctx, &match->payload,
+                                         write_memory_sink, sink, &error);
   return st;
 }
 
@@ -566,7 +474,8 @@ static lql_status record_spooled_payload(void *user,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   lql_error_init(&error);
-  st = lql_payload_write_json(&match->payload, seen->out, &error);
+  st = test_ctx->payload_write_json(test_ctx, &match->payload, seen->out,
+                                    &error);
   if (st != LQL_STATUS_OK) {
     return st;
   }
@@ -588,8 +497,8 @@ static lql_status record_spooled_payload_sink(void *user,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   lql_error_init(&error);
-  st = lql_payload_write_json_sink(&match->payload, write_memory_sink, sink,
-                                   &error);
+  st = test_ctx->payload_write_json_sink(test_ctx, &match->payload,
+                                         write_memory_sink, sink, &error);
   return st;
 }
 
@@ -600,13 +509,14 @@ static void expect_match(const char *expr, const char *json, int want) {
   int got;
 
   lql_error_init(&error);
-  st = lql_selector_parse(expr, &selector, &error);
+  st = test_ctx->selector_parse(test_ctx, expr, &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("parse failed for %s: %s\n", expr, error.message);
     ++failures;
     return;
   }
-  st = lql_matches_json(selector, json, strlen(json), &got, &error);
+  st = test_ctx->matches_json(test_ctx, selector, json, strlen(json), &got,
+                              &error);
   if (st != LQL_STATUS_OK) {
     printf("eval failed for %s: %s\n", expr, error.message);
     ++failures;
@@ -614,7 +524,7 @@ static void expect_match(const char *expr, const char *json, int want) {
     printf("match mismatch for %s: got %d want %d\n", expr, got, want);
     ++failures;
   }
-  lql_selector_free(selector);
+  test_ctx->selector_free(test_ctx, selector);
 }
 
 static void expect_parse_error(const char *expr) {
@@ -624,10 +534,10 @@ static void expect_parse_error(const char *expr) {
 
   selector = NULL;
   lql_error_init(&error);
-  st = lql_selector_parse(expr, &selector, &error);
+  st = test_ctx->selector_parse(test_ctx, expr, &selector, &error);
   if (st == LQL_STATUS_OK) {
     printf("parse unexpectedly succeeded for %s\n", expr);
-    lql_selector_free(selector);
+    test_ctx->selector_free(test_ctx, selector);
     ++failures;
   }
 }
@@ -639,13 +549,14 @@ static void expect_match_or(const char *expr, const char *json, int want) {
   int got;
 
   lql_error_init(&error);
-  st = lql_selector_parse_or(expr, &selector, &error);
+  st = test_ctx->selector_parse_or(test_ctx, expr, &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("parse-or failed for %s: %s\n", expr, error.message);
     ++failures;
     return;
   }
-  st = lql_matches_json(selector, json, strlen(json), &got, &error);
+  st = test_ctx->matches_json(test_ctx, selector, json, strlen(json), &got,
+                              &error);
   if (st != LQL_STATUS_OK) {
     printf("eval-or failed for %s: %s\n", expr, error.message);
     ++failures;
@@ -653,7 +564,7 @@ static void expect_match_or(const char *expr, const char *json, int want) {
     printf("or match mismatch for %s: got %d want %d\n", expr, got, want);
     ++failures;
   }
-  lql_selector_free(selector);
+  test_ctx->selector_free(test_ctx, selector);
 }
 
 static void expect_stream_file(void) {
@@ -668,7 +579,8 @@ static void expect_stream_file(void) {
 
   memset(&seen, 0, sizeof(seen));
   lql_error_init(&error);
-  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("stream parse failed: %s\n", error.message);
     ++failures;
@@ -677,7 +589,7 @@ static void expect_stream_file(void) {
   fp = tmpfile();
   if (fp == NULL) {
     printf("tmpfile failed\n");
-    lql_selector_free(selector);
+    test_ctx->selector_free(test_ctx, selector);
     ++failures;
     return;
   }
@@ -685,15 +597,15 @@ static void expect_stream_file(void) {
       fseek(fp, 0L, SEEK_SET) != 0) {
     printf("tmpfile write/seek failed\n");
     fclose(fp);
-    lql_selector_free(selector);
+    test_ctx->selector_free(test_ctx, selector);
     ++failures;
     return;
   }
   memset(&result, 0, sizeof(result));
-  st = lql_query_file_decisions(selector, fp, record_decision, &seen, &result,
-                                &error);
+  st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
+                                      &seen, &result, &error);
   fclose(fp);
-  lql_selector_free(selector);
+  test_ctx->selector_free(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("stream query failed: %s\n", error.message);
     ++failures;
@@ -734,16 +646,17 @@ static void expect_source_stream(void) {
   reader.chunk_size = 5u;
   options.max_candidates = 2u;
   lql_error_init(&error);
-  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("source stream parse failed: %s\n", error.message);
     ++failures;
     return;
   }
-  st = lql_query_source_decisions_with_options(selector, read_chunk, &reader,
-                                               &options, record_decision, &seen,
-                                               &result, &error);
-  lql_selector_free(selector);
+  st = test_ctx->query_source_decisions_with_options(
+      test_ctx, selector, read_chunk, &reader, &options, record_decision, &seen,
+      &result, &error);
+  test_ctx->selector_free(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("source stream query failed: %s\n", error.message);
     ++failures;
@@ -798,17 +711,18 @@ static void expect_source_spooled_payload_api(void) {
     return;
   }
   lql_error_init(&error);
-  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("source spooled payload parse failed: %s\n", error.message);
     fclose(seen.out);
     ++failures;
     return;
   }
-  st = lql_query_source_spooled_matches_with_options(
-      selector, read_chunk, &reader, &options, record_spooled_payload, &seen,
-      &result, &error);
-  lql_selector_free(selector);
+  st = test_ctx->query_source_spooled_matches_with_options(
+      test_ctx, selector, read_chunk, &reader, &options, record_spooled_payload,
+      &seen, &result, &error);
+  test_ctx->selector_free(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("source spooled payload query failed: %s\n", error.message);
     fclose(seen.out);
@@ -846,16 +760,17 @@ static void expect_source_spooled_payload_api(void) {
   reader.chunk_size = 7u;
   options.max_matches = 1u;
   lql_error_init(&error);
-  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("source spooled payload sink parse failed: %s\n", error.message);
     ++failures;
     return;
   }
-  st = lql_query_source_spooled_matches_with_options(
-      selector, read_chunk, &reader, &options, record_spooled_payload_sink,
-      &sink, &result, &error);
-  lql_selector_free(selector);
+  st = test_ctx->query_source_spooled_matches_with_options(
+      test_ctx, selector, read_chunk, &reader, &options,
+      record_spooled_payload_sink, &sink, &result, &error);
+  test_ctx->selector_free(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("source spooled payload sink query failed: %s\n", error.message);
     ++failures;
@@ -877,7 +792,8 @@ static void expect_stream_array_items(void) {
 
   memset(&seen, 0, sizeof(seen));
   lql_error_init(&error);
-  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("array stream parse failed: %s\n", error.message);
     ++failures;
@@ -886,7 +802,7 @@ static void expect_stream_array_items(void) {
   fp = tmpfile();
   if (fp == NULL) {
     printf("array tmpfile failed\n");
-    lql_selector_free(selector);
+    test_ctx->selector_free(test_ctx, selector);
     ++failures;
     return;
   }
@@ -894,15 +810,15 @@ static void expect_stream_array_items(void) {
       fseek(fp, 0L, SEEK_SET) != 0) {
     printf("array tmpfile write/seek failed\n");
     fclose(fp);
-    lql_selector_free(selector);
+    test_ctx->selector_free(test_ctx, selector);
     ++failures;
     return;
   }
   memset(&result, 0, sizeof(result));
-  st = lql_query_file_decisions(selector, fp, record_decision, &seen, &result,
-                                &error);
+  st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
+                                      &seen, &result, &error);
   fclose(fp);
-  lql_selector_free(selector);
+  test_ctx->selector_free(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("array stream query failed: %s\n", error.message);
     ++failures;
@@ -935,7 +851,8 @@ static void expect_stream_stop_controls(void) {
   lql_status st;
 
   lql_error_init(&error);
-  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("stop controls parse failed: %s\n", error.message);
     ++failures;
@@ -963,8 +880,9 @@ static void expect_stream_stop_controls(void) {
     memset(&result, 0, sizeof(result));                                        \
     setup_options;                                                             \
     setup_seen;                                                                \
-    st = lql_query_file_decisions_with_options(                                \
-        selector, fp, &options, record_decision, &seen, &result, &error);      \
+    st = test_ctx->query_file_decisions_with_options(                          \
+        test_ctx, selector, fp, &options, record_decision, &seen, &result,     \
+        &error);                                                               \
     fclose(fp);                                                                \
     if (st != LQL_STATUS_OK) {                                                 \
       printf(label " query failed: %s\n", error.message);                      \
@@ -992,7 +910,7 @@ static void expect_stream_stop_controls(void) {
 
 #undef RUN_STOP_CASE
 
-  lql_selector_free(selector);
+  test_ctx->selector_free(test_ctx, selector);
 }
 
 static void expect_stream_error_api(void) {
@@ -1022,7 +940,8 @@ static void expect_stream_error_api(void) {
     return;
   }
 
-  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("stream error selector parse failed: %s\n", error.message);
     fclose(source);
@@ -1033,7 +952,7 @@ static void expect_stream_error_api(void) {
   if (fwrite(malformed, 1u, strlen(malformed), source) != strlen(malformed) ||
       fseek(source, 0L, SEEK_SET) != 0) {
     printf("stream error malformed source setup failed\n");
-    lql_selector_free(selector);
+    test_ctx->selector_free(test_ctx, selector);
     fclose(source);
     fclose(out);
     ++failures;
@@ -1041,8 +960,8 @@ static void expect_stream_error_api(void) {
   }
   memset(&seen, 0, sizeof(seen));
   lql_error_init(&error);
-  st = lql_query_file_decisions(selector, source, record_decision, &seen, NULL,
-                                &error);
+  st = test_ctx->query_file_decisions(test_ctx, selector, source,
+                                      record_decision, &seen, NULL, &error);
   if (st != LQL_STATUS_JSON_ERROR) {
     printf("malformed file decision stream status mismatch: %s\n",
            error.message);
@@ -1055,8 +974,9 @@ static void expect_stream_error_api(void) {
     memset(&payload_seen_value, 0, sizeof(payload_seen_value));
     payload_seen_value.out = out;
     lql_error_init(&error);
-    st = lql_query_file_matches(selector, source, record_payload,
-                                &payload_seen_value, NULL, &error);
+    st =
+        test_ctx->query_file_matches(test_ctx, selector, source, record_payload,
+                                     &payload_seen_value, NULL, &error);
     if (st != LQL_STATUS_JSON_ERROR) {
       printf("malformed file match stream status mismatch: %s\n",
              error.message);
@@ -1069,8 +989,8 @@ static void expect_stream_error_api(void) {
   reader.len = strlen(malformed);
   reader.chunk_size = 5u;
   lql_error_init(&error);
-  st = lql_query_source_decisions(selector, read_chunk, &reader,
-                                  record_decision, &seen, NULL, &error);
+  st = test_ctx->query_source_decisions(test_ctx, selector, read_chunk, &reader,
+                                        record_decision, &seen, NULL, &error);
   if (st != LQL_STATUS_JSON_ERROR) {
     printf("malformed source decision stream status mismatch: %s\n",
            error.message);
@@ -1083,19 +1003,19 @@ static void expect_stream_error_api(void) {
   reader.chunk_size = 5u;
   payload_seen_value.out = out;
   lql_error_init(&error);
-  st = lql_query_source_spooled_matches(selector, read_chunk, &reader,
-                                        record_spooled_payload,
-                                        &payload_seen_value, NULL, &error);
+  st = test_ctx->query_source_spooled_matches(
+      test_ctx, selector, read_chunk, &reader, record_spooled_payload,
+      &payload_seen_value, NULL, &error);
   if (st != LQL_STATUS_JSON_ERROR) {
     printf("malformed source spooled stream status mismatch: %s\n",
            error.message);
     ++failures;
   }
-  lql_selector_free(selector);
+  test_ctx->selector_free(test_ctx, selector);
 
   lql_error_init(&error);
-  st =
-      lql_query_file_decisions(NULL, NULL, record_decision, NULL, NULL, &error);
+  st = test_ctx->query_file_decisions(test_ctx, NULL, NULL, record_decision,
+                                      NULL, NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "file and on_decision are required") != 0) {
     printf("file decisions NULL file mismatch: %s\n", error.message);
@@ -1103,7 +1023,8 @@ static void expect_stream_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_query_file_decisions(NULL, source, NULL, NULL, NULL, &error);
+  st = test_ctx->query_file_decisions(test_ctx, NULL, source, NULL, NULL, NULL,
+                                      &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "file and on_decision are required") != 0) {
     printf("file decisions NULL callback mismatch: %s\n", error.message);
@@ -1111,8 +1032,8 @@ static void expect_stream_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_query_source_decisions(NULL, NULL, NULL, record_decision, NULL, NULL,
-                                  &error);
+  st = test_ctx->query_source_decisions(test_ctx, NULL, NULL, NULL,
+                                        record_decision, NULL, NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "read and on_decision are required") != 0) {
     printf("source decisions NULL read mismatch: %s\n", error.message);
@@ -1120,8 +1041,8 @@ static void expect_stream_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_query_source_decisions(NULL, read_chunk, NULL, NULL, NULL, NULL,
-                                  &error);
+  st = test_ctx->query_source_decisions(test_ctx, NULL, read_chunk, NULL, NULL,
+                                        NULL, NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "read and on_decision are required") != 0) {
     printf("source decisions NULL callback mismatch: %s\n", error.message);
@@ -1129,8 +1050,8 @@ static void expect_stream_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_query_source_spooled_matches(NULL, NULL, NULL, record_payload, NULL,
-                                        NULL, &error);
+  st = test_ctx->query_source_spooled_matches(
+      test_ctx, NULL, NULL, NULL, record_payload, NULL, NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "read and on_match are required") != 0) {
     printf("source spooled matches NULL read mismatch: %s\n", error.message);
@@ -1138,8 +1059,8 @@ static void expect_stream_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_query_source_spooled_matches(NULL, read_chunk, NULL, NULL, NULL,
-                                        NULL, &error);
+  st = test_ctx->query_source_spooled_matches(test_ctx, NULL, read_chunk, NULL,
+                                              NULL, NULL, NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "read and on_match are required") != 0) {
     printf("source spooled matches NULL callback mismatch: %s\n",
@@ -1148,7 +1069,8 @@ static void expect_stream_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_query_file_matches(NULL, NULL, record_payload, NULL, NULL, &error);
+  st = test_ctx->query_file_matches(test_ctx, NULL, NULL, record_payload, NULL,
+                                    NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "file and on_match are required") != 0) {
     printf("file matches NULL file mismatch: %s\n", error.message);
@@ -1156,7 +1078,8 @@ static void expect_stream_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_query_file_matches(NULL, source, NULL, NULL, NULL, &error);
+  st = test_ctx->query_file_matches(test_ctx, NULL, source, NULL, NULL, NULL,
+                                    &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "file and on_match are required") != 0) {
     printf("file matches NULL callback mismatch: %s\n", error.message);
@@ -1164,7 +1087,7 @@ static void expect_stream_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_payload_write_json(NULL, out, &error);
+  st = test_ctx->payload_write_json(test_ctx, NULL, out, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "payload and output file are required") != 0) {
     printf("payload write NULL payload mismatch: %s\n", error.message);
@@ -1174,7 +1097,7 @@ static void expect_stream_error_api(void) {
   memset(&payload, 0, sizeof(payload));
   payload.kind = LQL_PAYLOAD_NONE;
   lql_error_init(&error);
-  st = lql_payload_write_json(&payload, out, &error);
+  st = test_ctx->payload_write_json(test_ctx, &payload, out, &error);
   if (st != LQL_STATUS_UNSUPPORTED ||
       strcmp(error.message, "payload is not a seekable source range") != 0) {
     printf("payload write unsupported kind mismatch: %s\n", error.message);
@@ -1184,7 +1107,7 @@ static void expect_stream_error_api(void) {
   payload.kind = LQL_PAYLOAD_SEEKABLE_RANGE;
   payload.source = NULL;
   lql_error_init(&error);
-  st = lql_payload_write_json(&payload, out, &error);
+  st = test_ctx->payload_write_json(test_ctx, &payload, out, &error);
   if (st != LQL_STATUS_UNSUPPORTED ||
       strcmp(error.message, "payload is not a seekable source range") != 0) {
     printf("payload write missing source mismatch: %s\n", error.message);
@@ -1194,7 +1117,7 @@ static void expect_stream_error_api(void) {
   payload.kind = LQL_PAYLOAD_SEEKABLE_RANGE;
   payload.source = source;
   lql_error_init(&error);
-  st = lql_payload_write_json(&payload, NULL, &error);
+  st = test_ctx->payload_write_json(test_ctx, &payload, NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "payload and output file are required") != 0) {
     printf("payload write NULL out mismatch: %s\n", error.message);
@@ -1202,7 +1125,8 @@ static void expect_stream_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_payload_write_json_sink(NULL, write_memory_sink, NULL, &error);
+  st = test_ctx->payload_write_json_sink(test_ctx, NULL, write_memory_sink,
+                                         NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "payload and write callback are required") != 0) {
     printf("payload sink NULL payload mismatch: %s\n", error.message);
@@ -1210,7 +1134,8 @@ static void expect_stream_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_payload_write_json_sink(&payload, NULL, NULL, &error);
+  st =
+      test_ctx->payload_write_json_sink(test_ctx, &payload, NULL, NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "payload and write callback are required") != 0) {
     printf("payload sink NULL write mismatch: %s\n", error.message);
@@ -1255,8 +1180,8 @@ static void expect_stream_malformed_doc(lql_selector *selector,
 
   memset(&seen, 0, sizeof(seen));
   lql_error_init(&error);
-  st = lql_query_file_decisions(selector, source, record_decision, &seen, NULL,
-                                &error);
+  st = test_ctx->query_file_decisions(test_ctx, selector, source,
+                                      record_decision, &seen, NULL, &error);
   if (st != LQL_STATUS_JSON_ERROR) {
     printf("stream malformed file decisions mismatch: %s status=%s error=%s\n",
            label, lql_status_string(st), error.message);
@@ -1270,8 +1195,9 @@ static void expect_stream_malformed_doc(lql_selector *selector,
     memset(&payload_seen_value, 0, sizeof(payload_seen_value));
     payload_seen_value.out = out;
     lql_error_init(&error);
-    st = lql_query_file_matches(selector, source, record_payload,
-                                &payload_seen_value, NULL, &error);
+    st =
+        test_ctx->query_file_matches(test_ctx, selector, source, record_payload,
+                                     &payload_seen_value, NULL, &error);
     if (st != LQL_STATUS_JSON_ERROR) {
       printf("stream malformed file payload mismatch: %s status=%s error=%s\n",
              label, lql_status_string(st), error.message);
@@ -1285,8 +1211,8 @@ static void expect_stream_malformed_doc(lql_selector *selector,
   reader.len = strlen(doc);
   reader.chunk_size = 5u;
   lql_error_init(&error);
-  st = lql_query_source_decisions(selector, read_chunk, &reader,
-                                  record_decision, &seen, NULL, &error);
+  st = test_ctx->query_source_decisions(test_ctx, selector, read_chunk, &reader,
+                                        record_decision, &seen, NULL, &error);
   if (st != LQL_STATUS_JSON_ERROR) {
     printf("stream malformed source decisions mismatch: %s status=%s "
            "error=%s\n",
@@ -1301,9 +1227,9 @@ static void expect_stream_malformed_doc(lql_selector *selector,
   reader.chunk_size = 5u;
   payload_seen_value.out = out;
   lql_error_init(&error);
-  st = lql_query_source_spooled_matches(selector, read_chunk, &reader,
-                                        record_spooled_payload,
-                                        &payload_seen_value, NULL, &error);
+  st = test_ctx->query_source_spooled_matches(
+      test_ctx, selector, read_chunk, &reader, record_spooled_payload,
+      &payload_seen_value, NULL, &error);
   if (st != LQL_STATUS_JSON_ERROR) {
     printf("stream malformed source payload mismatch: %s status=%s error=%s\n",
            label, lql_status_string(st), error.message);
@@ -1329,7 +1255,8 @@ static void expect_stream_error_corpus_api(void) {
 
   selector = NULL;
   lql_error_init(&error);
-  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("stream malformed corpus selector parse failed: %s\n",
            error.message);
@@ -1339,7 +1266,7 @@ static void expect_stream_error_corpus_api(void) {
   for (i = 0u; i < sizeof(cases) / sizeof(cases[0]); ++i) {
     expect_stream_malformed_doc(selector, cases[i].name, cases[i].doc);
   }
-  lql_selector_free(selector);
+  test_ctx->selector_free(test_ctx, selector);
 }
 
 static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len) {
@@ -1404,7 +1331,8 @@ static void expect_seekable_payload_api(void) {
   }
   lql_error_init(&error);
   selector = NULL;
-  st = lql_selector_parse("/status=\"open\"", &selector, &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("payload parse failed: %s\n", error.message);
     fclose(fp);
@@ -1415,13 +1343,13 @@ static void expect_seekable_payload_api(void) {
   memset(&seen, 0, sizeof(seen));
   seen.out = out;
   memset(&result, 0, sizeof(result));
-  st = lql_query_file_matches(selector, fp, record_payload, &seen, &result,
-                              &error);
+  st = test_ctx->query_file_matches(test_ctx, selector, fp, record_payload,
+                                    &seen, &result, &error);
   if (st != LQL_STATUS_OK) {
     printf("payload query failed: %s\n", error.message);
     fclose(fp);
     fclose(out);
-    lql_selector_free(selector);
+    test_ctx->selector_free(test_ctx, selector);
     ++failures;
     return;
   }
@@ -1453,8 +1381,8 @@ static void expect_seekable_payload_api(void) {
   } else {
     memset(&sink, 0, sizeof(sink));
     memset(&result, 0, sizeof(result));
-    st = lql_query_file_matches(selector, fp, record_payload_sink, &sink,
-                                &result, &error);
+    st = test_ctx->query_file_matches(
+        test_ctx, selector, fp, record_payload_sink, &sink, &result, &error);
     if (st != LQL_STATUS_OK) {
       printf("payload sink query failed: %s\n", error.message);
       ++failures;
@@ -1473,7 +1401,8 @@ static void expect_seekable_payload_api(void) {
   payload.offset = 0u;
   payload.size = 24u;
   lql_error_init(&error);
-  st = lql_payload_write_json_sink(&payload, write_memory_sink, &sink, &error);
+  st = test_ctx->payload_write_json_sink(test_ctx, &payload, write_memory_sink,
+                                         &sink, &error);
   if (st != LQL_STATUS_STOP ||
       strcmp(error.message, "payload sink write failed") != 0) {
     printf("payload sink failure mismatch: status=%s error=%s\n",
@@ -1490,8 +1419,9 @@ static void expect_seekable_payload_api(void) {
     memset(&result, 0, sizeof(result));
     seen.out = out;
     seen.stop_after_first = 1;
-    st = lql_query_file_matches_with_options(
-        selector, fp, &options, record_payload, &seen, &result, &error);
+    st = test_ctx->query_file_matches_with_options(test_ctx, selector, fp,
+                                                   &options, record_payload,
+                                                   &seen, &result, &error);
     if (st != LQL_STATUS_OK) {
       printf("payload stop query failed: %s\n", error.message);
       ++failures;
@@ -1503,7 +1433,7 @@ static void expect_seekable_payload_api(void) {
     }
   }
 
-  lql_selector_free(selector);
+  test_ctx->selector_free(test_ctx, selector);
   fclose(fp);
   fclose(out);
 }
@@ -1558,7 +1488,7 @@ static void expect_projection_api(void) {
   fields[3] = "/items/1/sku";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(fields, 4u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, fields, 4u, &projection, &error);
   if (st != LQL_STATUS_OK) {
     printf("projection parse failed: %s\n", error.message);
     fclose(source);
@@ -1567,8 +1497,9 @@ static void expect_projection_api(void) {
     return;
   }
   found = 0;
-  st = lql_project_file_range(projection, source, 0u, (lql_uint64)strlen(first),
-                              out, &found, &error);
+  st = test_ctx->project_file_range(test_ctx, projection, source, 0u,
+                                    (lql_uint64)strlen(first), out, &found,
+                                    &error);
   if (st != LQL_STATUS_OK) {
     printf("projection range failed: %s\n", error.message);
     ++failures;
@@ -1581,42 +1512,44 @@ static void expect_projection_api(void) {
     printf("projection output mismatch: %s\n", buf);
     ++failures;
   }
-  lql_projection_free(projection);
+  test_ctx->projection_free(test_ctx, projection);
   fclose(out);
 
   out = tmpfile();
   root_field[0] = "/id";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(root_field, 1u, &projection, &error);
+  st =
+      test_ctx->projection_parse(test_ctx, root_field, 1u, &projection, &error);
   if (st != LQL_STATUS_OK) {
     printf("root field projection parse failed: %s\n", error.message);
     ++failures;
   } else {
     found = 0;
-    st = lql_project_file_range(
-        projection, source, (lql_uint64)(strlen(first) + 1u),
+    st = test_ctx->project_file_range(
+        test_ctx, projection, source, (lql_uint64)(strlen(first) + 1u),
         (lql_uint64)strlen(second), out, &found, &error);
     if (st != LQL_STATUS_OK) {
       printf("second object projection failed: %s\n", error.message);
       ++failures;
     }
   }
-  lql_projection_free(projection);
+  test_ctx->projection_free(test_ctx, projection);
   fclose(out);
 
   out = tmpfile();
   missing[0] = "/missing";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(missing, 1u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, missing, 1u, &projection, &error);
   if (st != LQL_STATUS_OK) {
     printf("missing projection parse failed: %s\n", error.message);
     ++failures;
   } else {
     found = 1;
-    st = lql_project_file_range(projection, source, 0u,
-                                (lql_uint64)strlen(first), out, &found, &error);
+    st = test_ctx->project_file_range(test_ctx, projection, source, 0u,
+                                      (lql_uint64)strlen(first), out, &found,
+                                      &error);
     if (st != LQL_STATUS_OK) {
       printf("missing projection range failed: %s\n", error.message);
       ++failures;
@@ -1628,41 +1561,41 @@ static void expect_projection_api(void) {
       ++failures;
     }
   }
-  lql_projection_free(projection);
+  test_ctx->projection_free(test_ctx, projection);
   fclose(out);
 
   invalid[0] = "/items/999999999999999999999999/sku";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(invalid, 1u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, invalid, 1u, &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("oversized array projection path parsed\n");
-    lql_projection_free(projection);
+    test_ctx->projection_free(test_ctx, projection);
     ++failures;
   }
   root[0] = "/";
   projection = NULL;
-  st = lql_projection_parse(root, 1u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, root, 1u, &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("root projection path parsed\n");
-    lql_projection_free(projection);
+    test_ctx->projection_free(test_ctx, projection);
     ++failures;
   }
   index[0] = "/0/id";
   projection = NULL;
-  st = lql_projection_parse(index, 1u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, index, 1u, &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("leading index projection path parsed\n");
-    lql_projection_free(projection);
+    test_ctx->projection_free(test_ctx, projection);
     ++failures;
   }
   conflict[0] = "/nested";
   conflict[1] = "/nested/x";
   projection = NULL;
-  st = lql_projection_parse(conflict, 2u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, conflict, 2u, &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("conflicting projection paths parsed\n");
-    lql_projection_free(projection);
+    test_ctx->projection_free(test_ctx, projection);
     ++failures;
   }
 
@@ -1670,20 +1603,22 @@ static void expect_projection_api(void) {
   root_field[0] = "/id";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(root_field, 1u, &projection, &error);
+  st =
+      test_ctx->projection_parse(test_ctx, root_field, 1u, &projection, &error);
   if (st != LQL_STATUS_OK || out == NULL) {
     printf("large-offset projection setup failed\n");
     ++failures;
   } else {
     found = 1;
-    st = lql_project_file_range(projection, source, ~(lql_uint64)0,
-                                (lql_uint64)strlen(first), out, &found, &error);
+    st = test_ctx->project_file_range(test_ctx, projection, source,
+                                      ~(lql_uint64)0, (lql_uint64)strlen(first),
+                                      out, &found, &error);
     if (st != LQL_STATUS_JSON_ERROR || found) {
       printf("large-offset projection unexpectedly succeeded\n");
       ++failures;
     }
   }
-  lql_projection_free(projection);
+  test_ctx->projection_free(test_ctx, projection);
   if (out != NULL) {
     fclose(out);
   }
@@ -1712,20 +1647,21 @@ static void expect_projection_api(void) {
   root_field[0] = "/id";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(root_field, 1u, &projection, &error);
+  st =
+      test_ctx->projection_parse(test_ctx, root_field, 1u, &projection, &error);
   if (st != LQL_STATUS_OK) {
     printf("scalar projection parse failed: %s\n", error.message);
     ++failures;
   } else {
     found = 0;
-    st =
-        lql_project_file_range(projection, source, 0u, 1u, out, &found, &error);
+    st = test_ctx->project_file_range(test_ctx, projection, source, 0u, 1u, out,
+                                      &found, &error);
     if (st == LQL_STATUS_OK) {
       printf("scalar projection unexpectedly succeeded\n");
       ++failures;
     }
   }
-  lql_projection_free(projection);
+  test_ctx->projection_free(test_ctx, projection);
   fclose(source);
   fclose(out);
 }
@@ -1755,7 +1691,7 @@ static void expect_buffered_projection_api(void) {
   fields[2] = "/items/1/sku";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(fields, 3u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, fields, 3u, &projection, &error);
   if (st != LQL_STATUS_OK) {
     printf("buffered projection parse failed: %s\n", error.message);
     fclose(out);
@@ -1763,7 +1699,8 @@ static void expect_buffered_projection_api(void) {
     return;
   }
   found = 0;
-  st = lql_project_json(projection, doc, strlen(doc), out, &found, &error);
+  st = test_ctx->project_json(test_ctx, projection, doc, strlen(doc), out,
+                              &found, &error);
   if (st != LQL_STATUS_OK) {
     printf("buffered projection failed: %s\n", error.message);
     ++failures;
@@ -1776,20 +1713,21 @@ static void expect_buffered_projection_api(void) {
     printf("buffered projection output mismatch: %s\n", buf);
     ++failures;
   }
-  lql_projection_free(projection);
+  test_ctx->projection_free(test_ctx, projection);
   fclose(out);
 
   out = tmpfile();
   missing[0] = "/missing";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(missing, 1u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, missing, 1u, &projection, &error);
   if (st != LQL_STATUS_OK || out == NULL) {
     printf("buffered missing projection setup failed\n");
     ++failures;
   } else {
     found = 1;
-    st = lql_project_json(projection, doc, strlen(doc), out, &found, &error);
+    st = test_ctx->project_json(test_ctx, projection, doc, strlen(doc), out,
+                                &found, &error);
     if (st != LQL_STATUS_OK) {
       printf("buffered missing projection failed: %s\n", error.message);
       ++failures;
@@ -1801,7 +1739,7 @@ static void expect_buffered_projection_api(void) {
       ++failures;
     }
   }
-  lql_projection_free(projection);
+  test_ctx->projection_free(test_ctx, projection);
   if (out != NULL) {
     fclose(out);
   }
@@ -1832,7 +1770,7 @@ static void expect_source_projection_api(void) {
   fields[2] = "/items/1/sku";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(fields, 3u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, fields, 3u, &projection, &error);
   if (st != LQL_STATUS_OK) {
     printf("source projection parse failed: %s\n", error.message);
     fclose(out);
@@ -1845,7 +1783,8 @@ static void expect_source_projection_api(void) {
   reader.len = strlen(doc);
   reader.chunk_size = 4u;
   found = 0;
-  st = lql_project_source(projection, read_chunk, &reader, out, &found, &error);
+  st = test_ctx->project_source(test_ctx, projection, read_chunk, &reader, out,
+                                &found, &error);
   if (st != LQL_STATUS_OK) {
     printf("source projection failed: %s\n", error.message);
     ++failures;
@@ -1864,7 +1803,8 @@ static void expect_source_projection_api(void) {
 
   found = 1;
   lql_error_init(&error);
-  st = lql_project_source(projection, NULL, &reader, out, &found, &error);
+  st = test_ctx->project_source(test_ctx, projection, NULL, &reader, out,
+                                &found, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
       strcmp(error.message, "projection source read callback is required") !=
           0) {
@@ -1874,7 +1814,8 @@ static void expect_source_projection_api(void) {
   }
   found = 1;
   lql_error_init(&error);
-  st = lql_project_source(NULL, read_chunk, &reader, out, &found, &error);
+  st = test_ctx->project_source(test_ctx, NULL, read_chunk, &reader, out,
+                                &found, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
       strcmp(error.message,
              "projection, reader, out, and out_found are required") != 0) {
@@ -1884,8 +1825,8 @@ static void expect_source_projection_api(void) {
   }
   found = 1;
   lql_error_init(&error);
-  st =
-      lql_project_source(projection, read_chunk, &reader, NULL, &found, &error);
+  st = test_ctx->project_source(test_ctx, projection, read_chunk, &reader, NULL,
+                                &found, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
       strcmp(error.message,
              "projection, reader, out, and out_found are required") != 0) {
@@ -1894,7 +1835,8 @@ static void expect_source_projection_api(void) {
     ++failures;
   }
   lql_error_init(&error);
-  st = lql_project_source(projection, read_chunk, &reader, out, NULL, &error);
+  st = test_ctx->project_source(test_ctx, projection, read_chunk, &reader, out,
+                                NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message,
              "projection, reader, out, and out_found are required") != 0) {
@@ -1903,8 +1845,8 @@ static void expect_source_projection_api(void) {
   }
   found = 1;
   lql_error_init(&error);
-  st =
-      lql_project_source(projection, read_fail_once, NULL, out, &found, &error);
+  st = test_ctx->project_source(test_ctx, projection, read_fail_once, NULL, out,
+                                &found, &error);
   if (st != LQL_STATUS_JSON_ERROR || found ||
       strcmp(error.message, "projection source read failed") != 0) {
     printf("source projection read error mismatch: found=%d error=%s\n", found,
@@ -1912,7 +1854,7 @@ static void expect_source_projection_api(void) {
     ++failures;
   }
 
-  lql_projection_free(projection);
+  test_ctx->projection_free(test_ctx, projection);
   fclose(out);
 }
 
@@ -1941,13 +1883,14 @@ static void expect_projection_path_invariant_api(void) {
   duplicate[1] = "/id";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(duplicate, 2u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, duplicate, 2u, &projection, &error);
   if (st != LQL_STATUS_OK) {
     printf("duplicate projection path rejected: %s\n", error.message);
     ++failures;
   } else {
     found = 0;
-    st = lql_project_json(projection, doc, strlen(doc), out, &found, &error);
+    st = test_ctx->project_json(test_ctx, projection, doc, strlen(doc), out,
+                                &found, &error);
     if (st != LQL_STATUS_OK) {
       printf("duplicate projection failed: %s\n", error.message);
       ++failures;
@@ -1960,17 +1903,18 @@ static void expect_projection_path_invariant_api(void) {
       ++failures;
     }
   }
-  lql_projection_free(projection);
+  test_ctx->projection_free(test_ctx, projection);
   fclose(out);
 
   conflict_parent_first[0] = "/meta";
   conflict_parent_first[1] = "/meta/trace";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(conflict_parent_first, 2u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, conflict_parent_first, 2u,
+                                  &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("parent-first projection conflict parsed\n");
-    lql_projection_free(projection);
+    test_ctx->projection_free(test_ctx, projection);
     ++failures;
   }
 
@@ -1978,10 +1922,11 @@ static void expect_projection_path_invariant_api(void) {
   conflict_child_first[1] = "/items";
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(conflict_child_first, 2u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, conflict_child_first, 2u,
+                                  &projection, &error);
   if (st == LQL_STATUS_OK) {
     printf("child-first projection conflict parsed\n");
-    lql_projection_free(projection);
+    test_ctx->projection_free(test_ctx, projection);
     ++failures;
   }
 }
@@ -1995,7 +1940,7 @@ static void expect_projection_parse_error_corpus_api(void) {
 
   projection = (lql_projection *)1;
   lql_error_init(&error);
-  st = lql_projection_parse(NULL, 0u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, NULL, 0u, &projection, &error);
   if (st != LQL_STATUS_PARSE_ERROR || projection != NULL) {
     printf("projection parse corpus empty field-set mismatch: status=%s "
            "error=%s\n",
@@ -2005,13 +1950,14 @@ static void expect_projection_parse_error_corpus_api(void) {
 
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(blank_fields, 2u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, blank_fields, 2u, &projection,
+                                  &error);
   if (st != LQL_STATUS_PARSE_ERROR || projection != NULL) {
     printf("projection parse corpus blank field-set mismatch: status=%s "
            "error=%s\n",
            lql_status_string(st), error.message);
     ++failures;
-    lql_projection_free(projection);
+    test_ctx->projection_free(test_ctx, projection);
   }
 
 #define EXPECT_PROJECTION_PARSE_ERROR(label, value)                            \
@@ -2019,13 +1965,14 @@ static void expect_projection_parse_error_corpus_api(void) {
     field = (value);                                                           \
     projection = NULL;                                                         \
     lql_error_init(&error);                                                    \
-    st = lql_projection_parse(&field, 1u, &projection, &error);                \
+    st =                                                                       \
+        test_ctx->projection_parse(test_ctx, &field, 1u, &projection, &error); \
     if (st != LQL_STATUS_PARSE_ERROR || projection != NULL) {                  \
       printf("projection parse corpus mismatch: " label                        \
              " status=%s error=%s\n",                                          \
              lql_status_string(st), error.message);                            \
       ++failures;                                                              \
-      lql_projection_free(projection);                                         \
+      test_ctx->projection_free(test_ctx, projection);                         \
     }                                                                          \
   } while (0)
 
@@ -2064,7 +2011,7 @@ static void expect_projection_compact_error_api(void) {
 
   projection = (lql_projection *)1;
   lql_error_init(&error);
-  st = lql_projection_parse(NULL, 0u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, NULL, 0u, &projection, &error);
   if (st != LQL_STATUS_PARSE_ERROR || projection != NULL ||
       strcmp(error.message, "projection fields required") != 0) {
     printf("projection parse empty-field error mismatch: %s\n", error.message);
@@ -2073,7 +2020,7 @@ static void expect_projection_compact_error_api(void) {
 
   field = "/id";
   lql_error_init(&error);
-  st = lql_projection_parse(&field, 1u, NULL, &error);
+  st = test_ctx->projection_parse(test_ctx, &field, 1u, NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "out projection required") != 0) {
     printf("projection parse NULL out error mismatch: %s\n", error.message);
@@ -2082,7 +2029,7 @@ static void expect_projection_compact_error_api(void) {
 
   projection = NULL;
   lql_error_init(&error);
-  st = lql_projection_parse(&field, 1u, &projection, &error);
+  st = test_ctx->projection_parse(test_ctx, &field, 1u, &projection, &error);
   if (st != LQL_STATUS_OK) {
     printf("projection/compact error projection setup failed: %s\n",
            error.message);
@@ -2090,7 +2037,8 @@ static void expect_projection_compact_error_api(void) {
   } else {
     found = 1;
     lql_error_init(&error);
-    st = lql_project_json(projection, NULL, 0u, out, &found, &error);
+    st = test_ctx->project_json(test_ctx, projection, NULL, 0u, out, &found,
+                                &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
         strcmp(error.message, "json is required") != 0) {
       printf("project_json NULL json error mismatch: %s\n", error.message);
@@ -2099,7 +2047,8 @@ static void expect_projection_compact_error_api(void) {
 
     found = 1;
     lql_error_init(&error);
-    st = lql_project_json(NULL, "{}", strlen("{}"), out, &found, &error);
+    st = test_ctx->project_json(test_ctx, NULL, "{}", strlen("{}"), out, &found,
+                                &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
         strcmp(error.message,
                "projection, reader, out, and out_found are required") != 0) {
@@ -2110,7 +2059,8 @@ static void expect_projection_compact_error_api(void) {
 
     found = 1;
     lql_error_init(&error);
-    st = lql_project_file_range(projection, NULL, 0u, 2u, out, &found, &error);
+    st = test_ctx->project_file_range(test_ctx, projection, NULL, 0u, 2u, out,
+                                      &found, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT || found ||
         strcmp(error.message, "projection file is required") != 0) {
       printf("project_file_range NULL file error mismatch: %s\n",
@@ -2120,8 +2070,8 @@ static void expect_projection_compact_error_api(void) {
 
     found = 1;
     lql_error_init(&error);
-    st = lql_project_json(projection, malformed, strlen(malformed), out, &found,
-                          &error);
+    st = test_ctx->project_json(test_ctx, projection, malformed,
+                                strlen(malformed), out, &found, &error);
     if (st != LQL_STATUS_JSON_ERROR || found) {
       printf("project_json malformed input status mismatch: %s\n",
              error.message);
@@ -2135,9 +2085,9 @@ static void expect_projection_compact_error_api(void) {
     } else {
       found = 1;
       lql_error_init(&error);
-      st = lql_project_file_range(projection, source, 0u,
-                                  (lql_uint64)strlen(malformed), out, &found,
-                                  &error);
+      st = test_ctx->project_file_range(test_ctx, projection, source, 0u,
+                                        (lql_uint64)strlen(malformed), out,
+                                        &found, &error);
       if (st != LQL_STATUS_JSON_ERROR || found) {
         printf("project_file_range malformed input status mismatch: %s\n",
                error.message);
@@ -2145,10 +2095,10 @@ static void expect_projection_compact_error_api(void) {
       }
     }
   }
-  lql_projection_free(projection);
+  test_ctx->projection_free(test_ctx, projection);
 
   lql_error_init(&error);
-  st = lql_compact_file_range(NULL, 0u, 0u, out, &error);
+  st = test_ctx->compact_file_range(test_ctx, NULL, 0u, 0u, out, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "file and out are required") != 0) {
     printf("compact_file_range NULL file error mismatch: %s\n", error.message);
@@ -2156,7 +2106,7 @@ static void expect_projection_compact_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_compact_file_range(source, 0u, 0u, NULL, &error);
+  st = test_ctx->compact_file_range(test_ctx, source, 0u, 0u, NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "file and out are required") != 0) {
     printf("compact_file_range NULL out error mismatch: %s\n", error.message);
@@ -2164,7 +2114,7 @@ static void expect_projection_compact_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_compact_source(NULL, NULL, out, &error);
+  st = test_ctx->compact_source(test_ctx, NULL, NULL, out, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "read and out are required") != 0) {
     printf("compact_source NULL read error mismatch: %s\n", error.message);
@@ -2172,7 +2122,7 @@ static void expect_projection_compact_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_compact_source(read_chunk, NULL, NULL, &error);
+  st = test_ctx->compact_source(test_ctx, read_chunk, NULL, NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "read and out are required") != 0) {
     printf("compact_source NULL out error mismatch: %s\n", error.message);
@@ -2180,7 +2130,7 @@ static void expect_projection_compact_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_compact_source(read_fail_once, NULL, out, &error);
+  st = test_ctx->compact_source(test_ctx, read_fail_once, NULL, out, &error);
   if (st != LQL_STATUS_JSON_ERROR ||
       strcmp(error.message, "compact source read failed") != 0) {
     printf("compact_source read error mismatch: %s\n", error.message);
@@ -2188,7 +2138,7 @@ static void expect_projection_compact_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_compact_json(NULL, 0u, out, &error);
+  st = test_ctx->compact_json(test_ctx, NULL, 0u, out, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "json and out are required") != 0) {
     printf("compact_json NULL json error mismatch: %s\n", error.message);
@@ -2196,7 +2146,7 @@ static void expect_projection_compact_error_api(void) {
   }
 
   lql_error_init(&error);
-  st = lql_compact_json("{}", strlen("{}"), NULL, &error);
+  st = test_ctx->compact_json(test_ctx, "{}", strlen("{}"), NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "json and out are required") != 0) {
     printf("compact_json NULL out error mismatch: %s\n", error.message);
@@ -2241,8 +2191,8 @@ static void expect_compact_api(void) {
     return;
   }
   lql_error_init(&error);
-  st = lql_compact_file_range(source, 0u, (lql_uint64)strlen(first), out,
-                              &error);
+  st = test_ctx->compact_file_range(test_ctx, source, 0u,
+                                    (lql_uint64)strlen(first), out, &error);
   if (st != LQL_STATUS_OK) {
     printf("compact file range failed: %s\n", error.message);
     ++failures;
@@ -2259,7 +2209,7 @@ static void expect_compact_api(void) {
   reader.len = strlen(first);
   reader.chunk_size = 4u;
   lql_error_init(&error);
-  st = lql_compact_source(read_chunk, &reader, out, &error);
+  st = test_ctx->compact_source(test_ctx, read_chunk, &reader, out, &error);
   if (st != LQL_STATUS_OK) {
     printf("compact source failed: %s\n", error.message);
     ++failures;
@@ -2275,8 +2225,8 @@ static void expect_compact_api(void) {
 
   out = tmpfile();
   lql_error_init(&error);
-  st = lql_compact_json("{ \"ok\" : true }", strlen("{ \"ok\" : true }"), out,
-                        &error);
+  st = test_ctx->compact_json(test_ctx, "{ \"ok\" : true }",
+                              strlen("{ \"ok\" : true }"), out, &error);
   if (st != LQL_STATUS_OK) {
     printf("compact buffer failed: %s\n", error.message);
     ++failures;
@@ -2289,7 +2239,8 @@ static void expect_compact_api(void) {
 
   out = tmpfile();
   lql_error_init(&error);
-  st = lql_compact_file_range(source, 0u, (lql_uint64)3, out, &error);
+  st = test_ctx->compact_file_range(test_ctx, source, 0u, (lql_uint64)3, out,
+                                    &error);
   if (st != LQL_STATUS_JSON_ERROR) {
     printf("compact invalid range unexpectedly succeeded\n");
     ++failures;
@@ -2321,7 +2272,8 @@ static void expect_compact_error_corpus_api(void) {
       continue;
     }
     lql_error_init(&error);
-    st = lql_compact_json(cases[i].json, strlen(cases[i].json), out, &error);
+    st = test_ctx->compact_json(test_ctx, cases[i].json, strlen(cases[i].json),
+                                out, &error);
     if (st != LQL_STATUS_JSON_ERROR) {
       printf("compact_json invalid corpus mismatch: %s status=%s error=%s\n",
              cases[i].name, lql_status_string(st), error.message);
@@ -2341,7 +2293,7 @@ static void expect_compact_error_corpus_api(void) {
     reader.len = strlen(cases[i].json);
     reader.chunk_size = 5u;
     lql_error_init(&error);
-    st = lql_compact_source(read_chunk, &reader, out, &error);
+    st = test_ctx->compact_source(test_ctx, read_chunk, &reader, out, &error);
     if (st != LQL_STATUS_JSON_ERROR) {
       printf("compact_source invalid corpus mismatch: %s status=%s error=%s\n",
              cases[i].name, lql_status_string(st), error.message);
@@ -2369,8 +2321,8 @@ static void expect_compact_error_corpus_api(void) {
       ++failures;
     } else {
       lql_error_init(&error);
-      st = lql_compact_file_range(source, 0u, (lql_uint64)strlen(cases[i].json),
-                                  out, &error);
+      st = test_ctx->compact_file_range(
+          test_ctx, source, 0u, (lql_uint64)strlen(cases[i].json), out, &error);
       if (st != LQL_STATUS_JSON_ERROR) {
         printf("compact_file_range invalid corpus mismatch: %s status=%s "
                "error=%s\n",
@@ -2404,32 +2356,32 @@ static void expect_mutation_plan_api(void) {
   valid[5] = "rm:/state/legacy";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(valid, 6u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, valid, 6u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("mutation plan parse failed: %s\n", error.message);
     ++failures;
-  } else if (lql_mutation_plan_count(plan) != 7u) {
+  } else if (test_ctx->mutation_plan_count(test_ctx, plan) != 7u) {
     printf("mutation plan count mismatch: %lu\n",
-           (unsigned long)lql_mutation_plan_count(plan));
+           (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
     ++failures;
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
 
   wildcards[0] = "/items/*/status=ready";
   wildcards[1] = "/groups/.../sku=ok";
   wildcards[2] = "/records[]/count=+1";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(wildcards, 3u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, wildcards, 3u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("wildcard mutation plan parse failed: %s\n", error.message);
     ++failures;
-  } else if (lql_mutation_plan_count(plan) != 3u) {
+  } else if (test_ctx->mutation_plan_count(test_ctx, plan) != 3u) {
     printf("wildcard mutation plan count mismatch: %lu\n",
-           (unsigned long)lql_mutation_plan_count(plan));
+           (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
     ++failures;
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
 
   invalid_default[0] = "badexpr";
   invalid_default[1] = "/";
@@ -2442,19 +2394,20 @@ static void expect_mutation_plan_api(void) {
   for (i = 0u; i < sizeof(invalid_default) / sizeof(invalid_default[0]); ++i) {
     plan = NULL;
     lql_error_init(&error);
-    st = lql_mutation_plan_parse(&invalid_default[i], 1u, &plan, &error);
+    st = test_ctx->mutation_plan_parse(test_ctx, &invalid_default[i], 1u, &plan,
+                                       &error);
     if (st != LQL_STATUS_PARSE_ERROR || plan != NULL) {
       printf("invalid mutation parse mismatch: %s status=%s error=%s\n",
              invalid_default[i], lql_status_string(st), error.message);
       ++failures;
     }
-    lql_mutation_plan_free(plan);
+    test_ctx->mutation_plan_free(test_ctx, plan);
   }
 
   blank = "";
   plan = (lql_mutation_plan *)1;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(&blank, 1u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, &blank, 1u, &plan, &error);
   if (st != LQL_STATUS_PARSE_ERROR || plan != NULL ||
       strcmp(error.message, "no valid field mutations parsed") != 0) {
     printf("blank mutation parse mismatch: %s\n", error.message);
@@ -2467,29 +2420,29 @@ static void expect_mutation_plan_api(void) {
   options.enable_file_values = 1;
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse_with_options(file_backed, 1u, &options, &plan,
-                                            &error);
+  st = test_ctx->mutation_plan_parse_with_options(test_ctx, file_backed, 1u,
+                                                  &options, &plan, &error);
   if (st != LQL_STATUS_PARSE_ERROR || plan != NULL) {
     printf("relative file-backed mutation status mismatch: %s\n",
            error.message);
     ++failures;
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
 
   options.file_value_base_dir = "/tmp";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse_with_options(file_backed, 2u, &options, &plan,
-                                            &error);
+  st = test_ctx->mutation_plan_parse_with_options(test_ctx, file_backed, 2u,
+                                                  &options, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("enabled file-backed mutation parse failed: %s\n", error.message);
     ++failures;
-  } else if (lql_mutation_plan_count(plan) != 2u) {
+  } else if (test_ctx->mutation_plan_count(test_ctx, plan) != 2u) {
     printf("enabled file-backed mutation count mismatch: %lu\n",
-           (unsigned long)lql_mutation_plan_count(plan));
+           (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
     ++failures;
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
 
   invalid_file_options[0] = "file:/payload++";
   invalid_file_options[1] = "file:rm:/payload=blob.txt";
@@ -2505,14 +2458,14 @@ static void expect_mutation_plan_api(void) {
     }
     plan = NULL;
     lql_error_init(&error);
-    st = lql_mutation_plan_parse_with_options(&invalid_file_options[i], 1u,
-                                              &options, &plan, &error);
+    st = test_ctx->mutation_plan_parse_with_options(
+        test_ctx, &invalid_file_options[i], 1u, &options, &plan, &error);
     if (st != LQL_STATUS_PARSE_ERROR || plan != NULL) {
       printf("invalid file-backed mutation parsed: %s status=%s error=%s\n",
              invalid_file_options[i], lql_status_string(st), error.message);
       ++failures;
     }
-    lql_mutation_plan_free(plan);
+    test_ctx->mutation_plan_free(test_ctx, plan);
   }
 }
 
@@ -2539,15 +2492,15 @@ static void expect_mutation_error_api(void) {
     return;
   }
 
-  if (lql_mutation_plan_count(NULL) != 0u) {
+  if (test_ctx->mutation_plan_count(test_ctx, NULL) != 0u) {
     printf("NULL mutation plan count mismatch\n");
     ++failures;
   }
-  lql_mutation_plan_free(NULL);
+  test_ctx->mutation_plan_free(test_ctx, NULL);
 
   expr = "/status=done";
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(&expr, 1u, NULL, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, &expr, 1u, NULL, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "out is required") != 0) {
     printf("mutation parse NULL out mismatch: %s\n", error.message);
@@ -2556,7 +2509,7 @@ static void expect_mutation_error_api(void) {
 
   plan = (lql_mutation_plan *)1;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(NULL, 0u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, NULL, 0u, &plan, &error);
   if (st != LQL_STATUS_PARSE_ERROR || plan != NULL ||
       strcmp(error.message, "no field mutations provided") != 0) {
     printf("mutation parse empty input mismatch: %s\n", error.message);
@@ -2566,7 +2519,7 @@ static void expect_mutation_error_api(void) {
   expr = NULL;
   plan = (lql_mutation_plan *)1;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(&expr, 1u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, &expr, 1u, &plan, &error);
   if (st != LQL_STATUS_PARSE_ERROR || plan != NULL ||
       strcmp(error.message, "no valid field mutations parsed") != 0) {
     printf("mutation parse NULL expression mismatch: %s\n", error.message);
@@ -2576,13 +2529,14 @@ static void expect_mutation_error_api(void) {
   expr = "/status=done";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(&expr, 1u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, &expr, 1u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("mutation error plan setup failed: %s\n", error.message);
     ++failures;
   } else {
     lql_error_init(&error);
-    st = lql_mutate_file_range_root_fields(NULL, source, 0u, 2u, out, &error);
+    st = test_ctx->mutate_file_range_root_fields(test_ctx, NULL, source, 0u, 2u,
+                                                 out, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
         strcmp(error.message, "plan, file, and out are required") != 0) {
       printf("root mutation NULL plan mismatch: %s\n", error.message);
@@ -2590,7 +2544,8 @@ static void expect_mutation_error_api(void) {
     }
 
     lql_error_init(&error);
-    st = lql_mutate_file_range_root_fields(plan, NULL, 0u, 2u, out, &error);
+    st = test_ctx->mutate_file_range_root_fields(test_ctx, plan, NULL, 0u, 2u,
+                                                 out, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
         strcmp(error.message, "plan, file, and out are required") != 0) {
       printf("root mutation NULL file mismatch: %s\n", error.message);
@@ -2598,7 +2553,8 @@ static void expect_mutation_error_api(void) {
     }
 
     lql_error_init(&error);
-    st = lql_mutate_file_range_paths(plan, source, 0u, 2u, NULL, &error);
+    st = test_ctx->mutate_file_range_paths(test_ctx, plan, source, 0u, 2u, NULL,
+                                           &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
         strcmp(error.message, "plan, file, and out are required") != 0) {
       printf("path mutation NULL out mismatch: %s\n", error.message);
@@ -2606,7 +2562,7 @@ static void expect_mutation_error_api(void) {
     }
 
     lql_error_init(&error);
-    st = lql_mutate_json(NULL, "{}", strlen("{}"), out, &error);
+    st = test_ctx->mutate_json(test_ctx, NULL, "{}", strlen("{}"), out, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
         strcmp(error.message, "plan, json, and out are required") != 0) {
       printf("json mutation NULL plan mismatch: %s\n", error.message);
@@ -2614,7 +2570,7 @@ static void expect_mutation_error_api(void) {
     }
 
     lql_error_init(&error);
-    st = lql_mutate_json(plan, NULL, 0u, out, &error);
+    st = test_ctx->mutate_json(test_ctx, plan, NULL, 0u, out, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
         strcmp(error.message, "plan, json, and out are required") != 0) {
       printf("json mutation NULL json mismatch: %s\n", error.message);
@@ -2622,7 +2578,8 @@ static void expect_mutation_error_api(void) {
     }
 
     lql_error_init(&error);
-    st = lql_mutate_json(plan, "{}", strlen("{}"), NULL, &error);
+    st =
+        test_ctx->mutate_json(test_ctx, plan, "{}", strlen("{}"), NULL, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
         strcmp(error.message, "plan, json, and out are required") != 0) {
       printf("json mutation NULL out mismatch: %s\n", error.message);
@@ -2630,7 +2587,8 @@ static void expect_mutation_error_api(void) {
     }
 
     lql_error_init(&error);
-    st = lql_mutate_json(plan, malformed, strlen(malformed), out, &error);
+    st = test_ctx->mutate_json(test_ctx, plan, malformed, strlen(malformed),
+                               out, &error);
     if (st != LQL_STATUS_JSON_ERROR) {
       printf("json mutation malformed input status mismatch: %s\n",
              error.message);
@@ -2644,16 +2602,18 @@ static void expect_mutation_error_api(void) {
       ++failures;
     } else {
       lql_error_init(&error);
-      st = lql_mutate_file_range_paths(
-          plan, source, 0u, (lql_uint64)strlen(malformed), out, &error);
+      st = test_ctx->mutate_file_range_paths(test_ctx, plan, source, 0u,
+                                             (lql_uint64)strlen(malformed), out,
+                                             &error);
       if (st != LQL_STATUS_JSON_ERROR) {
         printf("path mutation malformed input status mismatch: %s\n",
                error.message);
         ++failures;
       }
       lql_error_init(&error);
-      st = lql_mutate_file_range_root_fields(
-          plan, source, 0u, (lql_uint64)strlen(malformed), out, &error);
+      st = test_ctx->mutate_file_range_root_fields(
+          test_ctx, plan, source, 0u, (lql_uint64)strlen(malformed), out,
+          &error);
       if (st != LQL_STATUS_JSON_ERROR) {
         printf("root mutation malformed input status mismatch: %s\n",
                error.message);
@@ -2661,7 +2621,7 @@ static void expect_mutation_error_api(void) {
       }
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -2707,13 +2667,13 @@ static void expect_root_field_mutation_api(void) {
   exprs[4] = "/quoted_number=\"2\"";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 5u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 5u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("root mutation plan parse failed: %s\n", error.message);
     ++failures;
   } else {
-    st = lql_mutate_file_range_root_fields(
-        plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
+    st = test_ctx->mutate_file_range_root_fields(
+        test_ctx, plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
     if (st != LQL_STATUS_OK) {
       printf("root mutation failed: %s\n", error.message);
       ++failures;
@@ -2725,7 +2685,7 @@ static void expect_root_field_mutation_api(void) {
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(out);
 
   payload = fopen("lql-test-payload.txt", "wb");
@@ -2764,14 +2724,14 @@ static void expect_root_field_mutation_api(void) {
   options.file_value_base_dir = ".";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse_with_options(file_exprs, 4u, &options, &plan,
-                                            &error);
+  st = test_ctx->mutation_plan_parse_with_options(test_ctx, file_exprs, 4u,
+                                                  &options, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("file-backed root mutation parse failed: %s\n", error.message);
     ++failures;
   } else {
-    st = lql_mutate_file_range_root_fields(
-        plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
+    st = test_ctx->mutate_file_range_root_fields(
+        test_ctx, plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
     if (st != LQL_STATUS_OK) {
       printf("file-backed root mutation failed: %s\n", error.message);
       ++failures;
@@ -2784,7 +2744,7 @@ static void expect_root_field_mutation_api(void) {
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(out);
   remove("lql-test-payload.txt");
   remove("lql-test-payload.bin");
@@ -2793,16 +2753,16 @@ static void expect_root_field_mutation_api(void) {
   exprs[0] = "/nested/status=done";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 1u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 1u, &plan, &error);
   if (st == LQL_STATUS_OK) {
-    st = lql_mutate_file_range_root_fields(
-        plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
+    st = test_ctx->mutate_file_range_root_fields(
+        test_ctx, plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
     if (st != LQL_STATUS_UNSUPPORTED) {
       printf("nested root mutation unexpectedly supported\n");
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -2848,13 +2808,13 @@ static void expect_path_mutation_api(void) {
   exprs[6] = "time:/state/updated=2025-01-02T03:04:05.123456789+02:30";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 7u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 7u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("path mutation plan parse failed: %s\n", error.message);
     ++failures;
   } else {
-    st = lql_mutate_file_range_paths(plan, source, 0u, (lql_uint64)strlen(doc),
-                                     out, &error);
+    st = test_ctx->mutate_file_range_paths(
+        test_ctx, plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
     if (st != LQL_STATUS_OK) {
       printf("path mutation failed: %s\n", error.message);
       ++failures;
@@ -2867,7 +2827,7 @@ static void expect_path_mutation_api(void) {
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -2894,12 +2854,12 @@ static void expect_buffered_mutation_api(void) {
   exprs[2] = "rm:/state/old";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 3u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 3u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("buffered mutation plan parse failed: %s\n", error.message);
     ++failures;
   } else {
-    st = lql_mutate_json(plan, doc, strlen(doc), out, &error);
+    st = test_ctx->mutate_json(test_ctx, plan, doc, strlen(doc), out, &error);
     if (st != LQL_STATUS_OK) {
       printf("buffered mutation failed: %s\n", error.message);
       ++failures;
@@ -2911,7 +2871,7 @@ static void expect_buffered_mutation_api(void) {
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(out);
 }
 
@@ -2939,7 +2899,7 @@ static void expect_source_mutation_api(void) {
   exprs[3] = "/state/missing=value";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 4u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 4u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("source mutation plan parse failed: %s\n", error.message);
     ++failures;
@@ -2948,7 +2908,8 @@ static void expect_source_mutation_api(void) {
     reader.data = doc;
     reader.len = strlen(doc);
     reader.chunk_size = 3u;
-    st = lql_mutate_source_paths(plan, read_chunk, &reader, out, &error);
+    st = test_ctx->mutate_source_paths(test_ctx, plan, read_chunk, &reader, out,
+                                       &error);
     if (st != LQL_STATUS_OK) {
       printf("source mutation failed: %s\n", error.message);
       ++failures;
@@ -2963,35 +2924,39 @@ static void expect_source_mutation_api(void) {
     }
 
     lql_error_init(&error);
-    st = lql_mutate_source_paths(NULL, read_chunk, &reader, out, &error);
+    st = test_ctx->mutate_source_paths(test_ctx, NULL, read_chunk, &reader, out,
+                                       &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
         strcmp(error.message, "plan, read, and out are required") != 0) {
       printf("source mutation NULL plan mismatch: %s\n", error.message);
       ++failures;
     }
     lql_error_init(&error);
-    st = lql_mutate_source_paths(plan, NULL, &reader, out, &error);
+    st = test_ctx->mutate_source_paths(test_ctx, plan, NULL, &reader, out,
+                                       &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
         strcmp(error.message, "plan, read, and out are required") != 0) {
       printf("source mutation NULL read mismatch: %s\n", error.message);
       ++failures;
     }
     lql_error_init(&error);
-    st = lql_mutate_source_paths(plan, read_chunk, &reader, NULL, &error);
+    st = test_ctx->mutate_source_paths(test_ctx, plan, read_chunk, &reader,
+                                       NULL, &error);
     if (st != LQL_STATUS_INVALID_ARGUMENT ||
         strcmp(error.message, "plan, read, and out are required") != 0) {
       printf("source mutation NULL out mismatch: %s\n", error.message);
       ++failures;
     }
     lql_error_init(&error);
-    st = lql_mutate_source_paths(plan, read_fail_once, NULL, out, &error);
+    st = test_ctx->mutate_source_paths(test_ctx, plan, read_fail_once, NULL,
+                                       out, &error);
     if (st != LQL_STATUS_JSON_ERROR ||
         strcmp(error.message, "mutation source read failed") != 0) {
       printf("source mutation read error mismatch: %s\n", error.message);
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(out);
 }
 
@@ -3017,12 +2982,12 @@ static void expect_mutation_quoted_value_api(void) {
   exprs[3] = "/state/number=\"2\"";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 4u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 4u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("quoted mutation plan parse failed: %s\n", error.message);
     ++failures;
   } else {
-    st = lql_mutate_json(plan, doc, strlen(doc), out, &error);
+    st = test_ctx->mutate_json(test_ctx, plan, doc, strlen(doc), out, &error);
     if (st != LQL_STATUS_OK) {
       printf("quoted mutation failed: %s\n", error.message);
       ++failures;
@@ -3035,7 +3000,7 @@ static void expect_mutation_quoted_value_api(void) {
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(out);
 }
 
@@ -3090,7 +3055,8 @@ static void expect_mutation_file_backed_value_api(void) {
   options.file_value_base_dir = ".";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse_with_options(exprs, 4u, &options, &plan, &error);
+  st = test_ctx->mutation_plan_parse_with_options(test_ctx, exprs, 4u, &options,
+                                                  &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("SDK file-backed mutation parse failed: %s\n", error.message);
     ++failures;
@@ -3104,7 +3070,7 @@ static void expect_mutation_file_backed_value_api(void) {
     printf("SDK file-backed buffered output tmpfile failed\n");
     ++failures;
   } else {
-    st = lql_mutate_json(plan, "{}", strlen("{}"), out, &error);
+    st = test_ctx->mutate_json(test_ctx, plan, "{}", strlen("{}"), out, &error);
     if (st != LQL_STATUS_OK) {
       printf("SDK file-backed buffered mutation failed: %s\n", error.message);
       ++failures;
@@ -3126,8 +3092,8 @@ static void expect_mutation_file_backed_value_api(void) {
     printf("SDK file-backed range source setup failed\n");
     ++failures;
   } else {
-    st = lql_mutate_file_range_paths(plan, source, 0u, (lql_uint64)strlen("{}"),
-                                     out, &error);
+    st = test_ctx->mutate_file_range_paths(
+        test_ctx, plan, source, 0u, (lql_uint64)strlen("{}"), out, &error);
     if (st != LQL_STATUS_OK) {
       printf("SDK file-backed range mutation failed: %s\n", error.message);
       ++failures;
@@ -3144,7 +3110,7 @@ static void expect_mutation_file_backed_value_api(void) {
     fclose(out);
   }
 
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   remove("lql-test-sdk-file-backed.txt");
   remove("lql-test-sdk-file-backed.bin");
 }
@@ -3175,16 +3141,17 @@ static void expect_mutation_shorthand_api(void) {
   brace_exprs[1] = "/audit{/created=true,/nested/score=3}";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(brace_exprs, 2u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, brace_exprs, 2u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("brace mutation plan parse failed: %s\n", error.message);
     ++failures;
-  } else if (lql_mutation_plan_count(plan) != 6u) {
+  } else if (test_ctx->mutation_plan_count(test_ctx, plan) != 6u) {
     printf("brace mutation expansion count mismatch: %lu\n",
-           (unsigned long)lql_mutation_plan_count(plan));
+           (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
     ++failures;
   } else {
-    st = lql_mutate_json(plan, brace_doc, strlen(brace_doc), out, &error);
+    st = test_ctx->mutate_json(test_ctx, plan, brace_doc, strlen(brace_doc),
+                               out, &error);
     if (st != LQL_STATUS_OK) {
       printf("brace mutation failed: %s\n", error.message);
       ++failures;
@@ -3197,7 +3164,7 @@ static void expect_mutation_shorthand_api(void) {
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(out);
 
   out = tmpfile();
@@ -3211,12 +3178,14 @@ static void expect_mutation_shorthand_api(void) {
   escaped_exprs[2] = "/a~1b/created=1";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(escaped_exprs, 3u, &plan, &error);
+  st =
+      test_ctx->mutation_plan_parse(test_ctx, escaped_exprs, 3u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("escaped mutation plan parse failed: %s\n", error.message);
     ++failures;
   } else {
-    st = lql_mutate_json(plan, escaped_doc, strlen(escaped_doc), out, &error);
+    st = test_ctx->mutate_json(test_ctx, plan, escaped_doc, strlen(escaped_doc),
+                               out, &error);
     if (st != LQL_STATUS_OK) {
       printf("escaped mutation failed: %s\n", error.message);
       ++failures;
@@ -3228,7 +3197,7 @@ static void expect_mutation_shorthand_api(void) {
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(out);
 }
 
@@ -3270,13 +3239,13 @@ static void expect_array_element_mutation_api(void) {
   exprs[3] = "/other/0=done";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 4u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 4u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("array mutation plan parse failed: %s\n", error.message);
     ++failures;
   } else {
-    st = lql_mutate_file_range_paths(plan, source, 0u, (lql_uint64)strlen(doc),
-                                     out, &error);
+    st = test_ctx->mutate_file_range_paths(
+        test_ctx, plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
     if (st != LQL_STATUS_OK) {
       printf("array mutation failed: %s\n", error.message);
       ++failures;
@@ -3288,7 +3257,7 @@ static void expect_array_element_mutation_api(void) {
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -3333,13 +3302,13 @@ static void expect_wildcard_mutation_api(void) {
   exprs[2] = "/numeric_object[]/status=bad";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 3u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 3u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("wildcard mutation plan parse failed: %s\n", error.message);
     ++failures;
   } else {
-    st = lql_mutate_file_range_paths(plan, source, 0u, (lql_uint64)strlen(doc),
-                                     out, &error);
+    st = test_ctx->mutate_file_range_paths(
+        test_ctx, plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
     if (st != LQL_STATUS_OK) {
       printf("wildcard mutation failed: %s\n", error.message);
       ++failures;
@@ -3353,7 +3322,7 @@ static void expect_wildcard_mutation_api(void) {
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -3398,13 +3367,13 @@ static void expect_recursive_mutation_api(void) {
   exprs[3] = "/groups/.../count=+2";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 4u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 4u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("recursive mutation plan parse failed: %s\n", error.message);
     ++failures;
   } else {
-    st = lql_mutate_file_range_paths(plan, source, 0u, (lql_uint64)strlen(doc),
-                                     out, &error);
+    st = test_ctx->mutate_file_range_paths(
+        test_ctx, plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
     if (st != LQL_STATUS_OK) {
       printf("recursive mutation failed: %s\n", error.message);
       ++failures;
@@ -3417,7 +3386,7 @@ static void expect_recursive_mutation_api(void) {
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(source);
   fclose(out);
 }
@@ -3462,14 +3431,14 @@ static void expect_array_wildcard_value_mutation_api(void) {
   exprs[4] = "/groups/.../count=+2";
   plan = NULL;
   lql_error_init(&error);
-  st = lql_mutation_plan_parse(exprs, 5u, &plan, &error);
+  st = test_ctx->mutation_plan_parse(test_ctx, exprs, 5u, &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("array wildcard value mutation plan parse failed: %s\n",
            error.message);
     ++failures;
   } else {
-    st = lql_mutate_file_range_paths(plan, source, 0u, (lql_uint64)strlen(doc),
-                                     out, &error);
+    st = test_ctx->mutate_file_range_paths(
+        test_ctx, plan, source, 0u, (lql_uint64)strlen(doc), out, &error);
     if (st != LQL_STATUS_OK) {
       printf("array wildcard value mutation failed: %s\n", error.message);
       ++failures;
@@ -3481,7 +3450,7 @@ static void expect_array_wildcard_value_mutation_api(void) {
       ++failures;
     }
   }
-  lql_mutation_plan_free(plan);
+  test_ctx->mutation_plan_free(test_ctx, plan);
   fclose(source);
   fclose(out);
 }

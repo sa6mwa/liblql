@@ -181,27 +181,6 @@ static void destroy_clql_ctx(void) {
   }
 }
 
-#define lql_projection_parse(fields, field_count, out, error)                  \
-  clql_ctx->projection_parse(clql_ctx, (fields), (field_count), (out), (error))
-#define lql_projection_free(projection)                                        \
-  clql_ctx->projection_free(clql_ctx, (projection))
-#define lql_mutation_plan_parse_with_options(exprs, expr_count, options, out,  \
-                                             error)                            \
-  clql_ctx->mutation_plan_parse_with_options(clql_ctx, (exprs), (expr_count),  \
-                                             (options), (out), (error))
-#define lql_mutation_plan_free(plan)                                           \
-  clql_ctx->mutation_plan_free(clql_ctx, (plan))
-#define lql_selector_parse(expr, out, error)                                   \
-  clql_ctx->selector_parse(clql_ctx, (expr), (out), (error))
-#define lql_selector_parse_or(expr, out, error)                                \
-  clql_ctx->selector_parse_or(clql_ctx, (expr), (out), (error))
-#define lql_selector_free(selector)                                            \
-  clql_ctx->selector_free(clql_ctx, (selector))
-#define lql_query_file_decisions(selector, file, on_decision, user,            \
-                                 out_result, error)                            \
-  clql_ctx->query_file_decisions(clql_ctx, (selector), (file), (on_decision),  \
-                                 (user), (out_result), (error))
-
 static int parse_bool_text(const char *text, int *out) {
   if (text == NULL || out == NULL) {
     return 0;
@@ -940,8 +919,8 @@ int main(int argc, char **argv) {
   }
   (void)atexit(destroy_clql_ctx);
   if (fields.count != 0u) {
-    st = lql_projection_parse((const char *const *)fields.items, fields.count,
-                              &projection, &error);
+    st = clql_ctx->projection_parse(clql_ctx, (const char *const *)fields.items,
+                                    fields.count, &projection, &error);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
       lql_dealloc(selector_expr_owned);
@@ -955,26 +934,28 @@ int main(int argc, char **argv) {
     memset(&mutation_options, 0, sizeof(mutation_options));
     mutation_options.enable_file_values = enable_file_mutations;
     mutation_options.file_value_base_dir = ".";
-    st = lql_mutation_plan_parse_with_options(
-        (const char *const *)mutations.items, mutations.count,
+    st = clql_ctx->mutation_plan_parse_with_options(
+        clql_ctx, (const char *const *)mutations.items, mutations.count,
         &mutation_options, &mutation_plan, &error);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "clql: %s\n", error.message);
       lql_dealloc(selector_expr_owned);
-      lql_projection_free(projection);
+      clql_ctx->projection_free(clql_ctx, projection);
       free_projection_args(&fields);
       free_projection_args(&mutations);
       free_projection_args(&input_paths);
       return 2;
     }
   }
-  st = or_mode ? lql_selector_parse_or(selector_expr, &selector, &error)
-               : lql_selector_parse(selector_expr, &selector, &error);
+  st = or_mode ? clql_ctx->selector_parse_or(clql_ctx, selector_expr, &selector,
+                                             &error)
+               : clql_ctx->selector_parse(clql_ctx, selector_expr, &selector,
+                                          &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "clql: %s\n", error.message);
     lql_dealloc(selector_expr_owned);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
+    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+    clql_ctx->projection_free(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -983,9 +964,9 @@ int main(int argc, char **argv) {
   if (inline_mode && mutation_plan == NULL) {
     fprintf(stderr, "clql: inline mode requires mutation expressions\n");
     lql_dealloc(selector_expr_owned);
-    lql_selector_free(selector);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
+    clql_ctx->selector_free(clql_ctx, selector);
+    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+    clql_ctx->projection_free(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -994,9 +975,9 @@ int main(int argc, char **argv) {
   if (inline_mode && input_paths.count == 0u) {
     fprintf(stderr, "clql: inline mode requires a file path\n");
     lql_dealloc(selector_expr_owned);
-    lql_selector_free(selector);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
+    clql_ctx->selector_free(clql_ctx, selector);
+    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+    clql_ctx->projection_free(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -1006,9 +987,9 @@ int main(int argc, char **argv) {
                       strcmp(input_path, "-") == 0)) {
     fprintf(stderr, "clql: inline mode requires a single JSON file\n");
     lql_dealloc(selector_expr_owned);
-    lql_selector_free(selector);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
+    clql_ctx->selector_free(clql_ctx, selector);
+    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+    clql_ctx->projection_free(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -1024,9 +1005,9 @@ int main(int argc, char **argv) {
         if (st != LQL_STATUS_OK) {
           fprintf(stderr, "clql: %s\n", error.message);
           lql_dealloc(selector_expr_owned);
-          lql_selector_free(selector);
-          lql_mutation_plan_free(mutation_plan);
-          lql_projection_free(projection);
+          clql_ctx->selector_free(clql_ctx, selector);
+          clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+          clql_ctx->projection_free(clql_ctx, projection);
           free_projection_args(&fields);
           free_projection_args(&mutations);
           free_projection_args(&input_paths);
@@ -1042,9 +1023,9 @@ int main(int argc, char **argv) {
         close_input_path(input);
         close_input_path(range_source);
         lql_dealloc(selector_expr_owned);
-        lql_selector_free(selector);
-        lql_mutation_plan_free(mutation_plan);
-        lql_projection_free(projection);
+        clql_ctx->selector_free(clql_ctx, selector);
+        clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+        clql_ctx->projection_free(clql_ctx, projection);
         free_projection_args(&fields);
         free_projection_args(&mutations);
         free_projection_args(&input_paths);
@@ -1060,8 +1041,9 @@ int main(int argc, char **argv) {
       ranges.compact = compact;
       ranges.matches_only = matches_only;
       lql_error_init(&ranges.callback_error);
-      st = lql_query_file_decisions(selector, input, output_match_range,
-                                    &ranges, &result, &error);
+      st = clql_ctx->query_file_decisions(clql_ctx, selector, input,
+                                          output_match_range, &ranges, &result,
+                                          &error);
       if (st != LQL_STATUS_OK && ranges.callback_error.code != LQL_STATUS_OK) {
         error = ranges.callback_error;
       }
@@ -1070,9 +1052,9 @@ int main(int argc, char **argv) {
       if (st != LQL_STATUS_OK) {
         fprintf(stderr, "clql: %s\n", error.message);
         lql_dealloc(selector_expr_owned);
-        lql_selector_free(selector);
-        lql_mutation_plan_free(mutation_plan);
-        lql_projection_free(projection);
+        clql_ctx->selector_free(clql_ctx, selector);
+        clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+        clql_ctx->projection_free(clql_ctx, projection);
         free_projection_args(&fields);
         free_projection_args(&mutations);
         free_projection_args(&input_paths);
@@ -1080,9 +1062,9 @@ int main(int argc, char **argv) {
       }
     }
     lql_dealloc(selector_expr_owned);
-    lql_selector_free(selector);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
+    clql_ctx->selector_free(clql_ctx, selector);
+    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+    clql_ctx->projection_free(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -1096,9 +1078,9 @@ int main(int argc, char **argv) {
       lql_dealloc(selector_expr_owned);
       close_input_path(input);
       close_input_path(range_source);
-      lql_selector_free(selector);
-      lql_mutation_plan_free(mutation_plan);
-      lql_projection_free(projection);
+      clql_ctx->selector_free(clql_ctx, selector);
+      clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+      clql_ctx->projection_free(clql_ctx, projection);
       free_projection_args(&fields);
       free_projection_args(&mutations);
       free_projection_args(&input_paths);
@@ -1113,9 +1095,9 @@ int main(int argc, char **argv) {
       lql_dealloc(selector_expr_owned);
       close_input_path(input);
       close_input_path(range_source);
-      lql_selector_free(selector);
-      lql_mutation_plan_free(mutation_plan);
-      lql_projection_free(projection);
+      clql_ctx->selector_free(clql_ctx, selector);
+      clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+      clql_ctx->projection_free(clql_ctx, projection);
       free_projection_args(&fields);
       free_projection_args(&mutations);
       free_projection_args(&input_paths);
@@ -1128,8 +1110,9 @@ int main(int argc, char **argv) {
     ranges.compact = compact;
     ranges.matches_only = matches_only;
     lql_error_init(&ranges.callback_error);
-    st = lql_query_file_decisions(selector, input, output_match_range, &ranges,
-                                  &result, &error);
+    st = clql_ctx->query_file_decisions(clql_ctx, selector, input,
+                                        output_match_range, &ranges, &result,
+                                        &error);
     if (st != LQL_STATUS_OK && ranges.callback_error.code != LQL_STATUS_OK) {
       error = ranges.callback_error;
     }
@@ -1159,9 +1142,9 @@ int main(int argc, char **argv) {
       inline_tmp_path = NULL;
     }
     lql_dealloc(selector_expr_owned);
-    lql_selector_free(selector);
-    lql_mutation_plan_free(mutation_plan);
-    lql_projection_free(projection);
+    clql_ctx->selector_free(clql_ctx, selector);
+    clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+    clql_ctx->projection_free(clql_ctx, projection);
     free_projection_args(&fields);
     free_projection_args(&mutations);
     free_projection_args(&input_paths);
@@ -1175,10 +1158,10 @@ int main(int argc, char **argv) {
   st = lql_eval_query_file_spooled_matches(selector, stdin, stdout, compact,
                                            projection, mutation_plan,
                                            matches_only, &result, &error);
-  lql_selector_free(selector);
+  clql_ctx->selector_free(clql_ctx, selector);
   lql_dealloc(selector_expr_owned);
-  lql_mutation_plan_free(mutation_plan);
-  lql_projection_free(projection);
+  clql_ctx->mutation_plan_free(clql_ctx, mutation_plan);
+  clql_ctx->projection_free(clql_ctx, projection);
   free_projection_args(&fields);
   free_projection_args(&mutations);
   free_projection_args(&input_paths);

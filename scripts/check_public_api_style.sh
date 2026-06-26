@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
-header=${1:?usage: check_public_api_style.sh HEADER [SHARED_LIBRARY]}
+header=${1:?usage: check_public_api_style.sh HEADER [SHARED_LIBRARY] [SOURCE_ROOT]}
 shared=${2:-}
+source_root=${3:-}
 
 forbidden='
 lql_selector_parse
@@ -59,6 +60,27 @@ if [ -n "$shared" ] && [ -f "$shared" ]; then
       fi
     done
   fi
+fi
+
+if [ -n "$source_root" ] && [ -d "$source_root" ]; then
+  for symbol in $forbidden; do
+    if grep -REn \
+      "^[[:space:]]*#define[[:space:]]+${symbol}[[:space:]]*\\(" \
+      "$source_root/src" "$source_root/tests" "$source_root/parity" \
+      "$source_root/lua" "$source_root/examples" "$source_root/bench" \
+      2>/dev/null; then
+      printf 'public API style: forbidden free-operation macro wrapper: %s\n' "$symbol" >&2
+      failed=1
+    fi
+    if grep -REn \
+      "^[[:space:]]*static[[:space:]][^(;]*[[:space:]*]${symbol}[[:space:]]*\\(" \
+      "$source_root/src" "$source_root/tests" "$source_root/parity" \
+      "$source_root/lua" "$source_root/examples" "$source_root/bench" \
+      2>/dev/null; then
+      printf 'public API style: forbidden static free-operation wrapper: %s\n' "$symbol" >&2
+      failed=1
+    fi
+  done
 fi
 
 exit "$failed"

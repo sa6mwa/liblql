@@ -67,7 +67,9 @@ instantiatable `lql *` with `lql_new()`, invoke operations as
 `lql_destroy(ctx)`. Selector, query, payload, projection, compact, and mutation
 operations are receiver methods only; standalone public functions are limited
 to construction, diagnostics, version/capability helpers, and
-allocator/cleanup utilities.
+allocator/cleanup utilities. Project-owned code must also use receiver calls
+directly rather than recreating removed operation free functions through local
+macros or static wrapper shims.
 
 The API should be handle-oriented and explicit about ownership:
 
@@ -539,7 +541,9 @@ Current implementation is an early slice:
 - `make test` includes `lql.public-api-style`, which fails if removed
   selector/query/payload/projection/compact/mutation free-operation prototypes
   reappear in the installed header or, when a shared library is built, as
-  exported dynamic symbols;
+  exported dynamic symbols; it also scans project-owned source trees for
+  exact-name macro or static wrapper shims that recreate those removed
+  operation functions;
 - project-owned allocations have a central liblql allocator surface, and
   direct C runtime allocation calls are limited to the allocator
   implementation;

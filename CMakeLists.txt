@@ -155,7 +155,8 @@ if(LQL_BUILD_TESTS)
   add_test(NAME lql.public-api-style
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_public_api_style.sh
       ${CMAKE_CURRENT_SOURCE_DIR}/include/lql/lql.h
-      ${LQL_PUBLIC_API_STYLE_SHARED})
+      ${LQL_PUBLIC_API_STYLE_SHARED}
+      ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(lql.public-api-style PROPERTIES LABELS "unit;api" TIMEOUT 5)
 
   set(LQL_HEADER_SMOKE_WARNINGS)
