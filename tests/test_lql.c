@@ -4070,6 +4070,8 @@ static void expect_selector_match_api(void) {
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("contains{field=/message,any=missing|degraded}",
                "{\"message\":\"upstream timeout\"}", 0);
+  expect_match("contains{field=/message,any=hello world|degraded}",
+               "{\"message\":\"hello world\"}", 1);
   expect_match("icontains{field=/message,value=TIMEOUT}",
                "{\"message\":\"upstream timeout\"}", 1);
   expect_match("icontains{f=/message,a=TIMEOUT|DEGRADED}",
@@ -4201,6 +4203,7 @@ static void expect_selector_parse_error_api(void) {
   expect_parse_error("date{field=/timestamp,since=tomorrowish}");
   expect_parse_error("prefix{field=/service,any=auth|edge}");
   expect_parse_error("in{field=/env}");
+  expect_parse_error("in{field=/env,any= prod | stage }");
   expect_parse_error("in{field=/env,any=prod|stage,a=dev}");
   expect_parse_error("in{field=/env,any=prod|stage,foo=bar}");
   expect_parse_error("range{field=/progress}");

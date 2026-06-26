@@ -482,16 +482,36 @@ static lql_node_kind kind_from_name(const char *name) {
   return LQL_NODE_ALL;
 }
 
-static int parse_any_values(char *decoded, lql_term *term, lql_error *error) {
+static int parse_any_values(char *decoded, lql_term *term,
+                            int reject_surrounding_whitespace,
+                            lql_error *error) {
   char *cursor;
   char *bar;
   char *item;
+  size_t raw_len;
+  const char *raw_start;
+  const char *raw_end;
 
   cursor = decoded;
   while (cursor != NULL) {
     bar = strchr(cursor, '|');
     if (bar != NULL) {
       *bar = '\0';
+    }
+    raw_len = strlen(cursor);
+    raw_start = cursor;
+    while (*raw_start != '\0' && isspace((unsigned char)*raw_start)) {
+      ++raw_start;
+    }
+    raw_end = cursor + raw_len;
+    while (raw_end > raw_start && isspace((unsigned char)raw_end[-1])) {
+      --raw_end;
+    }
+    if (reject_surrounding_whitespace && raw_end > raw_start &&
+        (raw_start != cursor || raw_end != cursor + raw_len)) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "selector any values must not have surrounding whitespace");
+      return 0;
     }
     item = trim_dup(cursor, strlen(cursor));
     if (item == NULL) {
@@ -657,6 +677,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
   char **seen_slot;
   const char *date_slot;
   int skip_duplicate;
+  int value_had_leading_space;
 
   memset(term, 0, sizeof(*term));
   seen_field = NULL;
@@ -693,6 +714,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       --key_end;
       *key_end = '\0';
     }
+    value_had_leading_space = isspace((unsigned char)*val) ? 1 : 0;
     while (isspace((unsigned char)*val)) {
       ++val;
     }
@@ -703,6 +725,13 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
     }
     raw_value = trim_dup(val, strlen(val));
     if (raw_value == NULL) {
+      goto fail;
+    }
+    if (kind == LQL_NODE_IN && key_is_any(key) && value_had_leading_space &&
+        raw_value[0] != '\0') {
+      lql_dealloc(raw_value);
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "selector any values must not have surrounding whitespace");
       goto fail;
     }
     seen_slot = NULL;
@@ -780,7 +809,7 @@ static int parse_key_values(char *body, lql_node_kind kind, lql_term *term,
       }
       lql_dealloc(decoded);
     } else if (key_is_any(key)) {
-      if (!parse_any_values(decoded, term, error)) {
+      if (!parse_any_values(decoded, term, kind == LQL_NODE_IN, error)) {
         lql_dealloc(decoded);
         goto fail;
       }

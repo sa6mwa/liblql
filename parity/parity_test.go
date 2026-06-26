@@ -2544,6 +2544,7 @@ func TestCLQLSelectorParseErrorParity(t *testing.T) {
 		`date{field=/timestamp,since=tomorrowish}`,
 		`prefix{field=/service,any=auth|edge}`,
 		`in{field=/env}`,
+		`in{field=/env,any= prod | stage }`,
 		`in{field=/env,any=prod|stage,a=dev}`,
 		`in{field=/env,any=prod|stage,foo=bar}`,
 		`range{field=/progress}`,

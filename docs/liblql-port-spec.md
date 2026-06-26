@@ -690,7 +690,8 @@ Current implementation is an early slice:
   around comparison operators, and brace selector assignments accept comma,
   newline, or whitespace-separated `key=value` clauses;
 - selector parse-error parity tests cover supported-term key validation,
-  duplicate-key validation, and invalid selector invariants;
+  duplicate-key validation, strict `in.any` value whitespace validation, and
+  invalid selector invariants;
 - `clql` exists as a selector/projection/mutation compatibility CLI;
   projection and mutation path behavior are still being expanded toward full
   CLI parity;
