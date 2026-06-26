@@ -50,6 +50,42 @@ if os.getenv("LQL_REQUIRE_CORE") == "1" and not lql.has_core() then
 end
 
 local client = lql.new()
+
+local version = client:version()
+if type(version) ~= "string" or version == "" then
+  fail("expected non-empty client version")
+end
+
+local client_capabilities = client:capabilities()
+assert_equal(client_capabilities.selector_parse, true,
+             "client capabilities selector_parse")
+assert_equal(client_capabilities.selector_inspection, true,
+             "client capabilities selector_inspection")
+assert_equal(client_capabilities.matches_json, true,
+             "client capabilities matches_json")
+assert_equal(client_capabilities.file_decision_stream, true,
+             "client capabilities file_decision_stream")
+assert_equal(client_capabilities.source_decision_stream, true,
+             "client capabilities source_decision_stream")
+assert_equal(client_capabilities.file_match_stream, true,
+             "client capabilities file_match_stream")
+assert_equal(client_capabilities.seekable_range_payloads, true,
+             "client capabilities seekable_range_payloads")
+assert_equal(client_capabilities.source_spooled_match_stream, true,
+             "client capabilities source_spooled_match_stream")
+assert_equal(client_capabilities.payload_sink_write, true,
+             "client capabilities payload_sink_write")
+assert_equal(client_capabilities.payload_projection, true,
+             "client capabilities payload_projection")
+assert_equal(client_capabilities.projection_source, true,
+             "client capabilities projection_source")
+assert_equal(client_capabilities.compact_source, true,
+             "client capabilities compact_source")
+assert_equal(client_capabilities.mutation_source, true,
+             "client capabilities mutation_source")
+assert_equal(client_capabilities.mutation_file_values, true,
+             "client capabilities mutation_file_values")
+
 local open_selector, selector_err =
   client:selector_parse('/status="open"')
 open_selector = assert_no_error(open_selector, selector_err,

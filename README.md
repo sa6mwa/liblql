@@ -55,9 +55,10 @@ artifact-local lonejson dependency provenance under `share/<package>/`.
 The Lua tree now includes a Lua 5.5 facade backed by a direct `lql.core` C
 module over public liblql APIs;
 `lql.new()` returns a C-owned client userdata backed by a public `lql *`
-receiver and covers callback decision streams plus callback-scoped seekable
-payload handles. The parity benchmark surface has Go, C, and Lua runners over
-shared generated fixtures.
+receiver and exposes receiver version/capability queries, selector
+inspection, callback decision streams, and callback-scoped seekable payload
+handles. The parity benchmark surface has Go, C, and Lua runners over shared
+generated fixtures.
 The standalone Lua source package, rendered release rockspec, and LuaRocks
 source rock are produced and verified locally. The release matrix builds and
 verifies Linux GNU/musl artifacts for x86_64, aarch64, and armhf with

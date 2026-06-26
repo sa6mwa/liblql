@@ -202,6 +202,77 @@ static void lua_lql_push_bool_field(lua_State *L, const char *name, int value) {
   lua_setfield(L, -2, name);
 }
 
+static void lua_lql_push_capabilities(lua_State *L,
+                                      const lql_capabilities *capabilities) {
+  lua_newtable(L);
+  lua_lql_push_bool_field(L, "selector_parse", capabilities->selector_parse);
+  lua_lql_push_bool_field(L, "selector_inspection",
+                          capabilities->selector_inspection);
+  lua_lql_push_bool_field(L, "matches_json", capabilities->matches_json);
+  lua_lql_push_bool_field(L, "file_decision_stream",
+                          capabilities->file_decision_stream);
+  lua_lql_push_bool_field(L, "source_decision_stream",
+                          capabilities->source_decision_stream);
+  lua_lql_push_bool_field(L, "file_match_stream",
+                          capabilities->file_match_stream);
+  lua_lql_push_bool_field(L, "seekable_range_payloads",
+                          capabilities->seekable_range_payloads);
+  lua_lql_push_bool_field(L, "source_spooled_match_stream",
+                          capabilities->source_spooled_match_stream);
+  lua_lql_push_bool_field(L, "spooled_payloads",
+                          capabilities->spooled_payloads);
+  lua_lql_push_bool_field(L, "payload_sink_write",
+                          capabilities->payload_sink_write);
+  lua_lql_push_bool_field(L, "payload_projection",
+                          capabilities->payload_projection);
+  lua_lql_push_bool_field(L, "projection_file_range",
+                          capabilities->projection_file_range);
+  lua_lql_push_bool_field(L, "projection_source",
+                          capabilities->projection_source);
+  lua_lql_push_bool_field(L, "projection_buffered_json",
+                          capabilities->projection_buffered_json);
+  lua_lql_push_bool_field(L, "compact_file_range",
+                          capabilities->compact_file_range);
+  lua_lql_push_bool_field(L, "compact_source", capabilities->compact_source);
+  lua_lql_push_bool_field(L, "compact_buffered_json",
+                          capabilities->compact_buffered_json);
+  lua_lql_push_bool_field(L, "mutation_parse", capabilities->mutation_parse);
+  lua_lql_push_bool_field(L, "mutation_file_range",
+                          capabilities->mutation_file_range);
+  lua_lql_push_bool_field(L, "mutation_file_range_candidates",
+                          capabilities->mutation_file_range_candidates);
+  lua_lql_push_bool_field(L, "mutation_source", capabilities->mutation_source);
+  lua_lql_push_bool_field(L, "mutation_source_candidates",
+                          capabilities->mutation_source_candidates);
+  lua_lql_push_bool_field(
+      L, "mutation_file_range_projected_candidates",
+      capabilities->mutation_file_range_projected_candidates);
+  lua_lql_push_bool_field(L, "mutation_source_projected_candidates",
+                          capabilities->mutation_source_projected_candidates);
+  lua_lql_push_bool_field(L, "mutation_buffered_json",
+                          capabilities->mutation_buffered_json);
+  lua_lql_push_bool_field(L, "mutation_file_values",
+                          capabilities->mutation_file_values);
+}
+
+static int lua_client_version(lua_State *L) {
+  lua_lql_client *client;
+
+  client = lua_lql_check_client(L, 1);
+  lua_pushstring(L, client->ctx->version(client->ctx));
+  return 1;
+}
+
+static int lua_client_capabilities_get(lua_State *L) {
+  lua_lql_client *client;
+  lql_capabilities capabilities;
+
+  client = lua_lql_check_client(L, 1);
+  client->ctx->capabilities_get(client->ctx, &capabilities);
+  lua_lql_push_capabilities(L, &capabilities);
+  return 1;
+}
+
 static void lua_lql_push_selector_capabilities(
     lua_State *L, const lql_selector_capabilities *capabilities) {
   lua_newtable(L);
@@ -222,8 +293,7 @@ static void lua_lql_push_selector_capabilities(
 static void lua_lql_push_selector_execution_traits(
     lua_State *L, const lql_selector_execution_traits *traits) {
   lua_newtable(L);
-  lua_lql_push_bool_field(L, "uses_contains_like",
-                          traits->uses_contains_like);
+  lua_lql_push_bool_field(L, "uses_contains_like", traits->uses_contains_like);
   lua_lql_push_bool_field(L, "uses_recursive_path",
                           traits->uses_recursive_path);
   lua_lql_push_bool_field(L, "uses_wildcard_path", traits->uses_wildcard_path);
@@ -1794,6 +1864,8 @@ static int lua_lql_mutate_source(lua_State *L) {
 }
 
 static const luaL_Reg lua_lql_client_methods[] = {
+    {"version", lua_client_version},
+    {"capabilities", lua_client_capabilities_get},
     {"selector_parse", lua_lql_selector_parse},
     {"selector_capabilities", lua_lql_selector_capabilities_get},
     {"selector_execution_traits", lua_lql_selector_execution_traits_get},
