@@ -4482,6 +4482,41 @@ static void expect_file_range_candidate_mutation_api(void) {
         }
       }
     }
+
+    if (fseek(source, 0L, SEEK_SET) != 0) {
+      printf("candidate mutation match-all rewind failed\n");
+      ++failures;
+    } else {
+      fclose(out);
+      out = tmpfile();
+      if (out == NULL) {
+        printf("candidate mutation match-all tmpfile failed\n");
+        ++failures;
+      } else {
+        memset(&result, 0, sizeof(result));
+        lql_error_init(&error);
+        st = test_ctx->mutate_file_range_candidates(
+            test_ctx, NULL, plan, source, 0u, (lql_uint64)strlen(doc), out, 1,
+            0, &result, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("candidate mutation match-all failed: %s\n", error.message);
+          ++failures;
+        } else if (result.candidates_seen != 2u ||
+                   result.candidates_matched != 2u || result.stopped_early) {
+          printf("candidate mutation match-all result mismatch: seen=%lu "
+                 "matched=%lu stopped=%d\n",
+                 (unsigned long)result.candidates_seen,
+                 (unsigned long)result.candidates_matched,
+                 result.stopped_early);
+          ++failures;
+        } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                   strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n"
+                               "{\"id\":\"b\",\"status\":\"done\"}\n") != 0) {
+          printf("candidate mutation match-all output mismatch: %s\n", buf);
+          ++failures;
+        }
+      }
+    }
   }
   test_ctx->mutation_plan_destroy(test_ctx, plan);
   test_ctx->selector_destroy(test_ctx, selector);
@@ -4588,6 +4623,42 @@ static void expect_source_candidate_mutation_api(void) {
       } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                  strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n") != 0) {
         printf("source candidate mutation matches-only output mismatch: %s\n",
+               buf);
+        ++failures;
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source candidate mutation match-all tmpfile failed\n");
+      ++failures;
+    } else {
+      memset(&reader, 0, sizeof(reader));
+      reader.data = doc;
+      reader.len = strlen(doc);
+      reader.chunk_size = 3u;
+      memset(&result, 0, sizeof(result));
+      lql_error_init(&error);
+      st = test_ctx->mutate_source_candidates(test_ctx, NULL, plan, read_chunk,
+                                              &reader, out, 1, 0, &result,
+                                              &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation match-all failed: %s\n",
+               error.message);
+        ++failures;
+      } else if (result.candidates_seen != 2u ||
+                 result.candidates_matched != 2u || result.stopped_early) {
+        printf("source candidate mutation match-all result mismatch: seen=%lu "
+               "matched=%lu stopped=%d\n",
+               (unsigned long)result.candidates_seen,
+               (unsigned long)result.candidates_matched,
+               result.stopped_early);
+        ++failures;
+      } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                 strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n"
+                             "{\"id\":\"b\",\"status\":\"done\"}\n") != 0) {
+        printf("source candidate mutation match-all output mismatch: %s\n",
                buf);
         ++failures;
       }

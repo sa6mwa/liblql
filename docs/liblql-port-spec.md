@@ -784,8 +784,9 @@ Current implementation status:
 - public SDK seekable and callback-source candidate-stream mutation exposes
   the selector-plus-plan path used by `clql`: top-level arrays are expanded as
   candidate streams, matched candidates are mutated, unmatched candidates are
-  preserved unless `matches_only` is set, and result counters report candidates
-  and matches;
+  preserved unless `matches_only` is set, match-all candidate-stream mutation
+  mutates every top-level array candidate, and result counters report
+  candidates and matches;
 - brace shorthand mutation execution is covered by C SDK contract tests and
   Go-backed CLI parity tests for nested set, increment, delete, and path
   expansion behavior;
