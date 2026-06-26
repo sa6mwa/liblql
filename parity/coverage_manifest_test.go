@@ -64,6 +64,7 @@ var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"mutation", "match-all mixed candidate stream mutation", []string{"TestCLQLMatchAllMutationMixedStreamParity"}},
 	{"mutation", "seekable file mutation matches-only output", []string{"TestCLQLMutationMatchesOnlyParity"}},
 	{"mutation", "seekable file projection before mutation", []string{"TestCLQLMutationProjectionParity"}},
+	{"mutation", "seekable file projection before mutation suppresses missing projections", []string{"TestCLQLMutationProjectionMissingFieldsParity"}},
 	{"mutation", "stdin projection before mutation with matches-only output", []string{"TestCLQLStdinMutationProjectionMatchesOnlyParity"}},
 	{"mutation", "stdin projection before mutation with unmatched preservation", []string{"TestCLQLStdinMutationProjectionPreservesUnmatchedParity"}},
 	{"mutation", "stdin mutation matches-only output", []string{"TestCLQLStdinMutationMatchesOnlyParity"}},

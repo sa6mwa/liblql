@@ -984,6 +984,10 @@ Current implementation status:
   multiple files; inline and write-mode execution failures for empty or
   malformed JSON input preserve the original input file rather than replacing
   it with a failed temp output;
+- CLI projection-before-mutation parity covers the edge where all projected
+  fields are missing and no output should be emitted, and the edge where a
+  matched candidate is dropped because its post-mutation projection is missing
+  while an unmatched candidate with the projected field is preserved;
 - Go-backed SDK parity tests now exist for public `liblql` selector
   parse/evaluate behavior for AND and OR parser entry points, top-level
   comma/newline selector separators, selector capability/trait inspection

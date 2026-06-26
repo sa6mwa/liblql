@@ -2650,6 +2650,76 @@ func TestCLQLMutationProjectionParity(t *testing.T) {
 	}
 }
 
+func TestCLQLMutationProjectionMissingFieldsParity(t *testing.T) {
+	clql := os.Getenv("CLQL_PATH")
+	if clql == "" {
+		t.Skip("CLQL_PATH not set")
+	}
+	cases := []struct {
+		name string
+		body string
+		args []string
+		want string
+	}{
+		{
+			name: "all projected outputs missing",
+			body: `{"id":"a"}
+{"id":"b"}`,
+			args: []string{
+				"-c",
+				"-f", "/missing",
+				"-m", "/noop=1",
+				`contains{f=/}`,
+			},
+			want: "",
+		},
+		{
+			name: "matched candidate missing projection is dropped",
+			body: `{"status":404}
+{"status":200,"uri":"/ok"}`,
+			args: []string{
+				"-c",
+				"-f", "/uri",
+				"-m", "/hello=world",
+				`/status=404`,
+			},
+			want: `{"uri":"/ok"}` + "\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp, err := os.CreateTemp(t.TempDir(), "clql-mutate-project-missing-*.json")
+			if err != nil {
+				t.Fatalf("create temp: %v", err)
+			}
+			if _, err := tmp.WriteString(tc.body); err != nil {
+				t.Fatalf("write temp: %v", err)
+			}
+			if err := tmp.Close(); err != nil {
+				t.Fatalf("close temp: %v", err)
+			}
+			args := append([]string{}, tc.args...)
+			args = append(args, tmp.Name())
+			cmd := exec.Command(clql, args...)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("clql mutation projection missing fields failed: %v out=%q", err, string(out))
+			}
+			got, err := decodeJSONValues(out)
+			if err != nil {
+				t.Fatalf("decode clql mutation projection missing output: %v out=%q", err, string(out))
+			}
+			want, err := decodeJSONValues([]byte(tc.want))
+			if err != nil {
+				t.Fatalf("decode expected mutation projection missing output: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("mutation projection missing fields mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+			}
+		})
+	}
+}
+
 func TestCLQLStdinMutationProjectionMatchesOnlyParity(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
