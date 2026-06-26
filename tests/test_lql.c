@@ -6391,7 +6391,9 @@ static void expect_selector_parse_equivalence_api(void) {
   {
     static const char *const exprs[] = {
         "eq{field=/status,value=open}", "eq{value=open,field=/status}",
-        "eq{f=/status,v=open}", " /status = \"open\" "};
+        "eq{f=/status,v=open}",
+        "eq{field=/status,field=/status,value=open,value=open}",
+        "eq{field=/status value=open}", " /status = \"open\" "};
     expect_selector_equivalent_forms("eq aliases", exprs,
                                      sizeof(exprs) / sizeof(exprs[0]),
                                      "{\"status\":\"open\"}",
