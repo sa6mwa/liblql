@@ -106,6 +106,7 @@ EOF
 cat >"$tmp/src/lql_project.c" <<'EOF'
 void *projection_allocator(void) { return projection->allocator != NULL ? projection->allocator : lql_allocator_from_receiver(self); }
 static void projection_path_cleanup(lql_allocator *allocator, void *path) { (void)allocator; (void)path; }
+static int parse_projection_path(lql *self, lql_allocator *allocator, const char *raw, void *out) { (void)self; (void)allocator; (void)raw; (void)out; return 0; }
 struct lql_projection {
   lql_allocator *allocator;
 };
@@ -113,6 +114,7 @@ EOF
 
 cat >"$tmp/src/lql_mutation.c" <<'EOF'
 static void mutation_plan_cleanup_items(lql_allocator *allocator, void *plan) { (void)allocator; (void)plan; }
+static int parse_mutation_expr(lql *self, lql_allocator *allocator, const char *expr, void *plan) { (void)self; (void)allocator; (void)expr; (void)plan; return 0; }
 EOF
 
 printf '%s\n' 'stale cleanup surface is `lql_dealloc()`' >"$tmp/README.md"
@@ -163,6 +165,7 @@ expect_diagnostic "$out" "selector internals must be receiver-owned at subsystem
 expect_diagnostic "$out" "receiver-owned operations must not fall back to handle-stored allocators"
 expect_diagnostic "$out" "receiver-owned child handles must not store allocators"
 expect_diagnostic "$out" "receiver-owned cleanup helpers must take lql \*self"
+expect_diagnostic "$out" "receiver-owned parser boundary helpers must derive allocators"
 expect_diagnostic "$out" "lonejson runtimes must use receiver allocator bridge"
 expect_diagnostic "$out" "private receiver implementations must not be called with NULL receivers"
 expect_diagnostic "$out" "receiver methods must be file-local methods"

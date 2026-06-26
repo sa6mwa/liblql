@@ -253,14 +253,19 @@ static void projection_path_cleanup(lql *self, projection_path *path) {
   path->segment_count = 0u;
 }
 
-static int parse_projection_path(lql *self, lql_allocator *allocator,
-                                 const char *raw, projection_path *out) {
+static int parse_projection_path(lql *self, const char *raw,
+                                 projection_path *out) {
+  lql_allocator *allocator;
   const char *start;
   const char *end;
   const char *seg;
   char *decoded;
   size_t len;
   memset(out, 0, sizeof(*out));
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    return 0;
+  }
   if (raw == NULL) {
     return 0;
   }
@@ -364,10 +369,15 @@ static int projection_paths_have_container_conflict(const projection_path *a,
   return 0;
 }
 
-static int add_path(lql *self, lql_allocator *allocator,
-                    lql_projection *projection, projection_path *path) {
+static int add_path(lql *self, lql_projection *projection,
+                    projection_path *path) {
+  lql_allocator *allocator;
   projection_path *next;
   size_t i;
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    return 0;
+  }
   if (path->segment_count == 0u) {
     return 1;
   }
@@ -959,13 +969,13 @@ static lql_status projection_parse_method(
     return LQL_STATUS_NO_MEMORY;
   }
   for (i = 0u; i < field_count; ++i) {
-    if (!parse_projection_path(self, allocator, fields[i], &path)) {
+    if (!parse_projection_path(self, fields[i], &path)) {
       self->projection_destroy(self, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "invalid or unsupported projection field path");
       return LQL_STATUS_PARSE_ERROR;
     }
-    if (!add_path(self, allocator, projection, &path)) {
+    if (!add_path(self, projection, &path)) {
       projection_path_cleanup(self, &path);
       self->projection_destroy(self, projection);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,

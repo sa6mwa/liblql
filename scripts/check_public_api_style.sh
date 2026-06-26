@@ -350,6 +350,18 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  receiver_parser_allocator_hits=$(
+    grep -REn \
+      '^[[:space:]]*static[[:space:]]+int[[:space:]]+(parse_projection_path|add_path|split_path|parse_mutation_expr|parse_brace_mutation)[[:space:]]*\([^)]*lql_allocator[[:space:]]+\*' \
+      "$source_root/src/lql_project.c" \
+      "$source_root/src/lql_mutation.c" 2>/dev/null || true
+  )
+  if [ -n "$receiver_parser_allocator_hits" ]; then
+    printf 'public API style: receiver-owned parser boundary helpers must derive allocators from lql *self\n' >&2
+    printf '%s\n' "$receiver_parser_allocator_hits" >&2
+    failed=1
+  fi
+
   lonejson_default_allocator_hits=$(
     grep -En 'lonejson_new[[:space:]]*\([[:space:]]*NULL[[:space:]]*,' \
       "$source_root/src/lql_selector.c" \

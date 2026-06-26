@@ -637,8 +637,9 @@ static int expand_and_add_segment(lql_allocator *allocator, mutation_path *path,
   return path_add_segment(allocator, path, segment);
 }
 
-static int split_path(lql *self, lql_allocator *allocator, const char *raw,
-                      mutation_path *out, lql_error *error) {
+static int split_path(lql *self, const char *raw, mutation_path *out,
+                      lql_error *error) {
+  lql_allocator *allocator;
   const char *path;
   const char *seg;
   const char *slash;
@@ -646,6 +647,10 @@ static int split_path(lql *self, lql_allocator *allocator, const char *raw,
   size_t len;
 
   memset(out, 0, sizeof(*out));
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    return 0;
+  }
   path = skip_space(raw);
   len = trimmed_len(path);
   if (len == 0u) {
@@ -760,15 +765,16 @@ static int parse_number_slice(lql_allocator *allocator, const char *s,
 
 static const char *unquoted_value(const char *value, size_t *out_len);
 
-static int parse_mutation_expr(lql *self, lql_allocator *allocator,
-                               const char *expr, lql_mutation_plan *plan,
+static int parse_mutation_expr(lql *self, const char *expr,
+                               lql_mutation_plan *plan,
                                const lql_mutation_parse_options *options,
                                lql_error *error);
 
-static int parse_brace_mutation(lql *self, lql_allocator *allocator,
-                                const char *expr, lql_mutation_plan *plan,
+static int parse_brace_mutation(lql *self, const char *expr,
+                                lql_mutation_plan *plan,
                                 const lql_mutation_parse_options *options,
                                 lql_error *error) {
+  lql_allocator *allocator;
   const char *open;
   size_t len;
   char *prefix_text;
@@ -778,6 +784,10 @@ static int parse_brace_mutation(lql *self, lql_allocator *allocator,
   lql_mutation_plan nested;
   size_t i;
 
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    return -1;
+  }
   len = strlen(expr);
   if (len == 0u || expr[len - 1u] != '}') {
     return 0;
@@ -794,7 +804,7 @@ static int parse_brace_mutation(lql *self, lql_allocator *allocator,
     allocator->destroy(allocator, prefix_text);
     return 0;
   }
-  if (!split_path(self, allocator, prefix_text, &prefix, error)) {
+  if (!split_path(self, prefix_text, &prefix, error)) {
     allocator->destroy(allocator, prefix_text);
     return -1;
   }
@@ -819,8 +829,7 @@ static int parse_brace_mutation(lql *self, lql_allocator *allocator,
   }
   memset(&nested, 0, sizeof(nested));
   for (i = 0u; i < parts.count; ++i) {
-    if (!parse_mutation_expr(self, allocator, parts.items[i], &nested, options,
-                             error)) {
+    if (!parse_mutation_expr(self, parts.items[i], &nested, options, error)) {
       mutation_plan_cleanup_items(self, &nested);
       string_list_cleanup(allocator, &parts);
       mutation_path_cleanup(self, &prefix);
@@ -887,10 +896,11 @@ static int parse_set_value(lql_allocator *allocator, char *value, int time_mode,
   return 1;
 }
 
-static int parse_mutation_expr(lql *self, lql_allocator *allocator,
-                               const char *raw, lql_mutation_plan *plan,
+static int parse_mutation_expr(lql *self, const char *raw,
+                               lql_mutation_plan *plan,
                                const lql_mutation_parse_options *options,
                                lql_error *error) {
+  lql_allocator *allocator;
   char *expr;
   char *eq;
   char *path_text;
@@ -903,6 +913,10 @@ static int parse_mutation_expr(lql *self, lql_allocator *allocator,
   double delta;
   size_t len;
 
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    return 0;
+  }
   expr = trimmed_dup_range(allocator, raw, strlen(raw));
   if (expr == NULL) {
     return 0;
@@ -952,7 +966,7 @@ static int parse_mutation_expr(lql *self, lql_allocator *allocator,
       return 0;
     }
     item.kind = MUTATION_REMOVE;
-    if (!split_path(self, allocator, expr, &item.path, error) ||
+    if (!split_path(self, expr, &item.path, error) ||
         !append_item(allocator, plan, &item)) {
       mutation_item_cleanup(self, &item);
       allocator->destroy(allocator, expr);
@@ -979,7 +993,7 @@ static int parse_mutation_expr(lql *self, lql_allocator *allocator,
     expr[len - 2u] = '\0';
     item.kind = MUTATION_INCREMENT;
     item.delta = delta;
-    if (!split_path(self, allocator, expr, &item.path, error) ||
+    if (!split_path(self, expr, &item.path, error) ||
         !append_item(allocator, plan, &item)) {
       mutation_item_cleanup(self, &item);
       allocator->destroy(allocator, expr);
@@ -988,8 +1002,7 @@ static int parse_mutation_expr(lql *self, lql_allocator *allocator,
     allocator->destroy(allocator, expr);
     return 1;
   }
-  brace_result =
-      parse_brace_mutation(self, allocator, expr, plan, options, error);
+  brace_result = parse_brace_mutation(self, expr, plan, options, error);
   if (brace_result != 0) {
     allocator->destroy(allocator, expr);
     return brace_result > 0;
@@ -1024,7 +1037,7 @@ static int parse_mutation_expr(lql *self, lql_allocator *allocator,
       allocator->destroy(allocator, expr);
       return 0;
     }
-    if (!split_path(self, allocator, path_text, &item.path, error) ||
+    if (!split_path(self, path_text, &item.path, error) ||
         !append_item(allocator, plan, &item)) {
       mutation_item_cleanup(self, &item);
       allocator->destroy(allocator, expr);
@@ -1050,7 +1063,7 @@ static int parse_mutation_expr(lql *self, lql_allocator *allocator,
     allocator->destroy(allocator, expr);
     return 0;
   }
-  if (!split_path(self, allocator, path_text, &item.path, error) ||
+  if (!split_path(self, path_text, &item.path, error) ||
       !append_item(allocator, plan, &item)) {
     mutation_item_cleanup(self, &item);
     allocator->destroy(allocator, expr);
@@ -1095,8 +1108,7 @@ static lql_status mutation_plan_parse_with_options_method(
                  : LQL_STATUS_NO_MEMORY;
     }
     for (j = 0u; j < parts.count; ++j) {
-      if (!parse_mutation_expr(self, allocator, parts.items[j], plan, options,
-                               error)) {
+      if (!parse_mutation_expr(self, parts.items[j], plan, options, error)) {
         string_list_cleanup(allocator, &parts);
         self->mutation_plan_destroy(self, plan);
         return error != NULL && error->code != LQL_STATUS_OK
