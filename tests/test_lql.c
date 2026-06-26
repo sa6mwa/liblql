@@ -34,9 +34,30 @@ static void expect_receiver_api(void) {
     ++failures;
     return;
   }
-  if (ctx->version == NULL || ctx->selector_parse == NULL ||
+  if (ctx->version == NULL || ctx->capabilities_get == NULL ||
+      ctx->selector_parse == NULL || ctx->selector_parse_or == NULL ||
+      ctx->selector_free == NULL || ctx->selector_is_empty == NULL ||
       ctx->matches_json == NULL || ctx->query_file_decisions == NULL ||
-      ctx->projection_parse == NULL || ctx->mutation_plan_parse == NULL ||
+      ctx->query_file_decisions_with_options == NULL ||
+      ctx->query_source_decisions == NULL ||
+      ctx->query_source_decisions_with_options == NULL ||
+      ctx->query_file_matches == NULL ||
+      ctx->query_file_matches_with_options == NULL ||
+      ctx->query_source_spooled_matches == NULL ||
+      ctx->query_source_spooled_matches_with_options == NULL ||
+      ctx->payload_write_json == NULL ||
+      ctx->payload_write_json_sink == NULL || ctx->projection_parse == NULL ||
+      ctx->projection_free == NULL || ctx->project_file_range == NULL ||
+      ctx->project_source == NULL || ctx->project_json == NULL ||
+      ctx->compact_file_range == NULL || ctx->compact_source == NULL ||
+      ctx->compact_json == NULL || ctx->mutation_plan_parse == NULL ||
+      ctx->mutation_plan_parse_with_options == NULL ||
+      ctx->mutation_plan_count == NULL || ctx->mutation_plan_free == NULL ||
+      ctx->mutate_file_range_root_fields == NULL ||
+      ctx->mutate_file_range_paths == NULL ||
+      ctx->mutate_file_range_candidates == NULL ||
+      ctx->mutate_source_paths == NULL ||
+      ctx->mutate_source_candidates == NULL || ctx->mutate_json == NULL ||
       ctx->destroy == NULL) {
     printf("receiver method table missing required methods\n");
     ++failures;
@@ -134,6 +155,9 @@ static void expect_public_utility_api(void) {
     }
   }
   test_ctx->selector_free(test_ctx, selector);
+  test_ctx->selector_free(test_ctx, NULL);
+  test_ctx->projection_free(test_ctx, NULL);
+  test_ctx->mutation_plan_free(test_ctx, NULL);
 
   selector = NULL;
   lql_error_init(&error);
