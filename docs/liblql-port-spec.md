@@ -1005,6 +1005,11 @@ Current implementation status:
   nested logical, and newline-separated selector cases from the Go oracle
   corpus, including multiple CLI selector arguments that combine ordinary
   AND terms with an embedded explicit OR group;
+- JSON Pointer helper behavior from Go is not exposed as a standalone C helper
+  API. The supported C contract is observable RFC 6901 path decoding through
+  product surfaces: selector matching, streaming selector decisions,
+  projection, and mutation all cover escaped slash and tilde segments such as
+  `/a~1b/~0key`;
 - C selector parse conformance covers the applicable public receiver string
   parser surface for brace assignment order, aliases, wrapper prefixes,
   whitespace, deep indexed merge behavior, and deep conflict rejection. Go's

@@ -167,6 +167,8 @@ func TestSDKSelectorMatchesJSONParity(t *testing.T) {
 		{`and.or.0.eq{field=/status,value=open}`, `{"status":"closed"}`},
 		{`or.and.0.eq{field=/status,value=open}`, `{"status":"open"}`},
 		{`or.and.0.eq{field=/status,value=open}`, `{"status":"closed"}`},
+		{`/a~1b/~0key="ready"`, `{"a/b":{"~key":"ready"}}`},
+		{`/a~1b/~0key="ready"`, `{"a":{"b":{"~key":"ready"}}}`},
 		{"/status=\"open\"\n/progress>=50", `{"status":"open","progress":72}`},
 		{"/status=\"open\"\n/progress>=50", `{"status":"open","progress":4}`},
 	}
@@ -1128,6 +1130,11 @@ func TestSDKStreamingDecisionParity(t *testing.T) {
 			name: "match-all string term over mixed scalar candidates",
 			expr: `icontains{f=/,v=""}`,
 			doc:  "\"x\"\n{\"id\":\"x\"}\n123\n",
+		},
+		{
+			name: "escaped JSON Pointer selector path",
+			expr: `/a~1b/~0key="ready"`,
+			doc:  "{\"a/b\":{\"~key\":\"ready\"}}\n{\"a/b\":{\"~key\":\"old\"}}\n{\"a\":{\"b\":{\"~key\":\"ready\"}}}\n",
 		},
 	}
 	for _, tc := range cases {

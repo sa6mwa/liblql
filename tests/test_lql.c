@@ -1345,6 +1345,59 @@ static void expect_stream_mixed_scalar_candidates(void) {
   test_ctx->selector_destroy(test_ctx, selector);
 }
 
+static void expect_stream_escaped_json_pointer_segments(void) {
+  static const char input[] =
+      "{\"a/b\":{\"~key\":\"ready\"}}\n"
+      "{\"a/b\":{\"~key\":\"old\"}}\n"
+      "{\"a\":{\"b\":{\"~key\":\"ready\"}}}\n";
+  FILE *fp;
+  lql_selector *selector;
+  lql_query_result result;
+  stream_seen seen;
+  lql_error error;
+  lql_status st;
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, "/a~1b/~0key=\"ready\"", &selector,
+                                &error);
+  if (st != LQL_STATUS_OK) {
+    printf("escaped pointer stream parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  fp = tmpfile();
+  if (fp == NULL) {
+    printf("escaped pointer stream tmpfile failed\n");
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||
+      fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("escaped pointer stream write/seek failed\n");
+    fclose(fp);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
+                                      &seen, &result, &error);
+  fclose(fp);
+  test_ctx->selector_destroy(test_ctx, selector);
+  if (st != LQL_STATUS_OK || seen.calls != 3 || seen.matched != 1 ||
+      result.candidates_seen != (lql_uint64)3 ||
+      result.candidates_matched != (lql_uint64)1) {
+    printf("escaped pointer stream mismatch: status=%s calls=%d matched=%d "
+           "seen=%lu result_matched=%lu error=%s\n",
+           lql_status_string(st), seen.calls, seen.matched,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched, error.message);
+    ++failures;
+  }
+}
+
 static void expect_source_stream(void) {
   static const char input[] =
       "{\"status\":\"closed\"}\n{\"status\":\"open\"}\n{\"status\":\"done\"}\n";
@@ -6692,6 +6745,8 @@ static void expect_sdk_contract_manifest(void) {
       {"streaming", "seekable FILE decision streams", expect_stream_file},
       {"streaming", "numeric object-key and array-index path segment streams",
        expect_stream_numeric_path_segments},
+      {"streaming", "escaped JSON Pointer selector streams",
+       expect_stream_escaped_json_pointer_segments},
       {"streaming", "mixed scalar and object candidate decision streams",
        expect_stream_mixed_scalar_candidates},
       {"streaming", "callback-source decision streams", expect_source_stream},
@@ -6770,7 +6825,7 @@ static void expect_sdk_contract_manifest(void) {
   };
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 8}, {"streaming", 12},
+      {"version", 1},      {"selector", 8}, {"streaming", 13},
       {"projection", 7},   {"compact", 2},  {"mutation", 20},
   };
   size_t i;
@@ -7250,6 +7305,9 @@ static void expect_selector_quoted_parse_api(void) {
                "{\"greeting\":\"hello\"}", 0);
   expect_match("exists{'/meta,etag'}", "{\"meta,etag\":\"x\"}", 1);
   expect_match("exists{'/meta,etag'}", "{\"meta\":{\"etag\":\"x\"}}", 0);
+  expect_match("/a~1b/~0key=\"ready\"", "{\"a/b\":{\"~key\":\"ready\"}}", 1);
+  expect_match("/a~1b/~0key=\"ready\"", "{\"a\":{\"b\":{\"~key\":\"ready\"}}}",
+               0);
 }
 
 static void expect_selector_any_or_equivalence_api(void) {
@@ -7586,6 +7644,7 @@ int main(void) {
   expect_version_api();
   expect_stream_file();
   expect_stream_numeric_path_segments();
+  expect_stream_escaped_json_pointer_segments();
   expect_stream_mixed_scalar_candidates();
   expect_source_stream();
   expect_stream_large_irrelevant_scalar_api();
