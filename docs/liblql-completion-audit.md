@@ -22,6 +22,7 @@ The following gates have passed from the current repository state:
 - `make release-matrix`
 - `make bench-1g-check`
 - clean `make release`
+- `LQL_PACKAGE_TARGETS=arm64-apple-darwin make release-matrix`
 
 The clean release rehearsal produced and verified:
 
@@ -37,6 +38,7 @@ The clean release rehearsal produced and verified:
   - `aarch64-linux-musl`
   - `armhf-linux-gnu`
   - `armhf-linux-musl`
+  - `arm64-apple-darwin`
 - `clql-0.0.0-<target>.tar.gz` for:
   - `x86_64-linux-gnu`
   - `x86_64-linux-musl`
@@ -44,6 +46,7 @@ The clean release rehearsal produced and verified:
   - `aarch64-linux-musl`
   - `armhf-linux-gnu`
   - `armhf-linux-musl`
+  - `arm64-apple-darwin`
 
 The release rehearsal verified the checksum manifest and expanded source
 archive test suite. The 1 GiB benchmark gate wrote
@@ -65,6 +68,7 @@ archive test suite. The 1 GiB benchmark gate wrote
 | Lua 5.5 only | C compile-time guard, Lua runtime fixtures, Lua package contract fixtures | Proven locally |
 | Go/C/Lua benchmark parity and memory gates | `make bench-check`, `make bench-memory-check`, `make bench-1g-check` | Proven locally |
 | Linux GNU/musl release artifacts | `make release-matrix`, `make release`, checksum manifest | Proven locally |
+| Darwin arm64 release artifacts | `LQL_PACKAGE_TARGETS=arm64-apple-darwin make release-matrix`, checksum manifest | Proven locally with available osxcross toolchain |
 | Source and Lua release artifacts | `make package-verify`, `make release`, checksum manifest | Proven locally |
 | Privacy and relocatability verification | `make package-verify`, `make release`, package privacy fixtures | Proven locally |
 | Warning-clean release build with `-Werror` | release-surface CTest in `make test-all` and source archive verification | Proven locally |
@@ -74,22 +78,13 @@ archive test suite. The 1 GiB benchmark gate wrote
 The goal is not complete until these items are resolved or explicitly accepted
 as out of scope by the engineer:
 
-1. `arm64-apple-darwin` artifact production is unproven locally.
-   `make release-matrix` and `make release` currently report:
-   `release-matrix: skipping arm64-apple-darwin: target compiler cannot link`.
-   The lifecycle allows optional Darwin skipping when the local cross toolchain
-   is unavailable, but the original target matrix still names Darwin as a
-   target. A final completion claim needs either a working Darwin toolchain run
-   or an explicit release-scope decision that Darwin is optional for this
-   release.
-
-2. Final tagged release artifacts are unproven.
+1. Final tagged release artifacts are unproven.
    The current worktree is untagged, so generated artifacts intentionally use
    version `0.0.0`. A real release still needs release authority, version
    selection, a lightweight `vX.Y.Z` tag on `HEAD`, clean tagged `make release`,
    and checksum-listed upload selection from the tagged artifact set.
 
-3. Full LQL parity is claimed only for the current public C/Lua/CLI contract.
+2. Full LQL parity is claimed only for the current public C/Lua/CLI contract.
    The executable `parity/oracle_inventory.tsv` classifies every test,
    benchmark, and example-bearing file in the pinned Go `pkt.systems/lql
    v0.17.1` module. Rows are either covered by C SDK, CLI, Lua, benchmark, or
@@ -100,7 +95,7 @@ as out of scope by the engineer:
    top-level values in the same stream. liblql must not emulate that by
    materializing the root array or source.
 
-4. Release publication is not done.
+3. Release publication is not done.
    No release branch squash, tag push, or GitHub release creation has been
    performed. That is intentionally outside an implementation verification pass
    unless the engineer starts the release flow.
@@ -109,8 +104,6 @@ as out of scope by the engineer:
 
 The next non-cosmetic work should be one of:
 
-- provision or point the repository at a working `arm64-apple-darwin` toolchain
-  and run `make release-matrix` plus `make release`;
 - implement the future lonejson streaming framing CR if that input shape is
   accepted into the dependency, then wire it into liblql callback-source
   streams with C-native tests;

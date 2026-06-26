@@ -86,6 +86,7 @@ typedef struct lql_term {
   int value_set;
   int ignore_case;
   char **any;
+  size_t *any_lens;
   size_t any_count;
   double range_gt;
   double range_gte;
@@ -125,9 +126,11 @@ struct lql_selector {
 LQL_INTERNAL_SYMBOL void lql_set_error(lql_error *error, lql_status status,
                                        const char *message);
 LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql *self, lql_node *node);
-LQL_INTERNAL_SYMBOL lql_status
-lql_parse_selector_internal(lql *self, const char *expr, int or_mode,
-                            lql_selector **out, lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
+                                                           const char *expr,
+                                                           int or_mode,
+                                                           lql_selector **out,
+                                                           lql_error *error);
 LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
                                                    lql_temporal *out);
 LQL_INTERNAL_SYMBOL int lql_temporal_compare(const lql_temporal *left,

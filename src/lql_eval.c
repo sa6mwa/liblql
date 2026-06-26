@@ -48,10 +48,11 @@ typedef struct spooled_source_reader {
   lonejson_spooled cursor;
 } spooled_source_reader;
 
-static lql_status execute_query_file_decisions(
-    lql *self, const lql_selector *selector, FILE *file,
-    const lql_query_options *query_options, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error);
+static lql_status
+execute_query_file_decisions(lql *self, const lql_selector *selector,
+                             FILE *file, const lql_query_options *query_options,
+                             lql_query_decision_fn on_decision, void *user,
+                             lql_query_result *out_result, lql_error *error);
 static lql_status execute_query_file_range_decisions(
     lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
     lql_uint64 size, lql_uint64 index_base,
@@ -205,11 +206,10 @@ static void reset_doc(eval_doc *doc) {
   doc->root_kind = '\0';
 }
 
-static int append_buf(eval_doc *doc, char **buf, size_t *len,
-                      const char *data, size_t n) {
+static int append_buf(eval_doc *doc, char **buf, size_t *len, const char *data,
+                      size_t n) {
   char *next;
-  next =
-      (char *)doc->allocator->realloc(doc->allocator, *buf, *len + n + 1u);
+  next = (char *)doc->allocator->realloc(doc->allocator, *buf, *len + n + 1u);
   if (next == NULL) {
     return 0;
   }
@@ -266,22 +266,40 @@ static int ascii_case_equal_prefix(const char *a, const char *b, size_t n) {
   return 1;
 }
 
+static int contains_case_len(const char *haystack, size_t h, const char *needle,
+                             size_t n, int ignore_case);
+
 static int contains_case(const char *haystack, const char *needle,
                          int ignore_case) {
   size_t h;
   size_t n;
-  size_t i;
   h = strlen(haystack);
   n = strlen(needle);
+  return contains_case_len(haystack, h, needle, n, ignore_case);
+}
+
+static int contains_case_len(const char *haystack, size_t h, const char *needle,
+                             size_t n, int ignore_case) {
+  size_t i;
+  unsigned char first;
   if (n == 0u) {
     return 1;
   }
   if (n > h) {
     return 0;
   }
+  first = ignore_case ? (unsigned char)tolower((unsigned char)needle[0])
+                      : (unsigned char)needle[0];
   for (i = 0u; i + n <= h; ++i) {
-    if (ignore_case ? ascii_case_equal_prefix(haystack + i, needle, n)
-                    : memcmp(haystack + i, needle, n) == 0) {
+    if (ignore_case) {
+      if ((unsigned char)tolower((unsigned char)haystack[i]) != first) {
+        continue;
+      }
+      if (ascii_case_equal_prefix(haystack + i, needle, n)) {
+        return 1;
+      }
+    } else if ((unsigned char)haystack[i] == first &&
+               memcmp(haystack + i, needle, n) == 0) {
       return 1;
     }
   }
@@ -429,6 +447,7 @@ static void observe_node(eval_doc *doc, const lql_node *node,
   size_t i;
   size_t n;
   size_t j;
+  size_t value_len;
   double number;
   lql_temporal temporal;
   lql_temporal query_temporal;
@@ -492,10 +511,12 @@ static void observe_node(eval_doc *doc, const lql_node *node,
         doc->hits[node->hit_index] = 1u;
       }
     } else {
+      value_len = strlen(value);
       for (j = 0u; j < node->term.any_count; ++j) {
-        if (contains_case(value, node->term.any[j],
-                          node->kind == LQL_NODE_ICONTAINS ||
-                              node->term.ignore_case)) {
+        needle = node->term.any[j];
+        if (contains_case_len(value, value_len, needle, node->term.any_lens[j],
+                              node->kind == LQL_NODE_ICONTAINS ||
+                                  node->term.ignore_case)) {
           doc->hits[node->hit_index] = 1u;
           break;
         }
@@ -866,8 +887,9 @@ typedef struct source_spooled_match_state {
 
 static int query_limit_enabled(lql_uint64 limit) { return limit != 0u; }
 
-static lql_query_options query_remaining_options(
-    const lql_query_options *options, const lql_query_result *result) {
+static lql_query_options
+query_remaining_options(const lql_query_options *options,
+                        const lql_query_result *result) {
   lql_query_options remaining;
   memset(&remaining, 0, sizeof(remaining));
   if (options == NULL || result == NULL) {
@@ -875,17 +897,16 @@ static lql_query_options query_remaining_options(
   }
   remaining = *options;
   if (query_limit_enabled(options->max_matches)) {
-    remaining.max_matches = result->candidates_matched >= options->max_matches
-                                ? (lql_uint64)1
-                                : options->max_matches -
-                                      result->candidates_matched;
+    remaining.max_matches =
+        result->candidates_matched >= options->max_matches
+            ? (lql_uint64)1
+            : options->max_matches - result->candidates_matched;
   }
   if (query_limit_enabled(options->max_candidates)) {
-    remaining.max_candidates = result->candidates_seen >=
-                                       options->max_candidates
-                                   ? (lql_uint64)1
-                                   : options->max_candidates -
-                                         result->candidates_seen;
+    remaining.max_candidates =
+        result->candidates_seen >= options->max_candidates
+            ? (lql_uint64)1
+            : options->max_candidates - result->candidates_seen;
   }
   if (query_limit_enabled(options->max_bytes_read)) {
     remaining.max_bytes_read = options->max_bytes_read;
@@ -1005,8 +1026,8 @@ eval_limited_file_read(void *user, unsigned char *buffer, size_t capacity) {
   return result;
 }
 
-static lonejson_read_result
-eval_pread_range(void *user, unsigned char *buffer, size_t capacity) {
+static lonejson_read_result eval_pread_range(void *user, unsigned char *buffer,
+                                             size_t capacity) {
   eval_pread_range_reader *reader;
   lonejson_read_result result;
   size_t want;
@@ -1098,8 +1119,9 @@ static void query_stream_state_cleanup_capture(query_stream_state *state) {
   }
 }
 
-static lonejson_status query_source_decision_payload_sink(
-    void *user, const void *data, size_t len, lonejson_error *error) {
+static lonejson_status
+query_source_decision_payload_sink(void *user, const void *data, size_t len,
+                                   lonejson_error *error) {
   query_stream_state *state;
   size_t copy_len;
   lonejson_status st;
@@ -1140,8 +1162,8 @@ static lonejson_status query_source_decision_payload_sink(
     state->pending_payload_prefix_len = 0u;
     return LONEJSON_STATUS_OK;
   }
-  copy_len = sizeof(state->pending_payload_prefix) -
-             state->pending_payload_prefix_len;
+  copy_len =
+      sizeof(state->pending_payload_prefix) - state->pending_payload_prefix_len;
   if (copy_len > len) {
     copy_len = len;
   }
@@ -1191,9 +1213,9 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
     reset_doc(&state->doc);
     state->result.candidates_seen += nested_result.candidates_seen;
     state->result.candidates_matched += nested_result.candidates_matched;
-    state->result.bytes_read =
-        state->offset_base + (lql_uint64)candidate->stream_offset +
-        (lql_uint64)candidate->byte_size;
+    state->result.bytes_read = state->offset_base +
+                               (lql_uint64)candidate->stream_offset +
+                               (lql_uint64)candidate->byte_size;
     if (nested_result.stopped_early) {
       state->result.stopped_early = 1;
       state->result.stop_reason = nested_result.stop_reason;
@@ -1234,9 +1256,9 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
     reset_doc(&state->doc);
     state->result.candidates_seen += nested_result.candidates_seen;
     state->result.candidates_matched += nested_result.candidates_matched;
-    state->result.bytes_read =
-        state->offset_base + (lql_uint64)candidate->stream_offset +
-        (lql_uint64)candidate->byte_size;
+    state->result.bytes_read = state->offset_base +
+                               (lql_uint64)candidate->stream_offset +
+                               (lql_uint64)candidate->byte_size;
     if (nested_result.stopped_early) {
       state->result.stopped_early = 1;
       state->result.stop_reason = nested_result.stop_reason;
@@ -1354,9 +1376,9 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
                          lonejson_error *error);
 
 static lonejson_status write_spooled_array_candidates(
-    lql *self, const lql_selector *selector,
-    const lql_projection *projection, const lql_mutation_plan *mutation_plan,
-    int matches_only, const lonejson_spooled *spooled, FILE *out, int compact,
+    lql *self, const lql_selector *selector, const lql_projection *projection,
+    const lql_mutation_plan *mutation_plan, int matches_only,
+    const lonejson_spooled *spooled, FILE *out, int compact,
     lonejson *compact_runtime, lql_query_result *out_result,
     lonejson_error *error) {
   lonejson *runtime;
@@ -1632,8 +1654,8 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
           reader.cursor.read_offset = 0u;
           if (state->receiver->mutate_source_paths(
                   state->receiver, state->mutation_plan, spooled_source_read,
-                  &reader, state->out, &state->mutation_error) !=
-              LQL_STATUS_OK) {
+                  &reader, state->out,
+                  &state->mutation_error) != LQL_STATUS_OK) {
             error->code = LONEJSON_STATUS_CALLBACK_FAILED;
             strncpy(error->message, state->mutation_error.message,
                     sizeof(error->message) - 1u);
@@ -1661,8 +1683,8 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
       reader.cursor.read_offset = 0u;
       if (state->receiver->project_source(
               state->receiver, state->projection, spooled_source_read, &reader,
-              state->out, &projected, &state->projection_error) !=
-          LQL_STATUS_OK) {
+              state->out, &projected,
+              &state->projection_error) != LQL_STATUS_OK) {
         error->code = LONEJSON_STATUS_CALLBACK_FAILED;
         strncpy(error->message, state->projection_error.message,
                 sizeof(error->message) - 1u);
@@ -1721,8 +1743,9 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
-static lql_status eval_selector_buffer(lql *self, const lql_selector *selector, const char *json,
-                  size_t json_len, int *out_matched, lql_error *error) {
+static lql_status eval_selector_buffer(lql *self, const lql_selector *selector,
+                                       const char *json, size_t json_len,
+                                       int *out_matched, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
@@ -1754,9 +1777,9 @@ static lql_status eval_selector_buffer(lql *self, const lql_selector *selector, 
   return LQL_STATUS_OK;
 }
 
-static lql_status
-matches_json_method(lql *self, const lql_selector *selector, const char *json,
-                    size_t json_len, int *out_matched, lql_error *error) {
+static lql_status matches_json_method(lql *self, const lql_selector *selector,
+                                      const char *json, size_t json_len,
+                                      int *out_matched, lql_error *error) {
   if (out_matched == NULL || json == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "json and out_matched are required");
@@ -1770,10 +1793,10 @@ matches_json_method(lql *self, const lql_selector *selector, const char *json,
                               error);
 }
 
-static lql_status query_file_decisions_method(
-    lql *self, const lql_selector *selector, FILE *file,
-    lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
-    lql_error *error) {
+static lql_status
+query_file_decisions_method(lql *self, const lql_selector *selector, FILE *file,
+                            lql_query_decision_fn on_decision, void *user,
+                            lql_query_result *out_result, lql_error *error) {
   return self->query_file_decisions_with_options(
       self, selector, file, NULL, on_decision, user, out_result, error);
 }
@@ -1789,13 +1812,14 @@ static lql_status query_file_decisions_with_options_method(
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   return execute_query_file_decisions(self, selector, file, options,
-                                       on_decision, user, out_result, error);
+                                      on_decision, user, out_result, error);
 }
 
-static lql_status query_source_decisions_method(
-    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
-    lql_query_decision_fn on_decision, void *user, lql_query_result *out_result,
-    lql_error *error) {
+static lql_status
+query_source_decisions_method(lql *self, const lql_selector *selector,
+                              lql_read_fn read, void *read_user,
+                              lql_query_decision_fn on_decision, void *user,
+                              lql_query_result *out_result, lql_error *error) {
   return self->query_source_decisions_with_options(self, selector, read,
                                                    read_user, NULL, on_decision,
                                                    user, out_result, error);
@@ -1812,8 +1836,8 @@ static lql_status query_source_decisions_with_options_method(
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   return execute_query_source_decisions(self, selector, read, read_user,
-                                         options, on_decision, user, out_result,
-                                         error);
+                                        options, on_decision, user, out_result,
+                                        error);
 }
 
 static lql_status query_source_spooled_matches_method(
@@ -1824,8 +1848,7 @@ static lql_status query_source_spooled_matches_method(
       self, selector, read, read_user, NULL, on_match, user, out_result, error);
 }
 
-static lql_status
-query_source_spooled_matches_with_options_method(
+static lql_status query_source_spooled_matches_with_options_method(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *options, lql_query_match_fn on_match, void *user,
     lql_query_result *out_result, lql_error *error) {
@@ -1836,14 +1859,14 @@ query_source_spooled_matches_with_options_method(
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   return execute_query_source_spooled_matches(self, selector, read, read_user,
-                                               options, on_match, user,
-                                               out_result, error);
+                                              options, on_match, user,
+                                              out_result, error);
 }
 
 static lql_status
 query_file_matches_method(lql *self, const lql_selector *selector, FILE *file,
-                            lql_query_match_fn on_match, void *user,
-                            lql_query_result *out_result, lql_error *error) {
+                          lql_query_match_fn on_match, void *user,
+                          lql_query_result *out_result, lql_error *error) {
   return self->query_file_matches_with_options(
       self, selector, file, NULL, on_match, user, out_result, error);
 }
@@ -1873,8 +1896,9 @@ static lql_status query_file_matches_with_options_method(
   return st;
 }
 
-static lql_status payload_write_json_method(
-    lql *self, const lql_payload *payload, FILE *out, lql_error *error) {
+static lql_status payload_write_json_method(lql *self,
+                                            const lql_payload *payload,
+                                            FILE *out, lql_error *error) {
   if (payload == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "payload and output file are required");
@@ -1884,9 +1908,11 @@ static lql_status payload_write_json_method(
                                        error);
 }
 
-static lql_status payload_write_json_sink_method(
-    lql *self, const lql_payload *payload, lql_write_fn write, void *write_user,
-    lql_error *error) {
+static lql_status payload_write_json_sink_method(lql *self,
+                                                 const lql_payload *payload,
+                                                 lql_write_fn write,
+                                                 void *write_user,
+                                                 lql_error *error) {
   lql_payload_sink_adapter adapter;
   off_t current;
   lql_status copy_status;
@@ -1953,9 +1979,11 @@ static lql_status payload_write_json_sink_method(
   return LQL_STATUS_OK;
 }
 
-static lql_status payload_project_json_method(
-    lql *self, const lql_payload *payload, const lql_projection *projection,
-    FILE *out, int *out_found, lql_error *error) {
+static lql_status payload_project_json_method(lql *self,
+                                              const lql_payload *payload,
+                                              const lql_projection *projection,
+                                              FILE *out, int *out_found,
+                                              lql_error *error) {
   off_t current;
   lql_status st;
   if (out_found != NULL) {
@@ -2121,10 +2149,11 @@ static lql_status mutate_source_projected_candidates_with_options_method(
       matches_only, query_options, out_result, error);
 }
 
-static lql_status execute_query_file_decisions(
-    lql *self, const lql_selector *selector, FILE *file,
-    const lql_query_options *query_options, lql_query_decision_fn on_decision,
-    void *user, lql_query_result *out_result, lql_error *error) {
+static lql_status
+execute_query_file_decisions(lql *self, const lql_selector *selector,
+                             FILE *file, const lql_query_options *query_options,
+                             lql_query_decision_fn on_decision, void *user,
+                             lql_query_result *out_result, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;

@@ -63,13 +63,24 @@ static int token_list_push(lql_selector_parser *ctx, lql_token_list *list,
 
 static int term_any_push(lql_selector_parser *ctx, lql_term *term, char *item) {
   char **next;
+  size_t *next_lens;
+  size_t len;
+  len = strlen(item);
   next = (char **)ctx->allocator->realloc(
       ctx->allocator, term->any, sizeof(char *) * (term->any_count + 1u));
   if (next == NULL) {
     return 0;
   }
   term->any = next;
-  term->any[term->any_count++] = item;
+  next_lens = (size_t *)ctx->allocator->realloc(
+      ctx->allocator, term->any_lens, sizeof(size_t) * (term->any_count + 1u));
+  if (next_lens == NULL) {
+    return 0;
+  }
+  term->any_lens = next_lens;
+  term->any[term->any_count] = item;
+  term->any_lens[term->any_count] = len;
+  ++term->any_count;
   return 1;
 }
 
@@ -974,6 +985,51 @@ static int string_term_is_match_all_alias(lql_node_kind kind,
   return 0;
 }
 
+static int expand_contains_any_to_or(lql_selector_parser *ctx, lql_node *node) {
+  lql_node *children;
+  lql_node tmp;
+  size_t i;
+
+  if (node->kind != LQL_NODE_CONTAINS && node->kind != LQL_NODE_ICONTAINS) {
+    return 1;
+  }
+  if (node->term.any_count == 0u) {
+    return 1;
+  }
+  children = (lql_node *)ctx->allocator->calloc(
+      ctx->allocator, node->term.any_count, sizeof(lql_node));
+  if (children == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < node->term.any_count; ++i) {
+    children[i].kind = node->kind;
+    children[i].term.field =
+        ctx->allocator->strdup(ctx->allocator, node->term.field);
+    children[i].term.value =
+        ctx->allocator->strdup(ctx->allocator, node->term.any[i]);
+    children[i].term.value_set = 1;
+    children[i].term.ignore_case = node->term.ignore_case;
+    if (children[i].term.field == NULL || children[i].term.value == NULL) {
+      for (; i > 0u; --i) {
+        lql_node_cleanup(ctx->receiver, &children[i - 1u]);
+      }
+      lql_node_cleanup(ctx->receiver, &children[i]);
+      ctx->allocator->destroy(ctx->allocator, children);
+      return 0;
+    }
+  }
+
+  memset(&tmp, 0, sizeof(tmp));
+  tmp.kind = node->kind;
+  tmp.term = node->term;
+  memset(&node->term, 0, sizeof(node->term));
+  node->kind = LQL_NODE_OR;
+  node->children = children;
+  node->child_count = tmp.term.any_count;
+  lql_node_cleanup(ctx->receiver, &tmp);
+  return 1;
+}
+
 static lql_status parse_exists_body(lql_selector_parser *ctx, const char *body,
                                     lql_term *term, lql_error *error) {
   lql_token_list parts;
@@ -1173,6 +1229,10 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
     if (string_term_is_match_all_alias(out->kind, &out->term)) {
       lql_node_cleanup(ctx->receiver, out);
       out->kind = LQL_NODE_ALL;
+    } else if (!expand_contains_any_to_or(ctx, out)) {
+      lql_node_cleanup(ctx->receiver, out);
+      ctx->allocator->destroy(ctx->allocator, copy);
+      return LQL_STATUS_NO_MEMORY;
     }
     ctx->allocator->destroy(ctx->allocator, copy);
     return LQL_STATUS_OK;
@@ -1493,9 +1553,11 @@ static lql_status finalize_indexed_group(lql_selector_parser *ctx,
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL lql_status
-lql_parse_selector_internal(lql *self, const char *expr, int or_mode,
-                            lql_selector **out, lql_error *error) {
+LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
+                                                           const char *expr,
+                                                           int or_mode,
+                                                           lql_selector **out,
+                                                           lql_error *error) {
   lql_selector_parser ctx_storage;
   lql_selector_parser *ctx;
   lql_allocator *allocator;

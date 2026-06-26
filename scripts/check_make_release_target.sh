@@ -49,6 +49,17 @@ check_release_surface() {
       printf 'release surface: project warning flags must include -Werror\n' >&2
       exit 1
     fi
+    if ! grep -F 'CMAKE_BUILD_WITH_INSTALL_RPATH ON' "$cmakelists" \
+      >/dev/null; then
+      printf 'release surface: Darwin builds must use install RPATH at build time\n' >&2
+      exit 1
+    fi
+    if ! grep -F 'INSTALL_RPATH "@loader_path"' "$cmakelists" >/dev/null ||
+       ! grep -F 'INSTALL_RPATH "@loader_path/../lib"' "$cmakelists" \
+         >/dev/null; then
+      printf 'release surface: Darwin runtime paths must be loader-relative\n' >&2
+      exit 1
+    fi
     for target in lql_common clql lql_payload_bench lql_match_example \
       lql_lua_core test_lql lql_handle_allocator_test lql_fuzz_smoke; do
       if grep -Eq "add_(library|executable)\\(${target}([[:space:]]|\\))" \
@@ -87,11 +98,17 @@ make release-matrix
 EOF
   cat >"$cmakelists" <<'EOF'
 set(LQL_PROJECT_WARNINGS -Wall -Wextra -Wpedantic -Werror)
+if(LQL_TARGET_OS STREQUAL "darwin")
+  set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+endif()
 function(lql_apply_project_warnings target)
 endfunction()
 add_library(lql_common OBJECT src/lql.c)
 lql_apply_project_warnings(lql_common)
+add_library(lql_shared SHARED src/lql.c)
+set_target_properties(lql_shared PROPERTIES INSTALL_RPATH "@loader_path")
 add_executable(clql src/clql.c)
+set_target_properties(clql PROPERTIES INSTALL_RPATH "@loader_path/../lib")
 lql_apply_project_warnings(clql)
 EOF
   check_release_surface "$makefile" "$release_script" "$cmakelists"
@@ -108,6 +125,14 @@ EOF
   if (check_release_surface "$makefile" "$release_script" \
     "$tmp/missing-target-warning.cmake" >/dev/null 2>&1); then
     printf 'release surface fixture: expected missing target warning policy to fail\n' >&2
+    exit 1
+  fi
+
+  sed '/CMAKE_BUILD_WITH_INSTALL_RPATH/d' "$cmakelists" \
+    >"$tmp/missing-darwin-build-rpath.cmake"
+  if (check_release_surface "$makefile" "$release_script" \
+    "$tmp/missing-darwin-build-rpath.cmake" >/dev/null 2>&1); then
+    printf 'release surface fixture: expected missing Darwin build RPATH to fail\n' >&2
     exit 1
   fi
 

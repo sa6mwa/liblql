@@ -111,6 +111,14 @@ check_release_preset() {
         .cacheVariables.LQL_TARGET_OS == $os and
         .cacheVariables.LQL_TARGET_LIBC == $libc)
     ' "$presets" >/dev/null || return 1
+  if [ "$target_id" = "arm64-apple-darwin" ]; then
+    jq -e --arg name "$name" '
+      .configurePresets[] |
+      select(.name == $name and
+        .cacheVariables.CMAKE_SYSTEM_NAME == "Darwin" and
+        .cacheVariables.CMAKE_SYSTEM_PROCESSOR == "arm64")
+    ' "$presets" >/dev/null || return 1
+  fi
 
   jq -e --arg name "$name" \
     '.buildPresets[] | select(.name == $name and .configurePreset == $name)' \
@@ -139,7 +147,7 @@ if [ "${1:-}" = "--fixtures" ]; then
     {"name":"aarch64-linux-musl-release","inherits":"release-base","cacheVariables":{"LQL_TARGET_ID":"aarch64-linux-musl","LQL_TARGET_ARCH":"aarch64","LQL_TARGET_OS":"linux","LQL_TARGET_LIBC":"musl"}},
     {"name":"armhf-linux-gnu-release","inherits":"release-base","cacheVariables":{"LQL_TARGET_ID":"armhf-linux-gnu","LQL_TARGET_ARCH":"armhf","LQL_TARGET_OS":"linux","LQL_TARGET_LIBC":"gnu"}},
     {"name":"armhf-linux-musl-release","inherits":"release-base","cacheVariables":{"LQL_TARGET_ID":"armhf-linux-musl","LQL_TARGET_ARCH":"armhf","LQL_TARGET_OS":"linux","LQL_TARGET_LIBC":"musl"}},
-    {"name":"arm64-apple-darwin-release","inherits":"release-base","cacheVariables":{"LQL_TARGET_ID":"arm64-apple-darwin","LQL_TARGET_ARCH":"arm64","LQL_TARGET_OS":"darwin","LQL_TARGET_LIBC":""}}
+    {"name":"arm64-apple-darwin-release","inherits":"release-base","cacheVariables":{"LQL_TARGET_ID":"arm64-apple-darwin","LQL_TARGET_ARCH":"arm64","LQL_TARGET_OS":"darwin","LQL_TARGET_LIBC":"","CMAKE_SYSTEM_NAME":"Darwin","CMAKE_SYSTEM_PROCESSOR":"arm64"}}
   ],
   "buildPresets": [
     {"name":"debug","configurePreset":"debug"},

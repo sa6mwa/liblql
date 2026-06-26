@@ -204,6 +204,7 @@ LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql *self, lql_node *node) {
     allocator->destroy(allocator, node->term.any[i]);
   }
   allocator->destroy(allocator, node->term.any);
+  allocator->destroy(allocator, node->term.any_lens);
   for (i = 0u; i < node->child_count; ++i) {
     lql_node_cleanup(self, &node->children[i]);
   }

@@ -38,6 +38,10 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   set(LQL_PROJECT_WARNINGS -Wall -Wextra -Wpedantic -Werror)
 endif()
 
+if(LQL_TARGET_OS STREQUAL "darwin")
+  set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+endif()
+
 function(lql_apply_project_warnings target)
   if(LQL_PROJECT_WARNINGS)
     target_compile_options(${target} PRIVATE ${LQL_PROJECT_WARNINGS})
@@ -79,6 +83,9 @@ if(LQL_BUILD_SHARED)
     OUTPUT_NAME lql
     VERSION "${PROJECT_VERSION}"
     SOVERSION 0)
+  if(LQL_TARGET_OS STREQUAL "darwin")
+    set_target_properties(lql_shared PROPERTIES INSTALL_RPATH "@loader_path")
+  endif()
   target_link_libraries(lql_shared PUBLIC lonejson::lonejson)
   target_include_directories(lql_shared PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -272,6 +279,11 @@ if(LQL_BUILD_TESTS)
       package-manifest-fixtures)
   set_tests_properties(lql.package-manifest-fixtures PROPERTIES
     LABELS "unit;packaging" TIMEOUT 5)
+  add_test(NAME lql.package-tool-path-fixtures
+    COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package.sh
+      package-tool-path-fixtures)
+  set_tests_properties(lql.package-tool-path-fixtures PROPERTIES
+    LABELS "unit;operability;packaging" TIMEOUT 5)
   add_test(NAME lql.package-lua-contract-fixtures
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/package.sh
       package-lua-contract-fixtures)

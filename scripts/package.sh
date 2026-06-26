@@ -129,9 +129,9 @@ package_one() {
   fi
 
   "$ROOT_DIR/scripts/deps.sh" "$target_id"
-  reset_build_dir_if_compiler_changed "$build_dir" "$cc"
-  (cd "$ROOT_DIR" && CC="$cc" cmake --preset "$preset")
-  (cd "$ROOT_DIR" && cmake --build --preset "$preset")
+  reset_build_dir_if_compiler_changed "$build_dir" "$cc" "$target_id"
+  (cd "$ROOT_DIR" && CC="$cc" run_with_tool_path "$cc" cmake --preset "$preset")
+  (cd "$ROOT_DIR" && run_with_tool_path "$cc" cmake --build --preset "$preset")
   discover_package_tools "$target_id"
   rm -rf "$work_dir"
   mkdir -p "$install_root"
@@ -202,9 +202,29 @@ target_cc() {
   esac
 }
 
+tool_dirname() {
+  tool=$1
+  case "$tool" in
+    */*) dirname "$tool" ;;
+    *) return 1 ;;
+  esac
+}
+
+run_with_tool_path() {
+  tool=$1
+  shift
+  tool_dir=$(tool_dirname "$tool" || true)
+  if [ -n "$tool_dir" ]; then
+    PATH="$tool_dir:$PATH" "$@"
+  else
+    "$@"
+  fi
+}
+
 reset_build_dir_if_compiler_changed() {
   build_dir=$1
   cc=$2
+  target_id=$3
   cache="$build_dir/CMakeCache.txt"
   if [ ! -f "$cache" ]; then
     return
@@ -212,7 +232,16 @@ reset_build_dir_if_compiler_changed() {
   cached=$(sed -n 's/^CMAKE_C_COMPILER:FILEPATH=//p' "$cache")
   if [ -n "$cached" ] && [ "$cached" != "$cc" ]; then
     rm -rf "$build_dir"
+    return
   fi
+  cached_system=$(sed -n 's/^CMAKE_SYSTEM_NAME:[^=]*=//p' "$cache")
+  case "$target_id" in
+    arm64-apple-darwin)
+      if [ "$cached_system" != "Darwin" ]; then
+        rm -rf "$build_dir"
+      fi
+      ;;
+  esac
 }
 
 compiler_link_smoke() {
@@ -226,7 +255,8 @@ int main(void) {
   return 0;
 }
 EOF
-  "$cc" "$smoke_dir/smoke.c" -o "$smoke_dir/smoke" >/dev/null 2>&1
+  run_with_tool_path "$cc" "$cc" "$smoke_dir/smoke.c" \
+    -o "$smoke_dir/smoke" >/dev/null 2>&1
 }
 
 package_source() {
@@ -461,7 +491,12 @@ strip_installed_artifacts() {
   fi
 
   while IFS= read -r file; do
-    "$strip_tool" "$file" >/dev/null 2>&1 || {
+    case "$target_id" in
+      *apple-darwin*) strip_args="-x" ;;
+      *) strip_args="" ;;
+    esac
+    # shellcheck disable=SC2086
+    "$strip_tool" $strip_args "$file" >/dev/null 2>&1 || {
       rm -f "$list"
       printf 'package: target strip failed for %s: %s\n' "$target_id" "$file" >&2
       exit 1
@@ -1071,11 +1106,13 @@ expect_strip_tool_generation() {
   fixture="$tmp_dir/strip-generation"
   output="$tmp_dir/strip-generation.out"
   strip_log="$tmp_dir/strip-generation.log"
+  darwin_log="$tmp_dir/strip-generation-darwin.log"
   fake_strip="$tmp_dir/fake-strip"
 
   mkdir -p "$fixture/bin" "$fixture/lib"
   printf 'fake executable\n' >"$fixture/bin/clql"
   printf 'fake shared library\n' >"$fixture/lib/liblql.so.0.0.0"
+  printf 'fake dylib\n' >"$fixture/lib/liblql.0.0.0.dylib"
 
   if (strip_installed_artifacts x86_64-linux-gnu "$fixture" \
     "$tmp_dir/no-strip") >"$output" 2>&1; then
@@ -1099,6 +1136,19 @@ EOF
      ! grep -Fx "$fixture/lib/liblql.so.0.0.0" "$strip_log" >/dev/null; then
     printf 'package privacy fixture did not invoke target strip for installed artifacts\n' >&2
     cat "$strip_log" >&2
+    exit 1
+  fi
+
+  cat >"$fake_strip" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"$darwin_log"
+EOF
+  chmod +x "$fake_strip"
+  strip_installed_artifacts arm64-apple-darwin "$fixture" "$fake_strip"
+  if ! grep -F -- "-x $fixture/lib/liblql.0.0.0.dylib" \
+    "$darwin_log" >/dev/null; then
+    printf 'package privacy fixture did not pass -x for Darwin strip\n' >&2
+    cat "$darwin_log" >&2
     exit 1
   fi
 }
@@ -1149,6 +1199,52 @@ check_package_manifest_fixtures() {
   fi
   ROOT_DIR=$old_root
   DIST_DIR=$old_dist
+}
+
+check_package_tool_path_fixtures() {
+  tmp_dir="$ROOT_DIR/build/package-tool-path-fixtures"
+  fake_cc="$tmp_dir/bin/fixture-cc"
+  fake_ld="$tmp_dir/bin/fixture-ld"
+  log="$tmp_dir/tool.log"
+
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir/bin"
+  cat >"$fake_ld" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+  cat >"$fake_cc" <<EOF
+#!/bin/sh
+if ! command -v fixture-ld >"$log"; then
+  exit 9
+fi
+out=
+while [ "\$#" -gt 0 ]; do
+  if [ "\$1" = "-o" ]; then
+    shift
+    out=\${1:-}
+  fi
+  shift || break
+done
+if [ -n "\$out" ]; then
+  : >"\$out"
+fi
+EOF
+  chmod +x "$fake_cc" "$fake_ld"
+
+  old_path=$PATH
+  PATH="/usr/bin:/bin"
+  if ! compiler_link_smoke fixture-target "$fake_cc"; then
+    PATH=$old_path
+    printf 'package tool path fixture did not prepend compiler directory\n' >&2
+    exit 1
+  fi
+  PATH=$old_path
+  if ! grep -Fx "$fake_ld" "$log" >/dev/null; then
+    printf 'package tool path fixture resolved wrong sibling linker\n' >&2
+    cat "$log" >&2
+    exit 1
+  fi
 }
 
 check_lua_package_contract_fixtures() {
@@ -1263,6 +1359,9 @@ case "$TARGET" in
     ;;
   package-manifest-fixtures)
     check_package_manifest_fixtures
+    ;;
+  package-tool-path-fixtures)
+    check_package_tool_path_fixtures
     ;;
   package-lua-contract-fixtures)
     check_lua_package_contract_fixtures

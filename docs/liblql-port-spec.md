@@ -1326,8 +1326,10 @@ Current implementation status:
 - current local lifecycle confidence has passed `make test-all`,
   `make bench-check`, `make bench-memory-check`, `make package-verify`, and
   `make release-matrix` on the available host/toolchain set. The release matrix
-  builds and verifies all Linux GNU/musl targets in the configured matrix and
-  reports Darwin as skipped when the local Darwin target compiler cannot link.
+  builds and verifies all Linux GNU/musl targets in the configured matrix.
+  `LQL_PACKAGE_TARGETS=arm64-apple-darwin make release-matrix` also builds and
+  verifies the Darwin arm64 `liblql` and `clql` artifacts when the osxcross
+  compiler, linker, strip, and otool are available.
   These gates are strong evidence for the current implementation state, but
   they are not a substitute for a requirement-by-requirement completion audit
   before claiming full LQL parity or final release readiness;
@@ -1369,7 +1371,10 @@ Current implementation status:
   `--strip` shortcut and strips project-owned installed binaries/shared
   libraries with the discovered target strip tool, with negative fixture
   coverage for missing strip and positive fixture coverage proving the selected
-  strip is invoked;
+  strip is invoked. Target compiler/linker probes and CMake release builds run
+  with the selected compiler's directory prepended to `PATH`, which allows
+  cross-compiler wrappers such as osxcross to resolve sibling target tools
+  instead of host tools;
   checksum manifest fixture coverage proves release-looking tarball, rockspec,
   and source-rock artifacts under `dist/` cannot be left out of the upload
   manifest;
@@ -1402,8 +1407,10 @@ Current implementation status:
   matching lonejson SDK archive for each target, builds and verifies
   `liblql` and `clql` artifacts for `x86_64`, `aarch64`, and `armhf`
   GNU/musl targets, and fails package verification if packaged shared
-  libraries or `clql` binaries do not match their target architecture;
-  Darwin packaging remains conditional on a working target compiler/linker.
+  libraries or `clql` binaries do not match their target architecture.
+  `arm64-apple-darwin` packaging uses the CMake Darwin system preset,
+  loader-relative Mach-O runtime paths, Darwin-safe `strip -x`, and
+  target-correct otool verification when the osxcross toolchain is available.
 
 The repository must not claim full LQL parity until the verification gates prove
 it.
