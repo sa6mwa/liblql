@@ -7,6 +7,7 @@ tmp=${TMPDIR:-/tmp}/lql-api-style-$$
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 mkdir -p "$tmp/src" "$tmp/tests" "$tmp/parity" "$tmp/lua" "$tmp/examples" \
   "$tmp/bench" "$tmp/include/lql"
+printf '%s\n' '# fixture' >"$tmp/README.md"
 
 header=$tmp/include/lql/lql.h
 cat >"$header" <<'EOF'
@@ -89,6 +90,10 @@ void *bad_alloc_wrapper(void) { return lql_alloc(1); }
 EOF
 run_expect_fail "liblql allocator wrapper call"
 rm -f "$tmp/src/alloc_wrapper.c"
+
+printf '%s\n' 'stale cleanup surface is `lql_dealloc()`' >"$tmp/README.md"
+run_expect_fail "README allocator wrapper documentation"
+printf '%s\n' '# fixture' >"$tmp/README.md"
 
 cat >"$tmp/lua/private.c" <<'EOF'
 #include "lql_internal.h"

@@ -31,10 +31,10 @@ mutation through a temp-file rename.
 The public C API now exposes an instantiatable receiver shell through
 `lql_new()`, with examples and bindings using `ctx->method(ctx, ...)`.
 Selector/query/projection/mutation operations are not exported as free-function
-wrappers, and the generic allocation cleanup surface is `lql_dealloc()`.
-Project-owned allocation is centralized through the liblql allocator surface,
-and `make test` rejects direct runtime allocator calls outside the allocator
-module.
+wrappers, and allocator wrapper functions are not part of the public API.
+Project-owned allocation is centralized through the internal liblql allocator
+surface, and `make test` rejects direct runtime allocator calls outside the
+allocator module.
 The same supported streaming mutation subset can run over non-seekable stdin
 through callback-scoped spooled candidate payloads.
 `clql -m -f` composes mutation and projection in Go-compatible order by

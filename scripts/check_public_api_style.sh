@@ -127,6 +127,15 @@ if [ -n "$shared" ] && [ -f "$shared" ]; then
 fi
 
 if [ -n "$source_root" ] && [ -d "$source_root" ]; then
+  if [ -f "$source_root/README.md" ]; then
+    for symbol in $forbidden; do
+      if grep -F "\`$symbol()\`" "$source_root/README.md" >/dev/null; then
+        printf 'public API style: README documents forbidden operation/cleanup wrapper: %s\n' "$symbol" >&2
+        failed=1
+      fi
+    done
+  fi
+
   for symbol in $forbidden; do
     if grep -REn \
       "^[[:space:]]*#define[[:space:]]+${symbol}[[:space:]]*\\(" \
