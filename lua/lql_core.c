@@ -885,7 +885,6 @@ static int lua_lql_select_json(lua_State *L) {
 
 static int lua_lql_project_json(lua_State *L) {
   lua_lql_client *client;
-  const char *selector_expr;
   const char *json;
   const char **fields;
   size_t field_count;
@@ -896,11 +895,11 @@ static int lua_lql_project_json(lua_State *L) {
   lql_status st;
   int matched;
   int found;
+  int selector_owned;
   FILE *out;
   lua_lql_buffer buffer;
 
   client = lua_lql_check_client(L, 1);
-  selector_expr = luaL_checkstring(L, 2);
   json = luaL_checklstring(L, 3, &json_len);
   fields = NULL;
   field_count = 0u;
@@ -908,13 +907,13 @@ static int lua_lql_project_json(lua_State *L) {
     return luaL_error(L, "out of memory");
   }
   selector = NULL;
+  selector_owned = 0;
   projection = NULL;
   matched = 0;
   found = 0;
   lua_lql_buffer_init(&buffer, L);
   lql_error_init(&error);
-  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
-                                   &error);
+  st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
   if (st == LQL_STATUS_OK) {
     st = client->ctx->matches_json(client->ctx, selector, json, json_len,
                                    &matched, &error);
@@ -940,7 +939,9 @@ static int lua_lql_project_json(lua_State *L) {
     }
   }
   client->ctx->projection_destroy(client->ctx, projection);
-  client->ctx->selector_destroy(client->ctx, selector);
+  if (selector_owned) {
+    client->ctx->selector_destroy(client->ctx, selector);
+  }
   if (fields != NULL) {
     (void)lua_lql_alloc(L, (void *)fields, sizeof(fields[0]) * field_count, 0u);
   }
@@ -955,7 +956,6 @@ static int lua_lql_project_json(lua_State *L) {
 
 static int lua_lql_mutate_json(lua_State *L) {
   lua_lql_client *client;
-  const char *selector_expr;
   const char *json;
   size_t json_len;
   lql_selector *selector;
@@ -964,20 +964,20 @@ static int lua_lql_mutate_json(lua_State *L) {
   lql_status st;
   int matched;
   int matches_only;
+  int selector_owned;
   FILE *out;
   lua_lql_buffer buffer;
 
   client = lua_lql_check_client(L, 1);
-  selector_expr = luaL_checkstring(L, 2);
   json = luaL_checklstring(L, 3, &json_len);
   matches_only = lua_lql_options_bool(L, 5, "matches_only");
   selector = NULL;
+  selector_owned = 0;
   plan = NULL;
   matched = 0;
   lua_lql_buffer_init(&buffer, L);
   lql_error_init(&error);
-  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
-                                   &error);
+  st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
   if (st == LQL_STATUS_OK) {
     st = client->ctx->matches_json(client->ctx, selector, json, json_len,
                                    &matched, &error);
@@ -1012,7 +1012,9 @@ static int lua_lql_mutate_json(lua_State *L) {
     }
   }
   client->ctx->mutation_plan_destroy(client->ctx, plan);
-  client->ctx->selector_destroy(client->ctx, selector);
+  if (selector_owned) {
+    client->ctx->selector_destroy(client->ctx, selector);
+  }
   if (st != LQL_STATUS_OK) {
     lua_lql_buffer_dispose(&buffer);
     return lua_lql_fail(L, &error);
@@ -1024,7 +1026,6 @@ static int lua_lql_mutate_json(lua_State *L) {
 
 static int lua_lql_select_file(lua_State *L) {
   lua_lql_client *client;
-  const char *selector_expr;
   const char *path;
   lql_selector *selector;
   lql_error error;
@@ -1033,18 +1034,18 @@ static int lua_lql_select_file(lua_State *L) {
   FILE *out;
   lua_lql_buffer buffer;
   lua_lql_file_state state;
+  int selector_owned;
 
   client = lua_lql_check_client(L, 1);
-  selector_expr = luaL_checkstring(L, 2);
   path = luaL_checkstring(L, 3);
   selector = NULL;
+  selector_owned = 0;
   input = NULL;
   out = NULL;
   lua_lql_buffer_init(&buffer, L);
   memset(&state, 0, sizeof(state));
   lql_error_init(&error);
-  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
-                                   &error);
+  st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
   if (st == LQL_STATUS_OK) {
     input = fopen(path, "rb");
     if (input == NULL) {
@@ -1080,7 +1081,9 @@ static int lua_lql_select_file(lua_State *L) {
   if (input != NULL) {
     fclose(input);
   }
-  client->ctx->selector_destroy(client->ctx, selector);
+  if (selector_owned) {
+    client->ctx->selector_destroy(client->ctx, selector);
+  }
   if (st != LQL_STATUS_OK) {
     lua_lql_buffer_dispose(&buffer);
     return lua_lql_fail(L, &error);
@@ -1092,7 +1095,6 @@ static int lua_lql_select_file(lua_State *L) {
 
 static int lua_lql_select_source(lua_State *L) {
   lua_lql_client *client;
-  const char *selector_expr;
   lql_selector *selector;
   lql_error error;
   lql_status st;
@@ -1101,19 +1103,19 @@ static int lua_lql_select_source(lua_State *L) {
   lua_lql_file_state state;
   lua_lql_source_state source_state;
   lql_query_result result;
+  int selector_owned;
 
   client = lua_lql_check_client(L, 1);
-  selector_expr = luaL_checkstring(L, 2);
   luaL_checktype(L, 3, LUA_TFUNCTION);
   selector = NULL;
+  selector_owned = 0;
   out = NULL;
   lua_lql_buffer_init(&buffer, L);
   memset(&state, 0, sizeof(state));
   memset(&source_state, 0, sizeof(source_state));
   memset(&result, 0, sizeof(result));
   lql_error_init(&error);
-  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
-                                   &error);
+  st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
   if (st == LQL_STATUS_OK) {
     out = tmpfile();
     if (out == NULL) {
@@ -1144,7 +1146,9 @@ static int lua_lql_select_source(lua_State *L) {
   if (out != NULL) {
     fclose(out);
   }
-  client->ctx->selector_destroy(client->ctx, selector);
+  if (selector_owned) {
+    client->ctx->selector_destroy(client->ctx, selector);
+  }
   if (st != LQL_STATUS_OK) {
     lua_lql_buffer_dispose(&buffer);
     return lua_lql_fail(L, &error);
@@ -1385,7 +1389,6 @@ static int lua_lql_each_match_source(lua_State *L) {
 
 static int lua_lql_project_file(lua_State *L) {
   lua_lql_client *client;
-  const char *selector_expr;
   const char *path;
   const char **fields;
   size_t field_count;
@@ -1397,9 +1400,9 @@ static int lua_lql_project_file(lua_State *L) {
   FILE *out;
   lua_lql_buffer buffer;
   lua_lql_file_state state;
+  int selector_owned;
 
   client = lua_lql_check_client(L, 1);
-  selector_expr = luaL_checkstring(L, 2);
   path = luaL_checkstring(L, 3);
   fields = NULL;
   field_count = 0u;
@@ -1407,14 +1410,14 @@ static int lua_lql_project_file(lua_State *L) {
     return luaL_error(L, "out of memory");
   }
   selector = NULL;
+  selector_owned = 0;
   projection = NULL;
   input = NULL;
   out = NULL;
   lua_lql_buffer_init(&buffer, L);
   memset(&state, 0, sizeof(state));
   lql_error_init(&error);
-  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
-                                   &error);
+  st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
   if (st == LQL_STATUS_OK) {
     st = client->ctx->projection_parse(client->ctx, fields, field_count,
                                        &projection, &error);
@@ -1455,7 +1458,9 @@ static int lua_lql_project_file(lua_State *L) {
     fclose(input);
   }
   client->ctx->projection_destroy(client->ctx, projection);
-  client->ctx->selector_destroy(client->ctx, selector);
+  if (selector_owned) {
+    client->ctx->selector_destroy(client->ctx, selector);
+  }
   if (fields != NULL) {
     (void)lua_lql_alloc(L, (void *)fields, sizeof(fields[0]) * field_count, 0u);
   }
@@ -1470,7 +1475,6 @@ static int lua_lql_project_file(lua_State *L) {
 
 static int lua_lql_project_source(lua_State *L) {
   lua_lql_client *client;
-  const char *selector_expr;
   const char **fields;
   size_t field_count;
   lql_selector *selector;
@@ -1482,9 +1486,9 @@ static int lua_lql_project_source(lua_State *L) {
   lua_lql_file_state state;
   lua_lql_source_state source_state;
   lql_query_result result;
+  int selector_owned;
 
   client = lua_lql_check_client(L, 1);
-  selector_expr = luaL_checkstring(L, 2);
   luaL_checktype(L, 3, LUA_TFUNCTION);
   fields = NULL;
   field_count = 0u;
@@ -1492,6 +1496,7 @@ static int lua_lql_project_source(lua_State *L) {
     return luaL_error(L, "out of memory");
   }
   selector = NULL;
+  selector_owned = 0;
   projection = NULL;
   out = NULL;
   lua_lql_buffer_init(&buffer, L);
@@ -1499,8 +1504,7 @@ static int lua_lql_project_source(lua_State *L) {
   memset(&source_state, 0, sizeof(source_state));
   memset(&result, 0, sizeof(result));
   lql_error_init(&error);
-  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
-                                   &error);
+  st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
   if (st == LQL_STATUS_OK) {
     st = client->ctx->projection_parse(client->ctx, fields, field_count,
                                        &projection, &error);
@@ -1537,7 +1541,9 @@ static int lua_lql_project_source(lua_State *L) {
     fclose(out);
   }
   client->ctx->projection_destroy(client->ctx, projection);
-  client->ctx->selector_destroy(client->ctx, selector);
+  if (selector_owned) {
+    client->ctx->selector_destroy(client->ctx, selector);
+  }
   if (fields != NULL) {
     (void)lua_lql_alloc(L, (void *)fields, sizeof(fields[0]) * field_count, 0u);
   }
@@ -1552,7 +1558,6 @@ static int lua_lql_project_source(lua_State *L) {
 
 static int lua_lql_mutate_file(lua_State *L) {
   lua_lql_client *client;
-  const char *selector_expr;
   const char *path;
   lql_selector *selector;
   lql_mutation_plan *plan;
@@ -1562,19 +1567,19 @@ static int lua_lql_mutate_file(lua_State *L) {
   FILE *out;
   lua_lql_buffer buffer;
   lua_lql_file_state state;
+  int selector_owned;
 
   client = lua_lql_check_client(L, 1);
-  selector_expr = luaL_checkstring(L, 2);
   path = luaL_checkstring(L, 3);
   selector = NULL;
+  selector_owned = 0;
   plan = NULL;
   input = NULL;
   out = NULL;
   lua_lql_buffer_init(&buffer, L);
   memset(&state, 0, sizeof(state));
   lql_error_init(&error);
-  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
-                                   &error);
+  st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
   if (st == LQL_STATUS_OK) {
     st = lua_lql_parse_mutation_plan(
         L, client->ctx, 4, 5,
@@ -1618,7 +1623,9 @@ static int lua_lql_mutate_file(lua_State *L) {
     fclose(input);
   }
   client->ctx->mutation_plan_destroy(client->ctx, plan);
-  client->ctx->selector_destroy(client->ctx, selector);
+  if (selector_owned) {
+    client->ctx->selector_destroy(client->ctx, selector);
+  }
   if (st != LQL_STATUS_OK) {
     lua_lql_buffer_dispose(&buffer);
     return lua_lql_fail(L, &error);
@@ -1630,7 +1637,6 @@ static int lua_lql_mutate_file(lua_State *L) {
 
 static int lua_lql_mutate_source(lua_State *L) {
   lua_lql_client *client;
-  const char *selector_expr;
   lql_selector *selector;
   lql_mutation_plan *plan;
   lql_error error;
@@ -1639,19 +1645,19 @@ static int lua_lql_mutate_source(lua_State *L) {
   lua_lql_buffer buffer;
   lua_lql_source_state source_state;
   lql_query_result result;
+  int selector_owned;
 
   client = lua_lql_check_client(L, 1);
-  selector_expr = luaL_checkstring(L, 2);
   luaL_checktype(L, 3, LUA_TFUNCTION);
   selector = NULL;
+  selector_owned = 0;
   plan = NULL;
   out = NULL;
   lua_lql_buffer_init(&buffer, L);
   memset(&source_state, 0, sizeof(source_state));
   memset(&result, 0, sizeof(result));
   lql_error_init(&error);
-  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
-                                   &error);
+  st = lua_lql_selector_arg(L, client, 2, &selector, &selector_owned, &error);
   if (st == LQL_STATUS_OK) {
     st = lua_lql_parse_mutation_plan(
         L, client->ctx, 4, 5,
@@ -1686,7 +1692,9 @@ static int lua_lql_mutate_source(lua_State *L) {
     fclose(out);
   }
   client->ctx->mutation_plan_destroy(client->ctx, plan);
-  client->ctx->selector_destroy(client->ctx, selector);
+  if (selector_owned) {
+    client->ctx->selector_destroy(client->ctx, selector);
+  }
   if (st != LQL_STATUS_OK) {
     lua_lql_buffer_dispose(&buffer);
     return lua_lql_fail(L, &error);

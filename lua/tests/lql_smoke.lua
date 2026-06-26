@@ -83,6 +83,12 @@ assert_equal(selected,
              '{"status":"open","id":"b","count":2,"state":{"old":true}}\n',
              "select_file output")
 
+selected, err = client:select_file(open_selector, input_path, {compact = true})
+selected = assert_no_error(selected, err, "select_file parsed selector")
+assert_equal(selected,
+             '{"status":"open","id":"b","count":2,"state":{"old":true}}\n',
+             "select_file parsed selector output")
+
 local decisions = {}
 local result
 result, err = client:query_file('/status="open"', input_path, function(decision)
@@ -177,6 +183,20 @@ selected = assert_no_error(selected, err, "select_source")
 assert_equal(selected, '{"status":"open","id":"ss2","count":6}\n',
              "select_source output")
 
+source_chunks = {
+  '{"status":"closed","id":"ssp1"}\n',
+  '{"status":"open","id":"ssp2","count":8}\n'
+}
+source_index = 1
+selected, err = client:select_source(open_selector, function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end)
+selected = assert_no_error(selected, err, "select_source parsed selector")
+assert_equal(selected, '{"status":"open","id":"ssp2","count":8}\n',
+             "select_source parsed selector output")
+
 local bad_select_source_result, bad_select_source_error =
   client:select_source('/status="open"', function(_)
     error("selection source read failed")
@@ -209,6 +229,19 @@ assert_equal(payloads[1],
              "each_match_file payload")
 assert_equal(streamed_payloads[1], payloads[1],
              "each_match_file streamed payload")
+
+local parsed_payload
+result, err = client:each_match_file(open_selector, input_path, function(match)
+  parsed_payload = assert_no_error(match.json(), nil,
+                                   "each_match_file parsed selector payload")
+end)
+result = assert_no_error(result, err, "each_match_file parsed selector")
+assert_equal(result.candidates_matched, 1,
+             "each_match_file parsed selector matches")
+assert_equal(parsed_payload,
+             '{"status":"open","id":"b","count":2,"state":{"old":true}}',
+             "each_match_file parsed selector payload")
+
 local late_payload, late_err = retained_payload.json()
 if late_payload ~= nil or not late_err or late_err.stderr == "" then
   fail("expected expired payload handle error")
@@ -283,6 +316,27 @@ assert_equal(result.candidates_seen, 2, "each_match_source candidates")
 assert_equal(result.candidates_matched, 1, "each_match_source matches")
 assert_equal(source_payload, '{"status":"open","id":"p2","count":5}',
              "each_match_source payload")
+
+source_chunks = {
+  '{"status":"closed","id":"pp1"}\n',
+  '{"status":"open","id":"pp2","count":9}\n'
+}
+source_index = 1
+local parsed_source_payload
+result, err = client:each_match_source(open_selector, function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end, function(match)
+  parsed_source_payload = assert_no_error(match.json(), nil,
+                                          "each_match_source parsed payload")
+end)
+result = assert_no_error(result, err, "each_match_source parsed selector")
+assert_equal(result.candidates_matched, 1,
+             "each_match_source parsed selector matches")
+assert_equal(parsed_source_payload, '{"status":"open","id":"pp2","count":9}',
+             "each_match_source parsed selector payload")
+
 local late_source_payload, late_source_err = retained_source_payload.json()
 if late_source_payload ~= nil or not late_source_err or
     late_source_err.stderr == "" then
@@ -324,11 +378,24 @@ projected, err = client:project_file('/status="open"', input_path,
 projected = assert_no_error(projected, err, "project_file")
 assert_equal(projected, '{"id":"b","count":2}\n', "project_file output")
 
+projected, err = client:project_file(open_selector, input_path,
+                                     {"/id", "/count"})
+projected = assert_no_error(projected, err, "project_file parsed selector")
+assert_equal(projected, '{"id":"b","count":2}\n',
+             "project_file parsed selector output")
+
 projected, err = client:project_json('/status="open"',
                                     '{"status":"open","id":"c","count":3}',
                                     {"/id", "/count"})
 projected = assert_no_error(projected, err, "project_json")
 assert_equal(projected, '{"id":"c","count":3}\n', "project_json output")
+
+projected, err = client:project_json(open_selector,
+                                     '{"status":"open","id":"cp","count":4}',
+                                     {"/id", "/count"})
+projected = assert_no_error(projected, err, "project_json parsed selector")
+assert_equal(projected, '{"id":"cp","count":4}\n',
+             "project_json parsed selector output")
 
 source_chunks = {
   '{"status":"closed","id":"ps1","count":1}\n',
@@ -342,6 +409,20 @@ projected, err = client:project_source('/status="open"', function(_)
 end, {"/id", "/count"})
 projected = assert_no_error(projected, err, "project_source")
 assert_equal(projected, '{"id":"ps2","count":7}\n', "project_source output")
+
+source_chunks = {
+  '{"status":"closed","id":"psp1","count":1}\n',
+  '{"status":"open","id":"psp2","count":11}\n'
+}
+source_index = 1
+projected, err = client:project_source(open_selector, function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end, {"/id", "/count"})
+projected = assert_no_error(projected, err, "project_source parsed selector")
+assert_equal(projected, '{"id":"psp2","count":11}\n',
+             "project_source parsed selector output")
 
 expect_oversized_source_error("project_source", function(read_fn)
   return client:project_source('/status="open"', read_fn, {"/id"})
@@ -366,6 +447,14 @@ assert_equal(mutated,
              '{"status":"open","id":"b","count":2,"state":{"status":"running"}}\n',
              "mutate_file output")
 
+mutated, err = client:mutate_file(open_selector, input_path,
+                                 {"/state/status=parsed", "rm:/state/old"},
+                                 {matches_only = true})
+mutated = assert_no_error(mutated, err, "mutate_file parsed selector")
+assert_equal(mutated,
+             '{"status":"open","id":"b","count":2,"state":{"status":"parsed"}}\n',
+             "mutate_file parsed selector output")
+
 mutated, err = client:mutate_json('/status="open"',
                                  '{"status":"open","state":{"old":true}}',
                                  {"/state/status=running", "rm:/state/old"},
@@ -373,6 +462,14 @@ mutated, err = client:mutate_json('/status="open"',
 mutated = assert_no_error(mutated, err, "mutate_json")
 assert_equal(mutated, '{"status":"open","state":{"status":"running"}}\n',
              "mutate_json output")
+
+mutated, err = client:mutate_json(open_selector,
+                                 '{"status":"open","state":{"old":true}}',
+                                 {"/state/status=parsed", "rm:/state/old"},
+                                 {matches_only = true})
+mutated = assert_no_error(mutated, err, "mutate_json parsed selector")
+assert_equal(mutated, '{"status":"open","state":{"status":"parsed"}}\n',
+             "mutate_json parsed selector output")
 
 source_chunks = {
   '{"status":"closed","id":"m1"}\n',
@@ -388,6 +485,21 @@ mutated = assert_no_error(mutated, err, "mutate_source")
 assert_equal(mutated,
              '{"status":"open","id":"m2","state":{"status":"running"}}\n',
              "mutate_source output")
+
+source_chunks = {
+  '{"status":"closed","id":"mp1"}\n',
+  '{"status":"open","id":"mp2","state":{"old":true}}\n'
+}
+source_index = 1
+mutated, err = client:mutate_source(open_selector, function(_)
+  local chunk = source_chunks[source_index]
+  source_index = source_index + 1
+  return chunk
+end, {"/state/status=parsed", "rm:/state/old"}, {matches_only = true})
+mutated = assert_no_error(mutated, err, "mutate_source parsed selector")
+assert_equal(mutated,
+             '{"status":"open","id":"mp2","state":{"status":"parsed"}}\n',
+             "mutate_source parsed selector output")
 
 local bad_mutate_source_result, bad_mutate_source_error =
   client:mutate_source('/status="open"', function(_)
