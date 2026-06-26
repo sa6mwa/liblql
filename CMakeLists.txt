@@ -217,6 +217,11 @@ if(LQL_BUILD_TESTS)
         ${LUA_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/lua/tests/lql_core_smoke.lua)
     set_tests_properties(lql.lua-core PROPERTIES LABELS "unit;api;lua" TIMEOUT 5)
   endif()
+  if(TARGET lql_match_example)
+    add_test(NAME lql.example-match COMMAND lql_match_example)
+    set_tests_properties(lql.example-match PROPERTIES
+      LABELS "example-smoke;api" TIMEOUT 5)
+  endif()
 endif()
 
 if(LQL_INSTALL)
