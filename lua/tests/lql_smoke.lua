@@ -273,6 +273,25 @@ if bad_source_result ~= nil or not bad_source_error or
   fail("expected oversized query_source chunk error")
 end
 
+local function expect_oversized_source_error(label, fn)
+  local value, source_error = fn(function(_)
+    return string.rep("x", 9000)
+  end)
+  if value ~= nil or not source_error or
+      not string.find(source_error.stderr or "", "larger than capacity", 1,
+                      true) then
+    fail("expected oversized " .. label .. " chunk error")
+  end
+end
+
+expect_oversized_source_error("select_source", function(read_fn)
+  return client:select_source('/status="open"', read_fn)
+end)
+
+expect_oversized_source_error("each_match_source", function(read_fn)
+  return client:each_match_source('/status="open"', read_fn, function(_) end)
+end)
+
 local projected
 projected, err = client:project_file('/status="open"', input_path,
                                     {"/id", "/count"})
@@ -297,6 +316,20 @@ projected, err = client:project_source('/status="open"', function(_)
 end, {"/id", "/count"})
 projected = assert_no_error(projected, err, "project_source")
 assert_equal(projected, '{"id":"ps2","count":7}\n', "project_source output")
+
+expect_oversized_source_error("project_source", function(read_fn)
+  return client:project_source('/status="open"', read_fn, {"/id"})
+end)
+
+local bad_project_source_result, bad_project_source_error =
+  client:project_source('/status="open"', function(_)
+    error("projection source read failed")
+  end, {"/id"})
+if bad_project_source_result ~= nil or not bad_project_source_error or
+    not string.find(bad_project_source_error.stderr or "",
+                    "projection source read failed", 1, true) then
+  fail("expected structured project_source read callback error")
+end
 
 local mutated
 mutated, err = client:mutate_file('/status="open"', input_path,
@@ -339,6 +372,12 @@ if bad_mutate_source_result ~= nil or not bad_mutate_source_error or
                     "mutation source read failed", 1, true) then
   fail("expected structured mutate_source read callback error")
 end
+
+expect_oversized_source_error("mutate_source", function(read_fn)
+  return client:mutate_source('/status="open"', read_fn,
+                              {"/state/status=running"},
+                              {matches_only = true})
+end)
 
 mutated, err = client:mutate_json('/status="open"', '{"status":"open"}',
                                  {

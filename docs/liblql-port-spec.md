@@ -866,9 +866,10 @@ Current implementation is an early slice:
   Lua callback-source mutation, relative file-backed mutation values through
   explicit `enable_file_mutations` and `file_value_base_dir` options, query
   stop reasons, candidate/match limit options, expired payload handles,
-  oversized Lua source-read chunk rejection, source-read error propagation for
-  query, selection, and mutation, callback error propagation, and structured
-  errors; the public API style gate rejects
+  oversized Lua source-read chunk rejection across query, selection,
+  match-payload, projection, and mutation source facades, source-read error
+  propagation for query, selection, projection, and mutation, callback error
+  propagation, and structured errors; the public API style gate rejects
   Lua facade use of private liblql headers, `LQL_INTERNAL_SYMBOL`, or private
   `_impl` receiver implementation functions so Lua remains a public-header
   binding rather than a private in-process shortcut;
