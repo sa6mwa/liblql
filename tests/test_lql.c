@@ -1037,6 +1037,76 @@ static void expect_source_spooled_payload_api(void) {
   reader.data = input;
   reader.len = strlen(input);
   reader.chunk_size = 7u;
+  options.max_candidates = 1u;
+  lql_error_init(&error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source spooled payload candidate limit parse failed: %s\n",
+           error.message);
+    ++failures;
+    return;
+  }
+  st = test_ctx->query_source_spooled_matches_with_options(
+      test_ctx, selector, read_chunk, &reader, &options,
+      record_spooled_payload_sink, &sink, &result, &error);
+  test_ctx->selector_destroy(test_ctx, selector);
+  if (st != LQL_STATUS_OK || sink.calls != 0 ||
+      result.candidates_seen != (lql_uint64)1 ||
+      result.candidates_matched != (lql_uint64)0 || !result.stopped_early ||
+      result.stop_reason != LQL_QUERY_STOP_CANDIDATE_LIMIT ||
+      result.bytes_read != (lql_uint64)28) {
+    printf("source spooled payload candidate limit mismatch: status=%s "
+           "calls=%d seen=%lu matched=%lu stop=%d bytes=%lu\n",
+           lql_status_string(st), sink.calls,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched, (int)result.stop_reason,
+           (unsigned long)result.bytes_read);
+    ++failures;
+  }
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&reader, 0, sizeof(reader));
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 7u;
+  options.max_bytes_read = 1u;
+  lql_error_init(&error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source spooled payload byte limit parse failed: %s\n",
+           error.message);
+    ++failures;
+    return;
+  }
+  st = test_ctx->query_source_spooled_matches_with_options(
+      test_ctx, selector, read_chunk, &reader, &options,
+      record_spooled_payload_sink, &sink, &result, &error);
+  test_ctx->selector_destroy(test_ctx, selector);
+  if (st != LQL_STATUS_OK || sink.calls != 0 ||
+      result.candidates_seen != (lql_uint64)1 ||
+      result.candidates_matched != (lql_uint64)0 || !result.stopped_early ||
+      result.stop_reason != LQL_QUERY_STOP_BYTE_LIMIT ||
+      result.bytes_read != (lql_uint64)28) {
+    printf("source spooled payload byte limit mismatch: status=%s "
+           "calls=%d seen=%lu matched=%lu stop=%d bytes=%lu\n",
+           lql_status_string(st), sink.calls,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched, (int)result.stop_reason,
+           (unsigned long)result.bytes_read);
+    ++failures;
+  }
+
+  memset(&sink, 0, sizeof(sink));
+  memset(&reader, 0, sizeof(reader));
+  memset(&options, 0, sizeof(options));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 7u;
   options.max_matches = 1u;
   lql_error_init(&error);
   st =
