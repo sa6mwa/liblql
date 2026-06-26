@@ -1190,6 +1190,9 @@ static void expect_stream_numeric_path_segments(void) {
 
 static void expect_stream_mixed_scalar_candidates(void) {
   static const char input[] = "\"x\"\n{\"id\":\"x\"}\n123\n";
+  static const char sized_first[] = "{\"a\":1}";
+  static const char sized_second[] = "{\"b\":[1, 2]}";
+  static const char sized_input[] = " \t{\"a\":1}\n\n  {\"b\":[1, 2]} \n";
   FILE *fp;
   FILE *out;
   lql_selector *selector;
@@ -1281,6 +1284,68 @@ static void expect_stream_mixed_scalar_candidates(void) {
       seen.offsets[1] != (lql_uint64)4 || seen.sizes[1] != (lql_uint64)10 ||
       seen.offsets[2] != (lql_uint64)15 || seen.sizes[2] != (lql_uint64)3) {
     printf("mixed scalar source stream ranges mismatch\n");
+    ++failures;
+  }
+
+  fp = tmpfile();
+  if (fp == NULL) {
+    printf("candidate size tmpfile failed\n");
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (fwrite(sized_input, 1u, strlen(sized_input), fp) !=
+          strlen(sized_input) ||
+      fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("candidate size write/seek failed\n");
+    fclose(fp);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  memset(&seen, 0, sizeof(seen));
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = test_ctx->query_file_decisions(test_ctx, NULL, fp, record_decision,
+                                      &seen, &result, &error);
+  fclose(fp);
+  if (st != LQL_STATUS_OK || seen.calls != 2 ||
+      result.candidates_seen != (lql_uint64)2 ||
+      seen.offsets[0] != (lql_uint64)2 ||
+      seen.sizes[0] != (lql_uint64)strlen(sized_first) ||
+      seen.offsets[1] != (lql_uint64)(2u + strlen(sized_first) + 4u) ||
+      seen.sizes[1] != (lql_uint64)strlen(sized_second)) {
+    printf("candidate size file contract mismatch: status=%s calls=%d "
+           "off0=%lu size0=%lu off1=%lu size1=%lu error=%s\n",
+           lql_status_string(st), seen.calls, (unsigned long)seen.offsets[0],
+           (unsigned long)seen.sizes[0], (unsigned long)seen.offsets[1],
+           (unsigned long)seen.sizes[1], error.message);
+    ++failures;
+  }
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&reader, 0, sizeof(reader));
+  memset(&result, 0, sizeof(result));
+  reader.data = sized_input;
+  reader.len = strlen(sized_input);
+  reader.chunk_size = 3u;
+  lql_error_init(&error);
+  st = test_ctx->query_source_decisions(test_ctx, NULL, read_chunk, &reader,
+                                        record_decision, &seen, &result,
+                                        &error);
+  if (st != LQL_STATUS_OK || seen.calls != 2 ||
+      result.candidates_seen != (lql_uint64)2 ||
+      seen.offsets[0] != (lql_uint64)2 ||
+      seen.sizes[0] != (lql_uint64)strlen(sized_first) ||
+      seen.offsets[1] != (lql_uint64)(2u + strlen(sized_first) + 4u) ||
+      seen.sizes[1] != (lql_uint64)strlen(sized_second) ||
+      reader.calls <= 1) {
+    printf("candidate size source contract mismatch: status=%s calls=%d "
+           "reads=%d off0=%lu size0=%lu off1=%lu size1=%lu error=%s\n",
+           lql_status_string(st), seen.calls, reader.calls,
+           (unsigned long)seen.offsets[0], (unsigned long)seen.sizes[0],
+           (unsigned long)seen.offsets[1], (unsigned long)seen.sizes[1],
+           error.message);
     ++failures;
   }
 

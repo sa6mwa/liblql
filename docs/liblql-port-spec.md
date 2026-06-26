@@ -1201,6 +1201,11 @@ Current implementation status:
   non-stopped streams report consumed input bytes, including
   trailing delimiters, while early-stop streams retain candidate-end accounting
   for stop decisions;
+- C SDK streaming tests assert the public candidate offset/size contract
+  directly for both seekable and callback-source decision streams: leading
+  whitespace, blank lines, and trailing delimiters affect candidate offsets and
+  total bytes consumed, but each `lql_query_decision.size` is the byte length
+  of the JSON value itself;
 - C SDK unit coverage is manifest-checked: every `expect_* (void)` SDK
   unit group in `tests/test_lql.c` must have exactly one manifest entry and
   exactly one `main()` call, so C-only regressions cannot be added without
