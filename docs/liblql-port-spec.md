@@ -1033,9 +1033,13 @@ Current implementation status:
   `LQL_STATUS_STOP`; C tests cover public status names, actionable diagnostics,
   safe zeroed result state on invalid arguments, callback-requested graceful
   stops, stop precedence, and partial result counters after malformed seekable
-  and callback-source streams. Go's `StreamError`, `AsStreamError`,
-  `StreamErrorCodeOf`, and `ErrStreamStop` wrapping behavior is not mirrored
-  unless liblql deliberately grows an equivalent public typed-error API;
+  and callback-source streams. Public result coverage also includes full-scan
+  counts, consumed byte counts, decision-only streams, seekable and
+  callback-source payload streams, and callback failure propagation. Go's
+  `StreamError`, `AsStreamError`, `StreamErrorCodeOf`, `ErrStreamStop`
+  wrapping behavior, capture-policy `BytesCaptured`, `SpillCount`, and
+  `SpillBytes` result fields are not mirrored unless liblql deliberately grows
+  equivalent public typed-error or aggregate accounting APIs;
 - reusable query payload sink behavior is a caller-owned callback contract in
   C, not a public temp-file sink factory. C tests cover seekable payload ranges
   and callback-source spooled payloads written into caller-managed sinks,
