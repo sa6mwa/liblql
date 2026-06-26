@@ -445,12 +445,13 @@ Performance gates must therefore validate two things separately:
 - behavioral parity: candidates, matches, payload counts, payload bytes, and
   parse/error outcomes agree with the oracle for supported behavior;
 - C-native performance: steady-state memory remains independent of total input
-  size, candidate size, match count, and result size, and C library paths have
-  documented headroom over Go once the relevant feature is mature.
+  size, candidate size, match count, and result size, and C library paths are
+  bounded by native C thresholds rather than Go throughput.
 
-Initial benchmark gates may be behavioral while surfaces are incomplete. Once a
-surface is claimed, the benchmark should move to a documented C-native
-threshold, baseline, or speedup floor for that specific public path.
+Initial benchmark gates include behavioral checks, bounded RSS, and a loose
+native C steady-state ns/byte ceiling for supported C records. Once a surface is
+mature enough for tighter guarantees, the benchmark should move to a documented
+C-native threshold, baseline, or speedup floor for that specific public path.
 CLI-mediated and Lua facade timing may remain report-only where process startup
 or facade overhead dominates the measurement, but claimed public liblql and Lua
 memory behavior must be gated rather than treated as report-only.

@@ -91,6 +91,15 @@ expect_failure "c-peak-rss-limit" "exceeds max" \
   env GO="$go_bin" LQL_BENCH_MAX_C_PEAK_RSS_BYTES=1 \
     "$root/scripts/check_parity_benchmark_memory.sh" "$log"
 
+log="$tmp/c-steady-state-throughput-limit.jsonl"
+cat > "$log" <<'JSONL'
+{"schema":"liblql.parity_benchmark.v1","impl":"c","dataset":"large_ndjson","selector":"eq_status_open","expr":"/status=\"open\"","mode":"decision_only_selector","submode":"warmup_included","bytes_per_iter":10,"candidates":1,"matches":1,"payloads":0,"payload_bytes":0,"payload_source_type":"none","fixture_sha256":"0000000000000000000000000000000000000000000000000000000000000000","ns_per_op":10,"peak_rss_bytes":1,"allocs_per_op":null,"unsupported":false,"unsupported_reason":""}
+{"schema":"liblql.parity_benchmark.v1","impl":"c","dataset":"large_ndjson","selector":"eq_status_open","expr":"/status=\"open\"","mode":"decision_only_selector","submode":"steady_state","bytes_per_iter":10,"candidates":1,"matches":1,"payloads":0,"payload_bytes":0,"payload_source_type":"none","fixture_sha256":"0000000000000000000000000000000000000000000000000000000000000000","ns_per_op":21,"peak_rss_bytes":1,"allocs_per_op":null,"unsupported":false,"unsupported_reason":""}
+JSONL
+expect_failure "c-steady-state-throughput-limit" "ns_per_byte" \
+  env GO="$go_bin" LQL_BENCH_MAX_C_STEADY_STATE_NS_PER_BYTE=2 \
+    "$root/scripts/check_parity_benchmark_memory.sh" "$log"
+
 expect_failure "candidate-mismatch" "benchmark candidate-count mismatch" \
   env LQL_BENCH_FIXTURE_DIR="$tmp/candidate" \
     LQL_BENCH_SUITE=smoke \

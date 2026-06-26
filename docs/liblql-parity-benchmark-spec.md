@@ -484,9 +484,11 @@ through the Go module in `parity/`.
 
 ## Performance Gate Policy
 
-Initial parity benchmark implementation should fail only on behavioral
-divergence and benchmark runner errors while the measured public surfaces are
-still incomplete.
+Parity benchmark gates fail on behavioral divergence, benchmark runner errors,
+unsupported records in claimed gate profiles, bounded-memory violations, and a
+loose C-native steady-state throughput ceiling for supported C records. The
+throughput ceiling is intentionally expressed as C `ns_per_op/bytes_per_iter`;
+Go throughput is not a target for C.
 
 Performance thresholds should be added after:
 
@@ -503,9 +505,10 @@ Suggested staged gates:
 - C library steady-state memory must remain bounded for streaming modes and
   must not grow with total input size, candidate size, match count, or result
   set size;
-- C library decision-only steady-state on `large_ndjson` must move to a
-  documented C-native baseline or minimum speedup floor once the selector class
-  is mature;
+- C library steady-state records are gated by
+  `LQL_BENCH_MAX_C_STEADY_STATE_NS_PER_BYTE`, defaulting to a deliberately loose
+  ceiling of `5000` ns/byte so pathological regressions fail without treating Go
+  as the performance baseline;
 - C library plus-value/open-read modes must prove callback-scoped payload
   access without candidate retention and must have a documented C-native
   baseline distinct from CLI-mediated `clql` timing;

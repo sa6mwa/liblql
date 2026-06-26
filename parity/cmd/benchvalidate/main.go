@@ -34,6 +34,7 @@ type record struct {
 func main() {
 	var opts validateOptions
 	flag.Int64Var(&opts.MaxCPeakRSSBytes, "max-c-peak-rss-bytes", 0, "fail supported C records whose peak_rss_bytes exceeds this value")
+	flag.Int64Var(&opts.MaxCSteadyStateNsPerByte, "max-c-steady-state-ns-per-byte", 0, "fail supported C steady_state records whose ns_per_op/bytes_per_iter exceeds this value")
 	flag.Int64Var(&opts.MaxLuaPeakRSSBytes, "max-lua-peak-rss-bytes", 0, "fail supported Lua records whose peak_rss_bytes exceeds this value")
 	flag.BoolVar(&opts.RequireLuaPeakRSS, "require-lua-peak-rss", false, "fail supported Lua records that do not report peak_rss_bytes")
 	flag.BoolVar(&opts.ForbidUnsupported, "forbid-unsupported", false, "fail any benchmark record marked unsupported")
@@ -45,10 +46,11 @@ func main() {
 }
 
 type validateOptions struct {
-	MaxCPeakRSSBytes   int64
-	MaxLuaPeakRSSBytes int64
-	RequireLuaPeakRSS  bool
-	ForbidUnsupported  bool
+	MaxCPeakRSSBytes         int64
+	MaxCSteadyStateNsPerByte int64
+	MaxLuaPeakRSSBytes       int64
+	RequireLuaPeakRSS        bool
+	ForbidUnsupported        bool
 }
 
 func validate(r io.Reader, opts validateOptions) error {
@@ -190,6 +192,13 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 	}
 	if requiresTiming(rec) && rec.NsPerOp == nil {
 		return fmt.Errorf("line %d: %s/%s records must report ns_per_op", line, rec.Impl, rec.Mode)
+	}
+	if rec.Impl == "c" && rec.Submode == "steady_state" &&
+		opts.MaxCSteadyStateNsPerByte > 0 && rec.NsPerOp != nil &&
+		rec.BytesPerIter > 0 &&
+		*rec.NsPerOp > rec.BytesPerIter*opts.MaxCSteadyStateNsPerByte {
+		observed := (*rec.NsPerOp + rec.BytesPerIter - 1) / rec.BytesPerIter
+		return fmt.Errorf("line %d: c/%s steady_state ns_per_byte %d exceeds max %d", line, rec.Mode, observed, opts.MaxCSteadyStateNsPerByte)
 	}
 	if requiresPeakRSS(rec, opts) {
 		if rec.PeakRSSBytes == nil {
