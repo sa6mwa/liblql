@@ -4811,11 +4811,13 @@ static void expect_selector_or_api(void) {
 
 static void expect_selector_parse_error_api(void) {
   expect_parse_error("contains{field=/message,value=timeout,any=error}");
+  expect_parse_error("icontains{field=/message,value=timeout,any=error}");
   expect_parse_error("contains{field=/message,any=}");
   expect_parse_error("contains{field=/message,any=||}");
   expect_parse_error("contains{field=/message,value=timeout,value=error}");
   expect_parse_error("contains{field=/message,value=timeout,ignoreCase=maybe}");
   expect_parse_error("eq{field=/status,f=/other,value=open}");
+  expect_parse_error("eq{field=/msg,any=foo|bar}");
   expect_parse_error("eq{field=/status,value=open,foo=bar}");
   expect_parse_error("eq{field=/status,value=open,ignoreCase=true}");
   expect_parse_error(
@@ -4835,11 +4837,29 @@ static void expect_selector_parse_error_api(void) {
   expect_parse_error("date{after=2025-01-01}");
   expect_parse_error("date{field=/timestamp,since=tomorrowish}");
   expect_parse_error("prefix{field=/service,any=auth|edge}");
+  expect_parse_error("iprefix{field=/service,any=auth|edge}");
+  expect_parse_error("in{field=/env,any=}");
   expect_parse_error("in{field=/env}");
+  expect_parse_error("in{any=prod|stage}");
   expect_parse_error("in{field=/env,any= prod | stage }");
   expect_parse_error("in{field=/env,any=prod|stage,a=dev}");
   expect_parse_error("in{field=/env,any=prod|stage,foo=bar}");
   expect_parse_error("range{field=/progress}");
+  expect_parse_error("range{gte=10}");
+  expect_parse_error("exists{}");
+  expect_parse_error("exists{/meta/etag,field=/status}");
+  expect_parse_error("exists{/meta/etag,/meta/id}");
+  expect_parse_error("exists{field=/meta/etag}");
+  expect_parse_error("and..eq{field=/status,value=open}");
+  expect_parse_error("and.foo.eq{field=/status,value=open}");
+  expect_parse_error("or.0.and.foo.exists{/meta/etag}");
+  expect_parse_error("or.0..eq{field=/status,value=open}");
+  expect_parse_error("nonsense");
+  expect_parse_error("eq{field=/status,value=open},nonsense");
+  expect_parse_error("eq{field=/status,value=\"open}");
+  expect_parse_error("and.eq{field=/status,value=open");
+  expect_parse_error("eq{field=/status,value=open}}");
+  expect_parse_error("/count>=");
 }
 
 int main(void) {

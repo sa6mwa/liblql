@@ -965,6 +965,46 @@ static int string_term_is_match_all_alias(lql_node_kind kind,
   return 0;
 }
 
+static lql_status parse_exists_body(const char *body, lql_term *term,
+                                    lql_error *error) {
+  lql_token_list parts;
+  char *decoded;
+  char *normalized;
+  lql_status st;
+
+  memset(term, 0, sizeof(*term));
+  st = split_top(body, &parts, error);
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  if (parts.count != 1u || strchr(parts.items[0], '=') != NULL) {
+    token_list_cleanup(&parts);
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "exists selector requires exactly one path");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  decoded = unquote(parts.items[0]);
+  if (decoded == NULL) {
+    token_list_cleanup(&parts);
+    return LQL_STATUS_NO_MEMORY;
+  }
+  if (decoded[0] == '\0') {
+    LQL_ALLOCATOR_DESTROY(decoded);
+    token_list_cleanup(&parts);
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "exists selector requires exactly one path");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  normalized = normalize_field_path(decoded);
+  LQL_ALLOCATOR_DESTROY(decoded);
+  token_list_cleanup(&parts);
+  if (normalized == NULL) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  term->field = normalized;
+  return LQL_STATUS_OK;
+}
+
 static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
   char *copy;
   char *body;
@@ -1109,11 +1149,9 @@ static lql_status parse_one(const char *expr, lql_node *out, lql_error *error) {
       return LQL_STATUS_PARSE_ERROR;
     }
     if (out->kind == LQL_NODE_EXISTS) {
-      value = unquote(body + 1);
-      out->term.field = value == NULL ? NULL : normalize_field_path(value);
-      LQL_ALLOCATOR_DESTROY(value);
+      st = parse_exists_body(body + 1, &out->term, error);
       LQL_ALLOCATOR_DESTROY(copy);
-      return out->term.field == NULL ? LQL_STATUS_NO_MEMORY : LQL_STATUS_OK;
+      return st;
     }
     st = parse_key_values(body + 1, out->kind, &out->term, error);
     if (st != LQL_STATUS_OK) {
