@@ -81,9 +81,11 @@ builders, evaluator, capability inspection, and public traversal. The previous
 private `lql_node`/`lql_term` tree and `LQL_NODE_*` vocabulary are removed from
 source.
 
-The selector AST work remains incomplete until the Lua facade exposes selector
-userdata backed by the public C selector API and the remaining oracle inventory
-rows are audited or narrowed.
+The Lua facade exposes selector userdata backed by the public C selector API for
+text parse, AST JSON import/export, AST traversal, builders, method-style
+inspection, and query reuse. The selector AST work remains incomplete only in
+the broader parity-proof sense until the remaining oracle inventory rows are
+audited or narrowed.
 
 ## Public Model
 

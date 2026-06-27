@@ -860,8 +860,10 @@ Current implementation status:
   and Go-compatible selector JSON parse/serialize through receiver methods.
   The C internals now use `lql_selector` as the recursive selector AST; the
   previous private `lql_node`/`lql_term` authority has been removed.
-  Selector-library parity is still not complete until the Lua selector userdata
-  facade exists and the remaining oracle inventory audit is closed;
+  The Lua facade now exposes selector userdata backed by the public C selector
+  API for parse, AST JSON import/export, traversal, builders, and query reuse.
+  Selector-library parity is still not complete until the remaining oracle
+  inventory audit is closed;
 - `make test` includes repository-boundary checks that fail if committed
   repository files reference the adjacent Go source checkout through
   `../lql`-style paths or workstation-local checkout paths; parity remains
@@ -1572,7 +1574,9 @@ Current implementation status:
   oversized Lua source-read chunk rejection across query, selection,
   match-payload, projection, and mutation source facades, source-read error
   propagation for query, selection, compaction, projection, and mutation,
-  callback error propagation, and structured errors; the public API style gate rejects
+  callback error propagation, selector AST JSON import/export, recursive
+  selector AST inspection, all selector builders, selector userdata methods,
+  selector builder/import error paths, and structured errors; the public API style gate rejects
   Lua facade use of private liblql headers, `LQL_INTERNAL_SYMBOL`, or private
   `_impl` receiver implementation functions so Lua remains a public-header
   binding rather than a private in-process shortcut; CMake verifies Lua headers

@@ -18,6 +18,13 @@ local function assert_no_error(value, err, message)
   return value
 end
 
+local function assert_len(values, want, message)
+  if #values ~= want then
+    fail(message .. ": got len " .. tostring(#values) ..
+         " want " .. tostring(want))
+  end
+end
+
 local function write_file(path, data)
   local file = io.open(path, "wb")
   if not file then
@@ -167,7 +174,169 @@ assert_equal(match_all_traits.requires_object_root, false,
 assert_equal(match_all_traits.uses_contains_like, false,
              "match-all selector_execution_traits contains")
 
-local matched, err = client:matches_json('/status="open"', '{"status":"open"}')
+local matched
+
+local or_root = assert_no_error(client:selector_root(or_selector), nil,
+                                "selector_root OR")
+assert_equal(or_root.kind, "or", "selector_root OR kind")
+assert_len(or_root.children, 2, "selector_root OR children")
+assert_equal(or_root.children[1].kind, "eq", "selector_root OR first kind")
+assert_equal(or_root.children[1].field, "/status",
+             "selector_root OR first field")
+assert_equal(or_root.children[1].value, "open",
+             "selector_root OR first value")
+assert_equal(or_root.children[2].kind, "range",
+             "selector_root OR second kind")
+assert_equal(or_root.children[2].field, "/progress",
+             "selector_root OR second field")
+assert_equal(or_root.children[2].gte, 50,
+             "selector_root OR second gte")
+assert_equal(or_root.children[2].gte_kind, "number",
+             "selector_root OR second gte kind")
+
+local method_root = assert_no_error(or_selector:root(), nil,
+                                    "selector method root")
+assert_equal(method_root.kind, "or", "selector method root kind")
+
+local selector_json = assert_no_error(or_selector:json(), nil,
+                                      "selector method json")
+assert_equal(selector_json,
+             '{"or":[{"eq":{"field":"/status","value":"open"}},' ..
+               '{"range":{"field":"/progress","gte":50}}]}',
+             "selector method json output")
+
+local json_selector, json_selector_err =
+  client:selector_parse_json(selector_json)
+json_selector = assert_no_error(json_selector, json_selector_err,
+                                "selector_parse_json round trip")
+matched, err = client:matches_json(json_selector,
+                                  '{"status":"closed","progress":72}')
+matched = assert_no_error(matched, err, "selector_parse_json match")
+assert_equal(matched, true, "selector_parse_json match output")
+assert_equal(client:selector_json(json_selector), selector_json,
+             "client selector_json output")
+assert_equal(or_selector:is_empty(), false, "selector method is_empty false")
+assert_equal(json_selector:capabilities()["or"], true,
+             "selector method capabilities")
+assert_equal(json_selector:execution_traits().early_non_match_likely, true,
+             "selector method execution traits")
+
+local all_selector, all_err = client:selector_all()
+all_selector = assert_no_error(all_selector, all_err, "selector_all")
+assert_equal(all_selector:is_empty(), true, "selector_all is empty")
+assert_equal(all_selector:json(), "{}", "selector_all json")
+assert_equal(all_selector:root().kind, "all", "selector_all root")
+
+local eq_selector, eq_err =
+  client:selector_string("eq", {field = "/status", value = "open"})
+eq_selector = assert_no_error(eq_selector, eq_err, "selector_string eq")
+assert_equal(eq_selector:json(),
+             '{"eq":{"field":"/status","value":"open"}}',
+             "selector_string eq json")
+matched, err = client:matches_json(eq_selector, '{"status":"open"}')
+matched = assert_no_error(matched, err, "selector_string eq match")
+assert_equal(matched, true, "selector_string eq match output")
+
+local contains_selector, contains_err =
+  client:selector_string("contains", {field = "/msg", ignore_case = true},
+                         {"WARN", "timeout"})
+contains_selector = assert_no_error(contains_selector, contains_err,
+                                    "selector_string contains any")
+local contains_root = contains_selector:root()
+assert_equal(contains_root.kind, "contains",
+             "selector_string contains root kind")
+assert_equal(contains_root.ignore_case, true,
+             "selector_string contains ignore_case")
+assert_len(contains_root.any, 2, "selector_string contains any len")
+matched, err = client:matches_json(contains_selector,
+                                  '{"msg":"warn before timeout"}')
+matched = assert_no_error(matched, err, "selector_string contains match")
+assert_equal(matched, true, "selector_string contains match output")
+
+local range_selector, range_err =
+  client:selector_range({field = "/progress", gte = 10})
+range_selector = assert_no_error(range_selector, range_err,
+                                 "selector_range numeric")
+assert_equal(range_selector:root().gte_kind, "number",
+             "selector_range numeric kind")
+
+local datetime_range_selector, datetime_range_err =
+  client:selector_range({field = "/timestamp",
+                         gte = "2026-03-05T10:28:21Z",
+                         lt = "2026-03-05T10:30:00Z"})
+datetime_range_selector =
+  assert_no_error(datetime_range_selector, datetime_range_err,
+                  "selector_range datetime")
+assert_equal(datetime_range_selector:root().gte_kind, "datetime",
+             "selector_range datetime kind")
+matched, err = client:matches_json(datetime_range_selector,
+                                  '{"timestamp":"2026-03-05T10:29:00Z"}')
+matched = assert_no_error(matched, err, "selector_range datetime match")
+assert_equal(matched, true, "selector_range datetime match output")
+
+local date_selector, date_err =
+  client:selector_date({field = "/timestamp",
+                        after = "2025-01-01",
+                        before = "2025-01-03"})
+date_selector = assert_no_error(date_selector, date_err, "selector_date")
+assert_equal(date_selector:root().after, "2025-01-01",
+             "selector_date after")
+matched, err = client:matches_json(date_selector,
+                                  '{"timestamp":"2025-01-02T00:00:00Z"}')
+matched = assert_no_error(matched, err, "selector_date match")
+assert_equal(matched, true, "selector_date match output")
+
+local since_selector, since_err =
+  client:selector_date({field = "/timestamp", since_kind = "today"})
+since_selector = assert_no_error(since_selector, since_err,
+                                 "selector_date since")
+assert_equal(since_selector:root().since_kind, "today",
+             "selector_date since kind")
+
+local in_selector, in_err =
+  client:selector_in({field = "/env"}, {"prod", "stage"})
+in_selector = assert_no_error(in_selector, in_err, "selector_in")
+assert_equal(in_selector:root().any[2], "stage", "selector_in any")
+matched, err = client:matches_json(in_selector, '{"env":"stage"}')
+matched = assert_no_error(matched, err, "selector_in match")
+assert_equal(matched, true, "selector_in match output")
+
+local exists_selector, exists_err = client:selector_exists("/meta/etag")
+exists_selector = assert_no_error(exists_selector, exists_err,
+                                  "selector_exists")
+assert_equal(exists_selector:root().path, "/meta/etag",
+             "selector_exists path")
+
+local and_selector, and_err =
+  client:selector_compound("and", {eq_selector, range_selector})
+and_selector = assert_no_error(and_selector, and_err,
+                               "selector_compound and")
+matched, err = client:matches_json(and_selector,
+                                  '{"status":"open","progress":25}')
+matched = assert_no_error(matched, err, "selector_compound and match")
+assert_equal(matched, true, "selector_compound and match output")
+
+local not_selector, not_err = client:selector_not(eq_selector)
+not_selector = assert_no_error(not_selector, not_err, "selector_not")
+matched, err = client:matches_json(not_selector, '{"status":"closed"}')
+matched = assert_no_error(matched, err, "selector_not match")
+assert_equal(matched, true, "selector_not match output")
+
+local bad_json_selector, bad_json_err =
+  client:selector_parse_json('{"eq":{"field":"/x","bad":true}}')
+if bad_json_selector ~= nil or not bad_json_err or
+    bad_json_err.status ~= 3 then
+  fail("expected structured selector_parse_json error")
+end
+
+local bad_range_selector, bad_range_err =
+  client:selector_range({field = "/progress"})
+if bad_range_selector ~= nil or not bad_range_err or
+    bad_range_err.status ~= 3 then
+  fail("expected structured selector_range error")
+end
+
+matched, err = client:matches_json('/status="open"', '{"status":"open"}')
 matched = assert_no_error(matched, err, "matches_json open")
 assert_equal(matched, true, "matches_json open")
 

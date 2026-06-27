@@ -35,9 +35,10 @@ public AST builders   /                   -> JSON serialization
 
 The C implementation uses `lql_selector` as the recursive selector AST
 internally; the previous private `lql_node`/`lql_term` tree has been removed.
-Full selector-library parity is still not claimed until the Lua facade exposes
-selector userdata backed by the public C API and the remaining selector oracle
-inventory is closed.
+The Lua facade exposes selector userdata backed by the public C API for text
+parse, AST JSON import/export, AST traversal, builders, and query reuse. Full
+selector-library parity is still not claimed until the remaining selector
+oracle inventory is closed.
 
 Projection, compaction, and mutation are exposed through the public receiver
 API for seekable ranges, caller-provided read callbacks, callback-source
@@ -76,9 +77,9 @@ module over public liblql APIs;
 `lql.new()` returns a C-owned client userdata backed by a public `lql *`
 receiver and exposes receiver version/capability queries, selector inspection,
 callback decision streams, and callback-scoped seekable payload handles.
-Selector userdata construction, JSON round-trips, and full AST traversal remain
-part of the selector AST parity work. The parity benchmark surface has Go, C,
-and Lua runners over shared generated fixtures.
+Selector userdata construction, JSON round-trips, and AST traversal are covered
+by Lua smoke tests over the public C receiver surface. The parity benchmark
+surface has Go, C, and Lua runners over shared generated fixtures.
 The standalone Lua source package, rendered release rockspec, and LuaRocks
 source rock are produced and verified locally. The release matrix builds and
 verifies configured target artifacts with target-correct compilers and

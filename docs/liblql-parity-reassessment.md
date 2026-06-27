@@ -37,8 +37,9 @@ needs an idiomatic C representation and a Lua userdata facade backed by that C
 surface. The C receiver API now covers traversal, selector AST JSON
 import/export, and selector builders, and `lql_selector` is now the canonical
 AST consumed by parser, JSON, builders, evaluator, capability inspection, and
-public traversal. Lua selector userdata and final inventory closure remain
-open after that.
+public traversal. Lua selector userdata now covers text parse, AST JSON
+import/export, traversal, builders, method-style inspection, and query reuse
+through that public C API. Final inventory closure remains open after that.
 
 ## What Parity Must Mean
 
@@ -106,8 +107,7 @@ by representative evidence but not by a full behavior matrix should be marked
 - The old broad selector SDK tests are now documented as residual regression
   corpora, not as completion evidence.
 - The port specification now treats selector AST parity as a first-class SDK
-  requirement. Evaluator parity cannot close selector library parity while the
-  Lua userdata facade is missing.
+  requirement. Evaluator parity cannot close selector library parity by itself.
 - The C receiver API now exposes selector AST builders for match-all,
   logical, string-term, range, date, in, and exists selectors. C-only tests
   cover builder construction and validation, and Go-vs-C SDK parity checks
@@ -115,6 +115,11 @@ by representative evidence but not by a full behavior matrix should be marked
   behavior. The JSON contract is structural: byte-identical JSON text is not
   required, but Go-emitted selector JSON must parse into liblql and selector
   JSON emitted by liblql must parse into Go with equivalent selector logic.
+- The Lua facade now exposes selector userdata backed by the public C selector
+  API. Lua smoke tests cover selector text parsing, selector AST JSON
+  round-trips, recursive AST table inspection, all public selector builders,
+  selector userdata methods, structured builder/import errors, and reuse of
+  built/imported selectors in query workflows.
 
 ## Completion Criteria
 
