@@ -5,3 +5,5 @@ CompileFlags:
     - -Ibuild/debug/generated/include
     - -I.cache/deps/x86_64-linux-gnu/lonejson/include
     - -std=c90
+Diagnostics:
+  UnusedIncludes: None
