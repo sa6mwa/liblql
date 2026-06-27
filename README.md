@@ -4,16 +4,41 @@
 SDK releases. It uses `lonejson` for JSON parsing, visiting, serialization, and
 stream-aware JSON operations.
 
-Current implementation status: the public C SDK, `clql`, Lua facade, Go oracle
-parity, benchmark gates, packaging, and release rehearsal surfaces are in place
-for the current public contract. Selectors cover equality, contains,
-icontains, prefix, iprefix, range, date, in, exists, AND/OR/NOT composition,
-JSON Pointer paths, array indexes, wildcards, recursive descent, shorthand
-operators, and date macros. Query streams support seekable `FILE *` inputs,
-callback-source decision streams, callback-scoped seekable range payloads,
-callback-scoped spooled payloads, caller-managed payload sinks, stop controls,
-root-array candidate streams, nested top-level array flattening, and
-large-input memory gates without hidden full-document materialization.
+Current implementation status: the public C SDK, `clql`, Go oracle parity,
+benchmark gates, packaging, and release rehearsal surfaces are in place for the
+current public contract. Selectors cover equality, contains, icontains, prefix,
+iprefix, range, date, in, exists, AND/OR/NOT composition, JSON Pointer paths,
+array indexes, wildcards, recursive descent, shorthand operators, and date
+macros. Query streams support seekable `FILE *` inputs, callback-source
+decision streams, callback-scoped seekable range payloads, callback-scoped
+spooled payloads, caller-managed payload sinks, stop controls, root-array
+candidate streams, nested top-level array flattening, and large-input memory
+gates without hidden full-document materialization.
+
+## Selector AST Architecture
+
+`lql_selector` is the required canonical selector AST. Text parsing, selector
+JSON parsing, and public AST builders must all produce `lql_selector`; selector
+evaluation, JSON serialization, traversal, capability inspection, and Lua
+userdata must consume that same AST. Streaming and performance code may derive
+a compiled plan from a selector, but that plan is execution state, not a second
+selector representation.
+
+```text
+text selector parser  \
+selector JSON parser  -> lql_selector AST -> evaluation
+public AST builders   /                   -> JSON serialization
+                                            -> public traversal/cursors
+                                            -> Lua selector userdata
+                                            -> optional lql_selector_plan
+```
+
+The current C implementation still has a known architecture gap: private
+`lql_node`/`lql_term` storage remains underneath `lql_selector`. The public
+selector API surface exists, but full selector-library parity is not claimed
+until that private AST authority is removed, `lql_selector` is the internal
+consumer boundary, and the Lua facade exposes selector userdata backed by the
+public C API.
 
 Projection, compaction, and mutation are exposed through the public receiver
 API for seekable ranges, caller-provided read callbacks, callback-source
@@ -50,10 +75,11 @@ provenance under `share/<package>/`.
 The Lua tree now includes a Lua 5.5 facade backed by a direct `lql.core` C
 module over public liblql APIs;
 `lql.new()` returns a C-owned client userdata backed by a public `lql *`
-receiver and exposes receiver version/capability queries, selector
-inspection, callback decision streams, and callback-scoped seekable payload
-handles. The parity benchmark surface has Go, C, and Lua runners over shared
-generated fixtures.
+receiver and exposes receiver version/capability queries, selector inspection,
+callback decision streams, and callback-scoped seekable payload handles.
+Selector userdata construction, JSON round-trips, and full AST traversal remain
+part of the selector AST parity work. The parity benchmark surface has Go, C,
+and Lua runners over shared generated fixtures.
 The standalone Lua source package, rendered release rockspec, and LuaRocks
 source rock are produced and verified locally. The release matrix builds and
 verifies configured target artifacts with target-correct compilers and

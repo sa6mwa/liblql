@@ -35,8 +35,12 @@ The selector AST audit found a larger public-surface gap:
 That is not a Go-only implementation detail. It is public library behavior that
 needs an idiomatic C representation and a Lua userdata facade backed by that C
 surface. The C receiver API now covers traversal, selector AST JSON
-import/export, and selector builders; Lua selector userdata and final inventory
-closure remain open.
+import/export, and selector builders, but the architecture is still incomplete:
+`lql_selector` currently wraps private `lql_node`/`lql_term` storage that acts
+as the real AST authority. The next selector refactor must make
+`lql_selector` the canonical AST consumed by parser, JSON, builders, evaluator,
+capability inspection, and Lua. Lua selector userdata and final inventory
+closure remain open after that.
 
 ## What Parity Must Mean
 
@@ -105,14 +109,15 @@ by representative evidence but not by a full behavior matrix should be marked
   corpora, not as completion evidence.
 - The port specification now treats selector AST parity as a first-class SDK
   requirement. Evaluator parity cannot close selector library parity while the
-  Lua userdata facade is missing.
+  canonical `lql_selector` refactor and Lua userdata facade are missing.
 - The C receiver API now exposes selector AST builders for match-all,
   logical, string-term, range, date, in, and exists selectors. C-only tests
   cover builder construction and validation, and Go-vs-C SDK parity checks
   prove C builder-created selectors match constructor-equivalent Go selector
-  behavior. The JSON contract is structural: byte-identical JSON text is not
-  required, but Go-emitted selector JSON must parse into liblql and selector
-  JSON emitted by liblql must parse into Go with equivalent selector logic.
+  behavior. This proves useful public-surface behavior, not final architecture.
+  The JSON contract is structural: byte-identical JSON text is not required,
+  but Go-emitted selector JSON must parse into liblql and selector JSON emitted
+  by liblql must parse into Go with equivalent selector logic.
 
 ## Completion Criteria
 
@@ -121,16 +126,19 @@ The implementation can be called complete only after:
 1. Every `partial` row in `parity/oracle_inventory.tsv` is either upgraded with
    explicit matrix evidence or narrowed to a documented non-applicable Go-only
    boundary.
-2. Public C selector AST traversal, construction, and Go-compatible selector
+2. `lql_selector` is the canonical C selector AST. No private `lql_node`,
+   `lql_term`, or `LQL_NODE_*` vocabulary remains as the real AST authority;
+   any streaming/query plan is explicitly derived execution state.
+3. Public C selector AST traversal, construction, and Go-compatible selector
    JSON parse/serialize APIs remain covered by C-native tests.
-3. The Lua facade exposes selector userdata backed by the public C AST API,
+4. The Lua facade exposes selector userdata backed by the public C AST API,
    with selector JSON round-trips and AST use in query workflows covered by
    Lua tests.
-4. Go-backed SDK parity checks prove selector AST JSON interchange
+5. Go-backed SDK parity checks prove selector AST JSON interchange
    structurally: Go-emitted selector JSON imports into liblql and preserves
    behavior, and constructor-equivalent C builder ASTs behave like Go
    selectors.
-5. The SDK and CLI coverage manifests use narrow requirement names that describe
+6. The SDK and CLI coverage manifests use narrow requirement names that describe
    the exact proven behavior.
-6. `make parity-test`, `make test`, `make package-source-smoke`, and the release
+7. `make parity-test`, `make test`, `make package-source-smoke`, and the release
    gates pass after the audit changes.

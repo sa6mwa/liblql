@@ -230,6 +230,8 @@ typedef enum lql_selector_since_kind {
   LQL_SELECTOR_SINCE_LITERAL = 4
 } lql_selector_since_kind;
 
+/* Borrowed cursor over the canonical lql_selector AST. It is not an owned
+   selector node and must not outlive the selector that produced it. */
 typedef struct lql_selector_node {
   lql_selector_node_kind kind;
   const void *impl;

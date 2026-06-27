@@ -6,38 +6,92 @@ This document defines the selector AST surface required for liblql parity with
 the Go `pkt.systems/lql v0.17.1` public library. It is an implementation target,
 not a record of the current code.
 
-The goal is not to copy Go structs into C. The goal is to expose the same
-public selector capabilities in idiomatic C:
+The goal is not to copy Go structs into C. The goal is to implement the same
+selector model in idiomatic C:
 
-- parse textual selector language into a public AST;
+- parse textual selector language into the canonical selector AST;
 - construct selector ASTs without text parsing;
 - inspect and traverse parsed or constructed ASTs;
 - serialize and parse selector AST JSON compatible with Go;
 - evaluate selectors and derive optimized plans from the same AST;
 - expose the same high-value AST workflows through Lua.
 
-The current opaque selector-evaluation handle is not enough for SDK parity.
+The current opaque selector-evaluation handle is not enough for SDK parity, and
+a private AST hidden behind a public facade is also not enough. The selector AST
+must be the product type, not an adapter over another selector tree.
+
+## Required Architecture
+
+Go `pkt.systems/lql v0.17.1` parses selector text into a public recursive
+`Selector` value. That same `Selector` value is what callers inspect,
+construct, marshal, unmarshal, and evaluate. The C implementation must follow
+the same architecture in C terms:
+
+```text
+text selector parser  \
+selector JSON parser  -> lql_selector AST -> evaluation
+public AST builders   /                   -> JSON serialization
+                                            -> public traversal/cursors
+                                            -> Lua selector userdata
+                                            -> optional lql_selector_plan
+```
+
+This is the rejected architecture:
+
+```text
+text selector parser -> private lql_node/lql_term tree
+                     -> lql_selector facade
+                     -> evaluator and JSON walk private nodes
+```
+
+The implementation rules are:
+
+- `lql_selector` is the only selector AST authority.
+- Parser, JSON import, public builders, clone operations, and Lua conversion
+  all produce `lql_selector`.
+- Evaluator, capability inspection, JSON export, public traversal, and Lua
+  methods all consume `lql_selector` directly.
+- A temporary parse builder may exist while parsing text or JSON, but it must
+  finalize into `lql_selector` and must not become an evaluator input.
+- A derived execution structure such as `lql_selector_plan`,
+  `lql_selector_engine`, or `lql_selector_program` is allowed for streaming and
+  performance. It is a compiled plan derived from `lql_selector`, not a second
+  AST and not the public selector representation.
+- Public `lql_selector_node` cursors are borrowed views over `lql_selector`.
+  The word `node` in that public cursor name is acceptable because callers need
+  to traverse AST nodes; it must not imply a private generic `lql_node` tree.
+- Private storage, if needed for ABI opacity, must be selector-owned storage
+  with selector-domain names and invariants. It must not be a generic
+  parallel vocabulary such as `lql_node`, `lql_term`, and `LQL_NODE_*` acting
+  as the real tree.
+
+In practical C terms, the eventual private fields may still be hidden from the
+installed header, may use tagged unions, arrays, child pointers, or arena-owned
+payloads, and may carry parsed temporal caches. Those are representation
+choices. The architectural boundary is that they are fields or helper payloads
+of the `lql_selector` AST, not a separate AST that `lql_selector` merely wraps.
 
 ## Current Status
 
-As of the current AST builder slice, the C receiver API exposes parsed selector
-AST traversal, Go-compatible selector AST JSON import/export, and receiver-based
-AST builders for every selector node family. C-only tests cover traversal,
-JSON, omitted versus explicit empty string values, builder success cases, and
-builder validation failures. Go-vs-C SDK tests cover Go-emitted selector JSON
-importing into liblql, C builder-created selectors matching equivalent Go
-constructor selectors, and liblql builder JSON importing back into Go with
-equivalent selector behavior.
+As of the current AST builder slice, the installed C receiver API exposes
+parsed selector traversal, Go-compatible selector AST JSON import/export, and
+receiver-based builders for every selector family. Those APIs are useful
+partial surface area, but the implementation is not yet architecturally in
+parity with Go: the C selector still wraps private `lql_node` and `lql_term`
+storage that acts as the real AST authority.
 
-The selector AST work remains incomplete until the Lua facade exposes selector
-userdata backed by the public C selector API and the remaining oracle inventory
+The next implementation refactor must remove that authority. `lql_selector`
+must become the canonical recursive AST consumed directly by parser, JSON,
+builders, evaluator, capability inspection, and Lua. The selector AST work
+remains incomplete until that refactor is done, the Lua facade exposes selector
+userdata backed by the public C selector API, and the remaining oracle inventory
 rows are audited or narrowed.
 
 ## Public Model
 
-`lql_selector` is the public selector AST owner. It may remain ABI-opaque, but
-the installed header must expose receiver methods that make the tree observable
-and constructible.
+`lql_selector` is the public and internal selector AST owner. It may remain
+ABI-opaque, but the installed header must expose receiver methods that make the
+tree observable and constructible.
 
 AST nodes are exposed as borrowed cursors or views. They are valid only while
 the owning `lql_selector` remains alive and unchanged. Simple traversal must
@@ -117,7 +171,7 @@ evaluation:
 
 Builder validation must reject invalid combinations at the same public semantic
 boundary as Go. Implementation-only caches or compiled programs must be derived
-after construction, not required for tree ownership.
+from `lql_selector` after construction, not required for tree ownership.
 
 ## JSON Shape
 
@@ -190,8 +244,9 @@ union points. The recursive selector node itself is also a union point:
 `and`/`or` carry arrays, `not` carries one child node, term operators carry
 operator-specific objects, and `exists` carries a string. The implementation may
 parse those shapes through lonejson visitors, `lonejson_json_value` visitors, or
-another lonejson-native adapter. It must not inspect raw JSON bytes with ad hoc
-token code.
+another lonejson-native adapter. The output of that parsing is `lql_selector`,
+not an intermediate private selector tree. It must not inspect raw JSON bytes
+with ad hoc token code.
 
 Manual JSON concatenation is not allowed, including for tests and small
 selector objects, unless the text is a fixed fixture that is not parsed or
@@ -228,6 +283,10 @@ Lua 5.5 is the only supported Lua runtime for this repository.
 
 The selector AST work is not complete until all of these are executable gates:
 
+- source/design checks proving no private `lql_node`, `lql_term`, or
+  `LQL_NODE_*` vocabulary remains as the canonical selector AST authority;
+- C-only tests proving parser, JSON import, and public builders all produce
+  `lql_selector` values consumed by the same evaluator and traversal APIs;
 - C-only tests for public AST traversal of parsed text selectors;
 - C-only tests for builder construction of every node family;
 - C-only tests for JSON parse and serialize behavior through public liblql APIs;

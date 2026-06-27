@@ -45,6 +45,10 @@ LQL_INTERNAL_SYMBOL void lql_eval_methods_install(lql *ctx);
 LQL_INTERNAL_SYMBOL void lql_project_methods_install(lql *ctx);
 LQL_INTERNAL_SYMBOL void lql_mutation_methods_install(lql *ctx);
 
+/* Transitional pre-refactor selector storage. This vocabulary must be removed
+   as an AST authority: lql_selector is the canonical selector AST described in
+   docs/liblql-selector-ast-spec.md. Do not add new behavior that depends on
+   lql_node/lql_term as a separate selector tree. */
 typedef enum lql_node_kind {
   LQL_NODE_ALL = 0,
   LQL_NODE_AND,
