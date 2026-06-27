@@ -12,6 +12,7 @@ static int append_literal(char *buf, size_t cap, size_t *pos,
                           const char *text);
 static int append_repeated(char *buf, size_t cap, size_t *pos, char ch,
                            size_t count);
+static int view_equals(lql_string_view view, const char *text);
 
 static int append_literal(char *buf, size_t cap, size_t *pos,
                           const char *text) {
@@ -35,6 +36,16 @@ static int append_repeated(char *buf, size_t cap, size_t *pos, char ch,
   *pos += count;
   buf[*pos] = '\0';
   return 1;
+}
+
+static int view_equals(lql_string_view view, const char *text) {
+  size_t len;
+  if (text == NULL) {
+    return view.data == NULL && view.len == 0u;
+  }
+  len = strlen(text);
+  return view.data != NULL && view.len == len &&
+         memcmp(view.data, text, len) == 0;
 }
 
 static void expect_receiver_api(void) {
@@ -68,9 +79,21 @@ static void expect_receiver_api(void) {
   }
   if (ctx->version == NULL || ctx->capabilities_get == NULL ||
       ctx->selector_parse == NULL || ctx->selector_parse_or == NULL ||
+      ctx->selector_parse_json == NULL ||
       ctx->selector_destroy == NULL || ctx->selector_is_empty == NULL ||
       ctx->selector_capabilities_get == NULL ||
       ctx->selector_execution_traits_get == NULL ||
+      ctx->selector_root == NULL ||
+      ctx->selector_node_child_count == NULL ||
+      ctx->selector_node_child == NULL ||
+      ctx->selector_node_string_term == NULL ||
+      ctx->selector_node_string_term_any == NULL ||
+      ctx->selector_node_range_term == NULL ||
+      ctx->selector_node_date_term == NULL ||
+      ctx->selector_node_in_term == NULL ||
+      ctx->selector_node_in_term_any == NULL ||
+      ctx->selector_node_exists_path == NULL ||
+      ctx->selector_write_json == NULL ||
       ctx->matches_json == NULL || ctx->query_file_decisions == NULL ||
       ctx->query_file_decisions_with_options == NULL ||
       ctx->query_source_decisions == NULL ||
@@ -6930,6 +6953,7 @@ static void expect_selector_match_all_alias_api(void);
 static void expect_selector_or_api(void);
 static void expect_selector_parse_error_api(void);
 static void expect_selector_inspection_api(void);
+static void expect_selector_ast_api(void);
 
 static void expect_sdk_contract_manifest(void) {
   static const sdk_contract_requirement manifest[] = {
@@ -6975,6 +6999,8 @@ static void expect_sdk_contract_manifest(void) {
       {"selector", "OR parse/evaluation public API", expect_selector_or_api},
       {"selector", "selector capability and execution-trait inspection",
        expect_selector_inspection_api},
+      {"selector", "public selector AST traversal and JSON serialization",
+       expect_selector_ast_api},
       {"selector", "parse-error invariants", expect_selector_parse_error_api},
       {"streaming", "seekable FILE decision streams", expect_stream_file},
       {"streaming", "numeric object-key and array-index path segment streams",
@@ -7059,7 +7085,7 @@ static void expect_sdk_contract_manifest(void) {
   };
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 12}, {"streaming", 13},
+      {"version", 1},      {"selector", 13}, {"streaming", 13},
       {"projection", 7},   {"compact", 2},  {"mutation", 20},
   };
   size_t i;
@@ -8019,6 +8045,318 @@ static void expect_selector_inspection_api(void) {
   test_ctx->selector_destroy(test_ctx, selector);
 }
 
+static void expect_selector_json_output(const char *expr, const char *want) {
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  FILE *out;
+  char buf[512];
+  size_t len;
+
+  selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, expr, &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("selector AST JSON parse failed for %s: %s\n", expr,
+           error.message);
+    ++failures;
+    return;
+  }
+  out = tmpfile();
+  if (out == NULL) {
+    printf("selector AST JSON tmpfile failed\n");
+    ++failures;
+    test_ctx->selector_destroy(test_ctx, selector);
+    return;
+  }
+  lql_error_init(&error);
+  st = test_ctx->selector_write_json(test_ctx, selector, out, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("selector AST JSON write failed for %s: %s\n", expr, error.message);
+    ++failures;
+  } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+             strcmp(buf, want) != 0) {
+    printf("selector AST JSON mismatch for %s\n got: %s\nwant: %s\n", expr,
+           buf, want);
+    ++failures;
+  }
+  fclose(out);
+  test_ctx->selector_destroy(test_ctx, selector);
+}
+
+static void expect_selector_ast_api(void) {
+  lql_selector *selector;
+  lql_selector *json_selector;
+  lql_selector_node root;
+  lql_selector_node child;
+  lql_selector_string_term string_term;
+  lql_selector_range_term range_term;
+  lql_selector_date_term date_term;
+  lql_selector_in_term in_term;
+  lql_string_view view;
+  lql_error error;
+  lql_status st;
+  size_t count;
+  const char *expr;
+  const char *json;
+  int matched;
+
+  lql_error_init(&error);
+  st = test_ctx->selector_write_json(test_ctx, NULL, NULL, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "output file required") != 0) {
+    printf("selector AST JSON invalid output mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  json_selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse_json(test_ctx, NULL, 1u, &json_selector,
+                                     &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT ||
+      strcmp(error.message, "selector JSON required") != 0 ||
+      json_selector != NULL) {
+    printf("selector AST JSON invalid input mismatch: %s\n", error.message);
+    ++failures;
+  }
+
+  expect_selector_json_output("contains{f=/hello/world}",
+                              "{\"contains\":{\"field\":\"/hello/world\"}}");
+  expect_selector_json_output(
+      "contains{f=/hello/world,v=\"\"}",
+      "{\"contains\":{\"field\":\"/hello/world\",\"value\":\"\"}}");
+
+  json = "{\"contains\":{\"field\":\"/hello/world\"}}";
+  json_selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse_json(test_ctx, json, strlen(json),
+                                     &json_selector, &error);
+  if (st != LQL_STATUS_OK || json_selector == NULL) {
+    printf("selector AST JSON parse omitted value failed: %s\n",
+           error.message);
+    ++failures;
+  } else {
+    memset(&root, 0, sizeof(root));
+    st = test_ctx->selector_root(test_ctx, json_selector, &root, &error);
+    memset(&string_term, 0, sizeof(string_term));
+    if (st != LQL_STATUS_OK ||
+        test_ctx->selector_node_string_term(test_ctx, root, &string_term,
+                                            &error) != LQL_STATUS_OK ||
+        !view_equals(string_term.field, "/hello/world") ||
+        string_term.value_present) {
+      printf("selector AST JSON omitted value term mismatch: %s\n",
+             error.message);
+      ++failures;
+    }
+    matched = 0;
+    st = test_ctx->matches_json(test_ctx, json_selector,
+                                "{\"hello\":{\"world\":\"anything\"}}",
+                                strlen("{\"hello\":{\"world\":\"anything\"}}"),
+                                &matched, &error);
+    if (st != LQL_STATUS_OK || !matched) {
+      printf("selector AST JSON omitted value match mismatch: %s\n",
+             error.message);
+      ++failures;
+    }
+    test_ctx->selector_destroy(test_ctx, json_selector);
+  }
+
+  json = "{\"contains\":{\"field\":\"/hello/world\",\"value\":\"\"}}";
+  json_selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse_json(test_ctx, json, strlen(json),
+                                     &json_selector, &error);
+  if (st != LQL_STATUS_OK || json_selector == NULL) {
+    printf("selector AST JSON parse explicit empty failed: %s\n",
+           error.message);
+    ++failures;
+  } else {
+    memset(&root, 0, sizeof(root));
+    st = test_ctx->selector_root(test_ctx, json_selector, &root, &error);
+    memset(&string_term, 0, sizeof(string_term));
+    if (st != LQL_STATUS_OK ||
+        test_ctx->selector_node_string_term(test_ctx, root, &string_term,
+                                            &error) != LQL_STATUS_OK ||
+        !string_term.value_present || !view_equals(string_term.value, "")) {
+      printf("selector AST JSON explicit empty term mismatch: %s\n",
+             error.message);
+      ++failures;
+    }
+    matched = 0;
+    st = test_ctx->matches_json(test_ctx, json_selector,
+                                "{\"hello\":{\"world\":\"\"}}",
+                                strlen("{\"hello\":{\"world\":\"\"}}"),
+                                &matched, &error);
+    if (st != LQL_STATUS_OK || !matched) {
+      printf("selector AST JSON explicit empty match mismatch: %s\n",
+             error.message);
+      ++failures;
+    }
+    test_ctx->selector_destroy(test_ctx, json_selector);
+  }
+
+  json = "{\"or\":[{\"eq\":{\"field\":\"/region\",\"value\":\"us\"}},"
+         "{\"eq\":{\"field\":\"/region\",\"value\":\"eu\"}}]}";
+  json_selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse_json(test_ctx, json, strlen(json),
+                                     &json_selector, &error);
+  if (st != LQL_STATUS_OK || json_selector == NULL) {
+    printf("selector AST JSON parse or failed: %s\n", error.message);
+    ++failures;
+  } else {
+    memset(&root, 0, sizeof(root));
+    count = 0u;
+    st = test_ctx->selector_root(test_ctx, json_selector, &root, &error);
+    if (st != LQL_STATUS_OK || root.kind != LQL_SELECTOR_NODE_OR ||
+        test_ctx->selector_node_child_count(test_ctx, root, &count, &error) !=
+            LQL_STATUS_OK ||
+        count != 2u) {
+      printf("selector AST JSON or traversal mismatch: %s\n", error.message);
+      ++failures;
+    }
+    matched = 0;
+    st = test_ctx->matches_json(test_ctx, json_selector, "{\"region\":\"eu\"}",
+                                strlen("{\"region\":\"eu\"}"), &matched,
+                                &error);
+    if (st != LQL_STATUS_OK || !matched) {
+      printf("selector AST JSON or match mismatch: %s\n", error.message);
+      ++failures;
+    }
+    test_ctx->selector_destroy(test_ctx, json_selector);
+  }
+
+  expr = "contains{field=/msg,any=warn|timeout},"
+         "range{field=/progress,gte=10},"
+         "range{field=/timestamp,lt=2026-03-05T11:29:41.265+01:00},"
+         "date{field=/timestamp,after=2025-01-01,before=2025-01-03},"
+         "in{field=/env,any=prod|stage},"
+         "exists{/meta/etag}";
+  selector = NULL;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, expr, &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("selector AST parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  memset(&root, 0, sizeof(root));
+  st = test_ctx->selector_root(test_ctx, selector, &root, &error);
+  if (st != LQL_STATUS_OK || root.kind != LQL_SELECTOR_NODE_AND) {
+    printf("selector AST root mismatch: %s\n", error.message);
+    ++failures;
+  }
+  count = 0u;
+  st = test_ctx->selector_node_child_count(test_ctx, root, &count, &error);
+  if (st != LQL_STATUS_OK || count != 6u) {
+    printf("selector AST child count mismatch: %lu %s\n",
+           (unsigned long)count, error.message);
+    ++failures;
+  }
+  st = test_ctx->selector_node_child(test_ctx, root, 0u, &child, &error);
+  if (st != LQL_STATUS_OK || child.kind != LQL_SELECTOR_NODE_CONTAINS) {
+    printf("selector AST contains child mismatch: %s\n", error.message);
+    ++failures;
+  } else {
+    memset(&string_term, 0, sizeof(string_term));
+    st = test_ctx->selector_node_string_term(test_ctx, child, &string_term,
+                                             &error);
+    if (st != LQL_STATUS_OK || !view_equals(string_term.field, "/msg") ||
+        string_term.value_present || string_term.any_count != 2u) {
+      printf("selector AST string term mismatch: %s\n", error.message);
+      ++failures;
+    }
+    st = test_ctx->selector_node_string_term_any(test_ctx, child, 1u, &view,
+                                                 &error);
+    if (st != LQL_STATUS_OK || !view_equals(view, "timeout")) {
+      printf("selector AST string any mismatch: %s\n", error.message);
+      ++failures;
+    }
+  }
+  st = test_ctx->selector_node_child(test_ctx, root, 1u, &child, &error);
+  if (st != LQL_STATUS_OK || child.kind != LQL_SELECTOR_NODE_RANGE) {
+    printf("selector AST numeric range child mismatch: %s\n", error.message);
+    ++failures;
+  } else {
+    memset(&range_term, 0, sizeof(range_term));
+    st = test_ctx->selector_node_range_term(test_ctx, child, &range_term,
+                                            &error);
+    if (st != LQL_STATUS_OK || !view_equals(range_term.field, "/progress") ||
+        range_term.gte.kind != LQL_SELECTOR_BOUND_NUMBER ||
+        range_term.gte.number != 10.0) {
+      printf("selector AST numeric range mismatch: %s\n", error.message);
+      ++failures;
+    }
+  }
+  st = test_ctx->selector_node_child(test_ctx, root, 2u, &child, &error);
+  if (st != LQL_STATUS_OK || child.kind != LQL_SELECTOR_NODE_RANGE) {
+    printf("selector AST datetime range child mismatch: %s\n", error.message);
+    ++failures;
+  } else {
+    memset(&range_term, 0, sizeof(range_term));
+    st = test_ctx->selector_node_range_term(test_ctx, child, &range_term,
+                                            &error);
+    if (st != LQL_STATUS_OK ||
+        range_term.lt.kind != LQL_SELECTOR_BOUND_DATETIME ||
+        !view_equals(range_term.lt.datetime,
+                     "2026-03-05T11:29:41.265+01:00")) {
+      printf("selector AST datetime range mismatch: %s\n", error.message);
+      ++failures;
+    }
+  }
+  st = test_ctx->selector_node_child(test_ctx, root, 3u, &child, &error);
+  if (st != LQL_STATUS_OK || child.kind != LQL_SELECTOR_NODE_DATE) {
+    printf("selector AST date child mismatch: %s\n", error.message);
+    ++failures;
+  } else {
+    memset(&date_term, 0, sizeof(date_term));
+    st = test_ctx->selector_node_date_term(test_ctx, child, &date_term,
+                                           &error);
+    if (st != LQL_STATUS_OK || !view_equals(date_term.field, "/timestamp") ||
+        !view_equals(date_term.after, "2025-01-01") ||
+        !view_equals(date_term.before, "2025-01-03")) {
+      printf("selector AST date term mismatch: %s\n", error.message);
+      ++failures;
+    }
+  }
+  st = test_ctx->selector_node_child(test_ctx, root, 4u, &child, &error);
+  if (st != LQL_STATUS_OK || child.kind != LQL_SELECTOR_NODE_IN) {
+    printf("selector AST in child mismatch: %s\n", error.message);
+    ++failures;
+  } else {
+    memset(&in_term, 0, sizeof(in_term));
+    st = test_ctx->selector_node_in_term(test_ctx, child, &in_term, &error);
+    if (st != LQL_STATUS_OK || !view_equals(in_term.field, "/env") ||
+        in_term.any_count != 2u) {
+      printf("selector AST in term mismatch: %s\n", error.message);
+      ++failures;
+    }
+    st = test_ctx->selector_node_in_term_any(test_ctx, child, 0u, &view,
+                                             &error);
+    if (st != LQL_STATUS_OK || !view_equals(view, "prod")) {
+      printf("selector AST in any mismatch: %s\n", error.message);
+      ++failures;
+    }
+  }
+  st = test_ctx->selector_node_child(test_ctx, root, 5u, &child, &error);
+  if (st != LQL_STATUS_OK || child.kind != LQL_SELECTOR_NODE_EXISTS) {
+    printf("selector AST exists child mismatch: %s\n", error.message);
+    ++failures;
+  } else {
+    st = test_ctx->selector_node_exists_path(test_ctx, child, &view, &error);
+    if (st != LQL_STATUS_OK || !view_equals(view, "/meta/etag")) {
+      printf("selector AST exists path mismatch: %s\n", error.message);
+      ++failures;
+    }
+  }
+  st = test_ctx->selector_node_child(test_ctx, root, 6u, &child, &error);
+  if (st != LQL_STATUS_INVALID_ARGUMENT) {
+    printf("selector AST child bounds should fail\n");
+    ++failures;
+  }
+  test_ctx->selector_destroy(test_ctx, selector);
+}
+
 int main(void) {
   lql_error error;
 
@@ -8043,6 +8381,7 @@ int main(void) {
   expect_selector_match_all_alias_api();
   expect_selector_or_api();
   expect_selector_inspection_api();
+  expect_selector_ast_api();
   expect_selector_parse_error_api();
   expect_version_api();
   expect_stream_file();

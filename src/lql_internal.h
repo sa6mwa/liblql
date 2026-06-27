@@ -88,6 +88,18 @@ typedef struct lql_term {
   char **any;
   size_t *any_lens;
   size_t any_count;
+  char *range_gt_text;
+  char *range_gte_text;
+  char *range_lt_text;
+  char *range_lte_text;
+  char *date_value_text;
+  char *date_since_text;
+  char *date_after_text;
+  char *date_before_text;
+  char *date_gt_text;
+  char *date_gte_text;
+  char *date_lt_text;
+  char *date_lte_text;
   double range_gt;
   double range_gte;
   double range_lt;
@@ -131,6 +143,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
                                                            int or_mode,
                                                            lql_selector **out,
                                                            lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_json_internal(
+    lql *self, const void *json, size_t json_len, lql_selector **out,
+    lql_error *error);
 LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
                                                    lql_temporal *out);
 LQL_INTERNAL_SYMBOL int lql_temporal_compare(const lql_temporal *left,

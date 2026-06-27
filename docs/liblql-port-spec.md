@@ -149,7 +149,8 @@ The public API must expose these surfaces:
 - selector AST construction through C-native builders or node construction
   methods, so consumers can create selector trees without text parsing;
 - selector AST JSON serialization and JSON parsing compatible with the Go
-  selector JSON representation;
+  selector JSON representation as structural interchange, not byte-identical
+  object-member ordering;
 - reusable selector plan/compiled state and receiver-based selector
   capability/trait inspection as optimization surfaces layered under or beside
   the AST;

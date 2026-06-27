@@ -195,6 +195,86 @@ typedef struct lql_selector_execution_traits {
   int early_non_match_likely;
 } lql_selector_execution_traits;
 
+typedef struct lql_string_view {
+  const char *data;
+  size_t len;
+} lql_string_view;
+
+typedef enum lql_selector_node_kind {
+  LQL_SELECTOR_NODE_ALL = 0,
+  LQL_SELECTOR_NODE_AND = 1,
+  LQL_SELECTOR_NODE_OR = 2,
+  LQL_SELECTOR_NODE_NOT = 3,
+  LQL_SELECTOR_NODE_EQ = 4,
+  LQL_SELECTOR_NODE_CONTAINS = 5,
+  LQL_SELECTOR_NODE_ICONTAINS = 6,
+  LQL_SELECTOR_NODE_PREFIX = 7,
+  LQL_SELECTOR_NODE_IPREFIX = 8,
+  LQL_SELECTOR_NODE_RANGE = 9,
+  LQL_SELECTOR_NODE_DATE = 10,
+  LQL_SELECTOR_NODE_IN = 11,
+  LQL_SELECTOR_NODE_EXISTS = 12
+} lql_selector_node_kind;
+
+typedef enum lql_selector_bound_kind {
+  LQL_SELECTOR_BOUND_ABSENT = 0,
+  LQL_SELECTOR_BOUND_NUMBER = 1,
+  LQL_SELECTOR_BOUND_DATETIME = 2
+} lql_selector_bound_kind;
+
+typedef enum lql_selector_since_kind {
+  LQL_SELECTOR_SINCE_NONE = 0,
+  LQL_SELECTOR_SINCE_NOW = 1,
+  LQL_SELECTOR_SINCE_TODAY = 2,
+  LQL_SELECTOR_SINCE_YESTERDAY = 3,
+  LQL_SELECTOR_SINCE_LITERAL = 4
+} lql_selector_since_kind;
+
+typedef struct lql_selector_node {
+  lql_selector_node_kind kind;
+  const void *impl;
+} lql_selector_node;
+
+typedef struct lql_selector_string_term {
+  lql_string_view field;
+  int value_present;
+  lql_string_view value;
+  int ignore_case;
+  size_t any_count;
+} lql_selector_string_term;
+
+typedef struct lql_selector_range_bound {
+  lql_selector_bound_kind kind;
+  double number;
+  lql_string_view datetime;
+} lql_selector_range_bound;
+
+typedef struct lql_selector_range_term {
+  lql_string_view field;
+  lql_selector_range_bound gt;
+  lql_selector_range_bound gte;
+  lql_selector_range_bound lt;
+  lql_selector_range_bound lte;
+} lql_selector_range_term;
+
+typedef struct lql_selector_date_term {
+  lql_string_view field;
+  lql_string_view value;
+  lql_string_view since;
+  lql_selector_since_kind since_kind;
+  lql_string_view after;
+  lql_string_view before;
+  lql_string_view gt;
+  lql_string_view gte;
+  lql_string_view lt;
+  lql_string_view lte;
+} lql_selector_date_term;
+
+typedef struct lql_selector_in_term {
+  lql_string_view field;
+  size_t any_count;
+} lql_selector_in_term;
+
 typedef lql_status (*lql_query_decision_fn)(void *user,
                                             const lql_query_decision *decision);
 typedef lql_status (*lql_query_match_fn)(void *user,
@@ -222,6 +302,10 @@ struct lql {
   /* Parses an OR selector expression; caller destroys *out on success. */
   lql_status (*selector_parse_or)(lql *self, const char *expr,
                                   lql_selector **out, lql_error *error);
+  /* Parses Go-compatible selector AST JSON; caller destroys *out on success. */
+  lql_status (*selector_parse_json)(lql *self, const void *json,
+                                    size_t json_len, lql_selector **out,
+                                    lql_error *error);
   /* Destroys a selector handle; NULL is accepted. */
   void (*selector_destroy)(lql *self, lql_selector *selector);
   /* Reports whether selector is NULL or matches all candidates. */
@@ -234,6 +318,55 @@ struct lql {
   void (*selector_execution_traits_get)(
       const lql *self, const lql_selector *selector,
       lql_selector_execution_traits *out);
+  /* Borrows the selector root AST node; out is valid while selector lives. */
+  lql_status (*selector_root)(const lql *self, const lql_selector *selector,
+                              lql_selector_node *out, lql_error *error);
+  /* Returns the child count for an AND, OR, or NOT AST node. */
+  lql_status (*selector_node_child_count)(const lql *self,
+                                          lql_selector_node node,
+                                          size_t *out_count,
+                                          lql_error *error);
+  /* Borrows one child AST node by index from an AND, OR, or NOT node. */
+  lql_status (*selector_node_child)(const lql *self, lql_selector_node node,
+                                    size_t index, lql_selector_node *out,
+                                    lql_error *error);
+  /* Borrows string-term data for eq/contains/icontains/prefix/iprefix nodes. */
+  lql_status (*selector_node_string_term)(
+      const lql *self, lql_selector_node node,
+      lql_selector_string_term *out, lql_error *error);
+  /* Borrows one any-list value from a string-term node. */
+  lql_status (*selector_node_string_term_any)(const lql *self,
+                                              lql_selector_node node,
+                                              size_t index,
+                                              lql_string_view *out,
+                                              lql_error *error);
+  /* Borrows range-term data for a range node. */
+  lql_status (*selector_node_range_term)(const lql *self,
+                                         lql_selector_node node,
+                                         lql_selector_range_term *out,
+                                         lql_error *error);
+  /* Borrows date-term data for a date node. */
+  lql_status (*selector_node_date_term)(const lql *self,
+                                        lql_selector_node node,
+                                        lql_selector_date_term *out,
+                                        lql_error *error);
+  /* Borrows in-term data for an in node. */
+  lql_status (*selector_node_in_term)(const lql *self, lql_selector_node node,
+                                      lql_selector_in_term *out,
+                                      lql_error *error);
+  /* Borrows one any-list value from an in node. */
+  lql_status (*selector_node_in_term_any)(const lql *self,
+                                          lql_selector_node node, size_t index,
+                                          lql_string_view *out,
+                                          lql_error *error);
+  /* Borrows the path for an exists node. */
+  lql_status (*selector_node_exists_path)(const lql *self,
+                                          lql_selector_node node,
+                                          lql_string_view *out,
+                                          lql_error *error);
+  /* Serializes the selector AST as compact Go-compatible JSON to out. */
+  lql_status (*selector_write_json)(lql *self, const lql_selector *selector,
+                                    FILE *out, lql_error *error);
   /* Evaluates one caller-buffered JSON value against selector. */
   lql_status (*matches_json)(lql *self, const lql_selector *selector,
                              const char *json, size_t json_len,

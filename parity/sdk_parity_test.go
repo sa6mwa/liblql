@@ -73,6 +73,102 @@ func fromGoSelectorExecutionTraits(t lql.SelectorExecutionTraits) lqlSelectorExe
 	}
 }
 
+func TestSDKSelectorASTJSONParity(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name   string
+		expr   string
+		orMode bool
+		docs   []string
+	}{
+		{name: "eq_shorthand", expr: `/status="open"`, docs: []string{
+			`{"status":"open"}`,
+			`{"status":"closed"}`,
+		}},
+		{name: "contains_omitted_value", expr: `contains{f=/hello/world}`, docs: []string{
+			`{"hello":{"world":{"nested":true}}}`,
+			`{"hello":{}}`,
+		}},
+		{name: "contains_explicit_empty", expr: `contains{f=/hello/world,v=""}`, docs: []string{
+			`{"hello":{"world":""}}`,
+			`{"hello":{"world":"non-empty"}}`,
+		}},
+		{name: "contains_any", expr: `contains{f=/msg,a=warn|timeout}`, docs: []string{
+			`{"msg":"warn: timeout waiting for lock"}`,
+			`{"msg":"all clear"}`,
+		}},
+		{name: "ignore_case_flag", expr: `contains{f=/msg,v=timeout,ic=t}`, docs: []string{
+			`{"msg":"TIMEOUT waiting"}`,
+			`{"msg":"still running"}`,
+		}},
+		{name: "implicit_and", expr: `eq{field=/status,value=open},range{field=/progress,gte=10}`, docs: []string{
+			`{"status":"open","progress":25}`,
+			`{"status":"open","progress":5}`,
+		}},
+		{name: "explicit_not", expr: `not.eq{field=/status,value=closed}`, docs: []string{
+			`{"status":"open"}`,
+			`{"status":"closed"}`,
+		}},
+		{name: "or_parse", expr: `eq{field=/region,value=us},eq{field=/region,value=eu}`, orMode: true, docs: []string{
+			`{"region":"eu"}`,
+			`{"region":"apac"}`,
+		}},
+		{name: "range_datetime", expr: `range{field=/timestamp,lt=2026-03-05T11:29:41.265+01:00}`, docs: []string{
+			`{"timestamp":"2026-03-05T09:00:00Z"}`,
+			`{"timestamp":"2026-03-05T12:00:00Z"}`,
+		}},
+		{name: "date_after_before", expr: `date{field=/timestamp,after=2025-01-01,before=2025-01-03}`, docs: []string{
+			`{"timestamp":"2025-01-02T00:00:00Z"}`,
+			`{"timestamp":"2025-01-04T00:00:00Z"}`,
+		}},
+		{name: "date_since_macro", expr: `date{field=/timestamp,since=yesterday}`, docs: []string{
+			`{"timestamp":"` + now.Add(-12*time.Hour).Format(time.RFC3339Nano) + `"}`,
+			`{"timestamp":"` + now.Add(-72*time.Hour).Format(time.RFC3339Nano) + `"}`,
+		}},
+		{name: "in_any", expr: `in{field=/env,any=prod|stage}`, docs: []string{
+			`{"env":"stage"}`,
+			`{"env":"dev"}`,
+		}},
+		{name: "exists", expr: `exists{/meta/etag}`, docs: []string{
+			`{"meta":{"etag":"abc"}}`,
+			`{"meta":{}}`,
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sel lql.Selector
+			var err error
+			if tc.orMode {
+				sel, err = lql.ParseSelectorStringOr(tc.expr)
+			} else {
+				sel, err = lql.ParseSelectorString(tc.expr)
+			}
+			if err != nil {
+				t.Fatalf("go parse selector: %v", err)
+			}
+			want, err := json.Marshal(sel)
+			if err != nil {
+				t.Fatalf("go marshal selector: %v", err)
+			}
+			for _, docJSON := range tc.docs {
+				var doc map[string]any
+				if err := json.Unmarshal([]byte(docJSON), &doc); err != nil {
+					t.Fatalf("unmarshal candidate: %v", err)
+				}
+				wantMatch := lql.Matches(sel, doc)
+				gotMatch, err := cSelectorJSONMatches(string(want), docJSON)
+				if err != nil {
+					t.Fatalf("liblql selector JSON import match: %v\nselector json: %s", err, string(want))
+				}
+				if gotMatch != wantMatch {
+					t.Fatalf("selector AST JSON behavior mismatch doc=%s got=%v want=%v\nselector json: %s",
+						docJSON, gotMatch, wantMatch, string(want))
+				}
+			}
+		})
+	}
+}
+
 func TestSDKSelectorWildcardPathParity(t *testing.T) {
 	cases := []sdkSelectorMatchCase{
 		{`/labels/*="alice"`, `{"labels":{"env":"prod","owner":"alice"},"items":[{"sku":"A"},{"sku":"B"}],"groups":[{"items":[{"sku":"A"},{"sku":"B"}]}],"scalar":"x","arrEmpty":[]}`},

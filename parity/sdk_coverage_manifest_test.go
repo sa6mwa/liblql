@@ -23,6 +23,7 @@ var sdkParityCoverageManifest = []sdkParityCoverageRequirement{
 	{"selector", "public liblql wildcard, recursive, array-wildcard, object-wildcard, exists, and in-any path traversal matches Go selector evaluation", []string{"TestSDKSelectorWildcardPathParity"}},
 	{"selector", "public liblql string selector terms cover case modes, contains.any, empty-value match-all, negated empty match-all, and omitted-value path assertions like Go", []string{"TestSDKSelectorStringTermParity"}},
 	{"selector", "public liblql selector logical composition covers AND, OR, explicit indexed groups, NOT, aliases, and mixed shorthand forms like Go", []string{"TestSDKSelectorLogicalCompositionParity"}},
+	{"selector", "public liblql imports Go selector AST JSON and preserves selector behavior for representative node families", []string{"TestSDKSelectorASTJSONParity"}},
 	{"selector", "public liblql residual selector regression corpus matches Go lql.Matches while remaining selector families are decomposed", []string{"TestSDKSelectorMatchesJSONParity"}},
 	{"selector", "public liblql residual OR selector regression corpus matches Go lql.Matches while OR selector families are decomposed", []string{"TestSDKSelectorMatchesJSONOrParity"}},
 	{"selector", "public liblql temporal literal formats match Go selector behavior for date-only, RFC3339Nano, offset, and naive UTC cases", []string{"TestSDKTemporalFormatParity"}},

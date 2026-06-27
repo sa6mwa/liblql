@@ -143,6 +143,112 @@ static int liblql_inspect_selector(lql *ctx, const char *expr, int empty_selecto
 	return 0;
 }
 
+static int liblql_selector_json(lql *ctx, const char *expr, int or_mode,
+                                char **out_json, size_t *out_len,
+                                char *errbuf, size_t errbuf_len) {
+	lql_error error;
+	lql_selector *selector;
+	lql_status status;
+	FILE *fp;
+	long len;
+	char *buf;
+	size_t got;
+
+	if (out_json == NULL || out_len == NULL) {
+		return (int)LQL_STATUS_INVALID_ARGUMENT;
+	}
+	*out_json = NULL;
+	*out_len = 0u;
+	lql_error_init(&error);
+	selector = NULL;
+	if (or_mode) {
+		status = ctx->selector_parse_or(ctx, expr, &selector, &error);
+	} else {
+		status = ctx->selector_parse(ctx, expr, &selector, &error);
+	}
+	if (status != LQL_STATUS_OK) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	fp = tmpfile();
+	if (fp == NULL) {
+		ctx->selector_destroy(ctx, selector);
+		return (int)LQL_STATUS_JSON_ERROR;
+	}
+	status = ctx->selector_write_json(ctx, selector, fp, &error);
+	ctx->selector_destroy(ctx, selector);
+	if (status != LQL_STATUS_OK) {
+		fclose(fp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (fflush(fp) != 0 || fseek(fp, 0, SEEK_END) != 0) {
+		fclose(fp);
+		return (int)LQL_STATUS_JSON_ERROR;
+	}
+	len = ftell(fp);
+	if (len < 0 || fseek(fp, 0, SEEK_SET) != 0) {
+		fclose(fp);
+		return (int)LQL_STATUS_JSON_ERROR;
+	}
+	buf = (char *)malloc((size_t)len + 1u);
+	if (buf == NULL) {
+		fclose(fp);
+		return (int)LQL_STATUS_NO_MEMORY;
+	}
+	got = fread(buf, 1u, (size_t)len, fp);
+	fclose(fp);
+	if (got != (size_t)len) {
+		free(buf);
+		return (int)LQL_STATUS_JSON_ERROR;
+	}
+	buf[(size_t)len] = '\0';
+	*out_json = buf;
+	*out_len = (size_t)len;
+	return 0;
+}
+
+static int liblql_selector_json_matches(lql *ctx, const char *selector_json,
+                                        const char *doc_json, int *out_matched,
+                                        char *errbuf, size_t errbuf_len) {
+	lql_error error;
+	lql_selector *selector;
+	lql_status status;
+
+	if (selector_json == NULL || doc_json == NULL || out_matched == NULL) {
+		return (int)LQL_STATUS_INVALID_ARGUMENT;
+	}
+	*out_matched = 0;
+	lql_error_init(&error);
+	selector = NULL;
+	status = ctx->selector_parse_json(ctx, selector_json, strlen(selector_json),
+	                                  &selector, &error);
+	if (status != LQL_STATUS_OK) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	status = ctx->matches_json(ctx, selector, doc_json, strlen(doc_json),
+	                           out_matched, &error);
+	ctx->selector_destroy(ctx, selector);
+	if (status != LQL_STATUS_OK) {
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	return 0;
+}
+
 static int liblql_parse_projection(lql *ctx, const char *const *fields,
                                    size_t field_count, char *errbuf,
                                    size_t errbuf_len) {
@@ -1520,6 +1626,38 @@ func cInspectSelector(expr string, emptySelector bool, orMode bool) (cSelectorIn
 		earlyNonMatchLikely: raw.early_non_match_likely != 0,
 	}
 	return out, nil
+}
+
+func cSelectorJSON(expr string, orMode bool) (string, error) {
+	cExpr := C.CString(expr)
+	defer C.free(unsafe.Pointer(cExpr))
+
+	var out *C.char
+	var outLen C.size_t
+	var errbuf [256]C.char
+	status := C.liblql_selector_json(C.liblql_receiver(), cExpr, cBool(orMode), &out, &outLen,
+		&errbuf[0], C.size_t(len(errbuf)))
+	if status != 0 {
+		return "", sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoStringN(out, C.int(outLen)), nil
+}
+
+func cSelectorJSONMatches(selectorJSON, doc string) (bool, error) {
+	cSelectorJSON := C.CString(selectorJSON)
+	defer C.free(unsafe.Pointer(cSelectorJSON))
+	cDoc := C.CString(doc)
+	defer C.free(unsafe.Pointer(cDoc))
+
+	var matched C.int
+	var errbuf [256]C.char
+	status := C.liblql_selector_json_matches(C.liblql_receiver(), cSelectorJSON, cDoc, &matched,
+		&errbuf[0], C.size_t(len(errbuf)))
+	if status != 0 {
+		return false, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	return matched != 0, nil
 }
 
 func cParseProjection(fields []string) (int, string) {

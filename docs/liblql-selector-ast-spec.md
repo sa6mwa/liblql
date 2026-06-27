@@ -106,7 +106,8 @@ after construction, not required for tree ownership.
 
 ## JSON Shape
 
-Selector AST JSON must match the Go public selector representation:
+Selector AST JSON must be compatible with the Go public selector
+representation as a structural interchange format:
 
 ```json
 {
@@ -126,7 +127,10 @@ Selector AST JSON must match the Go public selector representation:
 ```
 
 Serialization omits empty fields the same way Go omits `omitempty` fields. The
-zero-value selector serializes as an empty JSON object.
+zero-value selector serializes as an empty JSON object. JSON object member order
+is not a compatibility contract. The required contract is that Go-emitted
+selector AST JSON parses into liblql, liblql-emitted selector AST JSON parses
+as the same logical AST, and the resulting selector behavior is equivalent.
 
 String terms have a critical invariant:
 
@@ -156,21 +160,23 @@ payloads.
 
 Required lonejson usage:
 
-- define transport structs for selector, term, range, date, and in terms;
-- define `lonejson_map` metadata for those fixed object shapes;
-- use recursive object-array and nested-object mappings for `and`, `or`, and
-  `not` where lonejson map pointers support it;
-- use `lonejson_json_value` parse visitors or path-aware visitors for JSON
+- use lonejson value visitors for recursive selector sum-type parsing and JSON
   union points that fixed mappings cannot express directly;
+- use lonejson mapped structs where they improve fixed-shape term parsing, but
+  do not force recursive AST union handling through maps if a visitor is the
+  clearer lonejson-native surface;
 - use lonejson mapped serialization or `lonejson_writer` APIs for output;
 - route lonejson runtime allocation through the active `lql *` receiver
   allocator bridge;
 - cleanup every mapped transport value through lonejson cleanup/reset APIs.
 
 Range bound and permissive scalar-to-string term conversion are the important
-union points. The implementation may map those fields as `lonejson_json_value`
-and parse the value through lonejson visitors, or use another lonejson-native
-adapter. It must not inspect raw JSON bytes with ad hoc token code.
+union points. The recursive selector node itself is also a union point:
+`and`/`or` carry arrays, `not` carries one child node, term operators carry
+operator-specific objects, and `exists` carries a string. The implementation may
+parse those shapes through lonejson visitors, `lonejson_json_value` visitors, or
+another lonejson-native adapter. It must not inspect raw JSON bytes with ad hoc
+token code.
 
 Manual JSON concatenation is not allowed, including for tests and small
 selector objects, unless the text is a fixed fixture that is not parsed or
@@ -213,8 +219,8 @@ The selector AST work is not complete until all of these are executable gates:
 - C-only tests for omitted `value` versus explicit empty `value`;
 - C-only tests for range-bound numeric/string union behavior;
 - C-only tests for cleanup after failed AST JSON parse and failed builder calls;
-- Go-vs-C SDK parity tests comparing canonical selector AST JSON for text parse
-  and JSON round-trips;
+- Go-vs-C SDK parity tests proving Go selector AST JSON imports into liblql
+  and preserves selector behavior across representative node families;
 - Go-vs-C SDK parity tests for constructor-equivalent ASTs where the C builder
   is the public equivalent of Go constructors;
 - Lua tests for selector userdata construction, traversal, JSON round-trips,

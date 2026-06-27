@@ -102,8 +102,8 @@ by representative evidence but not by a full behavior matrix should be marked
 - The old broad selector SDK tests are now documented as residual regression
   corpora, not as completion evidence.
 - The port specification now treats selector AST parity as a first-class SDK
-  requirement. Evaluator parity cannot close selector library parity while the
-  public AST, selector JSON, builder, and Lua userdata facade are missing.
+  requirement. Evaluator parity cannot close selector library parity while AST
+  construction and the Lua userdata facade are missing.
 
 ## Completion Criteria
 
@@ -117,8 +117,9 @@ The implementation can be called complete only after:
 3. The Lua facade exposes selector userdata backed by the public C AST API,
    with selector JSON round-trips and AST use in query workflows covered by
    Lua tests.
-4. Go-backed SDK parity checks compare canonical selector AST JSON for text
-   parse, constructor-equivalent ASTs, and JSON round-trips.
+4. Go-backed SDK parity checks prove selector AST JSON interchange
+   structurally: Go-emitted selector JSON imports into liblql and preserves
+   behavior, and constructor-equivalent ASTs are covered once C builders exist.
 5. The SDK and CLI coverage manifests use narrow requirement names that describe
    the exact proven behavior.
 6. `make parity-test`, `make test`, `make package-source-smoke`, and the release
