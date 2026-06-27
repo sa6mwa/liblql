@@ -6,11 +6,25 @@ that full LQL parity is complete.
 
 ## Audit State
 
-- Audit date: 2026-06-26
-- Implementation evidence commit: `1b127b9 perf(selector): keep contains-any native`
+- Audit date: 2026-06-27
+- Implementation evidence commit: `d950dc4 fix(selector): align temporal format parity`
 - Current release version source: untagged git worktree, resolving to `0.0.0`
-- Current release command status: clean `make release` passes locally
-- Current worktree status at audit update: clean before this audit document
+- Current release command status: stale; do not treat previous release rehearsal
+  as final after the parity reassessment
+- Current worktree status at audit update: reassessment changes in progress
+
+## Reassessment Warning
+
+This repository is no longer considered complete. The temporal selector audit
+found a real Go/C divergence that the previous parity evidence did not catch:
+C accepted leap-second timestamps while Go rejected them. That specific bug is
+fixed, but the failure mode shows that prior broad `covered` claims were too
+coarse.
+
+See `docs/liblql-parity-reassessment.md`. Until every `partial` oracle row has
+explicit matrix evidence or a narrowed non-applicable boundary, this document is
+only historical evidence of gates that have passed, not a completion
+certificate.
 
 ## Proven Locally
 
@@ -62,10 +76,10 @@ streaming modes, and applies the 128 MiB memory profile.
 | Per-instance allocator boundary | public API style gate, handle allocator tests, ASan/UBSan in `make test-all` | Proven locally |
 | No adjacent Go source references in repository files | repository-boundary CTest in `make test-all` | Proven locally |
 | lonejson from GitHub release SDK archives | dependency acquisition in clean `make release`; package dependency manifests verified | Proven locally |
-| Selector behavior for claimed scope | C SDK tests with unique manifest requirement keys plus Go-backed `make parity-test` inside `make test-all`; CLI and SDK parity manifests reject duplicate requirement keys | Proven locally for claimed scope |
-| Projection behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests; CLI and SDK parity manifests reject duplicate requirement keys | Proven locally for claimed scope |
-| Mutation behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests; CLI and SDK parity manifests reject duplicate requirement keys | Proven locally for claimed scope |
-| Streaming decision and plus-value behavior | C SDK streaming tests, benchmark memory gates, 1 GiB memory gate | Proven locally for claimed scope |
+| Selector behavior for claimed scope | C SDK tests with unique manifest requirement keys plus Go-backed `make parity-test`; temporal format matrix now exists, but other selector families require reassessment | Partial pending matrix audit |
+| Projection behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests; exact matrix breadth requires reassessment | Partial pending matrix audit |
+| Mutation behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests; exact matrix breadth requires reassessment | Partial pending matrix audit |
+| Streaming decision and plus-value behavior | C SDK streaming tests, benchmark memory gates, 1 GiB memory gate; exact matrix breadth requires reassessment | Partial pending matrix audit |
 | Lua facade is direct liblql binding, not `clql` backed | Lua C module tests, Lua runtime fixtures, Lua release artifact verification | Proven locally |
 | Lua 5.5 only | C compile-time guard, Lua runtime fixtures, Lua package contract fixtures | Proven locally |
 | Go/C/Lua benchmark parity and memory gates | `make bench-check` and `make bench-memory-check` for Go-backed parity; `make bench-1g-check` for focused C/Lua 1 GiB bounded-memory invariants; clean `make release` | Proven locally |
@@ -77,11 +91,12 @@ streaming modes, and applies the 128 MiB memory profile.
 | Privacy and relocatability verification | `make package-verify`, `make release`, package privacy fixtures | Proven locally |
 | Warning-clean release build with `-Werror` | release-surface CTest in `make test-all` and source archive verification | Proven locally |
 
-## Remaining Release Work
+## Remaining Implementation And Release Work
 
-The implementation scope is locally proven for the current public C/Lua/CLI
-contract. Release execution remains unproven until these items are performed
-under release authority:
+The implementation scope is not yet proven. Before release, the parity
+reassessment must be completed and every `partial` oracle row must be resolved.
+Release execution also remains unproven until these items are performed under
+release authority:
 
 1. Final tagged release artifacts are unproven.
    The current worktree is untagged, so generated artifacts intentionally use
@@ -109,6 +124,8 @@ stream. liblql must not emulate that by materializing the root array or source.
 
 ## Next Completion Work
 
-The next non-cosmetic liblql work is the formal release flow: release authority,
-version selection, a lightweight `vX.Y.Z` tag on `HEAD`, tagged clean
-`make release`, and checksum-listed upload selection.
+The next non-cosmetic liblql work is parity proof repair, not release. Start
+with the high-risk surfaces in `docs/liblql-parity-reassessment.md`, add or
+tighten Go-vs-C SDK/CLI matrices, downgrade any unproven inventory rows to
+`partial`, and only then return to release authority, version selection, tagged
+clean `make release`, and checksum-listed upload selection.
