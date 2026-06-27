@@ -1,4 +1,24 @@
-# liblql Dependency Gaps
+# liblql v0 Parser And Framing Non-Parity
+
+This document records the deliberately excluded Go parity edges for the v0 C
+port. These are not selector, projection, mutation, or ordinary streaming
+semantic gaps. They are parser/framing compatibility edges inherited from the
+Go implementation's use of `encoding/json.Decoder` and from input shapes that
+mix framing modes.
+
+The v0 public contract is:
+
+- liblql uses lonejson strict JSON parsing and framing;
+- liblql supports repeated top-level JSON values and root-array item streams
+  as separate candidate-stream shapes;
+- liblql does not support a single candidate stream that starts with root-array
+  items and then continues with additional top-level JSON values;
+- liblql must not emulate these excluded cases by materializing the whole
+  source, adding a second JSON parser, or pre-normalizing input.
+
+The excluded cases can be revisited later if lonejson grows explicit streaming
+framing or compatibility modes and liblql deliberately expands its public
+contract.
 
 ## Mixed Array-Then-Values Candidate Framing
 
@@ -24,11 +44,10 @@ offset needed to resume parsing the following top-level values without adding a
 second parser in liblql. Callback sources also cannot rewind after a root array
 closes.
 
-The missing capability is dependency-owned framing, not capture. liblql must
-not emulate this by materializing the root array, spooling the whole input, or
-retaining all candidates. Until the dependency exposes a no-materialization
-framing mode for this shape, the shape remains outside the current liblql v0
-candidate-stream contract.
+The missing capability is dependency-owned framing, not capture. For v0, this
+shape is intentionally outside the public candidate-stream contract. liblql must
+not emulate it by materializing the root array, spooling the whole input, or
+retaining all candidates.
 
 lonejson `v0.35.1` exposes useful pieces:
 
@@ -52,8 +71,8 @@ A future dependency capability would need these semantics:
   rule to that array.
 - Nested arrays that are themselves candidate values should keep the existing
   candidate-recursion behavior controlled by the current candidate stream API;
-  this dependency gap is specifically about continuing after a top-level array
-  closes.
+  this future framing capability is specifically about continuing after a
+  top-level array closes.
 - Preserve existing candidate metadata contracts: candidate index, stream
   offset, byte size, payload size, and callback ordering must describe the
   emitted candidate value, not the enclosing array.
@@ -73,8 +92,9 @@ A future dependency capability would need these semantics:
 - Do not require temp files as a hidden substitute for streaming.
 - Do not change existing `AUTO`, `NDJSON`, `SINGLE_VALUE`, or `ARRAY_ITEMS`
   semantics.
-- Do not treat this dependency gap as remaining liblql implementation work
-  unless the public liblql candidate-stream contract is deliberately expanded.
+- Do not treat this excluded v0 non-parity case as remaining liblql
+  implementation work unless the public liblql candidate-stream contract is
+  deliberately expanded.
 
 ## Validation Needed
 
@@ -110,7 +130,9 @@ not currently matched by lonejson `v0.35.1`:
   number.
 
 These are dependency compatibility decisions because liblql intentionally uses
-lonejson as the JSON parser. liblql should not add an alternate JSON parser or
+lonejson as the JSON parser. For v0, liblql intentionally follows lonejson's
+strict behavior rather than Go decoder permissiveness for these malformed or
+ambiguous inputs. liblql should not add an alternate JSON parser or
 pre-normalization layer to mimic these edge cases. If exact Go stdlib
-compatibility is required, lonejson needs an explicit compatibility mode with
-documented semantics for these cases.
+compatibility is required later, lonejson needs an explicit compatibility mode
+with documented semantics for these cases.

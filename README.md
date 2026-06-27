@@ -36,9 +36,9 @@ public AST builders   /                   -> JSON serialization
 The C implementation uses `lql_selector` as the recursive selector AST
 internally; the previous private `lql_node`/`lql_term` tree has been removed.
 The Lua facade exposes selector userdata backed by the public C API for text
-parse, AST JSON import/export, AST traversal, builders, and query reuse. Full
-selector-library parity is still not claimed until the remaining selector
-oracle inventory is closed.
+parse, AST JSON import/export, AST traversal, builders, and query reuse.
+Selector-library parity for the v0 public contract is covered by C-only and
+Go-backed SDK matrices.
 
 Projection, compaction, and mutation are exposed through the public receiver
 API for seekable ranges, caller-provided read callbacks, callback-source

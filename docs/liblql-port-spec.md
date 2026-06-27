@@ -516,10 +516,10 @@ The public liblql v0 callback-source framing contract covers one stream of
 top-level JSON values and root-array item streams as exposed by lonejson
 `v0.35.1`. It does not claim the Go implementation's narrower mixed framing
 case where a non-seekable source starts with a top-level array and then
-continues with more top-level values. That shape is a documented dependency
-gap in `docs/liblql-dependency-gaps.md`, not current liblql implementation
-work. liblql must not materialize the root array or the whole source to emulate
-it.
+continues with more top-level values. That shape is an accepted v0 non-parity
+case documented in `docs/liblql-dependency-gaps.md`, not current liblql
+implementation work. liblql must not materialize the root array or the whole
+source to emulate it.
 
 Seekable range APIs use 64-bit liblql offsets and sizes. When a platform
 `FILE *` seek cannot represent a 64-bit range offset, liblql must fail the
@@ -1368,8 +1368,8 @@ Current implementation status:
   must not fake this by materializing the whole array or source; support for
   that exact shape needs dependency API support plus an explicit future public
   liblql framing contract that preserves streaming semantics. This is tracked
-  as `docs/liblql-dependency-gaps.md` and is not part of the current public
-  liblql v0 callback-source contract;
+  as an accepted v0 non-parity case in `docs/liblql-dependency-gaps.md` and is
+  not part of the current public liblql v0 callback-source contract;
 - lonejson `v0.35.1` exposes candidate `stream_offset`, `byte_size`, and
   `payload_size` plus callback-scoped `lonejson_spooled` handles with
   per-handle size/spilled inspection. It does not expose aggregate query-level

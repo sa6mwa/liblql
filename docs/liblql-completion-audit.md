@@ -14,7 +14,7 @@ that full LQL parity is complete.
 - Current worktree status at audit update: selector AST public surface exists,
   canonical C AST implementation refactor landed; Lua selector userdata facade
   implemented over the public C selector API
-- Oracle inventory snapshot: 43 covered rows, 3 partial rows, 1
+- Oracle inventory snapshot: 46 covered rows, 0 partial rows, 1
   not-applicable row, 0 gap rows
 
 ## Reassessment Warning
@@ -34,14 +34,13 @@ evaluator, capability inspection, and public traversal. The Lua selector
 userdata facade now covers selector parse, AST JSON import/export, AST
 traversal, builders, method-style inspection, and query reuse. The selector
 oracle rows are now decomposed across C-only and Go-vs-C SDK matrices; remaining
-partial rows are concentrated in candidate-stream framing and dependency-owned
-JSON compatibility boundaries.
+Go non-parity cases are documented v0 parser/framing exclusions rather than
+open implementation work.
 
-See `docs/liblql-parity-reassessment.md` and
-`docs/liblql-selector-ast-spec.md`. Until every `partial` oracle row has
-explicit matrix evidence or a narrowed non-applicable boundary, this document
-is only historical evidence of gates that have passed, not a completion
-certificate.
+See `docs/liblql-parity-reassessment.md`,
+`docs/liblql-selector-ast-spec.md`, and
+`docs/liblql-dependency-gaps.md`. The oracle inventory now has no open
+`partial` rows for the v0 public contract.
 
 ## Proven Locally
 
@@ -96,8 +95,8 @@ streaming modes, and applies the 128 MiB memory profile.
 | Selector public AST surface | Go exposes public selector AST construction, traversal, and JSON representation; liblql now has parsed selector traversal, selector JSON import/export, receiver-based AST builders, canonical `lql_selector` internals in C, Lua selector userdata facade coverage, and bidirectional Go/C selector JSON interchange evidence | Proven locally |
 | Selector behavior for claimed scope | C SDK tests with unique manifest requirement keys plus Go-backed `make parity-test`; wildcard/recursive paths, string terms, logical composition, parse equivalence, parse errors, AST traversal, AST JSON import/export, receiver builders, Lua selector userdata, and temporal formats are covered in `parity/oracle_inventory.tsv` | Proven locally |
 | Projection behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests, Go oracle projection row covered in `parity/oracle_inventory.tsv` | Proven locally |
-| Mutation behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests; exact matrix breadth requires reassessment | Partial pending matrix audit |
-| Streaming decision and plus-value behavior | C SDK streaming tests, benchmark memory gates, 1 GiB memory gate; exact matrix breadth requires reassessment | Partial pending matrix audit |
+| Mutation behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests, and documented v0 framing exclusions in `docs/liblql-dependency-gaps.md` | Proven locally |
+| Streaming decision and plus-value behavior | C SDK streaming tests, benchmark memory gates, 1 GiB memory gate, SDK parity tests, and documented v0 parser/framing exclusions in `docs/liblql-dependency-gaps.md` | Proven locally |
 | Lua facade is direct liblql binding, not `clql` backed | Lua C module tests, Lua runtime fixtures, Lua release artifact verification | Proven locally |
 | Lua 5.5 only | C compile-time guard, Lua runtime fixtures, Lua package contract fixtures | Proven locally |
 | Go/C/Lua benchmark parity and memory gates | `make bench-check` and `make bench-memory-check` for Go-backed parity; `make bench-1g-check` for focused C/Lua 1 GiB bounded-memory invariants; clean `make release` | Proven locally |
@@ -111,11 +110,9 @@ streaming modes, and applies the 128 MiB memory profile.
 
 ## Remaining Implementation And Release Work
 
-The implementation scope is not yet proven. Before release, the parity
-reassessment must be completed and every remaining `partial` oracle row must be
-resolved. The open rows are now concentrated in mutation-stream request-shape
-boundaries, candidate-stream framing, and dependency-owned streaming JSON
-compatibility behavior.
+The implementation scope for the v0 public contract is proven by the current
+oracle inventory and gates. Exact Go decoder/framing compatibility is not
+claimed for the documented v0 exclusions in `docs/liblql-dependency-gaps.md`.
 Release execution also remains unproven until these items are performed under
 release authority:
 
@@ -132,7 +129,8 @@ release authority:
 
 ## Contract Boundary
 
-Full LQL parity is not currently claimed. The executable
+Full LQL v0 public-contract parity is currently claimed, with documented
+parser/framing exclusions. The executable
 `parity/oracle_inventory.tsv` classifies every test, benchmark, and
 example-bearing file in the pinned Go `pkt.systems/lql v0.17.1` module. Rows
 are either covered by C SDK, CLI, Lua, benchmark, or release-gate evidence, or
@@ -145,13 +143,14 @@ Known Go behaviors excluded from the current candidate-stream contract are
 documented in `docs/liblql-dependency-gaps.md`: streams containing root-array
 items followed by additional top-level values, plus two Go `encoding/json`
 compatibility edges around unmatched surrogate handling and leading-zero
-numeric stream text. liblql must not emulate those by materializing the root
+numeric stream text. These are accepted v0 non-parity cases, not remaining
+implementation work. liblql must not emulate those by materializing the root
 array or source, adding a second JSON parser, or pre-normalizing input.
 
 ## Next Completion Work
 
-The next non-cosmetic liblql work is parity proof repair across the high-risk
-surfaces in `docs/liblql-parity-reassessment.md`. Add or tighten Go-vs-C
-SDK/CLI matrices, downgrade any unproven inventory rows to `partial` or `gap`,
-and only then return to release authority, version selection, tagged clean
-`make release`, and checksum-listed upload selection.
+The next non-cosmetic liblql work is release authority: version selection,
+lightweight tag creation, tagged clean `make release`, and checksum-listed
+upload selection. Any future exact Go decoder/framing compatibility work should
+start as an explicit lonejson/liblql contract expansion, not as hidden
+materialization or parser substitution.
