@@ -881,6 +881,16 @@ func sdkProjectionCases() []struct {
 			doc:    `{"status":"open","id":"a","meta":{"trace":9,"span":"s","ignore":true},"items":[{"sku":"A"},{"sku":"B"}]}`,
 		},
 		{
+			name:   "go basic projection corpus",
+			fields: []string{"/id", "/meta/trace", "/items/1/sku"},
+			doc:    `{"id":"a","meta":{"trace":9,"ignore":1},"items":[{"sku":"A"},{"sku":"B"}],"payload":"x"}`,
+		},
+		{
+			name:   "go parse normalization corpus",
+			fields: []string{" /id ", "", "/meta/trace", "/id"},
+			doc:    `{"id":"a","meta":{"trace":9,"ignore":1},"payload":"x"}`,
+		},
+		{
 			name:   "escaped pointer fields",
 			fields: []string{"/a~1b/~0key"},
 			doc:    `{"status":"open","a/b":{"~key":7},"id":"a"}`,
@@ -961,6 +971,7 @@ func TestSDKProjectionExecutionErrorParity(t *testing.T) {
 	}{
 		{name: "truncated object", doc: `{"id":`},
 		{name: "trailing comma", doc: `{"id":"a",}`},
+		{name: "trailing token", doc: `{"id":"a"} {"id":"b"}`},
 		{name: "invalid literal", doc: `{"id": tru}`},
 	}
 	for _, tc := range cases {
