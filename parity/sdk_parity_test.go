@@ -93,6 +93,30 @@ func TestSDKSelectorASTJSONParity(t *testing.T) {
 			`{"hello":{"world":""}}`,
 			`{"hello":{"world":"non-empty"}}`,
 		}},
+		{name: "icontains_omitted_value", expr: `icontains{f=/hello/world}`, docs: []string{
+			`{"hello":{"world":{"nested":true}}}`,
+			`{"hello":{}}`,
+		}},
+		{name: "icontains_explicit_empty", expr: `icontains{f=/hello/world,v=""}`, docs: []string{
+			`{"hello":{"world":""}}`,
+			`{"hello":{"world":"non-empty"}}`,
+		}},
+		{name: "prefix_omitted_value", expr: `prefix{f=/hello/world}`, docs: []string{
+			`{"hello":{"world":{"nested":true}}}`,
+			`{"hello":{}}`,
+		}},
+		{name: "prefix_explicit_empty", expr: `prefix{f=/hello/world,v=""}`, docs: []string{
+			`{"hello":{"world":""}}`,
+			`{"hello":{"world":"non-empty"}}`,
+		}},
+		{name: "iprefix_omitted_value", expr: `iprefix{f=/hello/world}`, docs: []string{
+			`{"hello":{"world":{"nested":true}}}`,
+			`{"hello":{}}`,
+		}},
+		{name: "iprefix_explicit_empty", expr: `iprefix{f=/hello/world,v=""}`, docs: []string{
+			`{"hello":{"world":""}}`,
+			`{"hello":{"world":"non-empty"}}`,
+		}},
 		{name: "contains_any", expr: `contains{f=/msg,a=warn|timeout}`, docs: []string{
 			`{"msg":"warn: timeout waiting for lock"}`,
 			`{"msg":"all clear"}`,

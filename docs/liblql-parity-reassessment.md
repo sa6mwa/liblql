@@ -120,6 +120,15 @@ by representative evidence but not by a full behavior matrix should be marked
   round-trips, recursive AST table inspection, all public selector builders,
   selector userdata methods, structured builder/import errors, and reuse of
   built/imported selectors in query workflows.
+- The selector JSON and selector constructor oracle rows are now covered:
+  Go-emitted selector JSON imports into C, C parsed-selector JSON imports into
+  Go, C builder-origin JSON imports into Go, omitted versus explicit-empty
+  string-term JSON is covered across contains/icontains/prefix/iprefix, and
+  constructor-equivalent C/Lua builders cover every public selector family.
+- Go temporal cache tests are closed as observable temporal behavior rather
+  than private cache state: C and Go agree on temporal parse/evaluation
+  behavior, including builder-created datetime bounds, while Go cache fields
+  remain an implementation detail outside the C API.
 
 ## Completion Criteria
 

@@ -8172,6 +8172,21 @@ static void expect_selector_ast_api(void) {
   expect_selector_json_output(
       "contains{f=/hello/world,v=\"\"}",
       "{\"contains\":{\"field\":\"/hello/world\",\"value\":\"\"}}");
+  expect_selector_json_output("icontains{f=/hello/world}",
+                              "{\"icontains\":{\"field\":\"/hello/world\"}}");
+  expect_selector_json_output(
+      "icontains{f=/hello/world,v=\"\"}",
+      "{\"icontains\":{\"field\":\"/hello/world\",\"value\":\"\"}}");
+  expect_selector_json_output("prefix{f=/hello/world}",
+                              "{\"prefix\":{\"field\":\"/hello/world\"}}");
+  expect_selector_json_output(
+      "prefix{f=/hello/world,v=\"\"}",
+      "{\"prefix\":{\"field\":\"/hello/world\",\"value\":\"\"}}");
+  expect_selector_json_output("iprefix{f=/hello/world}",
+                              "{\"iprefix\":{\"field\":\"/hello/world\"}}");
+  expect_selector_json_output(
+      "iprefix{f=/hello/world,v=\"\"}",
+      "{\"iprefix\":{\"field\":\"/hello/world\",\"value\":\"\"}}");
 
   json = "{\"contains\":{\"field\":\"/hello/world\"}}";
   json_selector = NULL;
@@ -8412,6 +8427,7 @@ static void expect_selector_builder_api(void) {
   lql_selector *closed_selector;
   lql_selector *not_selector;
   lql_selector *contains_selector;
+  lql_selector *contains_value_selector;
   lql_selector *datetime_range_selector;
   lql_selector *date_selector;
   lql_selector *in_selector;
@@ -8435,6 +8451,7 @@ static void expect_selector_builder_api(void) {
   closed_selector = NULL;
   not_selector = NULL;
   contains_selector = NULL;
+  contains_value_selector = NULL;
   datetime_range_selector = NULL;
   date_selector = NULL;
   in_selector = NULL;
@@ -8567,6 +8584,24 @@ static void expect_selector_builder_api(void) {
              error.message);
       ++failures;
     }
+  }
+
+  memset(&string_term, 0, sizeof(string_term));
+  string_term.field = view_from_cstr("/msg");
+  string_term.value = view_from_cstr("needle");
+  lql_error_init(&error);
+  st = test_ctx->selector_build_string(
+      test_ctx, LQL_SELECTOR_NODE_CONTAINS, &string_term, NULL,
+      &contains_value_selector, &error);
+  if (st != LQL_STATUS_OK || contains_value_selector == NULL) {
+    printf("selector_build_string contains value failed: %s\n",
+           error.message);
+    ++failures;
+  } else {
+    expect_selector_handle_json(
+        "build contains value without explicit value_present",
+        contains_value_selector,
+        "{\"contains\":{\"field\":\"/msg\",\"value\":\"needle\"}}");
   }
 
   memset(&range_term, 0, sizeof(range_term));
@@ -8702,6 +8737,7 @@ static void expect_selector_builder_api(void) {
   test_ctx->selector_destroy(test_ctx, closed_selector);
   test_ctx->selector_destroy(test_ctx, not_selector);
   test_ctx->selector_destroy(test_ctx, contains_selector);
+  test_ctx->selector_destroy(test_ctx, contains_value_selector);
   test_ctx->selector_destroy(test_ctx, datetime_range_selector);
   test_ctx->selector_destroy(test_ctx, date_selector);
   test_ctx->selector_destroy(test_ctx, in_selector);
