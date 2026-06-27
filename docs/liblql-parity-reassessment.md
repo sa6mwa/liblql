@@ -35,12 +35,10 @@ The selector AST audit found a larger public-surface gap:
 That is not a Go-only implementation detail. It is public library behavior that
 needs an idiomatic C representation and a Lua userdata facade backed by that C
 surface. The C receiver API now covers traversal, selector AST JSON
-import/export, and selector builders, but the architecture is still incomplete:
-`lql_selector` currently wraps private `lql_node`/`lql_term` storage that acts
-as the real AST authority. The next selector refactor must make
-`lql_selector` the canonical AST consumed by parser, JSON, builders, evaluator,
-capability inspection, and Lua. Lua selector userdata and final inventory
-closure remain open after that.
+import/export, and selector builders, and `lql_selector` is now the canonical
+AST consumed by parser, JSON, builders, evaluator, capability inspection, and
+public traversal. Lua selector userdata and final inventory closure remain
+open after that.
 
 ## What Parity Must Mean
 
@@ -109,15 +107,14 @@ by representative evidence but not by a full behavior matrix should be marked
   corpora, not as completion evidence.
 - The port specification now treats selector AST parity as a first-class SDK
   requirement. Evaluator parity cannot close selector library parity while the
-  canonical `lql_selector` refactor and Lua userdata facade are missing.
+  Lua userdata facade is missing.
 - The C receiver API now exposes selector AST builders for match-all,
   logical, string-term, range, date, in, and exists selectors. C-only tests
   cover builder construction and validation, and Go-vs-C SDK parity checks
   prove C builder-created selectors match constructor-equivalent Go selector
-  behavior. This proves useful public-surface behavior, not final architecture.
-  The JSON contract is structural: byte-identical JSON text is not required,
-  but Go-emitted selector JSON must parse into liblql and selector JSON emitted
-  by liblql must parse into Go with equivalent selector logic.
+  behavior. The JSON contract is structural: byte-identical JSON text is not
+  required, but Go-emitted selector JSON must parse into liblql and selector
+  JSON emitted by liblql must parse into Go with equivalent selector logic.
 
 ## Completion Criteria
 

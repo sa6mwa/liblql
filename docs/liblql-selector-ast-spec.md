@@ -73,18 +73,16 @@ of the `lql_selector` AST, not a separate AST that `lql_selector` merely wraps.
 
 ## Current Status
 
-As of the current AST builder slice, the installed C receiver API exposes
-parsed selector traversal, Go-compatible selector AST JSON import/export, and
-receiver-based builders for every selector family. Those APIs are useful
-partial surface area, but the implementation is not yet architecturally in
-parity with Go: the C selector still wraps private `lql_node` and `lql_term`
-storage that acts as the real AST authority.
+As of the canonical AST cutover, the installed C receiver API exposes parsed
+selector traversal, Go-compatible selector AST JSON import/export, and
+receiver-based builders for every selector family. The C implementation now
+uses `lql_selector` as the recursive selector AST consumed by parser, JSON,
+builders, evaluator, capability inspection, and public traversal. The previous
+private `lql_node`/`lql_term` tree and `LQL_NODE_*` vocabulary are removed from
+source.
 
-The next implementation refactor must remove that authority. `lql_selector`
-must become the canonical recursive AST consumed directly by parser, JSON,
-builders, evaluator, capability inspection, and Lua. The selector AST work
-remains incomplete until that refactor is done, the Lua facade exposes selector
-userdata backed by the public C selector API, and the remaining oracle inventory
+The selector AST work remains incomplete until the Lua facade exposes selector
+userdata backed by the public C selector API and the remaining oracle inventory
 rows are audited or narrowed.
 
 ## Public Model

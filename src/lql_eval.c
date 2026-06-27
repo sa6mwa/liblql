@@ -410,18 +410,18 @@ static int path_matches(const eval_doc *doc, const char *pattern,
   return path_matches_from(doc, seg, path, 0u);
 }
 
-static int node_is_term(const lql_node *node) {
+static int selector_is_predicate(const lql_selector *node) {
   switch (node->kind) {
-  case LQL_NODE_EQ:
-  case LQL_NODE_NE:
-  case LQL_NODE_CONTAINS:
-  case LQL_NODE_ICONTAINS:
-  case LQL_NODE_PREFIX:
-  case LQL_NODE_IPREFIX:
-  case LQL_NODE_RANGE:
-  case LQL_NODE_DATE:
-  case LQL_NODE_IN:
-  case LQL_NODE_EXISTS:
+  case LQL_SELECTOR_KIND_EQ:
+  case LQL_SELECTOR_KIND_NE:
+  case LQL_SELECTOR_KIND_CONTAINS:
+  case LQL_SELECTOR_KIND_ICONTAINS:
+  case LQL_SELECTOR_KIND_PREFIX:
+  case LQL_SELECTOR_KIND_IPREFIX:
+  case LQL_SELECTOR_KIND_RANGE:
+  case LQL_SELECTOR_KIND_DATE:
+  case LQL_SELECTOR_KIND_IN:
+  case LQL_SELECTOR_KIND_EXISTS:
     return 1;
   default:
     return 0;
@@ -441,7 +441,7 @@ static int resolve_since_macro(lql_since_macro macro, lql_temporal *out) {
   }
 }
 
-static void observe_node(eval_doc *doc, const lql_node *node,
+static void observe_node(eval_doc *doc, const lql_selector *node,
                          const lonejson_value_path *path, const char *value,
                          int is_number, int is_container, int is_null) {
   size_t i;
@@ -456,30 +456,30 @@ static void observe_node(eval_doc *doc, const lql_node *node,
   if (node == NULL) {
     return;
   }
-  if (!node_is_term(node)) {
+  if (!selector_is_predicate(node)) {
     for (i = 0u; i < node->child_count; ++i) {
       observe_node(doc, &node->children[i], path, value, is_number,
                    is_container, is_null);
     }
     return;
   }
-  if (doc->hits == NULL || !path_matches(doc, node->term.field, path)) {
+  if (doc->hits == NULL || !path_matches(doc, node->field, path)) {
     return;
   }
   switch (node->kind) {
-  case LQL_NODE_EQ:
+  case LQL_SELECTOR_KIND_EQ:
     if (is_container || is_null) {
       break;
     }
-    if (strcmp(value, node->term.value == NULL ? "" : node->term.value) == 0) {
+    if (strcmp(value, node->value == NULL ? "" : node->value) == 0) {
       doc->hits[node->hit_index] = 1u;
-    } else if (lql_parse_temporal_literal(node->term.value, &query_temporal) &&
+    } else if (lql_parse_temporal_literal(node->value, &query_temporal) &&
                lql_parse_temporal_literal(value, &temporal) &&
                lql_temporal_equal(&temporal, &query_temporal)) {
       doc->hits[node->hit_index] = 1u;
     }
     break;
-  case LQL_NODE_NE:
+  case LQL_SELECTOR_KIND_NE:
     if (is_container) {
       break;
     }
@@ -487,115 +487,115 @@ static void observe_node(eval_doc *doc, const lql_node *node,
       doc->hits[node->hit_index] = 1u;
       break;
     }
-    if (strcmp(value, node->term.value == NULL ? "" : node->term.value) != 0 &&
-        !(lql_parse_temporal_literal(node->term.value, &query_temporal) &&
+    if (strcmp(value, node->value == NULL ? "" : node->value) != 0 &&
+        !(lql_parse_temporal_literal(node->value, &query_temporal) &&
           lql_parse_temporal_literal(value, &temporal) &&
           lql_temporal_equal(&temporal, &query_temporal))) {
       doc->hits[node->hit_index] = 1u;
     }
     break;
-  case LQL_NODE_CONTAINS:
-  case LQL_NODE_ICONTAINS:
-    if (node->term.any_count == 0u && !node->term.value_set &&
-        node->term.value == NULL) {
+  case LQL_SELECTOR_KIND_CONTAINS:
+  case LQL_SELECTOR_KIND_ICONTAINS:
+    if (node->any_count == 0u && !node->value_set &&
+        node->value == NULL) {
       doc->hits[node->hit_index] = 1u;
       break;
     }
     if (is_container || is_null) {
       break;
     }
-    if (node->term.any_count == 0u) {
-      if (contains_case(value, node->term.value == NULL ? "" : node->term.value,
-                        node->kind == LQL_NODE_ICONTAINS ||
-                            node->term.ignore_case)) {
+    if (node->any_count == 0u) {
+      if (contains_case(value, node->value == NULL ? "" : node->value,
+                        node->kind == LQL_SELECTOR_KIND_ICONTAINS ||
+                            node->ignore_case)) {
         doc->hits[node->hit_index] = 1u;
       }
     } else {
       value_len = strlen(value);
-      for (j = 0u; j < node->term.any_count; ++j) {
-        needle = node->term.any[j];
-        if (contains_case_len(value, value_len, needle, node->term.any_lens[j],
-                              node->kind == LQL_NODE_ICONTAINS ||
-                                  node->term.ignore_case)) {
+      for (j = 0u; j < node->any_count; ++j) {
+        needle = node->any[j];
+        if (contains_case_len(value, value_len, needle, node->any_lens[j],
+                              node->kind == LQL_SELECTOR_KIND_ICONTAINS ||
+                                  node->ignore_case)) {
           doc->hits[node->hit_index] = 1u;
           break;
         }
       }
     }
     break;
-  case LQL_NODE_PREFIX:
-  case LQL_NODE_IPREFIX:
-    if (!node->term.value_set && node->term.value == NULL) {
+  case LQL_SELECTOR_KIND_PREFIX:
+  case LQL_SELECTOR_KIND_IPREFIX:
+    if (!node->value_set && node->value == NULL) {
       doc->hits[node->hit_index] = 1u;
       break;
     }
     if (is_container || is_null) {
       break;
     }
-    n = strlen(node->term.value == NULL ? "" : node->term.value);
+    n = strlen(node->value == NULL ? "" : node->value);
     if (strlen(value) >= n &&
-        (node->kind == LQL_NODE_IPREFIX || node->term.ignore_case
-             ? ascii_case_equal_prefix(value, node->term.value, n)
-             : memcmp(value, node->term.value, n) == 0)) {
+        (node->kind == LQL_SELECTOR_KIND_IPREFIX || node->ignore_case
+             ? ascii_case_equal_prefix(value, node->value, n)
+             : memcmp(value, node->value, n) == 0)) {
       doc->hits[node->hit_index] = 1u;
     }
     break;
-  case LQL_NODE_RANGE:
-    if (!is_container && !is_null && node->term.range_is_temporal) {
+  case LQL_SELECTOR_KIND_RANGE:
+    if (!is_container && !is_null && node->range_is_temporal) {
       if (lql_parse_temporal_literal(value, &temporal) &&
-          (!node->term.has_temporal_gt ||
-           lql_temporal_compare(&temporal, &node->term.temporal_gt) > 0) &&
-          (!node->term.has_temporal_gte ||
-           lql_temporal_compare(&temporal, &node->term.temporal_gte) >= 0) &&
-          (!node->term.has_temporal_lt ||
-           lql_temporal_compare(&temporal, &node->term.temporal_lt) < 0) &&
-          (!node->term.has_temporal_lte ||
-           lql_temporal_compare(&temporal, &node->term.temporal_lte) <= 0)) {
+          (!node->has_temporal_gt ||
+           lql_temporal_compare(&temporal, &node->temporal_gt) > 0) &&
+          (!node->has_temporal_gte ||
+           lql_temporal_compare(&temporal, &node->temporal_gte) >= 0) &&
+          (!node->has_temporal_lt ||
+           lql_temporal_compare(&temporal, &node->temporal_lt) < 0) &&
+          (!node->has_temporal_lte ||
+           lql_temporal_compare(&temporal, &node->temporal_lte) <= 0)) {
         doc->hits[node->hit_index] = 1u;
       }
     } else if (!is_container && !is_null && is_number) {
       number = strtod(value, NULL);
-      if ((!node->term.has_range_gt || number > node->term.range_gt) &&
-          (!node->term.has_range_gte || number >= node->term.range_gte) &&
-          (!node->term.has_range_lt || number < node->term.range_lt) &&
-          (!node->term.has_range_lte || number <= node->term.range_lte)) {
+      if ((!node->has_range_gt || number > node->range_gt) &&
+          (!node->has_range_gte || number >= node->range_gte) &&
+          (!node->has_range_lt || number < node->range_lt) &&
+          (!node->has_range_lte || number <= node->range_lte)) {
         doc->hits[node->hit_index] = 1u;
       }
     }
     break;
-  case LQL_NODE_DATE:
+  case LQL_SELECTOR_KIND_DATE:
     if (!is_container && !is_null &&
-        (node->term.since_macro == LQL_SINCE_NONE ||
-         resolve_since_macro(node->term.since_macro, &since_macro)) &&
+        (node->since_macro == LQL_SINCE_NONE ||
+         resolve_since_macro(node->since_macro, &since_macro)) &&
         lql_parse_temporal_literal(value, &temporal) &&
-        (!node->term.has_temporal_eq ||
-         lql_temporal_equal(&temporal, &node->term.temporal_eq)) &&
-        (node->term.since_macro == LQL_SINCE_NONE ||
+        (!node->has_temporal_eq ||
+         lql_temporal_equal(&temporal, &node->temporal_eq)) &&
+        (node->since_macro == LQL_SINCE_NONE ||
          lql_temporal_compare(&temporal, &since_macro) >= 0) &&
-        (!node->term.has_temporal_gt ||
-         lql_temporal_compare(&temporal, &node->term.temporal_gt) > 0) &&
-        (!node->term.has_temporal_gte ||
-         lql_temporal_compare(&temporal, &node->term.temporal_gte) >= 0) &&
-        (!node->term.has_temporal_lt ||
-         lql_temporal_compare(&temporal, &node->term.temporal_lt) < 0) &&
-        (!node->term.has_temporal_lte ||
-         lql_temporal_compare(&temporal, &node->term.temporal_lte) <= 0)) {
+        (!node->has_temporal_gt ||
+         lql_temporal_compare(&temporal, &node->temporal_gt) > 0) &&
+        (!node->has_temporal_gte ||
+         lql_temporal_compare(&temporal, &node->temporal_gte) >= 0) &&
+        (!node->has_temporal_lt ||
+         lql_temporal_compare(&temporal, &node->temporal_lt) < 0) &&
+        (!node->has_temporal_lte ||
+         lql_temporal_compare(&temporal, &node->temporal_lte) <= 0)) {
       doc->hits[node->hit_index] = 1u;
     }
     break;
-  case LQL_NODE_IN:
+  case LQL_SELECTOR_KIND_IN:
     if (is_container || is_null) {
       break;
     }
-    for (j = 0u; j < node->term.any_count; ++j) {
-      needle = node->term.any[j];
+    for (j = 0u; j < node->any_count; ++j) {
+      needle = node->any[j];
       if (strcmp(value, needle) == 0) {
         doc->hits[node->hit_index] = 1u;
         break;
       }
     }
     break;
-  case LQL_NODE_EXISTS:
+  case LQL_SELECTOR_KIND_EXISTS:
     if (!is_null) {
       doc->hits[node->hit_index] = 1u;
     }
@@ -605,14 +605,14 @@ static void observe_node(eval_doc *doc, const lql_node *node,
   }
 }
 
-static int selector_path_interested(const eval_doc *doc, const lql_node *node,
+static int selector_path_interested(const eval_doc *doc, const lql_selector *node,
                                     const lonejson_value_path *path) {
   size_t i;
 
   if (node == NULL) {
     return 0;
   }
-  if (!node_is_term(node)) {
+  if (!selector_is_predicate(node)) {
     for (i = 0u; i < node->child_count; ++i) {
       if (selector_path_interested(doc, &node->children[i], path)) {
         return 1;
@@ -620,47 +620,47 @@ static int selector_path_interested(const eval_doc *doc, const lql_node *node,
     }
     return 0;
   }
-  return path_matches(doc, node->term.field, path);
+  return path_matches(doc, node->field, path);
 }
 
 static int scalar_path_interested(const eval_doc *doc,
                                   const lonejson_value_path *path) {
-  if (doc->selector == NULL || doc->selector->root.kind == LQL_NODE_ALL) {
+  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return 0;
   }
-  return selector_path_interested(doc, &doc->selector->root, path);
+  return selector_path_interested(doc, doc->selector, path);
 }
 
 static void observe_value(eval_doc *doc, const lonejson_value_path *path,
                           const char *value, int is_number, int is_container,
                           int is_null) {
-  if (doc->selector == NULL || doc->selector->root.kind == LQL_NODE_ALL) {
+  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return;
   }
-  observe_node(doc, &doc->selector->root, path, value, is_number, is_container,
+  observe_node(doc, doc->selector, path, value, is_number, is_container,
                is_null);
 }
 
-static int eval_node(const lql_node *node, const eval_doc *doc) {
+static int eval_node(const lql_selector *node, const eval_doc *doc) {
   size_t i;
   switch (node->kind) {
-  case LQL_NODE_ALL:
+  case LQL_SELECTOR_KIND_ALL:
     return 1;
-  case LQL_NODE_AND:
+  case LQL_SELECTOR_KIND_AND:
     for (i = 0u; i < node->child_count; ++i) {
       if (!eval_node(&node->children[i], doc)) {
         return 0;
       }
     }
     return 1;
-  case LQL_NODE_OR:
+  case LQL_SELECTOR_KIND_OR:
     for (i = 0u; i < node->child_count; ++i) {
       if (eval_node(&node->children[i], doc)) {
         return 1;
       }
     }
     return 0;
-  case LQL_NODE_NOT:
+  case LQL_SELECTOR_KIND_NOT:
     return node->child_count == 0u ? 1 : !eval_node(&node->children[0], doc);
   default:
     return doc->hits != NULL && doc->hits[node->hit_index] != 0u;
@@ -1286,8 +1286,8 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
     return LONEJSON_CANDIDATE_CONTINUE;
   }
   matched = state->selector == NULL ||
-            state->selector->root.kind == LQL_NODE_ALL ||
-            eval_node(&state->selector->root, &state->doc);
+            state->selector->kind == LQL_SELECTOR_KIND_ALL ||
+            eval_node(state->selector, &state->doc);
   if (matched) {
     state->result.candidates_matched++;
   }
@@ -1502,8 +1502,8 @@ on_source_spooled_candidate_end(void *user,
     return LONEJSON_CANDIDATE_CONTINUE;
   }
   matched = state->selector == NULL ||
-            state->selector->root.kind == LQL_NODE_ALL ||
-            eval_node(&state->selector->root, &state->doc);
+            state->selector->kind == LQL_SELECTOR_KIND_ALL ||
+            eval_node(state->selector, &state->doc);
   state->result.candidates_seen++;
   state->result.bytes_read =
       (lql_uint64)(candidate->stream_offset + candidate->byte_size);
@@ -1590,8 +1590,8 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
     return LONEJSON_CANDIDATE_CONTINUE;
   }
   matched = state->selector == NULL ||
-            state->selector->root.kind == LQL_NODE_ALL ||
-            eval_node(&state->selector->root, &state->doc);
+            state->selector->kind == LQL_SELECTOR_KIND_ALL ||
+            eval_node(state->selector, &state->doc);
   if (matched || state->mutation_plan != NULL) {
     if (candidate->payload_spool == NULL) {
       reset_doc(&state->doc);
@@ -1770,8 +1770,8 @@ static lql_status eval_selector_buffer(lql *self, const lql_selector *selector,
     lonejson_free(runtime);
     return LQL_STATUS_JSON_ERROR;
   }
-  *out_matched = selector == NULL || selector->root.kind == LQL_NODE_ALL ||
-                 eval_node(&selector->root, &doc);
+  *out_matched = selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL ||
+                 eval_node(selector, &doc);
   destroy_doc(&doc);
   lonejson_free(runtime);
   return LQL_STATUS_OK;
@@ -1785,7 +1785,7 @@ static lql_status matches_json_method(lql *self, const lql_selector *selector,
                   "json and out_matched are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  if (selector == NULL || selector->root.kind == LQL_NODE_ALL) {
+  if (selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL) {
     *out_matched = 1;
     return LQL_STATUS_OK;
   }

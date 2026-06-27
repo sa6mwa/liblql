@@ -12,7 +12,8 @@ that full LQL parity is complete.
 - Current release command status: stale; do not treat previous release rehearsal
   as final after the parity reassessment
 - Current worktree status at audit update: selector AST public surface exists,
-  canonical AST implementation refactor still pending
+  canonical C AST implementation refactor landed; Lua selector userdata still
+  pending
 
 ## Reassessment Warning
 
@@ -25,19 +26,17 @@ coarse.
 The selector AST audit also found a public SDK gap: Go exposes selector parsing
 as a public recursive AST with JSON marshal/unmarshal and constructor behavior.
 liblql now exposes parsed selector traversal, Go-compatible selector AST JSON
-import/export, and receiver-based C AST builders, but the architecture still
-has a private `lql_node`/`lql_term` tree acting as the real selector AST.
-`lql_selector` must become the canonical AST consumed by parser, JSON,
-builders, evaluator, capability inspection, and Lua. The Lua selector userdata
-facade and final oracle-row audit are also incomplete. Full selector-library
-parity is not yet proven.
+import/export, and receiver-based C AST builders. The C implementation now
+uses `lql_selector` as the canonical AST consumed by parser, JSON, builders,
+evaluator, capability inspection, and public traversal. The Lua selector
+userdata facade and final oracle-row audit are still incomplete. Full
+selector-library parity is not yet proven.
 
 See `docs/liblql-parity-reassessment.md` and
 `docs/liblql-selector-ast-spec.md`. Until every `partial` oracle row has
 explicit matrix evidence or a narrowed non-applicable boundary, and until
-`lql_selector` is the canonical AST in C and is exposed through Lua, this
-document is only historical evidence of gates that have passed, not a
-completion certificate.
+selector ASTs are exposed through Lua, this document is only historical
+evidence of gates that have passed, not a completion certificate.
 
 ## Proven Locally
 
@@ -89,7 +88,7 @@ streaming modes, and applies the 128 MiB memory profile.
 | Per-instance allocator boundary | public API style gate, handle allocator tests, ASan/UBSan in `make test-all` | Proven locally |
 | No adjacent Go source references in repository files | repository-boundary CTest in `make test-all` | Proven locally |
 | lonejson from GitHub release SDK archives | dependency acquisition in clean `make release`; package dependency manifests verified | Proven locally |
-| Selector public AST surface | Go exposes public selector AST construction, traversal, and JSON representation; liblql now has parsed selector traversal, selector JSON import/export, and receiver-based AST builders in C, but the internal `lql_node`/`lql_term` authority and missing Lua selector userdata keep selector-library parity incomplete | Partial |
+| Selector public AST surface | Go exposes public selector AST construction, traversal, and JSON representation; liblql now has parsed selector traversal, selector JSON import/export, receiver-based AST builders, and canonical `lql_selector` internals in C, but missing Lua selector userdata keeps selector-library parity incomplete | Partial |
 | Selector behavior for claimed scope | C SDK tests with unique manifest requirement keys plus Go-backed `make parity-test`; temporal format matrix now exists, but other selector families require reassessment and evaluator parity does not prove AST parity | Partial pending matrix audit |
 | Projection behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests; exact matrix breadth requires reassessment | Partial pending matrix audit |
 | Mutation behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests; exact matrix breadth requires reassessment | Partial pending matrix audit |
@@ -141,10 +140,7 @@ stream. liblql must not emulate that by materializing the root array or source.
 
 ## Next Completion Work
 
-The next non-cosmetic liblql work is the canonical `lql_selector` refactor:
-remove private `lql_node`/`lql_term` as the selector AST authority and make
-parser, JSON, builders, evaluator, traversal, capability inspection, and Lua
-meet at `lql_selector`. After that, finish the Lua selector userdata facade and
+The next non-cosmetic liblql work is the Lua selector userdata facade and
 parity proof repair across the high-risk surfaces in
 `docs/liblql-parity-reassessment.md`. Add or tighten Go-vs-C SDK/CLI matrices,
 downgrade any unproven inventory rows to `partial` or `gap`, and only then

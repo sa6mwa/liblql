@@ -858,11 +858,10 @@ Current implementation status:
   exists;
 - the installed public C API now exposes selector AST traversal, construction,
   and Go-compatible selector JSON parse/serialize through receiver methods.
-  This is public surface progress, not complete selector-library parity: the C
-  internals still use private `lql_node`/`lql_term` storage as the real AST
-  authority. Selector-library parity is still not complete until
-  `lql_selector` is the canonical internal AST, the Lua selector userdata facade
-  exists, and the remaining oracle inventory audit is closed;
+  The C internals now use `lql_selector` as the recursive selector AST; the
+  previous private `lql_node`/`lql_term` authority has been removed.
+  Selector-library parity is still not complete until the Lua selector userdata
+  facade exists and the remaining oracle inventory audit is closed;
 - `make test` includes repository-boundary checks that fail if committed
   repository files reference the adjacent Go source checkout through
   `../lql`-style paths or workstation-local checkout paths; parity remains

@@ -45,26 +45,22 @@ LQL_INTERNAL_SYMBOL void lql_eval_methods_install(lql *ctx);
 LQL_INTERNAL_SYMBOL void lql_project_methods_install(lql *ctx);
 LQL_INTERNAL_SYMBOL void lql_mutation_methods_install(lql *ctx);
 
-/* Transitional pre-refactor selector storage. This vocabulary must be removed
-   as an AST authority: lql_selector is the canonical selector AST described in
-   docs/liblql-selector-ast-spec.md. Do not add new behavior that depends on
-   lql_node/lql_term as a separate selector tree. */
-typedef enum lql_node_kind {
-  LQL_NODE_ALL = 0,
-  LQL_NODE_AND,
-  LQL_NODE_OR,
-  LQL_NODE_NOT,
-  LQL_NODE_EQ,
-  LQL_NODE_NE,
-  LQL_NODE_CONTAINS,
-  LQL_NODE_ICONTAINS,
-  LQL_NODE_PREFIX,
-  LQL_NODE_IPREFIX,
-  LQL_NODE_RANGE,
-  LQL_NODE_DATE,
-  LQL_NODE_IN,
-  LQL_NODE_EXISTS
-} lql_node_kind;
+typedef enum lql_selector_kind {
+  LQL_SELECTOR_KIND_ALL = 0,
+  LQL_SELECTOR_KIND_AND,
+  LQL_SELECTOR_KIND_OR,
+  LQL_SELECTOR_KIND_NOT,
+  LQL_SELECTOR_KIND_EQ,
+  LQL_SELECTOR_KIND_NE,
+  LQL_SELECTOR_KIND_CONTAINS,
+  LQL_SELECTOR_KIND_ICONTAINS,
+  LQL_SELECTOR_KIND_PREFIX,
+  LQL_SELECTOR_KIND_IPREFIX,
+  LQL_SELECTOR_KIND_RANGE,
+  LQL_SELECTOR_KIND_DATE,
+  LQL_SELECTOR_KIND_IN,
+  LQL_SELECTOR_KIND_EXISTS
+} lql_selector_kind;
 
 __extension__ typedef signed long long lql_int64;
 
@@ -84,7 +80,8 @@ typedef enum lql_since_macro {
   LQL_SINCE_YESTERDAY
 } lql_since_macro;
 
-typedef struct lql_term {
+struct lql_selector {
+  lql_selector_kind kind;
   char *field;
   char *value;
   int value_set;
@@ -124,24 +121,16 @@ typedef struct lql_term {
   int has_temporal_lte;
   int range_is_temporal;
   lql_since_macro since_macro;
-} lql_term;
-
-typedef struct lql_node {
-  lql_node_kind kind;
-  lql_term term;
-  struct lql_node *children;
+  struct lql_selector *children;
   size_t child_count;
   size_t hit_index;
-} lql_node;
-
-struct lql_selector {
-  lql_node root;
   size_t hit_count;
 };
 
 LQL_INTERNAL_SYMBOL void lql_set_error(lql_error *error, lql_status status,
                                        const char *message);
-LQL_INTERNAL_SYMBOL void lql_node_cleanup(lql *self, lql_node *node);
+LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
+                                              lql_selector *selector);
 LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
                                                            const char *expr,
                                                            int or_mode,

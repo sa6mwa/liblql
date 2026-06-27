@@ -33,12 +33,11 @@ public AST builders   /                   -> JSON serialization
                                             -> optional lql_selector_plan
 ```
 
-The current C implementation still has a known architecture gap: private
-`lql_node`/`lql_term` storage remains underneath `lql_selector`. The public
-selector API surface exists, but full selector-library parity is not claimed
-until that private AST authority is removed, `lql_selector` is the internal
-consumer boundary, and the Lua facade exposes selector userdata backed by the
-public C API.
+The C implementation uses `lql_selector` as the recursive selector AST
+internally; the previous private `lql_node`/`lql_term` tree has been removed.
+Full selector-library parity is still not claimed until the Lua facade exposes
+selector userdata backed by the public C API and the remaining selector oracle
+inventory is closed.
 
 Projection, compaction, and mutation are exposed through the public receiver
 API for seekable ranges, caller-provided read callbacks, callback-source

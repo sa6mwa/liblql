@@ -399,6 +399,18 @@ if [ -n "$source_root" ] && [ -d "$source_root" ]; then
     failed=1
   fi
 
+  selector_legacy_ast_hits=$(
+    grep -REn '(^|[^_[:alnum:]])lql_(node|term)([^_[:alnum:]]|$)|LQL_NODE_' \
+      "$source_root/src" "$source_root/tests" "$source_root/lua" \
+      "$source_root/examples" "$source_root/bench" \
+      2>/dev/null || true
+  )
+  if [ -n "$selector_legacy_ast_hits" ]; then
+    printf 'public API style: selector internals must use lql_selector as the canonical AST\n' >&2
+    printf '%s\n' "$selector_legacy_ast_hits" >&2
+    failed=1
+  fi
+
   null_private_receiver_hits=$(
     grep -REn 'lql_[A-Za-z0-9_]+_impl[[:space:]]*\([[:space:]]*NULL[[:space:]]*,' \
       "$source_root/src/lql.c" \

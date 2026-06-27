@@ -90,6 +90,8 @@ EOF
 cat >"$tmp/src/lql_selector.c" <<'EOF'
 void bad_null_private_receiver(void) { lql_selector_destroy_impl(NULL, selector); }
 void bad_selector_allocator_entry(lql_allocator *allocator) { lql_parse_selector_internal(allocator, expr, 0, out, error); }
+typedef struct lql_node { int kind; } lql_node;
+enum { LQL_NODE_ALL = 0 };
 EOF
 
 cat >"$tmp/src/lql.c" <<'EOF'
@@ -175,6 +177,7 @@ expect_diagnostic "$out" "receiver-owned cleanup helpers must take lql \*self"
 expect_diagnostic "$out" "receiver-owned parser boundary helpers must derive allocators"
 expect_diagnostic "$out" "receiver-owned runtime helpers must take receiver runtime context"
 expect_diagnostic "$out" "lonejson runtimes must use receiver allocator bridge"
+expect_diagnostic "$out" "selector internals must use lql_selector as the canonical AST"
 expect_diagnostic "$out" "private receiver implementations must not be called with NULL receivers"
 expect_diagnostic "$out" "receiver methods must be file-local methods"
 expect_diagnostic "$out" "receiver operation internals must not be shared"
