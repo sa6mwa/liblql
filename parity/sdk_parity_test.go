@@ -1653,6 +1653,48 @@ func TestSDKStreamingNestedArrayFileDecisionParity(t *testing.T) {
 	}
 }
 
+func TestSDKStreamingNumericSegmentOracleParity(t *testing.T) {
+	doc := sdkNumericSegmentParityStream(t)
+	selectors := []string{
+		`/voucher/lines/10/amount>=3000`,
+		`exists{/voucher/lines/10/amount}`,
+		`in{field=/voucher/lines/10/status,any=open|closed}`,
+		`contains{field=/voucher/lines/10/msg,value=hello}`,
+		`iprefix{field=/voucher/lines/10/code,value=auth-10}`,
+		`/voucher/.../10/amount>=3000`,
+		`/batches[]/lines/10/amount>=4000`,
+		`/batches[]/.../10/status="open"`,
+	}
+	for _, expr := range selectors {
+		for _, mode := range []struct {
+			name string
+			id   int
+		}{
+			{name: "decision", id: 0},
+			{name: "payload", id: 1},
+		} {
+			t.Run(expr+"/"+mode.name, func(t *testing.T) {
+				want, err := goStreamQuery(expr, doc, mode.id, 0, 0, 0, false)
+				if err != nil {
+					t.Fatalf("go numeric stream: %v", err)
+				}
+				got, err := cStreamQuery(expr, doc, mode.id, 0, 0, 0, false)
+				if err != nil {
+					t.Fatalf("liblql numeric stream: %v", err)
+				}
+				assertStreamSummaryParity(t, got, want)
+				if mode.id == 0 {
+					if got.DecisionCallbacks != want.DecisionCallbacks {
+						t.Fatalf("decision callback mismatch: got=%d want=%d", got.DecisionCallbacks, want.DecisionCallbacks)
+					}
+					return
+				}
+				assertDecodedJSONValuesParity(t, got.PayloadJSON, want.PayloadJSON, "numeric stream payload")
+			})
+		}
+	}
+}
+
 func TestSDKStreamingPayloadParity(t *testing.T) {
 	for _, tc := range []struct {
 		name                 string
@@ -1736,6 +1778,126 @@ func TestSDKStreamingPayloadParity(t *testing.T) {
 	}
 }
 
+func TestSDKStreamingStdlibOracleParity(t *testing.T) {
+	invalidUTF8 := string([]byte{'"', 'a', 0xff, 'b', '"', '\n', '{', '"', 's', '"', ':', '"', 'x', 0xfe, 'y', '"', '}'})
+	valid := []struct {
+		name string
+		doc  string
+	}{
+		{
+			name: "ndjson-and-top-level-array",
+			doc:  "{\"id\":\"a\",\"n\":1}\n{\"id\":\"b\",\"n\":-2.5e+3}\n[{\"id\":\"c\",\"n\":3},[{\"id\":\"d\",\"n\":4}],true,null,\"x\"]",
+		},
+		{
+			name: "raw-invalid-utf8-bytes",
+			doc:  invalidUTF8,
+		},
+		{
+			name: "mixed-numbers",
+			doc:  `0 -0 1e-9 -1.2E+3 42`,
+		},
+	}
+	for _, tc := range valid {
+		t.Run("valid/"+tc.name, func(t *testing.T) {
+			want, err := goStreamQuery("", tc.doc, 1, 0, 0, 0, false)
+			if err != nil {
+				t.Fatalf("go valid stream: %v", err)
+			}
+			got, err := cStreamQuery("", tc.doc, 1, 0, 0, 0, false)
+			if err != nil {
+				t.Fatalf("liblql valid stream: %v", err)
+			}
+			assertStreamSummaryParity(t, got, want)
+			assertDecodedJSONValuesParity(t, got.PayloadJSON, want.PayloadJSON, "stdlib valid stream payload")
+		})
+	}
+
+	control := string([]byte{'"', 'a', '\n', 'b', '"'})
+	invalid := []struct {
+		name string
+		doc  string
+	}{
+		{name: "unterminated-object", doc: `{"id":1`},
+		{name: "invalid-unicode-escape", doc: `"\uZZZZ"`},
+		{name: "invalid-surrogate-followup-escape", doc: `{"a":"\uD800\uZZZZ"}`},
+		{name: "trailing-comma-array", doc: `[1,2,]`},
+		{name: "control-character-in-string", doc: control},
+		{name: "invalid-literal", doc: `tru`},
+	}
+	for _, tc := range invalid {
+		t.Run("invalid/"+tc.name, func(t *testing.T) {
+			want, wantErr := goStreamQuery("", tc.doc, 1, 0, 0, 0, false)
+			got, gotErr := cStreamQuery("", tc.doc, 1, 0, 0, 0, false)
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("stream error presence mismatch: got=%v want=%v", gotErr, wantErr)
+			}
+			assertStreamSummaryParity(t, got, want)
+			assertDecodedJSONValuesParity(t, got.PayloadJSON, want.PayloadJSON, "stdlib invalid stream partial payload")
+		})
+	}
+}
+
+func TestSDKStreamingMultiFieldSelectorOracleParity(t *testing.T) {
+	doc := `[
+  {
+    "id": "a",
+    "status": "open",
+    "region": "eu",
+    "msg": "Timeout while reading",
+    "service": "Auth-Service",
+    "progress": 12,
+    "latency": 180,
+    "env": "prod",
+    "meta": {"etag": "x", "trace": 1},
+    "items": [{"sku": "A", "price": 10}, {"sku": "B", "price": 25}],
+    "groups": [{"items": [{"sku": "A"}, {"sku": "B"}]}]
+  },
+  [
+    {
+      "id": "b",
+      "status": "closed",
+      "region": "us",
+      "msg": "done",
+      "service": "billing",
+      "progress": 5,
+      "latency": 90,
+      "env": "stage",
+      "meta": {"trace": 2},
+      "items": [{"sku": "C", "price": 5}],
+      "groups": [{"items": [{"sku": "C"}]}]
+    }
+  ],
+  {
+    "id": "c",
+    "status": "ok",
+    "region": "us",
+    "msg": "Complete",
+    "service": "auth-api",
+    "progress": 15,
+    "latency": 205,
+    "env": "dev",
+    "meta": {"etag": null, "trace": 3},
+    "items": [{"sku": "B", "price": 30}],
+    "groups": [{"items": [{"sku": "B"}]}]
+  },
+  7
+]`
+	for _, expr := range sdkParitySelectorExpressions() {
+		t.Run(expr, func(t *testing.T) {
+			want, err := goStreamQuery(expr, doc, 1, 0, 0, 0, false)
+			if err != nil {
+				t.Fatalf("go multi-field stream: %v", err)
+			}
+			got, err := cStreamQuery(expr, doc, 1, 0, 0, 0, false)
+			if err != nil {
+				t.Fatalf("liblql multi-field stream: %v", err)
+			}
+			assertStreamSummaryParity(t, got, want)
+			assertDecodedJSONValuesParity(t, got.PayloadJSON, want.PayloadJSON, "multi-field stream payload")
+		})
+	}
+}
+
 func TestSDKStreamingStopParity(t *testing.T) {
 	doc := "{\"status\":\"open\"}\n{\"status\":\"open\"}\n{\"status\":\"closed\"}\n"
 	cases := []struct {
@@ -1809,6 +1971,124 @@ func TestSDKStreamingErrorParity(t *testing.T) {
 				assertStreamSummaryParity(t, got, want)
 			})
 		}
+	}
+}
+
+func sdkNumericSegmentParityStream(t *testing.T) string {
+	t.Helper()
+	makeLineArray := func(amount int, status, msg, code string) []any {
+		lines := make([]any, 11)
+		for i := range lines {
+			lines[i] = map[string]any{"amount": i}
+		}
+		lines[10] = map[string]any{
+			"amount": amount,
+			"status": status,
+			"msg":    msg,
+			"code":   code,
+		}
+		return lines
+	}
+	docs := []any{
+		map[string]any{
+			"voucher": map[string]any{
+				"lines": map[string]any{
+					"10": map[string]any{
+						"amount": 3500,
+						"status": "open",
+						"msg":    "hello object line",
+						"code":   "AUTH-10-OBJECT",
+					},
+				},
+			},
+		},
+		map[string]any{
+			"voucher": map[string]any{
+				"lines": makeLineArray(3600, "closed", "hello array line", "AUTH-10-ARRAY"),
+			},
+		},
+		map[string]any{
+			"batches": []any{
+				map[string]any{
+					"lines": map[string]any{
+						"10": map[string]any{
+							"amount": 4100,
+							"status": "open",
+						},
+					},
+				},
+				map[string]any{
+					"lines": makeLineArray(4200, "closed", "nested array line", "AUTH-10-NESTED"),
+				},
+			},
+		},
+		map[string]any{
+			"voucher": map[string]any{
+				"lines": map[string]any{
+					"10": map[string]any{
+						"amount": 1200,
+						"status": "processing",
+						"msg":    "low amount",
+						"code":   "AUTH-10-LOW",
+					},
+				},
+			},
+		},
+	}
+	return encodeSDKJSONLines(t, docs)
+}
+
+func encodeSDKJSONLines(t *testing.T, docs []any) string {
+	t.Helper()
+	var out bytes.Buffer
+	for i, doc := range docs {
+		if i > 0 {
+			out.WriteByte('\n')
+		}
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatalf("marshal stream doc: %v", err)
+		}
+		out.Write(raw)
+	}
+	return out.String()
+}
+
+func sdkParitySelectorExpressions() []string {
+	return []string{
+		`/status="open"`,
+		`/status="open",/region="eu"`,
+		`and.eq{field=/status,value=open},and.range{field=/progress,gte=10}`,
+		`and.eq{field=/status,value=open},and.range{field=/latency,gte=150},/region="eu"`,
+		`or.eq{field=/status,value=open},or.eq{field=/status,value=closed}`,
+		`or.0.eq{field=/status,value=ok},or.0.range{field=/progress,gte=15}`,
+		`and.0.eq{field=/status,value=ok},and.0.range{field=/progress,gte=15}`,
+		`not.eq{field=/status,value=closed},/region="us"`,
+		`contains{field=/msg,value=Timeout}`,
+		`icontains{field=/msg,value=complete}`,
+		`contains{f=/msg,a=Timeout|queue}`,
+		`icontains{f=/msg,a=timeout|queue}`,
+		`icontains{f=/,v=""}`,
+		`prefix{field=/service,value=Auth}`,
+		`iprefix{field=/service,value=auth}`,
+		`in{field=/env,any=prod|stage}`,
+		`exists{/meta/etag}`,
+		`/items[]/sku="B"`,
+		`/items[]/price>=20,/region="eu"`,
+		`/groups/.../sku="B"`,
+		`/items/**/sku="B",exists{/meta/etag}`,
+		`/items/*/sku="B"`,
+		`/voucher/lines/10/amount>=1`,
+		`exists{/voucher/lines/10/status}`,
+		`in{field=/voucher/lines/10/status,any=open|closed|ok|processing}`,
+		`contains{field=/voucher/lines/10/msg,value=line}`,
+		`/voucher/.../10/amount>=1`,
+		`/timestamp="2026-03-05"`,
+		`/timestamp>=2026-03-05T10:28:21Z`,
+		`range{field=/timestamp,gte=2026-03-05T10:28:21Z,lt=2026-03-05T10:30:00Z}`,
+		`date{field=/timestamp,after=2026-03-05T10:28:21Z,before=2026-03-05T10:30:00Z}`,
+		`/status="open",or.eq{field=/msg,value="Timeout while reading"},or.eq{field=/msg,value=fail}`,
+		`or.eq{field=/status,value=open},or.eq{field=/status,value=closed},not.eq{field=/region,value=apac},range{field=/latency,gte=50},in{field=/env,any=prod|stage},exists{/meta}`,
 	}
 }
 
@@ -1997,6 +2277,9 @@ func goStreamQuery(expr, doc string, mode int, maxMatches, maxCandidates, maxByt
 				if err != nil {
 					return err
 				}
+			}
+			if len(summary.PayloadJSON) > 0 {
+				summary.PayloadJSON = append(summary.PayloadJSON, '\n')
 			}
 			summary.PayloadJSON = append(summary.PayloadJSON, payload...)
 			if stopAfterFirst && summary.MatchCallbacks == 1 {

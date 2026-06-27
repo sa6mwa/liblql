@@ -1553,6 +1553,12 @@ static lql_status liblql_collect_match(void *user,
 	if (match->payload.kind == LQL_PAYLOAD_SPOOLED) {
 		++state->summary->spooled_payloads;
 	}
+	if (state->summary->match_callbacks > 1) {
+		status = liblql_payload_file_write(state->payload_out, "\n", 1u);
+		if (status != LQL_STATUS_OK) {
+			return status;
+		}
+	}
 	lql_error_init(&error);
 	status = state->ctx->payload_write_json_sink(state->ctx, &match->payload,
 	                                             liblql_payload_file_write,

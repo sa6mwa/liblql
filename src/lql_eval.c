@@ -1297,8 +1297,9 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
     state->result.candidates_matched++;
   }
   state->result.candidates_seen++;
-  state->result.bytes_read =
-      (lql_uint64)(candidate->stream_offset + candidate->byte_size);
+  state->result.bytes_read = state->offset_base +
+                             (lql_uint64)candidate->stream_offset +
+                             (lql_uint64)candidate->byte_size;
   decision.matched = matched;
   decision.index = state->index_base + (lql_uint64)candidate->index;
   decision.offset = state->offset_base + (lql_uint64)candidate->stream_offset;

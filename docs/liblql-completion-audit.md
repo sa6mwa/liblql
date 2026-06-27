@@ -14,7 +14,7 @@ that full LQL parity is complete.
 - Current worktree status at audit update: selector AST public surface exists,
   canonical C AST implementation refactor landed; Lua selector userdata facade
   implemented over the public C selector API
-- Oracle inventory snapshot: 30 covered rows, 16 partial rows, 1
+- Oracle inventory snapshot: 31 covered rows, 15 partial rows, 1
   not-applicable row, 0 gap rows
 
 ## Reassessment Warning
@@ -139,10 +139,12 @@ shapes. Public Go library features such as selector AST construction,
 traversal, and JSON representation must be represented idiomatically in C/Lua
 rather than marked not-applicable.
 
-The one known Go behavior excluded from the current callback-source contract is
-documented as `docs/liblql-dependency-gaps.md`: a non-seekable source
-containing root-array items followed by additional top-level values in the same
-stream. liblql must not emulate that by materializing the root array or source.
+Known Go behaviors excluded from the current candidate-stream contract are
+documented in `docs/liblql-dependency-gaps.md`: streams containing root-array
+items followed by additional top-level values, plus two Go `encoding/json`
+compatibility edges around unmatched surrogate handling and leading-zero
+numeric stream text. liblql must not emulate those by materializing the root
+array or source, adding a second JSON parser, or pre-normalizing input.
 
 ## Next Completion Work
 
