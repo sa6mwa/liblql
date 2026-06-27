@@ -103,71 +103,75 @@ expect_example_match() {
   fi
 }
 
-expect_example_match '/status="open"' \
-  '{"status":"open"}' \
-  '{"status":"open"}'
-expect_example_match '/status!=closed' \
-  '{"status":"open"}' \
-  '{"status":"open"}'
-expect_example_match '/progress>=50' \
-  '{"progress":51}' \
-  '{"progress":51}'
-expect_example_match '/timestamp>="2025-01-01T00:00:00Z"' \
-  '{"timestamp":"2025-01-02T00:00:00Z"}' \
-  '{"timestamp":"2025-01-02T00:00:00Z"}'
-expect_example_match '/devices/0/status="online"' \
-  '{"devices":[{"status":"online"}]}' \
-  '{"devices":[{"status":"online"}]}'
-expect_example_match '/labels/*="production"' \
-  '{"labels":{"env":"production"}}' \
-  '{"labels":{"env":"production"}}'
-expect_example_match '/items[]/sku="ABC-123"' \
-  '{"items":[{"sku":"ABC-123"}]}' \
-  '{"items":[{"sku":"ABC-123"}]}'
-expect_example_match '/items/**/sku="ABC-123"' \
-  '{"items":[{"sku":"ABC-123"}]}' \
-  '{"items":[{"sku":"ABC-123"}]}'
-expect_example_match '/items/.../sku="ABC-123"' \
-  '{"items":[{"nested":{"sku":"ABC-123"}}]}' \
-  '{"items":[{"nested":{"sku":"ABC-123"}}]}'
-expect_example_match 'eq{field=/status,value=open}' \
-  '{"status":"open"}' \
-  '{"status":"open"}'
-expect_example_match 'contains{field=/msg,value=timeout,ic=t}' \
-  '{"msg":"Timeout while reading"}' \
-  '{"msg":"Timeout while reading"}'
-expect_example_match 'contains{field=/msg,any=timeout|degraded}' \
-  '{"msg":"service degraded"}' \
-  '{"msg":"service degraded"}'
-expect_example_match 'icontains{field=/msg,value=timeout}' \
-  '{"msg":"Timeout while reading"}' \
-  '{"msg":"Timeout while reading"}'
-expect_example_match 'icontains{field=/service,a=AUTH|EDGE}' \
-  '{"service":"auth-api"}' \
-  '{"service":"auth-api"}'
-expect_example_match 'iprefix{field=/service,value=auth}' \
-  '{"service":"AUTH-api"}' \
-  '{"service":"AUTH-api"}'
-expect_example_match 'date{field=/timestamp,after=2025-01-01,before=2025-02-01}' \
-  '{"timestamp":"2025-01-15T12:00:00Z"}' \
-  '{"timestamp":"2025-01-15T12:00:00Z"}'
-expect_example_match 'date{f=/timestamp,since=yesterday}' \
-  '{"timestamp":"2999-01-01T00:00:00Z"}' \
-  '{"timestamp":"2999-01-01T00:00:00Z"}'
-expect_example_match 'and.eq{field=/status,value=open},and.range{field=/progress,gte=50}' \
-  '{"status":"open","progress":50}' \
-  '{"status":"open","progress":50}'
-expect_example_match 'or.eq{field=/region,value=us},or.eq{field=/region,value=eu}' \
-  '{"region":"eu"}' \
-  '{"region":"eu"}'
-expect_example_match 'not.eq{field=/state,value=disabled}' \
-  '{"state":"enabled"}' \
-  '{"state":"enabled"}'
-expect_example_match 'exists{/metadata/etag}' \
-  '{"metadata":{"etag":"abc"}}' \
-  '{"metadata":{"etag":"abc"}}'
+complex_json='{"id":"42","status":"open","state":"enabled","progress":75,"priority":3,"timestamp":"2025-01-15T12:00:00Z","region":"eu","msg":"Timeout degraded while reading","service":"AUTH-edge","owner":{"name":"alice","team":"platform"},"devices":[{"status":"online","id":"pos-1"},{"status":"offline","id":"pos-2"}],"labels":{"env":"production","tier":"edge"},"items":[{"sku":"ABC-123","price":125,"nested":{"sku":"ABC-123"}},{"sku":"ZZZ-999","price":5}],"metadata":{"etag":"abc","trace":{"id":"t1"}}}'
+complex_future_json='{"id":"42","status":"open","state":"enabled","progress":75,"priority":3,"timestamp":"2999-01-01T00:00:00Z","region":"eu","msg":"Timeout degraded while reading","service":"AUTH-edge","owner":{"name":"alice","team":"platform"},"devices":[{"status":"online","id":"pos-1"},{"status":"offline","id":"pos-2"}],"labels":{"env":"production","tier":"edge"},"items":[{"sku":"ABC-123","price":125,"nested":{"sku":"ABC-123"}},{"sku":"ZZZ-999","price":5}],"metadata":{"etag":"abc","trace":{"id":"t1"}}}'
+complex_mutated_json='{"id":"42","status":"closed","state":"enabled","progress":75,"priority":3,"timestamp":"2025-01-15T12:00:00Z","region":"eu","msg":"Timeout degraded while reading","service":"AUTH-edge","owner":{"name":"alice","team":"platform"},"devices":[{"status":"online","id":"pos-1"},{"status":"offline","id":"pos-2"}],"labels":{"env":"production","tier":"edge"},"items":[{"sku":"ABC-123","price":125,"nested":{"sku":"ABC-123"}},{"sku":"ZZZ-999","price":5}],"metadata":{"etag":"abc","trace":{"id":"t1"}}}'
 
-projection_out=$(printf '%s' '{"priority":3,"owner":{"name":"alice"}}' |
+expect_example_match '/status="open"' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match '/status!=closed' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match '/progress>=50' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match '/timestamp>="2025-01-01T00:00:00Z"' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match '/devices/0/status="online"' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match '/labels/*="production"' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match '/items[]/sku="ABC-123"' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match '/items/**/sku="ABC-123"' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match '/items/.../sku="ABC-123"' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match 'eq{field=/status,value=open}' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match 'contains{field=/msg,value=timeout,ic=t}' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match 'contains{field=/msg,any=timeout|degraded}' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match 'icontains{field=/msg,value=timeout}' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match 'icontains{field=/service,a=AUTH|EDGE}' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match 'iprefix{field=/service,value=auth}' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match 'date{field=/timestamp,after=2025-01-01,before=2025-02-01}' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match 'date{f=/timestamp,since=yesterday}' \
+  "$complex_future_json" \
+  "$complex_future_json"
+expect_example_match 'and.eq{field=/status,value=open},and.range{field=/progress,gte=50}' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match 'or.eq{field=/region,value=us},or.eq{field=/region,value=eu}' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match 'not.eq{field=/state,value=disabled}' \
+  "$complex_json" \
+  "$complex_json"
+expect_example_match 'exists{/metadata/etag}' \
+  "$complex_json" \
+  "$complex_json"
+
+projection_out=$(printf '%s' "$complex_json" |
   "$clql" -c -f /owner/name '/priority>=3')
 if [ "$projection_out" != '{"owner":{"name":"alice"}}' ]; then
   printf 'clql smoke: projection help example failed: %s\n' "$projection_out" >&2
@@ -177,17 +181,17 @@ fi
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/clql-smoke.XXXXXX")
 or_input=$tmpdir/or.json
 inline_input=$tmpdir/inline.json
-printf '%s\n%s\n' '{"status":"closed"}' '{"status":"queued"}' >"$or_input"
+printf '%s\n%s\n' '{"status":"closed","region":"apac"}' "$complex_json" >"$or_input"
 or_out=$("$clql" -c -O '/status="open"' '/status="queued"' "$or_input")
-if [ "$or_out" != '{"status":"queued"}' ]; then
+if [ "$or_out" != "$complex_json" ]; then
   printf 'clql smoke: OR help example failed: %s\n' "$or_out" >&2
   exit 1
 fi
 
-printf '%s' '{"id":"42","status":"open"}' >"$inline_input"
+printf '%s' "$complex_json" >"$inline_input"
 "$clql" -m '/status="closed"' -i '/id="42"' "$inline_input"
 inline_out=$(cat "$inline_input")
-if [ "$inline_out" != '{"id":"42","status":"closed"}' ]; then
+if [ "$inline_out" != "$complex_mutated_json" ]; then
   printf 'clql smoke: inline mutation help example failed: %s\n' \
     "$inline_out" >&2
   exit 1
