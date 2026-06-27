@@ -7137,6 +7137,18 @@ static void expect_selector_match_api(void) {
                "{\"timestamp\":\"2026-03-11T00:11:28.123Z\"}", 1);
   expect_match("/timestamp=\"2026-03-11T01:11:28.123+01:00\"",
                "{\"timestamp\":\"2026-03-11T01:11:28.123Z\"}", 0);
+  expect_match("/timestamp=\"2026-03-11T01:11:28Z\"",
+               "{\"timestamp\":\"2026-03-11T01:11:28Z\"}", 1);
+  expect_match("/timestamp=\"2026-03-11T01:11:28.1\"",
+               "{\"timestamp\":\"2026-03-11T01:11:28.100000000Z\"}", 1);
+  expect_match("/timestamp=\"2026-03-11T01:11:28.123456789Z\"",
+               "{\"timestamp\":\"2026-03-11T01:11:28.123456789Z\"}", 1);
+  expect_match("/timestamp=\"2026-03-11T01:11:28.123456789+01:30\"",
+               "{\"timestamp\":\"2026-03-10T23:41:28.123456789Z\"}", 1);
+  expect_match("/timestamp=\"2026-03-11T01:11:28.123456789-02:30\"",
+               "{\"timestamp\":\"2026-03-11T03:41:28.123456789Z\"}", 1);
+  expect_match("/timestamp>=2026-03-11T01:11:28.123456789",
+               "{\"timestamp\":\"2026-03-11T01:11:28.123456790Z\"}", 1);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":11}", 1);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":10}", 0);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":20}", 1);
@@ -7696,6 +7708,12 @@ static void expect_selector_parse_error_api(void) {
   expect_parse_error("range{field=/timestamp,gte=yesterday}");
   expect_parse_error("/timestamp>=yesterday");
   expect_parse_error("date{field=/timestamp,value=2025-01-01 00:00:00}");
+  expect_parse_error("date{field=/timestamp,value=2026-03-11t01:11:28Z}");
+  expect_parse_error("date{field=/timestamp,value=2026-03-11T01:11:28z}");
+  expect_parse_error("date{field=/timestamp,value=2026-03-11T01:11}");
+  expect_parse_error("date{field=/timestamp,value=2026-03-11T01:11:28+0100}");
+  expect_parse_error("date{field=/timestamp,value=2026-03-11T01:11:28+01}");
+  expect_parse_error("date{field=/timestamp,value=2026-03-11T01:11:60Z}");
   expect_parse_error("date{field=/timestamp,after=2025-01-01,foo=bar}");
   expect_parse_error("date{field=/timestamp,since=yesterday,after=2025-01-01}");
   expect_parse_error("date{field=/timestamp,after=2025-01-01,gt=2025-01-02}");

@@ -195,16 +195,20 @@ func TestCLQLHelpSmoke(t *testing.T) {
 				t.Fatalf("clql %s failed: %v out=%q", flag, err, string(out))
 			}
 			needles := [][]byte{
-				[]byte("usage: clql"),
-				[]byte("--or|-O"),
-				[]byte("--compact|-c"),
-				[]byte("--inline|-i|--write|-w"),
-				[]byte("--enable-file-mutations|-F"),
-				[]byte("--theme|-t theme"),
-				[]byte("--field"),
-				[]byte("--mutate"),
-				[]byte("--matches-only"),
-				[]byte("--version"),
+				[]byte("clql - query, project, and mutate JSON with LQL selectors"),
+				[]byte("Usage:"),
+				[]byte("-O, --or[=bool]"),
+				[]byte("-M, --matches-only[=bool]"),
+				[]byte("-c, --compact[=bool]"),
+				[]byte("-f, --field <path>"),
+				[]byte("-m, --mutate <expr>"),
+				[]byte("-i, --inline[=bool]"),
+				[]byte("-F, --enable-file-mutations[=bool]"),
+				[]byte("-t, --theme <name>"),
+				[]byte("Selector examples (shorthand):"),
+				[]byte("Selector examples (full LQL):"),
+				[]byte("Projection and mutation examples:"),
+				[]byte("colorized JSON output is not implemented"),
 			}
 			for _, needle := range needles {
 				if !bytes.Contains(out, needle) {

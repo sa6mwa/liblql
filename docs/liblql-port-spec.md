@@ -157,11 +157,14 @@ Required selector features:
   - bracket sugar such as `/items[]/sku`;
 - temporal semantics:
   - date-only values;
-  - RFC3339 and RFC3339Nano;
-  - naive UTC datetimes;
+  - RFC3339 and RFC3339Nano with uppercase `T`, uppercase `Z`, and
+    `+HH:MM` / `-HH:MM` offsets;
+  - naive UTC datetimes in `YYYY-MM-DDTHH:MM:SS[.fffffffff]` form;
   - date equality intersection;
   - numeric and datetime range bounds;
   - `date.since` macros: `now`, `today`, `yesterday`.
+  - Go-compatible rejection of space-separated datetimes, lowercase `t`/`z`,
+    malformed offsets, minute-only timestamps, and leap-second timestamps.
 
 Unsupported selector features must be explicit in tests and benchmark output
 until implemented. Silent omission is not allowed.

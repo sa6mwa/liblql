@@ -225,6 +225,45 @@ func TestSDKSelectorMatchesJSONOrParity(t *testing.T) {
 	}
 }
 
+func TestSDKTemporalFormatParity(t *testing.T) {
+	cases := []sdkSelectorMatchCase{
+		{`/timestamp="2025-01-01"`, `{"timestamp":"2025-01-01T23:59:59Z"}`},
+		{`/timestamp="2025-01-01"`, `{"timestamp":"2025-01-02T00:00:00Z"}`},
+		{`/timestamp="2026-03-11T01:11:28Z"`, `{"timestamp":"2026-03-11T01:11:28Z"}`},
+		{`/timestamp="2026-03-11T01:11:28"`, `{"timestamp":"2026-03-11T01:11:28Z"}`},
+		{`/timestamp="2026-03-11T01:11:28"`, `{"timestamp":"2026-03-11T01:11:28+01:00"}`},
+		{`/timestamp="2026-03-11T01:11:28.1"`, `{"timestamp":"2026-03-11T01:11:28.100000000Z"}`},
+		{`/timestamp="2026-03-11T01:11:28.123456789"`, `{"timestamp":"2026-03-11T01:11:28.123456789Z"}`},
+		{`/timestamp="2026-03-11T01:11:28.123456789Z"`, `{"timestamp":"2026-03-11T01:11:28.123456789Z"}`},
+		{`/timestamp="2026-03-11T01:11:28.123456789+01:30"`, `{"timestamp":"2026-03-10T23:41:28.123456789Z"}`},
+		{`/timestamp="2026-03-11T01:11:28.123456789-02:30"`, `{"timestamp":"2026-03-11T03:41:28.123456789Z"}`},
+		{`/timestamp>=2026-03-11T01:11:28.123456789`, `{"timestamp":"2026-03-11T01:11:28.123456790Z"}`},
+		{`date{field=/timestamp,value=2026-03-11}`, `{"timestamp":"2026-03-11T23:59:59.999999999Z"}`},
+		{`date{field=/timestamp,value=2026-03-11}`, `{"timestamp":"2026-03-12T00:00:00Z"}`},
+		{`date{field=/timestamp,after=2026-03-11T01:11:28.123456789+01:00,before=2026-03-11T01:11:28.123456791+01:00}`, `{"timestamp":"2026-03-11T00:11:28.123456790Z"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.expr+"/"+tc.doc, func(t *testing.T) {
+			var doc map[string]any
+			if err := json.Unmarshal([]byte(tc.doc), &doc); err != nil {
+				t.Fatal(err)
+			}
+			sel, err := lql.ParseSelectorString(tc.expr)
+			if err != nil {
+				t.Fatalf("go parse: %v", err)
+			}
+			want := lql.Matches(sel, doc)
+			got, err := cMatchesJSON(tc.expr, tc.doc, false)
+			if err != nil {
+				t.Fatalf("liblql match: %v", err)
+			}
+			if got != want {
+				t.Fatalf("liblql temporal format parity mismatch: got match=%v want=%v", got, want)
+			}
+		})
+	}
+}
+
 func TestSDKSelectorParseErrorParity(t *testing.T) {
 	cases := []string{
 		`contains{field=/message,value=timeout,any=error}`,
@@ -245,6 +284,12 @@ func TestSDKSelectorParseErrorParity(t *testing.T) {
 		`range{field=/timestamp,gte=yesterday}`,
 		`/timestamp>=yesterday`,
 		`date{field=/timestamp,value=2025-01-01 00:00:00}`,
+		`date{field=/timestamp,value=2026-03-11t01:11:28Z}`,
+		`date{field=/timestamp,value=2026-03-11T01:11:28z}`,
+		`date{field=/timestamp,value=2026-03-11T01:11}`,
+		`date{field=/timestamp,value=2026-03-11T01:11:28+0100}`,
+		`date{field=/timestamp,value=2026-03-11T01:11:28+01}`,
+		`date{field=/timestamp,value=2026-03-11T01:11:60Z}`,
 		`date{field=/timestamp,after=2025-01-01,foo=bar}`,
 		`date{field=/timestamp,since=yesterday,after=2025-01-01}`,
 		`date{field=/timestamp,after=2025-01-01,gt=2025-01-02}`,

@@ -147,7 +147,8 @@ LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
   }
   ++p;
   if (!parse_ndigits(&p, 2, &h) || *p++ != ':' || !parse_ndigits(&p, 2, &mi) ||
-      *p++ != ':' || !parse_ndigits(&p, 2, &s) || h > 23 || mi > 59 || s > 60) {
+      *p++ != ':' || !parse_ndigits(&p, 2, &s) || h > 23 || mi > 59 ||
+      s > 59) {
     return 0;
   }
   if (*p == '.') {
