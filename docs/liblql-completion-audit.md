@@ -98,7 +98,7 @@ streaming modes, and applies the 128 MiB memory profile.
 | Go/C/Lua benchmark parity and memory gates | `make bench-check` and `make bench-memory-check` for Go-backed parity; `make bench-1g-check` for focused C/Lua 1 GiB bounded-memory invariants; clean `make release` | Proven locally |
 | Linux GNU/musl release artifacts | `make release-matrix`, `make release`, checksum manifest | Proven locally |
 | Darwin arm64 release artifacts | `LQL_PACKAGE_TARGETS=arm64-apple-darwin make release-matrix`, checksum manifest | Proven locally with available osxcross toolchain |
-| Darwin x86_64 release artifacts | lonejson `v0.35.0` GitHub release asset inventory has no `liblonejson-0.35.0-x86_64-apple-darwin.tar.gz`; liblql dependency policy requires GitHub release SDK archives | Not a current package target |
+| Darwin x86_64 release artifacts | lonejson `v0.35.1` GitHub release asset inventory has no `liblonejson-0.35.1-x86_64-apple-darwin.tar.gz`; liblql dependency policy requires GitHub release SDK archives | Not a current package target |
 | Source and Lua release artifacts | `make package-verify`, `make release`, checksum manifest | Proven locally |
 | Release version resolution | `make test` via `lql.release-version` and `lql.package-version-fixtures` CTest fixtures | Proven locally for untagged git, source archive `VERSION`, lightweight tags, annotated-tag rejection, shell/Make/CMake overrides, source/Lua package override names, embedded `VERSION`, release rockspec metadata, and checksum manifest naming |
 | Privacy and relocatability verification | `make package-verify`, `make release`, package privacy fixtures | Proven locally |

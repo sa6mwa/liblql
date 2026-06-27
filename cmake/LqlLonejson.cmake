@@ -1,4 +1,4 @@
-set(LQL_LONEJSON_VERSION "0.35.0")
+set(LQL_LONEJSON_VERSION "0.35.1")
 option(LQL_LONEJSON_STATIC "Prefer the static lonejson imported target" OFF)
 
 if(NOT LQL_EXTERNAL_ROOT)

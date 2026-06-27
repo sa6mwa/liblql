@@ -24,7 +24,7 @@ retaining all candidates. Until the dependency exposes a no-materialization
 framing mode for this shape, the shape remains outside the current liblql v0
 callback-source contract.
 
-lonejson `v0.35.0` exposes useful pieces:
+lonejson `v0.35.1` exposes useful pieces:
 
 - `AUTO` framing for repeated top-level values;
 - `ARRAY_ITEMS` framing for one top-level array treated as item candidates;
