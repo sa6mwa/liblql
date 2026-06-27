@@ -20,6 +20,32 @@ type sdkSelectorMatchCase struct {
 	doc  string
 }
 
+func assertSDKSelectorMatchesJSON(t *testing.T, expr string, docJSON string, or bool) {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(docJSON), &doc); err != nil {
+		t.Fatal(err)
+	}
+	var sel lql.Selector
+	var err error
+	if or {
+		sel, err = lql.ParseSelectorStringOr(expr)
+	} else {
+		sel, err = lql.ParseSelectorString(expr)
+	}
+	if err != nil {
+		t.Fatalf("go parse selector: %v", err)
+	}
+	want := lql.Matches(sel, doc)
+	got, err := cMatchesJSON(expr, docJSON, or)
+	if err != nil {
+		t.Fatalf("liblql match: %v", err)
+	}
+	if got != want {
+		t.Fatalf("liblql selector parity mismatch: got match=%v want=%v", got, want)
+	}
+}
+
 func fromGoSelectorCapabilities(c lql.SelectorCapabilities) lqlSelectorCapabilities {
 	return lqlSelectorCapabilities{
 		and:           c.And,
@@ -44,6 +70,117 @@ func fromGoSelectorExecutionTraits(t lql.SelectorExecutionTraits) lqlSelectorExe
 		usesWildcardPath:    t.UsesWildcardPath,
 		requiresObjectRoot:  t.RequiresObjectRoot,
 		earlyNonMatchLikely: t.EarlyNonMatchLikely,
+	}
+}
+
+func TestSDKSelectorWildcardPathParity(t *testing.T) {
+	cases := []sdkSelectorMatchCase{
+		{`/labels/*="alice"`, `{"labels":{"env":"prod","owner":"alice"},"items":[{"sku":"A"},{"sku":"B"}],"groups":[{"items":[{"sku":"A"},{"sku":"B"}]}],"scalar":"x","arrEmpty":[]}`},
+		{`/items/*/sku="B"`, `{"labels":{"env":"prod","owner":"alice"},"items":[{"sku":"A"},{"sku":"B"}],"groups":[{"items":[{"sku":"A"},{"sku":"B"}]}],"scalar":"x","arrEmpty":[]}`},
+		{`/items/**/sku="B"`, `{"labels":{"env":"prod","owner":"alice"},"items":[{"sku":"A"},{"sku":"B"}],"groups":[{"items":[{"sku":"A"},{"sku":"B"}]}],"scalar":"x","arrEmpty":[]}`},
+		{`/items[]/sku="B"`, `{"labels":{"env":"prod","owner":"alice"},"items":[{"sku":"A"},{"sku":"B"}],"groups":[{"items":[{"sku":"A"},{"sku":"B"}]}],"scalar":"x","arrEmpty":[]}`},
+		{`/groups[]/items/**/sku="B"`, `{"labels":{"env":"prod","owner":"alice"},"items":[{"sku":"A"},{"sku":"B"}],"groups":[{"items":[{"sku":"A"},{"sku":"B"}]}],"scalar":"x","arrEmpty":[]}`},
+		{`/groups/.../sku="B"`, `{"labels":{"env":"prod","owner":"alice"},"items":[{"sku":"A"},{"sku":"B"}],"groups":[{"items":[{"sku":"A"},{"sku":"B"}]}],"scalar":"x","arrEmpty":[]}`},
+		{`/items[]/sku="C"`, `{"labels":{"env":"prod","owner":"alice"},"items":[{"sku":"A"},{"sku":"B"}],"groups":[{"items":[{"sku":"A"},{"sku":"B"}]}],"scalar":"x","arrEmpty":[]}`},
+		{`/scalar/*="x"`, `{"labels":{"env":"prod","owner":"alice"},"items":[{"sku":"A"},{"sku":"B"}],"groups":[{"items":[{"sku":"A"},{"sku":"B"}]}],"scalar":"x","arrEmpty":[]}`},
+		{`/arrEmpty[]/sku="A"`, `{"labels":{"env":"prod","owner":"alice"},"items":[{"sku":"A"},{"sku":"B"}],"groups":[{"items":[{"sku":"A"},{"sku":"B"}]}],"scalar":"x","arrEmpty":[]}`},
+		{`/items[]/sku="B"`, `{"items":{"sku":"B"}}`},
+		{`/items[]/price>=20`, `{"items":[{"sku":"A","price":10},{"sku":"B","price":25}],"metrics":[{"battery_mv":4100},{"battery_mv":3300}]}`},
+		{`/metrics/**/battery_mv<3600`, `{"items":[{"sku":"A","price":10},{"sku":"B","price":25}],"metrics":[{"battery_mv":4100},{"battery_mv":3300}]}`},
+		{`/items/*/price>=20`, `{"items":[{"sku":"A","price":10},{"sku":"B","price":25}],"metrics":[{"battery_mv":4100},{"battery_mv":3300}]}`},
+		{`in{field=/labels/*,any=prod|stage}`, `{"labels":{"env":"prod","owner":"alice"}}`},
+		{`exists{/items/.../sku}`, `{"items":[{"sku":"A"}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.expr+"/"+tc.doc, func(t *testing.T) {
+			assertSDKSelectorMatchesJSON(t, tc.expr, tc.doc, false)
+		})
+	}
+}
+
+func TestSDKSelectorStringTermParity(t *testing.T) {
+	cases := []sdkSelectorMatchCase{
+		{`contains{field=/msg,value=Timeout}`, `{"msg":"Error: Timeout while reading","service":"Auth-Service","labels":{"owner":"ALICE-Team","env":"prod"}}`},
+		{`contains{field=/msg,value=timeout}`, `{"msg":"Error: Timeout while reading","service":"Auth-Service","labels":{"owner":"ALICE-Team","env":"prod"}}`},
+		{`contains{field=/msg,value=timeout,ic=t}`, `{"msg":"Error: Timeout while reading","service":"Auth-Service","labels":{"owner":"ALICE-Team","env":"prod"}}`},
+		{`contains{field=/msg,value=timeout,ignoreCase=f}`, `{"msg":"Error: Timeout while reading","service":"Auth-Service","labels":{"owner":"ALICE-Team","env":"prod"}}`},
+		{`icontains{field=/msg,value=timeout}`, `{"msg":"Error: Timeout while reading","service":"Auth-Service","labels":{"owner":"ALICE-Team","env":"prod"}}`},
+		{`icontains{field=/msg,value=timeout,ignoreCase=f}`, `{"msg":"Error: Timeout while reading","service":"Auth-Service","labels":{"owner":"ALICE-Team","env":"prod"}}`},
+		{`prefix{field=/service,value=auth}`, `{"msg":"Error: Timeout while reading","service":"Auth-Service","labels":{"owner":"ALICE-Team","env":"prod"}}`},
+		{`prefix{field=/service,value=auth,ignoreCase=true}`, `{"msg":"Error: Timeout while reading","service":"Auth-Service","labels":{"owner":"ALICE-Team","env":"prod"}}`},
+		{`iprefix{field=/service,value=auth}`, `{"msg":"Error: Timeout while reading","service":"Auth-Service","labels":{"owner":"ALICE-Team","env":"prod"}}`},
+		{`iprefix{field=/service,value=auth,ignoreCase=f}`, `{"msg":"Error: Timeout while reading","service":"Auth-Service","labels":{"owner":"ALICE-Team","env":"prod"}}`},
+		{`icontains{field=/labels/*,value=alice}`, `{"msg":"Error: Timeout while reading","service":"Auth-Service","labels":{"owner":"ALICE-Team","env":"prod"}}`},
+		{`contains{f=/msg,a=warn|Timeout}`, `{"msg":"Error: Timeout while reading"}`},
+		{`contains{f=/msg,a=warn|fatal}`, `{"msg":"Error: Timeout while reading"}`},
+		{`icontains{f=/msg,a=warn|timeout}`, `{"msg":"Error: Timeout while reading"}`},
+		{`icontains{f=/msg,a=warn|fatal}`, `{"msg":"Error: Timeout while reading"}`},
+		{`contains{f=/,v=""}`, `{"status":"open"}`},
+		{`icontains{f=/,v=""}`, `{"status":"open"}`},
+		{`prefix{f=/,v=""}`, `{"status":"open"}`},
+		{`iprefix{f=/,v=""}`, `{"status":"open"}`},
+		{`not.icontains{f=/,v=""}`, `{"status":"open"}`},
+		{`contains{f=/hello/world}`, `{"hello":{"world":{"nested":true}}}`},
+		{`contains{f=/hello/world}`, `{"hello":{"world":[1,2,3]}}`},
+		{`contains{f=/hello/world}`, `{"hello":{"world":null}}`},
+		{`contains{f=/hello/world}`, `{"hello":{"other":"x"}}`},
+		{`icontains{f=/hello/world}`, `{"hello":{"world":{"nested":true}}}`},
+		{`prefix{f=/hello/world}`, `{"hello":{"world":[1,2,3]}}`},
+		{`iprefix{f=/hello/world}`, `{"hello":{"world":null}}`},
+		{`contains{f=/hello/*}`, `{"hello":{"world":{"nested":true},"names":["alice","bob"]},"arrays":[{"id":1},{"id":2}]}`},
+		{`contains{f=/hello/...}`, `{"hello":{"world":{"nested":true},"names":["alice","bob"]},"arrays":[{"id":1},{"id":2}]}`},
+		{`contains{f=/arrays/[]}`, `{"hello":{"world":{"nested":true},"names":["alice","bob"]},"arrays":[{"id":1},{"id":2}]}`},
+		{`contains{f=/arrays/[]/id}`, `{"hello":{"world":{"nested":true},"names":["alice","bob"]},"arrays":[{"id":1},{"id":2}]}`},
+		{`contains{f=/hello/missing}`, `{"hello":{"world":{"nested":true},"names":["alice","bob"]},"arrays":[{"id":1},{"id":2}]}`},
+		{`contains{f=/missing/*}`, `{"hello":{"world":{"nested":true},"names":["alice","bob"]},"arrays":[{"id":1},{"id":2}]}`},
+		{`contains{f=/missing/...}`, `{"hello":{"world":{"nested":true},"names":["alice","bob"]},"arrays":[{"id":1},{"id":2}]}`},
+		{`contains{f=/missing/[]}`, `{"hello":{"world":{"nested":true},"names":["alice","bob"]},"arrays":[{"id":1},{"id":2}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.expr+"/"+tc.doc, func(t *testing.T) {
+			assertSDKSelectorMatchesJSON(t, tc.expr, tc.doc, false)
+		})
+	}
+}
+
+func TestSDKSelectorLogicalCompositionParity(t *testing.T) {
+	andCases := []sdkSelectorMatchCase{
+		{`/field="value",/status="ok"`, `{"field":"value","status":"ok"}`},
+		{`/field="value",/status="ok"`, `{"field":"value","status":"nope"}`},
+		{`/field="value",/status="ok"`, `{"field":"nope","status":"ok"}`},
+		{`and.eq{field=/status,value=ok},/msg="done"`, `{"status":"ok","msg":"done"}`},
+		{`and.eq{field=/status,value=ok},/msg="done"`, `{"status":"ok","msg":"nope"}`},
+		{`or.0.eq{field=/status,value=ok},or.0.range{field=/progress,gte=10}`, `{"status":"ok","progress":10}`},
+		{`or.0.eq{field=/status,value=ok},or.0.range{field=/progress,gte=10}`, `{"status":"ok","progress":5}`},
+		{`and.0.eq{field=/status,value=ok},and.0.range{field=/progress,gte=10}`, `{"status":"ok","progress":10}`},
+		{`and.0.eq{field=/status,value=ok},and.0.range{field=/progress,gte=10}`, `{"status":"nope","progress":10}`},
+		{`not.eq{field=/status,value=closed},/region="us"`, `{"status":"open","region":"us"}`},
+		{`not.eq{field=/status,value=closed},/region="us"`, `{"status":"closed","region":"us"}`},
+		{`eq{f=/status,v=ok},in{f=/env,a=prod|stage}`, `{"status":"ok","env":"prod"}`},
+		{`eq{f=/status,v=ok},in{f=/env,a=prod|stage}`, `{"status":"ok","env":"dev"}`},
+		{`/field="value",/status="ok",or.eq{field=/msg,value=done},or.eq{field=/msg,value=complete}`, `{"field":"value","status":"ok","msg":"done"}`},
+		{`/field="value",/status="ok",or.eq{field=/msg,value=done},or.eq{field=/msg,value=complete}`, `{"field":"value","status":"ok","msg":"nope"}`},
+	}
+	orCases := []sdkSelectorMatchCase{
+		{`/field="value",/status="ok"`, `{"field":"value","status":"nope"}`},
+		{`/field="value",/status="ok"`, `{"field":"nope","status":"ok"}`},
+		{`/field="value",/status="ok"`, `{"field":"nope","status":"nope"}`},
+		{`exists{/meta/etag},/status="ok"`, `{"meta":{"etag":"abc"}}`},
+		{`exists{/meta/etag},/status="ok"`, `{"status":"ok"}`},
+		{`exists{/meta/etag},/status="ok"`, `{"status":"nope"}`},
+		{`in{field=/env,any=prod|stage},/status="ok"`, `{"env":"prod"}`},
+		{`in{field=/env,any=prod|stage},/status="ok"`, `{"status":"ok"}`},
+		{`in{field=/env,any=prod|stage},/status="ok"`, `{"env":"dev"}`},
+	}
+	for _, tc := range andCases {
+		t.Run("and/"+tc.expr+"/"+tc.doc, func(t *testing.T) {
+			assertSDKSelectorMatchesJSON(t, tc.expr, tc.doc, false)
+		})
+	}
+	for _, tc := range orCases {
+		t.Run("or/"+tc.expr+"/"+tc.doc, func(t *testing.T) {
+			assertSDKSelectorMatchesJSON(t, tc.expr, tc.doc, true)
+		})
 	}
 }
 

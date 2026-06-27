@@ -6919,6 +6919,9 @@ typedef struct sdk_contract_surface_count {
 } sdk_contract_surface_count;
 
 static void expect_selector_match_api(void);
+static void expect_selector_wildcard_path_api(void);
+static void expect_selector_string_term_semantics_api(void);
+static void expect_selector_logical_composition_api(void);
 static void expect_selector_omitted_string_path_api(void);
 static void expect_selector_parse_equivalence_api(void);
 static void expect_selector_quoted_parse_api(void);
@@ -6948,6 +6951,16 @@ static void expect_sdk_contract_manifest(void) {
        "scalar, string, numeric, temporal, path, wildcard, "
        "existence, and logical matching",
        expect_selector_match_api},
+      {"selector",
+       "wildcard, recursive, array, object, exists, and in-any path traversal",
+       expect_selector_wildcard_path_api},
+      {"selector",
+       "string selector case modes, any values, empty-value match-all, and "
+       "path assertions",
+       expect_selector_string_term_semantics_api},
+      {"selector",
+       "logical composition across AND, OR, indexed groups, NOT, and aliases",
+       expect_selector_logical_composition_api},
       {"selector",
        "omitted-value string selectors assert path existence across value kinds",
        expect_selector_omitted_string_path_api},
@@ -7046,7 +7059,7 @@ static void expect_sdk_contract_manifest(void) {
   };
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 9}, {"streaming", 13},
+      {"version", 1},      {"selector", 12}, {"streaming", 13},
       {"projection", 7},   {"compact", 2},  {"mutation", 20},
   };
   size_t i;
@@ -7340,6 +7353,120 @@ static void expect_selector_match_api(void) {
                1);
   expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"closed\"}",
                0);
+}
+
+static void expect_selector_wildcard_path_api(void) {
+  static const char path_doc[] =
+      "{\"labels\":{\"env\":\"prod\",\"owner\":\"alice\"},\"items\":[{\"sku\":"
+      "\"A\",\"price\":10},{\"sku\":\"B\",\"price\":25}],\"groups\":[{\"items"
+      "\":[{\"sku\":\"A\"},{\"sku\":\"B\"}]}],\"metrics\":[{\"battery_mv\":"
+      "4100},{\"battery_mv\":3300}],\"scalar\":\"x\",\"arrEmpty\":[]}";
+
+  expect_match("/labels/*=\"alice\"", path_doc, 1);
+  expect_match("/items/*/sku=\"B\"", path_doc, 0);
+  expect_match("/items/**/sku=\"B\"", path_doc, 1);
+  expect_match("/items[]/sku=\"B\"", path_doc, 1);
+  expect_match("/groups[]/items/**/sku=\"B\"", path_doc, 1);
+  expect_match("/groups/.../sku=\"B\"", path_doc, 1);
+  expect_match("/items[]/sku=\"C\"", path_doc, 0);
+  expect_match("/scalar/*=\"x\"", path_doc, 0);
+  expect_match("/arrEmpty[]/sku=\"A\"", path_doc, 0);
+  expect_match("/items[]/sku=\"B\"", "{\"items\":{\"sku\":\"B\"}}", 0);
+  expect_match("/items[]/price>=20", path_doc, 1);
+  expect_match("/metrics/**/battery_mv<3600", path_doc, 1);
+  expect_match("/items/*/price>=20", path_doc, 0);
+  expect_match("in{field=/labels/*,any=prod|stage}",
+               "{\"labels\":{\"env\":\"prod\",\"owner\":\"alice\"}}", 1);
+  expect_match("exists{/items/.../sku}", "{\"items\":[{\"sku\":\"A\"}]}", 1);
+}
+
+static void expect_selector_string_term_semantics_api(void) {
+  static const char case_doc[] =
+      "{\"msg\":\"Error: Timeout while reading\",\"service\":\"Auth-Service\","
+      "\"labels\":{\"owner\":\"ALICE-Team\",\"env\":\"prod\"}}";
+  static const char path_doc[] =
+      "{\"hello\":{\"world\":{\"nested\":true},\"names\":[\"alice\","
+      "\"bob\"]},\"arrays\":[{\"id\":1},{\"id\":2}]}";
+
+  expect_match("contains{field=/msg,value=Timeout}", case_doc, 1);
+  expect_match("contains{field=/msg,value=timeout}", case_doc, 0);
+  expect_match("contains{field=/msg,value=timeout,ic=t}", case_doc, 1);
+  expect_match("contains{field=/msg,value=timeout,ignoreCase=f}", case_doc, 0);
+  expect_match("icontains{field=/msg,value=timeout}", case_doc, 1);
+  expect_match("icontains{field=/msg,value=timeout,ignoreCase=f}", case_doc, 1);
+  expect_match("prefix{field=/service,value=auth}", case_doc, 0);
+  expect_match("prefix{field=/service,value=auth,ignoreCase=true}", case_doc,
+               1);
+  expect_match("iprefix{field=/service,value=auth}", case_doc, 1);
+  expect_match("iprefix{field=/service,value=auth,ignoreCase=f}", case_doc, 1);
+  expect_match("icontains{field=/labels/*,value=alice}", case_doc, 1);
+  expect_match("contains{f=/msg,a=warn|Timeout}", case_doc, 1);
+  expect_match("contains{f=/msg,a=warn|fatal}", case_doc, 0);
+  expect_match("icontains{f=/msg,a=warn|timeout}", case_doc, 1);
+  expect_match("icontains{f=/msg,a=warn|fatal}", case_doc, 0);
+  expect_match("contains{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("icontains{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("prefix{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("iprefix{f=/,v=\"\"}", "{\"status\":\"open\"}", 1);
+  expect_match("not.icontains{f=/,v=\"\"}", "{\"status\":\"open\"}", 0);
+  expect_match("contains{f=/hello/world}",
+               "{\"hello\":{\"world\":{\"nested\":true}}}", 1);
+  expect_match("contains{f=/hello/world}",
+               "{\"hello\":{\"world\":[1,2,3]}}", 1);
+  expect_match("contains{f=/hello/world}", "{\"hello\":{\"world\":null}}", 1);
+  expect_match("contains{f=/hello/world}", "{\"hello\":{\"other\":\"x\"}}", 0);
+  expect_match("icontains{f=/hello/world}",
+               "{\"hello\":{\"world\":{\"nested\":true}}}", 1);
+  expect_match("prefix{f=/hello/world}",
+               "{\"hello\":{\"world\":[1,2,3]}}", 1);
+  expect_match("iprefix{f=/hello/world}", "{\"hello\":{\"world\":null}}", 1);
+  expect_match("contains{f=/hello/*}", path_doc, 1);
+  expect_match("contains{f=/hello/...}", path_doc, 1);
+  expect_match("contains{f=/arrays/[]}", path_doc, 1);
+  expect_match("contains{f=/arrays/[]/id}", path_doc, 1);
+  expect_match("contains{f=/hello/missing}", path_doc, 0);
+  expect_match("contains{f=/missing/*}", path_doc, 0);
+  expect_match("contains{f=/missing/...}", path_doc, 0);
+  expect_match("contains{f=/missing/[]}", path_doc, 0);
+}
+
+static void expect_selector_logical_composition_api(void) {
+  expect_match("/field=\"value\",/status=\"ok\"",
+               "{\"field\":\"value\",\"status\":\"ok\"}", 1);
+  expect_match("/field=\"value\",/status=\"ok\"",
+               "{\"field\":\"value\",\"status\":\"nope\"}", 0);
+  expect_match("/field=\"value\",/status=\"ok\"",
+               "{\"field\":\"nope\",\"status\":\"ok\"}", 0);
+  expect_match("and.eq{field=/status,value=ok},/msg=\"done\"",
+               "{\"status\":\"ok\",\"msg\":\"done\"}", 1);
+  expect_match("and.eq{field=/status,value=ok},/msg=\"done\"",
+               "{\"status\":\"ok\",\"msg\":\"nope\"}", 0);
+  expect_match(
+      "or.0.eq{field=/status,value=ok},or.0.range{field=/progress,gte=10}",
+      "{\"status\":\"ok\",\"progress\":10}", 1);
+  expect_match(
+      "or.0.eq{field=/status,value=ok},or.0.range{field=/progress,gte=10}",
+      "{\"status\":\"ok\",\"progress\":5}", 0);
+  expect_match(
+      "and.0.eq{field=/status,value=ok},and.0.range{field=/progress,gte=10}",
+      "{\"status\":\"ok\",\"progress\":10}", 1);
+  expect_match(
+      "and.0.eq{field=/status,value=ok},and.0.range{field=/progress,gte=10}",
+      "{\"status\":\"nope\",\"progress\":10}", 0);
+  expect_match("not.eq{field=/status,value=closed},/region=\"us\"",
+               "{\"status\":\"open\",\"region\":\"us\"}", 1);
+  expect_match("not.eq{field=/status,value=closed},/region=\"us\"",
+               "{\"status\":\"closed\",\"region\":\"us\"}", 0);
+  expect_match("eq{f=/status,v=ok},in{f=/env,a=prod|stage}",
+               "{\"status\":\"ok\",\"env\":\"prod\"}", 1);
+  expect_match("eq{f=/status,v=ok},in{f=/env,a=prod|stage}",
+               "{\"status\":\"ok\",\"env\":\"dev\"}", 0);
+  expect_match("/field=\"value\",/status=\"ok\",or.eq{field=/msg,value=done},"
+               "or.eq{field=/msg,value=complete}",
+               "{\"field\":\"value\",\"status\":\"ok\",\"msg\":\"done\"}", 1);
+  expect_match("/field=\"value\",/status=\"ok\",or.eq{field=/msg,value=done},"
+               "or.eq{field=/msg,value=complete}",
+               "{\"field\":\"value\",\"status\":\"ok\",\"msg\":\"nope\"}", 0);
 }
 
 static void expect_selector_omitted_string_path_api(void) {
@@ -7906,6 +8033,9 @@ int main(void) {
   expect_output_state_contract_api();
   expect_handle_ownership_contract_api();
   expect_selector_match_api();
+  expect_selector_wildcard_path_api();
+  expect_selector_string_term_semantics_api();
+  expect_selector_logical_composition_api();
   expect_selector_omitted_string_path_api();
   expect_selector_parse_equivalence_api();
   expect_selector_quoted_parse_api();

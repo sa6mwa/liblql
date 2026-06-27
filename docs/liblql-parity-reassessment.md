@@ -77,6 +77,15 @@ read as a work queue, not as a completion certificate. Rows that are supported
 by representative evidence but not by a full behavior matrix should be marked
 `partial`.
 
+## Progress Since Reassessment
+
+- Selector evaluation now has named Go-vs-C SDK matrices for wildcard and
+  recursive path traversal, string-term behavior, and logical composition.
+- The C unit contract has matching named selector groups for those behavior
+  families, so the C test suite exercises stable public invariants directly.
+- The old broad selector SDK tests are now documented as residual regression
+  corpora, not as completion evidence.
+
 ## Completion Criteria
 
 The implementation can be called complete only after:
