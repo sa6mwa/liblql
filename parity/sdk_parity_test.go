@@ -1311,6 +1311,19 @@ func TestSDKMutationPlanParseParity(t *testing.T) {
 			stringInput: true,
 		},
 		{
+			name: "multiline brace expression string",
+			mutations: []string{`
+/state/details{
+  /owner = "alice"
+  /note = "hi, world"
+}
+delete:/state/details/temporary
+/state/count=+4
+/state/count--
+`},
+			stringInput: true,
+		},
+		{
 			name:             "explicit file backed values",
 			mutations:        []string{`textfile:/payload=blob.txt`, `base64file:/encoded=blob.bin`},
 			enableFileValues: true,
@@ -1466,6 +1479,24 @@ func sdkMutationCases() []struct {
 			},
 		},
 		{
+			name: "quoted inline paths",
+			doc:  `{"data":{"hello key":"world","count":0},"meta":{"name":"helloworlder"}}`,
+			mutations: []string{
+				`/data{/hello key=Mars,/count++}`,
+				`/meta{/name=hellomarser,/previous=world}`,
+			},
+		},
+		{
+			name: "pointer inline paths",
+			doc:  `{"data":{"hello key":"world","count":0},"meta":{"name":"helloworlder"}}`,
+			mutations: []string{
+				`/data/hello key=Mars`,
+				`/data/count++`,
+				`/meta/name=hellomarser`,
+				`/meta/previous=world`,
+			},
+		},
+		{
 			name: "wildcard object and array paths",
 			doc:  `{"items":[{"status":"old"},{"status":"new"}],"labels":{"env":"prod","tier":"edge"},"numeric_object":{"0":{"status":"unchanged"}}}`,
 			mutations: []string{
@@ -1493,6 +1524,80 @@ func sdkMutationCases() []struct {
 				`rm:/drops[]`,
 				`/objects[]=done`,
 				`/groups/.../count=+2`,
+			},
+		},
+		{
+			name: "finance transaction domain fixture",
+			doc: `{
+  "transaction": {
+    "id": "TRX-2025-00042",
+    "batch": "AP-2025-11",
+    "status": "pending",
+    "amount": {"currency": "USD", "net": 12500.75, "fx_rate": 1.0000},
+    "counterparty": {"id": "SUP-9912", "name": "Northwind Supplies", "country": "SE", "risk_score": 38},
+    "entries": {
+      "1000": {"type": "debit", "gl": "5000", "cost_center": "OPS", "amount": 12500.75},
+      "2000": {"type": "credit", "gl": "2100", "cost_center": "OPS", "amount": 12500.75}
+    },
+    "approvals": {"required": 2, "completed": 1}
+  }
+}`,
+			mutations: []string{
+				`/transaction/status=posted`,
+				`/transaction/approvals/completed++`,
+				`/transaction/approvals/last_user=auditor-2`,
+				`/transaction/entries/2000/cost_center=HQ`,
+				`/transaction/counterparty/risk_score=+5`,
+			},
+		},
+		{
+			name: "voucher domain fixture",
+			doc: `{
+  "voucher": {
+    "id": "JV-2025-1101",
+    "book": "GENERAL",
+    "header": {"date": "2025-11-01", "period": "2025-11", "posted": false, "currency": "EUR"},
+    "lines": {
+      "10": {"account": "1510", "type": "debit", "amount": 3500, "dimensions": {"cost_center": "LON", "project": "RETROFIT"}},
+      "20": {"account": "3010", "type": "credit", "amount": 3500, "dimensions": {"cost_center": "LON", "project": "RETROFIT"}}
+    },
+    "attachments": {"count": 2}
+  }
+}`,
+			mutations: []string{
+				`/voucher/header/posted=true`,
+				`/voucher/attachments/count++`,
+				`/voucher/lines/20/amount=+250`,
+				`/voucher/lines/30/account=ACC-2999`,
+				`/voucher/lines/30/type=credit`,
+				`/voucher/lines/30/amount=250`,
+				`/voucher/lines/30/dimensions/cost_center=HUB`,
+			},
+		},
+		{
+			name: "firmware domain fixture",
+			doc: `{
+  "device": {
+    "id": "gw-2048",
+    "fleet": "retail-pos",
+    "location": {"region": "us-west", "site": "reno"},
+    "firmware": {"channel": "stable", "current": {"version": "2.3.1", "build": "2025.10.29"}, "target": {"version": "2.4.0", "build": "2025.11.05"}},
+    "rollout": {
+      "window": {"start": "2025-11-07T02:00:00Z", "end": "2025-11-07T05:00:00Z"},
+      "progress": {"percent": 35, "status": "running"},
+      "policy": {"max_failures": 3, "waves": 2}
+    },
+    "telemetry": {"battery_mv": 3800, "last_seen": "2025-11-08T04:11:00Z"}
+  }
+}`,
+			mutations: []string{
+				`/device/rollout/progress/percent=+15`,
+				`/device/rollout/progress/status=draining`,
+				`/device/rollout/policy/max_failures=+1`,
+				`/device/rollout/window/end="2025-11-07T06:00:00Z"`,
+				`/device/firmware/target/version=2.4.1`,
+				`/device/telemetry/last_seen="2025-11-08T05:00:00Z"`,
+				`/device/rollout/override_reason=site-maintenance`,
 			},
 		},
 	}

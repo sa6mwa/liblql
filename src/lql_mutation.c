@@ -544,13 +544,9 @@ static int split_expressions(mutation_parse_context *ctx, const char *input,
     } else if (*p == '{' && !in_quote) {
       ++depth;
     } else if (*p == '}' && !in_quote) {
-      if (depth == 0) {
-        lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
-                      "unexpected closing brace");
-        string_list_cleanup(ctx, out);
-        return 0;
+      if (depth != 0) {
+        --depth;
       }
-      --depth;
     } else if ((*p == ',' || *p == '\n') && !in_quote && depth == 0) {
       item = trimmed_dup_range(ctx, chunk, (size_t)(p - chunk));
       if (item == NULL) {
@@ -799,6 +795,7 @@ static int parse_brace_mutation(mutation_parse_context *ctx, const char *expr,
   size_t len;
   char *prefix_text;
   char *body;
+  size_t body_len;
   mutation_path prefix;
   string_list parts;
   lql_mutation_plan nested;
@@ -830,6 +827,15 @@ static int parse_brace_mutation(mutation_parse_context *ctx, const char *expr,
   if (body == NULL) {
     mutation_path_cleanup(ctx->self, &prefix);
     return -1;
+  }
+  body_len = strlen(body);
+  while (body_len != 0u &&
+         (body[body_len - 1u] == ' ' || body[body_len - 1u] == '\t' ||
+          body[body_len - 1u] == '\r' || body[body_len - 1u] == '\n')) {
+    body[--body_len] = '\0';
+  }
+  if (body_len != 0u && body[body_len - 1u] == '}') {
+    body[body_len - 1u] = '\0';
   }
   if (!split_expressions(ctx, body, &parts)) {
     ctx->allocator->destroy(ctx->allocator, body);

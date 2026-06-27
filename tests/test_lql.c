@@ -4205,6 +4205,7 @@ static void expect_mutation_plan_api(void) {
   const char *valid[11];
   const char *wildcards[3];
   const char *newline_separated;
+  const char *multiline_brace;
   const char *file_backed[2];
   const char *invalid_default[8];
   const char *invalid_file_options[4];
@@ -4246,6 +4247,28 @@ static void expect_mutation_plan_api(void) {
     ++failures;
   } else if (test_ctx->mutation_plan_count(test_ctx, plan) != 3u) {
     printf("newline-separated mutation plan count mismatch: %lu\n",
+           (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
+    ++failures;
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+
+  multiline_brace =
+      "/state/details{\n"
+      "  /owner = \"alice\"\n"
+      "  /note = \"hi, world\"\n"
+      "}\n"
+      "delete:/state/details/temporary\n"
+      "/state/count=+4\n"
+      "/state/count--";
+  plan = NULL;
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, &multiline_brace, 1u, &plan,
+                                     &error);
+  if (st != LQL_STATUS_OK) {
+    printf("multiline brace mutation plan parse failed: %s\n", error.message);
+    ++failures;
+  } else if (test_ctx->mutation_plan_count(test_ctx, plan) != 5u) {
+    printf("multiline brace mutation plan count mismatch: %lu\n",
            (unsigned long)test_ctx->mutation_plan_count(test_ctx, plan));
     ++failures;
   }
