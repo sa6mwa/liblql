@@ -150,6 +150,14 @@ func TestSDKSelectorASTJSONParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("go marshal selector: %v", err)
 			}
+			cJSON, err := cSelectorJSON(tc.expr, tc.orMode)
+			if err != nil {
+				t.Fatalf("liblql selector JSON export: %v", err)
+			}
+			var fromC lql.Selector
+			if err := json.Unmarshal([]byte(cJSON), &fromC); err != nil {
+				t.Fatalf("Go selector failed to parse liblql parsed-selector JSON: %v\njson: %s", err, cJSON)
+			}
 			for _, docJSON := range tc.docs {
 				var doc map[string]any
 				if err := json.Unmarshal([]byte(docJSON), &doc); err != nil {
@@ -163,6 +171,11 @@ func TestSDKSelectorASTJSONParity(t *testing.T) {
 				if gotMatch != wantMatch {
 					t.Fatalf("selector AST JSON behavior mismatch doc=%s got=%v want=%v\nselector json: %s",
 						docJSON, gotMatch, wantMatch, string(want))
+				}
+				goFromC := lql.Matches(fromC, doc)
+				if goFromC != wantMatch {
+					t.Fatalf("Go behavior after liblql parsed-selector JSON import mismatch doc=%s got=%v want=%v\nc selector json: %s",
+						docJSON, goFromC, wantMatch, cJSON)
 				}
 			}
 		})
