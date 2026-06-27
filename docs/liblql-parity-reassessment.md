@@ -21,6 +21,21 @@ That divergence is now fixed and protected by `TestSDKTemporalFormatParity`,
 C-only selector tests, and parser rejection tests. The important lesson is that
 the old proof shape allowed this gap to exist.
 
+The selector AST audit found a larger public-surface gap:
+
+- Go exposes a public recursive `Selector` AST with public `Term`,
+  `RangeTerm`, `DateTerm`, and `InTerm` values.
+- Go selector parsing returns that AST, Go users can construct and inspect it,
+  and Go can marshal/unmarshal selector AST JSON.
+- liblql currently has internal AST-like selector nodes, but the installed C
+  API exposes only opaque selector handles, evaluator/capability behavior, and
+  no public AST traversal, construction, or Go-compatible selector JSON
+  parse/serialize surface.
+
+That is not a Go-only implementation detail. It is public library behavior that
+needs an idiomatic C representation and a Lua userdata facade backed by that C
+surface.
+
 ## What Parity Must Mean
 
 For this repository, parity is only credible when a behavior family has at
@@ -42,11 +57,12 @@ an exhaustive parity claim.
 These surfaces currently need explicit matrix review before the implementation
 can be called complete:
 
-- Selector parse and evaluation:
-  shorthand forms, aliases, dotted wrappers, indexed group merges/conflicts,
-  quoted values, empty values, wildcard paths, recursive paths, string-term
-  path assertions, `contains.any`, `in.any`, logical composition, and temporal
-  literals.
+- Selector AST, parse, and evaluation:
+  public AST traversal/construction, selector AST JSON, shorthand forms,
+  aliases, dotted wrappers, indexed group merges/conflicts, quoted values,
+  empty values, wildcard paths, recursive paths, string-term path assertions,
+  omitted-value versus explicit-empty-value semantics, `contains.any`,
+  `in.any`, logical composition, and temporal literals.
 
 - Projection:
   path normalization, duplicate paths, conflict detection, missing fields,
@@ -85,6 +101,9 @@ by representative evidence but not by a full behavior matrix should be marked
   families, so the C test suite exercises stable public invariants directly.
 - The old broad selector SDK tests are now documented as residual regression
   corpora, not as completion evidence.
+- The port specification now treats selector AST parity as a first-class SDK
+  requirement. Evaluator parity cannot close selector library parity while the
+  public AST, selector JSON, builder, and Lua userdata facade are missing.
 
 ## Completion Criteria
 
@@ -93,7 +112,14 @@ The implementation can be called complete only after:
 1. Every `partial` row in `parity/oracle_inventory.tsv` is either upgraded with
    explicit matrix evidence or narrowed to a documented non-applicable Go-only
    boundary.
-2. The SDK and CLI coverage manifests use narrow requirement names that describe
+2. Public C selector AST traversal, construction, and Go-compatible selector
+   JSON parse/serialize APIs are implemented and covered by C-native tests.
+3. The Lua facade exposes selector userdata backed by the public C AST API,
+   with selector JSON round-trips and AST use in query workflows covered by
+   Lua tests.
+4. Go-backed SDK parity checks compare canonical selector AST JSON for text
+   parse, constructor-equivalent ASTs, and JSON round-trips.
+5. The SDK and CLI coverage manifests use narrow requirement names that describe
    the exact proven behavior.
-3. `make parity-test`, `make test`, `make package-source-smoke`, and the release
+6. `make parity-test`, `make test`, `make package-source-smoke`, and the release
    gates pass after the audit changes.

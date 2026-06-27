@@ -6,16 +6,57 @@ Port `pkt.systems/lql v0.17.1` from Go to C89 in this repository as
 `liblql`, with a companion CLI named `clql`.
 
 The C port must be suitable for lockd-style local JSON search and mutation
-workloads. It must preserve observable LQL behavior from the Go implementation
-where claimed, prove the C product contract through native C tests, use Go as
-the semantic oracle for convergence, and use `lonejson` for JSON parsing,
-serialization, validation, stream framing, escaping, payload capture, and
-rewrite support.
+workloads. It must provide feature parity with the Go implementation's public
+library, CLI, and supported embedding surfaces while remaining an idiomatic C
+library. Parity does not mean transliterating Go structs or implementation
+techniques into C. It means liblql exposes the same product capabilities in
+C-native forms: receiver objects, explicit ownership, allocator-aware handles,
+borrowed views, and stable method tables where Go uses public values and
+methods.
+
+The Go implementation is the semantic oracle for convergence. Native C tests
+prove the C product contract. Lua tests prove the Lua facade contract. `lonejson`
+owns JSON parsing, serialization, validation, stream framing, escaping, payload
+capture, and rewrite support.
 
 The implementation must not reference the adjacent Go source checkout from
 repository files. Go oracle checks must go through the `parity/` Go module,
 which pins `pkt.systems/lql v0.17.1`. Repository files must not derive
 behavior from, or reference, an adjacent Go source checkout.
+
+## Parity Contract
+
+The reference Go package exposes LQL as a library, not only as a command-line
+filter. liblql must therefore preserve library features, not merely observable
+CLI output. A Go public value shape can map to a different C public shape when
+that C shape is more idiomatic, but it cannot disappear.
+
+Selector parsing is the clearest example:
+
+- Go parses textual LQL selector expressions into a public recursive
+  `Selector` AST.
+- Go users can inspect and construct selector AST values directly.
+- Go can marshal and unmarshal selector AST values as JSON.
+
+The C/Lua port must expose equivalent capabilities. It may use receiver-style
+objects, borrowed node views, builders, visitors, and explicit destroy methods
+instead of public mutable Go structs, but selector AST access is not optional.
+An opaque selector handle that can only be evaluated is not feature parity.
+
+Implementation guidance:
+
+- Public C APIs should follow C idioms: stable receiver structs, enum tags,
+  out-parameters, borrowed `const char *` views with lengths where needed, and
+  caller-visible ownership rules.
+- Implementation internals may keep optimized compiled plans, indexes, caches,
+  or streaming execution traits, but those are below the public AST contract.
+- Lua should expose the same high-value AST capabilities as idiomatic Lua
+  userdata backed by the public C API. Table conversion helpers are optional
+  convenience facades; Lua must not own a second AST representation, duplicate
+  parser logic, or shell out to `clql`.
+- Go-only implementation details such as private caches, Go reflection helpers,
+  or Go-specific `time.Time` values do not need literal C equivalents. Public
+  library features do need equivalents.
 
 ## Release Artifacts
 
@@ -71,10 +112,12 @@ Project-owned code must also use receiver calls directly rather than recreating
 removed operation free functions or free-operation cleanup aliases through local
 macros or static wrapper shims.
 
-The API should be handle-oriented and explicit about ownership:
+The API must be handle-oriented and explicit about ownership:
 
-- parser/compiled selector handles are owned by the caller and destroyed with
+- parsed selector AST handles are owned by the caller and destroyed with
   receiver cleanup methods;
+- optimized selector plans, when present, are derived execution artifacts and
+  must not replace the public selector AST surface;
 - selector, projection, and mutation plan handles are receiver-owned child
   objects: they do not store allocator pointers or provide a fallback cleanup
   domain, and callers must destroy them through the same `lql *` receiver API
@@ -99,11 +142,17 @@ receiver methods; any future API that returns liblql-owned heap memory must
 have an ownership-specific cleanup method, so downstream users do not cross
 allocator boundaries or depend on allocator wrapper functions.
 
-The API should eventually expose these surfaces:
+The public API must expose these surfaces:
 
-- selector parse and receiver destroy;
+- selector parse into a public selector AST object and receiver destroy;
+- selector AST inspection through C-native receiver, cursor, or visitor methods;
+- selector AST construction through C-native builders or node construction
+  methods, so consumers can create selector trees without text parsing;
+- selector AST JSON serialization and JSON parsing compatible with the Go
+  selector JSON representation;
 - reusable selector plan/compiled state and receiver-based selector
-  capability/trait inspection;
+  capability/trait inspection as optimization surfaces layered under or beside
+  the AST;
 - selector evaluation over one arbitrary JSON value;
 - streaming query over arbitrary candidate streams;
 - projection path parse/plan and projection execution;
@@ -120,12 +169,157 @@ allocation is unavoidable, it must be explicit, bounded, and attributable to
 selector state, caller-provided buffers, small parser state, or documented
 spooling handles rather than total input size.
 
+## Selector AST Public API
+
+Selector AST access is a core SDK feature. The target is not an opaque
+"compiled selector only" API. The target is a C-native public AST API that
+matches the Go library's selector capabilities.
+
+The public selector API must use these C idioms:
+
+- `lql_selector` is a receiver-compatible public AST handle. It may remain
+  ABI-opaque through an `impl` pointer, but it must expose AST operations
+  through public receiver functions or method fields.
+- AST nodes are exposed as borrowed read-only cursors or views whose lifetime
+  is bounded by the owning `lql_selector`. Borrowed views must not allocate
+  during simple traversal.
+- Node kind is reported by a public enum with all Go selector families:
+  match-all/empty, `and`, `or`, `not`, `eq`, `contains`, `icontains`,
+  `prefix`, `iprefix`, `range`, `date`, `in`, and `exists`.
+- Child traversal exposes child count and indexed child access for `and` and
+  `or`, plus one child for `not`.
+- Term views expose field paths, explicit value presence, value text, `any`
+  lists, `ignoreCase`, `exists` path text, range bounds, date bounds, and
+  date-since macro/literal state without exposing internal temporal caches.
+- Range bounds expose whether they are numeric or datetime text. Datetime text
+  should preserve the selector literal used to build the AST; parsed temporal
+  caches are implementation detail.
+- Date bounds expose raw selector strings for `value`, `since`, `after`,
+  `before`, `gt`, `gte`, `lt`, and `lte`, plus a macro enum for recognized
+  `since` values where useful.
+- AST traversal APIs must be usable from C89 and C++ consumers without private
+  headers.
+
+The public selector API must support these workflows:
+
+- parse LQL text into an AST;
+- parse a JSON selector AST payload into an AST;
+- serialize an AST to the Go-compatible selector JSON representation;
+- inspect node kind, children, and term payloads;
+- construct an AST programmatically without passing through text syntax;
+- evaluate an AST against buffered JSON and streaming candidates;
+- create an optimized selector execution plan from an AST when needed;
+- clone or retain AST values only through explicit ownership APIs, not hidden
+  reference sharing.
+
+The AST API must not force downstream C users to know liblql's allocator. Any
+owned string or serialized payload returned by liblql must have an
+ownership-specific cleanup method on the receiver or owning AST object.
+Borrowed string views must document their lifetime and must not outlive the
+owning selector.
+
+The AST API must not expose Go-only implementation mechanics:
+
+- no Go struct field layout copied into C as public mutable memory;
+- no Go temporal cache type;
+- no Go `url.Values` type;
+- no dependence on reflection-like behavior.
+
+The AST API does need feature-equivalent entry points for Go public behavior:
+
+- parse from text;
+- parse from structured key/value input where a C-native map or builder surface
+  is provided;
+- construct from public C node/builder APIs;
+- serialize to and parse from JSON selector AST representation;
+- inspect and traverse the AST after parsing or construction.
+
+Until this public AST surface exists in C and is exposed through Lua, selector
+parse parity, selector JSON parity, and selector constructor parity are
+incomplete regardless of evaluator parity.
+
+## Selector AST JSON And Lonejson Mapping
+
+Selector AST JSON is part of the public selector contract. It must be parsed,
+validated, and serialized through lonejson `v0.35.0` mapping, `JSON_VALUE`,
+visitor, and writer surfaces. liblql must not hand-roll JSON object parsing,
+escaping, raw-token decoding, or serializer formatting for selector AST JSON.
+
+The implementation target is an internal set of lonejson-mapped transport
+structs that represent the Go selector JSON shape, then convert between those
+transport structs and liblql's public C AST handle:
+
+- `Selector` object fields: `and`, `or`, `not`, `eq`, `contains`,
+  `icontains`, `prefix`, `iprefix`, `range`, `date`, `in`, and `exists`.
+- `and` and `or` map to recursive arrays of selector transport objects.
+- `not` maps to one recursive selector transport object.
+- `eq`, `contains`, `icontains`, `prefix`, and `iprefix` map to term
+  transport objects.
+- `range`, `date`, and `in` map to their dedicated transport objects.
+- absent fields remain absent on serialization; empty selector serializes like
+  the Go zero-value selector.
+
+The term transport mapping must preserve the Go omitted-value invariant:
+
+- `field` is required.
+- `value` may be absent, and absence is semantically different from an
+  explicitly present empty string.
+- `value` accepts JSON strings, booleans, numbers, and `null`, converting them
+  to the same selector string values as Go.
+- `any` accepts either a Go-compatible string form or an array; array items are
+  converted to selector strings, trimmed where Go trims, and empty items are
+  discarded according to Go behavior.
+- `ignoreCase` accepts JSON booleans and Go-compatible string spellings where
+  the Go library accepts them; invalid types or spellings fail parse.
+
+The range transport mapping must preserve the Go `RangeBound` union:
+
+- `field` is required.
+- `gte`, `gt`, `lte`, and `lt` may each be absent.
+- each bound accepts either a JSON number or a JSON string;
+- numeric bounds remain numeric in the AST and in serialized JSON;
+- string bounds are trimmed like Go and remain datetime text in the AST and in
+  serialized JSON;
+- empty string bounds are rejected.
+
+The date transport mapping must expose and serialize raw string fields:
+`field`, `value`, `since`, `after`, `before`, `gte`, `gt`, `lte`, and `lt`.
+Recognized `since` macros may additionally be represented by a public C enum,
+but that enum is a convenience view over the raw JSON/string contract, not a
+replacement for it.
+
+The `in` transport mapping must require `field` and preserve the `any` string
+array semantics used by Go. The `exists` selector maps to the JSON string value
+of `exists`.
+
+Implementation notes:
+
+- Prefer ordinary lonejson `lonejson_map` definitions for fixed object shapes.
+  Recursive `and`, `or`, and `not` transport fields may use self-referential
+  map pointers where lonejson supports object-array and nested-object maps.
+- Use `lonejson_json_value` with parse visitors or path-aware visitors only for
+  JSON union points that a fixed map cannot express directly, such as the
+  number-or-string range bound or permissive scalar-to-string term values.
+- Use lonejson writers or mapped serialization for AST JSON output. Manual
+  concatenation is not acceptable, even for small objects.
+- Conversion from lonejson transport structs to liblql AST nodes must allocate
+  through the active `lql *` receiver allocator and must leave no lonejson-owned
+  dynamic fields live after cleanup.
+- AST JSON parsing may be buffer, reader, file, or path backed according to the
+  public API, but the chosen behavior must be named precisely. The selector AST
+  itself is naturally materialized as AST nodes; this does not relax the
+  no-materialization rule for JSON candidate streams.
+
 ## Selector Scope
 
 Selectors must converge to Go `pkt.systems/lql v0.17.1` behavior.
 
 Required selector features:
 
+- public parse-to-AST APIs for AND and OR text parsing;
+- public AST JSON parse/serialize APIs compatible with Go selector JSON;
+- public C-native AST builder APIs for all term and composition families;
+- public C-native AST traversal and term inspection APIs;
 - explicit terms:
   - `eq`
   - `contains`
@@ -168,6 +362,12 @@ Required selector features:
 
 Unsupported selector features must be explicit in tests and benchmark output
 until implemented. Silent omission is not allowed.
+
+Selector tests must distinguish evaluator parity from AST parity. Evaluation
+tests prove that a selector matches the same JSON values as Go. AST tests prove
+that parsing, construction, serialization, and traversal expose the same
+selector tree semantics as Go's public `Selector`, `Term`, `RangeTerm`,
+`DateTerm`, and `InTerm` surfaces.
 
 ## Projection Scope
 
@@ -334,7 +534,8 @@ The Lua implementation is part of this repository's parity story.
 
 Lua should expose the same high-value behavior as the C library:
 
-- selector parse/evaluate;
+- selector parse/evaluate and selector AST inspection/construction;
+- selector AST JSON round-trips compatible with the Go selector JSON shape;
 - streaming query;
 - projection;
 - mutation;
@@ -355,6 +556,17 @@ public `lql *` receiver created through `lql_new()`, and method calls dispatch
 through that receiver. Lua must not emulate the client with a table of
 module-level wrappers, and it must not depend on `clql`.
 
+Lua selector values must be userdata backed by the public liblql selector AST
+API. The Lua facade must not carry an independent selector parser, an
+independent mutable AST table model, or a hidden Go-shaped reimplementation.
+A Lua user must be able to parse selector text, inspect the AST through userdata
+methods, construct a selector AST through C-backed constructors or builders,
+serialize it to the Go-compatible selector JSON form, parse it back from that
+JSON form, and use it for query/mutation workflows through the same liblql
+receiver instance. Lua table helpers may exist for ergonomic construction or
+inspection, but they are conversion facades over C selector userdata, not the
+authoritative AST representation.
+
 ## Verification Requirements
 
 Verification is the primary quality gate.
@@ -363,9 +575,9 @@ The verification strategy has three distinct layers:
 
 - C-native product tests define what `liblql` and `clql` promise to downstream
   C, CLI, and Lua users. These tests assert public API ownership, callback
-  lifetimes, out-parameter state, partial I/O, cleanup, diagnostics,
-  bounded-memory semantics, and observable selector/projection/mutation
-  behavior.
+  lifetimes, out-parameter state, partial I/O, cleanup, diagnostics, selector
+  AST traversal/construction, bounded-memory semantics, and observable
+  selector/projection/mutation behavior.
 - Go oracle tests compare claimed LQL language and transformation behavior
   against `pkt.systems/lql v0.17.1` while the port is converging. They are
   convergence checks, not C unit tests.
@@ -376,17 +588,17 @@ The verification strategy has three distinct layers:
 Required gates:
 
 - C SDK contract tests for every public liblql behavior, with observable
-  assertions for the C API's ownership, error, callback, streaming,
-  bounded-memory, and result semantics;
+  assertions for the C API's ownership, error, callback, streaming, selector
+  AST, bounded-memory, and result semantics;
 - public header standalone compile tests;
 - C89 consumer tests;
 - CMake install-tree consumer tests;
 - pkg-config consumer tests;
 - `clql` smoke tests;
 - Go library parity tests through `parity/` while the port is converging; these
-  are oracle/reference checks for selector language and transformation
-  behavior, not substitutes for C API contract tests and not a source to
-  mechanically copy into C unit cases;
+  are oracle/reference checks for selector language, selector AST semantics,
+  and transformation behavior, not substitutes for C API contract tests and not
+  a source to mechanically copy into C unit cases;
 - Go CLI parity tests for `clql` versus the Go `lql` binary behavior where the
   C CLI claims compatibility;
 - Lua parity tests when Lua facade exists;
@@ -419,19 +631,27 @@ Parity benchmark spec:
 
 - `docs/liblql-parity-benchmark-spec.md`
 
+Selector AST implementation spec:
+
+- `docs/liblql-selector-ast-spec.md`
+
 Tests should assert observable behavior, not implementation details.
 
 Parity has two separate meanings in this repository:
 
 - SDK parity: public `liblql` behavior must converge to the Go `pkt.systems/lql`
-  library behavior for the LQL language and data transformations. The
-  Go-backed parity suite is the oracle for convergence and regression
-  detection while the port is incomplete. It must not be treated as C unit
-  coverage, and C unit tests must not be generated by mechanically copying Go
-  parity rows. C tests own the C-native public contract: handle lifetime,
-  ownership, out-parameter state, callback behavior, partial I/O, explicit
-  buffered versus streaming APIs, failure diagnostics, cleanup after errors,
-  bounded memory, and other behavior that downstream C consumers rely on.
+  library behavior for the LQL language, public library capabilities, and data
+  transformations. Public Go capabilities such as selector AST parsing,
+  construction, traversal, and JSON representation require idiomatic C and Lua
+  equivalents. They do not require Go struct layout or Go implementation
+  mechanics. The Go-backed parity suite is the oracle for convergence and
+  regression detection while the port is incomplete. It must not be treated as
+  C unit coverage, and C unit tests must not be generated by mechanically
+  copying Go parity rows. C tests own the C-native public contract: handle
+  lifetime, ownership, AST traversal ownership, out-parameter state, callback
+  behavior, partial I/O, explicit buffered versus streaming APIs, failure
+  diagnostics, cleanup after errors, bounded memory, and other behavior that
+  downstream C consumers rely on.
 - CLI parity: `clql` must converge to the Go `lql` command's observable CLI
   behavior for supported flags and workflows, excluding prettyx colorized JSON.
   CLI parity tests are command-level oracle checks. They do not prove SDK
@@ -454,7 +674,8 @@ current coverage status, evidence, and the next action. The gate fails when the
 pinned Go oracle changes without inventory updates. `covered` rows can support
 a final parity claim only together with the cited C/CLI/SDK/Lua tests; `partial`
 and `gap` rows are explicit remaining work, and `not-applicable` rows must state
-why the Go API shape is not part of the C/Lua product.
+why the Go behavior is genuinely implementation-specific rather than a public
+feature that needs an idiomatic C/Lua representation.
 
 ## C-Native Strategy
 
@@ -467,13 +688,18 @@ smells unless the public API is explicitly named as buffered and caller-owned.
 
 Development should proceed in larger outcome slices:
 
-- complete a behavior surface, such as selector evaluation, streaming payloads,
-  projection, mutation, CLI workflow, Lua facade, or release packaging;
+- complete a behavior surface, such as selector AST, selector evaluation,
+  streaming payloads, projection, mutation, CLI workflow, Lua facade, or release
+  packaging;
 - implement the C-native behavior and its public contract tests together;
 - run Go parity as an oracle to catch semantic drift from the reference;
 - add or update benchmarks when performance or memory behavior is part of the
   surface;
 - commit the completed surface slice.
+
+Idiomatic C may map Go public structs to receiver shells, borrowed cursors,
+builders, visitors, and explicit cleanup methods. It may not replace a public
+Go AST feature with an opaque evaluator-only handle and call that parity.
 
 Do not spend implementation cycles mining Go parity cases solely to duplicate
 them in C tests. When Go parity exposes a divergence, fix the C behavior, then
@@ -535,9 +761,16 @@ The port should progress in falsifiable slices:
    - lonejson dependency acquisition;
    - initial package surfaces.
 
-2. Selector core
-   - parse/evaluate scalar selectors;
-   - Go parity tests for supported subset.
+2. Selector AST foundation
+   - public selector AST handle, cursors, visitors, and builders;
+   - parse LQL text into the public AST for AND and OR entry points;
+   - parse and serialize Go-compatible selector AST JSON through lonejson
+     mappings, JSON_VALUE adapters, and writers;
+   - C-native AST traversal, construction, ownership, and JSON tests;
+   - Lua selector userdata facade backed by public liblql APIs, with optional
+     table conversion helpers only as C-backed convenience;
+   - Go-vs-C/Lua AST parity checks for text parse, constructors, JSON
+     round-trips, and omitted-value semantics.
 
 3. lonejson upgrade integration
    - consume candidate stream with 64-bit ranges;
@@ -545,37 +778,42 @@ The port should progress in falsifiable slices:
    - remove liblql-owned path reconstruction and scalar-list materialization
      where possible.
 
-4. Streaming query foundation
+4. Selector evaluation core
+   - evaluate scalar selectors from the public AST;
+   - derive optimized selector plans from the AST where useful;
+   - Go parity tests for supported evaluation subset.
+
+5. Streaming query foundation
    - decision-only candidate stream over `FILE *`;
    - candidate index, offset, and byte size callbacks;
    - no payload capture in decision-only mode.
 
-5. Full selector parity
+6. Full selector parity
    - wildcards;
    - temporal selectors;
    - `in`;
-   - selector plans.
+   - selector AST/evaluator/plan agreement.
 
-6. Streaming query parity
+7. Streaming query parity
    - seekable source range payload handles;
    - non-seekable caller sink/spool payload handles;
    - stop controls.
 
-7. Projection parity
+8. Projection parity
    - field selection;
    - CLI `-f`.
 
-8. Mutation parity
+9. Mutation parity
    - parse/plan;
    - multi-path rewrite;
    - file-backed mutation values;
    - inline write behavior.
 
-9. Lua parity
+10. Lua parity
    - facade and tests;
    - parity benchmarks.
 
-10. Packaging completion
+11. Packaging completion
    - liblql SDK archives;
    - clql archives;
    - release matrix verification.
@@ -592,6 +830,11 @@ Current implementation status:
 - lifecycle scaffold exists;
 - lonejson `v0.35.0` binary archive acquisition from GitHub release assets
   exists;
+- selector internals currently contain AST-like nodes, but the installed public
+  C API does not yet expose a public selector AST traversal, construction, or
+  Go-compatible selector JSON parse/serialize surface. The current public API
+  is therefore not selector-library parity complete even where evaluator
+  behavior has representative Go-backed parity evidence;
 - `make test` includes repository-boundary checks that fail if committed
   repository files reference the adjacent Go source checkout through
   `../lql`-style paths or workstation-local checkout paths; parity remains

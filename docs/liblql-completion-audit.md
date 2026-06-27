@@ -21,10 +21,16 @@ C accepted leap-second timestamps while Go rejected them. That specific bug is
 fixed, but the failure mode shows that prior broad `covered` claims were too
 coarse.
 
-See `docs/liblql-parity-reassessment.md`. Until every `partial` oracle row has
-explicit matrix evidence or a narrowed non-applicable boundary, this document is
-only historical evidence of gates that have passed, not a completion
-certificate.
+The selector AST audit also found a public SDK gap: Go exposes selector parsing
+as a public recursive AST with JSON marshal/unmarshal and constructor behavior,
+while liblql currently exposes only an opaque selector handle and evaluation or
+inspection summaries. That is not selector-library parity.
+
+See `docs/liblql-parity-reassessment.md` and
+`docs/liblql-selector-ast-spec.md`. Until every `partial` oracle row has
+explicit matrix evidence or a narrowed non-applicable boundary, and until the
+public selector AST surface exists in C and Lua, this document is only
+historical evidence of gates that have passed, not a completion certificate.
 
 ## Proven Locally
 
@@ -76,7 +82,8 @@ streaming modes, and applies the 128 MiB memory profile.
 | Per-instance allocator boundary | public API style gate, handle allocator tests, ASan/UBSan in `make test-all` | Proven locally |
 | No adjacent Go source references in repository files | repository-boundary CTest in `make test-all` | Proven locally |
 | lonejson from GitHub release SDK archives | dependency acquisition in clean `make release`; package dependency manifests verified | Proven locally |
-| Selector behavior for claimed scope | C SDK tests with unique manifest requirement keys plus Go-backed `make parity-test`; temporal format matrix now exists, but other selector families require reassessment | Partial pending matrix audit |
+| Selector public AST surface | Go exposes public selector AST construction, traversal, and JSON representation; current liblql public API has no equivalent installed C/Lua surface | Gap, not implemented |
+| Selector behavior for claimed scope | C SDK tests with unique manifest requirement keys plus Go-backed `make parity-test`; temporal format matrix now exists, but other selector families require reassessment and evaluator parity does not prove AST parity | Partial pending matrix audit |
 | Projection behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests; exact matrix breadth requires reassessment | Partial pending matrix audit |
 | Mutation behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests; exact matrix breadth requires reassessment | Partial pending matrix audit |
 | Streaming decision and plus-value behavior | C SDK streaming tests, benchmark memory gates, 1 GiB memory gate; exact matrix breadth requires reassessment | Partial pending matrix audit |
@@ -111,11 +118,14 @@ release authority:
 
 ## Contract Boundary
 
-Full LQL parity is claimed only for the current public C/Lua/CLI contract. The
-executable `parity/oracle_inventory.tsv` classifies every test, benchmark, and
+Full LQL parity is not currently claimed. The executable
+`parity/oracle_inventory.tsv` classifies every test, benchmark, and
 example-bearing file in the pinned Go `pkt.systems/lql v0.17.1` module. Rows
 are either covered by C SDK, CLI, Lua, benchmark, or release-gate evidence, or
-deliberately marked not-applicable for Go-only API shapes.
+deliberately marked not-applicable for genuinely implementation-specific Go
+shapes. Public Go library features such as selector AST construction,
+traversal, and JSON representation must be represented idiomatically in C/Lua
+rather than marked not-applicable.
 
 The one known Go behavior excluded from the current callback-source contract is
 documented as `docs/liblql-dependency-gaps.md`: a non-seekable source
@@ -124,8 +134,9 @@ stream. liblql must not emulate that by materializing the root array or source.
 
 ## Next Completion Work
 
-The next non-cosmetic liblql work is parity proof repair, not release. Start
-with the high-risk surfaces in `docs/liblql-parity-reassessment.md`, add or
-tighten Go-vs-C SDK/CLI matrices, downgrade any unproven inventory rows to
-`partial`, and only then return to release authority, version selection, tagged
-clean `make release`, and checksum-listed upload selection.
+The next non-cosmetic liblql work is selector AST public API design and
+implementation, then parity proof repair across the high-risk surfaces in
+`docs/liblql-parity-reassessment.md`. Add or tighten Go-vs-C SDK/CLI matrices,
+downgrade any unproven inventory rows to `partial` or `gap`, and only then
+return to release authority, version selection, tagged clean `make release`,
+and checksum-listed upload selection.
