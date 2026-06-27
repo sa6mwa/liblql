@@ -1079,6 +1079,16 @@ func TestSDKMutationFileRangeCandidateStreamParity(t *testing.T) {
 			mutations:   []string{`/status=done`},
 			matchesOnly: true,
 		},
+		{
+			name:     "query mutate handoff with time mutation",
+			selector: `/event="tabs_update"`,
+			doc: `{"event":"tabs_update","component":"host","id":1}
+{"event":"noop","component":"host","id":2}
+{"event":"tabs_update","component":"host","id":3}
+{"event":"tabs_update","component":"host","id":4}`,
+			mutations:   []string{`/processed=true`, `time:/processed_at=2023-11-14T22:13:20Z`},
+			matchesOnly: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
