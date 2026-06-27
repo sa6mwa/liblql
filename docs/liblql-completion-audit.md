@@ -14,7 +14,7 @@ that full LQL parity is complete.
 - Current worktree status at audit update: selector AST public surface exists,
   canonical C AST implementation refactor landed; Lua selector userdata facade
   implemented over the public C selector API
-- Oracle inventory snapshot: 34 covered rows, 12 partial rows, 1
+- Oracle inventory snapshot: 38 covered rows, 8 partial rows, 1
   not-applicable row, 0 gap rows
 
 ## Reassessment Warning
@@ -113,7 +113,7 @@ streaming modes, and applies the 128 MiB memory profile.
 The implementation scope is not yet proven. Before release, the parity
 reassessment must be completed and every remaining `partial` oracle row must be
 resolved. The open rows are now concentrated in selector parse/eval
-decomposition, mutation-streaming, and streaming behavior.
+decomposition, mutation-stream request-shape boundaries, and streaming behavior.
 Release execution also remains unproven until these items are performed under
 release authority:
 

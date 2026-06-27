@@ -191,10 +191,16 @@ static size_t trimmed_len(const char *start) {
 
 static char *trimmed_dup_range(mutation_parse_context *ctx, const char *start,
                                size_t len) {
+  const char *limit;
   const char *end;
   char *out;
-  start = skip_space(start);
-  end = start + len;
+  limit = start + len;
+  while (start < limit &&
+         (*start == ' ' || *start == '\t' || *start == '\r' ||
+          *start == '\n')) {
+    ++start;
+  }
+  end = limit;
   while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' ||
                          end[-1] == '\n')) {
     --end;
@@ -792,22 +798,65 @@ static int parse_mutation_expr(mutation_parse_context *ctx, const char *expr,
 static int parse_brace_mutation(mutation_parse_context *ctx, const char *expr,
                                 lql_mutation_plan *plan) {
   const char *open;
+  const char *close;
+  const char *p;
   size_t len;
   char *prefix_text;
   char *body;
-  size_t body_len;
+  int depth;
+  int in_quote;
+  int escape;
+  char quote;
   mutation_path prefix;
   string_list parts;
   lql_mutation_plan nested;
   size_t i;
 
   len = strlen(expr);
-  if (len == 0u || expr[len - 1u] != '}') {
+  if (len == 0u) {
     return 0;
   }
   open = strchr(expr, '{');
   if (open == NULL || open == expr) {
     return 0;
+  }
+  depth = 1;
+  in_quote = 0;
+  escape = 0;
+  quote = '\0';
+  close = NULL;
+  for (p = open + 1; *p != '\0'; ++p) {
+    if (escape) {
+      escape = 0;
+    } else if (*p == '\\') {
+      escape = 1;
+    } else if (*p == '"' || *p == '\'') {
+      if (!in_quote) {
+        in_quote = 1;
+        quote = *p;
+      } else if (quote == *p) {
+        in_quote = 0;
+        quote = '\0';
+      }
+    } else if (*p == '{' && !in_quote) {
+      ++depth;
+    } else if (*p == '}' && !in_quote) {
+      --depth;
+      if (depth == 0) {
+        close = p;
+        break;
+      }
+    }
+  }
+  if (close == NULL || in_quote) {
+    lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
+                  "unterminated brace in mutation expression");
+    return -1;
+  }
+  if (*skip_space(close + 1) != '\0') {
+    lql_set_error(ctx->error, LQL_STATUS_PARSE_ERROR,
+                  "unexpected trailing text after brace mutation");
+    return -1;
   }
   prefix_text = trimmed_dup_range(ctx, expr, (size_t)(open - expr));
   if (prefix_text == NULL) {
@@ -822,20 +871,10 @@ static int parse_brace_mutation(mutation_parse_context *ctx, const char *expr,
     return -1;
   }
   ctx->allocator->destroy(ctx->allocator, prefix_text);
-  body =
-      trimmed_dup_range(ctx, open + 1, len - (size_t)(open - expr) - 2u);
+  body = trimmed_dup_range(ctx, open + 1, (size_t)(close - open - 1));
   if (body == NULL) {
     mutation_path_cleanup(ctx->self, &prefix);
     return -1;
-  }
-  body_len = strlen(body);
-  while (body_len != 0u &&
-         (body[body_len - 1u] == ' ' || body[body_len - 1u] == '\t' ||
-          body[body_len - 1u] == '\r' || body[body_len - 1u] == '\n')) {
-    body[--body_len] = '\0';
-  }
-  if (body_len != 0u && body[body_len - 1u] == '}') {
-    body[body_len - 1u] = '\0';
   }
   if (!split_expressions(ctx, body, &parts)) {
     ctx->allocator->destroy(ctx->allocator, body);

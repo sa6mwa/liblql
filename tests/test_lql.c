@@ -4207,7 +4207,7 @@ static void expect_mutation_plan_api(void) {
   const char *newline_separated;
   const char *multiline_brace;
   const char *file_backed[2];
-  const char *invalid_default[8];
+  const char *invalid_default[9];
   const char *invalid_file_options[4];
   const char *blank;
   size_t i;
@@ -4298,6 +4298,7 @@ static void expect_mutation_plan_api(void) {
   invalid_default[5] = "time:/state/updated=2025-01-01";
   invalid_default[6] = "textfile:/payload=blob.txt";
   invalid_default[7] = "base64file:/payload=blob.bin";
+  invalid_default[8] = "/state/details{/owner=\"alice\"}}";
   for (i = 0u; i < sizeof(invalid_default) / sizeof(invalid_default[0]); ++i) {
     plan = NULL;
     lql_error_init(&error);
