@@ -169,6 +169,165 @@ func TestSDKSelectorASTJSONParity(t *testing.T) {
 	}
 }
 
+func TestSDKSelectorASTBuilderParity(t *testing.T) {
+	cases := []struct {
+		name     string
+		caseID   int
+		selector lql.Selector
+		docs     []string
+	}{
+		{
+			name:     "all",
+			caseID:   0,
+			selector: lql.Selector{},
+			docs: []string{
+				`{"status":"open"}`,
+				`{"status":"closed"}`,
+			},
+		},
+		{
+			name:     "eq",
+			caseID:   1,
+			selector: lql.Selector{Eq: &lql.Term{Field: "/status", Value: "open"}},
+			docs: []string{
+				`{"status":"open"}`,
+				`{"status":"closed"}`,
+			},
+		},
+		{
+			name:     "contains omitted value path assertion",
+			caseID:   2,
+			selector: lql.Selector{Contains: &lql.Term{Field: "/hello/world"}},
+			docs: []string{
+				`{"hello":{"world":{"nested":true}}}`,
+				`{"hello":{}}`,
+			},
+		},
+		{
+			name:     "contains any ignore case",
+			caseID:   3,
+			selector: lql.Selector{Contains: &lql.Term{Field: "/msg", Any: []string{"warn", "timeout"}, IgnoreCase: true}},
+			docs: []string{
+				`{"msg":"WARN: lock timeout"}`,
+				`{"msg":"all clear"}`,
+			},
+		},
+		{
+			name:   "numeric range",
+			caseID: 4,
+			selector: lql.Selector{Range: &lql.RangeTerm{
+				Field: "/progress",
+				GTE:   lql.NewNumericRangeBound(10),
+				LT:    lql.NewNumericRangeBound(90),
+			}},
+			docs: []string{
+				`{"progress":25}`,
+				`{"progress":95}`,
+			},
+		},
+		{
+			name:   "datetime range",
+			caseID: 5,
+			selector: lql.Selector{Range: &lql.RangeTerm{
+				Field: "/timestamp",
+				GTE:   lql.NewDatetimeRangeBound(" 2026-03-05T10:28:21Z "),
+				LT:    lql.NewDatetimeRangeBound("2026-03-05T10:30:00Z"),
+			}},
+			docs: []string{
+				`{"timestamp":"2026-03-05T10:29:00Z"}`,
+				`{"timestamp":"2026-03-05T10:31:00Z"}`,
+			},
+		},
+		{
+			name:   "date after before",
+			caseID: 6,
+			selector: lql.Selector{Date: &lql.DateTerm{
+				Field:  "/timestamp",
+				After:  "2025-01-01",
+				Before: "2025-01-03",
+			}},
+			docs: []string{
+				`{"timestamp":"2025-01-02T00:00:00Z"}`,
+				`{"timestamp":"2025-01-04T00:00:00Z"}`,
+			},
+		},
+		{
+			name:     "in any",
+			caseID:   7,
+			selector: lql.Selector{In: &lql.InTerm{Field: "/env", Any: []string{"prod", "stage"}}},
+			docs: []string{
+				`{"env":"stage"}`,
+				`{"env":"dev"}`,
+			},
+		},
+		{
+			name:     "exists",
+			caseID:   8,
+			selector: lql.Selector{Exists: "/meta/etag"},
+			docs: []string{
+				`{"meta":{"etag":"abc"}}`,
+				`{"meta":{}}`,
+			},
+		},
+		{
+			name:   "and",
+			caseID: 9,
+			selector: lql.Selector{And: []lql.Selector{
+				{Eq: &lql.Term{Field: "/status", Value: "open"}},
+				{Range: &lql.RangeTerm{Field: "/progress", GTE: lql.NewNumericRangeBound(10)}},
+			}},
+			docs: []string{
+				`{"status":"open","progress":25}`,
+				`{"status":"open","progress":5}`,
+			},
+		},
+		{
+			name:   "not",
+			caseID: 10,
+			selector: lql.Selector{Not: &lql.Selector{
+				Eq: &lql.Term{Field: "/status", Value: "closed"},
+			}},
+			docs: []string{
+				`{"status":"open"}`,
+				`{"status":"closed"}`,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cJSON, err := cSelectorBuilderJSON(tc.caseID)
+			if err != nil {
+				t.Fatalf("liblql builder JSON: %v", err)
+			}
+			var fromC lql.Selector
+			if err := json.Unmarshal([]byte(cJSON), &fromC); err != nil {
+				t.Fatalf("Go selector failed to parse liblql builder JSON: %v\njson: %s", err, cJSON)
+			}
+			for _, docJSON := range tc.docs {
+				var doc map[string]any
+				if err := json.Unmarshal([]byte(docJSON), &doc); err != nil {
+					t.Fatalf("unmarshal candidate: %v", err)
+				}
+				want := lql.Matches(tc.selector, doc)
+				got, err := cSelectorBuilderMatches(tc.caseID, docJSON)
+				if err != nil {
+					t.Fatalf("liblql builder match: %v", err)
+				}
+				if got != want {
+					t.Fatalf("builder behavior mismatch doc=%s got=%v want=%v\nc selector json: %s",
+						docJSON, got, want, cJSON)
+				}
+				goFromC := lql.Matches(fromC, doc)
+				if goFromC != want {
+					t.Fatalf("Go behavior after liblql builder JSON import mismatch doc=%s got=%v want=%v\nc selector json: %s",
+						docJSON, goFromC, want, cJSON)
+				}
+			}
+		})
+	}
+}
+
 func TestSDKSelectorWildcardPathParity(t *testing.T) {
 	cases := []sdkSelectorMatchCase{
 		{`/labels/*="alice"`, `{"labels":{"env":"prod","owner":"alice"},"items":[{"sku":"A"},{"sku":"B"}],"groups":[{"items":[{"sku":"A"},{"sku":"B"}]}],"scalar":"x","arrEmpty":[]}`},

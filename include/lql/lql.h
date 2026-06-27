@@ -367,6 +367,41 @@ struct lql {
   /* Serializes the selector AST as compact Go-compatible JSON to out. */
   lql_status (*selector_write_json)(lql *self, const lql_selector *selector,
                                     FILE *out, lql_error *error);
+  /* Builds an empty match-all selector; caller destroys *out on success. */
+  lql_status (*selector_build_all)(lql *self, lql_selector **out,
+                                   lql_error *error);
+  /* Builds an AND/OR selector from child selectors. Empty lists build all. */
+  lql_status (*selector_build_compound)(lql *self,
+                                        lql_selector_node_kind kind,
+                                        const lql_selector *const *children,
+                                        size_t child_count,
+                                        lql_selector **out,
+                                        lql_error *error);
+  /* Builds a NOT selector from one child selector. */
+  lql_status (*selector_build_not)(lql *self, const lql_selector *child,
+                                   lql_selector **out, lql_error *error);
+  /* Builds an eq/contains/icontains/prefix/iprefix selector term. */
+  lql_status (*selector_build_string)(lql *self,
+                                      lql_selector_node_kind kind,
+                                      const lql_selector_string_term *term,
+                                      const lql_string_view *any_values,
+                                      lql_selector **out, lql_error *error);
+  /* Builds a range selector term from numeric or datetime bounds. */
+  lql_status (*selector_build_range)(lql *self,
+                                     const lql_selector_range_term *term,
+                                     lql_selector **out, lql_error *error);
+  /* Builds a date selector term. */
+  lql_status (*selector_build_date)(lql *self,
+                                    const lql_selector_date_term *term,
+                                    lql_selector **out, lql_error *error);
+  /* Builds an in selector term. */
+  lql_status (*selector_build_in)(lql *self,
+                                  const lql_selector_in_term *term,
+                                  const lql_string_view *any_values,
+                                  lql_selector **out, lql_error *error);
+  /* Builds an exists selector term. */
+  lql_status (*selector_build_exists)(lql *self, lql_string_view path,
+                                      lql_selector **out, lql_error *error);
   /* Evaluates one caller-buffered JSON value against selector. */
   lql_status (*matches_json)(lql *self, const lql_selector *selector,
                              const char *json, size_t json_len,

@@ -146,6 +146,31 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
 LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_json_internal(
     lql *self, const void *json, size_t json_len, lql_selector **out,
     lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status
+lql_selector_build_all_internal(lql *self, lql_selector **out,
+                                lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_selector_build_compound_internal(
+    lql *self, lql_selector_node_kind kind,
+    const lql_selector *const *children, size_t child_count, lql_selector **out,
+    lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_selector_build_not_internal(
+    lql *self, const lql_selector *child, lql_selector **out,
+    lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
+    lql *self, lql_selector_node_kind kind,
+    const lql_selector_string_term *term, const lql_string_view *any_values,
+    lql_selector **out, lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_selector_build_range_internal(
+    lql *self, const lql_selector_range_term *term, lql_selector **out,
+    lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_selector_build_date_internal(
+    lql *self, const lql_selector_date_term *term, lql_selector **out,
+    lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_selector_build_in_internal(
+    lql *self, const lql_selector_in_term *term,
+    const lql_string_view *any_values, lql_selector **out, lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_selector_build_exists_internal(
+    lql *self, lql_string_view path, lql_selector **out, lql_error *error);
 LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
                                                    lql_temporal *out);
 LQL_INTERNAL_SYMBOL int lql_temporal_compare(const lql_temporal *left,

@@ -831,11 +831,10 @@ Current implementation status:
 - lifecycle scaffold exists;
 - lonejson `v0.35.0` binary archive acquisition from GitHub release assets
   exists;
-- selector internals currently contain AST-like nodes, but the installed public
-  C API does not yet expose a public selector AST traversal, construction, or
-  Go-compatible selector JSON parse/serialize surface. The current public API
-  is therefore not selector-library parity complete even where evaluator
-  behavior has representative Go-backed parity evidence;
+- the installed public C API now exposes selector AST traversal, construction,
+  and Go-compatible selector JSON parse/serialize through receiver methods.
+  Selector-library parity is still not complete until the Lua selector userdata
+  facade and remaining oracle inventory audit are closed;
 - `make test` includes repository-boundary checks that fail if committed
   repository files reference the adjacent Go source checkout through
   `../lql`-style paths or workstation-local checkout paths; parity remains

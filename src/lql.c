@@ -135,6 +135,14 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
   ctx->selector_node_in_term_any = selector_node_in_term_any_method;
   ctx->selector_node_exists_path = selector_node_exists_path_method;
   ctx->selector_write_json = selector_write_json_method;
+  ctx->selector_build_all = lql_selector_build_all_internal;
+  ctx->selector_build_compound = lql_selector_build_compound_internal;
+  ctx->selector_build_not = lql_selector_build_not_internal;
+  ctx->selector_build_string = lql_selector_build_string_internal;
+  ctx->selector_build_range = lql_selector_build_range_internal;
+  ctx->selector_build_date = lql_selector_build_date_internal;
+  ctx->selector_build_in = lql_selector_build_in_internal;
+  ctx->selector_build_exists = lql_selector_build_exists_internal;
   lql_eval_methods_install(ctx);
   lql_project_methods_install(ctx);
   lql_mutation_methods_install(ctx);

@@ -7,6 +7,9 @@ package parity
 #include <string.h>
 #include <lql/lql.h>
 
+static int liblql_read_tmp(FILE *tmp, char **out_json, size_t *out_len,
+                           char *errbuf, size_t errbuf_len);
+
 static lql *liblql_receiver(void) {
 	static lql *ctx = NULL;
 	lql_error error;
@@ -247,6 +250,231 @@ static int liblql_selector_json_matches(lql *ctx, const char *selector_json,
 		return (int)status;
 	}
 	return 0;
+}
+
+static lql_string_view liblql_view(const char *text) {
+	lql_string_view view;
+	view.data = text;
+	view.len = text == NULL ? 0u : strlen(text);
+	return view;
+}
+
+static int liblql_build_selector_case(lql *ctx, int case_id,
+                                      lql_selector **out_selector,
+                                      char *errbuf, size_t errbuf_len) {
+	lql_error error;
+	lql_status status;
+	lql_selector_string_term string_term;
+	lql_selector_range_term range_term;
+	lql_selector_date_term date_term;
+	lql_selector_in_term in_term;
+	lql_string_view any_values[2];
+	lql_selector *left;
+	lql_selector *right;
+	const lql_selector *children[2];
+
+	if (ctx == NULL || out_selector == NULL) {
+		return (int)LQL_STATUS_INVALID_ARGUMENT;
+	}
+	*out_selector = NULL;
+	left = NULL;
+	right = NULL;
+	lql_error_init(&error);
+	memset(&string_term, 0, sizeof(string_term));
+	memset(&range_term, 0, sizeof(range_term));
+	memset(&date_term, 0, sizeof(date_term));
+	memset(&in_term, 0, sizeof(in_term));
+	memset(any_values, 0, sizeof(any_values));
+
+	switch (case_id) {
+	case 0:
+		status = ctx->selector_build_all(ctx, out_selector, &error);
+		break;
+	case 1:
+		string_term.field = liblql_view("/status");
+		string_term.value_present = 1;
+		string_term.value = liblql_view("open");
+		status = ctx->selector_build_string(ctx, LQL_SELECTOR_NODE_EQ,
+		                                    &string_term, NULL,
+		                                    out_selector, &error);
+		break;
+	case 2:
+		string_term.field = liblql_view("/hello/world");
+		status = ctx->selector_build_string(ctx, LQL_SELECTOR_NODE_CONTAINS,
+		                                    &string_term, NULL,
+		                                    out_selector, &error);
+		break;
+	case 3:
+		string_term.field = liblql_view("/msg");
+		string_term.ignore_case = 1;
+		string_term.any_count = 2u;
+		any_values[0] = liblql_view("warn");
+		any_values[1] = liblql_view("timeout");
+		status = ctx->selector_build_string(ctx, LQL_SELECTOR_NODE_CONTAINS,
+		                                    &string_term, any_values,
+		                                    out_selector, &error);
+		break;
+	case 4:
+		range_term.field = liblql_view("/progress");
+		range_term.gte.kind = LQL_SELECTOR_BOUND_NUMBER;
+		range_term.gte.number = 10.0;
+		range_term.lt.kind = LQL_SELECTOR_BOUND_NUMBER;
+		range_term.lt.number = 90.0;
+		status = ctx->selector_build_range(ctx, &range_term, out_selector,
+		                                   &error);
+		break;
+	case 5:
+		range_term.field = liblql_view("/timestamp");
+		range_term.gte.kind = LQL_SELECTOR_BOUND_DATETIME;
+		range_term.gte.datetime = liblql_view(" 2026-03-05T10:28:21Z ");
+		range_term.lt.kind = LQL_SELECTOR_BOUND_DATETIME;
+		range_term.lt.datetime = liblql_view("2026-03-05T10:30:00Z");
+		status = ctx->selector_build_range(ctx, &range_term, out_selector,
+		                                   &error);
+		break;
+	case 6:
+		date_term.field = liblql_view("/timestamp");
+		date_term.after = liblql_view("2025-01-01");
+		date_term.before = liblql_view("2025-01-03");
+		status = ctx->selector_build_date(ctx, &date_term, out_selector,
+		                                  &error);
+		break;
+	case 7:
+		in_term.field = liblql_view("/env");
+		in_term.any_count = 2u;
+		any_values[0] = liblql_view("prod");
+		any_values[1] = liblql_view("stage");
+		status = ctx->selector_build_in(ctx, &in_term, any_values,
+		                                out_selector, &error);
+		break;
+	case 8:
+		status = ctx->selector_build_exists(ctx, liblql_view("/meta/etag"),
+		                                    out_selector, &error);
+		break;
+	case 9:
+		string_term.field = liblql_view("/status");
+		string_term.value_present = 1;
+		string_term.value = liblql_view("open");
+		status = ctx->selector_build_string(ctx, LQL_SELECTOR_NODE_EQ,
+		                                    &string_term, NULL, &left,
+		                                    &error);
+		if (status != LQL_STATUS_OK) {
+			break;
+		}
+		range_term.field = liblql_view("/progress");
+		range_term.gte.kind = LQL_SELECTOR_BOUND_NUMBER;
+		range_term.gte.number = 10.0;
+		status = ctx->selector_build_range(ctx, &range_term, &right, &error);
+		if (status != LQL_STATUS_OK) {
+			break;
+		}
+		children[0] = left;
+		children[1] = right;
+		status = ctx->selector_build_compound(ctx, LQL_SELECTOR_NODE_AND,
+		                                      children, 2u, out_selector,
+		                                      &error);
+		break;
+	case 10:
+		string_term.field = liblql_view("/status");
+		string_term.value_present = 1;
+		string_term.value = liblql_view("closed");
+		status = ctx->selector_build_string(ctx, LQL_SELECTOR_NODE_EQ,
+		                                    &string_term, NULL, &left,
+		                                    &error);
+		if (status != LQL_STATUS_OK) {
+			break;
+		}
+		status = ctx->selector_build_not(ctx, left, out_selector, &error);
+		break;
+	default:
+		status = LQL_STATUS_INVALID_ARGUMENT;
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, "unknown selector builder case", errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		break;
+	}
+
+	ctx->selector_destroy(ctx, left);
+	ctx->selector_destroy(ctx, right);
+	if (status != LQL_STATUS_OK && errbuf != NULL && errbuf_len > 0u &&
+	    errbuf[0] == '\0') {
+		strncpy(errbuf, error.message, errbuf_len - 1u);
+		errbuf[errbuf_len - 1u] = '\0';
+	}
+	return (int)status;
+}
+
+static int liblql_selector_builder_json(lql *ctx, int case_id,
+                                        char **out_json, size_t *out_len,
+                                        char *errbuf, size_t errbuf_len) {
+	lql_error error;
+	lql_selector *selector;
+	lql_status status;
+	FILE *fp;
+
+	if (out_json == NULL || out_len == NULL) {
+		return (int)LQL_STATUS_INVALID_ARGUMENT;
+	}
+	*out_json = NULL;
+	*out_len = 0u;
+	selector = NULL;
+	status = (lql_status)liblql_build_selector_case(ctx, case_id, &selector,
+	                                                errbuf, errbuf_len);
+	if (status != LQL_STATUS_OK) {
+		return (int)status;
+	}
+	fp = tmpfile();
+	if (fp == NULL) {
+		ctx->selector_destroy(ctx, selector);
+		return (int)LQL_STATUS_JSON_ERROR;
+	}
+	lql_error_init(&error);
+	status = ctx->selector_write_json(ctx, selector, fp, &error);
+	ctx->selector_destroy(ctx, selector);
+	if (status != LQL_STATUS_OK) {
+		fclose(fp);
+		if (errbuf != NULL && errbuf_len > 0u) {
+			strncpy(errbuf, error.message, errbuf_len - 1u);
+			errbuf[errbuf_len - 1u] = '\0';
+		}
+		return (int)status;
+	}
+	if (liblql_read_tmp(fp, out_json, out_len, errbuf, errbuf_len) != 0) {
+		fclose(fp);
+		return -1;
+	}
+	fclose(fp);
+	return 0;
+}
+
+static int liblql_selector_builder_matches(lql *ctx, int case_id,
+                                           const char *doc_json,
+                                           int *out_matched, char *errbuf,
+                                           size_t errbuf_len) {
+	lql_error error;
+	lql_selector *selector;
+	lql_status status;
+
+	if (doc_json == NULL || out_matched == NULL) {
+		return (int)LQL_STATUS_INVALID_ARGUMENT;
+	}
+	*out_matched = 0;
+	selector = NULL;
+	status = (lql_status)liblql_build_selector_case(ctx, case_id, &selector,
+	                                                errbuf, errbuf_len);
+	if (status != LQL_STATUS_OK) {
+		return (int)status;
+	}
+	lql_error_init(&error);
+	status = ctx->matches_json(ctx, selector, doc_json, strlen(doc_json),
+	                           out_matched, &error);
+	ctx->selector_destroy(ctx, selector);
+	if (status != LQL_STATUS_OK && errbuf != NULL && errbuf_len > 0u) {
+		strncpy(errbuf, error.message, errbuf_len - 1u);
+		errbuf[errbuf_len - 1u] = '\0';
+	}
+	return (int)status;
 }
 
 static int liblql_parse_projection(lql *ctx, const char *const *fields,
@@ -1654,6 +1882,33 @@ func cSelectorJSONMatches(selectorJSON, doc string) (bool, error) {
 	var errbuf [256]C.char
 	status := C.liblql_selector_json_matches(C.liblql_receiver(), cSelectorJSON, cDoc, &matched,
 		&errbuf[0], C.size_t(len(errbuf)))
+	if status != 0 {
+		return false, sdkParityError(C.GoString(&errbuf[0]))
+	}
+	return matched != 0, nil
+}
+
+func cSelectorBuilderJSON(caseID int) (string, error) {
+	var out *C.char
+	var outLen C.size_t
+	var errbuf [256]C.char
+	status := C.liblql_selector_builder_json(C.liblql_receiver(), C.int(caseID),
+		&out, &outLen, &errbuf[0], C.size_t(len(errbuf)))
+	if status != 0 {
+		return "", sdkParityError(C.GoString(&errbuf[0]))
+	}
+	defer C.free(unsafe.Pointer(out))
+	return C.GoStringN(out, C.int(outLen)), nil
+}
+
+func cSelectorBuilderMatches(caseID int, doc string) (bool, error) {
+	cDoc := C.CString(doc)
+	defer C.free(unsafe.Pointer(cDoc))
+
+	var matched C.int
+	var errbuf [256]C.char
+	status := C.liblql_selector_builder_matches(C.liblql_receiver(), C.int(caseID),
+		cDoc, &matched, &errbuf[0], C.size_t(len(errbuf)))
 	if status != 0 {
 		return false, sdkParityError(C.GoString(&errbuf[0]))
 	}

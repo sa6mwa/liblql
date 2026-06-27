@@ -18,6 +18,21 @@ public selector capabilities in idiomatic C:
 
 The current opaque selector-evaluation handle is not enough for SDK parity.
 
+## Current Status
+
+As of the current AST builder slice, the C receiver API exposes parsed selector
+AST traversal, Go-compatible selector AST JSON import/export, and receiver-based
+AST builders for every selector node family. C-only tests cover traversal,
+JSON, omitted versus explicit empty string values, builder success cases, and
+builder validation failures. Go-vs-C SDK tests cover Go-emitted selector JSON
+importing into liblql, C builder-created selectors matching equivalent Go
+constructor selectors, and liblql builder JSON importing back into Go with
+equivalent selector behavior.
+
+The selector AST work remains incomplete until the Lua facade exposes selector
+userdata backed by the public C selector API and the remaining oracle inventory
+rows are audited or narrowed.
+
 ## Public Model
 
 `lql_selector` is the public selector AST owner. It may remain ABI-opaque, but
