@@ -14,7 +14,7 @@ that full LQL parity is complete.
 - Current worktree status at audit update: selector AST public surface exists,
   canonical C AST implementation refactor landed; Lua selector userdata facade
   implemented over the public C selector API
-- Oracle inventory snapshot: 38 covered rows, 8 partial rows, 1
+- Oracle inventory snapshot: 43 covered rows, 3 partial rows, 1
   not-applicable row, 0 gap rows
 
 ## Reassessment Warning
@@ -32,9 +32,10 @@ import/export, and receiver-based C AST builders. The C implementation now
 uses `lql_selector` as the canonical AST consumed by parser, JSON, builders,
 evaluator, capability inspection, and public traversal. The Lua selector
 userdata facade now covers selector parse, AST JSON import/export, AST
-traversal, builders, method-style inspection, and query reuse. The final
-oracle-row audit is still incomplete, so full selector-library parity is not
-yet proven.
+traversal, builders, method-style inspection, and query reuse. The selector
+oracle rows are now decomposed across C-only and Go-vs-C SDK matrices; remaining
+partial rows are concentrated in candidate-stream framing and dependency-owned
+JSON compatibility boundaries.
 
 See `docs/liblql-parity-reassessment.md` and
 `docs/liblql-selector-ast-spec.md`. Until every `partial` oracle row has
@@ -93,7 +94,7 @@ streaming modes, and applies the 128 MiB memory profile.
 | No adjacent Go source references in repository files | repository-boundary CTest in `make test-all` | Proven locally |
 | lonejson from GitHub release SDK archives | dependency acquisition in clean `make release`; package dependency manifests verified | Proven locally |
 | Selector public AST surface | Go exposes public selector AST construction, traversal, and JSON representation; liblql now has parsed selector traversal, selector JSON import/export, receiver-based AST builders, canonical `lql_selector` internals in C, Lua selector userdata facade coverage, and bidirectional Go/C selector JSON interchange evidence | Proven locally |
-| Selector behavior for claimed scope | C SDK tests with unique manifest requirement keys plus Go-backed `make parity-test`; temporal format and several selector family matrices now exist, but remaining selector parse/eval rows require decomposition before full selector behavior parity is claimed | Partial pending matrix audit |
+| Selector behavior for claimed scope | C SDK tests with unique manifest requirement keys plus Go-backed `make parity-test`; wildcard/recursive paths, string terms, logical composition, parse equivalence, parse errors, AST traversal, AST JSON import/export, receiver builders, Lua selector userdata, and temporal formats are covered in `parity/oracle_inventory.tsv` | Proven locally |
 | Projection behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests, Go oracle projection row covered in `parity/oracle_inventory.tsv` | Proven locally |
 | Mutation behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests; exact matrix breadth requires reassessment | Partial pending matrix audit |
 | Streaming decision and plus-value behavior | C SDK streaming tests, benchmark memory gates, 1 GiB memory gate; exact matrix breadth requires reassessment | Partial pending matrix audit |
@@ -112,8 +113,9 @@ streaming modes, and applies the 128 MiB memory profile.
 
 The implementation scope is not yet proven. Before release, the parity
 reassessment must be completed and every remaining `partial` oracle row must be
-resolved. The open rows are now concentrated in selector parse/eval
-decomposition, mutation-stream request-shape boundaries, and streaming behavior.
+resolved. The open rows are now concentrated in mutation-stream request-shape
+boundaries, candidate-stream framing, and dependency-owned streaming JSON
+compatibility behavior.
 Release execution also remains unproven until these items are performed under
 release authority:
 
