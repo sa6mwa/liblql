@@ -61,26 +61,28 @@ static int token_list_push(lql_selector_parser *ctx, lql_token_list *list,
   return 1;
 }
 
-static int selector_any_push(lql_selector_parser *ctx, lql_selector *term, char *item) {
+static int selector_any_push(lql_selector_parser *ctx, lql_selector *selector, char *item) {
   char **next;
   size_t *next_lens;
   size_t len;
   len = strlen(item);
   next = (char **)ctx->allocator->realloc(
-      ctx->allocator, term->any, sizeof(char *) * (term->any_count + 1u));
+      ctx->allocator, selector->any,
+      sizeof(char *) * (selector->any_count + 1u));
   if (next == NULL) {
     return 0;
   }
-  term->any = next;
+  selector->any = next;
   next_lens = (size_t *)ctx->allocator->realloc(
-      ctx->allocator, term->any_lens, sizeof(size_t) * (term->any_count + 1u));
+      ctx->allocator, selector->any_lens,
+      sizeof(size_t) * (selector->any_count + 1u));
   if (next_lens == NULL) {
     return 0;
   }
-  term->any_lens = next_lens;
-  term->any[term->any_count] = item;
-  term->any_lens[term->any_count] = len;
-  ++term->any_count;
+  selector->any_lens = next_lens;
+  selector->any[selector->any_count] = item;
+  selector->any_lens[selector->any_count] = len;
+  ++selector->any_count;
   return 1;
 }
 
@@ -511,7 +513,7 @@ static lql_selector_kind kind_from_name(const char *name) {
 }
 
 static int parse_any_values(lql_selector_parser *ctx, char *decoded,
-                            lql_selector *term, int reject_surrounding_whitespace,
+                            lql_selector *selector, int reject_surrounding_whitespace,
                             lql_error *error) {
   char *cursor;
   char *bar;
@@ -546,7 +548,7 @@ static int parse_any_values(lql_selector_parser *ctx, char *decoded,
       return 0;
     }
     if (item[0] != '\0') {
-      if (!selector_any_push(ctx, term, item)) {
+      if (!selector_any_push(ctx, selector, item)) {
         ctx->allocator->destroy(ctx->allocator, item);
         return 0;
       }
@@ -555,7 +557,7 @@ static int parse_any_values(lql_selector_parser *ctx, char *decoded,
     }
     cursor = bar == NULL ? NULL : bar + 1;
   }
-  if (term->any_count == 0u) {
+  if (selector->any_count == 0u) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "selector any requires values");
     return 0;
@@ -591,7 +593,7 @@ static int ascii_equal_ignore_case(const char *a, const char *b) {
   return *a == '\0' && *b == '\0';
 }
 
-static int replace_term_text(lql_selector_parser *ctx, char **slot,
+static int replace_selector_text(lql_selector_parser *ctx, char **slot,
                              const char *decoded) {
   char *copy;
   copy = ctx->allocator->strdup(ctx->allocator, decoded);
@@ -603,7 +605,7 @@ static int replace_term_text(lql_selector_parser *ctx, char **slot,
   return 1;
 }
 
-static int set_range_bound(lql_selector_parser *ctx, lql_selector *term,
+static int set_range_bound(lql_selector_parser *ctx, lql_selector *selector,
                            const char *key, const char *decoded,
                            lql_error *error) {
   lql_temporal temporal;
@@ -617,68 +619,68 @@ static int set_range_bound(lql_selector_parser *ctx, lql_selector *term,
     return 0;
   }
   if (is_temporal) {
-    term->range_is_temporal = 1;
+    selector->range_is_temporal = 1;
     if (strcmp(key, "gt") == 0) {
-      if (!replace_term_text(ctx, &term->range_gt_text, decoded)) {
+      if (!replace_selector_text(ctx, &selector->range_gt_text, decoded)) {
         return 0;
       }
-      term->temporal_gt = temporal;
-      term->has_temporal_gt = 1;
+      selector->temporal_gt = temporal;
+      selector->has_temporal_gt = 1;
     } else if (strcmp(key, "gte") == 0) {
-      if (!replace_term_text(ctx, &term->range_gte_text, decoded)) {
+      if (!replace_selector_text(ctx, &selector->range_gte_text, decoded)) {
         return 0;
       }
-      term->temporal_gte = temporal;
-      term->has_temporal_gte = 1;
+      selector->temporal_gte = temporal;
+      selector->has_temporal_gte = 1;
     } else if (strcmp(key, "lt") == 0) {
-      if (!replace_term_text(ctx, &term->range_lt_text, decoded)) {
+      if (!replace_selector_text(ctx, &selector->range_lt_text, decoded)) {
         return 0;
       }
-      term->temporal_lt = temporal;
-      term->has_temporal_lt = 1;
+      selector->temporal_lt = temporal;
+      selector->has_temporal_lt = 1;
     } else {
-      if (!replace_term_text(ctx, &term->range_lte_text, decoded)) {
+      if (!replace_selector_text(ctx, &selector->range_lte_text, decoded)) {
         return 0;
       }
-      term->temporal_lte = temporal;
-      term->has_temporal_lte = 1;
+      selector->temporal_lte = temporal;
+      selector->has_temporal_lte = 1;
     }
     return 1;
   }
   if (strcmp(key, "gt") == 0) {
-    term->range_gt = number;
-    term->has_range_gt = 1;
+    selector->range_gt = number;
+    selector->has_range_gt = 1;
   } else if (strcmp(key, "gte") == 0) {
-    term->range_gte = number;
-    term->has_range_gte = 1;
+    selector->range_gte = number;
+    selector->has_range_gte = 1;
   } else if (strcmp(key, "lt") == 0) {
-    term->range_lt = number;
-    term->has_range_lt = 1;
+    selector->range_lt = number;
+    selector->has_range_lt = 1;
   } else {
-    term->range_lte = number;
-    term->has_range_lte = 1;
+    selector->range_lte = number;
+    selector->has_range_lte = 1;
   }
   return 1;
 }
 
-static int set_date_bound(lql_selector_parser *ctx, lql_selector *term,
+static int set_date_bound(lql_selector_parser *ctx, lql_selector *selector,
                           const char *slot, const char *decoded,
                           lql_error *error) {
   lql_temporal temporal;
   if (strcmp(slot, "since") == 0) {
-    if (!replace_term_text(ctx, &term->date_since_text, decoded)) {
+    if (!replace_selector_text(ctx, &selector->date_since_text, decoded)) {
       return 0;
     }
     if (ascii_equal_ignore_case(decoded, "now")) {
-      term->since_macro = LQL_SINCE_NOW;
+      selector->since_macro = LQL_SINCE_NOW;
       return 1;
     }
     if (ascii_equal_ignore_case(decoded, "today")) {
-      term->since_macro = LQL_SINCE_TODAY;
+      selector->since_macro = LQL_SINCE_TODAY;
       return 1;
     }
     if (ascii_equal_ignore_case(decoded, "yesterday")) {
-      term->since_macro = LQL_SINCE_YESTERDAY;
+      selector->since_macro = LQL_SINCE_YESTERDAY;
       return 1;
     }
   }
@@ -687,56 +689,56 @@ static int set_date_bound(lql_selector_parser *ctx, lql_selector *term,
     return 0;
   }
   if (strcmp(slot, "value") == 0) {
-    if (!replace_term_text(ctx, &term->date_value_text, decoded)) {
+    if (!replace_selector_text(ctx, &selector->date_value_text, decoded)) {
       return 0;
     }
-    term->temporal_eq = temporal;
-    term->has_temporal_eq = 1;
+    selector->temporal_eq = temporal;
+    selector->has_temporal_eq = 1;
   } else if (strcmp(slot, "since") == 0) {
-    term->temporal_gte = temporal;
-    term->has_temporal_gte = 1;
+    selector->temporal_gte = temporal;
+    selector->has_temporal_gte = 1;
   } else if (strcmp(slot, "after") == 0) {
-    if (!replace_term_text(ctx, &term->date_after_text, decoded)) {
+    if (!replace_selector_text(ctx, &selector->date_after_text, decoded)) {
       return 0;
     }
-    term->temporal_gt = temporal;
-    term->has_temporal_gt = 1;
+    selector->temporal_gt = temporal;
+    selector->has_temporal_gt = 1;
   } else if (strcmp(slot, "before") == 0) {
-    if (!replace_term_text(ctx, &term->date_before_text, decoded)) {
+    if (!replace_selector_text(ctx, &selector->date_before_text, decoded)) {
       return 0;
     }
-    term->temporal_lt = temporal;
-    term->has_temporal_lt = 1;
+    selector->temporal_lt = temporal;
+    selector->has_temporal_lt = 1;
   } else if (strcmp(slot, "gt") == 0) {
-    if (!replace_term_text(ctx, &term->date_gt_text, decoded)) {
+    if (!replace_selector_text(ctx, &selector->date_gt_text, decoded)) {
       return 0;
     }
-    term->temporal_gt = temporal;
-    term->has_temporal_gt = 1;
+    selector->temporal_gt = temporal;
+    selector->has_temporal_gt = 1;
   } else if (strcmp(slot, "gte") == 0) {
-    if (!replace_term_text(ctx, &term->date_gte_text, decoded)) {
+    if (!replace_selector_text(ctx, &selector->date_gte_text, decoded)) {
       return 0;
     }
-    term->temporal_gte = temporal;
-    term->has_temporal_gte = 1;
+    selector->temporal_gte = temporal;
+    selector->has_temporal_gte = 1;
   } else if (strcmp(slot, "lt") == 0) {
-    if (!replace_term_text(ctx, &term->date_lt_text, decoded)) {
+    if (!replace_selector_text(ctx, &selector->date_lt_text, decoded)) {
       return 0;
     }
-    term->temporal_lt = temporal;
-    term->has_temporal_lt = 1;
+    selector->temporal_lt = temporal;
+    selector->has_temporal_lt = 1;
   } else if (strcmp(slot, "lte") == 0) {
-    if (!replace_term_text(ctx, &term->date_lte_text, decoded)) {
+    if (!replace_selector_text(ctx, &selector->date_lte_text, decoded)) {
       return 0;
     }
-    term->temporal_lte = temporal;
-    term->has_temporal_lte = 1;
+    selector->temporal_lte = temporal;
+    selector->has_temporal_lte = 1;
   }
   return 1;
 }
 
 static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
-                                   lql_selector_kind kind, lql_selector *term,
+                                   lql_selector_kind kind, lql_selector *selector,
                                    lql_error *error) {
   lql_token_list parts;
   size_t i;
@@ -764,8 +766,8 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
   int skip_duplicate;
   int value_had_leading_space;
 
-  memset(term, 0, sizeof(*term));
-  term->kind = kind;
+  memset(selector, 0, sizeof(*selector));
+  selector->kind = kind;
   seen_field = NULL;
   seen_value = NULL;
   seen_any = NULL;
@@ -787,7 +789,7 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
     if (eq == NULL) {
       token_list_cleanup(ctx, &parts);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
-                    "selector term requires key=value");
+                    "selector predicate requires key=value");
       return LQL_STATUS_PARSE_ERROR;
     }
     *eq = '\0';
@@ -878,32 +880,32 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
       if (normalized == NULL) {
         goto fail;
       }
-      ctx->allocator->destroy(ctx->allocator, term->field);
-      term->field = normalized;
+      ctx->allocator->destroy(ctx->allocator, selector->field);
+      selector->field = normalized;
     } else if (kind == LQL_SELECTOR_KIND_DATE && key_is_value(key)) {
-      if (!set_date_bound(ctx, term, "value", decoded, error)) {
+      if (!set_date_bound(ctx, selector, "value", decoded, error)) {
         ctx->allocator->destroy(ctx->allocator, decoded);
         st = LQL_STATUS_PARSE_ERROR;
         goto fail;
       }
       ctx->allocator->destroy(ctx->allocator, decoded);
     } else if (key_is_value(key)) {
-      ctx->allocator->destroy(ctx->allocator, term->value);
-      term->value = decoded;
-      term->value_set = 1;
+      ctx->allocator->destroy(ctx->allocator, selector->value);
+      selector->value = decoded;
+      selector->value_set = 1;
     } else if (kind == LQL_SELECTOR_KIND_DATE &&
                (key_is_after(key) || key_is_before(key) || key_is_since(key))) {
       date_slot = key_is_after(key)    ? "after"
                   : key_is_before(key) ? "before"
                                        : "since";
-      if (!set_date_bound(ctx, term, date_slot, decoded, error)) {
+      if (!set_date_bound(ctx, selector, date_slot, decoded, error)) {
         ctx->allocator->destroy(ctx->allocator, decoded);
         st = LQL_STATUS_PARSE_ERROR;
         goto fail;
       }
       ctx->allocator->destroy(ctx->allocator, decoded);
     } else if (key_is_any(key)) {
-      if (!parse_any_values(ctx, decoded, term, kind == LQL_SELECTOR_KIND_IN, error)) {
+      if (!parse_any_values(ctx, decoded, selector, kind == LQL_SELECTOR_KIND_IN, error)) {
         ctx->allocator->destroy(ctx->allocator, decoded);
         st = error != NULL && error->code != LQL_STATUS_OK
                  ? error->code
@@ -912,7 +914,7 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
       }
       ctx->allocator->destroy(ctx->allocator, decoded);
     } else if (key_is_ignore_case(key)) {
-      if (!parse_bool_value(decoded, &term->ignore_case)) {
+      if (!parse_bool_value(decoded, &selector->ignore_case)) {
         ctx->allocator->destroy(ctx->allocator, decoded);
         st = LQL_STATUS_PARSE_ERROR;
         lql_set_error(error, LQL_STATUS_PARSE_ERROR,
@@ -922,12 +924,12 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
       ctx->allocator->destroy(ctx->allocator, decoded);
     } else if (key_is_range_bound(key)) {
       if (kind == LQL_SELECTOR_KIND_DATE) {
-        if (!set_date_bound(ctx, term, key, decoded, error)) {
+        if (!set_date_bound(ctx, selector, key, decoded, error)) {
           ctx->allocator->destroy(ctx->allocator, decoded);
           st = LQL_STATUS_PARSE_ERROR;
           goto fail;
         }
-      } else if (!set_range_bound(ctx, term, key, decoded, error)) {
+      } else if (!set_range_bound(ctx, selector, key, decoded, error)) {
         ctx->allocator->destroy(ctx->allocator, decoded);
         st = LQL_STATUS_PARSE_ERROR;
         goto fail;
@@ -936,7 +938,7 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
     }
   }
   token_list_cleanup(ctx, &parts);
-  if (term->field == NULL) {
+  if (selector->field == NULL) {
     st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "selector field required");
     goto fail_after_tokens;
@@ -962,7 +964,7 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
                   "date selector cannot combine before and lt");
     goto fail_after_tokens;
   }
-  if (term->any_count != 0u) {
+  if (selector->any_count != 0u) {
     if (kind != LQL_SELECTOR_KIND_CONTAINS && kind != LQL_SELECTOR_KIND_ICONTAINS &&
         kind != LQL_SELECTOR_KIND_IN) {
       st = LQL_STATUS_PARSE_ERROR;
@@ -970,42 +972,42 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
                     "selector operator does not support any");
       goto fail_after_tokens;
     }
-    if (kind != LQL_SELECTOR_KIND_IN && (term->value_set || term->value != NULL)) {
+    if (kind != LQL_SELECTOR_KIND_IN && (selector->value_set || selector->value != NULL)) {
       st = LQL_STATUS_PARSE_ERROR;
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector cannot set both value and any");
       goto fail_after_tokens;
     }
   }
-  if (kind == LQL_SELECTOR_KIND_IN && term->any_count == 0u) {
+  if (kind == LQL_SELECTOR_KIND_IN && selector->any_count == 0u) {
     st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "in selector requires any values");
     goto fail_after_tokens;
   }
-  if (kind == LQL_SELECTOR_KIND_RANGE && !term->has_range_gt && !term->has_range_gte &&
-      !term->has_range_lt && !term->has_range_lte && !term->has_temporal_gt &&
-      !term->has_temporal_gte && !term->has_temporal_lt &&
-      !term->has_temporal_lte) {
+  if (kind == LQL_SELECTOR_KIND_RANGE && !selector->has_range_gt && !selector->has_range_gte &&
+      !selector->has_range_lt && !selector->has_range_lte && !selector->has_temporal_gt &&
+      !selector->has_temporal_gte && !selector->has_temporal_lt &&
+      !selector->has_temporal_lte) {
     st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "range selector requires at least one bound");
     goto fail_after_tokens;
   }
   if (kind == LQL_SELECTOR_KIND_RANGE &&
-      (term->has_range_gt || term->has_range_gte || term->has_range_lt ||
-       term->has_range_lte) &&
-      (term->has_temporal_gt || term->has_temporal_gte ||
-       term->has_temporal_lt || term->has_temporal_lte)) {
+      (selector->has_range_gt || selector->has_range_gte || selector->has_range_lt ||
+       selector->has_range_lte) &&
+      (selector->has_temporal_gt || selector->has_temporal_gte ||
+       selector->has_temporal_lt || selector->has_temporal_lte)) {
     st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "range selector cannot mix numeric and datetime bounds");
     goto fail_after_tokens;
   }
-  if (kind == LQL_SELECTOR_KIND_DATE && !term->has_temporal_eq &&
-      !term->has_temporal_gt && !term->has_temporal_gte &&
-      !term->has_temporal_lt && !term->has_temporal_lte &&
-      term->since_macro == LQL_SINCE_NONE) {
+  if (kind == LQL_SELECTOR_KIND_DATE && !selector->has_temporal_eq &&
+      !selector->has_temporal_gt && !selector->has_temporal_gte &&
+      !selector->has_temporal_lt && !selector->has_temporal_lte &&
+      selector->since_macro == LQL_SINCE_NONE) {
     st = LQL_STATUS_PARSE_ERROR;
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "date selector requires at least one bound");
@@ -1025,40 +1027,40 @@ fail_after_tokens:
   return st;
 }
 
-static int string_term_is_match_all_alias(lql_selector_kind kind,
-                                          const lql_selector *term) {
+static int string_predicate_is_match_all_alias(lql_selector_kind kind,
+                                          const lql_selector *selector) {
   int empty_value;
   if (kind != LQL_SELECTOR_KIND_CONTAINS && kind != LQL_SELECTOR_KIND_ICONTAINS &&
       kind != LQL_SELECTOR_KIND_PREFIX && kind != LQL_SELECTOR_KIND_IPREFIX) {
     return 0;
   }
-  if (term->field == NULL || term->any_count != 0u) {
+  if (selector->field == NULL || selector->any_count != 0u) {
     return 0;
   }
   empty_value =
-      (!term->value_set && term->value == NULL) ||
-      (term->value_set && term->value != NULL && term->value[0] == '\0');
+      (!selector->value_set && selector->value == NULL) ||
+      (selector->value_set && selector->value != NULL && selector->value[0] == '\0');
   if (!empty_value) {
     return 0;
   }
-  if (strcmp(term->field, "/") == 0) {
+  if (strcmp(selector->field, "/") == 0) {
     return 1;
   }
   if ((kind == LQL_SELECTOR_KIND_CONTAINS || kind == LQL_SELECTOR_KIND_ICONTAINS) &&
-      (strcmp(term->field, "/*") == 0 || strcmp(term->field, "/...") == 0)) {
+      (strcmp(selector->field, "/*") == 0 || strcmp(selector->field, "/...") == 0)) {
     return 1;
   }
   return 0;
 }
 
 static lql_status parse_exists_body(lql_selector_parser *ctx, const char *body,
-                                    lql_selector *term, lql_error *error) {
+                                    lql_selector *selector, lql_error *error) {
   lql_token_list parts;
   char *decoded;
   char *normalized;
   lql_status st;
 
-  memset(term, 0, sizeof(*term));
+  memset(selector, 0, sizeof(*selector));
   st = split_top(ctx, body, &parts, error);
   if (st != LQL_STATUS_OK) {
     return st;
@@ -1087,7 +1089,7 @@ static lql_status parse_exists_body(lql_selector_parser *ctx, const char *body,
   if (normalized == NULL) {
     return LQL_STATUS_NO_MEMORY;
   }
-  term->field = normalized;
+  selector->field = normalized;
   return LQL_STATUS_OK;
 }
 
@@ -1251,7 +1253,7 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
       ctx->allocator->destroy(ctx->allocator, copy);
       return st;
     }
-    if (string_term_is_match_all_alias(out->kind, out)) {
+    if (string_predicate_is_match_all_alias(out->kind, out)) {
       lql_selector_cleanup(ctx->receiver, out);
       out->kind = LQL_SELECTOR_KIND_ALL;
     }
@@ -1264,8 +1266,8 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
   return LQL_STATUS_PARSE_ERROR;
 }
 
-static int selector_is_predicate(const lql_selector *node) {
-  switch (node->kind) {
+static int selector_is_predicate(const lql_selector *selector) {
+  switch (selector->kind) {
   case LQL_SELECTOR_KIND_EQ:
   case LQL_SELECTOR_KIND_NE:
   case LQL_SELECTOR_KIND_CONTAINS:
@@ -1282,18 +1284,18 @@ static int selector_is_predicate(const lql_selector *node) {
   }
 }
 
-static void assign_hit_indexes(lql_selector *node, size_t *next) {
+static void assign_hit_indexes(lql_selector *selector, size_t *next) {
   size_t i;
-  if (node == NULL) {
+  if (selector == NULL) {
     return;
   }
-  if (selector_is_predicate(node)) {
-    node->hit_index = *next;
+  if (selector_is_predicate(selector)) {
+    selector->hit_index = *next;
     ++*next;
     return;
   }
-  for (i = 0u; i < node->child_count; ++i) {
-    assign_hit_indexes(&node->children[i], next);
+  for (i = 0u; i < selector->child_count; ++i) {
+    assign_hit_indexes(&selector->children[i], next);
   }
 }
 
@@ -1405,7 +1407,7 @@ static void selector_json_frame_cleanup(selector_json_state *state,
 
 static int selector_json_push_frame(selector_json_state *state,
                                     selector_json_frame_kind kind,
-                                    lql_selector *node) {
+                                    lql_selector *selector) {
   selector_json_frame *next;
   next = (selector_json_frame *)state->parser.allocator->realloc(
       state->parser.allocator, state->frames,
@@ -1417,7 +1419,7 @@ static int selector_json_push_frame(selector_json_state *state,
   memset(&state->frames[state->frame_count], 0,
          sizeof(state->frames[state->frame_count]));
   state->frames[state->frame_count].kind = kind;
-  state->frames[state->frame_count].selector = node;
+  state->frames[state->frame_count].selector = selector;
   ++state->frame_count;
   return 1;
 }
@@ -1518,88 +1520,91 @@ static int selector_json_mark_seen(selector_json_frame *frame,
 }
 
 static int selector_json_store_field(selector_json_state *state,
-                                     lql_selector *node, const char *value) {
+                                     lql_selector *selector,
+                                     const char *value) {
   char *normalized;
   normalized = normalize_field_path(&state->parser, value);
   if (normalized == NULL) {
     return 0;
   }
-  state->parser.allocator->destroy(state->parser.allocator, node->field);
-  node->field = normalized;
+  state->parser.allocator->destroy(state->parser.allocator, selector->field);
+  selector->field = normalized;
   return 1;
 }
 
 static int selector_json_store_value(selector_json_state *state,
-                                     lql_selector *node, const char *value) {
+                                     lql_selector *selector,
+                                     const char *value) {
   char *copy;
   copy = state->parser.allocator->strdup(state->parser.allocator, value);
   if (copy == NULL) {
     return 0;
   }
-  state->parser.allocator->destroy(state->parser.allocator, node->value);
-  node->value = copy;
-  node->value_set = 1;
+  state->parser.allocator->destroy(state->parser.allocator, selector->value);
+  selector->value = copy;
+  selector->value_set = 1;
   return 1;
 }
 
-static int selector_json_push_any(selector_json_state *state, lql_selector *node,
+static int selector_json_push_any(selector_json_state *state,
+                                  lql_selector *selector,
                                   const char *value) {
   char *copy;
   copy = state->parser.allocator->strdup(state->parser.allocator, value);
   if (copy == NULL) {
     return 0;
   }
-  if (!selector_any_push(&state->parser, node, copy)) {
+  if (!selector_any_push(&state->parser, selector, copy)) {
     state->parser.allocator->destroy(state->parser.allocator, copy);
     return 0;
   }
   return 1;
 }
 
-static lql_status selector_json_validate_term(selector_json_state *state,
-                                              selector_json_frame *frame) {
-  lql_selector *node;
-  node = frame->selector;
-  if (node == NULL) {
+static lql_status selector_json_validate_predicate(selector_json_state *state,
+                                                   selector_json_frame *frame) {
+  lql_selector *selector;
+  selector = frame->selector;
+  if (selector == NULL) {
     return LQL_STATUS_PARSE_ERROR;
   }
-  if (node->field == NULL) {
+  if (selector->field == NULL) {
     lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                   "selector field required");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if (node->kind == LQL_SELECTOR_KIND_IN && node->any_count == 0u) {
+  if (selector->kind == LQL_SELECTOR_KIND_IN && selector->any_count == 0u) {
     lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                   "in selector requires any values");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if ((node->kind == LQL_SELECTOR_KIND_CONTAINS ||
-       node->kind == LQL_SELECTOR_KIND_ICONTAINS) &&
-      node->any_count != 0u &&
-      (node->value_set || node->value != NULL)) {
+  if ((selector->kind == LQL_SELECTOR_KIND_CONTAINS ||
+       selector->kind == LQL_SELECTOR_KIND_ICONTAINS) &&
+      selector->any_count != 0u &&
+      (selector->value_set || selector->value != NULL)) {
     lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                   "selector cannot set both value and any");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if (node->kind == LQL_SELECTOR_KIND_RANGE &&
-      !node->has_range_gt && !node->has_range_gte &&
-      !node->has_range_lt && !node->has_range_lte &&
-      !node->has_temporal_gt && !node->has_temporal_gte &&
-      !node->has_temporal_lt && !node->has_temporal_lte) {
+  if (selector->kind == LQL_SELECTOR_KIND_RANGE &&
+      !selector->has_range_gt && !selector->has_range_gte &&
+      !selector->has_range_lt && !selector->has_range_lte &&
+      !selector->has_temporal_gt && !selector->has_temporal_gte &&
+      !selector->has_temporal_lt && !selector->has_temporal_lte) {
     lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                   "range selector requires at least one bound");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if (node->kind == LQL_SELECTOR_KIND_RANGE &&
-      (node->has_range_gt || node->has_range_gte ||
-       node->has_range_lt || node->has_range_lte) &&
-      (node->has_temporal_gt || node->has_temporal_gte ||
-       node->has_temporal_lt || node->has_temporal_lte)) {
+  if (selector->kind == LQL_SELECTOR_KIND_RANGE &&
+      (selector->has_range_gt || selector->has_range_gte ||
+       selector->has_range_lt || selector->has_range_lte) &&
+      (selector->has_temporal_gt || selector->has_temporal_gte ||
+       selector->has_temporal_lt || selector->has_temporal_lte)) {
     lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                   "range selector cannot mix numeric and datetime bounds");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if (node->kind == LQL_SELECTOR_KIND_DATE && frame->seen_since &&
+  if (selector->kind == LQL_SELECTOR_KIND_DATE && frame->seen_since &&
       (frame->seen_value || frame->seen_after || frame->seen_before ||
        frame->seen_gt || frame->seen_gte || frame->seen_lt ||
        frame->seen_lte)) {
@@ -1607,20 +1612,22 @@ static lql_status selector_json_validate_term(selector_json_state *state,
                   "date selector since cannot be combined with other bounds");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if (node->kind == LQL_SELECTOR_KIND_DATE && frame->seen_after && frame->seen_gt) {
+  if (selector->kind == LQL_SELECTOR_KIND_DATE && frame->seen_after &&
+      frame->seen_gt) {
     lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                   "date selector cannot combine after and gt");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if (node->kind == LQL_SELECTOR_KIND_DATE && frame->seen_before && frame->seen_lt) {
+  if (selector->kind == LQL_SELECTOR_KIND_DATE && frame->seen_before &&
+      frame->seen_lt) {
     lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                   "date selector cannot combine before and lt");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if (node->kind == LQL_SELECTOR_KIND_DATE && !node->has_temporal_eq &&
-      !node->has_temporal_gt && !node->has_temporal_gte &&
-      !node->has_temporal_lt && !node->has_temporal_lte &&
-      node->since_macro == LQL_SINCE_NONE) {
+  if (selector->kind == LQL_SELECTOR_KIND_DATE && !selector->has_temporal_eq &&
+      !selector->has_temporal_gt && !selector->has_temporal_gte &&
+      !selector->has_temporal_lt && !selector->has_temporal_lte &&
+      selector->since_macro == LQL_SINCE_NONE) {
     lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                   "date selector requires at least one bound");
     return LQL_STATUS_PARSE_ERROR;
@@ -1685,7 +1692,7 @@ static lonejson_status selector_json_end_key(void *user,
     }
     if (frame->key_count != 0) {
       return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
-                                "selector JSON node has multiple operators");
+                                "selector JSON object has multiple operators");
     }
     if (frame->selector != NULL) {
       frame->selector->kind = kind;
@@ -1810,15 +1817,15 @@ static lonejson_status selector_json_object_end(void *user,
                                 "not selector requires one child");
     }
   } else {
-    st = selector_json_validate_term(state, frame);
+    st = selector_json_validate_predicate(state, frame);
     if (st != LQL_STATUS_OK) {
       return selector_json_fail(
           state, error, st,
           state->error != NULL && state->error->message[0] != '\0'
               ? state->error->message
-              : "invalid selector JSON term");
+              : "invalid selector JSON predicate");
     }
-    if (string_term_is_match_all_alias(frame->selector->kind,
+    if (string_predicate_is_match_all_alias(frame->selector->kind,
                                        frame->selector)) {
       lql_selector_cleanup(state->parser.receiver, frame->selector);
       frame->selector->kind = LQL_SELECTOR_KIND_ALL;
@@ -1904,44 +1911,45 @@ static lonejson_status selector_json_string_chunk(void *user, const char *data,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status selector_json_store_term_string(
+static lonejson_status selector_json_store_predicate_string(
     selector_json_state *state, selector_json_frame *frame,
     lonejson_error *error) {
   const char *key;
-  lql_selector *node;
+  lql_selector *selector;
   int ok;
   key = frame->pending_key;
-  node = frame->selector;
+  selector = frame->selector;
   ok = 1;
   if (key_is_field(key)) {
-    ok = selector_json_store_field(state, node, state->text);
-  } else if (node->kind == LQL_SELECTOR_KIND_DATE && key_is_value(key)) {
-    ok = set_date_bound(&state->parser, node, "value", state->text,
+    ok = selector_json_store_field(state, selector, state->text);
+  } else if (selector->kind == LQL_SELECTOR_KIND_DATE && key_is_value(key)) {
+    ok = set_date_bound(&state->parser, selector, "value", state->text,
                         state->error);
   } else if (key_is_value(key)) {
-    ok = selector_json_store_value(state, node, state->text);
-  } else if (node->kind == LQL_SELECTOR_KIND_DATE &&
+    ok = selector_json_store_value(state, selector, state->text);
+  } else if (selector->kind == LQL_SELECTOR_KIND_DATE &&
              (key_is_after(key) || key_is_before(key) || key_is_since(key))) {
-    ok = set_date_bound(&state->parser, node,
+    ok = set_date_bound(&state->parser, selector,
                         key_is_after(key)    ? "after"
                         : key_is_before(key) ? "before"
                                              : "since",
                         state->text, state->error);
   } else if (key_is_any(key)) {
-    ok = parse_any_values(&state->parser, state->text, node,
-                          node->kind == LQL_SELECTOR_KIND_IN, state->error);
+    ok = parse_any_values(&state->parser, state->text, selector,
+                          selector->kind == LQL_SELECTOR_KIND_IN,
+                          state->error);
   } else if (key_is_ignore_case(key)) {
-    ok = parse_bool_value(state->text, &node->ignore_case);
+    ok = parse_bool_value(state->text, &selector->ignore_case);
     if (!ok) {
       lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                     "selector ignoreCase must be true/false/t/f");
     }
   } else if (key_is_range_bound(key)) {
-    if (node->kind == LQL_SELECTOR_KIND_DATE) {
-      ok = set_date_bound(&state->parser, node, key, state->text,
+    if (selector->kind == LQL_SELECTOR_KIND_DATE) {
+      ok = set_date_bound(&state->parser, selector, key, state->text,
                           state->error);
     } else {
-      ok = set_range_bound(&state->parser, node, key, state->text,
+      ok = set_range_bound(&state->parser, selector, key, state->text,
                            state->error);
     }
   }
@@ -1953,7 +1961,7 @@ static lonejson_status selector_json_store_term_string(
             : LQL_STATUS_PARSE_ERROR,
         state->error != NULL && state->error->message[0] != '\0'
             ? state->error->message
-            : "invalid selector JSON term");
+            : "invalid selector JSON predicate");
   }
   state->parser.allocator->destroy(state->parser.allocator,
                                    frame->pending_key);
@@ -1988,7 +1996,7 @@ static lonejson_status selector_json_string_end(void *user,
     return LONEJSON_STATUS_OK;
   }
   if (frame->kind == SELECTOR_JSON_FRAME_PREDICATE && frame->pending_key != NULL) {
-    return selector_json_store_term_string(state, frame, error);
+    return selector_json_store_predicate_string(state, frame, error);
   }
   if (frame->kind == SELECTOR_JSON_FRAME_ANY_ARRAY && frame->selector != NULL) {
     if (!selector_json_push_any(state, frame->selector, state->text)) {
@@ -2396,7 +2404,7 @@ static int build_field(lql_selector_parser *ctx, lql_string_view view,
   return 1;
 }
 
-static int build_any_values(lql_selector_parser *ctx, lql_selector *term,
+static int build_any_values(lql_selector_parser *ctx, lql_selector *selector,
                             const lql_string_view *values, size_t count) {
   size_t i;
   char *copy;
@@ -2405,7 +2413,7 @@ static int build_any_values(lql_selector_parser *ctx, lql_selector *term,
     if (!view_to_cstr(ctx, values[i], 0, &copy)) {
       return 0;
     }
-    if (!selector_any_push(ctx, term, copy)) {
+    if (!selector_any_push(ctx, selector, copy)) {
       ctx->allocator->destroy(ctx->allocator, copy);
       return 0;
     }
@@ -2413,7 +2421,7 @@ static int build_any_values(lql_selector_parser *ctx, lql_selector *term,
   return 1;
 }
 
-static int build_range_bound(lql_selector_parser *ctx, lql_selector *term,
+static int build_range_bound(lql_selector_parser *ctx, lql_selector *selector,
                              const char *key,
                              lql_selector_range_bound bound,
                              lql_error *error) {
@@ -2424,7 +2432,7 @@ static int build_range_bound(lql_selector_parser *ctx, lql_selector *term,
   }
   if (bound.kind == LQL_SELECTOR_BOUND_NUMBER) {
     sprintf(number_buf, "%.17g", bound.number);
-    return set_range_bound(ctx, term, key, number_buf, error);
+    return set_range_bound(ctx, selector, key, number_buf, error);
   }
   if (bound.kind == LQL_SELECTOR_BOUND_DATETIME) {
     text = NULL;
@@ -2433,7 +2441,7 @@ static int build_range_bound(lql_selector_parser *ctx, lql_selector *term,
                     "range selector datetime bound required");
       return 0;
     }
-    if (!set_range_bound(ctx, term, key, text, error)) {
+    if (!set_range_bound(ctx, selector, key, text, error)) {
       ctx->allocator->destroy(ctx->allocator, text);
       return 0;
     }
@@ -2445,7 +2453,7 @@ static int build_range_bound(lql_selector_parser *ctx, lql_selector *term,
   return 0;
 }
 
-static int build_date_string(lql_selector_parser *ctx, lql_selector *term,
+static int build_date_string(lql_selector_parser *ctx, lql_selector *selector,
                              const char *slot, lql_string_view value,
                              lql_error *error) {
   char *text;
@@ -2458,7 +2466,7 @@ static int build_date_string(lql_selector_parser *ctx, lql_selector *term,
                   "date selector bound required");
     return 0;
   }
-  if (!set_date_bound(ctx, term, slot, text, error)) {
+  if (!set_date_bound(ctx, selector, slot, text, error)) {
     ctx->allocator->destroy(ctx->allocator, text);
     return 0;
   }
@@ -2466,14 +2474,14 @@ static int build_date_string(lql_selector_parser *ctx, lql_selector *term,
   return 1;
 }
 
-static lql_status selector_build_term_result(lql_selector_parser *ctx,
-                                             lql_selector *node,
-                                             lql_selector **out,
-                                             lql_error *error) {
+static lql_status selector_build_result(lql_selector_parser *ctx,
+                                        lql_selector *selector,
+                                        lql_selector **out,
+                                        lql_error *error) {
   lql_status st;
-  st = selector_from_built_root(ctx, node, out, error);
+  st = selector_from_built_root(ctx, selector, out, error);
   if (st != LQL_STATUS_OK) {
-    lql_selector_cleanup(ctx->receiver, node);
+    lql_selector_cleanup(ctx->receiver, selector);
   }
   return st;
 }
@@ -2540,7 +2548,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_compound_internal(
       }
     }
   }
-  return selector_build_term_result(&ctx, &root, out, error);
+  return selector_build_result(&ctx, &root, out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_not_internal(
@@ -2577,7 +2585,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_not_internal(
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
     return LQL_STATUS_NO_MEMORY;
   }
-  return selector_build_term_result(&ctx, &root, out, error);
+  return selector_build_result(&ctx, &root, out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
@@ -2585,7 +2593,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
     const lql_selector_string_term *term, const lql_string_view *any_values,
     lql_selector **out, lql_error *error) {
   lql_selector_parser ctx;
-  lql_selector node;
+  lql_selector selector;
   lql_selector_kind internal_kind;
   int has_value;
   lql_status st;
@@ -2606,59 +2614,59 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
                   "string selector kind invalid");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  memset(&node, 0, sizeof(node));
-  node.kind = internal_kind;
-  if (!build_field(&ctx, term->field, &node.field)) {
-    lql_selector_cleanup(ctx.receiver, &node);
+  memset(&selector, 0, sizeof(selector));
+  selector.kind = internal_kind;
+  if (!build_field(&ctx, term->field, &selector.field)) {
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "selector field required");
     return LQL_STATUS_PARSE_ERROR;
   }
   has_value = term->value_present || term->value.len != 0u;
   if (term->any_count != 0u) {
     if (any_values == NULL) {
-      lql_selector_cleanup(ctx.receiver, &node);
+      lql_selector_cleanup(ctx.receiver, &selector);
       lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                     "selector any values required");
       return LQL_STATUS_INVALID_ARGUMENT;
     }
     if (internal_kind != LQL_SELECTOR_KIND_CONTAINS &&
         internal_kind != LQL_SELECTOR_KIND_ICONTAINS) {
-      lql_selector_cleanup(ctx.receiver, &node);
+      lql_selector_cleanup(ctx.receiver, &selector);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector operator does not support any");
       return LQL_STATUS_PARSE_ERROR;
     }
     if (has_value) {
-      lql_selector_cleanup(ctx.receiver, &node);
+      lql_selector_cleanup(ctx.receiver, &selector);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector cannot set both value and any");
       return LQL_STATUS_PARSE_ERROR;
     }
-    if (!build_any_values(&ctx, &node, any_values, term->any_count)) {
-      lql_selector_cleanup(ctx.receiver, &node);
+    if (!build_any_values(&ctx, &selector, any_values, term->any_count)) {
+      lql_selector_cleanup(ctx.receiver, &selector);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector any requires values");
       return LQL_STATUS_PARSE_ERROR;
     }
   }
   if (has_value) {
-    if (!view_to_cstr(&ctx, term->value, 1, &node.value)) {
-      lql_selector_cleanup(ctx.receiver, &node);
+    if (!view_to_cstr(&ctx, term->value, 1, &selector.value)) {
+      lql_selector_cleanup(ctx.receiver, &selector);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector value invalid");
       return LQL_STATUS_PARSE_ERROR;
     }
-    node.value_set = term->value_present ? 1 : 0;
+    selector.value_set = term->value_present ? 1 : 0;
   }
-  node.ignore_case = term->ignore_case ? 1 : 0;
-  return selector_build_term_result(&ctx, &node, out, error);
+  selector.ignore_case = term->ignore_case ? 1 : 0;
+  return selector_build_result(&ctx, &selector, out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_range_internal(
     lql *self, const lql_selector_range_term *term, lql_selector **out,
     lql_error *error) {
   lql_selector_parser ctx;
-  lql_selector node;
+  lql_selector selector;
   lql_status st;
   st = builder_init(self, &ctx, out, error);
   if (st != LQL_STATUS_OK) {
@@ -2669,48 +2677,48 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_range_internal(
                   "range selector term required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  memset(&node, 0, sizeof(node));
-  node.kind = LQL_SELECTOR_KIND_RANGE;
-  if (!build_field(&ctx, term->field, &node.field)) {
-    lql_selector_cleanup(ctx.receiver, &node);
+  memset(&selector, 0, sizeof(selector));
+  selector.kind = LQL_SELECTOR_KIND_RANGE;
+  if (!build_field(&ctx, term->field, &selector.field)) {
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "selector field required");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if (!build_range_bound(&ctx, &node, "gt", term->gt, error) ||
-      !build_range_bound(&ctx, &node, "gte", term->gte, error) ||
-      !build_range_bound(&ctx, &node, "lt", term->lt, error) ||
-      !build_range_bound(&ctx, &node, "lte", term->lte, error)) {
-    lql_selector_cleanup(ctx.receiver, &node);
+  if (!build_range_bound(&ctx, &selector, "gt", term->gt, error) ||
+      !build_range_bound(&ctx, &selector, "gte", term->gte, error) ||
+      !build_range_bound(&ctx, &selector, "lt", term->lt, error) ||
+      !build_range_bound(&ctx, &selector, "lte", term->lte, error)) {
+    lql_selector_cleanup(ctx.receiver, &selector);
     return error != NULL && error->code != LQL_STATUS_OK
                ? error->code
                : LQL_STATUS_PARSE_ERROR;
   }
-  if (!node.has_range_gt && !node.has_range_gte &&
-      !node.has_range_lt && !node.has_range_lte &&
-      !node.has_temporal_gt && !node.has_temporal_gte &&
-      !node.has_temporal_lt && !node.has_temporal_lte) {
-    lql_selector_cleanup(ctx.receiver, &node);
+  if (!selector.has_range_gt && !selector.has_range_gte &&
+      !selector.has_range_lt && !selector.has_range_lte &&
+      !selector.has_temporal_gt && !selector.has_temporal_gte &&
+      !selector.has_temporal_lt && !selector.has_temporal_lte) {
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "range selector requires at least one bound");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if ((node.has_range_gt || node.has_range_gte ||
-       node.has_range_lt || node.has_range_lte) &&
-      (node.has_temporal_gt || node.has_temporal_gte ||
-       node.has_temporal_lt || node.has_temporal_lte)) {
-    lql_selector_cleanup(ctx.receiver, &node);
+  if ((selector.has_range_gt || selector.has_range_gte ||
+       selector.has_range_lt || selector.has_range_lte) &&
+      (selector.has_temporal_gt || selector.has_temporal_gte ||
+       selector.has_temporal_lt || selector.has_temporal_lte)) {
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "range selector cannot mix numeric and datetime bounds");
     return LQL_STATUS_PARSE_ERROR;
   }
-  return selector_build_term_result(&ctx, &node, out, error);
+  return selector_build_result(&ctx, &selector, out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_date_internal(
     lql *self, const lql_selector_date_term *term, lql_selector **out,
     lql_error *error) {
   lql_selector_parser ctx;
-  lql_selector node;
+  lql_selector selector;
   lql_status st;
   const char *macro;
   lql_string_view macro_view;
@@ -2723,10 +2731,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_date_internal(
                   "date selector term required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  memset(&node, 0, sizeof(node));
-  node.kind = LQL_SELECTOR_KIND_DATE;
-  if (!build_field(&ctx, term->field, &node.field)) {
-    lql_selector_cleanup(ctx.receiver, &node);
+  memset(&selector, 0, sizeof(selector));
+  selector.kind = LQL_SELECTOR_KIND_DATE;
+  if (!build_field(&ctx, term->field, &selector.field)) {
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "selector field required");
     return LQL_STATUS_PARSE_ERROR;
   }
@@ -2740,7 +2748,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_date_internal(
     } else if (term->since_kind == LQL_SELECTOR_SINCE_YESTERDAY) {
       macro = "yesterday";
     } else if (term->since_kind == LQL_SELECTOR_SINCE_LITERAL) {
-      lql_selector_cleanup(ctx.receiver, &node);
+      lql_selector_cleanup(ctx.receiver, &selector);
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "date selector since literal required");
       return LQL_STATUS_PARSE_ERROR;
@@ -2750,15 +2758,15 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_date_internal(
       macro_view.len = strlen(macro);
     }
   }
-  if (!build_date_string(&ctx, &node, "value", term->value, error) ||
-      !build_date_string(&ctx, &node, "since", macro_view, error) ||
-      !build_date_string(&ctx, &node, "after", term->after, error) ||
-      !build_date_string(&ctx, &node, "before", term->before, error) ||
-      !build_date_string(&ctx, &node, "gt", term->gt, error) ||
-      !build_date_string(&ctx, &node, "gte", term->gte, error) ||
-      !build_date_string(&ctx, &node, "lt", term->lt, error) ||
-      !build_date_string(&ctx, &node, "lte", term->lte, error)) {
-    lql_selector_cleanup(ctx.receiver, &node);
+  if (!build_date_string(&ctx, &selector, "value", term->value, error) ||
+      !build_date_string(&ctx, &selector, "since", macro_view, error) ||
+      !build_date_string(&ctx, &selector, "after", term->after, error) ||
+      !build_date_string(&ctx, &selector, "before", term->before, error) ||
+      !build_date_string(&ctx, &selector, "gt", term->gt, error) ||
+      !build_date_string(&ctx, &selector, "gte", term->gte, error) ||
+      !build_date_string(&ctx, &selector, "lt", term->lt, error) ||
+      !build_date_string(&ctx, &selector, "lte", term->lte, error)) {
+    lql_selector_cleanup(ctx.receiver, &selector);
     return error != NULL && error->code != LQL_STATUS_OK
                ? error->code
                : LQL_STATUS_PARSE_ERROR;
@@ -2768,39 +2776,39 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_date_internal(
        view_has_value(term->before) || view_has_value(term->gt) ||
        view_has_value(term->gte) || view_has_value(term->lt) ||
        view_has_value(term->lte))) {
-    lql_selector_cleanup(ctx.receiver, &node);
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "date selector since cannot be combined with other bounds");
     return LQL_STATUS_PARSE_ERROR;
   }
   if (view_has_value(term->after) && view_has_value(term->gt)) {
-    lql_selector_cleanup(ctx.receiver, &node);
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "date selector cannot combine after and gt");
     return LQL_STATUS_PARSE_ERROR;
   }
   if (view_has_value(term->before) && view_has_value(term->lt)) {
-    lql_selector_cleanup(ctx.receiver, &node);
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "date selector cannot combine before and lt");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if (!node.has_temporal_eq && !node.has_temporal_gt &&
-      !node.has_temporal_gte && !node.has_temporal_lt &&
-      !node.has_temporal_lte && node.since_macro == LQL_SINCE_NONE) {
-    lql_selector_cleanup(ctx.receiver, &node);
+  if (!selector.has_temporal_eq && !selector.has_temporal_gt &&
+      !selector.has_temporal_gte && !selector.has_temporal_lt &&
+      !selector.has_temporal_lte && selector.since_macro == LQL_SINCE_NONE) {
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "date selector requires at least one bound");
     return LQL_STATUS_PARSE_ERROR;
   }
-  return selector_build_term_result(&ctx, &node, out, error);
+  return selector_build_result(&ctx, &selector, out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_in_internal(
     lql *self, const lql_selector_in_term *term,
     const lql_string_view *any_values, lql_selector **out, lql_error *error) {
   lql_selector_parser ctx;
-  lql_selector node;
+  lql_selector selector;
   lql_status st;
   st = builder_init(self, &ctx, out, error);
   if (st != LQL_STATUS_OK) {
@@ -2811,46 +2819,46 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_in_internal(
                   "in selector term required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  memset(&node, 0, sizeof(node));
-  node.kind = LQL_SELECTOR_KIND_IN;
-  if (!build_field(&ctx, term->field, &node.field)) {
-    lql_selector_cleanup(ctx.receiver, &node);
+  memset(&selector, 0, sizeof(selector));
+  selector.kind = LQL_SELECTOR_KIND_IN;
+  if (!build_field(&ctx, term->field, &selector.field)) {
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "selector field required");
     return LQL_STATUS_PARSE_ERROR;
   }
   if (term->any_count == 0u || any_values == NULL) {
-    lql_selector_cleanup(ctx.receiver, &node);
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "in selector requires any values");
     return LQL_STATUS_PARSE_ERROR;
   }
-  if (!build_any_values(&ctx, &node, any_values, term->any_count)) {
-    lql_selector_cleanup(ctx.receiver, &node);
+  if (!build_any_values(&ctx, &selector, any_values, term->any_count)) {
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "in selector requires non-empty any values");
     return LQL_STATUS_PARSE_ERROR;
   }
-  return selector_build_term_result(&ctx, &node, out, error);
+  return selector_build_result(&ctx, &selector, out, error);
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_exists_internal(
     lql *self, lql_string_view path, lql_selector **out, lql_error *error) {
   lql_selector_parser ctx;
-  lql_selector node;
+  lql_selector selector;
   lql_status st;
   st = builder_init(self, &ctx, out, error);
   if (st != LQL_STATUS_OK) {
     return st;
   }
-  memset(&node, 0, sizeof(node));
-  node.kind = LQL_SELECTOR_KIND_EXISTS;
-  if (!build_field(&ctx, path, &node.field)) {
-    lql_selector_cleanup(ctx.receiver, &node);
+  memset(&selector, 0, sizeof(selector));
+  selector.kind = LQL_SELECTOR_KIND_EXISTS;
+  if (!build_field(&ctx, path, &selector.field)) {
+    lql_selector_cleanup(ctx.receiver, &selector);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "exists selector requires exactly one path");
     return LQL_STATUS_PARSE_ERROR;
   }
-  return selector_build_term_result(&ctx, &node, out, error);
+  return selector_build_result(&ctx, &selector, out, error);
 }
 
 typedef struct indexed_group {
@@ -2972,18 +2980,18 @@ static int token_contains_indexed_wrapper(lql_selector_parser *ctx,
   return 0;
 }
 
-static int node_conflicts_with_child(const lql_selector *node,
+static int selector_conflicts_with_child(const lql_selector *selector,
                                      const lql_selector *child) {
   size_t i;
   const lql_selector *current;
-  if (node == NULL || child == NULL) {
+  if (selector == NULL || child == NULL) {
     return 0;
   }
   if (!selector_is_predicate(child) && child->kind != LQL_SELECTOR_KIND_NOT) {
     return 0;
   }
-  for (i = 0u; i < node->child_count; ++i) {
-    current = &node->children[i];
+  for (i = 0u; i < selector->child_count; ++i) {
+    current = &selector->children[i];
     if (current->kind == child->kind) {
       return 1;
     }
@@ -3025,7 +3033,7 @@ static lql_status append_plain_group_node(lql_selector_parser *ctx,
       group->or_group.kind = LQL_SELECTOR_KIND_OR;
     }
     if (group->indexed &&
-        node_conflicts_with_child(&group->or_group, &child->children[0])) {
+        selector_conflicts_with_child(&group->or_group, &child->children[0])) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "selector expression has conflicting indexed clauses");
       return LQL_STATUS_PARSE_ERROR;
@@ -3038,7 +3046,7 @@ static lql_status append_plain_group_node(lql_selector_parser *ctx,
     child->child_count = 0u;
     return LQL_STATUS_OK;
   }
-  if (group->indexed && node_conflicts_with_child(&group->selector, child)) {
+  if (group->indexed && selector_conflicts_with_child(&group->selector, child)) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "selector expression has conflicting indexed clauses");
     return LQL_STATUS_PARSE_ERROR;
