@@ -320,6 +320,10 @@ colorized pretty output. Accepted theme spellings must not change compact JSON
 output, selector behavior, projection behavior, or mutation behavior.
 
 The CLI must produce actionable errors with stable wording where practical.
+`clql -h` and `clql --help` are not required to copy the Go `lql` help text.
+They must present a C-native help surface with a concise summary, usage forms,
+grouped options, the intentional `--theme` compatibility/no-color caveat, and
+examples for selection, projection, and mutation.
 
 ## Lua Scope
 

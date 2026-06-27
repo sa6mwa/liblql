@@ -689,15 +689,87 @@ static int create_inline_temp(const char *path, char **out_path,
 }
 
 static void usage(FILE *out) {
-  fprintf(out, "usage: clql [--or|-O] [--compact|-c] [--inline|-i|--write|-w] "
-               "[--enable-file-mutations|-F] [--theme|-t theme]\n");
-  fprintf(out, "            [--field|-f field] [--mutate|-m expr] "
-               "[--matches-only|-M] selector [data.json]\n");
+  fprintf(out, "clql - query, project, and mutate JSON with LQL selectors\n");
+  fprintf(out, "\n");
+  fprintf(out, "Usage:\n");
+  fprintf(out, "  clql [options] <selector> [file]\n");
+  fprintf(out, "  clql [options] <selector> < input.json\n");
+  fprintf(out, "  clql --help\n");
+  fprintf(out, "  clql --version\n");
+  fprintf(out, "\n");
+  fprintf(out, "Input:\n");
+  fprintf(out, "  file                       read JSON from file; use - for stdin\n");
+  fprintf(out, "  stdin                      used when no file is provided\n");
+  fprintf(out, "\n");
+  fprintf(out, "Selection:\n");
+  fprintf(out, "  -O, --or[=bool]            combine selector terms with OR\n");
+  fprintf(out, "  -M, --matches-only[=bool]  emit only matched candidates\n");
+  fprintf(out, "  -c, --compact[=bool]       emit compact JSON\n");
+  fprintf(out, "\n");
+  fprintf(out, "Projection:\n");
+  fprintf(out, "  -f, --field <path>         project a field from each match; repeatable\n");
+  fprintf(out, "      --field=<path>         same as --field <path>\n");
+  fprintf(out, "\n");
+  fprintf(out, "Mutation:\n");
+  fprintf(out, "  -m, --mutate <expr>        apply a mutation expression; repeatable\n");
+  fprintf(out, "      --mutate=<expr>        same as --mutate <expr>\n");
+  fprintf(out, "  -i, --inline[=bool]        rewrite the input file in place\n");
+  fprintf(out, "  -w, --write[=bool]         alias for --inline\n");
+  fprintf(out, "  -F, --enable-file-mutations[=bool]\n");
+  fprintf(out, "                             allow file-backed mutation values\n");
+  fprintf(out, "\n");
+  fprintf(out, "Compatibility:\n");
+  fprintf(out, "  -t, --theme <name>         accepted for Go lql compatibility;\n");
+  fprintf(out, "                             colorized JSON output is not implemented\n");
+  fprintf(out, "      --theme=<name>         same as --theme <name>\n");
+  fprintf(out, "  -h, --help                 show this help\n");
+  fprintf(out, "  -v, --version              show the clql version\n");
+  fprintf(out, "\n");
+  fprintf(out, "Selector examples (shorthand):\n");
+  fprintf(out, "  clql '/status=\"open\"' data.json\n");
+  fprintf(out, "  clql '/status!=closed' data.json\n");
+  fprintf(out, "  clql '/progress>=50' data.json\n");
+  fprintf(out, "  clql '/timestamp>=\"2025-01-01T00:00:00Z\"' data.json\n");
+  fprintf(out, "  clql '/devices/0/status=\"online\"' data.json\n");
+  fprintf(out, "  clql '/labels/*=\"production\"' data.json\n");
+  fprintf(out, "  clql '/items[]/sku=\"ABC-123\"' data.json\n");
+  fprintf(out, "  clql '/items/**/sku=\"ABC-123\"' data.json\n");
+  fprintf(out, "  clql '/items/.../sku=\"ABC-123\"' data.json\n");
+  fprintf(out, "\n");
+  fprintf(out, "Selector examples (full LQL):\n");
+  fprintf(out, "  clql 'eq{field=/status,value=open}' data.json\n");
+  fprintf(out, "  clql 'contains{field=/msg,value=timeout,ic=t}' data.json\n");
+  fprintf(out, "  clql 'contains{field=/msg,any=timeout|degraded}' data.json\n");
+  fprintf(out, "  clql 'icontains{field=/msg,value=timeout}' data.json\n");
+  fprintf(out, "  clql 'icontains{field=/service,a=AUTH|EDGE}' data.json\n");
+  fprintf(out, "  clql 'iprefix{field=/service,value=auth}' data.json\n");
   fprintf(out,
-          "       clql [--or|-O] [--compact|-c] [--matches-only|-M] selector < "
+          "  clql 'date{field=/timestamp,after=2025-01-01,before=2025-02-01}' "
           "data.json\n");
-  fprintf(out, "       clql --help\n");
-  fprintf(out, "       clql --version\n");
+  fprintf(out, "  clql 'date{f=/timestamp,since=yesterday}' data.json\n");
+  fprintf(out,
+          "  clql "
+          "'and.eq{field=/status,value=open},and.range{field=/progress,gte=50}' "
+          "data.json\n");
+  fprintf(out,
+          "  clql "
+          "'or.eq{field=/region,value=us},or.eq{field=/region,value=eu}' "
+          "data.json\n");
+  fprintf(out, "  clql 'not.eq{field=/state,value=disabled}' data.json\n");
+  fprintf(out, "  clql 'exists{/metadata/etag}' data.json\n");
+  fprintf(out, "\n");
+  fprintf(out, "Projection and mutation examples:\n");
+  fprintf(out, "  clql -c -f /owner/name '/priority>=3' < data.json\n");
+  fprintf(out, "  clql -m '/status=\"closed\"' -i '/id=\"42\"' data.json\n");
+  fprintf(out, "  clql -O '/status=\"open\"' '/status=\"queued\"' data.json\n");
+  fprintf(out, "\n");
+  fprintf(out, "Notes:\n");
+  fprintf(out, "  With -m, selectors choose which objects are mutated. Add -M to output\n");
+  fprintf(out, "  only selector matches. contains/icontains accept value=... or\n");
+  fprintf(out, "  any=/a=... pipe-delimited lists. range accepts numeric or datetime\n");
+  fprintf(out, "  literals. date supports value, after, before, gt, gte, lt, and lte;\n");
+  fprintf(out, "  only date{...,since=...} supports relative macros such as now, today,\n");
+  fprintf(out, "  and yesterday.\n");
 }
 
 int main(int argc, char **argv) {
