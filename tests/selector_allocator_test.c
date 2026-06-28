@@ -31,6 +31,7 @@ typedef struct memory_reader {
 } memory_reader;
 
 static void counting_destroy(lql_allocator *self, void *ptr);
+static int make_blob_doc(char *buf, size_t capacity, size_t blob_len);
 
 static void counting_record_alloc(counting_allocator *counter, size_t size) {
   ++counter->alloc_count;
@@ -838,6 +839,108 @@ static int expect_mutation_parse_failure_cleans_allocator(void) {
   return 0;
 }
 
+static int mutate_blob_doc(lql *ctx, lql_mutation_plan *plan, const char *json,
+                           counting_allocator *counter, size_t *out_delta) {
+  lql_error error;
+  lql_status st;
+  FILE *out;
+  size_t before;
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("mutation blob tmpfile failed\n");
+    return 1;
+  }
+  before = counter->alloc_count;
+  lql_error_init(&error);
+  st = ctx->mutate_json(ctx, plan, json, strlen(json), out, &error);
+  fclose(out);
+  if (st != LQL_STATUS_OK) {
+    printf("mutation blob mutate failed: %s\n", error.message);
+    return 1;
+  }
+  *out_delta = counter->alloc_count - before;
+  return 0;
+}
+
+static int expect_mutation_unselected_large_blob_allocation_stable(void) {
+  counting_allocator counter;
+  lql *ctx;
+  lql_mutation_plan *plan;
+  const char *exprs[1];
+  lql_error error;
+  lql_status st;
+  size_t small_delta;
+  size_t large_delta;
+  size_t small_peak;
+  char small_doc[128];
+  char large_doc[10064];
+
+  if (!make_blob_doc(small_doc, sizeof(small_doc), 32u) ||
+      !make_blob_doc(large_doc, sizeof(large_doc), 9800u)) {
+    printf("mutation blob fixture construction failed\n");
+    return 1;
+  }
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("mutation blob receiver failed: %s\n", error.message);
+    return 1;
+  }
+  exprs[0] = "/id=\"b\"";
+  plan = NULL;
+  lql_error_init(&error);
+  st = ctx->mutation_plan_parse(ctx, exprs, 1u, &plan, &error);
+  if (st != LQL_STATUS_OK || plan == NULL) {
+    printf("mutation blob parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (mutate_blob_doc(ctx, plan, small_doc, &counter, &small_delta) != 0) {
+    ctx->mutation_plan_destroy(ctx, plan);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  small_peak = counter.peak_outstanding_bytes;
+  if (mutate_blob_doc(ctx, plan, large_doc, &counter, &large_delta) != 0) {
+    ctx->mutation_plan_destroy(ctx, plan);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (large_delta > small_delta + 1u) {
+    printf("mutation unselected blob allocation grew with input: small=%lu "
+           "large=%lu\n",
+           (unsigned long)small_delta, (unsigned long)large_delta);
+    ctx->mutation_plan_destroy(ctx, plan);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.peak_outstanding_bytes > small_peak + 32768u) {
+    printf("mutation unselected blob peak grew with input: small=%lu "
+           "large=%lu\n",
+           (unsigned long)small_peak,
+           (unsigned long)counter.peak_outstanding_bytes);
+    ctx->mutation_plan_destroy(ctx, plan);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  ctx->mutation_plan_destroy(ctx, plan);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.outstanding_bytes != 0u ||
+      counter.destroy_count == 0u) {
+    printf("mutation blob allocator cleanup imbalance: outstanding=%lu "
+           "bytes=%lu destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.outstanding_bytes,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
 static int expect_selector_parse_failure_cleans_allocator(void) {
   counting_allocator counter;
   lql *ctx;
@@ -1013,6 +1116,7 @@ static int expect_projection_unselected_large_blob_allocation_stable(void) {
   lql_status st;
   size_t small_delta;
   size_t large_delta;
+  size_t small_peak;
   char small_doc[128];
   char large_doc[10064];
 
@@ -1045,6 +1149,7 @@ static int expect_projection_unselected_large_blob_allocation_stable(void) {
     ctx->destroy(ctx);
     return 1;
   }
+  small_peak = counter.peak_outstanding_bytes;
   if (project_blob_doc(ctx, projection, large_doc, &counter, &large_delta) !=
       0) {
     ctx->projection_destroy(ctx, projection);
@@ -1055,6 +1160,15 @@ static int expect_projection_unselected_large_blob_allocation_stable(void) {
     printf("projection unselected blob allocation grew with input: small=%lu "
            "large=%lu\n",
            (unsigned long)small_delta, (unsigned long)large_delta);
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.peak_outstanding_bytes > small_peak + 32768u) {
+    printf("projection unselected blob peak grew with input: small=%lu "
+           "large=%lu\n",
+           (unsigned long)small_peak,
+           (unsigned long)counter.peak_outstanding_bytes);
     ctx->projection_destroy(ctx, projection);
     ctx->destroy(ctx);
     return 1;
@@ -1124,6 +1238,7 @@ int main(void) {
   failures += expect_projection_unselected_large_blob_allocation_stable();
   failures += expect_projection_parse_failure_cleans_allocator();
   failures += expect_mutation_success_uses_allocator();
+  failures += expect_mutation_unselected_large_blob_allocation_stable();
   failures += expect_mutation_parse_failure_cleans_allocator();
   return failures == 0 ? 0 : 1;
 }
