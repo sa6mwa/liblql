@@ -134,9 +134,26 @@ package_one() {
 
   "$ROOT_DIR/scripts/deps.sh" "$target_id"
   reset_build_dir_if_compiler_changed "$build_dir" "$cc" "$target_id"
-  (cd "$ROOT_DIR" && CC="$cc" run_with_tool_path "$cc" cmake \
-    --preset "$preset" -DLQL_CLQL_STATIC_LINK=ON)
-  (cd "$ROOT_DIR" && run_with_tool_path "$cc" cmake --build --preset "$preset")
+  if [ "$target_id" = arm64-apple-darwin ]; then
+    darwin_ld=$(darwin_linker "$target_id" "$cc") || {
+      if [ "$MATRIX_MODE" = 1 ]; then
+        printf 'release-matrix: skipping %s: target linker unavailable\n' "$target_id" >&2
+        return 0
+      fi
+      printf 'package: target linker unavailable for %s\n' "$target_id" >&2
+      exit 1
+    }
+    (cd "$ROOT_DIR" && CC="$cc" run_with_target_path "$target_id" "$cc" cmake \
+      --preset "$preset" -DLQL_CLQL_STATIC_LINK=ON \
+      -DCMAKE_LINKER="$darwin_ld" \
+      "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=$darwin_ld" \
+      "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=$darwin_ld" \
+      "-DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=$darwin_ld")
+  else
+    (cd "$ROOT_DIR" && CC="$cc" run_with_target_path "$target_id" "$cc" cmake \
+      --preset "$preset" -DLQL_CLQL_STATIC_LINK=ON)
+  fi
+  (cd "$ROOT_DIR" && run_with_target_path "$target_id" "$cc" cmake --build --preset "$preset")
   discover_package_tools "$target_id"
   rm -rf "$work_dir"
   mkdir -p "$install_root"
@@ -220,6 +237,57 @@ run_with_tool_path() {
   fi
 }
 
+target_tool_dir() {
+  target_id=$1
+  tool=$2
+  case "$target_id" in
+    arm64-apple-darwin)
+      darwin_host=${CPKT_OSXCROSS_HOST:-arm64-apple-darwin25}
+      osxcross_bin="${OSXCROSS_ROOT:-$HOME/.local/cross/osxcross}/bin"
+      tool_dir=$(tool_dirname "$tool" || true)
+      if [ -n "$tool_dir" ] && [ -x "$tool_dir/$darwin_host-ld" ]; then
+        printf '%s\n' "$tool_dir"
+        return
+      fi
+      if [ -x "$osxcross_bin/$darwin_host-ld" ]; then
+        printf '%s\n' "$osxcross_bin"
+        return
+      fi
+      if [ -n "$tool_dir" ]; then
+        printf '%s\n' "$tool_dir"
+      fi
+      ;;
+    *)
+      tool_dirname "$tool" || true
+      ;;
+  esac
+}
+
+run_with_target_path() {
+  target_id=$1
+  tool=$2
+  shift 2
+  tool_dir=$(target_tool_dir "$target_id" "$tool")
+  if [ -n "$tool_dir" ]; then
+    PATH="$tool_dir:$PATH" "$@"
+  else
+    "$@"
+  fi
+}
+
+darwin_linker() {
+  target_id=$1
+  cc=$2
+  [ "$target_id" = arm64-apple-darwin ] || return 1
+  darwin_host=${CPKT_OSXCROSS_HOST:-arm64-apple-darwin25}
+  tool_dir=$(target_tool_dir "$target_id" "$cc")
+  if [ -n "$tool_dir" ] && [ -x "$tool_dir/$darwin_host-ld" ]; then
+    printf '%s/%s-ld\n' "$tool_dir" "$darwin_host"
+    return 0
+  fi
+  return 1
+}
+
 reset_build_dir_if_compiler_changed() {
   build_dir=$1
   cc=$2
@@ -247,6 +315,7 @@ compiler_link_smoke() {
   target_id=$1
   cc=$2
   smoke_dir="$ROOT_DIR/build/package-compiler-smoke/$target_id"
+  smoke_darwin_ld=
   rm -rf "$smoke_dir"
   mkdir -p "$smoke_dir"
   cat >"$smoke_dir/smoke.c" <<'EOF'
@@ -254,8 +323,18 @@ int main(void) {
   return 0;
 }
 EOF
-  run_with_tool_path "$cc" "$cc" "$smoke_dir/smoke.c" \
-    -o "$smoke_dir/smoke" >/dev/null 2>&1
+  case "$target_id" in
+    arm64-apple-darwin)
+      smoke_darwin_ld=$(darwin_linker "$target_id" "$cc") || return 1
+      run_with_target_path "$target_id" "$cc" "$cc" \
+        "-fuse-ld=$smoke_darwin_ld" "$smoke_dir/smoke.c" \
+        -o "$smoke_dir/smoke" >/dev/null 2>&1
+      ;;
+    *)
+      run_with_target_path "$target_id" "$cc" "$cc" "$smoke_dir/smoke.c" \
+        -o "$smoke_dir/smoke" >/dev/null 2>&1
+      ;;
+  esac
 }
 
 package_source() {
@@ -1616,10 +1695,13 @@ check_package_tool_path_fixtures() {
   tmp_dir="$ROOT_DIR/build/package-tool-path-fixtures"
   fake_cc="$tmp_dir/bin/fixture-cc"
   fake_ld="$tmp_dir/bin/fixture-ld"
+  darwin_cc="$tmp_dir/osxcross/bin/arm64-apple-darwin25-cc"
+  darwin_ld="$tmp_dir/osxcross/bin/arm64-apple-darwin25-ld"
   log="$tmp_dir/tool.log"
+  darwin_log="$tmp_dir/darwin-tool.log"
 
   rm -rf "$tmp_dir"
-  mkdir -p "$tmp_dir/bin"
+  mkdir -p "$tmp_dir/bin" "$tmp_dir/osxcross/bin"
   cat >"$fake_ld" <<'EOF'
 #!/bin/sh
 exit 0
@@ -1654,6 +1736,63 @@ EOF
   if ! grep -Fx "$fake_ld" "$log" >/dev/null; then
     printf 'package tool path fixture resolved wrong sibling linker\n' >&2
     cat "$log" >&2
+    exit 1
+  fi
+
+  cat >"$darwin_ld" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+  cat >"$darwin_cc" <<EOF
+#!/bin/sh
+command -v arm64-apple-darwin25-ld >"$darwin_log" || exit 9
+if [ "\$(command -v arm64-apple-darwin25-ld)" != "$darwin_ld" ]; then
+  printf 'wrong-ld=%s\n' "\$(command -v arm64-apple-darwin25-ld)" >>"$darwin_log"
+  exit 8
+fi
+seen_fuse=0
+out=
+for arg in "\$@"; do
+  case "\$arg" in
+    -fuse-ld=$darwin_ld) seen_fuse=1 ;;
+  esac
+done
+while [ "\$#" -gt 0 ]; do
+  if [ "\$1" = "-o" ]; then
+    shift
+    out=\${1:-}
+  fi
+  shift || break
+done
+if [ "\$seen_fuse" != 1 ]; then
+  printf 'missing-fuse-ld\n' >>"$darwin_log"
+  exit 7
+fi
+if [ -n "\$out" ]; then
+  : >"\$out"
+fi
+EOF
+  chmod +x "$darwin_cc" "$darwin_ld"
+
+  old_path=$PATH
+  PATH="/usr/bin:/bin"
+  if ! compiler_link_smoke arm64-apple-darwin "$darwin_cc"; then
+    PATH=$old_path
+    printf 'package tool path fixture did not route Darwin link through target ld\n' >&2
+    cat "$darwin_log" >&2
+    exit 1
+  fi
+  PATH=$old_path
+  if ! grep -Fx "$darwin_ld" "$darwin_log" >/dev/null; then
+    printf 'package tool path fixture resolved wrong Darwin linker\n' >&2
+    cat "$darwin_log" >&2
+    exit 1
+  fi
+
+  if [ "$(darwin_linker arm64-apple-darwin "$darwin_cc")" != "$darwin_ld" ]; then
+    printf 'package tool path fixture selected wrong CMake Darwin linker\n' >&2
+    printf 'got: %s\nwant: %s\n' \
+      "$(darwin_linker arm64-apple-darwin "$darwin_cc")" "$darwin_ld" >&2
     exit 1
   fi
 }

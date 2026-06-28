@@ -1672,10 +1672,13 @@ Current implementation status:
   strip is invoked. Darwin final artifacts are not stripped as routine package
   post-processing, avoiding Mach-O code-signature invalidation risk and keeping
   install-name correctness in the build/install graph. Target compiler/linker
-  probes and CMake release builds run with the selected compiler's directory
-  prepended to `PATH`, which allows
-  cross-compiler wrappers such as osxcross to resolve sibling target tools
-  instead of host tools;
+  probes and CMake release builds run with the selected target tool directory
+  prepended to `PATH`; for Darwin/osxcross builds package generation also sets
+  `CMAKE_LINKER` to the target `${CPKT_OSXCROSS_HOST}-ld` and injects an
+  absolute `-fuse-ld=<target-ld>` into executable, shared-library, and module
+  linker flags. `lql.package-tool-path-fixtures` proves the Darwin link smoke
+  route sees the target linker before ambient host tools and receives the
+  explicit `-fuse-ld` argument;
   checksum manifest fixture coverage proves release-looking tarball, rockspec,
   and source-rock artifacts under `dist/` cannot be left out of the upload
   manifest, and `scripts/package.sh print-release-assets` derives the exact
@@ -1717,8 +1720,9 @@ Current implementation status:
   `arm64-apple-darwin` packaging uses the CMake Darwin system preset, an
   explicit `@rpath` install name for SDK `liblql`, a static `clql`
   project/dependency closure with only normal system dynamic libraries, no
-  routine final-artifact Mach-O mutation, and target-correct `otool`
-  verification when the osxcross toolchain is available.
+  routine final-artifact Mach-O mutation, explicit osxcross target-linker
+  routing through `PATH`, `CMAKE_LINKER`, and `-fuse-ld`, and target-correct
+  `otool` verification when the osxcross toolchain is available.
 
 The repository must not claim full LQL parity until the verification gates prove
 it.
