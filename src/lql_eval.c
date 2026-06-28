@@ -792,7 +792,7 @@ static size_t selector_in_max_value_len(const lql_selector *selector) {
   return max_len;
 }
 
-static int selector_eq_requires_scalar_buffer(const lql_selector *selector) {
+static int selector_exact_requires_scalar_buffer(const lql_selector *selector) {
   if (selector_prefix_value_len(selector) > LQL_EVAL_EXACT_CAP) {
     return 1;
   }
@@ -823,7 +823,8 @@ static int selector_string_buffer_required(const eval_doc *doc,
   }
   switch (selector->kind) {
   case LQL_SELECTOR_KIND_EQ:
-    return selector_eq_requires_scalar_buffer(selector);
+  case LQL_SELECTOR_KIND_NE:
+    return selector_exact_requires_scalar_buffer(selector);
   case LQL_SELECTOR_KIND_CONTAINS:
   case LQL_SELECTOR_KIND_ICONTAINS:
     max_needle = selector_contains_max_needle(selector);
@@ -951,12 +952,14 @@ static int selector_exact_stream_interested(const eval_doc *doc,
     return found;
   }
   if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
+       selector->kind != LQL_SELECTOR_KIND_NE &&
        selector->kind != LQL_SELECTOR_KIND_IN) ||
       !path_matches(doc, selector->field, path)) {
     return 0;
   }
-  if (selector->kind == LQL_SELECTOR_KIND_EQ) {
-    if (selector_eq_requires_scalar_buffer(selector)) {
+  if (selector->kind == LQL_SELECTOR_KIND_EQ ||
+      selector->kind == LQL_SELECTOR_KIND_NE) {
+    if (selector_exact_requires_scalar_buffer(selector)) {
       return 0;
     }
     value_len = selector_prefix_value_len(selector);
@@ -1146,16 +1149,23 @@ static void observe_exact_stream_end(eval_doc *doc,
     return;
   }
   if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
+       selector->kind != LQL_SELECTOR_KIND_NE &&
        selector->kind != LQL_SELECTOR_KIND_IN) ||
       !path_matches(doc, selector->field, path) ||
       doc->hits[selector->hit_index] != 0u) {
     return;
   }
-  if (selector->kind == LQL_SELECTOR_KIND_EQ) {
+  if (selector->kind == LQL_SELECTOR_KIND_EQ ||
+      selector->kind == LQL_SELECTOR_KIND_NE) {
     value = selector->value == NULL ? "" : selector->value;
     value_len = strlen(value);
-    if (doc->scalar_len == value_len && doc->prefix_len >= value_len &&
+    if (selector->kind == LQL_SELECTOR_KIND_EQ &&
+        doc->scalar_len == value_len && doc->prefix_len >= value_len &&
         memcmp(doc->prefix_buf, value, value_len) == 0) {
+      doc->hits[selector->hit_index] = 1u;
+    } else if (selector->kind == LQL_SELECTOR_KIND_NE &&
+               (doc->scalar_len != value_len || doc->prefix_len < value_len ||
+                memcmp(doc->prefix_buf, value, value_len) != 0)) {
       doc->hits[selector->hit_index] = 1u;
     }
     return;
