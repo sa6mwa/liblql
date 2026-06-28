@@ -541,16 +541,15 @@ operation rather than truncating or wrapping the requested offset.
 - `--help` / `-h`;
 - `--version` / `-v`.
 
-`--theme` / `-t` is accepted as a compatibility no-op. The Go CLI uses it only
-to select a prettyx palette; the C CLI intentionally does not implement
-colorized pretty output. Accepted theme spellings must not change compact JSON
-output, selector behavior, projection behavior, or mutation behavior.
+`--theme` / `-t` is not part of the `clql` CLI. The Go CLI uses theme options
+only for `prettyx` colorized output, which this port intentionally does not
+ship. `clql` must not accept no-op compatibility flags for unimplemented
+features.
 
 The CLI must produce actionable errors with stable wording where practical.
 `clql -h` and `clql --help` are not required to copy the Go `lql` help text.
 They must present a C-native help surface with a concise summary, usage forms,
-grouped options, the intentional `--theme` compatibility/no-color caveat, and
-examples for selection, projection, and mutation.
+grouped options, and examples for selection, projection, and mutation.
 
 ## Lua Scope
 
@@ -1232,9 +1231,8 @@ Current implementation status:
   parsing, malformed JSON diagnostics, and file-backed mutation workflows;
 - fast CTest now includes `lql.cli-smoke`, which asserts the stable
   `clql --version` format, the documented `clql --help` option surface, and
-  the CLI-owned compact selector behavior for prettyx-compatible `--theme` and
-  `-t` no-op forms, including joined and clustered short-option spellings and
-  Go-compatible rejection of unknown theme names;
+  rejection of unsupported `prettyx` theme flags instead of accepting no-op
+  compatibility options for features `clql` does not ship;
 - C SDK contract tests cover the currently implemented public liblql selector,
   selector inspection, streaming, projection, compacting, mutation, version,
   and capability surfaces, including mutation plan parse success, expansion

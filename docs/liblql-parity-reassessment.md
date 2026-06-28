@@ -92,8 +92,8 @@ be called complete for the v0 public contract:
 
 - CLI:
   argument splitting, interspersed flags, stdin/file behavior, inline/write
-  mutation, help/version/theme compatibility, multi-file mutation, projection,
-  compact output, and error messages.
+  mutation, help/version behavior, unsupported theme rejection, multi-file
+  mutation, projection, compact output, and error messages.
 
 ## Process Fix
 

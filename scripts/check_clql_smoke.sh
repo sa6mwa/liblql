@@ -41,7 +41,7 @@ for needle in \
   "Selection:" \
   "Projection:" \
   "Mutation:" \
-  "Compatibility:" \
+  "Commands:" \
   "Selector examples (shorthand):" \
   "Selector examples (full LQL):" \
   "Projection and mutation examples:" \
@@ -55,8 +55,6 @@ for needle in \
   "-i, --inline[=bool]" \
   "-w, --write[=bool]" \
   "-F, --enable-file-mutations[=bool]" \
-  "-t, --theme <name>" \
-  "colorized JSON output is not implemented" \
   "clql --help" \
   "clql --version" \
   "clql '/status=\"open\"' data.json" \
@@ -208,23 +206,36 @@ if [ "$inline_out" != "$primary_closed_json" ]; then
   exit 1
 fi
 
-theme_input='{"status":"open"}'
-theme_expected='{"status":"open"}'
 for theme_args in \
-  '-c --theme default' \
-  '-c --theme=default' \
-  '-c -t default' \
-  '-c -tdefault' \
-  '-c -t=default' \
+  '--theme default' \
+  '--theme=default' \
+  '-t default' \
+  '-tdefault' \
+  '-t=default' \
   '-ctdefault' \
   '-ct=default'
 do
   # shellcheck disable=SC2086
-  theme_out=$(printf '%s' "$theme_input" | "$clql" $theme_args '/status="open"')
-  if [ "$theme_out" != "$theme_expected" ]; then
-    printf 'clql smoke: theme compatibility output mismatch for %s: %s\n' \
+  if theme_out=$(printf '%s' '{"status":"open"}' | "$clql" $theme_args '/status="open"' 2>&1); then
+    printf 'clql smoke: unsupported theme flag unexpectedly succeeded for %s: %s\n' \
       "$theme_args" "$theme_out" >&2
-    printf 'clql smoke: expected: %s\n' "$theme_expected" >&2
     exit 1
   fi
+  case "$theme_out" in
+    *"unknown option"*) ;;
+    *)
+      printf 'clql smoke: unsupported theme flag diagnostic mismatch for %s: %s\n' \
+        "$theme_args" "$theme_out" >&2
+      exit 1
+      ;;
+  esac
 done
+
+if "$clql" --help | grep -E -- '(^|[[:space:]])(-t|--theme)([[:space:],=]|$)' >/dev/null; then
+  printf 'clql smoke: help still advertises unsupported theme flag\n' >&2
+  exit 1
+fi
+if "$clql" --help | grep -F 'colorized JSON output is not implemented' >/dev/null; then
+  printf 'clql smoke: help still documents colorized JSON caveat\n' >&2
+  exit 1
+fi

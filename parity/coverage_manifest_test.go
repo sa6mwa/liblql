@@ -20,7 +20,7 @@ type cliParityCoverageRequirement struct {
 var cliParityCoverageManifest = []cliParityCoverageRequirement{
 	{"cli", "version output", []string{"TestCLQLVersionSmoke"}},
 	{"cli", "help output", []string{"TestCLQLHelpSmoke"}},
-	{"cli", "prettyx theme compatibility no-op", []string{"TestCLQLThemeFlagCompatibility"}},
+	{"cli", "unsupported prettyx theme flags are rejected", []string{"TestCLQLThemeFlagUnsupported"}},
 	{"cli", "long boolean option value compatibility", []string{"TestCLQLBooleanFlagValueCompatibility"}},
 	{"cli", "short option cluster compatibility", []string{"TestCLQLShortOptionClusterCompatibility"}},
 	{"cli", "end-of-options positional compatibility", []string{"TestCLQLEndOfOptionsCompatibility"}},

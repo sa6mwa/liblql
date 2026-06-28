@@ -204,15 +204,24 @@ func TestCLQLHelpSmoke(t *testing.T) {
 				[]byte("-m, --mutate <expr>"),
 				[]byte("-i, --inline[=bool]"),
 				[]byte("-F, --enable-file-mutations[=bool]"),
-				[]byte("-t, --theme <name>"),
+				[]byte("Commands:"),
 				[]byte("Selector examples (shorthand):"),
 				[]byte("Selector examples (full LQL):"),
 				[]byte("Projection and mutation examples:"),
-				[]byte("colorized JSON output is not implemented"),
 			}
 			for _, needle := range needles {
 				if !bytes.Contains(out, needle) {
 					t.Fatalf("clql %s help missing %q: %q", flag, needle, string(out))
+				}
+			}
+			rejected := [][]byte{
+				[]byte("-t, --theme"),
+				[]byte("--theme"),
+				[]byte("colorized JSON output is not implemented"),
+			}
+			for _, needle := range rejected {
+				if bytes.Contains(out, needle) {
+					t.Fatalf("clql %s help advertises unsupported %q: %q", flag, needle, string(out))
 				}
 			}
 		})
@@ -909,7 +918,7 @@ func TestCLQLCompactSelectionParity(t *testing.T) {
 	}
 }
 
-func TestCLQLThemeFlagCompatibility(t *testing.T) {
+func TestCLQLThemeFlagUnsupported(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
 		t.Skip("CLQL_PATH not set")
@@ -936,42 +945,14 @@ func TestCLQLThemeFlagCompatibility(t *testing.T) {
 			cmd := exec.Command(clql, cmdArgs...)
 			cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
 			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("clql theme flag failed: %v out=%q", err, string(out))
-			}
-			if string(out) != "{\"status\":\"open\"}\n" {
-				t.Fatalf("theme flag changed compact output: %q", string(out))
-			}
-		})
-	}
-	invalidCases := []struct {
-		name string
-		args []string
-	}{
-		{"long separate", []string{"-c", "--theme", "definitely-not-a-theme"}},
-		{"long equals", []string{"-c", "--theme=definitely-not-a-theme"}},
-		{"short separate", []string{"-c", "-t", "definitely-not-a-theme"}},
-		{"short joined", []string{"-c", "-tdefinitely-not-a-theme"}},
-		{"short equals", []string{"-c", "-t=definitely-not-a-theme"}},
-		{"clustered short joined", []string{"-ctdefinitely-not-a-theme"}},
-		{"clustered short equals", []string{"-ct=definitely-not-a-theme"}},
-	}
-	for _, tc := range invalidCases {
-		tc := tc
-		t.Run("invalid "+tc.name, func(t *testing.T) {
-			cmdArgs := append([]string{}, tc.args...)
-			cmdArgs = append(cmdArgs, `/status="open"`)
-			cmd := exec.Command(clql, cmdArgs...)
-			cmd.Stdin = bytes.NewBufferString(`{"status":"open"}`)
-			out, err := cmd.CombinedOutput()
 			if err == nil {
-				t.Fatalf("clql invalid theme unexpectedly succeeded: out=%q", string(out))
+				t.Fatalf("clql unsupported theme flag unexpectedly succeeded: out=%q", string(out))
 			}
 			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 2 {
-				t.Fatalf("clql invalid theme exit mismatch: err=%v out=%q", err, string(out))
+				t.Fatalf("clql unsupported theme exit mismatch: err=%v out=%q", err, string(out))
 			}
-			if !bytes.Contains(out, []byte("unknown theme")) {
-				t.Fatalf("clql invalid theme diagnostic mismatch: out=%q", string(out))
+			if !bytes.Contains(out, []byte("unknown option")) {
+				t.Fatalf("clql unsupported theme diagnostic mismatch: out=%q", string(out))
 			}
 		})
 	}
