@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 #define LQL_EVAL_CONTAINS_TAIL_CAP 8192u
+#define LQL_EVAL_PREFIX_CAP 8192u
 
 typedef struct eval_doc {
   lql_allocator *allocator;
@@ -31,9 +32,14 @@ typedef struct eval_doc {
   size_t val_cap;
   int scalar_interested;
   int scalar_stream_contains;
+  int scalar_stream_prefix;
+  size_t scalar_len;
   size_t contains_tail_len;
   size_t contains_tail_need;
   char contains_tail[LQL_EVAL_CONTAINS_TAIL_CAP];
+  size_t prefix_len;
+  size_t prefix_need;
+  char prefix_buf[LQL_EVAL_PREFIX_CAP];
   int *container_types;
   size_t *container_depths;
   size_t container_count;
@@ -253,8 +259,12 @@ static void reset_doc(eval_doc *doc) {
   }
   doc->scalar_interested = 0;
   doc->scalar_stream_contains = 0;
+  doc->scalar_stream_prefix = 0;
+  doc->scalar_len = 0u;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
+  doc->prefix_len = 0u;
+  doc->prefix_need = 0u;
   doc->container_count = 0u;
   doc->root_kind = '\0';
 }
@@ -757,11 +767,19 @@ static size_t selector_contains_max_needle(const lql_selector *selector) {
   return max_len;
 }
 
+static size_t selector_prefix_value_len(const lql_selector *selector) {
+  if (selector->value == NULL) {
+    return 0u;
+  }
+  return strlen(selector->value);
+}
+
 static int selector_string_buffer_required(const eval_doc *doc,
                                            const lql_selector *selector,
                                            const lonejson_value_path *path) {
   size_t i;
   size_t max_needle;
+  size_t prefix_len;
 
   if (selector == NULL) {
     return 0;
@@ -782,6 +800,10 @@ static int selector_string_buffer_required(const eval_doc *doc,
   case LQL_SELECTOR_KIND_ICONTAINS:
     max_needle = selector_contains_max_needle(selector);
     return max_needle > LQL_EVAL_CONTAINS_TAIL_CAP + 1u;
+  case LQL_SELECTOR_KIND_PREFIX:
+  case LQL_SELECTOR_KIND_IPREFIX:
+    prefix_len = selector_prefix_value_len(selector);
+    return prefix_len > LQL_EVAL_PREFIX_CAP;
   case LQL_SELECTOR_KIND_EXISTS:
     return 0;
   default:
@@ -830,6 +852,47 @@ static int selector_contains_stream_interested(const eval_doc *doc,
   return 1;
 }
 
+static int selector_prefix_stream_interested(const eval_doc *doc,
+                                             const lql_selector *selector,
+                                             const lonejson_value_path *path,
+                                             size_t *prefix_need) {
+  size_t i;
+  size_t child_prefix_need;
+  size_t value_len;
+  int found;
+
+  if (selector == NULL) {
+    return 0;
+  }
+  if (!selector_is_predicate(selector)) {
+    found = 0;
+    for (i = 0u; i < selector->child_count; ++i) {
+      child_prefix_need = 0u;
+      if (selector_prefix_stream_interested(doc, &selector->children[i], path,
+                                            &child_prefix_need)) {
+        found = 1;
+        if (child_prefix_need > *prefix_need) {
+          *prefix_need = child_prefix_need;
+        }
+      }
+    }
+    return found;
+  }
+  if ((selector->kind != LQL_SELECTOR_KIND_PREFIX &&
+       selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
+      !path_matches(doc, selector->field, path)) {
+    return 0;
+  }
+  value_len = selector_prefix_value_len(selector);
+  if (value_len > LQL_EVAL_PREFIX_CAP) {
+    return 0;
+  }
+  if (value_len > *prefix_need) {
+    *prefix_need = value_len;
+  }
+  return 1;
+}
+
 static int scalar_path_buffer_required(const eval_doc *doc,
                                        const lonejson_value_path *path) {
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
@@ -845,6 +908,15 @@ static int scalar_path_contains_stream_interested(
   }
   return selector_contains_stream_interested(doc, doc->selector, path,
                                             tail_need);
+}
+
+static int scalar_path_prefix_stream_interested(
+    const eval_doc *doc, const lonejson_value_path *path, size_t *prefix_need) {
+  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return 0;
+  }
+  return selector_prefix_stream_interested(doc, doc->selector, path,
+                                          prefix_need);
 }
 
 static void observe_contains_stream_begin(eval_doc *doc,
@@ -884,6 +956,30 @@ static void observe_contains_stream_begin(eval_doc *doc,
   }
 }
 
+static void observe_prefix_stream_begin(eval_doc *doc,
+                                        const lql_selector *selector,
+                                        const lonejson_value_path *path) {
+  size_t i;
+
+  if (selector == NULL || doc->hits == NULL) {
+    return;
+  }
+  if (!selector_is_predicate(selector)) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      observe_prefix_stream_begin(doc, &selector->children[i], path);
+    }
+    return;
+  }
+  if ((selector->kind != LQL_SELECTOR_KIND_PREFIX &&
+       selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
+      !path_matches(doc, selector->field, path)) {
+    return;
+  }
+  if (!selector->value_set && selector->value == NULL) {
+    doc->hits[selector->hit_index] = 1u;
+  }
+}
+
 static void observe_scalar_exists_begin(eval_doc *doc,
                                         const lql_selector *selector,
                                         const lonejson_value_path *path) {
@@ -900,6 +996,48 @@ static void observe_scalar_exists_begin(eval_doc *doc,
   }
   if (selector->kind == LQL_SELECTOR_KIND_EXISTS &&
       path_matches(doc, selector->field, path)) {
+    doc->hits[selector->hit_index] = 1u;
+  }
+}
+
+static void observe_prefix_stream_end(eval_doc *doc,
+                                      const lql_selector *selector,
+                                      const lonejson_value_path *path) {
+  size_t i;
+  size_t value_len;
+  int ignore_case;
+
+  if (selector == NULL || doc->hits == NULL) {
+    return;
+  }
+  if (!selector_is_predicate(selector)) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      observe_prefix_stream_end(doc, &selector->children[i], path);
+    }
+    return;
+  }
+  if ((selector->kind != LQL_SELECTOR_KIND_PREFIX &&
+       selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
+      !path_matches(doc, selector->field, path) ||
+      doc->hits[selector->hit_index] != 0u) {
+    return;
+  }
+  value_len = selector_prefix_value_len(selector);
+  if (doc->scalar_len < value_len || doc->prefix_len < value_len) {
+    return;
+  }
+  ignore_case = selector->kind == LQL_SELECTOR_KIND_IPREFIX ||
+                selector->ignore_case;
+  if (ignore_case) {
+    if (ascii_case_equal_prefix(doc->prefix_buf,
+                                selector->value == NULL ? "" :
+                                                          selector->value,
+                                value_len)) {
+      doc->hits[selector->hit_index] = 1u;
+    }
+  } else if (memcmp(doc->prefix_buf,
+                    selector->value == NULL ? "" : selector->value,
+                    value_len) == 0) {
     doc->hits[selector->hit_index] = 1u;
   }
 }
@@ -1028,6 +1166,20 @@ static void contains_stream_update_tail(eval_doc *doc, const char *data,
   doc->contains_tail_len = keep_len;
 }
 
+static void prefix_stream_update(eval_doc *doc, const char *data, size_t len) {
+  size_t keep_len;
+
+  if (doc->prefix_need == 0u || doc->prefix_len >= doc->prefix_need) {
+    return;
+  }
+  keep_len = doc->prefix_need - doc->prefix_len;
+  if (keep_len > len) {
+    keep_len = len;
+  }
+  memcpy(doc->prefix_buf + doc->prefix_len, data, keep_len);
+  doc->prefix_len += keep_len;
+}
+
 static void observe_value(eval_doc *doc, const lonejson_value_path *path,
                           const char *value, int is_number, int is_container,
                           int is_null) {
@@ -1112,21 +1264,30 @@ static lonejson_status on_string_begin(void *user,
   eval_doc *doc = (eval_doc *)user;
   (void)error;
   doc->val_len = 0u;
+  doc->scalar_len = 0u;
   if (doc->val_buf != NULL && doc->val_cap != 0u) {
     doc->val_buf[0] = '\0';
   }
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
+  doc->prefix_len = 0u;
+  doc->prefix_need = 0u;
   doc->scalar_interested = scalar_path_buffer_required(doc, path);
   if (!doc->scalar_interested) {
     observe_scalar_exists_begin(doc, doc->selector, path);
     doc->scalar_stream_contains = scalar_path_contains_stream_interested(
         doc, path, &doc->contains_tail_need);
+    doc->scalar_stream_prefix = scalar_path_prefix_stream_interested(
+        doc, path, &doc->prefix_need);
     if (doc->scalar_stream_contains) {
       observe_contains_stream_begin(doc, doc->selector, path);
     }
+    if (doc->scalar_stream_prefix) {
+      observe_prefix_stream_begin(doc, doc->selector, path);
+    }
   } else {
     doc->scalar_stream_contains = 0;
+    doc->scalar_stream_prefix = 0;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -1136,12 +1297,15 @@ static lonejson_status on_string_chunk(void *user,
                                        const char *data, size_t len,
                                        lonejson_error *error) {
   eval_doc *doc = (eval_doc *)user;
-  (void)path;
   (void)error;
+  doc->scalar_len += len;
   if (!doc->scalar_interested) {
     if (doc->scalar_stream_contains) {
       observe_contains_stream_chunk(doc, doc->selector, path, data, len);
       contains_stream_update_tail(doc, data, len);
+    }
+    if (doc->scalar_stream_prefix) {
+      prefix_stream_update(doc, data, len);
     }
     return LONEJSON_STATUS_OK;
   }
@@ -1160,15 +1324,21 @@ static lonejson_status on_string_end(void *user,
   }
   if (doc->scalar_interested) {
     observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 0, 0, 0);
+  } else if (doc->scalar_stream_prefix) {
+    observe_prefix_stream_end(doc, doc->selector, path);
   }
   doc->val_len = 0u;
+  doc->scalar_len = 0u;
   if (doc->val_buf != NULL && doc->val_cap != 0u) {
     doc->val_buf[0] = '\0';
   }
   doc->scalar_interested = 0;
   doc->scalar_stream_contains = 0;
+  doc->scalar_stream_prefix = 0;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
+  doc->prefix_len = 0u;
+  doc->prefix_need = 0u;
   return LONEJSON_STATUS_OK;
 }
 
@@ -1195,15 +1365,21 @@ static lonejson_status on_number_end(void *user,
   }
   if (doc->scalar_interested) {
     observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 1, 0, 0);
+  } else if (doc->scalar_stream_prefix) {
+    observe_prefix_stream_end(doc, doc->selector, path);
   }
   doc->val_len = 0u;
+  doc->scalar_len = 0u;
   if (doc->val_buf != NULL && doc->val_cap != 0u) {
     doc->val_buf[0] = '\0';
   }
   doc->scalar_interested = 0;
   doc->scalar_stream_contains = 0;
+  doc->scalar_stream_prefix = 0;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
+  doc->prefix_len = 0u;
+  doc->prefix_need = 0u;
   return LONEJSON_STATUS_OK;
 }
 

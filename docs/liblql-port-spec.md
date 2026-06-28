@@ -171,11 +171,12 @@ selector state, caller-provided buffers, small parser state, or documented
 spooling handles rather than total input size.
 Selected scalar predicates must not silently materialize full values when their
 semantics can be decided incrementally. `contains` and `icontains` string
-predicates are expected to evaluate from lonejson scalar chunks with bounded
-suffix state for cross-chunk matches. Whole-scalar buffering is acceptable only
-for predicates whose semantics currently require the complete scalar text, such
-as exact equality, membership, temporal parsing, numeric range parsing, and
-prefix checks until those predicates receive equivalent streaming evaluators.
+predicates evaluate from lonejson scalar chunks with bounded suffix state for
+cross-chunk matches. `prefix` and `iprefix` predicates retain only a bounded
+leading slice sufficient to decide the prefix. Whole-scalar buffering is
+acceptable only for predicates whose semantics currently require the complete
+scalar text, such as exact equality, membership, temporal parsing, and numeric
+range parsing.
 
 ## Selector AST Public API
 
@@ -1202,8 +1203,9 @@ Current implementation status:
   and marks selector term hits as values stream through, rather than building a
   per-candidate scalar document list; scalar chunk buffering is gated by
   selector-relevant paths, unrelated large string and number values are not
-  accumulated merely because they appear in a candidate, and selected
-  `contains`/`icontains` string predicates stream through bounded suffix state
+  accumulated merely because they appear in a candidate, selected
+  `contains`/`icontains` string predicates stream through bounded suffix state,
+  and selected `prefix`/`iprefix` predicates retain only a bounded leading slice
   instead of retaining the full selected scalar;
 - first C selector parse/evaluate subset exists, including
   `contains.any`, `icontains.any`, `in.any`, wildcard selector paths,
