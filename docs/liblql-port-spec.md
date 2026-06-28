@@ -1700,22 +1700,25 @@ Current implementation status:
   verification when package verification runs in a git worktree, and
   extracted-tree configure/build/test smoke; `lql.package-source-manifest-fixtures`
   proves stale source archive manifests are rejected;
-- host `clql` archive production carries required lonejson runtime libraries
-  and verifies extracted `clql --version` through a relocatable runpath; `clql`
-  dependency provenance marks lonejson as bundled runtime and package
-  verification requires the bundled lonejson license, while the liblql SDK
-  manifest marks lonejson as an external SDK dependency and checks the
-  CMake/pkg-config dependency declarations;
+- host `clql` archive production ships a single executable and verifies that
+  `clql` has no dynamic `liblql` or `liblonejson` dependency. On Linux release
+  builds request a static executable when the target compiler supports it; on
+  Darwin, `liblql` and lonejson are linked into `clql` while normal system
+  libraries remain dynamic. `clql` dependency provenance marks lonejson as a
+  bundled static runtime component and package verification requires the
+  bundled lonejson license, while the liblql SDK manifest marks lonejson as an
+  external SDK dependency and checks the CMake/pkg-config dependency
+  declarations;
 - `make release-matrix` selects target-correct Linux compilers, acquires the
   matching lonejson SDK archive for each target, builds and verifies
   `liblql` and `clql` artifacts for `x86_64`, `aarch64`, and `armhf`
   GNU/musl targets, and fails package verification if packaged shared
   libraries or `clql` binaries do not match their target architecture.
   `arm64-apple-darwin` packaging uses the CMake Darwin system preset, an
-  explicit `@rpath` install name for `liblql`, an executable-relative
-  `@executable_path/../lib` rpath for `clql`, no routine final-artifact Mach-O
-  mutation, and target-correct `otool` verification when the osxcross toolchain
-  is available.
+  explicit `@rpath` install name for SDK `liblql`, a static `clql`
+  project/dependency closure with only normal system dynamic libraries, no
+  routine final-artifact Mach-O mutation, and target-correct `otool`
+  verification when the osxcross toolchain is available.
 
 The repository must not claim full LQL parity until the verification gates prove
 it.

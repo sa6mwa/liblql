@@ -134,7 +134,8 @@ package_one() {
 
   "$ROOT_DIR/scripts/deps.sh" "$target_id"
   reset_build_dir_if_compiler_changed "$build_dir" "$cc" "$target_id"
-  (cd "$ROOT_DIR" && CC="$cc" run_with_tool_path "$cc" cmake --preset "$preset")
+  (cd "$ROOT_DIR" && CC="$cc" run_with_tool_path "$cc" cmake \
+    --preset "$preset" -DLQL_CLQL_STATIC_LINK=ON)
   (cd "$ROOT_DIR" && run_with_tool_path "$cc" cmake --build --preset "$preset")
   discover_package_tools "$target_id"
   rm -rf "$work_dir"
@@ -147,15 +148,9 @@ package_one() {
   write_dependency_manifest "$lib_root/share/$PROJECT/dependencies.json" \
     "$target_id" false "external-sdk"
 
-  mkdir -p "$cli_root/bin" "$cli_root/lib" "$cli_root/share/doc/$CLI_PROJECT" \
+  mkdir -p "$cli_root/bin" "$cli_root/share/doc/$CLI_PROJECT" \
     "$cli_root/share/doc/lonejson" "$cli_root/share/$CLI_PROJECT"
   cp "$install_root/bin/clql" "$cli_root/bin/clql"
-  if ls "$dep_root"/lib/liblonejson.so* >/dev/null 2>&1; then
-    cp -P "$dep_root"/lib/liblonejson.so* "$cli_root/lib/"
-  fi
-  if ls "$dep_root"/lib/liblonejson*.dylib* >/dev/null 2>&1; then
-    cp -P "$dep_root"/lib/liblonejson*.dylib* "$cli_root/lib/"
-  fi
   cp "$ROOT_DIR/LICENSE" "$cli_root/share/doc/$CLI_PROJECT/LICENSE"
   cp "$ROOT_DIR/README.md" "$cli_root/share/doc/$CLI_PROJECT/README.md"
   if [ -f "$dep_root/share/doc/liblonejson/LICENSE" ]; then
@@ -553,6 +548,51 @@ verify_macho_runtime_paths() {
     fi
   done <"$macho_files"
   rm -f "$macho_files" "$macho_output" "$macho_values"
+}
+
+verify_clql_static_dependency_closure() {
+  artifact=$1
+  target_id=$2
+  file=$3
+  readelf_tool=$4
+  otool_tool=$5
+  deps_output="${TMPDIR:-/tmp}/lql-package-clql-deps.$$"
+
+  case "$target_id" in
+    *apple-darwin)
+      if [ -z "$otool_tool" ] || ! command -v "$otool_tool" >/dev/null 2>&1; then
+        printf 'package-verify: otool unavailable for clql static dependency inspection: %s\n' "$artifact" >&2
+        exit 1
+      fi
+      "$otool_tool" -L "$file" >"$deps_output"
+      if "$otool_tool" -l "$file" | awk '$1 == "cmd" && $2 == "LC_RPATH" { found = 1 } END { exit found ? 0 : 1 }'; then
+        printf 'package-verify: static clql must not carry Darwin LC_RPATH in %s: %s\n' \
+          "$artifact" "$file" >&2
+        rm -f "$deps_output"
+        exit 1
+      fi
+      ;;
+    *linux-*)
+      if [ -z "$readelf_tool" ] || ! command -v "$readelf_tool" >/dev/null 2>&1; then
+        printf 'package-verify: readelf unavailable for clql static dependency inspection: %s\n' "$artifact" >&2
+        exit 1
+      fi
+      "$readelf_tool" -d "$file" >"$deps_output" 2>/dev/null || : >"$deps_output"
+      ;;
+    *)
+      rm -f "$deps_output"
+      return
+      ;;
+  esac
+
+  if grep -E 'lib(lql|lonejson)[.][^ /)]*' "$deps_output" >/dev/null; then
+    printf 'package-verify: clql must not have dynamic liblql/lonejson dependencies in %s: %s\n' \
+      "$artifact" "$file" >&2
+    grep -E 'lib(lql|lonejson)[.][^ /)]*' "$deps_output" >&2
+    rm -f "$deps_output"
+    exit 1
+  fi
+  rm -f "$deps_output"
 }
 
 verify_target_file() {
@@ -1065,16 +1105,18 @@ verify_one_archive() {
       test -x "$root/bin/clql"
       verify_target_file "$artifact" "$target_id" "$root/bin/clql" \
         "$LQL_TOOL_FILE"
-      test -d "$root/lib"
       test -f "$root/share/doc/clql/LICENSE"
       test -f "$root/share/doc/clql/README.md"
       verify_dependency_manifest "$artifact" "$root" "$CLI_PROJECT" "$target_id" \
         true "runtime"
+      verify_clql_static_dependency_closure "$artifact" "$target_id" \
+        "$root/bin/clql" "$LQL_TOOL_READELF" "$LQL_TOOL_OTOOL"
       if is_host_smoke_target "${expected#${CLI_PROJECT}-${version_value}-}"; then
         "$root/bin/clql" --version | grep -qx "clql $version_value"
       fi
-      if [ -e "$root/include" ] || find "$root/lib" -name 'liblql*' | grep . >/dev/null; then
-        printf 'package-verify: clql archive must not contain SDK headers or liblql libraries\n' >&2
+      if [ -e "$root/include" ] ||
+         find "$root" -type f \( -name 'liblql*' -o -name 'liblonejson*.so*' -o -name 'liblonejson*.dylib*' \) | grep . >/dev/null; then
+        printf 'package-verify: clql archive must not contain SDK headers or dynamic liblql/lonejson libraries\n' >&2
         exit 1
       fi
       ;;
@@ -1371,6 +1413,91 @@ expect_macho_runtime_path_failures() {
   fi
 }
 
+expect_clql_static_dependency_failures() {
+  tmp_dir=$1
+  fixture="$tmp_dir/clql-static-deps"
+  fake_readelf="$tmp_dir/clql-fake-readelf"
+  fake_otool="$tmp_dir/clql-fake-otool"
+  output="$tmp_dir/clql-static-deps.out"
+
+  mkdir -p "$fixture/bin"
+  printf 'fake executable\n' >"$fixture/bin/clql"
+
+  cat >"$fake_readelf" <<'EOF'
+#!/bin/sh
+printf ' 0x0000000000000001 (NEEDED) Shared library: [liblonejson.so.19]\n'
+EOF
+  chmod +x "$fake_readelf"
+  if (verify_clql_static_dependency_closure \
+    clql-0.0.0-x86_64-linux-gnu.tar.gz x86_64-linux-gnu \
+    "$fixture/bin/clql" "$fake_readelf" "") >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly accepted dynamic clql Linux dependency\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'clql must not have dynamic liblql/lonejson dependencies' \
+    "$output" >/dev/null; then
+    printf 'package privacy fixture did not report dynamic clql Linux dependency\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+
+  cat >"$fake_otool" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -L)
+    printf '%s:\n' "$2"
+    printf '\t@rpath/liblonejson.19.dylib (compatibility version 19.0.0, current version 0.35.1)\n'
+    printf '\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)\n'
+    ;;
+  -l)
+    exit 0
+    ;;
+esac
+EOF
+  chmod +x "$fake_otool"
+  if (verify_clql_static_dependency_closure \
+    clql-0.0.0-arm64-apple-darwin.tar.gz arm64-apple-darwin \
+    "$fixture/bin/clql" "" "$fake_otool") >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly accepted dynamic clql Darwin dependency\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'clql must not have dynamic liblql/lonejson dependencies' \
+    "$output" >/dev/null; then
+    printf 'package privacy fixture did not report dynamic clql Darwin dependency\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+
+  cat >"$fake_otool" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -L)
+    printf '%s:\n' "$2"
+    printf '\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)\n'
+    ;;
+  -l)
+    printf 'Load command 0\n'
+    printf '          cmd LC_RPATH\n'
+    printf '      cmdsize 40\n'
+    printf '         path @executable_path/../lib (offset 12)\n'
+    ;;
+esac
+EOF
+  chmod +x "$fake_otool"
+  if (verify_clql_static_dependency_closure \
+    clql-0.0.0-arm64-apple-darwin.tar.gz arm64-apple-darwin \
+    "$fixture/bin/clql" "" "$fake_otool") >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly accepted static clql Darwin rpath\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'static clql must not carry Darwin LC_RPATH' \
+    "$output" >/dev/null; then
+    printf 'package privacy fixture did not report static clql Darwin rpath\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+}
+
 expect_strip_tool_generation() {
   tmp_dir=$1
   fixture="$tmp_dir/strip-generation"
@@ -1430,6 +1557,7 @@ check_package_privacy_fixtures() {
   expect_target_file_tool_failure "$tmp_dir"
   expect_readelf_tool_failure "$tmp_dir"
   expect_macho_runtime_path_failures "$tmp_dir"
+  expect_clql_static_dependency_failures "$tmp_dir"
   expect_strip_tool_generation "$tmp_dir"
 }
 
