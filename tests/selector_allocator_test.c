@@ -1343,6 +1343,164 @@ static int expect_selector_prefix_large_blob_allocation_stable(void) {
   return 0;
 }
 
+static int expect_selector_exact_large_blob_allocation_stable(void) {
+  static char small_doc[128];
+  static char large_doc[70064];
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  int matched;
+  size_t small_peak;
+
+  if (!make_blob_doc(small_doc, sizeof(small_doc), 32u) ||
+      !make_blob_doc(large_doc, sizeof(large_doc), 69800u)) {
+    printf("selector exact blob fixture construction failed\n");
+    return 1;
+  }
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("selector exact blob receiver failed: %s\n", error.message);
+    return 1;
+  }
+  selector = NULL;
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "eq{field=/blob,value=missing}", &selector,
+                           &error);
+  if (st != LQL_STATUS_OK || selector == NULL) {
+    printf("selector exact blob parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  matched = 1;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, selector, small_doc, strlen(small_doc), &matched,
+                         &error);
+  if (st != LQL_STATUS_OK || matched) {
+    printf("selector exact blob small eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  small_peak = counter.peak_outstanding_bytes;
+
+  matched = 1;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, selector, large_doc, strlen(large_doc), &matched,
+                         &error);
+  if (st != LQL_STATUS_OK || matched) {
+    printf("selector exact blob large eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.peak_outstanding_bytes > small_peak + 32768u) {
+    printf("selector exact selected blob peak grew with input: small=%lu "
+           "large=%lu\n",
+           (unsigned long)small_peak,
+           (unsigned long)counter.peak_outstanding_bytes);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("selector exact blob allocator cleanup imbalance: "
+           "outstanding=%lu destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
+static int expect_selector_in_large_blob_allocation_stable(void) {
+  static char small_doc[128];
+  static char large_doc[70064];
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  int matched;
+  size_t small_peak;
+
+  if (!make_blob_doc(small_doc, sizeof(small_doc), 32u) ||
+      !make_blob_doc(large_doc, sizeof(large_doc), 69800u)) {
+    printf("selector in blob fixture construction failed\n");
+    return 1;
+  }
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("selector in blob receiver failed: %s\n", error.message);
+    return 1;
+  }
+  selector = NULL;
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "in{field=/blob,any=missing|other}",
+                           &selector, &error);
+  if (st != LQL_STATUS_OK || selector == NULL) {
+    printf("selector in blob parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  matched = 1;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, selector, small_doc, strlen(small_doc), &matched,
+                         &error);
+  if (st != LQL_STATUS_OK || matched) {
+    printf("selector in blob small eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  small_peak = counter.peak_outstanding_bytes;
+
+  matched = 1;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, selector, large_doc, strlen(large_doc), &matched,
+                         &error);
+  if (st != LQL_STATUS_OK || matched) {
+    printf("selector in blob large eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.peak_outstanding_bytes > small_peak + 32768u) {
+    printf("selector in selected blob peak grew with input: small=%lu "
+           "large=%lu\n",
+           (unsigned long)small_peak,
+           (unsigned long)counter.peak_outstanding_bytes);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("selector in blob allocator cleanup imbalance: "
+           "outstanding=%lu destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
 static int expect_projection_parse_failure_cleans_allocator(void) {
   counting_allocator counter;
   lql *ctx;
@@ -1394,6 +1552,8 @@ int main(void) {
   failures += expect_selector_parse_failure_cleans_allocator();
   failures += expect_selector_contains_large_blob_allocation_stable();
   failures += expect_selector_prefix_large_blob_allocation_stable();
+  failures += expect_selector_exact_large_blob_allocation_stable();
+  failures += expect_selector_in_large_blob_allocation_stable();
   failures += expect_projection_success_uses_allocator();
   failures += expect_projection_unselected_large_blob_allocation_stable();
   failures += expect_projection_parse_failure_cleans_allocator();

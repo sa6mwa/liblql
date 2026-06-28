@@ -737,6 +737,8 @@ static int set_date_bound(lql_selector_parser *ctx, lql_selector *selector,
   return 1;
 }
 
+static void cache_selector_value_temporal(lql_selector *selector);
+
 static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
                                    lql_selector_kind kind, lql_selector *selector,
                                    lql_error *error) {
@@ -1013,6 +1015,7 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
                   "date selector requires at least one bound");
     goto fail_after_tokens;
   }
+  cache_selector_value_temporal(selector);
   dispose_seen_key_values(ctx, seen_field, seen_value, seen_any,
                           seen_ignore_case, seen_gt, seen_gte, seen_lt,
                           seen_lte, seen_after, seen_before, seen_since);
@@ -1051,6 +1054,16 @@ static int string_predicate_is_match_all_alias(lql_selector_kind kind,
     return 1;
   }
   return 0;
+}
+
+static void cache_selector_value_temporal(lql_selector *selector) {
+  selector->value_is_temporal = 0;
+  if ((selector->kind == LQL_SELECTOR_KIND_EQ ||
+       selector->kind == LQL_SELECTOR_KIND_NE) &&
+      selector->value != NULL &&
+      lql_parse_temporal_literal(selector->value, &selector->temporal_eq)) {
+    selector->value_is_temporal = 1;
+  }
 }
 
 static lql_status parse_exists_body(lql_selector_parser *ctx, const char *body,
@@ -1190,6 +1203,7 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
       memset(&child, 0, sizeof(child));
       child = *out;
       child.kind = LQL_SELECTOR_KIND_EQ;
+      cache_selector_value_temporal(&child);
       memset(out, 0, sizeof(*out));
       out->children = (lql_selector *)ctx->allocator->calloc(ctx->allocator, 1u,
                                                          sizeof(lql_selector));
@@ -1224,6 +1238,9 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
       }
     } else {
       out->kind = LQL_SELECTOR_KIND_EQ;
+    }
+    if (out->kind == LQL_SELECTOR_KIND_EQ) {
+      cache_selector_value_temporal(out);
     }
     ctx->allocator->destroy(ctx->allocator, copy);
     return LQL_STATUS_OK;
@@ -1632,6 +1649,7 @@ static lql_status selector_json_validate_predicate(selector_json_state *state,
                   "date selector requires at least one bound");
     return LQL_STATUS_PARSE_ERROR;
   }
+  cache_selector_value_temporal(selector);
   return LQL_STATUS_OK;
 }
 
@@ -2659,6 +2677,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
     selector.value_set = term->value_present ? 1 : 0;
   }
   selector.ignore_case = term->ignore_case ? 1 : 0;
+  cache_selector_value_temporal(&selector);
   return selector_build_result(&ctx, &selector, out, error);
 }
 

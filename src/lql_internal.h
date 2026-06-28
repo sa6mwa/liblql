@@ -114,6 +114,7 @@ struct lql_selector {
   char *field;
   char *value;
   int value_set;
+  int value_is_temporal;
   int ignore_case;
   char **any;
   size_t *any_lens;
