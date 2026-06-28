@@ -7,10 +7,14 @@ INSTALL ?= install
 help:
 	@printf '%s\n' \
 	  'make deps-debug              fetch host lonejson SDK' \
+	  'make deps-release            fetch release lonejson SDK' \
+	  'make deps-cross              fetch all release lonejson SDKs' \
 	  'make build                   build static clql, preferring musl then GNU' \
 	  'make build-debug             configure and build debug preset' \
+	  'make build-release           configure and build host GNU release preset' \
 	  'make install                 install built clql to $${PREFIX:-/usr/local}/bin' \
 	  'make test                    run fast C/API tests' \
+	  'make test-debug              alias for fast C/API tests' \
 	  'make parity-test             run Go-backed parity tests' \
 	  'make test-all                run tests, fuzz smoke, sanitizers, and Lua smoke tests' \
 	  'make asan                    run ASan/UBSan tests' \
@@ -23,15 +27,28 @@ help:
 	  'make bench-lockd-perf-check run lockd-specific C performance gates' \
 	  'make bench-memory-check     run scalable streaming and C mutation memory gates' \
 	  'make bench-1g-check         run 1 GiB/128 MiB streaming memory gate' \
+	  'make benchmarks-go          run Go benchmark implementation' \
+	  'make benchmarks-c           run C benchmark implementation' \
+	  'make benchmarks-lua         run Lua benchmark implementation' \
 	  'make benchmarks-parity      require Go/C/Lua benchmark implementations' \
 	  'make format                  clang-format project C sources' \
 	  'make package                 build host package artifacts' \
+	  'make package-source          build source archive' \
+	  'make package-source-smoke    build and verify source archive' \
+	  'make package-checksums       write checksum manifest' \
 	  'make release-lua-artifacts   build Lua source, rockspec, and source rock' \
 	  'make package-verify          verify generated packages' \
+	  'make verify-release-archives verify checksum-listed release archives' \
+	  'make verify-release-privacy  verify release privacy and relocatability' \
+	  'make finalize-slice          format and run fast tests' \
+	  'make prerelease              deterministic local prerelease gate' \
+	  'make prerelease-hardening    expensive prerelease gate plus release matrix' \
 	  'make release-matrix          build release target matrix where toolchains exist' \
 	  'make release                 clean, test, benchmark, package, and verify release artifacts' \
+	  'make print-release-version   print resolved release version' \
 	  'make print-release-assets    print checksum-listed release upload assets' \
-	  'make clean                   remove generated build/dist/cache/Lua state'
+	  'make clean                   remove generated build/dist/cache/Lua state' \
+	  'make clean-dist              remove generated dist artifacts'
 
 deps-debug:
 	@./scripts/deps.sh x86_64-linux-gnu

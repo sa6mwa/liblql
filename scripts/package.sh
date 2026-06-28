@@ -267,22 +267,22 @@ package_source() {
   version_value=$(version)
   work_dir="$ROOT_DIR/build/package/source"
   source_root="$work_dir/${PROJECT}-${version_value}"
-  manifest="$work_dir/source-files.txt"
+  package_source_manifest="$work_dir/source-files.txt"
 
   rm -rf "$work_dir"
   mkdir -p "$source_root"
   if [ -d "$ROOT_DIR/.git" ]; then
-    (cd "$ROOT_DIR" && git ls-files) >"$manifest"
+    (cd "$ROOT_DIR" && git ls-files) >"$package_source_manifest"
   elif [ -f "$ROOT_DIR/RELEASE_MANIFEST" ]; then
-    sed '/^VERSION$/d;/^RELEASE_MANIFEST$/d' "$ROOT_DIR/RELEASE_MANIFEST" >"$manifest"
+    sed '/^VERSION$/d;/^RELEASE_MANIFEST$/d' "$ROOT_DIR/RELEASE_MANIFEST" >"$package_source_manifest"
   else
     printf 'package-source: git metadata or RELEASE_MANIFEST is required\n' >&2
     exit 1
   fi
-  (cd "$ROOT_DIR" && tar -cf - -T "$manifest") | (cd "$source_root" && tar -xf -)
+  (cd "$ROOT_DIR" && tar -cf - -T "$package_source_manifest") | (cd "$source_root" && tar -xf -)
   printf '%s\n' "$version_value" >"$source_root/VERSION"
   {
-    cat "$manifest"
+    cat "$package_source_manifest"
     printf '%s\n' VERSION RELEASE_MANIFEST
   } | LC_ALL=C sort >"$source_root/RELEASE_MANIFEST"
   make_tar_gz "$source_root" "$DIST_DIR/${PROJECT}-${version_value}.tar.gz"
@@ -421,6 +421,140 @@ verify_elf_runtime_paths() {
   fi
 }
 
+is_allowed_macho_path() {
+  path=$1
+  case "$path" in
+    @rpath/*|@loader_path|@loader_path/*|@executable_path|@executable_path/*)
+      return 0
+      ;;
+    /usr/lib/*|/System/Library/*)
+      return 0
+      ;;
+    /*)
+      return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_allowed_macho_rpath() {
+  path=$1
+  case "$path" in
+    @loader_path|@loader_path/*|@executable_path|@executable_path/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+verify_macho_path() {
+  artifact=$1
+  file=$2
+  kind=$3
+  path=$4
+
+  case "$path" in
+    *"$ROOT_DIR"*|*"$HOME"*|*/.cache/*|*/build/*|*/tmp/*|/tmp/*|/var/tmp/*|/Users/*|/home/*|/workspace/*)
+      printf 'package-verify: non-relocatable Mach-O %s in %s: %s\n' \
+        "$kind" "$artifact" "$file" >&2
+      printf '  path=%s\n' "$path" >&2
+      exit 1
+      ;;
+  esac
+
+  if ! is_allowed_macho_path "$path"; then
+    printf 'package-verify: non-relocatable Mach-O %s in %s: %s\n' \
+      "$kind" "$artifact" "$file" >&2
+    printf '  path=%s\n' "$path" >&2
+    exit 1
+  fi
+}
+
+verify_macho_runtime_paths() {
+  artifact=$1
+  root=$2
+  otool_tool=${3:-${LQL_OTOOL:-otool}}
+  macho_files="${TMPDIR:-/tmp}/lql-package-macho-files.$$"
+  macho_output="${TMPDIR:-/tmp}/lql-package-otool.$$"
+  macho_values="${TMPDIR:-/tmp}/lql-package-macho-values.$$"
+
+  case "$(basename "$artifact")" in
+    *apple-darwin*) ;;
+    *) return ;;
+  esac
+
+  if [ -z "$otool_tool" ] || ! command -v "$otool_tool" >/dev/null 2>&1; then
+    printf 'package-verify: otool unavailable for Mach-O loader metadata inspection: %s\n' "$artifact" >&2
+    printf 'PKT_DIAGNOSTIC_BEGIN\n' >&2
+    printf 'surface=package-verify\n' >&2
+    printf 'phase=darwin-macho-runtime-paths\n' >&2
+    printf 'status=failed\n' >&2
+    printf 'class=external-tool-unavailable\n' >&2
+    printf 'reason=otool-unavailable\n' >&2
+    printf 'artifact=%s\n' "$artifact" >&2
+    printf 'next=configure the Darwin target build or set LQL_OTOOL to the target-correct otool\n' >&2
+    printf 'PKT_DIAGNOSTIC_END\n' >&2
+    exit 1
+  fi
+
+  {
+    find "$root/bin" -type f 2>/dev/null || true
+    find "$root/lib" -type f \( -name '*.dylib' -o -name '*.dylib.*' \) \
+      2>/dev/null || true
+  } >"$macho_files"
+
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    if "$otool_tool" -D "$file" >"$macho_output" 2>/dev/null; then
+      id_path=$(sed -n '2p' "$macho_output" | awk '{print $1}')
+      if [ -n "$id_path" ]; then
+        case "$(basename "$file"):$id_path" in
+          liblql*:@rpath/*) ;;
+          liblql*:*)
+            printf 'package-verify: liblql Darwin install name must be @rpath-relative in %s: %s\n' \
+              "$artifact" "$file" >&2
+            printf '  install-name=%s\n' "$id_path" >&2
+            rm -f "$macho_files" "$macho_output" "$macho_values"
+            exit 1
+            ;;
+        esac
+        verify_macho_path "$artifact" "$file" install-name "$id_path"
+      fi
+    fi
+
+    if "$otool_tool" -L "$file" >"$macho_output" 2>/dev/null; then
+      sed '1d' "$macho_output" | awk 'NF {print $1}' >"$macho_values"
+      while IFS= read -r dep_path; do
+        [ -n "$dep_path" ] || continue
+        verify_macho_path "$artifact" "$file" dependency-path "$dep_path"
+      done <"$macho_values"
+    fi
+
+    if "$otool_tool" -l "$file" >"$macho_output" 2>/dev/null; then
+      awk '
+        $1 == "cmd" && $2 == "LC_RPATH" { in_rpath = 1; next }
+        in_rpath && $1 == "path" { print $2; in_rpath = 0; next }
+        $1 == "cmd" { in_rpath = 0 }
+      ' "$macho_output" >"$macho_values"
+      while IFS= read -r rpath; do
+        [ -n "$rpath" ] || continue
+        if ! is_allowed_macho_rpath "$rpath"; then
+          printf 'package-verify: non-relocatable Mach-O rpath in %s: %s\n' \
+            "$artifact" "$file" >&2
+          printf '  rpath=%s\n' "$rpath" >&2
+          rm -f "$macho_files" "$macho_output" "$macho_values"
+          exit 1
+        fi
+      done <"$macho_values"
+    fi
+  done <"$macho_files"
+  rm -f "$macho_files" "$macho_output" "$macho_values"
+}
+
 verify_target_file() {
   artifact=$1
   target_id=$2
@@ -488,6 +622,13 @@ strip_installed_artifacts() {
     return
   fi
 
+  case "$target_id" in
+    *apple-darwin*)
+      rm -f "$list"
+      return
+      ;;
+  esac
+
   if [ -z "$strip_tool" ] || ! command -v "$strip_tool" >/dev/null 2>&1; then
     rm -f "$list"
     printf 'package: target strip unavailable for %s\n' "$target_id" >&2
@@ -496,7 +637,7 @@ strip_installed_artifacts() {
 
   while IFS= read -r file; do
     case "$target_id" in
-      *apple-darwin*) strip_args="-x" ;;
+      *apple-darwin*) continue ;;
       *) strip_args="" ;;
     esac
     # shellcheck disable=SC2086
@@ -706,17 +847,17 @@ write_current_source_manifest() {
 }
 
 verify_source_manifest_matches_current() {
-  manifest=$1
-  artifact=$2
-  expected=$3
+  source_manifest=$1
+  source_artifact=$2
+  source_expected=$3
 
   if [ ! -d "$ROOT_DIR/.git" ]; then
     return 0
   fi
-  write_current_source_manifest "$expected"
-  if ! cmp -s "$expected" "$manifest"; then
-    printf 'package-verify: source archive manifest does not match current tracked repository files: %s\n' "$artifact" >&2
-    diff -u "$expected" "$manifest" >&2 || true
+  write_current_source_manifest "$source_expected"
+  if ! cmp -s "$source_expected" "$source_manifest"; then
+    printf 'package-verify: source archive manifest does not match current tracked repository files: %s\n' "$source_artifact" >&2
+    diff -u "$source_expected" "$source_manifest" >&2 || true
     exit 1
   fi
 }
@@ -945,6 +1086,7 @@ verify_one_archive() {
 
   verify_no_local_paths "$artifact" "$root"
   verify_elf_runtime_paths "$artifact" "$root" "$LQL_TOOL_READELF"
+  verify_macho_runtime_paths "$artifact" "$root" "$LQL_TOOL_OTOOL"
   case "$expected" in
     ${PROJECT}-${version_value}-*) verify_host_consumers "$artifact" "$root" "$target_id" ;;
   esac
@@ -1125,12 +1267,115 @@ expect_readelf_tool_failure() {
   fi
 }
 
+write_fake_otool() {
+  out=$1
+  id_path=$2
+  dep_path=$3
+  rpath=$4
+
+  cat >"$out" <<EOF
+#!/bin/sh
+mode=\$1
+file=\$2
+case "\$mode" in
+  -D)
+    printf '%s:\\n' "\$file"
+    case "\$file" in
+      *.dylib|*.dylib.*) printf '%s\\n' "$id_path" ;;
+    esac
+    ;;
+  -L)
+    printf '%s:\\n' "\$file"
+    printf '\\t%s (compatibility version 0.0.0, current version 0.0.0)\\n' "$dep_path"
+    printf '\\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1.0.0)\\n'
+    ;;
+  -l)
+    printf 'Load command 0\\n'
+    printf '          cmd LC_RPATH\\n'
+    printf '      cmdsize 32\\n'
+    printf '         path %s (offset 12)\\n' "$rpath"
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+EOF
+  chmod +x "$out"
+}
+
+expect_macho_runtime_path_failures() {
+  tmp_dir=$1
+  fixture="$tmp_dir/macho-runtime"
+  fake_otool="$tmp_dir/fake-otool"
+  output="$tmp_dir/macho-runtime.out"
+
+  mkdir -p "$fixture/bin" "$fixture/lib" "$tmp_dir/no-otool-bin"
+  printf 'fake executable\n' >"$fixture/bin/clql"
+  printf 'fake dylib\n' >"$fixture/lib/liblql.dylib"
+
+  if (verify_macho_runtime_paths liblql-0.0.0-arm64-apple-darwin.tar.gz \
+    "$fixture" "$tmp_dir/no-otool-bin/otool") >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly accepted missing otool\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'package-verify: otool unavailable for Mach-O loader metadata inspection' \
+    "$output" >/dev/null ||
+     ! grep -F 'class=external-tool-unavailable' "$output" >/dev/null; then
+    printf 'package privacy fixture did not report missing otool diagnostic\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+
+  write_fake_otool "$fake_otool" "@rpath/liblql.dylib" \
+    "@rpath/liblonejson.dylib" "@loader_path/../lib"
+  verify_macho_runtime_paths liblql-0.0.0-arm64-apple-darwin.tar.gz \
+    "$fixture" "$fake_otool"
+
+  write_fake_otool "$fake_otool" "/tmp/liblql.dylib" \
+    "@rpath/liblonejson.dylib" "@loader_path/../lib"
+  if (verify_macho_runtime_paths liblql-0.0.0-arm64-apple-darwin.tar.gz \
+    "$fixture" "$fake_otool") >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly accepted local Darwin install name\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'Darwin install name must be @rpath-relative' "$output" >/dev/null; then
+    printf 'package privacy fixture did not report bad Darwin install name\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+
+  write_fake_otool "$fake_otool" "@rpath/liblql.dylib" \
+    "/usr/local/lib/libbad.dylib" "@loader_path/../lib"
+  if (verify_macho_runtime_paths liblql-0.0.0-arm64-apple-darwin.tar.gz \
+    "$fixture" "$fake_otool") >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly accepted non-system Darwin dependency path\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'non-relocatable Mach-O dependency-path' "$output" >/dev/null; then
+    printf 'package privacy fixture did not report bad Darwin dependency path\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+
+  write_fake_otool "$fake_otool" "@rpath/liblql.dylib" \
+    "@rpath/liblonejson.dylib" "/tmp/liblql-rpath"
+  if (verify_macho_runtime_paths liblql-0.0.0-arm64-apple-darwin.tar.gz \
+    "$fixture" "$fake_otool") >"$output" 2>&1; then
+    printf 'package privacy fixture unexpectedly accepted non-system Darwin rpath\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'non-relocatable Mach-O rpath' "$output" >/dev/null; then
+    printf 'package privacy fixture did not report bad Darwin rpath\n' >&2
+    cat "$output" >&2
+    exit 1
+  fi
+}
+
 expect_strip_tool_generation() {
   tmp_dir=$1
   fixture="$tmp_dir/strip-generation"
   output="$tmp_dir/strip-generation.out"
   strip_log="$tmp_dir/strip-generation.log"
-  darwin_log="$tmp_dir/strip-generation-darwin.log"
   fake_strip="$tmp_dir/fake-strip"
 
   mkdir -p "$fixture/bin" "$fixture/lib"
@@ -1163,16 +1408,11 @@ EOF
     exit 1
   fi
 
-  cat >"$fake_strip" <<EOF
-#!/bin/sh
-printf '%s\n' "\$*" >>"$darwin_log"
-EOF
-  chmod +x "$fake_strip"
-  strip_installed_artifacts arm64-apple-darwin "$fixture" "$fake_strip"
-  if ! grep -F -- "-x $fixture/lib/liblql.0.0.0.dylib" \
-    "$darwin_log" >/dev/null; then
-    printf 'package privacy fixture did not pass -x for Darwin strip\n' >&2
-    cat "$darwin_log" >&2
+  : >"$strip_log"
+  strip_installed_artifacts arm64-apple-darwin "$fixture" "$tmp_dir/no-darwin-strip"
+  if [ -s "$strip_log" ]; then
+    printf 'package privacy fixture stripped Darwin final artifacts unexpectedly\n' >&2
+    cat "$strip_log" >&2
     exit 1
   fi
 }
@@ -1189,6 +1429,7 @@ check_package_privacy_fixtures() {
   expect_runtime_path_failure "$tmp_dir"
   expect_target_file_tool_failure "$tmp_dir"
   expect_readelf_tool_failure "$tmp_dir"
+  expect_macho_runtime_path_failures "$tmp_dir"
   expect_strip_tool_generation "$tmp_dir"
 }
 

@@ -85,7 +85,10 @@ if(LQL_BUILD_SHARED)
     VERSION "${PROJECT_VERSION}"
     SOVERSION 0)
   if(LQL_TARGET_OS STREQUAL "darwin")
-    set_target_properties(lql_shared PROPERTIES INSTALL_RPATH "@loader_path")
+    set_target_properties(lql_shared PROPERTIES
+      MACOSX_RPATH ON
+      INSTALL_NAME_DIR "@rpath"
+      INSTALL_RPATH "@loader_path")
   endif()
   target_link_libraries(lql_shared PUBLIC lonejson::lonejson)
   target_include_directories(lql_shared PUBLIC
@@ -106,7 +109,7 @@ if(LQL_BUILD_BINARY)
     target_link_options(clql PRIVATE -static)
   endif()
   if(LQL_TARGET_OS STREQUAL "darwin")
-    set_target_properties(clql PROPERTIES INSTALL_RPATH "@loader_path/../lib")
+    set_target_properties(clql PROPERTIES INSTALL_RPATH "@executable_path/../lib")
   else()
     set_target_properties(clql PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
   endif()

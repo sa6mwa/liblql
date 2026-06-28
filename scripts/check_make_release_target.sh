@@ -64,10 +64,14 @@ check_release_surface() {
       printf 'release surface: Darwin builds must use install RPATH at build time\n' >&2
       exit 1
     fi
+    if ! grep -F 'INSTALL_NAME_DIR "@rpath"' "$cmakelists" >/dev/null; then
+      printf 'release surface: Darwin dylib install name must be @rpath-relative\n' >&2
+      exit 1
+    fi
     if ! grep -F 'INSTALL_RPATH "@loader_path"' "$cmakelists" >/dev/null ||
-       ! grep -F 'INSTALL_RPATH "@loader_path/../lib"' "$cmakelists" \
+       ! grep -F 'INSTALL_RPATH "@executable_path/../lib"' "$cmakelists" \
          >/dev/null; then
-      printf 'release surface: Darwin runtime paths must be loader-relative\n' >&2
+      printf 'release surface: Darwin runtime paths must be artifact-relative\n' >&2
       exit 1
     fi
     for target in lql_common clql lql_payload_bench lql_match_example \
@@ -119,9 +123,11 @@ endfunction()
 add_library(lql_common OBJECT src/lql.c)
 lql_apply_project_warnings(lql_common)
 add_library(lql_shared SHARED src/lql.c)
-set_target_properties(lql_shared PROPERTIES INSTALL_RPATH "@loader_path")
+set_target_properties(lql_shared PROPERTIES
+  INSTALL_NAME_DIR "@rpath"
+  INSTALL_RPATH "@loader_path")
 add_executable(clql src/clql.c)
-set_target_properties(clql PROPERTIES INSTALL_RPATH "@loader_path/../lib")
+set_target_properties(clql PROPERTIES INSTALL_RPATH "@executable_path/../lib")
 lql_apply_project_warnings(clql)
 EOF
   check_release_surface "$makefile" "$release_script" "$cmakelists"
@@ -146,6 +152,14 @@ EOF
   if (check_release_surface "$makefile" "$release_script" \
     "$tmp/missing-darwin-build-rpath.cmake" >/dev/null 2>&1); then
     printf 'release surface fixture: expected missing Darwin build RPATH to fail\n' >&2
+    exit 1
+  fi
+
+  sed '/INSTALL_NAME_DIR/d' "$cmakelists" \
+    >"$tmp/missing-darwin-install-name.cmake"
+  if (check_release_surface "$makefile" "$release_script" \
+    "$tmp/missing-darwin-install-name.cmake" >/dev/null 2>&1); then
+    printf 'release surface fixture: expected missing Darwin install name to fail\n' >&2
     exit 1
   fi
 

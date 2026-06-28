@@ -770,10 +770,16 @@ Binary SDK archives must be relocatable and must not contain:
 - `$HOME`;
 - absolute local `file://` URLs;
 - sanitizer runtime or debug metadata;
-- non-relocatable RPATH/RUNPATH or Darwin install names.
+- non-relocatable ELF RPATH/RUNPATH;
+- non-relocatable Darwin Mach-O install names, dependency paths, or rpaths.
 
 `package-verify` must expand checksum-listed artifacts and nested archives
-before scanning.
+before scanning. For Darwin archives, package verification must inspect
+extracted final binaries and dylibs with target-correct `otool`; absence of
+that inspection tool is a release-blocking verification failure for a packaged
+Darwin artifact. Darwin final artifacts are not routinely post-processed with
+`strip` or `install_name_tool`; the release path must produce correct Mach-O
+loader metadata at CMake link/install time and then verify it.
 
 `dist/` is generated output. Checksums/manifests define upload artifacts.
 
@@ -1649,18 +1655,25 @@ Current implementation status:
   fails on repository paths, `$HOME`, absolute local `file://` URLs, and
   absolute ELF RPATH/RUNPATH entries when host tooling can create the fixture,
   and fails closed when `file(1)` or Linux ELF `readelf` inspection is
-  unavailable for binary artifact verification; package verification now uses
+  unavailable for binary artifact verification; fast CTest also includes
+  Mach-O negative fixtures proving the verifier fails closed when target-correct
+  `otool` is unavailable for a Darwin package and rejects local or non-`@rpath`
+  `liblql` install names, non-system absolute Darwin dependency paths, and
+  non-relative Darwin rpaths; package verification now uses
   `scripts/discover_target_tools.sh` to resolve target inspection tools from
   the configured release build directory before ambient `PATH`, and
   `lql.target-tools-fixtures` covers configured CMake cache tools,
   target-prefixed compiler siblings, unprefixed compiler siblings, `PATH`
   fallback, and refusal to accept known host Darwin inspection tools for
   cross-built artifacts; package generation installs without CMake's ambient
-  `--strip` shortcut and strips project-owned installed binaries/shared
+  `--strip` shortcut and strips project-owned Linux installed binaries/shared
   libraries with the discovered target strip tool, with negative fixture
   coverage for missing strip and positive fixture coverage proving the selected
-  strip is invoked. Target compiler/linker probes and CMake release builds run
-  with the selected compiler's directory prepended to `PATH`, which allows
+  strip is invoked. Darwin final artifacts are not stripped as routine package
+  post-processing, avoiding Mach-O code-signature invalidation risk and keeping
+  install-name correctness in the build/install graph. Target compiler/linker
+  probes and CMake release builds run with the selected compiler's directory
+  prepended to `PATH`, which allows
   cross-compiler wrappers such as osxcross to resolve sibling target tools
   instead of host tools;
   checksum manifest fixture coverage proves release-looking tarball, rockspec,
@@ -1698,9 +1711,11 @@ Current implementation status:
   `liblql` and `clql` artifacts for `x86_64`, `aarch64`, and `armhf`
   GNU/musl targets, and fails package verification if packaged shared
   libraries or `clql` binaries do not match their target architecture.
-  `arm64-apple-darwin` packaging uses the CMake Darwin system preset,
-  loader-relative Mach-O runtime paths, Darwin-safe `strip -x`, and
-  target-correct otool verification when the osxcross toolchain is available.
+  `arm64-apple-darwin` packaging uses the CMake Darwin system preset, an
+  explicit `@rpath` install name for `liblql`, an executable-relative
+  `@executable_path/../lib` rpath for `clql`, no routine final-artifact Mach-O
+  mutation, and target-correct `otool` verification when the osxcross toolchain
+  is available.
 
 The repository must not claim full LQL parity until the verification gates prove
 it.

@@ -66,8 +66,12 @@ the opt-in parse options and `clql -F`, and execute through source-backed
 lonejson writers on both seekable file input and the supported spooled stdin
 mutation path. `liblql` and `clql` package archives are produced and verified
 locally for Linux GNU/musl x86_64, aarch64, armhf, and Darwin arm64 when the
-osxcross toolchain is available. Extracted SDK consumer smokes cover direct C,
-CMake `find_package`, and pkg-config usage; the source archive is verified
+osxcross toolchain is available. Darwin packages are verify-only after install:
+`liblql` is linked with an `@rpath` install name, `clql` uses an
+`@executable_path/../lib` rpath when it needs packaged runtime libraries, and
+`package-verify` inspects extracted Mach-O install names, dependency paths, and
+rpaths with target-correct `otool`. Extracted SDK consumer smokes cover direct
+C, CMake `find_package`, and pkg-config usage; the source archive is verified
 through an extracted-tree build/test smoke. The host `clql` archive carries the
 lonejson runtime libraries it needs and is verified with an extracted
 `--version` smoke. Binary archives include artifact-local lonejson dependency
