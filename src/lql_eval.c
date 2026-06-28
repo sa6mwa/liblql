@@ -306,6 +306,57 @@ static int contains_case_len(const char *haystack, size_t h, const char *needle,
   return 0;
 }
 
+static int contains_any_case_len(const char *haystack, size_t h, char **needles,
+                                 const size_t *needle_lens, size_t count,
+                                 int ignore_case) {
+  unsigned char firsts[32];
+  size_t i;
+  size_t j;
+  size_t n;
+  unsigned char hay_ch;
+  if (count == 0u) {
+    return 0;
+  }
+  if (count > sizeof(firsts) / sizeof(firsts[0])) {
+    for (j = 0u; j < count; ++j) {
+      if (contains_case_len(haystack, h, needles[j], needle_lens[j],
+                            ignore_case)) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+  for (j = 0u; j < count; ++j) {
+    if (needle_lens[j] == 0u) {
+      return 1;
+    }
+    firsts[j] = ignore_case
+                    ? (unsigned char)tolower((unsigned char)needles[j][0])
+                    : (unsigned char)needles[j][0];
+  }
+  for (i = 0u; i < h; ++i) {
+    hay_ch = ignore_case ? (unsigned char)tolower((unsigned char)haystack[i])
+                         : (unsigned char)haystack[i];
+    for (j = 0u; j < count; ++j) {
+      n = needle_lens[j];
+      if (n > h - i) {
+        continue;
+      }
+      if (hay_ch != firsts[j]) {
+        continue;
+      }
+      if (ignore_case) {
+        if (ascii_case_equal_prefix(haystack + i, needles[j], n)) {
+          return 1;
+        }
+      } else if (memcmp(haystack + i, needles[j], n) == 0) {
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
 static int path_segment_matches(const char *start, size_t len,
                                 const lonejson_path_segment *segment) {
   size_t i;
@@ -454,6 +505,7 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
   lql_temporal query_temporal;
   lql_temporal since_macro;
   const char *needle;
+  int ignore_case;
   if (selector == NULL) {
     return;
   }
@@ -513,14 +565,12 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
       }
     } else {
       value_len = strlen(value);
-      for (j = 0u; j < selector->any_count; ++j) {
-        needle = selector->any[j];
-        if (contains_case_len(value, value_len, needle, selector->any_lens[j],
-                              selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
-                                  selector->ignore_case)) {
-          doc->hits[selector->hit_index] = 1u;
-          break;
-        }
+      ignore_case = selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
+                    selector->ignore_case;
+      if (contains_any_case_len(value, value_len, selector->any,
+                                selector->any_lens, selector->any_count,
+                                ignore_case)) {
+        doc->hits[selector->hit_index] = 1u;
       }
     }
     break;
