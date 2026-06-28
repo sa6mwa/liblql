@@ -68,7 +68,11 @@ build: build-clql-static
 build-clql-static:
 	@./scripts/build_clql_static.sh
 
-install: build
+install:
+	@[ -x build/clql-static/clql ] || { \
+	  printf '%s\n' 'make install requires build/clql-static/clql; run make build first' >&2; \
+	  exit 1; \
+	}
 	@$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
 	@$(INSTALL) -m 0755 build/clql-static/clql "$(DESTDIR)$(BINDIR)/clql"
 	@printf 'installed %s\n' "$(DESTDIR)$(BINDIR)/clql"

@@ -22,8 +22,16 @@ check_install_surface() {
     printf 'install surface: build-clql-static must call scripts/build_clql_static.sh\n' >&2
     return 1
   fi
-  if ! grep -Eq '^install: build' "$makefile"; then
-    printf 'install surface: make install must depend on build\n' >&2
+  if ! grep -Eq '^install:[[:space:]]*$' "$makefile"; then
+    printf 'install surface: make install must not depend on build\n' >&2
+    return 1
+  fi
+  if grep -Eq '^install:.*build' "$makefile"; then
+    printf 'install surface: make install must not run builds\n' >&2
+    return 1
+  fi
+  if ! grep -F 'run make build first' "$makefile" >/dev/null; then
+    printf 'install surface: make install must explain missing built clql\n' >&2
     return 1
   fi
   if ! grep -F '$(DESTDIR)$(BINDIR)/clql' "$makefile" >/dev/null; then
@@ -79,7 +87,8 @@ help:
 build: build-clql-static
 build-clql-static:
 	@./scripts/build_clql_static.sh
-install: build
+install:
+	@[ -x build/clql-static/clql ] || { printf '%s\n' 'make install requires build/clql-static/clql; run make build first' >&2; exit 1; }
 	@install -m 0755 build/clql-static/clql "$(DESTDIR)$(BINDIR)/clql"
 EOF
   cat >"$build_script" <<'EOF'
@@ -101,6 +110,13 @@ EOF
   if check_install_surface "$tmp/no-destdir.mk" "$build_script" \
     "$cmakelists" >/dev/null 2>&1; then
     printf 'install surface fixture: expected missing DESTDIR to fail\n' >&2
+    exit 1
+  fi
+
+  sed 's/^install:$/install: build/' "$makefile" >"$tmp/install-builds.mk"
+  if check_install_surface "$tmp/install-builds.mk" "$build_script" \
+    "$cmakelists" >/dev/null 2>&1; then
+    printf 'install surface fixture: expected install build dependency to fail\n' >&2
     exit 1
   fi
 
