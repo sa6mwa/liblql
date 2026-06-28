@@ -1,16 +1,19 @@
 # liblql Parity Reassessment
 
 This document records the June 2026 reassessment after the temporal selector
-gap showed that the previous parity evidence was too coarse.
+gap showed that the previous parity evidence was too coarse. The reassessment
+is now closed for the v0 public contract: `parity/oracle_inventory.tsv`
+contains no `partial` or `gap` rows, and exact Go parser/framing differences
+are documented as v0 exclusions in `docs/liblql-dependency-gaps.md`.
 
-## Current Finding
+## Finding
 
-The implementation must not be considered complete. The previous parity gates
-proved many representative cases, but they did not prove every broad behavior
-claim at the same level of rigor. In particular, a row marked `covered` in
-`parity/oracle_inventory.tsv` could mean "there is evidence for this family",
-not "all observable behavior in this family has an explicit Go/C parity
-matrix".
+The original finding was that the implementation could not be considered
+complete because the previous parity gates proved many representative cases but
+did not prove every broad behavior claim at the same level of rigor. In
+particular, a row marked `covered` in `parity/oracle_inventory.tsv` could mean
+"there is evidence for this family", not "all observable behavior in this
+family has an explicit Go/C parity matrix".
 
 The temporal selector audit found one real divergence:
 
@@ -39,7 +42,8 @@ import/export, and selector builders, and `lql_selector` is now the canonical
 AST consumed by parser, JSON, builders, evaluator, capability inspection, and
 public traversal. Lua selector userdata now covers text parse, AST JSON
 import/export, traversal, builders, method-style inspection, and query reuse
-through that public C API. Final inventory closure remains open after that.
+through that public C API. The final inventory closure is now complete for the
+v0 public contract.
 
 ## What Parity Must Mean
 
@@ -57,10 +61,10 @@ least one of these proof shapes:
 Representative examples are useful smoke tests. They are not enough to justify
 an exhaustive parity claim.
 
-## High-Risk Areas Requiring Reaudit
+## Reaudited High-Risk Areas
 
-These surfaces currently need explicit matrix review before the implementation
-can be called complete:
+These surfaces required explicit matrix review before the implementation could
+be called complete for the v0 public contract:
 
 - Selector AST, parse, and evaluation:
   public AST traversal/construction, selector AST JSON, shorthand forms,
@@ -91,12 +95,13 @@ can be called complete:
   mutation, help/version/theme compatibility, multi-file mutation, projection,
   compact output, and error messages.
 
-## Immediate Process Fix
+## Process Fix
 
-Until each high-risk surface is audited, `parity/oracle_inventory.tsv` must be
-read as a work queue, not as a completion certificate. Rows that are supported
-by representative evidence but not by a full behavior matrix should be marked
-`partial`.
+During the reassessment, `parity/oracle_inventory.tsv` was treated as a work
+queue rather than a completion certificate. Rows supported only by
+representative evidence were marked `partial` until they gained explicit
+matrix evidence or a documented v0 boundary. That process is now complete:
+the current inventory has no `partial` or `gap` rows.
 
 ## Progress Since Reassessment
 
@@ -129,14 +134,23 @@ by representative evidence but not by a full behavior matrix should be marked
   than private cache state: C and Go agree on temporal parse/evaluation
   behavior, including builder-created datetime bounds, while Go cache fields
   remain an implementation detail outside the C API.
+- Projection, mutation, CLI, streaming, benchmark, and Lua rows are now
+  covered for the v0 public contract by their cited C-native tests, CLI/SDK
+  parity matrices, Lua tests, benchmark gates, and documented Go-only
+  boundaries.
+- Exact Go parser/framing behavior is not fully claimed. The accepted v0
+  non-parity cases are mixed array-items-then-values candidate framing, Go
+  `encoding/json` permissiveness for unmatched surrogates, and Go repeated
+  value decoding of leading-zero numeric text. Those are documented in
+  `docs/liblql-dependency-gaps.md` and must not be emulated with hidden
+  materialization, pre-normalization, or a second parser.
 
-## Completion Criteria
+## Completed Criteria
 
-The implementation can be called complete only after:
+The v0 public-contract reassessment is complete because:
 
-1. Every `partial` row in `parity/oracle_inventory.tsv` is either upgraded with
-   explicit matrix evidence or narrowed to a documented non-applicable Go-only
-   boundary.
+1. Every row in `parity/oracle_inventory.tsv` is either `covered` with cited
+   evidence or `not-applicable` for a documented Go-only implementation detail.
 2. `lql_selector` is the canonical C selector AST. No private `lql_node`,
    `lql_term`, or `LQL_NODE_*` vocabulary remains as the real AST authority;
    any streaming/query plan is explicitly derived execution state.
@@ -151,5 +165,6 @@ The implementation can be called complete only after:
    selectors.
 6. The SDK and CLI coverage manifests use narrow requirement names that describe
    the exact proven behavior.
-7. `make parity-test`, `make test`, `make package-source-smoke`, and the release
-   gates pass after the audit changes.
+7. `make parity-test` and `make test` pass after the audit changes. Release
+   packaging gates remain separate release-authority work and are tracked in
+   `docs/liblql-completion-audit.md`.

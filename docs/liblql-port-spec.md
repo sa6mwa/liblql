@@ -696,10 +696,11 @@ rather than workstation-path based: it records every test, benchmark, and
 example-bearing file in the pinned `pkt.systems/lql v0.17.1` module, the
 current coverage status, evidence, and the next action. The gate fails when the
 pinned Go oracle changes without inventory updates. `covered` rows can support
-a final parity claim only together with the cited C/CLI/SDK/Lua tests; `partial`
-and `gap` rows are explicit remaining work, and `not-applicable` rows must state
-why the Go behavior is genuinely implementation-specific rather than a public
-feature that needs an idiomatic C/Lua representation.
+a final parity claim only together with the cited C/CLI/SDK/Lua tests. If
+`partial` or `gap` rows exist, they are explicit remaining work.
+`not-applicable` rows must state why the Go behavior is genuinely
+implementation-specific rather than a public feature that needs an idiomatic
+C/Lua representation. The current v0 inventory has no `partial` or `gap` rows.
 
 ## C-Native Strategy
 
@@ -1289,7 +1290,7 @@ Current implementation status:
 - the pinned Go oracle inventory is executable through
   `parity/oracle_inventory.tsv` and `TestOracleInventory`; it currently records
   all `pkt.systems/lql v0.17.1` test, benchmark, and example-bearing files and
-  classifies them as `covered`, `partial`, `gap`, or `not-applicable`;
+  classifies them as `covered` or `not-applicable` for the v0 public contract;
 - CLI selector parity includes scalar, string, numeric, temporal, contains,
   prefix, existence, wildcard, recursive, numeric object/array segment,
   nested logical, and newline-separated selector cases from the Go oracle

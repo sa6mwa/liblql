@@ -1,13 +1,15 @@
 # liblql Completion Audit
 
 This audit records current evidence for the full `liblql` port objective and
-the remaining unproven scope. It is not a release note and it is not a claim
-that full LQL parity is complete.
+the remaining release-authority scope. It is not a release note. It claims v0
+public-contract parity with the parser/framing exclusions documented in
+`docs/liblql-dependency-gaps.md`; it does not claim final tagged release
+publication.
 
 ## Audit State
 
-- Audit date: 2026-06-27
-- Implementation evidence: current committed branch state for this audit update
+- Audit date: 2026-06-28
+- Implementation evidence: current branch state for this audit update
 - Current release version source: untagged git worktree, resolving to `0.0.0`
 - Current release command status: stale; do not treat previous release rehearsal
   as final after the parity reassessment
@@ -17,13 +19,14 @@ that full LQL parity is complete.
 - Oracle inventory snapshot: 46 covered rows, 0 partial rows, 1
   not-applicable row, 0 gap rows
 
-## Reassessment Warning
+## Reassessment Result
 
-This repository is no longer considered complete. The temporal selector audit
-found a real Go/C divergence that the previous parity evidence did not catch:
-C accepted leap-second timestamps while Go rejected them. That specific bug is
-fixed, but the failure mode shows that prior broad `covered` claims were too
-coarse.
+The temporal selector audit found a real Go/C divergence that the previous
+parity evidence did not catch: C accepted leap-second timestamps while Go
+rejected them. That specific bug is fixed, and the broader reassessment is now
+closed for the v0 public contract. The failure mode remains documented here
+because it explains why broad `covered` claims must be tied to concrete
+C/CLI/SDK/Lua evidence.
 
 The selector AST audit also found a public SDK gap: Go exposes selector parsing
 as a public recursive AST with JSON marshal/unmarshal and constructor behavior.
