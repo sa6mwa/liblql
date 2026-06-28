@@ -18,6 +18,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#define LQL_EVAL_CONTAINS_TAIL_CAP 8192u
+
 typedef struct eval_doc {
   lql_allocator *allocator;
   lql_impl *impl;
@@ -28,6 +30,10 @@ typedef struct eval_doc {
   size_t val_len;
   size_t val_cap;
   int scalar_interested;
+  int scalar_stream_contains;
+  size_t contains_tail_len;
+  size_t contains_tail_need;
+  char contains_tail[LQL_EVAL_CONTAINS_TAIL_CAP];
   int *container_types;
   size_t *container_depths;
   size_t container_count;
@@ -246,6 +252,9 @@ static void reset_doc(eval_doc *doc) {
     doc->val_buf[0] = '\0';
   }
   doc->scalar_interested = 0;
+  doc->scalar_stream_contains = 0;
+  doc->contains_tail_len = 0u;
+  doc->contains_tail_need = 0u;
   doc->container_count = 0u;
   doc->root_kind = '\0';
 }
@@ -726,31 +735,297 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
   }
 }
 
-static int selector_path_interested(const eval_doc *doc,
-                                    const lql_selector *selector,
-                                    const lonejson_value_path *path) {
+static size_t selector_contains_max_needle(const lql_selector *selector) {
   size_t i;
+  size_t max_len;
+  size_t len;
+
+  max_len = 0u;
+  if (selector->any_count == 0u) {
+    if (selector->value != NULL) {
+      max_len = strlen(selector->value);
+    }
+    return max_len;
+  }
+  for (i = 0u; i < selector->any_count; ++i) {
+    len = selector->any_lens == NULL ? strlen(selector->any[i])
+                                     : selector->any_lens[i];
+    if (len > max_len) {
+      max_len = len;
+    }
+  }
+  return max_len;
+}
+
+static int selector_string_buffer_required(const eval_doc *doc,
+                                           const lql_selector *selector,
+                                           const lonejson_value_path *path) {
+  size_t i;
+  size_t max_needle;
 
   if (selector == NULL) {
     return 0;
   }
   if (!selector_is_predicate(selector)) {
     for (i = 0u; i < selector->child_count; ++i) {
-      if (selector_path_interested(doc, &selector->children[i], path)) {
+      if (selector_string_buffer_required(doc, &selector->children[i], path)) {
         return 1;
       }
     }
     return 0;
   }
-  return path_matches(doc, selector->field, path);
+  if (!path_matches(doc, selector->field, path)) {
+    return 0;
+  }
+  switch (selector->kind) {
+  case LQL_SELECTOR_KIND_CONTAINS:
+  case LQL_SELECTOR_KIND_ICONTAINS:
+    max_needle = selector_contains_max_needle(selector);
+    return max_needle > LQL_EVAL_CONTAINS_TAIL_CAP + 1u;
+  case LQL_SELECTOR_KIND_EXISTS:
+    return 0;
+  default:
+    return 1;
+  }
 }
 
-static int scalar_path_interested(const eval_doc *doc,
-                                  const lonejson_value_path *path) {
+static int selector_contains_stream_interested(const eval_doc *doc,
+                                               const lql_selector *selector,
+                                               const lonejson_value_path *path,
+                                               size_t *tail_need) {
+  size_t i;
+  size_t max_needle;
+  size_t child_tail_need;
+  int found;
+
+  if (selector == NULL) {
+    return 0;
+  }
+  if (!selector_is_predicate(selector)) {
+    found = 0;
+    for (i = 0u; i < selector->child_count; ++i) {
+      child_tail_need = 0u;
+      if (selector_contains_stream_interested(doc, &selector->children[i], path,
+                                              &child_tail_need)) {
+        found = 1;
+        if (child_tail_need > *tail_need) {
+          *tail_need = child_tail_need;
+        }
+      }
+    }
+    return found;
+  }
+  if ((selector->kind != LQL_SELECTOR_KIND_CONTAINS &&
+       selector->kind != LQL_SELECTOR_KIND_ICONTAINS) ||
+      !path_matches(doc, selector->field, path)) {
+    return 0;
+  }
+  max_needle = selector_contains_max_needle(selector);
+  if (max_needle > LQL_EVAL_CONTAINS_TAIL_CAP + 1u) {
+    return 0;
+  }
+  if (max_needle > 1u && max_needle - 1u > *tail_need) {
+    *tail_need = max_needle - 1u;
+  }
+  return 1;
+}
+
+static int scalar_path_buffer_required(const eval_doc *doc,
+                                       const lonejson_value_path *path) {
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return 0;
   }
-  return selector_path_interested(doc, doc->selector, path);
+  return selector_string_buffer_required(doc, doc->selector, path);
+}
+
+static int scalar_path_contains_stream_interested(
+    const eval_doc *doc, const lonejson_value_path *path, size_t *tail_need) {
+  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return 0;
+  }
+  return selector_contains_stream_interested(doc, doc->selector, path,
+                                            tail_need);
+}
+
+static void observe_contains_stream_begin(eval_doc *doc,
+                                          const lql_selector *selector,
+                                          const lonejson_value_path *path) {
+  size_t i;
+  size_t j;
+
+  if (selector == NULL || doc->hits == NULL) {
+    return;
+  }
+  if (!selector_is_predicate(selector)) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      observe_contains_stream_begin(doc, &selector->children[i], path);
+    }
+    return;
+  }
+  if ((selector->kind != LQL_SELECTOR_KIND_CONTAINS &&
+       selector->kind != LQL_SELECTOR_KIND_ICONTAINS) ||
+      !path_matches(doc, selector->field, path)) {
+    return;
+  }
+  if (selector->any_count == 0u) {
+    if (!selector->value_set && selector->value == NULL) {
+      doc->hits[selector->hit_index] = 1u;
+    } else if (selector->value == NULL || selector->value[0] == '\0') {
+      doc->hits[selector->hit_index] = 1u;
+    }
+    return;
+  }
+  for (j = 0u; j < selector->any_count; ++j) {
+    if ((selector->any_lens == NULL && selector->any[j][0] == '\0') ||
+        (selector->any_lens != NULL && selector->any_lens[j] == 0u)) {
+      doc->hits[selector->hit_index] = 1u;
+      return;
+    }
+  }
+}
+
+static void observe_scalar_exists_begin(eval_doc *doc,
+                                        const lql_selector *selector,
+                                        const lonejson_value_path *path) {
+  size_t i;
+
+  if (selector == NULL || doc->hits == NULL) {
+    return;
+  }
+  if (!selector_is_predicate(selector)) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      observe_scalar_exists_begin(doc, &selector->children[i], path);
+    }
+    return;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_EXISTS &&
+      path_matches(doc, selector->field, path)) {
+    doc->hits[selector->hit_index] = 1u;
+  }
+}
+
+static int contains_stream_scan(const char *tail, size_t tail_len,
+                                const char *data, size_t len,
+                                const char *needle, size_t needle_len,
+                                int ignore_case) {
+  char boundary[LQL_EVAL_CONTAINS_TAIL_CAP * 2u];
+  size_t prefix_len;
+  size_t boundary_len;
+
+  if (contains_case_len(data, len, needle, needle_len, ignore_case)) {
+    return 1;
+  }
+  if (tail_len == 0u || len == 0u || needle_len <= 1u) {
+    return 0;
+  }
+  prefix_len = len;
+  if (prefix_len > needle_len - 1u) {
+    prefix_len = needle_len - 1u;
+  }
+  if (tail_len + prefix_len > sizeof(boundary)) {
+    return 0;
+  }
+  memcpy(boundary, tail, tail_len);
+  memcpy(boundary + tail_len, data, prefix_len);
+  boundary_len = tail_len + prefix_len;
+  return contains_case_len(boundary, boundary_len, needle, needle_len,
+                           ignore_case);
+}
+
+static int contains_any_stream_scan(const char *tail, size_t tail_len,
+                                    const char *data, size_t len,
+                                    char **needles,
+                                    const size_t *needle_lens, size_t count,
+                                    int ignore_case) {
+  char boundary[LQL_EVAL_CONTAINS_TAIL_CAP * 2u];
+  size_t prefix_len;
+  size_t boundary_len;
+
+  if (contains_any_case_len(data, len, needles, needle_lens, count,
+                            ignore_case)) {
+    return 1;
+  }
+  if (tail_len == 0u || len == 0u) {
+    return 0;
+  }
+  prefix_len = len;
+  if (prefix_len > LQL_EVAL_CONTAINS_TAIL_CAP) {
+    prefix_len = LQL_EVAL_CONTAINS_TAIL_CAP;
+  }
+  memcpy(boundary, tail, tail_len);
+  memcpy(boundary + tail_len, data, prefix_len);
+  boundary_len = tail_len + prefix_len;
+  return contains_any_case_len(boundary, boundary_len, needles, needle_lens,
+                               count, ignore_case);
+}
+
+static void observe_contains_stream_chunk(eval_doc *doc,
+                                          const lql_selector *selector,
+                                          const lonejson_value_path *path,
+                                          const char *data, size_t len) {
+  size_t i;
+  size_t value_len;
+  int ignore_case;
+
+  if (selector == NULL || doc->hits == NULL) {
+    return;
+  }
+  if (!selector_is_predicate(selector)) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      observe_contains_stream_chunk(doc, &selector->children[i], path, data,
+                                    len);
+    }
+    return;
+  }
+  if ((selector->kind != LQL_SELECTOR_KIND_CONTAINS &&
+       selector->kind != LQL_SELECTOR_KIND_ICONTAINS) ||
+      !path_matches(doc, selector->field, path) ||
+      doc->hits[selector->hit_index] != 0u) {
+    return;
+  }
+  ignore_case = selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
+                selector->ignore_case;
+  if (selector->any_count == 0u) {
+    value_len = selector->value == NULL ? 0u : strlen(selector->value);
+    if (contains_stream_scan(doc->contains_tail, doc->contains_tail_len, data,
+                             len, selector->value == NULL ? "" :
+                                                               selector->value,
+                             value_len, ignore_case)) {
+      doc->hits[selector->hit_index] = 1u;
+    }
+  } else if (contains_any_stream_scan(doc->contains_tail,
+                                      doc->contains_tail_len, data, len,
+                                      selector->any, selector->any_lens,
+                                      selector->any_count, ignore_case)) {
+    doc->hits[selector->hit_index] = 1u;
+  }
+}
+
+static void contains_stream_update_tail(eval_doc *doc, const char *data,
+                                        size_t len) {
+  char boundary[LQL_EVAL_CONTAINS_TAIL_CAP * 2u];
+  size_t total_len;
+  size_t keep_len;
+
+  if (doc->contains_tail_need == 0u) {
+    doc->contains_tail_len = 0u;
+    return;
+  }
+  if (len >= doc->contains_tail_need) {
+    memcpy(doc->contains_tail, data + len - doc->contains_tail_need,
+           doc->contains_tail_need);
+    doc->contains_tail_len = doc->contains_tail_need;
+    return;
+  }
+  memcpy(boundary, doc->contains_tail, doc->contains_tail_len);
+  memcpy(boundary + doc->contains_tail_len, data, len);
+  total_len = doc->contains_tail_len + len;
+  keep_len = total_len;
+  if (keep_len > doc->contains_tail_need) {
+    keep_len = doc->contains_tail_need;
+  }
+  memcpy(doc->contains_tail, boundary + total_len - keep_len, keep_len);
+  doc->contains_tail_len = keep_len;
 }
 
 static void observe_value(eval_doc *doc, const lonejson_value_path *path,
@@ -840,7 +1115,19 @@ static lonejson_status on_string_begin(void *user,
   if (doc->val_buf != NULL && doc->val_cap != 0u) {
     doc->val_buf[0] = '\0';
   }
-  doc->scalar_interested = scalar_path_interested(doc, path);
+  doc->contains_tail_len = 0u;
+  doc->contains_tail_need = 0u;
+  doc->scalar_interested = scalar_path_buffer_required(doc, path);
+  if (!doc->scalar_interested) {
+    observe_scalar_exists_begin(doc, doc->selector, path);
+    doc->scalar_stream_contains = scalar_path_contains_stream_interested(
+        doc, path, &doc->contains_tail_need);
+    if (doc->scalar_stream_contains) {
+      observe_contains_stream_begin(doc, doc->selector, path);
+    }
+  } else {
+    doc->scalar_stream_contains = 0;
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -852,6 +1139,10 @@ static lonejson_status on_string_chunk(void *user,
   (void)path;
   (void)error;
   if (!doc->scalar_interested) {
+    if (doc->scalar_stream_contains) {
+      observe_contains_stream_chunk(doc, doc->selector, path, data, len);
+      contains_stream_update_tail(doc, data, len);
+    }
     return LONEJSON_STATUS_OK;
   }
   return append_buf(doc, &doc->val_buf, &doc->val_len, data, len)
@@ -875,6 +1166,9 @@ static lonejson_status on_string_end(void *user,
     doc->val_buf[0] = '\0';
   }
   doc->scalar_interested = 0;
+  doc->scalar_stream_contains = 0;
+  doc->contains_tail_len = 0u;
+  doc->contains_tail_need = 0u;
   return LONEJSON_STATUS_OK;
 }
 
@@ -907,6 +1201,9 @@ static lonejson_status on_number_end(void *user,
     doc->val_buf[0] = '\0';
   }
   doc->scalar_interested = 0;
+  doc->scalar_stream_contains = 0;
+  doc->contains_tail_len = 0u;
+  doc->contains_tail_need = 0u;
   return LONEJSON_STATUS_OK;
 }
 
