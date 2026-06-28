@@ -11,6 +11,13 @@ typedef struct counting_allocator {
   size_t outstanding;
 } counting_allocator;
 
+typedef struct memory_reader {
+  const char *data;
+  size_t len;
+  size_t offset;
+  size_t chunk_size;
+} memory_reader;
+
 static void *counting_alloc(lql_allocator *self, size_t size) {
   counting_allocator *counter;
   void *ptr;
@@ -88,6 +95,32 @@ static void counting_allocator_init(counting_allocator *counter) {
   counter->api.realloc = counting_realloc;
   counter->api.destroy = counting_destroy;
   counter->api.strdup = counting_strdup;
+}
+
+static lql_read_result read_memory_chunk(void *user, unsigned char *buffer,
+                                         size_t capacity) {
+  memory_reader *reader;
+  lql_read_result result;
+  size_t n;
+
+  reader = (memory_reader *)user;
+  memset(&result, 0, sizeof(result));
+  if (reader->offset >= reader->len) {
+    result.eof = 1;
+    return result;
+  }
+  n = reader->len - reader->offset;
+  if (n > capacity) {
+    n = capacity;
+  }
+  if (reader->chunk_size != 0u && n > reader->chunk_size) {
+    n = reader->chunk_size;
+  }
+  memcpy(buffer, reader->data + reader->offset, n);
+  reader->offset += n;
+  result.bytes_read = n;
+  result.eof = reader->offset >= reader->len;
+  return result;
 }
 
 static lql_status count_matched_decision(void *user,
@@ -297,6 +330,200 @@ static int expect_file_decisions_steady_state_has_no_receiver_alloc(void) {
   ctx->destroy(ctx);
   if (counter.outstanding != 0u || counter.destroy_count == 0u) {
     printf("file decision allocator cleanup imbalance: outstanding=%lu "
+           "destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
+static int expect_source_decisions_steady_state_has_no_receiver_alloc(void) {
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  const char *json;
+  memory_reader reader;
+  lql_query_result result;
+  size_t matched;
+  size_t alloc_count_after_second_warmup;
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("source decision receiver failed: %s\n", error.message);
+    return 1;
+  }
+  selector = NULL;
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK || selector == NULL) {
+    printf("source decision selector parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  json = "{\"status\":\"open\",\"message\":\"hello\"}\n"
+         "{\"status\":\"closed\",\"message\":\"bye\"}\n";
+
+  reader.data = json;
+  reader.len = strlen(json);
+  reader.offset = 0u;
+  reader.chunk_size = 7u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("source decision first warmup failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  reader.offset = 0u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("source decision second warmup failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  alloc_count_after_second_warmup = counter.alloc_count;
+
+  reader.offset = 0u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("source decision steady eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.alloc_count != alloc_count_after_second_warmup) {
+    printf("source decision steady eval allocated: before=%lu after=%lu\n",
+           (unsigned long)alloc_count_after_second_warmup,
+           (unsigned long)counter.alloc_count);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("source decision allocator cleanup imbalance: outstanding=%lu "
+           "destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
+static int
+expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  const char *json;
+  memory_reader reader;
+  lql_query_result result;
+  size_t matched;
+  size_t alloc_count_after_second_warmup;
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("source array decision receiver failed: %s\n", error.message);
+    return 1;
+  }
+  selector = NULL;
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK || selector == NULL) {
+    printf("source array decision selector parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  json = "[{\"status\":\"open\",\"message\":\"hello\"},"
+         "{\"status\":\"closed\",\"message\":\"bye\"}]";
+
+  reader.data = json;
+  reader.len = strlen(json);
+  reader.offset = 0u;
+  reader.chunk_size = 7u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("source array decision first warmup failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  reader.offset = 0u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("source array decision second warmup failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  alloc_count_after_second_warmup = counter.alloc_count;
+
+  reader.offset = 0u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("source array decision steady eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.alloc_count != alloc_count_after_second_warmup) {
+    printf(
+        "source array decision steady eval allocated: before=%lu after=%lu\n",
+        (unsigned long)alloc_count_after_second_warmup,
+        (unsigned long)counter.alloc_count);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("source array decision allocator cleanup imbalance: outstanding=%lu "
            "destroys=%lu\n",
            (unsigned long)counter.outstanding,
            (unsigned long)counter.destroy_count);
@@ -681,6 +908,9 @@ int main(void) {
   failures = 0;
   failures += expect_selector_success_uses_allocator();
   failures += expect_file_decisions_steady_state_has_no_receiver_alloc();
+  failures += expect_source_decisions_steady_state_has_no_receiver_alloc();
+  failures +=
+      expect_source_array_decisions_steady_state_has_no_receiver_alloc();
   failures += expect_selector_parse_failure_cleans_allocator();
   failures += expect_projection_success_uses_allocator();
   failures += expect_projection_unselected_large_blob_allocation_stable();
