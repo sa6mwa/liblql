@@ -2,7 +2,7 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INSTALL ?= install
 
-.PHONY: help deps-debug deps-release deps-cross build build-clql-static build-debug build-release install test test-debug parity-test test-all asan fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-lockd-perf-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version print-release-assets format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-clql-static build-debug build-release build-bench-release install test test-debug parity-test test-all asan fuzz fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-gate perf-gate bench-lockd-perf-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version print-release-assets format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -12,18 +12,22 @@ help:
 	  'make build                   build static clql, preferring musl then GNU' \
 	  'make build-debug             configure and build debug preset' \
 	  'make build-release           configure and build host GNU release preset' \
+	  'make build-bench-release     configure and build optimized benchmark helpers' \
 	  'make install                 install built clql to $${PREFIX:-/usr/local}/bin' \
 	  'make test                    run fast C/API tests' \
 	  'make test-debug              alias for fast C/API tests' \
 	  'make parity-test             run Go-backed parity tests' \
 	  'make test-all                run tests, fuzz smoke, sanitizers, and Lua smoke tests' \
 	  'make asan                    run ASan/UBSan tests' \
+	  'make fuzz                    alias for bounded public API fuzz smoke seeds' \
 	  'make fuzz-smoke              run bounded public API fuzz smoke seeds' \
 	  'make lua-rock                install Lua facade into build/luarocks' \
 	  'make lua-env                 print Lua facade environment exports' \
 	  'make lua-test                run Lua facade smoke tests' \
 	  'make benchmarks             run local parity benchmark smoke' \
 	  'make bench-check            run deterministic benchmark smoke gate' \
+	  'make bench-gate             alias for deterministic benchmark smoke gate' \
+	  'make perf-gate              alias for deterministic benchmark smoke gate' \
 	  'make bench-lockd-perf-check run lockd-specific C performance gates' \
 	  'make bench-memory-check     run scalable streaming and C mutation memory gates' \
 	  'make bench-1g-check         run 1 GiB/128 MiB streaming memory gate' \
@@ -77,6 +81,10 @@ build-release: deps-release
 	@cmake --preset x86_64-linux-gnu-release
 	@cmake --build --preset x86_64-linux-gnu-release
 
+build-bench-release: deps-release
+	@cmake --preset bench-release
+	@cmake --build --preset bench-release
+
 test test-debug: build-debug
 	@ctest --preset debug -LE 'parity|fuzz'
 
@@ -93,6 +101,8 @@ asan: deps-debug
 fuzz-smoke: build-debug
 	@ctest --preset debug -L fuzz
 
+fuzz: fuzz-smoke
+
 lua-test: build-debug
 	@./scripts/run_lua_tests.sh
 
@@ -108,17 +118,23 @@ lua-env:
 bench benchmarks: build-debug
 	@./scripts/check_parity_benchmark_schema.sh
 
-bench-check: build-debug
+bench-check: build-debug build-bench-release
 	@mkdir -p build
 	@LQL_BENCH_SUITE=smoke ./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --check --require go,c,lua > build/bench-check.jsonl
-	@./scripts/check_lockd_perf_benchmark.sh
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
+	  ./scripts/check_lockd_perf_benchmark.sh
 	@./scripts/check_parity_benchmark_failures.sh
 	@./scripts/check_parity_benchmark_fixtures.sh
 	@./scripts/check_parity_benchmark_memory.sh build/bench-check.jsonl
 	@./scripts/check_parity_benchmark_schema.sh
 
-bench-lockd-perf-check: build-debug
-	@./scripts/check_lockd_perf_benchmark.sh
+bench-gate perf-gate: bench-check
+
+bench-lockd-perf-check: build-bench-release
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
+	  ./scripts/check_lockd_perf_benchmark.sh
 
 bench-memory-check: build-debug
 	@./scripts/check_parity_benchmark_large_memory.sh
@@ -165,4 +181,4 @@ clean:
 	@./scripts/clean.sh
 
 clean-dist:
-	@rm -rf dist
+	@./scripts/clean.sh --dist

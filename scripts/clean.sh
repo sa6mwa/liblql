@@ -1,10 +1,51 @@
 #!/bin/sh
 set -eu
 
+usage() {
+  printf 'usage: clean.sh [--dist|--fixtures]\n' >&2
+}
+
+safe_remove_path() {
+  root=$1
+  path=$2
+  case "$root" in
+    ""|/|"$HOME")
+      printf 'clean: refusing unsafe root: %s\n' "$root" >&2
+      exit 1
+      ;;
+  esac
+  case "$path" in
+    ""|/|"$root"|"$HOME"|..|../*|*/..|*/../*)
+      printf 'clean: refusing unsafe generated path: %s\n' "$path" >&2
+      exit 1
+      ;;
+  esac
+  case "$path" in
+    "$root"/build|"$root"/dist|"$root"/.cache|"$root"/lql|"$root"/lua/*.o)
+      rm -rf "$path"
+      ;;
+    *)
+      printf 'clean: refusing path outside generated state: %s\n' "$path" >&2
+      exit 1
+      ;;
+  esac
+}
+
 clean_root() {
   root=$1
-  rm -rf "${root}/build" "${root}/dist" "${root}/.cache" "${root}/lql"
-  rm -f "${root}"/lua/*.o
+  safe_remove_path "$root" "${root}/build"
+  safe_remove_path "$root" "${root}/dist"
+  safe_remove_path "$root" "${root}/.cache"
+  safe_remove_path "$root" "${root}/lql"
+  for obj in "${root}"/lua/*.o; do
+    [ -e "$obj" ] || continue
+    safe_remove_path "$root" "$obj"
+  done
+}
+
+clean_dist() {
+  root=$1
+  safe_remove_path "$root" "${root}/dist"
 }
 
 if [ "${1:-}" = "--fixtures" ]; then
@@ -31,8 +72,34 @@ if [ "${1:-}" = "--fixtures" ]; then
     printf 'clean fixture: source file was removed\n' >&2
     exit 1
   fi
+  if (safe_remove_path "$tmp" "$tmp") >/dev/null 2>&1; then
+    printf 'clean fixture: unsafe root removal was accepted\n' >&2
+    exit 1
+  fi
+  if (safe_remove_path "$tmp" "$tmp/src") >/dev/null 2>&1; then
+    printf 'clean fixture: non-generated path removal was accepted\n' >&2
+    exit 1
+  fi
+  mkdir -p "$tmp/dist"
+  printf 'generated\n' >"$tmp/dist/state"
+  clean_dist "$tmp"
+  if [ -e "$tmp/dist" ]; then
+    printf 'clean fixture: clean-dist left dist behind\n' >&2
+    exit 1
+  fi
   exit 0
 fi
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-clean_root "$root"
+case "${1:-}" in
+  "")
+    clean_root "$root"
+    ;;
+  --dist)
+    clean_dist "$root"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
