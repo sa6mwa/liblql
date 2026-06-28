@@ -28,12 +28,13 @@ static lql_status selector_parse_json_method(lql *self, const void *json,
 static void selector_destroy_method(lql *self, lql_selector *selector);
 static int selector_is_empty_method(const lql *self,
                                     const lql_selector *selector);
-static void selector_capabilities_get_method(
-    const lql *self, const lql_selector *selector,
-    lql_selector_capabilities *out);
-static void selector_execution_traits_get_method(
-    const lql *self, const lql_selector *selector,
-    lql_selector_execution_traits *out);
+static void selector_capabilities_get_method(const lql *self,
+                                             const lql_selector *selector,
+                                             lql_selector_capabilities *out);
+static void
+selector_execution_traits_get_method(const lql *self,
+                                     const lql_selector *selector,
+                                     lql_selector_execution_traits *out);
 static lql_status selector_root_method(const lql *self,
                                        const lql_selector *selector,
                                        lql_selector_node *out,
@@ -47,15 +48,19 @@ static lql_status selector_node_child_method(const lql *self,
                                              size_t index,
                                              lql_selector_node *out,
                                              lql_error *error);
-static lql_status selector_node_string_term_method(
-    const lql *self, lql_selector_node node, lql_selector_string_term *out,
-    lql_error *error);
-static lql_status selector_node_string_term_any_method(
-    const lql *self, lql_selector_node node, size_t index,
-    lql_string_view *out, lql_error *error);
-static lql_status selector_node_range_term_method(
-    const lql *self, lql_selector_node node, lql_selector_range_term *out,
-    lql_error *error);
+static lql_status
+selector_node_string_term_method(const lql *self, lql_selector_node node,
+                                 lql_selector_string_term *out,
+                                 lql_error *error);
+static lql_status selector_node_string_term_any_method(const lql *self,
+                                                       lql_selector_node node,
+                                                       size_t index,
+                                                       lql_string_view *out,
+                                                       lql_error *error);
+static lql_status selector_node_range_term_method(const lql *self,
+                                                  lql_selector_node node,
+                                                  lql_selector_range_term *out,
+                                                  lql_error *error);
 static lql_status selector_node_date_term_method(const lql *self,
                                                  lql_selector_node node,
                                                  lql_selector_date_term *out,
@@ -243,18 +248,35 @@ static void receiver_capabilities_get(const lql *self, lql_capabilities *out) {
 static void receiver_destroy(lql *self) {
   lql_allocator *allocator;
   lql_impl *impl;
+  lql_pool_block *block;
+  lql_pool_block *next_block;
   if (self == NULL) {
     return;
   }
   impl = (lql_impl *)self->impl;
   allocator = lql_allocator_from_receiver(self);
   if (impl != NULL) {
+    if (impl->eval_runtime != NULL) {
+      lonejson_free(impl->eval_runtime);
+      impl->eval_runtime = NULL;
+    }
+    allocator->destroy(allocator, impl->eval_hits);
+    allocator->destroy(allocator, impl->eval_val_buf);
+    allocator->destroy(allocator, impl->eval_container_types);
+    allocator->destroy(allocator, impl->eval_container_depths);
+    block = impl->eval_pool_all;
+    while (block != NULL) {
+      next_block = block->all_next;
+      allocator->destroy(allocator, block);
+      block = next_block;
+    }
     allocator->destroy(allocator, impl);
   }
   allocator->destroy(allocator, self);
 }
 
-LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self, lql_selector *selector) {
+LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
+                                              lql_selector *selector) {
   lql_allocator *allocator;
   size_t i;
   if (selector == NULL) {
@@ -290,17 +312,14 @@ LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self, lql_selector *selector)
   memset(selector, 0, sizeof(*selector));
 }
 
-static lql_status selector_parse_method(lql *self,
-                                                       const char *expr,
-                                                       lql_selector **out,
-                                                       lql_error *error) {
+static lql_status selector_parse_method(lql *self, const char *expr,
+                                        lql_selector **out, lql_error *error) {
   return lql_parse_selector_internal(self, expr, 0, out, error);
 }
 
-static lql_status selector_parse_or_method(lql *self,
-                                                          const char *expr,
-                                                          lql_selector **out,
-                                                          lql_error *error) {
+static lql_status selector_parse_or_method(lql *self, const char *expr,
+                                           lql_selector **out,
+                                           lql_error *error) {
   return lql_parse_selector_internal(self, expr, 1, out, error);
 }
 
@@ -311,8 +330,7 @@ static lql_status selector_parse_json_method(lql *self, const void *json,
   return lql_parse_selector_json_internal(self, json, json_len, out, error);
 }
 
-static void selector_destroy_method(lql *self,
-                                                   lql_selector *selector) {
+static void selector_destroy_method(lql *self, lql_selector *selector) {
   if (selector != NULL) {
     lql_allocator *allocator;
     lql_selector_cleanup(self, selector);
@@ -324,8 +342,8 @@ static void selector_destroy_method(lql *self,
   }
 }
 
-static int
-selector_is_empty_method(const lql *self, const lql_selector *selector) {
+static int selector_is_empty_method(const lql *self,
+                                    const lql_selector *selector) {
   (void)self;
   return selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL;
 }
@@ -397,8 +415,7 @@ static void lql_string_view_clear(lql_string_view *view) {
 static int cursor_is_string_predicate(lql_selector_node_kind kind) {
   return kind == LQL_SELECTOR_NODE_EQ || kind == LQL_SELECTOR_NODE_CONTAINS ||
          kind == LQL_SELECTOR_NODE_ICONTAINS ||
-         kind == LQL_SELECTOR_NODE_PREFIX ||
-         kind == LQL_SELECTOR_NODE_IPREFIX;
+         kind == LQL_SELECTOR_NODE_PREFIX || kind == LQL_SELECTOR_NODE_IPREFIX;
 }
 
 static lql_status selector_root_method(const lql *self,
@@ -470,9 +487,10 @@ static lql_status selector_node_child_method(const lql *self,
   return LQL_STATUS_OK;
 }
 
-static lql_status selector_node_string_term_method(
-    const lql *self, lql_selector_node node, lql_selector_string_term *out,
-    lql_error *error) {
+static lql_status
+selector_node_string_term_method(const lql *self, lql_selector_node node,
+                                 lql_selector_string_term *out,
+                                 lql_error *error) {
   const lql_selector *internal;
   (void)self;
   if (out == NULL) {
@@ -489,17 +507,18 @@ static lql_status selector_node_string_term_method(
   }
   out->field = lql_view_cstr(internal->field);
   out->value_present = internal->value_set ||
-                       (internal->value != NULL &&
-                        internal->value[0] != '\0');
+                       (internal->value != NULL && internal->value[0] != '\0');
   out->value = lql_view_cstr(internal->value);
   out->ignore_case = internal->ignore_case;
   out->any_count = internal->any_count;
   return LQL_STATUS_OK;
 }
 
-static lql_status selector_node_string_term_any_method(
-    const lql *self, lql_selector_node node, size_t index,
-    lql_string_view *out, lql_error *error) {
+static lql_status selector_node_string_term_any_method(const lql *self,
+                                                       lql_selector_node node,
+                                                       size_t index,
+                                                       lql_string_view *out,
+                                                       lql_error *error) {
   const lql_selector *internal;
   (void)self;
   if (out == NULL) {
@@ -540,9 +559,10 @@ static lql_selector_range_bound range_datetime_bound(const char *text) {
   return out;
 }
 
-static lql_status selector_node_range_term_method(
-    const lql *self, lql_selector_node node, lql_selector_range_term *out,
-    lql_error *error) {
+static lql_status selector_node_range_term_method(const lql *self,
+                                                  lql_selector_node node,
+                                                  lql_selector_range_term *out,
+                                                  lql_error *error) {
   const lql_selector *internal;
   (void)self;
   if (out == NULL) {
@@ -733,12 +753,12 @@ static lonejson_status writer_string_view(lonejson_writer *writer,
 }
 
 static lonejson_status write_selector_json(lonejson_writer *writer,
-                                                const lql_selector *selector,
-                                                lonejson_error *error);
+                                           const lql_selector *selector,
+                                           lonejson_error *error);
 
 static lonejson_status write_string_predicate_json(lonejson_writer *writer,
-                                              const lql_selector *selector,
-                                              lonejson_error *error) {
+                                                   const lql_selector *selector,
+                                                   lonejson_error *error) {
   size_t i;
   if (lonejson_writer_begin_object(writer, error) != LONEJSON_STATUS_OK ||
       writer_key(writer, "field", error) != LONEJSON_STATUS_OK ||
@@ -749,12 +769,10 @@ static lonejson_status write_string_predicate_json(lonejson_writer *writer,
   if (selector->value_set ||
       (selector->value != NULL && selector->value[0] != '\0')) {
     if (writer_key(writer, "value", error) != LONEJSON_STATUS_OK ||
-        lonejson_writer_string(writer,
-                               selector->value == NULL ? "" : selector->value,
-                               selector->value == NULL
-                                   ? 0u
-                                   : strlen(selector->value),
-                               error) != LONEJSON_STATUS_OK) {
+        lonejson_writer_string(
+            writer, selector->value == NULL ? "" : selector->value,
+            selector->value == NULL ? 0u : strlen(selector->value),
+            error) != LONEJSON_STATUS_OK) {
       return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
     }
   }
@@ -845,12 +863,10 @@ static lonejson_status write_range_predicate_json(lonejson_writer *writer,
       writer_key(writer, "field", error) != LONEJSON_STATUS_OK ||
       lonejson_writer_string(writer, selector->field, strlen(selector->field),
                              error) != LONEJSON_STATUS_OK ||
-      write_range_bound_member(writer, "gt", gt, error) !=
-          LONEJSON_STATUS_OK ||
+      write_range_bound_member(writer, "gt", gt, error) != LONEJSON_STATUS_OK ||
       write_range_bound_member(writer, "gte", gte, error) !=
           LONEJSON_STATUS_OK ||
-      write_range_bound_member(writer, "lt", lt, error) !=
-          LONEJSON_STATUS_OK ||
+      write_range_bound_member(writer, "lt", lt, error) != LONEJSON_STATUS_OK ||
       write_range_bound_member(writer, "lte", lte, error) !=
           LONEJSON_STATUS_OK ||
       lonejson_writer_end_object(writer, error) != LONEJSON_STATUS_OK) {
@@ -882,36 +898,28 @@ static lonejson_status write_date_predicate_json(lonejson_writer *writer,
                              error) != LONEJSON_STATUS_OK ||
       write_optional_string_member(writer, "value",
                                    lql_view_cstr(selector->date_value_text),
-                                   error) !=
-          LONEJSON_STATUS_OK ||
+                                   error) != LONEJSON_STATUS_OK ||
       write_optional_string_member(writer, "since",
                                    lql_view_cstr(selector->date_since_text),
-                                   error) !=
-          LONEJSON_STATUS_OK ||
+                                   error) != LONEJSON_STATUS_OK ||
       write_optional_string_member(writer, "after",
                                    lql_view_cstr(selector->date_after_text),
-                                   error) !=
-          LONEJSON_STATUS_OK ||
+                                   error) != LONEJSON_STATUS_OK ||
       write_optional_string_member(writer, "before",
                                    lql_view_cstr(selector->date_before_text),
-                                   error) !=
-          LONEJSON_STATUS_OK ||
+                                   error) != LONEJSON_STATUS_OK ||
       write_optional_string_member(writer, "gte",
                                    lql_view_cstr(selector->date_gte_text),
-                                   error) !=
-          LONEJSON_STATUS_OK ||
+                                   error) != LONEJSON_STATUS_OK ||
       write_optional_string_member(writer, "gt",
                                    lql_view_cstr(selector->date_gt_text),
-                                   error) !=
-          LONEJSON_STATUS_OK ||
+                                   error) != LONEJSON_STATUS_OK ||
       write_optional_string_member(writer, "lte",
                                    lql_view_cstr(selector->date_lte_text),
-                                   error) !=
-          LONEJSON_STATUS_OK ||
+                                   error) != LONEJSON_STATUS_OK ||
       write_optional_string_member(writer, "lt",
                                    lql_view_cstr(selector->date_lt_text),
-                                   error) !=
-          LONEJSON_STATUS_OK ||
+                                   error) != LONEJSON_STATUS_OK ||
       lonejson_writer_end_object(writer, error) != LONEJSON_STATUS_OK) {
     return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
   }
@@ -919,8 +927,8 @@ static lonejson_status write_date_predicate_json(lonejson_writer *writer,
 }
 
 static lonejson_status write_in_predicate_json(lonejson_writer *writer,
-                                          const lql_selector *selector,
-                                          lonejson_error *error) {
+                                               const lql_selector *selector,
+                                               lonejson_error *error) {
   size_t i;
   if (lonejson_writer_begin_object(writer, error) != LONEJSON_STATUS_OK ||
       writer_key(writer, "field", error) != LONEJSON_STATUS_OK ||
@@ -943,9 +951,10 @@ static lonejson_status write_in_predicate_json(lonejson_writer *writer,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status write_selector_children_json(lonejson_writer *writer,
-                                                    const lql_selector *selector,
-                                                    lonejson_error *error) {
+static lonejson_status
+write_selector_children_json(lonejson_writer *writer,
+                             const lql_selector *selector,
+                             lonejson_error *error) {
   size_t i;
   if (lonejson_writer_begin_array(writer, error) != LONEJSON_STATUS_OK) {
     return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
@@ -960,8 +969,8 @@ static lonejson_status write_selector_children_json(lonejson_writer *writer,
 }
 
 static lonejson_status write_selector_json(lonejson_writer *writer,
-                                                const lql_selector *selector,
-                                                lonejson_error *error) {
+                                           const lql_selector *selector,
+                                           lonejson_error *error) {
   const char *key;
   if (lonejson_writer_begin_object(writer, error) != LONEJSON_STATUS_OK) {
     return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
@@ -1023,12 +1032,11 @@ static lonejson_status write_selector_json(lonejson_writer *writer,
         break;
       case LQL_SELECTOR_KIND_NOT:
         if (selector->child_count == 0u) {
-          if (write_selector_json(writer, NULL, error) !=
-              LONEJSON_STATUS_OK) {
+          if (write_selector_json(writer, NULL, error) != LONEJSON_STATUS_OK) {
             return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
           }
-        } else if (write_selector_json(writer, &selector->children[0],
-                                           error) != LONEJSON_STATUS_OK) {
+        } else if (write_selector_json(writer, &selector->children[0], error) !=
+                   LONEJSON_STATUS_OK) {
           return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
         }
         break;
@@ -1038,22 +1046,26 @@ static lonejson_status write_selector_json(lonejson_writer *writer,
       case LQL_SELECTOR_KIND_ICONTAINS:
       case LQL_SELECTOR_KIND_PREFIX:
       case LQL_SELECTOR_KIND_IPREFIX:
-        if (write_string_predicate_json(writer, selector, error) != LONEJSON_STATUS_OK) {
+        if (write_string_predicate_json(writer, selector, error) !=
+            LONEJSON_STATUS_OK) {
           return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
         }
         break;
       case LQL_SELECTOR_KIND_RANGE:
-        if (write_range_predicate_json(writer, selector, error) != LONEJSON_STATUS_OK) {
+        if (write_range_predicate_json(writer, selector, error) !=
+            LONEJSON_STATUS_OK) {
           return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
         }
         break;
       case LQL_SELECTOR_KIND_DATE:
-        if (write_date_predicate_json(writer, selector, error) != LONEJSON_STATUS_OK) {
+        if (write_date_predicate_json(writer, selector, error) !=
+            LONEJSON_STATUS_OK) {
           return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
         }
         break;
       case LQL_SELECTOR_KIND_IN:
-        if (write_in_predicate_json(writer, selector, error) != LONEJSON_STATUS_OK) {
+        if (write_in_predicate_json(writer, selector, error) !=
+            LONEJSON_STATUS_OK) {
           return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
         }
         break;
@@ -1094,8 +1106,8 @@ static lql_status selector_write_json_method(lql *self,
                                  &lj_error);
   if (st == LONEJSON_STATUS_OK) {
     writer_ready = 1;
-    st = write_selector_json(
-        &writer, selector == NULL ? NULL : selector, &lj_error);
+    st = write_selector_json(&writer, selector == NULL ? NULL : selector,
+                             &lj_error);
   }
   if (st == LONEJSON_STATUS_OK) {
     st = lonejson_writer_finish(&writer, &lj_error);
@@ -1107,7 +1119,7 @@ static lql_status selector_write_json_method(lql *self,
   if (st != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
                   lj_error.message[0] == '\0' ? "selector JSON write failed"
-                                               : lj_error.message);
+                                              : lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
   return LQL_STATUS_OK;
@@ -1198,9 +1210,9 @@ static void selector_capabilities_visit(lql_selector_capabilities *out,
   }
 }
 
-static void selector_capabilities_get_method(
-    const lql *self, const lql_selector *selector,
-    lql_selector_capabilities *out) {
+static void selector_capabilities_get_method(const lql *self,
+                                             const lql_selector *selector,
+                                             lql_selector_capabilities *out) {
   (void)self;
   if (out == NULL) {
     return;
@@ -1212,9 +1224,10 @@ static void selector_capabilities_get_method(
   selector_capabilities_visit(out, selector);
 }
 
-static void selector_execution_traits_get_method(
-    const lql *self, const lql_selector *selector,
-    lql_selector_execution_traits *out) {
+static void
+selector_execution_traits_get_method(const lql *self,
+                                     const lql_selector *selector,
+                                     lql_selector_execution_traits *out) {
   lql_selector_capabilities capabilities;
 
   if (out == NULL) {
@@ -1226,7 +1239,7 @@ static void selector_execution_traits_get_method(
   out->uses_recursive_path = capabilities.recursive_path;
   out->uses_wildcard_path = capabilities.wildcard_path;
   out->requires_object_root = !selector_is_empty_method(self, selector);
-  out->early_non_match_likely =
-      out->requires_object_root && !out->uses_contains_like &&
-      !out->uses_recursive_path;
+  out->early_non_match_likely = out->requires_object_root &&
+                                !out->uses_contains_like &&
+                                !out->uses_recursive_path;
 }

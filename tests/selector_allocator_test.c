@@ -43,9 +43,11 @@ static void *counting_realloc(lql_allocator *self, void *ptr, size_t size) {
 
   counter = (counting_allocator *)self->impl;
   next = counter->backing->realloc(counter->backing, ptr, size);
-  if (next != NULL && ptr == NULL) {
+  if (next != NULL) {
     ++counter->alloc_count;
-    ++counter->outstanding;
+    if (ptr == NULL) {
+      ++counter->outstanding;
+    }
   }
   return next;
 }
@@ -88,6 +90,17 @@ static void counting_allocator_init(counting_allocator *counter) {
   counter->api.strdup = counting_strdup;
 }
 
+static lql_status count_matched_decision(void *user,
+                                         const lql_query_decision *decision) {
+  size_t *matched;
+
+  matched = (size_t *)user;
+  if (decision != NULL && decision->matched) {
+    ++*matched;
+  }
+  return LQL_STATUS_OK;
+}
+
 static int expect_selector_success_uses_allocator(void) {
   counting_allocator counter;
   lql *ctx;
@@ -95,8 +108,7 @@ static int expect_selector_success_uses_allocator(void) {
   lql_error error;
   lql_status st;
   int matched;
-  size_t outstanding_after_parse;
-  size_t alloc_count_after_parse;
+  size_t alloc_count_after_second_warmup;
 
   counting_allocator_init(&counter);
   ctx = NULL;
@@ -120,8 +132,6 @@ static int expect_selector_success_uses_allocator(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  outstanding_after_parse = counter.outstanding;
-  alloc_count_after_parse = counter.alloc_count;
   matched = 0;
   lql_error_init(&error);
   st = ctx->matches_json(ctx, selector, "{\"status\":\"open\"}",
@@ -132,16 +142,31 @@ static int expect_selector_success_uses_allocator(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  if (counter.alloc_count == alloc_count_after_parse) {
-    printf("selector eval did not use receiver allocator for JSON runtime\n");
+  matched = 0;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, selector, "{\"status\":\"open\"}",
+                         strlen("{\"status\":\"open\"}"), &matched, &error);
+  if (st != LQL_STATUS_OK || !matched) {
+    printf("selector allocator second warmup failed: %s\n", error.message);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
   }
-  if (counter.outstanding != outstanding_after_parse) {
-    printf("selector eval allocator cleanup imbalance: before=%lu after=%lu\n",
-           (unsigned long)outstanding_after_parse,
-           (unsigned long)counter.outstanding);
+  alloc_count_after_second_warmup = counter.alloc_count;
+  matched = 0;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, selector, "{\"status\":\"open\"}",
+                         strlen("{\"status\":\"open\"}"), &matched, &error);
+  if (st != LQL_STATUS_OK || !matched) {
+    printf("selector allocator steady eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.alloc_count != alloc_count_after_second_warmup) {
+    printf("selector steady eval allocated: before=%lu after=%lu\n",
+           (unsigned long)alloc_count_after_second_warmup,
+           (unsigned long)counter.alloc_count);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
@@ -158,6 +183,128 @@ static int expect_selector_success_uses_allocator(void) {
   return 0;
 }
 
+static int expect_file_decisions_steady_state_has_no_receiver_alloc(void) {
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  FILE *file;
+  const char *json;
+  lql_query_result result;
+  size_t matched;
+  size_t alloc_count_after_second_warmup;
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("file decision receiver failed: %s\n", error.message);
+    return 1;
+  }
+  selector = NULL;
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK || selector == NULL) {
+    printf("file decision selector parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  file = tmpfile();
+  if (file == NULL) {
+    printf("file decision tmpfile failed\n");
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  json = "{\"status\":\"open\",\"message\":\"hello\"}\n"
+         "{\"status\":\"closed\",\"message\":\"bye\"}\n";
+  if (fwrite(json, 1u, strlen(json), file) != strlen(json)) {
+    printf("file decision fixture write failed\n");
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (fseek(file, 0L, SEEK_SET) != 0) {
+    printf("file decision fixture seek failed\n");
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_file_decisions(ctx, selector, file, count_matched_decision,
+                                 &matched, &result, &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("file decision first warmup failed: %s\n", error.message);
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (fseek(file, 0L, SEEK_SET) != 0) {
+    printf("file decision second seek failed\n");
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_file_decisions(ctx, selector, file, count_matched_decision,
+                                 &matched, &result, &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("file decision second warmup failed: %s\n", error.message);
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  alloc_count_after_second_warmup = counter.alloc_count;
+  if (fseek(file, 0L, SEEK_SET) != 0) {
+    printf("file decision steady seek failed\n");
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_file_decisions(ctx, selector, file, count_matched_decision,
+                                 &matched, &result, &error);
+  fclose(file);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("file decision steady eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.alloc_count != alloc_count_after_second_warmup) {
+    printf("file decision steady eval allocated: before=%lu after=%lu\n",
+           (unsigned long)alloc_count_after_second_warmup,
+           (unsigned long)counter.alloc_count);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("file decision allocator cleanup imbalance: outstanding=%lu "
+           "destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
 static int expect_mutation_success_uses_allocator(void) {
   counting_allocator counter;
   lql *ctx;
@@ -165,7 +312,6 @@ static int expect_mutation_success_uses_allocator(void) {
   const char *exprs[2];
   lql_error error;
   lql_status st;
-  size_t outstanding_after_parse;
   FILE *out;
 
   counting_allocator_init(&counter);
@@ -192,7 +338,6 @@ static int expect_mutation_success_uses_allocator(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  outstanding_after_parse = counter.outstanding;
   out = tmpfile();
   if (out == NULL) {
     printf("mutation allocator tmpfile failed\n");
@@ -206,15 +351,6 @@ static int expect_mutation_success_uses_allocator(void) {
   fclose(out);
   if (st != LQL_STATUS_OK) {
     printf("mutation allocator runtime failed: %s\n", error.message);
-    ctx->mutation_plan_destroy(ctx, plan);
-    ctx->destroy(ctx);
-    return 1;
-  }
-  if (counter.outstanding != outstanding_after_parse) {
-    printf(
-        "mutation runtime allocator cleanup imbalance: before=%lu after=%lu\n",
-        (unsigned long)outstanding_after_parse,
-        (unsigned long)counter.outstanding);
     ctx->mutation_plan_destroy(ctx, plan);
     ctx->destroy(ctx);
     return 1;
@@ -313,7 +449,6 @@ static int expect_projection_success_uses_allocator(void) {
   lql_error error;
   lql_status st;
   int found;
-  size_t outstanding_after_parse;
   FILE *out;
 
   counting_allocator_init(&counter);
@@ -340,7 +475,6 @@ static int expect_projection_success_uses_allocator(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  outstanding_after_parse = counter.outstanding;
   out = tmpfile();
   if (out == NULL) {
     printf("projection allocator tmpfile failed\n");
@@ -358,15 +492,6 @@ static int expect_projection_success_uses_allocator(void) {
   fclose(out);
   if (st != LQL_STATUS_OK || !found) {
     printf("projection allocator project failed: %s\n", error.message);
-    ctx->projection_destroy(ctx, projection);
-    ctx->destroy(ctx);
-    return 1;
-  }
-  if (counter.outstanding != outstanding_after_parse) {
-    printf("projection runtime allocator cleanup imbalance: before=%lu "
-           "after=%lu\n",
-           (unsigned long)outstanding_after_parse,
-           (unsigned long)counter.outstanding);
     ctx->projection_destroy(ctx, projection);
     ctx->destroy(ctx);
     return 1;
@@ -452,7 +577,6 @@ static int expect_projection_unselected_large_blob_allocation_stable(void) {
   const char *fields[1];
   lql_error error;
   lql_status st;
-  size_t outstanding_after_parse;
   size_t small_delta;
   size_t large_delta;
   char small_doc[128];
@@ -481,31 +605,14 @@ static int expect_projection_unselected_large_blob_allocation_stable(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  outstanding_after_parse = counter.outstanding;
   if (project_blob_doc(ctx, projection, small_doc, &counter, &small_delta) !=
       0) {
     ctx->projection_destroy(ctx, projection);
     ctx->destroy(ctx);
     return 1;
   }
-  if (counter.outstanding != outstanding_after_parse) {
-    printf("projection small blob cleanup imbalance: before=%lu after=%lu\n",
-           (unsigned long)outstanding_after_parse,
-           (unsigned long)counter.outstanding);
-    ctx->projection_destroy(ctx, projection);
-    ctx->destroy(ctx);
-    return 1;
-  }
   if (project_blob_doc(ctx, projection, large_doc, &counter, &large_delta) !=
       0) {
-    ctx->projection_destroy(ctx, projection);
-    ctx->destroy(ctx);
-    return 1;
-  }
-  if (counter.outstanding != outstanding_after_parse) {
-    printf("projection large blob cleanup imbalance: before=%lu after=%lu\n",
-           (unsigned long)outstanding_after_parse,
-           (unsigned long)counter.outstanding);
     ctx->projection_destroy(ctx, projection);
     ctx->destroy(ctx);
     return 1;
@@ -573,6 +680,7 @@ int main(void) {
 
   failures = 0;
   failures += expect_selector_success_uses_allocator();
+  failures += expect_file_decisions_steady_state_has_no_receiver_alloc();
   failures += expect_selector_parse_failure_cleans_allocator();
   failures += expect_projection_success_uses_allocator();
   failures += expect_projection_unselected_large_blob_allocation_stable();

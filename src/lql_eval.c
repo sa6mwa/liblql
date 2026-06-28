@@ -20,16 +20,20 @@
 
 typedef struct eval_doc {
   lql_allocator *allocator;
+  lql_impl *impl;
   const lql_selector *selector;
   unsigned char *hits;
+  size_t hits_cap;
   char *val_buf;
   size_t val_len;
+  size_t val_cap;
   int scalar_interested;
   int *container_types;
   size_t *container_depths;
   size_t container_count;
   size_t container_cap;
   char root_kind;
+  int borrowed_scratch;
 } eval_doc;
 
 typedef struct lql_match_adapter {
@@ -170,26 +174,65 @@ static lql_status on_match_decision(void *user,
 }
 
 static void destroy_doc(eval_doc *doc) {
-  doc->allocator->destroy(doc->allocator, doc->hits);
-  doc->allocator->destroy(doc->allocator, doc->val_buf);
-  doc->allocator->destroy(doc->allocator, doc->container_types);
-  doc->allocator->destroy(doc->allocator, doc->container_depths);
+  if (doc->borrowed_scratch && doc->impl != NULL) {
+    doc->impl->eval_hits = doc->hits;
+    doc->impl->eval_hits_cap = doc->hits_cap;
+    doc->impl->eval_val_buf = doc->val_buf;
+    doc->impl->eval_val_cap = doc->val_cap;
+    doc->impl->eval_container_types = doc->container_types;
+    doc->impl->eval_container_depths = doc->container_depths;
+    doc->impl->eval_container_cap = doc->container_cap;
+    doc->impl->eval_scratch_in_use = 0;
+  } else {
+    doc->allocator->destroy(doc->allocator, doc->hits);
+    doc->allocator->destroy(doc->allocator, doc->val_buf);
+    doc->allocator->destroy(doc->allocator, doc->container_types);
+    doc->allocator->destroy(doc->allocator, doc->container_depths);
+  }
   memset(doc, 0, sizeof(*doc));
 }
 
 static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
+  lql_impl *impl;
+  unsigned char *next_hits;
   memset(doc, 0, sizeof(*doc));
   doc->allocator = lql_allocator_from_receiver(self);
+  impl = self == NULL ? NULL : (lql_impl *)self->impl;
+  doc->impl = impl;
   doc->selector = selector;
   if (doc->allocator == NULL) {
     return 0;
   }
+  if (impl != NULL && !impl->eval_scratch_in_use) {
+    impl->eval_scratch_in_use = 1;
+    doc->borrowed_scratch = 1;
+    doc->hits = impl->eval_hits;
+    doc->hits_cap = impl->eval_hits_cap;
+    doc->val_buf = impl->eval_val_buf;
+    doc->val_cap = impl->eval_val_cap;
+    doc->container_types = impl->eval_container_types;
+    doc->container_depths = impl->eval_container_depths;
+    doc->container_cap = impl->eval_container_cap;
+    impl->eval_hits = NULL;
+    impl->eval_hits_cap = 0u;
+    impl->eval_val_buf = NULL;
+    impl->eval_val_cap = 0u;
+    impl->eval_container_types = NULL;
+    impl->eval_container_depths = NULL;
+    impl->eval_container_cap = 0u;
+  }
   if (selector != NULL && selector->hit_count != 0u) {
-    doc->hits = (unsigned char *)doc->allocator->calloc(
-        doc->allocator, selector->hit_count, 1u);
-    if (doc->hits == NULL) {
-      return 0;
+    if (doc->hits_cap < selector->hit_count) {
+      next_hits = (unsigned char *)doc->allocator->realloc(
+          doc->allocator, doc->hits, selector->hit_count);
+      if (next_hits == NULL) {
+        destroy_doc(doc);
+        return 0;
+      }
+      doc->hits = next_hits;
+      doc->hits_cap = selector->hit_count;
     }
+    memset(doc->hits, 0, selector->hit_count);
   }
   return 1;
 }
@@ -198,9 +241,10 @@ static void reset_doc(eval_doc *doc) {
   if (doc->selector != NULL && doc->selector->hit_count != 0u) {
     memset(doc->hits, 0, doc->selector->hit_count);
   }
-  doc->allocator->destroy(doc->allocator, doc->val_buf);
-  doc->val_buf = NULL;
   doc->val_len = 0u;
+  if (doc->val_buf != NULL && doc->val_cap != 0u) {
+    doc->val_buf[0] = '\0';
+  }
   doc->scalar_interested = 0;
   doc->container_count = 0u;
   doc->root_kind = '\0';
@@ -209,11 +253,21 @@ static void reset_doc(eval_doc *doc) {
 static int append_buf(eval_doc *doc, char **buf, size_t *len, const char *data,
                       size_t n) {
   char *next;
-  next = (char *)doc->allocator->realloc(doc->allocator, *buf, *len + n + 1u);
-  if (next == NULL) {
-    return 0;
+  size_t need;
+  size_t next_cap;
+  need = *len + n + 1u;
+  if (need > doc->val_cap) {
+    next_cap = doc->val_cap == 0u ? 64u : doc->val_cap;
+    while (next_cap < need) {
+      next_cap *= 2u;
+    }
+    next = (char *)doc->allocator->realloc(doc->allocator, *buf, next_cap);
+    if (next == NULL) {
+      return 0;
+    }
+    *buf = next;
+    doc->val_cap = next_cap;
   }
-  *buf = next;
   memcpy(*buf + *len, data, n);
   *len += n;
   (*buf)[*len] = '\0';
@@ -310,6 +364,7 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
                                  const size_t *needle_lens, size_t count,
                                  int ignore_case) {
   unsigned char firsts[32];
+  unsigned char first_present[256];
   size_t i;
   size_t j;
   size_t n;
@@ -326,6 +381,7 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
     }
     return 0;
   }
+  memset(first_present, 0, sizeof(first_present));
   for (j = 0u; j < count; ++j) {
     if (needle_lens[j] == 0u) {
       return 1;
@@ -333,10 +389,14 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
     firsts[j] = ignore_case
                     ? (unsigned char)tolower((unsigned char)needles[j][0])
                     : (unsigned char)needles[j][0];
+    first_present[firsts[j]] = 1u;
   }
   for (i = 0u; i < h; ++i) {
     hay_ch = ignore_case ? (unsigned char)tolower((unsigned char)haystack[i])
                          : (unsigned char)haystack[i];
+    if (!first_present[hay_ch]) {
+      continue;
+    }
     for (j = 0u; j < count; ++j) {
       n = needle_lens[j];
       if (n > h - i) {
@@ -504,9 +564,8 @@ static int resolve_since_macro(lql_since_macro macro, lql_temporal *out) {
 }
 
 static void observe_selector(eval_doc *doc, const lql_selector *selector,
-                             const lonejson_value_path *path,
-                             const char *value, int is_number,
-                             int is_container, int is_null) {
+                             const lonejson_value_path *path, const char *value,
+                             int is_number, int is_container, int is_null) {
   size_t i;
   size_t n;
   size_t j;
@@ -777,9 +836,10 @@ static lonejson_status on_string_begin(void *user,
                                        lonejson_error *error) {
   eval_doc *doc = (eval_doc *)user;
   (void)error;
-  doc->allocator->destroy(doc->allocator, doc->val_buf);
-  doc->val_buf = NULL;
   doc->val_len = 0u;
+  if (doc->val_buf != NULL && doc->val_cap != 0u) {
+    doc->val_buf[0] = '\0';
+  }
   doc->scalar_interested = scalar_path_interested(doc, path);
   return LONEJSON_STATUS_OK;
 }
@@ -810,9 +870,10 @@ static lonejson_status on_string_end(void *user,
   if (doc->scalar_interested) {
     observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 0, 0, 0);
   }
-  doc->allocator->destroy(doc->allocator, doc->val_buf);
-  doc->val_buf = NULL;
   doc->val_len = 0u;
+  if (doc->val_buf != NULL && doc->val_cap != 0u) {
+    doc->val_buf[0] = '\0';
+  }
   doc->scalar_interested = 0;
   return LONEJSON_STATUS_OK;
 }
@@ -841,9 +902,10 @@ static lonejson_status on_number_end(void *user,
   if (doc->scalar_interested) {
     observe_value(doc, path, doc->val_buf == NULL ? "" : doc->val_buf, 1, 0, 0);
   }
-  doc->allocator->destroy(doc->allocator, doc->val_buf);
-  doc->val_buf = NULL;
   doc->val_len = 0u;
+  if (doc->val_buf != NULL && doc->val_cap != 0u) {
+    doc->val_buf[0] = '\0';
+  }
   doc->scalar_interested = 0;
   return LONEJSON_STATUS_OK;
 }
@@ -1817,12 +1879,14 @@ static lql_status eval_selector_buffer(lql *self, const lql_selector *selector,
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
   lonejson_status st;
+  int runtime_cached;
   eval_doc doc;
 
   if (!init_doc(&doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lql_lonejson_new(self, &lj_error);
+  runtime_cached = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&doc);
@@ -1834,13 +1898,13 @@ static lql_status eval_selector_buffer(lql *self, const lql_selector *selector,
   if (st != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&doc);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_cached);
     return LQL_STATUS_JSON_ERROR;
   }
   *out_matched = selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL ||
                  eval_selector_tree(selector, &doc);
   destroy_doc(&doc);
-  lonejson_free(runtime);
+  lql_lonejson_release(self, runtime, runtime_cached);
   return LQL_STATUS_OK;
 }
 
@@ -2226,6 +2290,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   lonejson_path_value_visitor visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
+  int runtime_cached;
   query_stream_state state;
 
   memset(&state, 0, sizeof(state));
@@ -2243,7 +2308,8 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lql_lonejson_new(self, &lj_error);
+  runtime_cached = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -2260,7 +2326,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_cached);
     if (out_result != NULL) {
       *out_result = state.result;
     }
@@ -2274,7 +2340,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   }
   query_finish_file_bytes(&state.result, file);
   destroy_doc(&state.doc);
-  lonejson_free(runtime);
+  lql_lonejson_release(self, runtime, runtime_cached);
   if (out_result != NULL) {
     *out_result = state.result;
   }
@@ -2291,6 +2357,7 @@ static lql_status execute_query_file_range_decisions(
   lonejson_path_value_visitor visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
+  int runtime_cached;
   query_stream_state state;
   eval_pread_range_reader reader;
 
@@ -2309,7 +2376,8 @@ static lql_status execute_query_file_range_decisions(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lql_lonejson_new(self, &lj_error);
+  runtime_cached = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -2318,7 +2386,7 @@ static lql_status execute_query_file_range_decisions(
   reader.fd = fileno(file);
   if (reader.fd < 0) {
     destroy_doc(&state.doc);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_cached);
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
                   "failed to access input range descriptor");
     return LQL_STATUS_JSON_ERROR;
@@ -2336,7 +2404,7 @@ static lql_status execute_query_file_range_decisions(
   st = lonejson_visit_candidates_reader(runtime, eval_pread_range, &reader,
                                         &options, &lj_error);
   destroy_doc(&state.doc);
-  lonejson_free(runtime);
+  lql_lonejson_release(self, runtime, runtime_cached);
   if (st != LONEJSON_STATUS_OK) {
     if (out_result != NULL) {
       *out_result = state.result;
@@ -2374,6 +2442,7 @@ static lql_status execute_query_source_decisions_with_base(
   lonejson_path_value_visitor visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
+  int runtime_cached;
   query_stream_state state;
   source_reader_adapter adapter;
 
@@ -2391,7 +2460,8 @@ static lql_status execute_query_source_decisions_with_base(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lql_lonejson_new(self, &lj_error);
+  runtime_cached = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -2421,7 +2491,7 @@ static lql_status execute_query_source_decisions_with_base(
   if (st != LONEJSON_STATUS_OK) {
     query_stream_state_cleanup_capture(&state);
     destroy_doc(&state.doc);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_cached);
     if (out_result != NULL) {
       *out_result = state.result;
     }
@@ -2441,7 +2511,7 @@ static lql_status execute_query_source_decisions_with_base(
   }
   query_stream_state_cleanup_capture(&state);
   destroy_doc(&state.doc);
-  lonejson_free(runtime);
+  lql_lonejson_release(self, runtime, runtime_cached);
   if (out_result != NULL) {
     *out_result = state.result;
   }

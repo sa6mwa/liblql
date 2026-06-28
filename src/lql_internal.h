@@ -13,6 +13,19 @@
 
 typedef struct lql_allocator lql_allocator;
 typedef struct lql_impl lql_impl;
+typedef struct lql_pool_block lql_pool_block;
+
+struct lql_pool_block {
+  union {
+    void *ptr;
+    long l;
+    double d;
+    long double ld;
+  } align;
+  lql_pool_block *all_next;
+  lql_pool_block *free_next;
+  size_t size;
+};
 
 struct lql_allocator {
   void *impl;
@@ -25,6 +38,18 @@ struct lql_allocator {
 
 struct lql_impl {
   lql_allocator *allocator;
+  lql_pool_block *eval_pool_all;
+  lql_pool_block *eval_pool_free;
+  lonejson *eval_runtime;
+  int eval_runtime_in_use;
+  unsigned char *eval_hits;
+  size_t eval_hits_cap;
+  char *eval_val_buf;
+  size_t eval_val_cap;
+  int *eval_container_types;
+  size_t *eval_container_depths;
+  size_t eval_container_cap;
+  int eval_scratch_in_use;
 };
 
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
@@ -41,6 +66,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
                                                       lql_error *error);
 LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
                                                lonejson_error *error);
+LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_acquire(lql *self, int *out_cached,
+                                                   lonejson_error *error);
+LQL_INTERNAL_SYMBOL void lql_lonejson_release(lql *self, lonejson *runtime,
+                                              int cached);
 LQL_INTERNAL_SYMBOL void lql_eval_methods_install(lql *ctx);
 LQL_INTERNAL_SYMBOL void lql_project_methods_install(lql *ctx);
 LQL_INTERNAL_SYMBOL void lql_mutation_methods_install(lql *ctx);
@@ -136,19 +165,16 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
                                                            int or_mode,
                                                            lql_selector **out,
                                                            lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_json_internal(
-    lql *self, const void *json, size_t json_len, lql_selector **out,
-    lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status
-lql_selector_build_all_internal(lql *self, lql_selector **out,
-                                lql_error *error);
+lql_parse_selector_json_internal(lql *self, const void *json, size_t json_len,
+                                 lql_selector **out, lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_selector_build_all_internal(
+    lql *self, lql_selector **out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_compound_internal(
-    lql *self, lql_selector_node_kind kind,
-    const lql_selector *const *children, size_t child_count, lql_selector **out,
-    lql_error *error);
+    lql *self, lql_selector_node_kind kind, const lql_selector *const *children,
+    size_t child_count, lql_selector **out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_not_internal(
-    lql *self, const lql_selector *child, lql_selector **out,
-    lql_error *error);
+    lql *self, const lql_selector *child, lql_selector **out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
     lql *self, lql_selector_node_kind kind,
     const lql_selector_string_term *term, const lql_string_view *any_values,
@@ -156,9 +182,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_range_internal(
     lql *self, const lql_selector_range_term *term, lql_selector **out,
     lql_error *error);
-LQL_INTERNAL_SYMBOL lql_status lql_selector_build_date_internal(
-    lql *self, const lql_selector_date_term *term, lql_selector **out,
-    lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status
+lql_selector_build_date_internal(lql *self, const lql_selector_date_term *term,
+                                 lql_selector **out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_in_internal(
     lql *self, const lql_selector_in_term *term,
     const lql_string_view *any_values, lql_selector **out, lql_error *error);
