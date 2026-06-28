@@ -402,18 +402,29 @@ static int pattern_segment_matches(const eval_doc *doc, const char *start,
                                    size_t len, const lonejson_value_path *path,
                                    size_t path_idx) {
   int parent_type;
-  if (path_idx >= path->segment_count ||
-      !parent_container_type(doc, path_idx, &parent_type)) {
-    return 0;
-  }
   if (pattern_segment_is(start, len, "*")) {
+    if (path_idx >= path->segment_count ||
+        !parent_container_type(doc, path_idx, &parent_type)) {
+      return 0;
+    }
     return parent_type == '{';
   }
   if (pattern_segment_is(start, len, "[]")) {
+    if (path_idx >= path->segment_count ||
+        !parent_container_type(doc, path_idx, &parent_type)) {
+      return 0;
+    }
     return parent_type == '[';
   }
   if (pattern_segment_is(start, len, "**")) {
+    if (path_idx >= path->segment_count ||
+        !parent_container_type(doc, path_idx, &parent_type)) {
+      return 0;
+    }
     return parent_type == '{' || parent_type == '[';
+  }
+  if (path_idx >= path->segment_count) {
+    return 0;
   }
   return path_segment_matches(start, len, &path->segments[path_idx]);
 }
