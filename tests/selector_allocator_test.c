@@ -9,7 +9,19 @@ typedef struct counting_allocator {
   size_t alloc_count;
   size_t destroy_count;
   size_t outstanding;
+  size_t outstanding_bytes;
+  size_t peak_outstanding_bytes;
 } counting_allocator;
+
+typedef union counting_header {
+  struct {
+    size_t size;
+  } meta;
+  void *ptr;
+  long l;
+  double d;
+  long double ld;
+} counting_header;
 
 typedef struct memory_reader {
   const char *data;
@@ -18,70 +30,119 @@ typedef struct memory_reader {
   size_t chunk_size;
 } memory_reader;
 
+static void counting_destroy(lql_allocator *self, void *ptr);
+
+static void counting_record_alloc(counting_allocator *counter, size_t size) {
+  ++counter->alloc_count;
+  ++counter->outstanding;
+  counter->outstanding_bytes += size;
+  if (counter->outstanding_bytes > counter->peak_outstanding_bytes) {
+    counter->peak_outstanding_bytes = counter->outstanding_bytes;
+  }
+}
+
+static counting_header *counting_header_from_user(void *ptr) {
+  return ((counting_header *)ptr) - 1;
+}
+
 static void *counting_alloc(lql_allocator *self, size_t size) {
   counting_allocator *counter;
-  void *ptr;
+  counting_header *raw;
 
   counter = (counting_allocator *)self->impl;
-  ptr = counter->backing->alloc(counter->backing, size);
-  if (ptr != NULL) {
-    ++counter->alloc_count;
-    ++counter->outstanding;
+  raw = (counting_header *)counter->backing->alloc(counter->backing,
+                                                   sizeof(*raw) + size);
+  if (raw != NULL) {
+    raw->meta.size = size;
+    counting_record_alloc(counter, size);
+    return (void *)(raw + 1);
   }
-  return ptr;
+  return NULL;
 }
 
 static void *counting_calloc(lql_allocator *self, size_t count, size_t size) {
   counting_allocator *counter;
-  void *ptr;
+  counting_header *raw;
+  size_t total;
 
   counter = (counting_allocator *)self->impl;
-  ptr = counter->backing->calloc(counter->backing, count, size);
-  if (ptr != NULL) {
-    ++counter->alloc_count;
-    ++counter->outstanding;
+  total = count * size;
+  raw = (counting_header *)counter->backing->calloc(counter->backing, 1u,
+                                                    sizeof(*raw) + total);
+  if (raw != NULL) {
+    raw->meta.size = total;
+    counting_record_alloc(counter, total);
+    return (void *)(raw + 1);
   }
-  return ptr;
+  return NULL;
 }
 
 static void *counting_realloc(lql_allocator *self, void *ptr, size_t size) {
   counting_allocator *counter;
-  void *next;
+  counting_header *raw;
+  counting_header *next;
+  size_t old_size;
 
   counter = (counting_allocator *)self->impl;
-  next = counter->backing->realloc(counter->backing, ptr, size);
-  if (next != NULL) {
-    ++counter->alloc_count;
-    if (ptr == NULL) {
-      ++counter->outstanding;
-    }
+  if (ptr == NULL) {
+    return counting_alloc(self, size);
   }
-  return next;
+  if (size == 0u) {
+    counting_destroy(self, ptr);
+    return NULL;
+  }
+  raw = counting_header_from_user(ptr);
+  old_size = raw->meta.size;
+  next = (counting_header *)counter->backing->realloc(counter->backing, raw,
+                                                      sizeof(*raw) + size);
+  if (next != NULL) {
+    next->meta.size = size;
+    ++counter->alloc_count;
+    if (size >= old_size) {
+      counter->outstanding_bytes += size - old_size;
+    } else {
+      counter->outstanding_bytes -= old_size - size;
+    }
+    if (counter->outstanding_bytes > counter->peak_outstanding_bytes) {
+      counter->peak_outstanding_bytes = counter->outstanding_bytes;
+    }
+    return (void *)(next + 1);
+  }
+  return NULL;
 }
 
 static void counting_destroy(lql_allocator *self, void *ptr) {
   counting_allocator *counter;
+  counting_header *raw;
 
   if (ptr == NULL) {
     return;
   }
   counter = (counting_allocator *)self->impl;
+  raw = counting_header_from_user(ptr);
   ++counter->destroy_count;
   if (counter->outstanding > 0u) {
     --counter->outstanding;
   }
-  counter->backing->destroy(counter->backing, ptr);
+  if (counter->outstanding_bytes >= raw->meta.size) {
+    counter->outstanding_bytes -= raw->meta.size;
+  } else {
+    counter->outstanding_bytes = 0u;
+  }
+  counter->backing->destroy(counter->backing, raw);
 }
 
 static char *counting_strdup(lql_allocator *self, const char *text) {
-  counting_allocator *counter;
   char *ptr;
+  size_t len;
 
-  counter = (counting_allocator *)self->impl;
-  ptr = counter->backing->strdup(counter->backing, text);
+  if (text == NULL) {
+    return NULL;
+  }
+  len = strlen(text);
+  ptr = (char *)counting_alloc(self, len + 1u);
   if (ptr != NULL) {
-    ++counter->alloc_count;
-    ++counter->outstanding;
+    memcpy(ptr, text, len + 1u);
   }
   return ptr;
 }
@@ -131,6 +192,19 @@ static lql_status count_matched_decision(void *user,
   if (decision != NULL && decision->matched) {
     ++*matched;
   }
+  return LQL_STATUS_OK;
+}
+
+static lql_status count_spooled_match(void *user,
+                                      const lql_query_match *match) {
+  size_t *matched;
+
+  matched = (size_t *)user;
+  if (match == NULL || match->payload.kind != LQL_PAYLOAD_SPOOLED ||
+      match->payload.spooled == NULL) {
+    return LQL_STATUS_JSON_ERROR;
+  }
+  ++*matched;
   return LQL_STATUS_OK;
 }
 
@@ -532,6 +606,139 @@ expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
   return 0;
 }
 
+static int make_large_match_doc(char *buf, size_t capacity, size_t blob_len) {
+  const char *prefix;
+  const char *suffix;
+  size_t prefix_len;
+  size_t suffix_len;
+
+  prefix = "{\"id\":\"a\",\"blob\":\"";
+  suffix = "\"}\n";
+  prefix_len = strlen(prefix);
+  suffix_len = strlen(suffix);
+  if (capacity <= prefix_len + blob_len + suffix_len) {
+    return 0;
+  }
+  memcpy(buf, prefix, prefix_len);
+  memset(buf + prefix_len, 'x', blob_len);
+  memcpy(buf + prefix_len + blob_len, suffix, suffix_len + 1u);
+  return 1;
+}
+
+static int run_source_spooled_match_query(lql *ctx, lql_selector *selector,
+                                          const char *json, size_t *out_matches,
+                                          lql_query_result *out_result,
+                                          lql_error *error) {
+  memory_reader reader;
+
+  reader.data = json;
+  reader.len = strlen(json);
+  reader.offset = 0u;
+  reader.chunk_size = 4096u;
+  *out_matches = 0u;
+  memset(out_result, 0, sizeof(*out_result));
+  lql_error_init(error);
+  return ctx->query_source_spooled_matches(
+             ctx, selector, read_memory_chunk, &reader, count_spooled_match,
+             out_matches, out_result, error) == LQL_STATUS_OK
+             ? 0
+             : 1;
+}
+
+static int expect_source_spooled_match_peak_is_per_candidate_bounded(void) {
+  static char single_doc[90000];
+  static char double_doc[180000];
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  lql_query_result result;
+  size_t matches;
+  size_t baseline_peak;
+  size_t single_delta;
+  size_t double_delta;
+  size_t single_len;
+
+  if (!make_large_match_doc(single_doc, sizeof(single_doc), 65536u)) {
+    printf("source spooled single fixture construction failed\n");
+    return 1;
+  }
+  single_len = strlen(single_doc);
+  if (sizeof(double_doc) <= single_len * 2u) {
+    printf("source spooled double fixture too small\n");
+    return 1;
+  }
+  memcpy(double_doc, single_doc, single_len);
+  memcpy(double_doc + single_len, single_doc, single_len + 1u);
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("source spooled receiver failed: %s\n", error.message);
+    return 1;
+  }
+  selector = NULL;
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "/id=\"a\"", &selector, &error);
+  if (st != LQL_STATUS_OK || selector == NULL) {
+    printf("source spooled selector parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  baseline_peak = counter.peak_outstanding_bytes;
+  if (run_source_spooled_match_query(ctx, selector, single_doc, &matches,
+                                     &result, &error) != 0 ||
+      matches != 1u || result.candidates_seen != 1u) {
+    printf("source spooled single query failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  single_delta = counter.peak_outstanding_bytes - baseline_peak;
+
+  if (run_source_spooled_match_query(ctx, selector, double_doc, &matches,
+                                     &result, &error) != 0 ||
+      matches != 2u || result.candidates_seen != 2u) {
+    printf("source spooled double query failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  double_delta = counter.peak_outstanding_bytes - baseline_peak;
+
+  if (single_delta == 0u || single_delta > 196608u) {
+    printf("source spooled single peak out of bounds: delta=%lu\n",
+           (unsigned long)single_delta);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (double_delta > single_delta + 32768u) {
+    printf("source spooled peak grew with stream size: single=%lu double=%lu\n",
+           (unsigned long)single_delta, (unsigned long)double_delta);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.outstanding_bytes != 0u ||
+      counter.destroy_count == 0u) {
+    printf("source spooled allocator cleanup imbalance: outstanding=%lu "
+           "bytes=%lu destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.outstanding_bytes,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
 static int expect_mutation_success_uses_allocator(void) {
   counting_allocator counter;
   lql *ctx;
@@ -911,6 +1118,7 @@ int main(void) {
   failures += expect_source_decisions_steady_state_has_no_receiver_alloc();
   failures +=
       expect_source_array_decisions_steady_state_has_no_receiver_alloc();
+  failures += expect_source_spooled_match_peak_is_per_candidate_bounded();
   failures += expect_selector_parse_failure_cleans_allocator();
   failures += expect_projection_success_uses_allocator();
   failures += expect_projection_unselected_large_blob_allocation_stable();
