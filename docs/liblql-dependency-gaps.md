@@ -49,7 +49,7 @@ shape is intentionally outside the public candidate-stream contract. liblql must
 not emulate it by materializing the root array, spooling the whole input, or
 retaining all candidates.
 
-lonejson `v0.35.1` exposes useful pieces:
+lonejson `v0.35.2` exposes useful pieces:
 
 - `AUTO` framing for repeated top-level values;
 - `ARRAY_ITEMS` framing for one top-level array treated as item candidates;
@@ -119,7 +119,7 @@ streams to claim this additional Go-compatible input shape.
 
 The Go `pkt.systems/lql v0.17.1` stream parity corpus compares `QueryStream`
 against `encoding/json.Decoder`. Two observable edge cases from that corpus are
-not currently matched by lonejson `v0.35.1`:
+not currently matched by lonejson `v0.35.2`:
 
 - The string payload
   `{"id":"a","s":"line\n\t\u0001\u2028\u2029\ud800\udc00\ud800x"}`
