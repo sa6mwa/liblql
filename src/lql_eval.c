@@ -21,6 +21,7 @@
 #define LQL_EVAL_CONTAINS_TAIL_CAP 8192u
 #define LQL_EVAL_PREFIX_CAP 8192u
 #define LQL_EVAL_EXACT_CAP 8192u
+#define LQL_EVAL_TEMPORAL_CAP 8192u
 
 typedef struct eval_doc {
   lql_allocator *allocator;
@@ -35,13 +36,14 @@ typedef struct eval_doc {
   int scalar_stream_contains;
   int scalar_stream_prefix;
   int scalar_stream_exact;
+  int scalar_stream_temporal;
   size_t scalar_len;
   size_t contains_tail_len;
   size_t contains_tail_need;
   char contains_tail[LQL_EVAL_CONTAINS_TAIL_CAP];
   size_t prefix_len;
   size_t prefix_need;
-  char prefix_buf[LQL_EVAL_PREFIX_CAP];
+  char prefix_buf[LQL_EVAL_PREFIX_CAP + 1u];
   int *container_types;
   size_t *container_depths;
   size_t container_count;
@@ -263,6 +265,7 @@ static void reset_doc(eval_doc *doc) {
   doc->scalar_stream_contains = 0;
   doc->scalar_stream_prefix = 0;
   doc->scalar_stream_exact = 0;
+  doc->scalar_stream_temporal = 0;
   doc->scalar_len = 0u;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
@@ -793,10 +796,13 @@ static size_t selector_in_max_value_len(const lql_selector *selector) {
 }
 
 static int selector_exact_requires_scalar_buffer(const lql_selector *selector) {
+  if (selector->value_is_temporal) {
+    return selector_prefix_value_len(selector) > LQL_EVAL_TEMPORAL_CAP;
+  }
   if (selector_prefix_value_len(selector) > LQL_EVAL_EXACT_CAP) {
     return 1;
   }
-  return selector->value_is_temporal;
+  return 0;
 }
 
 static int selector_string_buffer_required(const eval_doc *doc,
@@ -836,6 +842,10 @@ static int selector_string_buffer_required(const eval_doc *doc,
   case LQL_SELECTOR_KIND_IN:
     exact_len = selector_in_max_value_len(selector);
     return exact_len > LQL_EVAL_EXACT_CAP;
+  case LQL_SELECTOR_KIND_RANGE:
+    return !selector->range_is_temporal;
+  case LQL_SELECTOR_KIND_DATE:
+    return 0;
   case LQL_SELECTOR_KIND_EXISTS:
     return 0;
   default:
@@ -959,6 +969,9 @@ static int selector_exact_stream_interested(const eval_doc *doc,
   }
   if (selector->kind == LQL_SELECTOR_KIND_EQ ||
       selector->kind == LQL_SELECTOR_KIND_NE) {
+    if (selector->value_is_temporal) {
+      return 0;
+    }
     if (selector_exact_requires_scalar_buffer(selector)) {
       return 0;
     }
@@ -973,6 +986,53 @@ static int selector_exact_stream_interested(const eval_doc *doc,
     *exact_need = value_len;
   }
   return 1;
+}
+
+static int selector_temporal_stream_interested(const eval_doc *doc,
+                                               const lql_selector *selector,
+                                               const lonejson_value_path *path,
+                                               size_t *temporal_need) {
+  size_t i;
+  size_t child_temporal_need;
+  int found;
+
+  if (selector == NULL) {
+    return 0;
+  }
+  if (!selector_is_predicate(selector)) {
+    found = 0;
+    for (i = 0u; i < selector->child_count; ++i) {
+      child_temporal_need = 0u;
+      if (selector_temporal_stream_interested(doc, &selector->children[i],
+                                              path, &child_temporal_need)) {
+        found = 1;
+        if (child_temporal_need > *temporal_need) {
+          *temporal_need = child_temporal_need;
+        }
+      }
+    }
+    return found;
+  }
+  if (!path_matches(doc, selector->field, path)) {
+    return 0;
+  }
+  if ((selector->kind == LQL_SELECTOR_KIND_EQ ||
+       selector->kind == LQL_SELECTOR_KIND_NE) &&
+      selector->value_is_temporal) {
+    if (LQL_EVAL_TEMPORAL_CAP > *temporal_need) {
+      *temporal_need = LQL_EVAL_TEMPORAL_CAP;
+    }
+    return 1;
+  }
+  if ((selector->kind == LQL_SELECTOR_KIND_RANGE &&
+       selector->range_is_temporal) ||
+      selector->kind == LQL_SELECTOR_KIND_DATE) {
+    if (LQL_EVAL_TEMPORAL_CAP > *temporal_need) {
+      *temporal_need = LQL_EVAL_TEMPORAL_CAP;
+    }
+    return 1;
+  }
+  return 0;
 }
 
 static int scalar_path_buffer_required(const eval_doc *doc,
@@ -1007,6 +1067,16 @@ static int scalar_path_exact_stream_interested(
     return 0;
   }
   return selector_exact_stream_interested(doc, doc->selector, path, exact_need);
+}
+
+static int scalar_path_temporal_stream_interested(
+    const eval_doc *doc, const lonejson_value_path *path,
+    size_t *temporal_need) {
+  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return 0;
+  }
+  return selector_temporal_stream_interested(doc, doc->selector, path,
+                                            temporal_need);
 }
 
 static void observe_contains_stream_begin(eval_doc *doc,
@@ -1182,6 +1252,93 @@ static void observe_exact_stream_end(eval_doc *doc,
   }
 }
 
+static void observe_temporal_stream_end(eval_doc *doc,
+                                        const lql_selector *selector,
+                                        const lonejson_value_path *path) {
+  size_t i;
+  lql_temporal temporal;
+  lql_temporal since_macro;
+  int parsed;
+
+  if (selector == NULL || doc->hits == NULL) {
+    return;
+  }
+  if (!selector_is_predicate(selector)) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      observe_temporal_stream_end(doc, &selector->children[i], path);
+    }
+    return;
+  }
+  if (!path_matches(doc, selector->field, path) ||
+      doc->hits[selector->hit_index] != 0u) {
+    return;
+  }
+  if (selector->kind != LQL_SELECTOR_KIND_EQ &&
+      selector->kind != LQL_SELECTOR_KIND_NE &&
+      selector->kind != LQL_SELECTOR_KIND_RANGE &&
+      selector->kind != LQL_SELECTOR_KIND_DATE) {
+    return;
+  }
+  if ((selector->kind == LQL_SELECTOR_KIND_EQ ||
+       selector->kind == LQL_SELECTOR_KIND_NE) &&
+      !selector->value_is_temporal) {
+    return;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_RANGE &&
+      !selector->range_is_temporal) {
+    return;
+  }
+  parsed = doc->scalar_len == doc->prefix_len &&
+           doc->prefix_len <= LQL_EVAL_TEMPORAL_CAP &&
+           lql_parse_temporal_literal(doc->prefix_buf, &temporal);
+  switch (selector->kind) {
+  case LQL_SELECTOR_KIND_EQ:
+    if (parsed && lql_temporal_equal(&temporal, &selector->temporal_eq)) {
+      doc->hits[selector->hit_index] = 1u;
+    }
+    break;
+  case LQL_SELECTOR_KIND_NE:
+    if (!parsed || !lql_temporal_equal(&temporal, &selector->temporal_eq)) {
+      doc->hits[selector->hit_index] = 1u;
+    }
+    break;
+  case LQL_SELECTOR_KIND_RANGE:
+    if (parsed &&
+        (!selector->has_temporal_gt ||
+         lql_temporal_compare(&temporal, &selector->temporal_gt) > 0) &&
+        (!selector->has_temporal_gte ||
+         lql_temporal_compare(&temporal, &selector->temporal_gte) >= 0) &&
+        (!selector->has_temporal_lt ||
+         lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
+        (!selector->has_temporal_lte ||
+         lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
+      doc->hits[selector->hit_index] = 1u;
+    }
+    break;
+  case LQL_SELECTOR_KIND_DATE:
+    if (parsed &&
+        (selector->since_macro == LQL_SINCE_NONE ||
+         resolve_since_macro(selector->since_macro, &since_macro)) &&
+        (!selector->has_temporal_eq ||
+         lql_temporal_equal(&temporal, &selector->temporal_eq)) &&
+        (selector->since_macro == LQL_SINCE_NONE ||
+         lql_temporal_compare(&temporal, &since_macro) >= 0) &&
+        (!selector->has_temporal_gt ||
+         lql_temporal_compare(&temporal, &selector->temporal_gt) > 0) &&
+        (!selector->has_temporal_gte ||
+         lql_temporal_compare(&temporal, &selector->temporal_gte) >= 0) &&
+        (!selector->has_temporal_lt ||
+         lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
+        (!selector->has_temporal_lte ||
+         lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
+      doc->hits[selector->hit_index] = 1u;
+    }
+    break;
+  default:
+    break;
+  }
+}
+
 static int contains_stream_scan(const char *tail, size_t tail_len,
                                 const char *data, size_t len,
                                 const char *needle, size_t needle_len,
@@ -1318,6 +1475,9 @@ static void prefix_stream_update(eval_doc *doc, const char *data, size_t len) {
   }
   memcpy(doc->prefix_buf + doc->prefix_len, data, keep_len);
   doc->prefix_len += keep_len;
+  if (doc->prefix_len <= LQL_EVAL_PREFIX_CAP) {
+    doc->prefix_buf[doc->prefix_len] = '\0';
+  }
 }
 
 static void observe_value(eval_doc *doc, const lonejson_value_path *path,
@@ -1412,6 +1572,7 @@ static lonejson_status on_string_begin(void *user,
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;
   doc->prefix_need = 0u;
+  doc->prefix_buf[0] = '\0';
   doc->scalar_interested = scalar_path_buffer_required(doc, path);
   if (!doc->scalar_interested) {
     observe_scalar_exists_begin(doc, doc->selector, path);
@@ -1420,6 +1581,8 @@ static lonejson_status on_string_begin(void *user,
     doc->scalar_stream_prefix = scalar_path_prefix_stream_interested(
         doc, path, &doc->prefix_need);
     doc->scalar_stream_exact = scalar_path_exact_stream_interested(
+        doc, path, &doc->prefix_need);
+    doc->scalar_stream_temporal = scalar_path_temporal_stream_interested(
         doc, path, &doc->prefix_need);
     if (doc->scalar_stream_contains) {
       observe_contains_stream_begin(doc, doc->selector, path);
@@ -1431,6 +1594,7 @@ static lonejson_status on_string_begin(void *user,
     doc->scalar_stream_contains = 0;
     doc->scalar_stream_prefix = 0;
     doc->scalar_stream_exact = 0;
+    doc->scalar_stream_temporal = 0;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -1451,6 +1615,10 @@ static lonejson_status on_string_chunk(void *user,
       prefix_stream_update(doc, data, len);
     }
     if (doc->scalar_stream_exact && !doc->scalar_stream_prefix) {
+      prefix_stream_update(doc, data, len);
+    }
+    if (doc->scalar_stream_temporal && !doc->scalar_stream_prefix &&
+        !doc->scalar_stream_exact) {
       prefix_stream_update(doc, data, len);
     }
     return LONEJSON_STATUS_OK;
@@ -1477,6 +1645,9 @@ static lonejson_status on_string_end(void *user,
     if (doc->scalar_stream_exact) {
       observe_exact_stream_end(doc, doc->selector, path);
     }
+    if (doc->scalar_stream_temporal) {
+      observe_temporal_stream_end(doc, doc->selector, path);
+    }
   }
   doc->val_len = 0u;
   doc->scalar_len = 0u;
@@ -1487,6 +1658,7 @@ static lonejson_status on_string_end(void *user,
   doc->scalar_stream_contains = 0;
   doc->scalar_stream_prefix = 0;
   doc->scalar_stream_exact = 0;
+  doc->scalar_stream_temporal = 0;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;
@@ -1524,6 +1696,9 @@ static lonejson_status on_number_end(void *user,
     if (doc->scalar_stream_exact) {
       observe_exact_stream_end(doc, doc->selector, path);
     }
+    if (doc->scalar_stream_temporal) {
+      observe_temporal_stream_end(doc, doc->selector, path);
+    }
   }
   doc->val_len = 0u;
   doc->scalar_len = 0u;
@@ -1534,6 +1709,7 @@ static lonejson_status on_number_end(void *user,
   doc->scalar_stream_contains = 0;
   doc->scalar_stream_prefix = 0;
   doc->scalar_stream_exact = 0;
+  doc->scalar_stream_temporal = 0;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;

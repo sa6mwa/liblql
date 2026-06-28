@@ -1579,6 +1579,165 @@ static int expect_selector_not_equal_large_blob_allocation_stable(void) {
   return 0;
 }
 
+static int expect_selector_temporal_large_blob_allocation_stable(void) {
+  static char small_doc[128];
+  static char large_doc[70064];
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *eq_selector;
+  lql_selector *date_selector;
+  lql_selector *range_selector;
+  lql_error error;
+  lql_status st;
+  int matched;
+  size_t small_peak;
+
+  if (!make_blob_doc(small_doc, sizeof(small_doc), 32u) ||
+      !make_blob_doc(large_doc, sizeof(large_doc), 69800u)) {
+    printf("selector temporal blob fixture construction failed\n");
+    return 1;
+  }
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("selector temporal blob receiver failed: %s\n", error.message);
+    return 1;
+  }
+
+  eq_selector = NULL;
+  date_selector = NULL;
+  range_selector = NULL;
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "eq{field=/blob,value=2025-01-01}",
+                           &eq_selector, &error);
+  if (st != LQL_STATUS_OK || eq_selector == NULL) {
+    printf("selector temporal eq parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "date{field=/blob,value=2025-01-01}",
+                           &date_selector, &error);
+  if (st != LQL_STATUS_OK || date_selector == NULL) {
+    printf("selector temporal date parse failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, eq_selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "range{field=/blob,gte=2025-01-01}",
+                           &range_selector, &error);
+  if (st != LQL_STATUS_OK || range_selector == NULL) {
+    printf("selector temporal range parse failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, date_selector);
+    ctx->selector_destroy(ctx, eq_selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  matched = 1;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, eq_selector, small_doc, strlen(small_doc),
+                         &matched, &error);
+  if (st != LQL_STATUS_OK || matched) {
+    printf("selector temporal eq small eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, range_selector);
+    ctx->selector_destroy(ctx, date_selector);
+    ctx->selector_destroy(ctx, eq_selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  matched = 1;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, date_selector, small_doc, strlen(small_doc),
+                         &matched, &error);
+  if (st != LQL_STATUS_OK || matched) {
+    printf("selector temporal date small eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, range_selector);
+    ctx->selector_destroy(ctx, date_selector);
+    ctx->selector_destroy(ctx, eq_selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  matched = 1;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, range_selector, small_doc, strlen(small_doc),
+                         &matched, &error);
+  if (st != LQL_STATUS_OK || matched) {
+    printf("selector temporal range small eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, range_selector);
+    ctx->selector_destroy(ctx, date_selector);
+    ctx->selector_destroy(ctx, eq_selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  small_peak = counter.peak_outstanding_bytes;
+
+  matched = 1;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, eq_selector, large_doc, strlen(large_doc),
+                         &matched, &error);
+  if (st != LQL_STATUS_OK || matched) {
+    printf("selector temporal eq large eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, range_selector);
+    ctx->selector_destroy(ctx, date_selector);
+    ctx->selector_destroy(ctx, eq_selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  matched = 1;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, date_selector, large_doc, strlen(large_doc),
+                         &matched, &error);
+  if (st != LQL_STATUS_OK || matched) {
+    printf("selector temporal date large eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, range_selector);
+    ctx->selector_destroy(ctx, date_selector);
+    ctx->selector_destroy(ctx, eq_selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  matched = 1;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, range_selector, large_doc, strlen(large_doc),
+                         &matched, &error);
+  if (st != LQL_STATUS_OK || matched) {
+    printf("selector temporal range large eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, range_selector);
+    ctx->selector_destroy(ctx, date_selector);
+    ctx->selector_destroy(ctx, eq_selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.peak_outstanding_bytes > small_peak + 32768u) {
+    printf("selector temporal selected blob peak grew with input: small=%lu "
+           "large=%lu\n",
+           (unsigned long)small_peak,
+           (unsigned long)counter.peak_outstanding_bytes);
+    ctx->selector_destroy(ctx, range_selector);
+    ctx->selector_destroy(ctx, date_selector);
+    ctx->selector_destroy(ctx, eq_selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, range_selector);
+  ctx->selector_destroy(ctx, date_selector);
+  ctx->selector_destroy(ctx, eq_selector);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("selector temporal blob allocator cleanup imbalance: "
+           "outstanding=%lu destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
 static int expect_projection_parse_failure_cleans_allocator(void) {
   counting_allocator counter;
   lql *ctx;
@@ -1633,6 +1792,7 @@ int main(void) {
   failures += expect_selector_exact_large_blob_allocation_stable();
   failures += expect_selector_in_large_blob_allocation_stable();
   failures += expect_selector_not_equal_large_blob_allocation_stable();
+  failures += expect_selector_temporal_large_blob_allocation_stable();
   failures += expect_projection_success_uses_allocator();
   failures += expect_projection_unselected_large_blob_allocation_stable();
   failures += expect_projection_parse_failure_cleans_allocator();

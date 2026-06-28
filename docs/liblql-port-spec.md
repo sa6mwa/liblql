@@ -175,9 +175,12 @@ predicates evaluate from lonejson scalar chunks with bounded suffix state for
 cross-chunk matches. `prefix` and `iprefix` predicates retain only a bounded
 leading slice sufficient to decide the prefix. Non-temporal `eq`, public
 inequality (`!=`), and `in` predicates also evaluate from a bounded leading
-slice plus scalar length. Whole-scalar buffering is acceptable only for
-predicates whose semantics currently require the complete scalar text, such as
-temporal equality fallback, temporal/date parsing, and numeric range parsing.
+slice plus scalar length. Temporal equality fallback, temporal inequality,
+`date`, and datetime `range` predicates evaluate from bounded scalar text plus
+scalar length. Whole-scalar buffering is acceptable only for predicates whose
+semantics currently require the complete scalar text, currently numeric range
+parsing, or for selector literals that exceed the bounded streaming evaluator
+caps.
 
 ## Selector AST Public API
 
@@ -1208,8 +1211,10 @@ Current implementation status:
   `contains`/`icontains` string predicates stream through bounded suffix state,
   selected `prefix`/`iprefix` predicates retain only a bounded leading slice,
   and selected non-temporal `eq`, public inequality (`!=`), plus `in`
-  predicates retain only a bounded leading slice plus scalar length instead of
-  retaining the full selected scalar;
+  predicates retain only a bounded leading slice plus scalar length, while
+  selected temporal equality fallback, temporal inequality, `date`, and
+  datetime `range` predicates retain only bounded scalar text plus scalar length
+  instead of retaining the full selected scalar;
 - first C selector parse/evaluate subset exists, including
   `contains.any`, `icontains.any`, `in.any`, wildcard selector paths,
   single-quoted selector values containing spaces or commas, quoted JSON
