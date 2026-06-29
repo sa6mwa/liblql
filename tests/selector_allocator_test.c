@@ -6,11 +6,13 @@
 typedef struct counting_allocator {
   lql_allocator api;
   lql_allocator *backing;
+  size_t alloc_attempt_count;
   size_t alloc_count;
   size_t destroy_count;
   size_t outstanding;
   size_t outstanding_bytes;
   size_t peak_outstanding_bytes;
+  int frozen;
 } counting_allocator;
 
 typedef union counting_header {
@@ -55,6 +57,10 @@ static void *counting_alloc(lql_allocator *self, size_t size) {
   counting_header *raw;
 
   counter = (counting_allocator *)self->impl;
+  ++counter->alloc_attempt_count;
+  if (counter->frozen) {
+    return NULL;
+  }
   raw = (counting_header *)counter->backing->alloc(counter->backing,
                                                    sizeof(*raw) + size);
   if (raw != NULL) {
@@ -71,6 +77,10 @@ static void *counting_calloc(lql_allocator *self, size_t count, size_t size) {
   size_t total;
 
   counter = (counting_allocator *)self->impl;
+  ++counter->alloc_attempt_count;
+  if (counter->frozen) {
+    return NULL;
+  }
   total = count * size;
   raw = (counting_header *)counter->backing->calloc(counter->backing, 1u,
                                                     sizeof(*raw) + total);
@@ -94,6 +104,10 @@ static void *counting_realloc(lql_allocator *self, void *ptr, size_t size) {
   }
   if (size == 0u) {
     counting_destroy(self, ptr);
+    return NULL;
+  }
+  ++counter->alloc_attempt_count;
+  if (counter->frozen) {
     return NULL;
   }
   raw = counting_header_from_user(ptr);
@@ -163,6 +177,10 @@ static void counting_allocator_init(counting_allocator *counter) {
   counter->api.strdup = counting_strdup;
 }
 
+static void counting_allocator_freeze(counting_allocator *counter) {
+  counter->frozen = 1;
+}
+
 static lql_read_result read_memory_chunk(void *user, unsigned char *buffer,
                                          size_t capacity) {
   memory_reader *reader;
@@ -220,7 +238,7 @@ static int expect_selector_success_uses_allocator(void) {
   lql_error error;
   lql_status st;
   int matched;
-  size_t alloc_count_after_second_warmup;
+  size_t alloc_attempts_after_second_warmup;
 
   counting_allocator_init(&counter);
   ctx = NULL;
@@ -264,7 +282,8 @@ static int expect_selector_success_uses_allocator(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  alloc_count_after_second_warmup = counter.alloc_count;
+  alloc_attempts_after_second_warmup = counter.alloc_attempt_count;
+  counting_allocator_freeze(&counter);
   matched = 0;
   lql_error_init(&error);
   st = ctx->matches_json(ctx, selector, "{\"status\":\"open\"}",
@@ -275,10 +294,10 @@ static int expect_selector_success_uses_allocator(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  if (counter.alloc_count != alloc_count_after_second_warmup) {
-    printf("selector steady eval allocated: before=%lu after=%lu\n",
-           (unsigned long)alloc_count_after_second_warmup,
-           (unsigned long)counter.alloc_count);
+  if (counter.alloc_attempt_count != alloc_attempts_after_second_warmup) {
+    printf("selector steady eval attempted allocation: before=%lu after=%lu\n",
+           (unsigned long)alloc_attempts_after_second_warmup,
+           (unsigned long)counter.alloc_attempt_count);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
@@ -305,7 +324,7 @@ static int expect_file_decisions_steady_state_has_no_receiver_alloc(void) {
   const char *json;
   lql_query_result result;
   size_t matched;
-  size_t alloc_count_after_second_warmup;
+  size_t alloc_attempts_after_second_warmup;
 
   counting_allocator_init(&counter);
   ctx = NULL;
@@ -377,7 +396,8 @@ static int expect_file_decisions_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  alloc_count_after_second_warmup = counter.alloc_count;
+  alloc_attempts_after_second_warmup = counter.alloc_attempt_count;
+  counting_allocator_freeze(&counter);
   if (fseek(file, 0L, SEEK_SET) != 0) {
     printf("file decision steady seek failed\n");
     fclose(file);
@@ -397,10 +417,11 @@ static int expect_file_decisions_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  if (counter.alloc_count != alloc_count_after_second_warmup) {
-    printf("file decision steady eval allocated: before=%lu after=%lu\n",
-           (unsigned long)alloc_count_after_second_warmup,
-           (unsigned long)counter.alloc_count);
+  if (counter.alloc_attempt_count != alloc_attempts_after_second_warmup) {
+    printf("file decision steady eval attempted allocation: before=%lu "
+           "after=%lu\n",
+           (unsigned long)alloc_attempts_after_second_warmup,
+           (unsigned long)counter.alloc_attempt_count);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
@@ -427,7 +448,7 @@ static int expect_source_decisions_steady_state_has_no_receiver_alloc(void) {
   memory_reader reader;
   lql_query_result result;
   size_t matched;
-  size_t alloc_count_after_second_warmup;
+  size_t alloc_attempts_after_second_warmup;
 
   counting_allocator_init(&counter);
   ctx = NULL;
@@ -478,7 +499,8 @@ static int expect_source_decisions_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  alloc_count_after_second_warmup = counter.alloc_count;
+  alloc_attempts_after_second_warmup = counter.alloc_attempt_count;
+  counting_allocator_freeze(&counter);
 
   reader.offset = 0u;
   matched = 0u;
@@ -493,10 +515,11 @@ static int expect_source_decisions_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  if (counter.alloc_count != alloc_count_after_second_warmup) {
-    printf("source decision steady eval allocated: before=%lu after=%lu\n",
-           (unsigned long)alloc_count_after_second_warmup,
-           (unsigned long)counter.alloc_count);
+  if (counter.alloc_attempt_count != alloc_attempts_after_second_warmup) {
+    printf("source decision steady eval attempted allocation: before=%lu "
+           "after=%lu\n",
+           (unsigned long)alloc_attempts_after_second_warmup,
+           (unsigned long)counter.alloc_attempt_count);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
@@ -529,7 +552,7 @@ expect_compound_source_decisions_steady_state_has_no_receiver_alloc(void) {
   memory_reader reader;
   lql_query_result result;
   size_t matched;
-  size_t alloc_count_after_second_warmup;
+  size_t alloc_attempts_after_second_warmup;
 
   counting_allocator_init(&counter);
   ctx = NULL;
@@ -643,7 +666,8 @@ expect_compound_source_decisions_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  alloc_count_after_second_warmup = counter.alloc_count;
+  alloc_attempts_after_second_warmup = counter.alloc_attempt_count;
+  counting_allocator_freeze(&counter);
 
   reader.offset = 0u;
   matched = 0u;
@@ -658,11 +682,12 @@ expect_compound_source_decisions_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  if (counter.alloc_count != alloc_count_after_second_warmup) {
-    printf("compound source decision steady eval allocated: before=%lu "
-           "after=%lu\n",
-           (unsigned long)alloc_count_after_second_warmup,
-           (unsigned long)counter.alloc_count);
+  if (counter.alloc_attempt_count != alloc_attempts_after_second_warmup) {
+    printf(
+        "compound source decision steady eval attempted allocation: before=%lu "
+        "after=%lu\n",
+        (unsigned long)alloc_attempts_after_second_warmup,
+        (unsigned long)counter.alloc_attempt_count);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
@@ -691,7 +716,7 @@ expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
   memory_reader reader;
   lql_query_result result;
   size_t matched;
-  size_t alloc_count_after_second_warmup;
+  size_t alloc_attempts_after_second_warmup;
 
   counting_allocator_init(&counter);
   ctx = NULL;
@@ -742,7 +767,8 @@ expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  alloc_count_after_second_warmup = counter.alloc_count;
+  alloc_attempts_after_second_warmup = counter.alloc_attempt_count;
+  counting_allocator_freeze(&counter);
 
   reader.offset = 0u;
   matched = 0u;
@@ -757,11 +783,11 @@ expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  if (counter.alloc_count != alloc_count_after_second_warmup) {
-    printf(
-        "source array decision steady eval allocated: before=%lu after=%lu\n",
-        (unsigned long)alloc_count_after_second_warmup,
-        (unsigned long)counter.alloc_count);
+  if (counter.alloc_attempt_count != alloc_attempts_after_second_warmup) {
+    printf("source array decision steady eval attempted allocation: before=%lu "
+           "after=%lu\n",
+           (unsigned long)alloc_attempts_after_second_warmup,
+           (unsigned long)counter.alloc_attempt_count);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
@@ -770,6 +796,116 @@ expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
   ctx->destroy(ctx);
   if (counter.outstanding != 0u || counter.destroy_count == 0u) {
     printf("source array decision allocator cleanup imbalance: outstanding=%lu "
+           "destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
+static int
+expect_mixed_observer_source_decisions_have_no_hot_path_receiver_alloc(void) {
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  const char *expr;
+  const char *json;
+  memory_reader reader;
+  lql_query_result result;
+  size_t matched;
+  size_t alloc_attempts_after_second_warmup;
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("mixed observer receiver failed: %s\n", error.message);
+    return 1;
+  }
+  selector = NULL;
+  expr = "and.eq{field=/status,value=open},"
+         "and.contains{field=/message,any=critical-window|timeout},"
+         "and.iprefix{field=/service,value=auth},"
+         "and.range{field=/latency,gte=1,lte=100},"
+         "and.date{field=/timestamp,after=2025-01-01,before=2025-12-31}";
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, expr, &selector, &error);
+  if (st != LQL_STATUS_OK || selector == NULL) {
+    printf("mixed observer selector parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  json = "{\"status\":\"open\",\"message\":\"critical-window observed\","
+         "\"service\":\"auth-api\",\"latency\":42,"
+         "\"timestamp\":\"2025-03-01T09:30:00Z\"}\n"
+         "{\"status\":\"open\",\"message\":\"nomatch\","
+         "\"service\":\"billing\",\"latency\":150,"
+         "\"timestamp\":\"2025-03-01T09:30:00Z\"}\n";
+
+  reader.data = json;
+  reader.len = strlen(json);
+  reader.chunk_size = 5u;
+  reader.offset = 0u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("mixed observer first warmup failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  reader.offset = 0u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("mixed observer second warmup failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  alloc_attempts_after_second_warmup = counter.alloc_attempt_count;
+  counting_allocator_freeze(&counter);
+
+  reader.offset = 0u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("mixed observer steady eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.alloc_attempt_count != alloc_attempts_after_second_warmup) {
+    printf("mixed observer steady eval attempted allocation: before=%lu "
+           "after=%lu\n",
+           (unsigned long)alloc_attempts_after_second_warmup,
+           (unsigned long)counter.alloc_attempt_count);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("mixed observer allocator cleanup imbalance: outstanding=%lu "
            "destroys=%lu\n",
            (unsigned long)counter.outstanding,
            (unsigned long)counter.destroy_count);
@@ -2171,6 +2307,8 @@ int main(void) {
       expect_compound_source_decisions_steady_state_has_no_receiver_alloc();
   failures +=
       expect_source_array_decisions_steady_state_has_no_receiver_alloc();
+  failures +=
+      expect_mixed_observer_source_decisions_have_no_hot_path_receiver_alloc();
   failures += expect_source_spooled_match_peak_is_per_candidate_bounded();
   failures += expect_selector_parse_failure_cleans_allocator();
   failures += expect_selector_contains_large_blob_allocation_stable();

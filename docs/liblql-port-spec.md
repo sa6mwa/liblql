@@ -225,6 +225,12 @@ Candidate hit state, stream-miss state, and `in` alternative state should also
 use generation or epoch marks so candidate reset is O(1) in steady state. Full
 scratch clears are allowed at query setup and on epoch wraparound; they must
 not occur once per candidate.
+Steady-state decision scanning must not attempt receiver allocation after the
+selector and evaluator scratch have been warmed for the same query shape. The
+C allocator contract tests should freeze a receiver allocator after warmup and
+rerun file, callback-source, root-array source, compound, and mixed scalar
+observer-family scans; any liblql-owned allocation attempt in that warmed hot
+path is a test failure.
 
 As of lonejson `v0.35.2`, the path-value visitor used by liblql still enforces
 a small raw JSON number-token limit and performs bounded internal allocation for
@@ -1682,7 +1688,10 @@ Current implementation status:
   1 GiB/128 MiB profile over the same runner and validator, defaults to at
   least 1 GiB of generated NDJSON, and is part of the final `make release`
   gate because bounded-memory streaming is a product contract rather than an
-  optional hardening check;
+  optional hardening check; the C allocator contract test also freezes the
+  receiver allocator after warmup and rejects liblql-owned allocation attempts
+  in warmed decision-query hot paths, including a mixed selector that exercises
+  exact, contains-any, prefix, numeric range, and temporal observers together;
 - current local lifecycle confidence has passed `make test-all`,
   `make bench-check`, `make bench-memory-check`, `make bench-1g-check`,
   `make package-verify`, `make release-matrix`, and clean `make release` on

@@ -89,6 +89,9 @@ contains, prefix, exact, temporal, and numeric-range predicate discovery walks.
 Candidate hit, stream-miss, and `in` alternative scratch also use candidate
 epoch marks, so candidate reset is O(1) in steady state instead of clearing
 selector-sized buffers for every candidate.
+The C allocator contract tests warm representative query paths, freeze the
+receiver allocator, and then rerun candidate scans; any attempted liblql-owned
+allocation in the warmed decision hot path fails `make test`.
 `clql -m -f` composes mutation and projection in Go-compatible order by
 projecting each output candidate first, then mutating the projected value for
 matched candidates; this uses a callback-scoped temp-file spill for the
@@ -153,6 +156,9 @@ Selected-scalar query predicates use bounded streaming state in liblql rather
 than full selected-value buffers, including numeric `range`; the current
 lonejson visitor still imposes a small raw number-token limit documented in
 `docs/liblql-dependency-gaps.md`.
+The fast C test gate also proves the warmed decision hot path does not attempt
+receiver allocation for file, callback-source, root-array source, compound, and
+mixed scalar-observer selectors.
 
 Common verification targets:
 
