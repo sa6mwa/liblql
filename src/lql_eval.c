@@ -2416,6 +2416,23 @@ typedef struct spooled_match_state {
   eval_doc doc;
 } spooled_match_state;
 
+typedef struct file_mutation_range_state {
+  lql *receiver;
+  const lql_selector *selector;
+  FILE *file;
+  int fd;
+  lql_uint64 offset_base;
+  FILE *out;
+  int compact;
+  const lql_mutation_plan *mutation_plan;
+  int matches_only;
+  lql_query_options options;
+  unsigned int limit_flags;
+  lql_query_result result;
+  lql_error mutation_error;
+  eval_doc doc;
+} file_mutation_range_state;
+
 typedef struct source_spooled_match_state {
   lql *receiver;
   const lql_selector *selector;
@@ -2513,6 +2530,32 @@ static int eval_copy_range(FILE *in, FILE *out, lql_uint64 size) {
     if (fwrite(buf, 1u, got, out) != got) {
       return 0;
     }
+    size -= (lql_uint64)got;
+  }
+  return 1;
+}
+
+static int eval_copy_fd_range(int fd, lql_uint64 offset, FILE *out,
+                              lql_uint64 size) {
+  char buf[8192];
+  size_t want;
+  ssize_t got;
+  off_t pos;
+
+  while (size != 0u) {
+    want = size > (lql_uint64)sizeof(buf) ? sizeof(buf) : (size_t)size;
+    pos = (off_t)offset;
+    if (pos < (off_t)0 || (lql_uint64)pos != offset) {
+      return 0;
+    }
+    got = pread(fd, buf, want, pos);
+    if (got <= (ssize_t)0) {
+      return 0;
+    }
+    if (fwrite(buf, 1u, (size_t)got, out) != (size_t)got) {
+      return 0;
+    }
+    offset += (lql_uint64)got;
     size -= (lql_uint64)got;
   }
   return 1;
@@ -2653,6 +2696,44 @@ static lonejson_read_result eval_pread_range(void *user, unsigned char *buffer,
   off_t pos;
 
   result = lonejson_default_read_result();
+  reader = (eval_pread_range_reader *)user;
+  if (reader->remaining == 0u) {
+    result.eof = 1;
+    return result;
+  }
+  want = reader->remaining > (lql_uint64)capacity ? capacity
+                                                  : (size_t)reader->remaining;
+  pos = (off_t)reader->offset;
+  if (pos < (off_t)0 || (lql_uint64)pos != reader->offset) {
+    result.error_code = 1;
+    return result;
+  }
+  got = pread(reader->fd, buffer, want, pos);
+  if (got < (ssize_t)0) {
+    result.error_code = 1;
+    return result;
+  }
+  result.bytes_read = (size_t)got;
+  reader->offset += (lql_uint64)result.bytes_read;
+  reader->remaining -= (lql_uint64)result.bytes_read;
+  if ((size_t)got != want) {
+    result.error_code = 1;
+  }
+  if (reader->remaining == 0u) {
+    result.eof = 1;
+  }
+  return result;
+}
+
+static lql_read_result eval_lql_pread_range(void *user, unsigned char *buffer,
+                                            size_t capacity) {
+  eval_pread_range_reader *reader;
+  lql_read_result result;
+  size_t want;
+  ssize_t got;
+  off_t pos;
+
+  memset(&result, 0, sizeof(result));
   reader = (eval_pread_range_reader *)user;
   if (reader->remaining == 0u) {
     result.eof = 1;
@@ -3370,6 +3451,198 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
+static lonejson_candidate_callback_result
+on_file_mutation_candidate_begin(void *user,
+                                 const lonejson_candidate_info *candidate,
+                                 lonejson_error *error) {
+  file_mutation_range_state *state = (file_mutation_range_state *)user;
+  (void)candidate;
+  (void)error;
+  reset_doc(&state->doc);
+  return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static lonejson_candidate_callback_result
+on_file_mutation_candidate_end(void *user,
+                               const lonejson_candidate_info *candidate,
+                               lonejson_error *error) {
+  file_mutation_range_state *state;
+  lql_query_options nested_options;
+  lql_query_result nested_result;
+  eval_pread_range_reader reader;
+  lql_status st;
+  lql_uint64 offset;
+  lql_uint64 size;
+  int matched;
+  int wrote_output;
+
+  (void)error;
+  state = (file_mutation_range_state *)user;
+  offset = state->offset_base + (lql_uint64)candidate->stream_offset;
+  size = (lql_uint64)candidate->byte_size;
+
+  if (state->doc.root_kind == '[') {
+    nested_options = query_remaining_options(&state->options, &state->result);
+    memset(&nested_result, 0, sizeof(nested_result));
+    st = execute_query_file_range_spooled_matches(
+        state->receiver, state->selector, state->file, offset, size, state->out,
+        state->compact, NULL, state->mutation_plan, state->matches_only,
+        &nested_options, &nested_result, &state->mutation_error);
+    reset_doc(&state->doc);
+    state->result.candidates_seen += nested_result.candidates_seen;
+    state->result.candidates_matched += nested_result.candidates_matched;
+    state->result.bytes_read = offset + size;
+    if (nested_result.stopped_early) {
+      state->result.stopped_early = 1;
+      state->result.stop_reason = nested_result.stop_reason;
+      return LONEJSON_CANDIDATE_STOP;
+    }
+    if (st != LQL_STATUS_OK) {
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+    return LONEJSON_CANDIDATE_CONTINUE;
+  }
+
+  matched = state->selector == NULL ||
+            state->selector->kind == LQL_SELECTOR_KIND_ALL ||
+            eval_selector_tree(state->selector, &state->doc);
+  if (state->compact && (!matched || state->doc.root_kind != '{')) {
+    nested_options = query_remaining_options(&state->options, &state->result);
+    memset(&nested_result, 0, sizeof(nested_result));
+    st = execute_query_file_range_spooled_matches(
+        state->receiver, state->selector, state->file, offset, size, state->out,
+        state->compact, NULL, state->mutation_plan, state->matches_only,
+        &nested_options, &nested_result, &state->mutation_error);
+    reset_doc(&state->doc);
+    state->result.candidates_seen += nested_result.candidates_seen;
+    state->result.candidates_matched += nested_result.candidates_matched;
+    state->result.bytes_read = offset + size;
+    if (nested_result.stopped_early) {
+      state->result.stopped_early = 1;
+      state->result.stop_reason = nested_result.stop_reason;
+      return LONEJSON_CANDIDATE_STOP;
+    }
+    if (st != LQL_STATUS_OK) {
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+    return LONEJSON_CANDIDATE_CONTINUE;
+  }
+  wrote_output = 0;
+  if (matched) {
+    state->result.candidates_matched++;
+    if (state->doc.root_kind == '{') {
+      reader.fd = state->fd;
+      reader.offset = offset;
+      reader.remaining = size;
+      st = state->receiver->mutate_source_paths(
+          state->receiver, state->mutation_plan, eval_lql_pread_range, &reader,
+          state->out, &state->mutation_error);
+      if (st != LQL_STATUS_OK) {
+        reset_doc(&state->doc);
+        return LONEJSON_CANDIDATE_ERROR;
+      }
+      wrote_output = 1;
+    } else if (!eval_copy_fd_range(state->fd, offset, state->out, size)) {
+      reset_doc(&state->doc);
+      return LONEJSON_CANDIDATE_ERROR;
+    } else {
+      wrote_output = 1;
+    }
+  } else if (!state->matches_only) {
+    if (!eval_copy_fd_range(state->fd, offset, state->out, size)) {
+      reset_doc(&state->doc);
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+    wrote_output = 1;
+  }
+  if (wrote_output && fputc('\n', state->out) == EOF) {
+    reset_doc(&state->doc);
+    return LONEJSON_CANDIDATE_ERROR;
+  }
+  state->result.candidates_seen++;
+  state->result.bytes_read = offset + size;
+  reset_doc(&state->doc);
+  if (query_result_stop_if_limited(&state->result, &state->options,
+                                   state->limit_flags)) {
+    return LONEJSON_CANDIDATE_STOP;
+  }
+  return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static lql_status execute_mutate_file_range_candidates_fast(
+    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
+    FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
+    int matches_only, const lql_query_options *query_options,
+    lql_query_result *out_result, lql_error *error) {
+  lonejson *runtime;
+  lonejson_error lj_error;
+  lonejson_path_value_visitor visitor;
+  lonejson_candidate_stream_options options;
+  lonejson_status st;
+  file_mutation_range_state state;
+  eval_pread_range_reader reader;
+  int runtime_pooled;
+
+  memset(&state, 0, sizeof(state));
+  state.receiver = self;
+  state.selector = selector;
+  state.file = file;
+  state.out = out;
+  state.compact = compact;
+  state.mutation_plan = plan;
+  state.matches_only = matches_only;
+  state.offset_base = offset;
+  state.fd = fileno(file);
+  if (state.fd < 0) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to access mutation input descriptor");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (query_options != NULL) {
+    state.options = *query_options;
+  }
+  state.limit_flags = query_limit_flags(&state.options);
+  lql_error_init(&state.mutation_error);
+  if (!init_doc(&state.doc, self, selector)) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
+  if (runtime == NULL) {
+    destroy_doc(&state.doc);
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  reader.fd = state.fd;
+  reader.offset = offset;
+  reader.remaining = size;
+  init_eval_visitor(&visitor);
+  options = lonejson_default_candidate_stream_options();
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  options.path_visitor = &visitor;
+  options.visitor_user = &state.doc;
+  options.candidate_begin = on_file_mutation_candidate_begin;
+  options.candidate_end = on_file_mutation_candidate_end;
+  options.candidate_user = &state;
+  st = lonejson_visit_candidates_reader(runtime, eval_pread_range, &reader,
+                                        &options, &lj_error);
+  destroy_doc(&state.doc);
+  lql_lonejson_release(self, runtime, runtime_pooled);
+  if (out_result != NULL) {
+    *out_result = state.result;
+  }
+  if (st != LONEJSON_STATUS_OK) {
+    if (state.mutation_error.code != LQL_STATUS_OK) {
+      lql_set_error(error, state.mutation_error.code,
+                    state.mutation_error.message);
+      return state.mutation_error.code;
+    }
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  return LQL_STATUS_OK;
+}
+
 static lql_status eval_selector_buffer(lql *self, const lql_selector *selector,
                                        const char *json, size_t json_len,
                                        int *out_matched, lql_error *error) {
@@ -3684,9 +3957,9 @@ static lql_status mutate_file_range_candidates_method(
                   "plan, file, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_file_range_spooled_matches(
-      self, selector, file, offset, size, out, compact, NULL, plan,
-      matches_only, NULL, out_result, error);
+  return execute_mutate_file_range_candidates_fast(
+      self, selector, plan, file, offset, size, out, compact, matches_only, NULL,
+      out_result, error);
 }
 
 static lql_status mutate_file_range_candidates_with_options_method(
@@ -3700,9 +3973,9 @@ static lql_status mutate_file_range_candidates_with_options_method(
                   "plan, file, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_file_range_spooled_matches(
-      self, selector, file, offset, size, out, compact, NULL, plan,
-      matches_only, query_options, out_result, error);
+  return execute_mutate_file_range_candidates_fast(
+      self, selector, plan, file, offset, size, out, compact, matches_only,
+      query_options, out_result, error);
 }
 
 static lql_status mutate_file_range_projected_candidates_method(
