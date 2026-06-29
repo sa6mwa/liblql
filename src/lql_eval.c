@@ -3517,19 +3517,23 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
   matched = state->selector == NULL ||
             state->selector->kind == LQL_SELECTOR_KIND_ALL ||
             eval_selector_tree(state->selector, &state->doc);
+  if (!matched && state->mutation_plan != NULL && state->matches_only) {
+    state->result.candidates_seen++;
+    state->result.bytes_read =
+        (lql_uint64)(candidate->stream_offset + candidate->byte_size);
+    reset_doc(&state->doc);
+    if (query_result_stop_if_limited(&state->result, &state->options,
+                                     state->limit_flags)) {
+      return LONEJSON_CANDIDATE_STOP;
+    }
+    return LONEJSON_CANDIDATE_CONTINUE;
+  }
   if (matched || state->mutation_plan != NULL) {
     if (candidate->payload_spool == NULL) {
       reset_doc(&state->doc);
       return LONEJSON_CANDIDATE_ERROR;
     }
     if (state->mutation_plan != NULL) {
-      if (!matched && state->matches_only) {
-        state->result.candidates_seen++;
-        state->result.bytes_read =
-            (lql_uint64)(candidate->stream_offset + candidate->byte_size);
-        reset_doc(&state->doc);
-        return LONEJSON_CANDIDATE_CONTINUE;
-      }
       if (state->projection != NULL) {
         if (eval_project_then_maybe_mutate_spooled(
                 state->receiver, state->projection, state->mutation_plan,
