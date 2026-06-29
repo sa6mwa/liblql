@@ -244,6 +244,9 @@ streams.
 
 ## Single-Pass Candidate Transform Visitors
 
+The standalone CR for this dependency feature is
+[`docs/lonejson-cr-single-pass-candidate-transform.md`](lonejson-cr-single-pass-candidate-transform.md).
+
 The predicate-gated capture feature above removes wasted replay work for sparse
 selectors. It does not solve dense or all-match transforms where every
 candidate is retained. Current callback-source projection and candidate

@@ -1762,8 +1762,10 @@ Current implementation status:
   required final performance step is a lonejson single-pass candidate transform
   visitor that lets selector observation and projection/mutation writing share
   one validated parse; liblql must not emulate that with full-candidate
-  buffering, temp-file staging, or a second JSON parser. The dependency need is
-  tracked in `docs/liblql-dependency-gaps.md`;
+  buffering, temp-file staging, selector/result caches, or a second JSON
+  parser. The dependency need is tracked in
+  `docs/lonejson-cr-single-pass-candidate-transform.md` and summarized in
+  `docs/liblql-dependency-gaps.md`;
 - current local lifecycle confidence has passed `make test-all`,
   `make bench-check`, `make bench-memory-check`, `make bench-1g-check`,
   `make package-verify`, `make release-matrix`, and clean `make release` on
