@@ -72,7 +72,7 @@ typedef struct mutation_item {
 
 struct lql_mutation_plan {
   mutation_item *items;
-  const mutation_item **value_depth_order;
+  size_t *value_depth_indexes;
   size_t *value_depth_offsets;
   size_t count;
   size_t max_segment_count;
@@ -104,9 +104,9 @@ static int mutation_plan_refresh_traits(lql_allocator *allocator,
   if (plan == NULL || allocator == NULL) {
     return 0;
   }
-  allocator->destroy(allocator, plan->value_depth_order);
+  allocator->destroy(allocator, plan->value_depth_indexes);
   allocator->destroy(allocator, plan->value_depth_offsets);
-  plan->value_depth_order = NULL;
+  plan->value_depth_indexes = NULL;
   plan->value_depth_offsets = NULL;
   plan->max_segment_count = 0u;
   plan->variable_depth_paths = 0;
@@ -137,9 +137,9 @@ static int mutation_plan_refresh_traits(lql_allocator *allocator,
   if (plan->count == 0u || plan->variable_depth_paths) {
     return 1;
   }
-  plan->value_depth_order = (const mutation_item **)allocator->calloc(
-      allocator, plan->count, sizeof(plan->value_depth_order[0]));
-  if (plan->value_depth_order == NULL) {
+  plan->value_depth_indexes = (size_t *)allocator->calloc(
+      allocator, plan->count, sizeof(plan->value_depth_indexes[0]));
+  if (plan->value_depth_indexes == NULL) {
     return 0;
   }
   plan->value_depth_offsets =
@@ -162,7 +162,7 @@ static int mutation_plan_refresh_traits(lql_allocator *allocator,
   for (i = 0u; i < plan->count; ++i) {
     depth = plan->items[i].path.segment_count;
     offset = plan->value_depth_offsets[depth] + cursor[depth]++;
-    plan->value_depth_order[offset] = &plan->items[i];
+    plan->value_depth_indexes[offset] = i;
   }
   allocator->destroy(allocator, cursor);
   return 1;
@@ -333,11 +333,11 @@ static void mutation_plan_cleanup_items(lql *self, lql_mutation_plan *plan) {
   for (i = 0u; i < plan->count; ++i) {
     mutation_item_cleanup(self, &plan->items[i]);
   }
-  allocator->destroy(allocator, plan->value_depth_order);
+  allocator->destroy(allocator, plan->value_depth_indexes);
   allocator->destroy(allocator, plan->value_depth_offsets);
   allocator->destroy(allocator, plan->items);
   plan->items = NULL;
-  plan->value_depth_order = NULL;
+  plan->value_depth_indexes = NULL;
   plan->value_depth_offsets = NULL;
   plan->count = 0u;
   plan->max_segment_count = 0u;
@@ -1824,13 +1824,12 @@ static int mutation_value_index(const mutation_stream_state *state,
   size_t start;
   size_t end;
   const mutation_path_frame *frame;
-  const mutation_item *item;
   frame = current_value_path_frame(state);
   if (!value_path_is_array_element_from_frame(frame, path)) {
     return 0;
   }
   if (!state->plan->variable_depth_paths &&
-      state->plan->value_depth_order != NULL &&
+      state->plan->value_depth_indexes != NULL &&
       state->plan->value_depth_offsets != NULL) {
     if (path == NULL || path->segment_count > state->plan->max_segment_count) {
       return 0;
@@ -1838,16 +1837,9 @@ static int mutation_value_index(const mutation_stream_state *state,
     start = state->plan->value_depth_offsets[path->segment_count];
     end = state->plan->value_depth_offsets[path->segment_count + 1u];
     for (i = start; i < end; ++i) {
-      item = state->plan->value_depth_order[i];
-      if (item == NULL) {
-        continue;
-      }
-      index = (size_t)(item - state->plan->items);
-      if (index >= state->plan->count) {
-        continue;
-      }
-      if (value_path_item_matches_from_frame(frame, &item->path, 0u, path,
-                                             0u)) {
+      index = state->plan->value_depth_indexes[i];
+      if (value_path_item_matches_from_frame(
+              frame, &state->plan->items[index].path, 0u, path, 0u)) {
         *out = index;
         return 1;
       }
