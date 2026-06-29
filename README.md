@@ -113,7 +113,9 @@ mutation on the no-capture scan path instead of routing misses through spooled
 writer replay.
 Mutation writer passes hold the caller-provided `FILE *` lock once for the
 duration of the rewrite, reducing repeated stdio lock work while preserving the
-existing FILE API and streaming directly to the caller's output.
+existing FILE API and streaming directly to the caller's output. Linux builds
+use unlocked stdio writes inside that already-locked region, avoiding per-write
+lock branches without adding output caches or materialized buffers.
 Callback-source decision streams inspect one bounded prefix chunk and use
 no-capture parsing for ordinary non-array streams, while preserving sink capture
 for root-array recursion on non-seekable inputs.

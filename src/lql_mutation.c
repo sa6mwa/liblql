@@ -1,6 +1,9 @@
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200112L
 #endif
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE 1
+#endif
 #ifndef _FILE_OFFSET_BITS
 #define _FILE_OFFSET_BITS 64
 #endif
@@ -502,8 +505,14 @@ static lonejson_status file_sink(void *user, const void *data, size_t len,
   FILE *out;
   (void)error;
   out = (FILE *)user;
+#if defined(__linux__)
+  return fwrite_unlocked(data, 1u, len, out) == len
+             ? LONEJSON_STATUS_OK
+             : LONEJSON_STATUS_CALLBACK_FAILED;
+#else
   return fwrite(data, 1u, len, out) == len ? LONEJSON_STATUS_OK
                                            : LONEJSON_STATUS_CALLBACK_FAILED;
+#endif
 }
 
 static lonejson_read_result limited_read(void *user, unsigned char *buffer,

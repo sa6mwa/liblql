@@ -1773,8 +1773,9 @@ Current implementation status:
   the `CAPTURE_NONE` candidate scan path and avoids spooled writer replay for
   candidates that cannot be emitted;
 - mutation writer execution holds the caller-provided `FILE *` lock once during
-  the rewrite pass, reducing repeated stdio lock overhead without bypassing the
-  public FILE output contract or adding output buffering;
+  the rewrite pass. Linux builds use unlocked stdio writes inside that
+  already-locked region, reducing repeated stdio lock overhead without
+  bypassing the public FILE output contract or adding output buffering;
 - source-backed projection and mutation are now profiled as dominated by
   lonejson candidate spooling/replay for dense non-seekable streams. The
   required final performance step is a lonejson single-pass candidate transform
