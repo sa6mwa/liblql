@@ -1888,6 +1888,7 @@ static void observe_contains_stream_chunk(eval_doc *doc,
                                           const char *data, size_t len) {
   size_t i;
   size_t value_len;
+  const char *tail;
   int ignore_case;
 
   (void)selector;
@@ -1895,6 +1896,7 @@ static void observe_contains_stream_chunk(eval_doc *doc,
   if (doc->hits == NULL) {
     return;
   }
+  tail = contains_tail_data(doc);
   for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
     selector = doc->scalar_path_predicates[i];
     if ((selector->kind != LQL_SELECTOR_KIND_CONTAINS &&
@@ -1906,36 +1908,41 @@ static void observe_contains_stream_chunk(eval_doc *doc,
         selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case;
     if (selector->any_count == 0u) {
       value_len = selector->value_len;
-      if (contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
-                               data, len,
+      if (contains_stream_scan(tail, doc->contains_tail_len, data, len,
                                selector->value == NULL ? "" : selector->value,
                                value_len, ignore_case)) {
         hit_mark(doc, selector);
       }
+    } else if (selector->any_count == 1u) {
+      if (contains_stream_scan(tail, doc->contains_tail_len, data, len,
+                               selector->any[0], selector->any_lens[0],
+                               ignore_case)) {
+        hit_mark(doc, selector);
+      }
     } else if (selector->any_count == 2u) {
-      if (contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
-                               data, len, selector->any[0],
+      if (contains_stream_scan(tail, doc->contains_tail_len, data, len,
+                               selector->any[0],
                                selector->any_lens[0], ignore_case) ||
-          contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
-                               data, len, selector->any[1],
+          contains_stream_scan(tail, doc->contains_tail_len, data, len,
+                               selector->any[1],
                                selector->any_lens[1], ignore_case)) {
         hit_mark(doc, selector);
       }
     } else if (selector->any_count == 3u) {
-      if (contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
-                               data, len, selector->any[0],
+      if (contains_stream_scan(tail, doc->contains_tail_len, data, len,
+                               selector->any[0],
                                selector->any_lens[0], ignore_case) ||
-          contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
-                               data, len, selector->any[1],
+          contains_stream_scan(tail, doc->contains_tail_len, data, len,
+                               selector->any[1],
                                selector->any_lens[1], ignore_case) ||
-          contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
-                               data, len, selector->any[2],
+          contains_stream_scan(tail, doc->contains_tail_len, data, len,
+                               selector->any[2],
                                selector->any_lens[2], ignore_case)) {
         hit_mark(doc, selector);
       }
     } else if (contains_any_stream_scan(
-                   contains_tail_data(doc), doc->contains_tail_len, data, len,
-                   selector->any, selector->any_lens,
+                   tail, doc->contains_tail_len, data, len, selector->any,
+                   selector->any_lens,
                    ignore_case ? selector->any_ifirsts : selector->any_firsts,
                    ignore_case ? selector->any_ifirst_bitmap
                                : selector->any_first_bitmap,
