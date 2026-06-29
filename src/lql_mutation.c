@@ -8,6 +8,7 @@
 #include "lql_internal.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <lonejson.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,9 +67,40 @@ typedef struct mutation_source_reader {
 
 typedef struct mutation_path_frame {
   unsigned char *array_segments;
+  unsigned long array_segment_bits;
   size_t segment_count;
   char container;
 } mutation_path_frame;
+
+#define MUTATION_FRAME_INLINE_BITS (sizeof(unsigned long) * CHAR_BIT)
+
+static int mutation_frame_array_segment(const mutation_path_frame *frame,
+                                        size_t index) {
+  if (frame == NULL || index >= frame->segment_count) {
+    return 0;
+  }
+  if (frame->array_segments != NULL) {
+    return frame->array_segments[index] ? 1 : 0;
+  }
+  if (index >= MUTATION_FRAME_INLINE_BITS) {
+    return 0;
+  }
+  return (frame->array_segment_bits & (1UL << index)) != 0u;
+}
+
+static void mutation_frame_set_array_segment(mutation_path_frame *frame,
+                                             size_t index) {
+  if (frame == NULL || index >= frame->segment_count) {
+    return;
+  }
+  if (frame->array_segments != NULL) {
+    frame->array_segments[index] = 1u;
+    return;
+  }
+  if (index < MUTATION_FRAME_INLINE_BITS) {
+    frame->array_segment_bits |= 1UL << index;
+  }
+}
 
 typedef struct mutation_stream_state {
   lql_allocator *allocator;
@@ -195,9 +227,8 @@ static char *trimmed_dup_range(mutation_parse_context *ctx, const char *start,
   const char *end;
   char *out;
   limit = start + len;
-  while (start < limit &&
-         (*start == ' ' || *start == '\t' || *start == '\r' ||
-          *start == '\n')) {
+  while (start < limit && (*start == ' ' || *start == '\t' || *start == '\r' ||
+                           *start == '\n')) {
     ++start;
   }
   end = limit;
@@ -491,8 +522,8 @@ mutation_source_read(void *user, unsigned char *buffer, size_t capacity) {
 static int append_buf(mutation_stream_state *state, char **buf, size_t *len,
                       const char *data, size_t n) {
   char *next;
-  next = (char *)state->allocator->realloc(state->allocator, *buf,
-                                           *len + n + 1u);
+  next =
+      (char *)state->allocator->realloc(state->allocator, *buf, *len + n + 1u);
   if (next == NULL) {
     return 0;
   }
@@ -628,9 +659,9 @@ static char *decode_path_segment(mutation_parse_context *ctx, const char *src,
 static int path_add_segment(mutation_parse_context *ctx, mutation_path *path,
                             char *segment) {
   char **next;
-  next = (char **)ctx->allocator->realloc(
-      ctx->allocator, path->segments,
-      sizeof(path->segments[0]) * (path->segment_count + 1u));
+  next = (char **)ctx->allocator->realloc(ctx->allocator, path->segments,
+                                          sizeof(path->segments[0]) *
+                                              (path->segment_count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -718,8 +749,7 @@ static int append_item(mutation_parse_context *ctx, lql_mutation_plan *plan,
                        mutation_item *item) {
   mutation_item *next;
   next = (mutation_item *)ctx->allocator->realloc(
-      ctx->allocator, plan->items,
-      sizeof(plan->items[0]) * (plan->count + 1u));
+      ctx->allocator, plan->items, sizeof(plan->items[0]) * (plan->count + 1u));
   if (next == NULL) {
     return 0;
   }
@@ -735,8 +765,8 @@ static int prepend_path(mutation_parse_context *ctx, mutation_item *item,
   size_t i;
   size_t count;
   count = prefix->segment_count + item->path.segment_count;
-  segments =
-      (char **)ctx->allocator->calloc(ctx->allocator, count, sizeof(segments[0]));
+  segments = (char **)ctx->allocator->calloc(ctx->allocator, count,
+                                             sizeof(segments[0]));
   if (segments == NULL) {
     return 0;
   }
@@ -1190,21 +1220,22 @@ static lql_status mutation_plan_parse_with_options_method(
   return LQL_STATUS_OK;
 }
 
-static lql_status mutation_plan_parse_method(
-    lql *self, const char *const *exprs, size_t expr_count,
-    lql_mutation_plan **out, lql_error *error) {
+static lql_status mutation_plan_parse_method(lql *self,
+                                             const char *const *exprs,
+                                             size_t expr_count,
+                                             lql_mutation_plan **out,
+                                             lql_error *error) {
   return self->mutation_plan_parse_with_options(self, exprs, expr_count, NULL,
                                                 out, error);
 }
 
-static size_t
-mutation_plan_count_method(const lql *self, const lql_mutation_plan *plan) {
+static size_t mutation_plan_count_method(const lql *self,
+                                         const lql_mutation_plan *plan) {
   (void)self;
   return plan == NULL ? 0u : plan->count;
 }
 
-static void
-mutation_plan_destroy_method(lql *self, lql_mutation_plan *plan) {
+static void mutation_plan_destroy_method(lql *self, lql_mutation_plan *plan) {
   lql_allocator *allocator;
   if (plan == NULL) {
     return;
@@ -1356,7 +1387,7 @@ static int virtual_path_segment_matches(const mutation_path *item_path,
   if (actual_index < parent->segment_count) {
     return stream_path_segment_matches(
         item_path->segments[item_index], &parent->segments[actual_index],
-        frame->array_segments[actual_index] ? 1 : 0);
+        mutation_frame_array_segment(frame, actual_index));
   }
   segment.data = key;
   segment.len = key_len;
@@ -1417,11 +1448,11 @@ static int value_path_segment_is_array(const mutation_stream_state *state,
   }
   frame = &state->path_frames[state->path_frame_count - 1u];
   if (frame->segment_count == path->segment_count) {
-    return frame->array_segments[index] ? 1 : 0;
+    return mutation_frame_array_segment(frame, index);
   }
   if (frame->segment_count + 1u == path->segment_count) {
     if (index < frame->segment_count) {
-      return frame->array_segments[index] ? 1 : 0;
+      return mutation_frame_array_segment(frame, index);
     }
     return frame->container == 'a';
   }
@@ -1505,7 +1536,7 @@ static int stream_path_prefix_matches(const mutation_path *item_path,
   }
   for (i = 0u; i < path->segment_count; ++i) {
     if (!stream_path_segment_matches(item_path->segments[i], &path->segments[i],
-                                     frame->array_segments[i] ? 1 : 0)) {
+                                     mutation_frame_array_segment(frame, i))) {
       return 0;
     }
   }
@@ -1818,24 +1849,28 @@ static lonejson_status mutation_push_path_frame(mutation_stream_state *state,
   (void)error;
   memset(&frame, 0, sizeof(frame));
   frame.container = container;
-  if (path != NULL && path->segment_count != 0u) {
+  frame.segment_count = path == NULL ? 0u : path->segment_count;
+  if (frame.segment_count > MUTATION_FRAME_INLINE_BITS) {
     frame.array_segments = (unsigned char *)state->allocator->calloc(
-        state->allocator, path->segment_count, sizeof(frame.array_segments[0]));
+        state->allocator, frame.segment_count, sizeof(frame.array_segments[0]));
     if (frame.array_segments == NULL) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
+  }
+  if (frame.segment_count != 0u) {
     parent = mutation_parent_frame(state);
     if (parent != NULL) {
-      for (i = 0u; i < parent->segment_count && i < path->segment_count; ++i) {
-        frame.array_segments[i] = parent->array_segments[i];
+      for (i = 0u; i < parent->segment_count && i < frame.segment_count; ++i) {
+        if (mutation_frame_array_segment(parent, i)) {
+          mutation_frame_set_array_segment(&frame, i);
+        }
       }
-      if (path->segment_count > parent->segment_count &&
+      if (frame.segment_count > parent->segment_count &&
           parent->container == 'a') {
-        frame.array_segments[path->segment_count - 1u] = 1u;
+        mutation_frame_set_array_segment(&frame, frame.segment_count - 1u);
       }
     }
   }
-  frame.segment_count = path == NULL ? 0u : path->segment_count;
   next = (mutation_path_frame *)state->allocator->realloc(
       state->allocator, state->path_frames,
       sizeof(state->path_frames[0]) * (state->path_frame_count + 1u));
@@ -1898,7 +1933,7 @@ static int mutation_descends_from_virtual_object(
   for (i = 0u; i < parent->segment_count; ++i) {
     if (!stream_path_segment_matches(item->path.segments[i],
                                      &parent->segments[i],
-                                     frame->array_segments[i] ? 1 : 0)) {
+                                     mutation_frame_array_segment(frame, i))) {
       return 0;
     }
   }
@@ -2325,8 +2360,8 @@ static lonejson_status mutation_key_end(void *user,
   state = (mutation_stream_state *)user;
   if (state->skipping) {
     frame = current_path_frame(state, path);
-    if (skipped_earlier_increment_key_index(
-            state, path, frame, state->key_buf, state->key_len, &index)) {
+    if (skipped_earlier_increment_key_index(state, path, frame, state->key_buf,
+                                            state->key_len, &index)) {
       state->active_increment = 1;
       state->active_keyed = 1;
       state->active_index = index;
@@ -2362,8 +2397,7 @@ static lonejson_status mutation_key_end(void *user,
     if (item->kind == MUTATION_SET) {
       if (lonejson_writer_key(&state->writer, state->key_buf, state->key_len,
                               error) != LONEJSON_STATUS_OK ||
-          write_mutation_set_value(state, item, error) !=
-              LONEJSON_STATUS_OK) {
+          write_mutation_set_value(state, item, error) != LONEJSON_STATUS_OK) {
         return LONEJSON_STATUS_CALLBACK_FAILED;
       }
       state->applied[index] = 1;
@@ -2748,9 +2782,11 @@ static lql_status mutate_file_range_root_fields_method(
                                                out, error);
 }
 
-static lql_status mutate_file_range_paths_method(
-    lql *self, const lql_mutation_plan *plan, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, lql_error *error) {
+static lql_status mutate_file_range_paths_method(lql *self,
+                                                 const lql_mutation_plan *plan,
+                                                 FILE *file, lql_uint64 offset,
+                                                 lql_uint64 size, FILE *out,
+                                                 lql_error *error) {
   if (plan == NULL || file == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "plan, file, and out are required");
@@ -2765,9 +2801,10 @@ static lql_status mutate_file_range_paths_method(
                                                out, error);
 }
 
-static lql_status mutate_source_paths_method(
-    lql *self, const lql_mutation_plan *plan, lql_read_fn read, void *read_user,
-    FILE *out, lql_error *error) {
+static lql_status mutate_source_paths_method(lql *self,
+                                             const lql_mutation_plan *plan,
+                                             lql_read_fn read, void *read_user,
+                                             FILE *out, lql_error *error) {
   mutation_source_reader reader;
   lql_status st;
 
@@ -2792,9 +2829,9 @@ static lql_status mutate_source_paths_method(
   return st;
 }
 
-static lql_status
-mutate_json_method(lql *self, const lql_mutation_plan *plan, const char *json,
-                     size_t json_len, FILE *out, lql_error *error) {
+static lql_status mutate_json_method(lql *self, const lql_mutation_plan *plan,
+                                     const char *json, size_t json_len,
+                                     FILE *out, lql_error *error) {
   buffer_reader reader;
 
   if (plan == NULL || json == NULL || out == NULL) {
@@ -2816,7 +2853,8 @@ mutate_json_method(lql *self, const lql_mutation_plan *plan, const char *json,
 
 LQL_INTERNAL_SYMBOL void lql_mutation_methods_install(lql *ctx) {
   ctx->mutation_plan_parse = mutation_plan_parse_method;
-  ctx->mutation_plan_parse_with_options = mutation_plan_parse_with_options_method;
+  ctx->mutation_plan_parse_with_options =
+      mutation_plan_parse_with_options_method;
   ctx->mutation_plan_count = mutation_plan_count_method;
   ctx->mutation_plan_destroy = mutation_plan_destroy_method;
   ctx->mutate_file_range_root_fields = mutate_file_range_root_fields_method;
