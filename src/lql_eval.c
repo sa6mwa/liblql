@@ -78,12 +78,6 @@ typedef struct eval_doc {
   int borrowed_scratch;
 } eval_doc;
 
-typedef struct lql_match_adapter {
-  FILE *file;
-  lql_query_match_fn on_match;
-  void *user;
-} lql_match_adapter;
-
 typedef struct lql_payload_sink_adapter {
   lql_write_fn write;
   void *user;
@@ -103,6 +97,15 @@ static lql_status execute_query_file_range_decisions(
     lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
     lql_uint64 size, lql_uint64 index_base,
     const lql_query_options *query_options, lql_query_decision_fn on_decision,
+    void *user, lql_query_result *out_result, lql_error *error);
+static lql_status execute_query_file_matches(
+    lql *self, const lql_selector *selector, FILE *file,
+    const lql_query_options *query_options, lql_query_match_fn on_match,
+    void *user, lql_query_result *out_result, lql_error *error);
+static lql_status execute_query_file_range_matches(
+    lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
+    lql_uint64 size, lql_uint64 index_base,
+    const lql_query_options *query_options, lql_query_match_fn on_match,
     void *user, lql_query_result *out_result, lql_error *error);
 static lql_status execute_query_source_decisions(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
@@ -194,25 +197,6 @@ static lonejson_status payload_lql_sink(void *user, const void *data,
   adapter->status = adapter->write(adapter->user, data, len);
   return adapter->status == LQL_STATUS_OK ? LONEJSON_STATUS_OK
                                           : LONEJSON_STATUS_CALLBACK_FAILED;
-}
-
-static lql_status on_match_decision(void *user,
-                                    const lql_query_decision *decision) {
-  lql_match_adapter *adapter;
-  lql_query_match match;
-
-  if (!decision->matched) {
-    return LQL_STATUS_OK;
-  }
-  adapter = (lql_match_adapter *)user;
-  memset(&match, 0, sizeof(match));
-  match.decision = *decision;
-  match.payload.kind = LQL_PAYLOAD_SEEKABLE_RANGE;
-  match.payload.index = decision->index;
-  match.payload.offset = decision->offset;
-  match.payload.size = decision->size;
-  match.payload.source = adapter->file;
-  return adapter->on_match(adapter->user, &match);
 }
 
 static void destroy_doc(eval_doc *doc) {
@@ -579,6 +563,26 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
     n = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
     return contains_case_len(haystack, h, needles[0], n, ignore_case);
   }
+  if (count == 2u) {
+    n = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
+    if (contains_case_len(haystack, h, needles[0], n, ignore_case)) {
+      return 1;
+    }
+    n = needle_lens == NULL ? strlen(needles[1]) : needle_lens[1];
+    return contains_case_len(haystack, h, needles[1], n, ignore_case);
+  }
+  if (count == 3u) {
+    n = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
+    if (contains_case_len(haystack, h, needles[0], n, ignore_case)) {
+      return 1;
+    }
+    n = needle_lens == NULL ? strlen(needles[1]) : needle_lens[1];
+    if (contains_case_len(haystack, h, needles[1], n, ignore_case)) {
+      return 1;
+    }
+    n = needle_lens == NULL ? strlen(needles[2]) : needle_lens[2];
+    return contains_case_len(haystack, h, needles[2], n, ignore_case);
+  }
   if (firsts == NULL &&
       count > sizeof(stack_firsts) / sizeof(stack_firsts[0])) {
     for (j = 0u; j < count; ++j) {
@@ -608,11 +612,12 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
   }
   for (i = 0u; i < h; ++i) {
     raw_ch = (unsigned char)haystack[i];
-    if (first_bitmap != NULL && (first_bitmap[raw_ch >> 3] &
-                                 (unsigned char)(1u << (raw_ch & 7u))) == 0u) {
+    hay_ch = ignore_case ? ascii_lower_byte(raw_ch) : raw_ch;
+    if (first_bitmap != NULL &&
+        (first_bitmap[hay_ch >> 3] &
+         (unsigned char)(1u << (hay_ch & 7u))) == 0u) {
       continue;
     }
-    hay_ch = ignore_case ? ascii_lower_byte(raw_ch) : raw_ch;
     for (j = 0u; j < count; ++j) {
       if (hay_ch != firsts[j]) {
         continue;
@@ -1781,6 +1786,31 @@ static int contains_any_stream_scan(const char *tail, size_t tail_len,
     return contains_stream_scan(tail, tail_len, data, len, needles[0],
                                 needle_len, ignore_case);
   }
+  if (count == 2u) {
+    needle_len = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
+    if (contains_stream_scan(tail, tail_len, data, len, needles[0],
+                             needle_len, ignore_case)) {
+      return 1;
+    }
+    needle_len = needle_lens == NULL ? strlen(needles[1]) : needle_lens[1];
+    return contains_stream_scan(tail, tail_len, data, len, needles[1],
+                                needle_len, ignore_case);
+  }
+  if (count == 3u) {
+    needle_len = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
+    if (contains_stream_scan(tail, tail_len, data, len, needles[0],
+                             needle_len, ignore_case)) {
+      return 1;
+    }
+    needle_len = needle_lens == NULL ? strlen(needles[1]) : needle_lens[1];
+    if (contains_stream_scan(tail, tail_len, data, len, needles[1],
+                             needle_len, ignore_case)) {
+      return 1;
+    }
+    needle_len = needle_lens == NULL ? strlen(needles[2]) : needle_lens[2];
+    return contains_stream_scan(tail, tail_len, data, len, needles[2],
+                                needle_len, ignore_case);
+  }
   if (contains_any_case_len(data, len, needles, needle_lens, count, firsts,
                             first_bitmap, ignore_case)) {
     return 1;
@@ -1837,6 +1867,27 @@ static void observe_contains_stream_chunk(eval_doc *doc,
                                data, len,
                                selector->value == NULL ? "" : selector->value,
                                value_len, ignore_case)) {
+        hit_mark(doc, selector);
+      }
+    } else if (selector->any_count == 2u) {
+      if (contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
+                               data, len, selector->any[0],
+                               selector->any_lens[0], ignore_case) ||
+          contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
+                               data, len, selector->any[1],
+                               selector->any_lens[1], ignore_case)) {
+        hit_mark(doc, selector);
+      }
+    } else if (selector->any_count == 3u) {
+      if (contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
+                               data, len, selector->any[0],
+                               selector->any_lens[0], ignore_case) ||
+          contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
+                               data, len, selector->any[1],
+                               selector->any_lens[1], ignore_case) ||
+          contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
+                               data, len, selector->any[2],
+                               selector->any_lens[2], ignore_case)) {
         hit_mark(doc, selector);
       }
     } else if (contains_any_stream_scan(
@@ -2235,6 +2286,7 @@ typedef struct query_stream_state {
   lql_query_options options;
   unsigned int limit_flags;
   lql_query_decision_fn on_decision;
+  lql_query_match_fn on_match;
   void *user;
   lql_query_result result;
   lql_status callback_status;
@@ -2710,6 +2762,7 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
   lql_query_result nested_result;
   spooled_source_reader nested_reader;
   lql_query_decision decision;
+  lql_query_match match;
   lql_status st;
   int matched;
   (void)error;
@@ -2717,12 +2770,21 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
       state->file != NULL) {
     nested_options = query_remaining_options(&state->options, &state->result);
     memset(&nested_result, 0, sizeof(nested_result));
-    st = execute_query_file_range_decisions(
-        state->receiver, state->selector, state->file,
-        state->offset_base + (lql_uint64)candidate->stream_offset,
-        (lql_uint64)candidate->byte_size,
-        state->index_base + state->result.candidates_seen, &nested_options,
-        state->on_decision, state->user, &nested_result, NULL);
+    if (state->on_match != NULL) {
+      st = execute_query_file_range_matches(
+          state->receiver, state->selector, state->file,
+          state->offset_base + (lql_uint64)candidate->stream_offset,
+          (lql_uint64)candidate->byte_size,
+          state->index_base + state->result.candidates_seen, &nested_options,
+          state->on_match, state->user, &nested_result, NULL);
+    } else {
+      st = execute_query_file_range_decisions(
+          state->receiver, state->selector, state->file,
+          state->offset_base + (lql_uint64)candidate->stream_offset,
+          (lql_uint64)candidate->byte_size,
+          state->index_base + state->result.candidates_seen, &nested_options,
+          state->on_decision, state->user, &nested_result, NULL);
+    }
     reset_doc(&state->doc);
     state->result.candidates_seen += nested_result.candidates_seen;
     state->result.candidates_matched += nested_result.candidates_matched;
@@ -2786,6 +2848,38 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
   state->result.bytes_read = state->offset_base +
                              (lql_uint64)candidate->stream_offset +
                              (lql_uint64)candidate->byte_size;
+  if (state->on_match != NULL) {
+    if (matched) {
+      memset(&match, 0, sizeof(match));
+      match.decision.matched = 1;
+      match.decision.index = state->index_base + (lql_uint64)candidate->index;
+      match.decision.offset =
+          state->offset_base + (lql_uint64)candidate->stream_offset;
+      match.decision.size = (lql_uint64)candidate->byte_size;
+      match.payload.kind = LQL_PAYLOAD_SEEKABLE_RANGE;
+      match.payload.index = match.decision.index;
+      match.payload.offset = match.decision.offset;
+      match.payload.size = match.decision.size;
+      match.payload.source = state->file;
+      st = state->on_match(state->user, &match);
+      reset_doc(&state->doc);
+      if (st == LQL_STATUS_STOP) {
+        query_stop(state, LQL_QUERY_STOP_CALLBACK);
+        return LONEJSON_CANDIDATE_STOP;
+      }
+      if (st != LQL_STATUS_OK) {
+        state->callback_status = st;
+        return LONEJSON_CANDIDATE_ERROR;
+      }
+    } else {
+      reset_doc(&state->doc);
+    }
+    if (query_result_stop_if_limited(&state->result, &state->options,
+                                     state->limit_flags)) {
+      return LONEJSON_CANDIDATE_STOP;
+    }
+    return LONEJSON_CANDIDATE_CONTINUE;
+  }
   decision.matched = matched;
   decision.index = state->index_base + (lql_uint64)candidate->index;
   decision.offset = state->offset_base + (lql_uint64)candidate->stream_offset;
@@ -3330,25 +3424,14 @@ static lql_status query_file_matches_with_options_method(
     lql *self, const lql_selector *selector, FILE *file,
     const lql_query_options *options, lql_query_match_fn on_match, void *user,
     lql_query_result *out_result, lql_error *error) {
-  lql_match_adapter adapter;
-  lql_status st;
   if (file == NULL || on_match == NULL) {
     clear_query_result(out_result);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "file and on_match are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  adapter.file = file;
-  adapter.on_match = on_match;
-  adapter.user = user;
-  st = self->query_file_decisions_with_options(self, selector, file, options,
-                                               on_match_decision, &adapter,
-                                               out_result, error);
-  if (st != LQL_STATUS_OK && error != NULL &&
-      strcmp(error->message, "query decision callback failed") == 0) {
-    lql_set_error(error, st, "query match callback failed");
-  }
-  return st;
+  return execute_query_file_matches(self, selector, file, options, on_match,
+                                    user, out_result, error);
 }
 
 static lql_status payload_write_json_method(lql *self,
@@ -3772,6 +3855,150 @@ static lql_status execute_query_file_range_decisions(
     if (state.callback_status != LQL_STATUS_OK) {
       lql_set_error(error, state.callback_status,
                     "query decision callback failed");
+      return state.callback_status;
+    }
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (out_result != NULL) {
+    *out_result = state.result;
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status execute_query_file_matches(
+    lql *self, const lql_selector *selector, FILE *file,
+    const lql_query_options *query_options, lql_query_match_fn on_match,
+    void *user, lql_query_result *out_result, lql_error *error) {
+  lonejson *runtime;
+  lonejson_error lj_error;
+  lonejson_path_value_visitor visitor;
+  lonejson_candidate_stream_options options;
+  lonejson_status st;
+  int runtime_cached;
+  query_stream_state state;
+
+  memset(&state, 0, sizeof(state));
+  state.receiver = self;
+  state.file = file;
+  state.offset_base = 0u;
+  state.index_base = 0u;
+  state.selector = selector;
+  state.on_match = on_match;
+  state.user = user;
+  state.callback_status = LQL_STATUS_OK;
+  if (query_options != NULL) {
+    state.options = *query_options;
+  }
+  state.limit_flags = query_limit_flags(&state.options);
+  if (!init_doc(&state.doc, self, selector)) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  runtime_cached = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
+  if (runtime == NULL) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    destroy_doc(&state.doc);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  init_eval_visitor(&visitor);
+  options = lonejson_default_candidate_stream_options();
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  options.path_visitor = &visitor;
+  options.visitor_user = &state.doc;
+  options.candidate_begin = on_candidate_begin;
+  options.candidate_end = on_candidate_end;
+  options.candidate_user = &state;
+  st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
+  if (st != LONEJSON_STATUS_OK) {
+    destroy_doc(&state.doc);
+    lql_lonejson_release(self, runtime, runtime_cached);
+    if (out_result != NULL) {
+      *out_result = state.result;
+    }
+    if (state.callback_status != LQL_STATUS_OK) {
+      lql_set_error(error, state.callback_status,
+                    "query match callback failed");
+      return state.callback_status;
+    }
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  query_finish_file_bytes(&state.result, file);
+  destroy_doc(&state.doc);
+  lql_lonejson_release(self, runtime, runtime_cached);
+  if (out_result != NULL) {
+    *out_result = state.result;
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status execute_query_file_range_matches(
+    lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
+    lql_uint64 size, lql_uint64 index_base,
+    const lql_query_options *query_options, lql_query_match_fn on_match,
+    void *user, lql_query_result *out_result, lql_error *error) {
+  lonejson *runtime;
+  lonejson_error lj_error;
+  lonejson_path_value_visitor visitor;
+  lonejson_candidate_stream_options options;
+  lonejson_status st;
+  int runtime_cached;
+  query_stream_state state;
+  eval_pread_range_reader reader;
+
+  memset(&state, 0, sizeof(state));
+  state.receiver = self;
+  state.file = file;
+  state.offset_base = offset;
+  state.index_base = index_base;
+  state.selector = selector;
+  state.on_match = on_match;
+  state.user = user;
+  state.callback_status = LQL_STATUS_OK;
+  if (query_options != NULL) {
+    state.options = *query_options;
+  }
+  state.limit_flags = query_limit_flags(&state.options);
+  if (!init_doc(&state.doc, self, selector)) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  runtime_cached = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
+  if (runtime == NULL) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    destroy_doc(&state.doc);
+    return LQL_STATUS_JSON_ERROR;
+  }
+  reader.fd = fileno(file);
+  if (reader.fd < 0) {
+    destroy_doc(&state.doc);
+    lql_lonejson_release(self, runtime, runtime_cached);
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to access input range descriptor");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  reader.offset = offset;
+  reader.remaining = size;
+  init_eval_visitor(&visitor);
+  options = lonejson_default_candidate_stream_options();
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  options.path_visitor = &visitor;
+  options.visitor_user = &state.doc;
+  options.candidate_begin = on_candidate_begin;
+  options.candidate_end = on_candidate_end;
+  options.candidate_user = &state;
+  st = lonejson_visit_candidates_reader(runtime, eval_pread_range, &reader,
+                                        &options, &lj_error);
+  destroy_doc(&state.doc);
+  lql_lonejson_release(self, runtime, runtime_cached);
+  if (st != LONEJSON_STATUS_OK) {
+    if (out_result != NULL) {
+      *out_result = state.result;
+    }
+    if (state.callback_status != LQL_STATUS_OK) {
+      lql_set_error(error, state.callback_status,
+                    "query match callback failed");
       return state.callback_status;
     }
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);

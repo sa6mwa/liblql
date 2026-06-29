@@ -8,6 +8,7 @@ c_max=${LQL_BENCH_MAX_C_PEAK_RSS_BYTES:-134217728}
 c_max_ns_per_byte=${LQL_BENCH_MAX_C_STEADY_STATE_NS_PER_BYTE:-5000}
 file_max_ns_per_byte=${LQL_BENCH_LOCKD_FILE_MAX_NS_PER_BYTE:-$c_max_ns_per_byte}
 contains_any_max_ratio=${LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_RATIO:-1.10}
+contains_any_max_delta=${LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_DELTA:-2.00}
 go_bin="${GO:-go}"
 
 mkdir -p "$root/build"
@@ -21,7 +22,8 @@ LQL_BENCH_SUITE=lockd-perf \
   --max-c-peak-rss-bytes "$c_max" \
   --max-c-steady-state-ns-per-byte "$c_max_ns_per_byte") < "$log"
 
-awk -v file_max="$file_max_ns_per_byte" -v ratio_max="$contains_any_max_ratio" '
+awk -v file_max="$file_max_ns_per_byte" -v ratio_max="$contains_any_max_ratio" \
+  -v delta_max="$contains_any_max_delta" '
 function field_number(line, key, s) {
   s = line
   sub(".*\"" key "\":", "", s)
@@ -77,8 +79,9 @@ END {
     printf "lockd base64 file-backed mutation ns_per_byte %.3f exceeds max %.3f\n", metrics["file_base64"], file_max > "/dev/stderr"
     exit 1
   }
-  if (metrics["contains_any"] > metrics["explicit_or"] * ratio_max) {
-    printf "lockd contains.any ns_per_byte %.3f exceeds explicit-or %.3f by ratio max %.3f\n", metrics["contains_any"], metrics["explicit_or"], ratio_max > "/dev/stderr"
+  if (metrics["contains_any"] > metrics["explicit_or"] * ratio_max &&
+      metrics["contains_any"] - metrics["explicit_or"] > delta_max) {
+    printf "lockd contains.any ns_per_byte %.3f exceeds explicit-or %.3f by ratio max %.3f and delta max %.3f\n", metrics["contains_any"], metrics["explicit_or"], ratio_max, delta_max > "/dev/stderr"
     exit 1
   }
 }

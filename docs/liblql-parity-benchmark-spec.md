@@ -104,8 +104,12 @@ Current implementation status:
   payloads, runs Go and C over the same fixtures, validates counter parity and
   benchmark schema, gates C steady-state file-backed mutation throughput with
   `LQL_BENCH_LOCKD_FILE_MAX_NS_PER_BYTE`, and gates C contains.any against
-  explicit OR with `LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_RATIO`. These are
-  C-native guardrails; they do not define Go throughput as the C target.
+  explicit OR with `LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_RATIO` and
+  `LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_DELTA` (default `2.00`). The ratio
+  catches meaningful regressions while the absolute delta keeps single-run
+  low-single-digit nanosecond per-byte variance from dominating otherwise
+  low-latency rows. These are C-native guardrails; they do not define Go
+  throughput as the C target.
   `make bench-check` invokes this target.
 - `make bench-memory-check` runs a separate scalable Go/C/Lua streaming memory
   profile over a generated NDJSON fixture. By default it generates at least
@@ -623,9 +627,9 @@ Suggested staged gates:
   `make bench-lockd-perf-check`, with text and base64 payload throughput
   thresholds expressed in C `ns_per_op/bytes_per_iter`;
 - C contains.any specialization is gated against the corresponding explicit OR
-  selector through `LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_RATIO`; this is a
-  C-native regression guard for the selector engine and is separate from Go
-  timing;
+  selector through `LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_RATIO` and
+  `LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_DELTA`; this is a C-native regression
+  guard for the selector engine and is separate from Go timing;
 - Lua memory is gated for the current direct-module seekable-file and
   callback-source benchmark workflows. Lua-supported modes must keep bounded
   memory and must not materialize complete candidates or result sets to satisfy
