@@ -76,6 +76,8 @@ struct lql_mutation_plan {
   size_t *value_depth_offsets;
   size_t *key_depth_indexes;
   size_t *key_depth_offsets;
+  size_t *create_indexes;
+  size_t create_count;
   size_t count;
   size_t max_segment_count;
   int literal_only_paths;
@@ -103,6 +105,7 @@ static int mutation_plan_refresh_traits(lql_allocator *allocator,
   size_t offset;
   size_t *cursor;
   size_t key_index_count;
+  size_t create_count;
   int literal_only;
   if (plan == NULL || allocator == NULL) {
     return 0;
@@ -111,12 +114,16 @@ static int mutation_plan_refresh_traits(lql_allocator *allocator,
   allocator->destroy(allocator, plan->value_depth_offsets);
   allocator->destroy(allocator, plan->key_depth_indexes);
   allocator->destroy(allocator, plan->key_depth_offsets);
+  allocator->destroy(allocator, plan->create_indexes);
   plan->value_depth_indexes = NULL;
   plan->value_depth_offsets = NULL;
   plan->key_depth_indexes = NULL;
   plan->key_depth_offsets = NULL;
+  plan->create_indexes = NULL;
+  plan->create_count = 0u;
   plan->max_segment_count = 0u;
   plan->variable_depth_paths = 0;
+  create_count = 0u;
   literal_only = plan->count != 0u;
   for (i = 0u; i < plan->count && literal_only; ++i) {
     if (plan->items[i].path.segment_count > plan->max_segment_count) {
@@ -124,6 +131,9 @@ static int mutation_plan_refresh_traits(lql_allocator *allocator,
     }
     if (mutation_path_has_ellipsis(&plan->items[i].path)) {
       plan->variable_depth_paths = 1;
+    }
+    if (plan->items[i].can_create_missing_object) {
+      ++create_count;
     }
     for (j = 0u; j < plan->items[i].path.segment_count; ++j) {
       if (plan->items[i].path.segment_kinds[j] != MUTATION_PATH_LITERAL) {
@@ -139,8 +149,25 @@ static int mutation_plan_refresh_traits(lql_allocator *allocator,
     if (mutation_path_has_ellipsis(&plan->items[i].path)) {
       plan->variable_depth_paths = 1;
     }
+    if (plan->items[i].can_create_missing_object) {
+      ++create_count;
+    }
   }
   plan->literal_only_paths = literal_only;
+  if (create_count != 0u) {
+    plan->create_indexes = (size_t *)allocator->calloc(
+        allocator, create_count, sizeof(plan->create_indexes[0]));
+    if (plan->create_indexes == NULL) {
+      return 0;
+    }
+    plan->create_count = create_count;
+    create_count = 0u;
+    for (i = 0u; i < plan->count; ++i) {
+      if (plan->items[i].can_create_missing_object) {
+        plan->create_indexes[create_count++] = i;
+      }
+    }
+  }
   if (plan->count == 0u || plan->variable_depth_paths) {
     return 1;
   }
@@ -385,12 +412,15 @@ static void mutation_plan_cleanup_items(lql *self, lql_mutation_plan *plan) {
   allocator->destroy(allocator, plan->value_depth_offsets);
   allocator->destroy(allocator, plan->key_depth_indexes);
   allocator->destroy(allocator, plan->key_depth_offsets);
+  allocator->destroy(allocator, plan->create_indexes);
   allocator->destroy(allocator, plan->items);
   plan->items = NULL;
   plan->value_depth_indexes = NULL;
   plan->value_depth_offsets = NULL;
   plan->key_depth_indexes = NULL;
   plan->key_depth_offsets = NULL;
+  plan->create_indexes = NULL;
+  plan->create_count = 0u;
   plan->count = 0u;
   plan->max_segment_count = 0u;
   plan->literal_only_paths = 0;
@@ -2515,19 +2545,24 @@ mutation_find_missing_object_key_value(mutation_stream_state *state,
                                        const lonejson_value_path *parent,
                                        mutation_missing_object_match *match) {
   size_t i;
+  size_t item_index;
   size_t depth;
   const mutation_item *item;
   const mutation_path_frame *frame;
+  if (state == NULL || state->plan == NULL || state->plan->create_count == 0u) {
+    return 0;
+  }
   if (parent != NULL && parent->segment_count != 0u) {
     frame = current_path_frame(state, parent);
-    for (i = 0u; i < state->plan->count; ++i) {
-      item = &state->plan->items[i];
-      if (state->applied[i] || !item->can_create_missing_object ||
-          state->prefix_seen_depth[i] > parent->segment_count ||
+    for (i = 0u; i < state->plan->create_count; ++i) {
+      item_index = state->plan->create_indexes[i];
+      item = &state->plan->items[item_index];
+      if (state->applied[item_index] ||
+          state->prefix_seen_depth[item_index] > parent->segment_count ||
           !mutation_descends_from_object(item, parent, frame)) {
         continue;
       }
-      match->index = i;
+      match->index = item_index;
       match->depth = parent->segment_count;
       match->virtual_object = 0;
       return 1;
@@ -2535,15 +2570,16 @@ mutation_find_missing_object_key_value(mutation_stream_state *state,
   }
   frame = current_path_frame(state, parent);
   depth = parent == NULL ? 0u : parent->segment_count + 1u;
-  for (i = 0u; i < state->plan->count; ++i) {
-    item = &state->plan->items[i];
-    if (state->applied[i] || !item->can_create_missing_object ||
-        state->prefix_seen_depth[i] > depth ||
+  for (i = 0u; i < state->plan->create_count; ++i) {
+    item_index = state->plan->create_indexes[i];
+    item = &state->plan->items[item_index];
+    if (state->applied[item_index] ||
+        state->prefix_seen_depth[item_index] > depth ||
         !mutation_descends_from_virtual_object(
             item, parent, frame, state->key_buf, state->key_len)) {
       continue;
     }
-    match->index = i;
+    match->index = item_index;
     match->depth = depth;
     match->virtual_object = 1;
     return 1;
@@ -2555,6 +2591,7 @@ static lonejson_status write_missing_object_key_value(
     mutation_stream_state *state, const lonejson_value_path *parent,
     const mutation_missing_object_match *match, lonejson_error *error) {
   size_t i;
+  size_t item_index;
   size_t depth;
   const mutation_item *item;
   const mutation_path_frame *frame;
@@ -2571,10 +2608,14 @@ static lonejson_status write_missing_object_key_value(
                               error) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
-  for (i = match->index + 1u; i < state->plan->count; ++i) {
-    item = &state->plan->items[i];
-    if (state->applied[i] || !item->can_create_missing_object ||
-        state->prefix_seen_depth[i] > depth) {
+  for (i = 0u; i < state->plan->create_count; ++i) {
+    item_index = state->plan->create_indexes[i];
+    if (item_index <= match->index) {
+      continue;
+    }
+    item = &state->plan->items[item_index];
+    if (state->applied[item_index] ||
+        state->prefix_seen_depth[item_index] > depth) {
       continue;
     }
     if (match->virtual_object) {
@@ -2760,14 +2801,19 @@ write_missing_object_mutations(mutation_stream_state *state,
                                const lonejson_value_path *path,
                                lonejson_error *error) {
   size_t i;
+  size_t item_index;
   const mutation_item *item;
   const mutation_path_frame *frame;
+  if (state->plan->create_count == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
   frame = current_path_frame(state, path);
-  for (i = 0u; i < state->plan->count; ++i) {
-    item = &state->plan->items[i];
-    if (state->applied[i] || !item->can_create_missing_object ||
+  for (i = 0u; i < state->plan->create_count; ++i) {
+    item_index = state->plan->create_indexes[i];
+    item = &state->plan->items[item_index];
+    if (state->applied[item_index] ||
         !mutation_descends_from_object(item, path, frame) ||
-        state->prefix_seen_depth[i] > path->segment_count) {
+        state->prefix_seen_depth[item_index] > path->segment_count) {
       continue;
     }
     if (write_synthetic_subtree(state, item, path->segment_count, error) !=
@@ -3279,6 +3325,7 @@ static lql_status mutate_reader_with_supported_plan(
   lonejson_status st;
   mutation_stream_state state;
   size_t i;
+  size_t item_index;
   int runtime_pooled;
   int out_locked;
 
@@ -3324,8 +3371,9 @@ static lql_status mutate_reader_with_supported_plan(
     st = LONEJSON_STATUS_CALLBACK_FAILED;
   }
   if (st == LONEJSON_STATUS_OK) {
-    for (i = 0u; i < plan->count; ++i) {
-      if (!state.applied[i] && plan->items[i].can_create_missing_object) {
+    for (i = 0u; i < plan->create_count; ++i) {
+      item_index = plan->create_indexes[i];
+      if (!state.applied[item_index]) {
         st = LONEJSON_STATUS_CALLBACK_FAILED;
         lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                       "mutation path could not be applied without "
