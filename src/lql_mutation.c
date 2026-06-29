@@ -1522,15 +1522,20 @@ static int mutation_item_matches_virtual_key(const mutation_item *item,
                                    0u);
 }
 
-static int value_path_segment_is_array(const mutation_stream_state *state,
-                                       const lonejson_value_path *path,
-                                       size_t index) {
-  const mutation_path_frame *frame;
-  if (state == NULL || path == NULL || index >= path->segment_count ||
-      state->path_frame_count == 0u) {
+static const mutation_path_frame *
+current_value_path_frame(const mutation_stream_state *state) {
+  if (state == NULL || state->path_frame_count == 0u) {
+    return NULL;
+  }
+  return &state->path_frames[state->path_frame_count - 1u];
+}
+
+static int value_path_segment_is_array_from_frame(
+    const mutation_path_frame *frame, const lonejson_value_path *path,
+    size_t index) {
+  if (frame == NULL || path == NULL || index >= path->segment_count) {
     return 0;
   }
-  frame = &state->path_frames[state->path_frame_count - 1u];
   if (frame->segment_count == path->segment_count) {
     return mutation_frame_array_segment(frame, index);
   }
@@ -1543,19 +1548,22 @@ static int value_path_segment_is_array(const mutation_stream_state *state,
   return 0;
 }
 
-static int value_path_is_array_element(const mutation_stream_state *state,
+static int
+value_path_is_array_element_from_frame(const mutation_path_frame *frame,
                                        const lonejson_value_path *path) {
   if (path == NULL || path->segment_count == 0u) {
     return 0;
   }
-  return value_path_segment_is_array(state, path, path->segment_count - 1u);
+  return value_path_segment_is_array_from_frame(frame, path,
+                                                path->segment_count - 1u);
 }
 
-static int value_path_item_matches_from(const mutation_stream_state *state,
-                                        const mutation_path *item_path,
-                                        size_t item_index,
-                                        const lonejson_value_path *path,
-                                        size_t path_index) {
+static int
+value_path_item_matches_from_frame(const mutation_path_frame *frame,
+                                   const mutation_path *item_path,
+                                   size_t item_index,
+                                   const lonejson_value_path *path,
+                                   size_t path_index) {
   size_t i;
   while (item_index < item_path->segment_count) {
     if (item_path->segment_kinds[item_index] == MUTATION_PATH_ELLIPSIS) {
@@ -1563,8 +1571,8 @@ static int value_path_item_matches_from(const mutation_stream_state *state,
         return 1;
       }
       for (i = path_index; i <= path->segment_count; ++i) {
-        if (value_path_item_matches_from(state, item_path, item_index + 1u,
-                                         path, i)) {
+        if (value_path_item_matches_from_frame(frame, item_path,
+                                               item_index + 1u, path, i)) {
           return 1;
         }
       }
@@ -1575,7 +1583,7 @@ static int value_path_item_matches_from(const mutation_stream_state *state,
             item_path->segment_kinds[item_index],
             item_path->segments[item_index],
             item_path->segment_lens[item_index], &path->segments[path_index],
-            value_path_segment_is_array(state, path, path_index))) {
+            value_path_segment_is_array_from_frame(frame, path, path_index))) {
       return 0;
     }
     ++item_index;
@@ -1587,12 +1595,14 @@ static int value_path_item_matches_from(const mutation_stream_state *state,
 static int mutation_value_index(const mutation_stream_state *state,
                                 const lonejson_value_path *path, size_t *out) {
   size_t i;
-  if (!value_path_is_array_element(state, path)) {
+  const mutation_path_frame *frame;
+  frame = current_value_path_frame(state);
+  if (!value_path_is_array_element_from_frame(frame, path)) {
     return 0;
   }
   for (i = 0u; i < state->plan->count; ++i) {
-    if (value_path_item_matches_from(state, &state->plan->items[i].path, 0u,
-                                     path, 0u)) {
+    if (value_path_item_matches_from_frame(frame, &state->plan->items[i].path,
+                                           0u, path, 0u)) {
       *out = i;
       return 1;
     }
@@ -1883,14 +1893,16 @@ static int skipped_earlier_increment_index(const mutation_stream_state *state,
                                            size_t *out) {
   size_t i;
   const mutation_item *item;
+  const mutation_path_frame *frame;
   if (state == NULL || path == NULL || !state->skipping ||
       !state->skip_has_mask) {
     return 0;
   }
+  frame = current_value_path_frame(state);
   for (i = 0u; i < state->skip_mask_index; ++i) {
     item = &state->plan->items[i];
     if (item->kind == MUTATION_INCREMENT &&
-        value_path_item_matches_from(state, &item->path, 0u, path, 0u)) {
+        value_path_item_matches_from_frame(frame, &item->path, 0u, path, 0u)) {
       *out = i;
       return 1;
     }
