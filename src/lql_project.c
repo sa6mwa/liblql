@@ -57,6 +57,7 @@ typedef struct projection_state {
   char *num_buf;
   size_t num_len;
   char inline_num_buf[PROJECTION_NUM_INLINE_CAP];
+  const projection_path *number_path;
   size_t capture_depth;
   int capturing;
   int in_string;
@@ -952,6 +953,7 @@ static lonejson_status on_number_begin(void *user,
                                        const lonejson_value_path *path,
                                        lonejson_error *error) {
   projection_state *state;
+  const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
   if (path != NULL && path->segment_count == 0u) {
@@ -960,10 +962,13 @@ static lonejson_status on_number_begin(void *user,
   }
   if (state->capturing) {
     projection_num_reset(state);
+    state->number_path = NULL;
     state->in_number = 1;
     return LONEJSON_STATUS_OK;
   }
-  state->in_number = selected_path(state->projection, path) != NULL;
+  projected_path = selected_path(state->projection, path);
+  state->number_path = projected_path;
+  state->in_number = projected_path != NULL;
   if (state->in_number) {
     projection_num_reset(state);
   }
@@ -989,7 +994,6 @@ static lonejson_status on_number_end(void *user,
                                      const lonejson_value_path *path,
                                      lonejson_error *error) {
   projection_state *state;
-  const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
   if (path != NULL && path->segment_count == 0u) {
@@ -1000,10 +1004,10 @@ static lonejson_status on_number_end(void *user,
     return LONEJSON_STATUS_OK;
   }
   if (!state->capturing) {
-    projected_path = selected_path(state->projection, path);
-    if (projected_path == NULL ||
-        projection_key(state, projected_path) != LONEJSON_STATUS_OK) {
+    if (state->number_path == NULL ||
+        projection_key(state, state->number_path) != LONEJSON_STATUS_OK) {
       state->in_number = 0;
+      state->number_path = NULL;
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
   }
@@ -1013,6 +1017,7 @@ static lonejson_status on_number_end(void *user,
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   state->in_number = 0;
+  state->number_path = NULL;
   return LONEJSON_STATUS_OK;
 }
 
