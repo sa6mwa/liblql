@@ -1775,7 +1775,7 @@ static int contains_stream_boundary_scan(const char *tail, size_t tail_len,
       continue;
     }
     matched = 1;
-    for (i = 0u; i < needle_len; ++i) {
+    for (i = 1u; i < needle_len; ++i) {
       tail_pos = start + i;
       if (tail_pos < tail_len) {
         a = (unsigned char)tail[tail_pos];
