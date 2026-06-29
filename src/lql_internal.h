@@ -214,6 +214,7 @@ struct lql_selector {
   size_t observer_contains_tail_need;
   size_t observer_prefix_need;
   unsigned char observer_family;
+  unsigned char observer_ignore_case;
   unsigned int predicate_features;
   int match_sticky_once_true;
   size_t hit_index;

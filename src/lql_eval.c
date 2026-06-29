@@ -1093,8 +1093,7 @@ static void observe_prepared_contains_value(eval_doc *doc, const char *value,
     if (is_container || is_null) {
       continue;
     }
-    ignore_case =
-        selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case;
+    ignore_case = selector->observer_ignore_case;
     if (selector->any_count == 0u) {
       if (contains_case_len(value, value_len,
                             selector->value_data, selector->value_len,
@@ -1136,7 +1135,7 @@ static void observe_prepared_prefix_value(eval_doc *doc, const char *value,
     }
     n = selector->value_len;
     if (value_len >= n &&
-        (selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case
+        (selector->observer_ignore_case
              ? ascii_case_equal_prefix(value, selector->value, n)
              : memcmp(value, selector->value, n) == 0)) {
       hit_mark_fast(doc, selector);
@@ -1452,8 +1451,7 @@ static void observe_prefix_stream_chunk(eval_doc *doc,
     if (value_len == 0u) {
       continue;
     }
-    ignore_case =
-        selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case;
+    ignore_case = selector->observer_ignore_case;
     if (!literal_chunk_matches(selector->value_data, value_len, offset, data,
                                len, ignore_case, value_len)) {
       stream_miss_mark_fast(doc, selector);
@@ -1571,8 +1569,7 @@ static void observe_prefix_stream_end(eval_doc *doc,
       continue;
     }
     if (value_len <= doc->prefix_len) {
-      ignore_case =
-          selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case;
+      ignore_case = selector->observer_ignore_case;
       if (ignore_case &&
           !ascii_case_equal_prefix(doc->prefix_buf, selector->value_data,
                                    value_len)) {
@@ -1990,8 +1987,7 @@ static void observe_contains_stream_chunk(eval_doc *doc,
     if (hit_marked_fast(doc, selector)) {
       continue;
     }
-    ignore_case =
-        selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case;
+    ignore_case = selector->observer_ignore_case;
     if (selector->any_count == 0u) {
       value_len = selector->value_len;
       if (contains_stream_scan(tail, doc->contains_tail_len, data, len,

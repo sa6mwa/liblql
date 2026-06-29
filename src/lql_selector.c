@@ -1435,6 +1435,7 @@ selector_refresh_predicate_features(lql_selector *selector) {
   features = 0u;
   selector->observer_feature = 0u;
   selector->observer_family = LQL_EVAL_FAMILY_COUNT;
+  selector->observer_ignore_case = 0u;
   selector->observer_contains_tail_need = 0u;
   selector->observer_prefix_need = 0u;
   switch (selector->kind) {
@@ -1442,6 +1443,9 @@ selector_refresh_predicate_features(lql_selector *selector) {
   case LQL_SELECTOR_KIND_ICONTAINS:
     selector->observer_feature = LQL_SELECTOR_FEATURE_CONTAINS;
     selector->observer_family = LQL_EVAL_FAMILY_CONTAINS;
+    selector->observer_ignore_case =
+        (unsigned char)(selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
+                        selector->ignore_case);
     need = selector->any_count == 0u ? selector->value_len
                                      : selector->any_max_len;
     selector->observer_contains_tail_need = need > 1u ? need - 1u : 0u;
@@ -1450,6 +1454,9 @@ selector_refresh_predicate_features(lql_selector *selector) {
   case LQL_SELECTOR_KIND_IPREFIX:
     selector->observer_feature = LQL_SELECTOR_FEATURE_PREFIX;
     selector->observer_family = LQL_EVAL_FAMILY_PREFIX;
+    selector->observer_ignore_case =
+        (unsigned char)(selector->kind == LQL_SELECTOR_KIND_IPREFIX ||
+                        selector->ignore_case);
     selector->observer_prefix_need =
         selector->value_len > LQL_EVAL_PREFIX_CAP ? LQL_EVAL_PREFIX_CAP
                                                   : selector->value_len;
@@ -2746,6 +2753,7 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->observer_contains_tail_need = 0u;
   dst->observer_prefix_need = 0u;
   dst->observer_family = LQL_EVAL_FAMILY_COUNT;
+  dst->observer_ignore_case = 0u;
   dst->predicate_features = 0u;
   if (!clone_string(ctx, src->field, &dst->field) ||
       !clone_string(ctx, src->value, &dst->value) ||
