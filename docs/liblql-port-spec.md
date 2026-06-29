@@ -235,6 +235,10 @@ Candidate hit state, stream-miss state, and `in` alternative state should also
 use generation or epoch marks so candidate reset is O(1) in steady state. Full
 scratch clears are allowed at query setup and on epoch wraparound; they must
 not occur once per candidate.
+Receiver-owned evaluator scratch should carry candidate and scalar-path epochs
+across warmed queries. Query setup should not clear selector-sized hit,
+stream-miss, `in`, or scalar-path match arrays unless scratch grows, scratch is
+not receiver-owned, or an epoch wraps.
 Steady-state decision scanning must not attempt receiver allocation after the
 selector and evaluator scratch have been warmed for the same query shape. The
 C allocator contract tests should freeze a receiver allocator after warmup and

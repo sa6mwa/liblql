@@ -57,6 +57,8 @@ struct lql_impl {
   int *eval_container_types;
   size_t *eval_container_depths;
   size_t eval_container_cap;
+  unsigned int eval_candidate_epoch;
+  unsigned int eval_scalar_path_epoch;
   int eval_scratch_in_use;
 };
 
