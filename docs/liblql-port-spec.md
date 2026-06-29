@@ -253,6 +253,10 @@ Object and array begin observers should use the same prepared-path machinery
 with a container-capable observer-family mask (`exists`, empty `contains`, and
 empty `prefix`) so container callbacks do not run a separate full predicate
 scan or branch through scalar-only observer families.
+Selector finalization should also retain whether any such container observer is
+present, so scalar-only selectors can install root-only container begin
+callbacks and omit container end callbacks when no parent-container stack is
+needed.
 `contains.any` and `icontains.any` selectors should carry selector-owned
 first-byte lookup masks so no-match scalar scans can reject most bytes in O(1)
 without checking every alternative. The masks are parse-time selector metadata,
@@ -1767,7 +1771,9 @@ Current implementation status:
   metadata instead of repeating broad predicate scans. Contains, prefix, and
   exact observers share one scalar text length per value, and selectors whose
   truth is sticky once true reuse the candidate's already-observed positive
-  match at finalization instead of walking the selector tree again;
+  match at finalization instead of walking the selector tree again. Selectors
+  also retain container-observer feature bits so scalar-only literal selectors
+  use root-only object/array begin callbacks and omit container end callbacks;
 - mutation execution derives a private literal-only path trait at plan parse
   time and uses it to bypass recursive virtual-key matching for common literal
   mutation plans such as nested set operations, reducing branches in the

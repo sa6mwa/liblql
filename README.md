@@ -109,6 +109,9 @@ contains, prefix, or exact families need it, rather than rescanning the same
 value separately for each observer family. For selectors whose truth is sticky
 once true, candidate finalization reuses the already-observed positive match
 state instead of walking the selector tree again at candidate end.
+Selectors also carry container-observer feature bits, so scalar-only selectors
+use root-only object/array callbacks instead of running container path
+preparation on every object and array boundary.
 Seekable mutation setup initializes only live mutation state and plan scratch,
 not the full inline frame reserve. Path frames are assigned when pushed, so this
 removes per-candidate zeroing without adding retained candidate state.

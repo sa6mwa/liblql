@@ -2102,10 +2102,7 @@ static void observe_container_value(eval_doc *doc,
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return;
   }
-  container_features = doc->selector->predicate_features &
-                       (LQL_SELECTOR_FEATURE_EXISTS |
-                        LQL_SELECTOR_FEATURE_CONTAINS |
-                        LQL_SELECTOR_FEATURE_PREFIX);
+  container_features = doc->selector->container_observer_features;
   if (container_features == 0u) {
     return;
   }
@@ -2169,6 +2166,16 @@ static lonejson_status on_object_begin(void *user,
   return push_container(doc, path, '{');
 }
 
+static lonejson_status on_object_begin_root_only(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  eval_doc *doc = (eval_doc *)user;
+  (void)error;
+  if (path->segment_count == 0u) {
+    doc->root_kind = '{';
+  }
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status on_object_end(void *user,
                                      const lonejson_value_path *path,
                                      lonejson_error *error) {
@@ -2187,6 +2194,16 @@ static lonejson_status on_array_begin(void *user,
   }
   observe_container_value(doc, path);
   return push_container(doc, path, '[');
+}
+
+static lonejson_status on_array_begin_root_only(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  eval_doc *doc = (eval_doc *)user;
+  (void)error;
+  if (path->segment_count == 0u) {
+    doc->root_kind = '[';
+  }
+  return LONEJSON_STATUS_OK;
 }
 
 static lonejson_status on_array_end(void *user, const lonejson_value_path *path,
@@ -2421,6 +2438,15 @@ static void init_eval_visitor(lonejson_path_value_visitor *visitor) {
 
 static void configure_eval_visitor_for_doc(lonejson_path_value_visitor *visitor,
                                            const eval_doc *doc) {
+  if (visitor != NULL && doc != NULL && !doc->track_container_types &&
+      (doc->selector == NULL ||
+       doc->selector->container_observer_features == 0u)) {
+    visitor->object_begin = on_object_begin_root_only;
+    visitor->array_begin = on_array_begin_root_only;
+    visitor->object_end = NULL;
+    visitor->array_end = NULL;
+    return;
+  }
   if (visitor != NULL && doc != NULL && !doc->track_container_types) {
     visitor->object_end = NULL;
     visitor->array_end = NULL;

@@ -211,6 +211,7 @@ struct lql_selector {
   int predicate_has_variable_path;
   size_t max_in_alternative_count;
   unsigned int observer_feature;
+  unsigned int container_observer_features;
   size_t observer_contains_tail_need;
   size_t observer_prefix_need;
   unsigned char observer_family;

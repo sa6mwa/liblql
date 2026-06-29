@@ -1426,6 +1426,7 @@ static size_t selector_refresh_derived_lengths(lql_selector *selector) {
 static unsigned int
 selector_refresh_predicate_features(lql_selector *selector) {
   unsigned int features;
+  unsigned int container_features;
   size_t need;
   size_t i;
 
@@ -1433,7 +1434,9 @@ selector_refresh_predicate_features(lql_selector *selector) {
     return 0u;
   }
   features = 0u;
+  container_features = 0u;
   selector->observer_feature = 0u;
+  selector->container_observer_features = 0u;
   selector->observer_family = LQL_EVAL_FAMILY_COUNT;
   selector->observer_ignore_case = 0u;
   selector->observer_contains_tail_need = 0u;
@@ -1449,6 +1452,10 @@ selector_refresh_predicate_features(lql_selector *selector) {
     need = selector->any_count == 0u ? selector->value_len
                                      : selector->any_max_len;
     selector->observer_contains_tail_need = need > 1u ? need - 1u : 0u;
+    if (selector->any_count == 0u && !selector->value_set &&
+        selector->value == NULL) {
+      container_features |= LQL_SELECTOR_FEATURE_CONTAINS;
+    }
     break;
   case LQL_SELECTOR_KIND_PREFIX:
   case LQL_SELECTOR_KIND_IPREFIX:
@@ -1460,6 +1467,9 @@ selector_refresh_predicate_features(lql_selector *selector) {
     selector->observer_prefix_need =
         selector->value_len > LQL_EVAL_PREFIX_CAP ? LQL_EVAL_PREFIX_CAP
                                                   : selector->value_len;
+    if (!selector->value_set && selector->value == NULL) {
+      container_features |= LQL_SELECTOR_FEATURE_PREFIX;
+    }
     break;
   case LQL_SELECTOR_KIND_EQ:
   case LQL_SELECTOR_KIND_NE:
@@ -1501,6 +1511,7 @@ selector_refresh_predicate_features(lql_selector *selector) {
   case LQL_SELECTOR_KIND_EXISTS:
     selector->observer_feature = LQL_SELECTOR_FEATURE_EXISTS;
     selector->observer_family = LQL_EVAL_FAMILY_EXISTS;
+    container_features |= LQL_SELECTOR_FEATURE_EXISTS;
     break;
   default:
     break;
@@ -1508,8 +1519,10 @@ selector_refresh_predicate_features(lql_selector *selector) {
   features |= selector->observer_feature;
   for (i = 0u; i < selector->child_count; ++i) {
     features |= selector_refresh_predicate_features(&selector->children[i]);
+    container_features |= selector->children[i].container_observer_features;
   }
   selector->predicate_features = features;
+  selector->container_observer_features = container_features;
   return features;
 }
 
@@ -2750,6 +2763,7 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->any_max_len = 0u;
   dst->max_in_alternative_count = 0u;
   dst->observer_feature = 0u;
+  dst->container_observer_features = 0u;
   dst->observer_contains_tail_need = 0u;
   dst->observer_prefix_need = 0u;
   dst->observer_family = LQL_EVAL_FAMILY_COUNT;
