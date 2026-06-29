@@ -41,7 +41,9 @@ struct lql_impl {
   lql_pool_block *eval_pool_all;
   lql_pool_block *eval_pool_free;
   lonejson *eval_runtime;
+  lonejson *eval_runtime_nested;
   int eval_runtime_in_use;
+  int eval_runtime_nested_in_use;
   unsigned int *eval_hits;
   size_t eval_hits_cap;
   unsigned int *eval_stream_misses;

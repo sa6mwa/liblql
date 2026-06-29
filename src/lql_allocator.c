@@ -293,6 +293,19 @@ LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_acquire(lql *self, int *out_pooled,
     }
     return impl->eval_runtime;
   }
+  if (!impl->eval_runtime_nested_in_use) {
+    if (impl->eval_runtime_nested == NULL) {
+      impl->eval_runtime_nested = lql_lonejson_new_pooled(self, error);
+      if (impl->eval_runtime_nested == NULL) {
+        return NULL;
+      }
+    }
+    impl->eval_runtime_nested_in_use = 1;
+    if (out_pooled != NULL) {
+      *out_pooled = 1;
+    }
+    return impl->eval_runtime_nested;
+  }
   return lql_lonejson_new(self, error);
 }
 
@@ -307,6 +320,10 @@ LQL_INTERNAL_SYMBOL void lql_lonejson_release(lql *self, lonejson *runtime,
     impl = (lql_impl *)self->impl;
     if (impl->eval_runtime == runtime) {
       impl->eval_runtime_in_use = 0;
+      return;
+    }
+    if (impl->eval_runtime_nested == runtime) {
+      impl->eval_runtime_nested_in_use = 0;
       return;
     }
   }

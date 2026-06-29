@@ -260,6 +260,10 @@ static void receiver_destroy(lql *self) {
       lonejson_free(impl->eval_runtime);
       impl->eval_runtime = NULL;
     }
+    if (impl->eval_runtime_nested != NULL) {
+      lonejson_free(impl->eval_runtime_nested);
+      impl->eval_runtime_nested = NULL;
+    }
     allocator->destroy(allocator, impl->eval_hits);
     allocator->destroy(allocator, impl->eval_stream_misses);
     allocator->destroy(allocator, impl->eval_scalar_path_predicates);

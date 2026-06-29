@@ -2982,13 +2982,15 @@ static lql_status mutate_reader_with_supported_plan(
   lonejson_status st;
   mutation_stream_state state;
   size_t i;
+  int runtime_pooled;
 
   if (plan == NULL || reader_fn == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "plan, reader, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  runtime = lql_lonejson_new(self, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
@@ -2996,7 +2998,7 @@ static lql_status mutate_reader_with_supported_plan(
   memset(&state, 0, sizeof(state));
   state.allocator = lql_allocator_from_receiver(self);
   if (state.allocator == NULL) {
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "mutation receiver allocator required");
     return LQL_STATUS_INVALID_ARGUMENT;
@@ -3004,13 +3006,13 @@ static lql_status mutate_reader_with_supported_plan(
   state.plan = plan;
   state.error = &lj_error;
   if (!mutation_state_init_plan_scratch(&state, plan)) {
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     return LQL_STATUS_NO_MEMORY;
   }
   if (lonejson_writer_init_sink(runtime, &state.writer, file_sink, out,
                                 &lj_error) != LONEJSON_STATUS_OK) {
     mutation_state_cleanup_plan_scratch(&state);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
@@ -3039,7 +3041,7 @@ static lql_status mutate_reader_with_supported_plan(
   mutation_key_reset(&state);
   mutation_num_reset(&state);
   mutation_state_cleanup_plan_scratch(&state);
-  lonejson_free(runtime);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   if (st != LONEJSON_STATUS_OK) {
     if (error != NULL && error->code == LQL_STATUS_UNSUPPORTED) {
       return LQL_STATUS_UNSUPPORTED;
