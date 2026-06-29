@@ -2306,7 +2306,8 @@ static int mutation_scan_key_literal_plan(mutation_stream_state *state,
           memcmp(item->path.segments[depth], key, key_len) != 0) {
         continue;
       }
-      if (!stream_path_prefix_matches_known(&item->path, path, frame, depth)) {
+      if (state->prefix_seen_depth[item_index] < depth &&
+          !stream_path_prefix_matches_known(&item->path, path, frame, depth)) {
         continue;
       }
       if (state->prefix_seen_depth[item_index] < next_depth) {
@@ -2331,7 +2332,8 @@ static int mutation_scan_key_literal_plan(mutation_stream_state *state,
         memcmp(item->path.segments[depth], key, key_len) != 0) {
       continue;
     }
-    if (!stream_path_prefix_matches_known(&item->path, path, frame, depth)) {
+    if (state->prefix_seen_depth[i] < depth &&
+        !stream_path_prefix_matches_known(&item->path, path, frame, depth)) {
       continue;
     }
     if (state->prefix_seen_depth[i] < next_depth) {
