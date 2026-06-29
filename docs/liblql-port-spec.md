@@ -188,6 +188,10 @@ selector-owned alternatives. Temporal equality fallback, temporal inequality,
 scalar length. Numeric `range` predicates evaluate number chunks with a bounded
 leading slice, a small significant-digit window, and decimal/exponent counters;
 liblql must not allocate storage proportional to the selected number text.
+The evaluator may derive receiver-owned execution scratch from `lql_selector`
+for performance, such as a flat borrowed predicate view used by scalar
+callbacks. That scratch must remain selector-derived, bounded by selector
+shape, and must not become a parallel selector AST or public representation.
 
 As of lonejson `v0.35.2`, the path-value visitor used by liblql still enforces
 a small raw JSON number-token limit and performs bounded internal allocation for

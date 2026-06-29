@@ -61,6 +61,9 @@ Query execution is chunk-driven for selected string and number predicates:
 `contains`, `prefix`, `eq`, `!=`, `in`, temporal comparison, and numeric range
 matching use bounded selector-sized stream scratch rather than materializing the
 selected scalar. The hot path has no liblql-owned full-scalar buffer fallback.
+During evaluation, liblql derives a borrowed flat predicate view from the
+`lql_selector` AST so scalar callbacks do not repeatedly recurse through the
+selector tree; this is execution scratch, not a second selector model.
 `clql -m -f` composes mutation and projection in Go-compatible order by
 projecting each output candidate first, then mutating the projected value for
 matched candidates; this uses a callback-scoped temp-file spill for the
