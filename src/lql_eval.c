@@ -576,7 +576,6 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
                                  const unsigned char *firsts,
                                  const unsigned char *first_bitmap,
                                  int ignore_case) {
-  unsigned char stack_firsts[32];
   size_t i;
   size_t j;
   size_t n;
@@ -592,31 +591,25 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
     return 0;
   }
   if (count == 1u) {
-    n = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
-    return contains_case_len(haystack, h, needles[0], n, ignore_case);
+    return contains_case_len(haystack, h, needles[0], needle_lens[0],
+                             ignore_case);
   }
   if (!ignore_case && count <= 3u) {
     for (j = 0u; j < count; ++j) {
-      n = needle_lens == NULL ? strlen(needles[j]) : needle_lens[j];
-      if (contains_case_len(haystack, h, needles[j], n, 0)) {
+      if (contains_case_len(haystack, h, needles[j], needle_lens[j], 0)) {
         return 1;
       }
     }
     return 0;
   }
   if (count == 2u) {
-    n = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
-    n0 = n;
-    n1 = needle_lens == NULL ? strlen(needles[1]) : needle_lens[1];
+    n0 = needle_lens[0];
+    n1 = needle_lens[1];
     if (n0 == 0u || n1 == 0u) {
       return 1;
     }
-    f0 = firsts == NULL ? (unsigned char)needles[0][0] : firsts[0];
-    f1 = firsts == NULL ? (unsigned char)needles[1][0] : firsts[1];
-    if (ignore_case && firsts == NULL) {
-      f0 = ascii_lower_byte(f0);
-      f1 = ascii_lower_byte(f1);
-    }
+    f0 = firsts[0];
+    f1 = firsts[1];
     for (i = 0u; i < h; ++i) {
       raw_ch = (unsigned char)haystack[i];
       hay_ch = ignore_case ? ascii_lower_byte(raw_ch) : raw_ch;
@@ -642,20 +635,15 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
     return 0;
   }
   if (count == 3u) {
-    n0 = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
-    n1 = needle_lens == NULL ? strlen(needles[1]) : needle_lens[1];
-    n2 = needle_lens == NULL ? strlen(needles[2]) : needle_lens[2];
+    n0 = needle_lens[0];
+    n1 = needle_lens[1];
+    n2 = needle_lens[2];
     if (n0 == 0u || n1 == 0u || n2 == 0u) {
       return 1;
     }
-    f0 = firsts == NULL ? (unsigned char)needles[0][0] : firsts[0];
-    f1 = firsts == NULL ? (unsigned char)needles[1][0] : firsts[1];
-    f2 = firsts == NULL ? (unsigned char)needles[2][0] : firsts[2];
-    if (ignore_case && firsts == NULL) {
-      f0 = ascii_lower_byte(f0);
-      f1 = ascii_lower_byte(f1);
-      f2 = ascii_lower_byte(f2);
-    }
+    f0 = firsts[0];
+    f1 = firsts[1];
+    f2 = firsts[2];
     for (i = 0u; i < h; ++i) {
       raw_ch = (unsigned char)haystack[i];
       hay_ch = ignore_case ? ascii_lower_byte(raw_ch) : raw_ch;
@@ -689,38 +677,15 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
     }
     return 0;
   }
-  if (firsts == NULL &&
-      count > sizeof(stack_firsts) / sizeof(stack_firsts[0])) {
-    for (j = 0u; j < count; ++j) {
-      if (contains_case_len(haystack, h, needles[j], needle_lens[j],
-                            ignore_case)) {
-        return 1;
-      }
-    }
-    return 0;
-  }
-  if (firsts == NULL) {
-    for (j = 0u; j < count; ++j) {
-      if (needle_lens[j] == 0u) {
-        return 1;
-      }
-      stack_firsts[j] =
-          ignore_case ? ascii_lower_byte((unsigned char)needles[j][0])
-                      : (unsigned char)needles[j][0];
-    }
-    firsts = stack_firsts;
-  }
   for (j = 0u; j < count; ++j) {
-    if ((needle_lens == NULL && needles[j][0] == '\0') ||
-        (needle_lens != NULL && needle_lens[j] == 0u)) {
+    if (needle_lens[j] == 0u) {
       return 1;
     }
   }
   for (i = 0u; i < h; ++i) {
     raw_ch = (unsigned char)haystack[i];
     hay_ch = ignore_case ? ascii_lower_byte(raw_ch) : raw_ch;
-    if (first_bitmap != NULL &&
-        (first_bitmap[hay_ch >> 3] &
+    if ((first_bitmap[hay_ch >> 3] &
          (unsigned char)(1u << (hay_ch & 7u))) == 0u) {
       continue;
     }
@@ -2002,9 +1967,8 @@ static int contains_any_stream_scan(const char *tail, size_t tail_len,
   unsigned char ch;
 
   if (count == 1u) {
-    needle_len = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
     return contains_stream_scan(tail, tail_len, data, len, needles[0],
-                                needle_len, ignore_case);
+                                needle_lens[0], ignore_case);
   }
   if (contains_any_case_len(data, len, needles, needle_lens, count, firsts,
                             first_bitmap, ignore_case)) {
@@ -2013,22 +1977,20 @@ static int contains_any_stream_scan(const char *tail, size_t tail_len,
   if (tail_len == 0u || len == 0u) {
     return 0;
   }
-  if (first_bitmap != NULL) {
-    for (i = 0u; i < tail_len; ++i) {
-      ch = (unsigned char)tail[i];
-      if (ignore_case) {
-        ch = ascii_lower_byte(ch);
-      }
-      if ((first_bitmap[ch >> 3] & (unsigned char)(1u << (ch & 7u))) != 0u) {
-        break;
-      }
+  for (i = 0u; i < tail_len; ++i) {
+    ch = (unsigned char)tail[i];
+    if (ignore_case) {
+      ch = ascii_lower_byte(ch);
     }
-    if (i == tail_len) {
-      return 0;
+    if ((first_bitmap[ch >> 3] & (unsigned char)(1u << (ch & 7u))) != 0u) {
+      break;
     }
   }
+  if (i == tail_len) {
+    return 0;
+  }
   for (i = 0u; i < count; ++i) {
-    needle_len = needle_lens == NULL ? strlen(needles[i]) : needle_lens[i];
+    needle_len = needle_lens[i];
     if (contains_stream_boundary_scan(tail, tail_len, data, len, needles[i],
                                       needle_len, ignore_case)) {
       return 1;
