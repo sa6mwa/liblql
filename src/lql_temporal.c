@@ -6,18 +6,54 @@
 #include <string.h>
 #include <time.h>
 
+static int digit_value(unsigned char c) {
+  return c >= (unsigned char)'0' && c <= (unsigned char)'9'
+             ? (int)(c - (unsigned char)'0')
+             : -1;
+}
+
 static int parse_ndigits(const char **p, int n, int *out) {
   int i;
   int v;
+  int digit;
   v = 0;
   for (i = 0; i < n; ++i) {
-    if (!isdigit((unsigned char)(*p)[i])) {
+    digit = digit_value((unsigned char)(*p)[i]);
+    if (digit < 0) {
       return 0;
     }
-    v = (v * 10) + ((*p)[i] - '0');
+    v = (v * 10) + digit;
   }
   *p += n;
   *out = v;
+  return 1;
+}
+
+static int parse_2_at(const char *p, int *out) {
+  int hi;
+  int lo;
+  hi = digit_value((unsigned char)p[0]);
+  lo = digit_value((unsigned char)p[1]);
+  if (hi < 0 || lo < 0) {
+    return 0;
+  }
+  *out = hi * 10 + lo;
+  return 1;
+}
+
+static int parse_4_at(const char *p, int *out) {
+  int a;
+  int b;
+  int c;
+  int d;
+  a = digit_value((unsigned char)p[0]);
+  b = digit_value((unsigned char)p[1]);
+  c = digit_value((unsigned char)p[2]);
+  d = digit_value((unsigned char)p[3]);
+  if (a < 0 || b < 0 || c < 0 || d < 0) {
+    return 0;
+  }
+  *out = ((a * 10 + b) * 10 + c) * 10 + d;
   return 1;
 }
 
@@ -101,6 +137,92 @@ static int current_utc_seconds(lql_int64 *out) {
   return 1;
 }
 
+static int parse_temporal_fast(const char *raw, lql_temporal *out) {
+  const char *p;
+  size_t len;
+  int y;
+  int mo;
+  int d;
+  int h;
+  int mi;
+  int s;
+  int off_h;
+  int off_m;
+  int off_sign;
+  int offset;
+  int nanos;
+  int frac_digits;
+  int digit;
+
+  len = strlen(raw);
+  if (len != 10u && len < 19u) {
+    return 0;
+  }
+  if (!parse_4_at(raw, &y) || raw[4] != '-' || !parse_2_at(raw + 5, &mo) ||
+      raw[7] != '-' || !parse_2_at(raw + 8, &d) || !valid_ymd(y, mo, d)) {
+    return 0;
+  }
+  if (raw[10] == '\0') {
+    out->year = y;
+    out->month = mo;
+    out->day = d;
+    out->date_only = 1;
+    out->seconds = days_from_civil(y, mo, d) * (lql_int64)86400;
+    out->nanoseconds = 0;
+    return 1;
+  }
+  if (raw[10] != 'T' || !parse_2_at(raw + 11, &h) || raw[13] != ':' ||
+      !parse_2_at(raw + 14, &mi) || raw[16] != ':' ||
+      !parse_2_at(raw + 17, &s) || h > 23 || mi > 59 || s > 59) {
+    return 0;
+  }
+  p = raw + 19;
+  offset = 0;
+  nanos = 0;
+  if (*p == '.') {
+    ++p;
+    digit = digit_value((unsigned char)*p);
+    if (digit < 0) {
+      return 0;
+    }
+    frac_digits = 0;
+    while ((digit = digit_value((unsigned char)*p)) >= 0) {
+      if (frac_digits < 9) {
+        nanos = (nanos * 10) + digit;
+      }
+      ++p;
+      ++frac_digits;
+    }
+    while (frac_digits < 9) {
+      nanos *= 10;
+      ++frac_digits;
+    }
+  }
+  if (*p == 'Z') {
+    ++p;
+  } else if (*p == '+' || *p == '-') {
+    off_sign = *p == '-' ? -1 : 1;
+    ++p;
+    if (!parse_2_at(p, &off_h) || p[2] != ':' ||
+        !parse_2_at(p + 3, &off_m) || off_h > 23 || off_m > 59) {
+      return 0;
+    }
+    p += 5;
+    offset = off_sign * (off_h * 3600 + off_m * 60);
+  }
+  if (*p != '\0') {
+    return 0;
+  }
+  out->year = y;
+  out->month = mo;
+  out->day = d;
+  out->date_only = 0;
+  out->seconds = days_from_civil(y, mo, d) * (lql_int64)86400 +
+                 (lql_int64)(h * 3600 + mi * 60 + s - offset);
+  out->nanoseconds = nanos;
+  return 1;
+}
+
 LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
                                                    lql_temporal *out) {
   const char *p;
@@ -119,6 +241,9 @@ LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
 
   if (raw == NULL || out == NULL) {
     return 0;
+  }
+  if (parse_temporal_fast(raw, out)) {
+    return 1;
   }
   while (isspace((unsigned char)*raw)) {
     ++raw;
@@ -153,11 +278,11 @@ LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
   }
   if (*p == '.') {
     ++p;
-    if (!isdigit((unsigned char)*p)) {
+    if (digit_value((unsigned char)*p) < 0) {
       return 0;
     }
     frac_digits = 0;
-    while (isdigit((unsigned char)*p)) {
+    while (digit_value((unsigned char)*p) >= 0) {
       if (frac_digits < 9) {
         nanos = (nanos * 10) + (*p - '0');
       }
