@@ -179,13 +179,15 @@ be made to look supported by materializing selected values.
 
 `contains` and `icontains` string predicates evaluate from lonejson scalar
 chunks with a reusable suffix window sized by the selector's longest needle, so
-cross-chunk matches do not require a selected-scalar buffer. `prefix` and
-`iprefix` predicates compare chunks directly against selector-owned literals and
-retain only a bounded leading slice for short-literal fast paths. Non-temporal
-`eq` and public inequality (`!=`) also compare chunks directly against
-selector-owned literals plus scalar length. `in` predicates keep selector-sized
-live/dead state per alternative and compare chunks directly against
-selector-owned alternatives. Temporal equality fallback, temporal inequality,
+cross-chunk matches do not require a selected-scalar buffer. Boundary checks
+must reject impossible suffix offsets by first byte before entering full literal
+comparison. `prefix` and `iprefix` predicates compare chunks directly against
+selector-owned literals and retain only a bounded leading slice for
+short-literal fast paths. Non-temporal `eq` and public inequality (`!=`) also
+compare chunks directly against selector-owned literals plus scalar length. `in`
+predicates keep selector-sized live/dead state per alternative and compare
+chunks directly against selector-owned alternatives. Temporal equality fallback,
+temporal inequality,
 `date`, and datetime `range` predicates evaluate from bounded scalar text plus
 scalar length. Numeric `range` predicates evaluate number chunks with a bounded
 leading slice, a small significant-digit window, and decimal/exponent counters;

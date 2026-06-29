@@ -1753,13 +1753,25 @@ static int contains_stream_boundary_scan(const char *tail, size_t tail_len,
   size_t data_pos;
   unsigned char a;
   unsigned char b;
+  unsigned char first;
   int matched;
 
   if (tail_len == 0u || len == 0u || needle_len <= 1u) {
     return 0;
   }
+  first = (unsigned char)needle[0];
+  if (ignore_case) {
+    first = ascii_lower_byte(first);
+  }
   for (start = 0u; start < tail_len; ++start) {
     if (tail_len - start >= needle_len || tail_len - start + len < needle_len) {
+      continue;
+    }
+    a = (unsigned char)tail[start];
+    if (ignore_case) {
+      a = ascii_lower_byte(a);
+    }
+    if (a != first) {
       continue;
     }
     matched = 1;
