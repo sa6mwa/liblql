@@ -770,6 +770,9 @@ static lonejson_status on_object_key_chunk(void *user,
   (void)path;
   (void)error;
   state = (projection_state *)user;
+  if (!state->capturing) {
+    return LONEJSON_STATUS_OK;
+  }
   return append_buf(state, &state->key_buf, &state->key_len, data, len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
@@ -784,8 +787,7 @@ static lonejson_status on_object_key_end(void *user,
   state = (projection_state *)user;
   if (state->capturing &&
       lonejson_writer_key(&state->writer, state->key_buf,
-                          strlen(state->key_buf),
-                          state->error) != LONEJSON_STATUS_OK) {
+                          state->key_len, state->error) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   return LONEJSON_STATUS_OK;
