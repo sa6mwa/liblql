@@ -75,6 +75,7 @@ typedef struct eval_doc {
   size_t container_cap;
   size_t container_high_water;
   char root_kind;
+  int candidate_matched;
   int borrowed_scratch;
 } eval_doc;
 
@@ -398,6 +399,7 @@ static void reset_doc(eval_doc *doc) {
   doc->prefix_len = 0u;
   doc->prefix_need = 0u;
   doc->root_kind = '\0';
+  doc->candidate_matched = 0;
 }
 
 static char *contains_tail_data(eval_doc *doc) {
@@ -828,6 +830,8 @@ static int path_matches(const eval_doc *doc, const char *pattern,
 
 static void stream_miss_clear(eval_doc *doc, const lql_selector *selector);
 static int hit_marked(const eval_doc *doc, const lql_selector *selector);
+static int eval_selector_tree(const lql_selector *selector,
+                              const eval_doc *doc);
 static size_t selector_contains_max_needle(const lql_selector *selector);
 static size_t selector_prefix_value_len(const lql_selector *selector);
 static size_t selector_in_max_value_len(const lql_selector *selector);
@@ -949,6 +953,9 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
   }
   doc->scalar_path_features = 0u;
   doc->scalar_path_predicate_count = 0u;
+  if (doc->candidate_matched && doc->selector->match_sticky_once_true) {
+    return;
+  }
   if (!selector_path_depth_possible(doc->selector, path)) {
     return;
   }
@@ -1043,6 +1050,11 @@ static void hit_mark(eval_doc *doc, const lql_selector *selector) {
   if (doc != NULL && selector != NULL && doc->hits != NULL &&
       selector->hit_index < doc->hits_cap) {
     doc->hits[selector->hit_index] = doc->candidate_epoch;
+    if (!doc->candidate_matched && doc->selector != NULL &&
+        doc->selector->match_sticky_once_true &&
+        eval_selector_tree(doc->selector, doc)) {
+      doc->candidate_matched = 1;
+    }
   }
 }
 

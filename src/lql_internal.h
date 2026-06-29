@@ -190,6 +190,7 @@ struct lql_selector {
   int predicate_has_variable_path;
   size_t max_in_alternative_count;
   unsigned int predicate_features;
+  int match_sticky_once_true;
   size_t hit_index;
   size_t hit_count;
 };

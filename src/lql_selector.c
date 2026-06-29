@@ -1472,6 +1472,40 @@ selector_refresh_predicate_features(lql_selector *selector) {
   return features;
 }
 
+static int selector_refresh_match_sticky(lql_selector *selector) {
+  size_t i;
+  int sticky;
+
+  if (selector == NULL) {
+    return 0;
+  }
+  switch (selector->kind) {
+  case LQL_SELECTOR_KIND_ALL:
+    sticky = 1;
+    break;
+  case LQL_SELECTOR_KIND_AND:
+  case LQL_SELECTOR_KIND_OR:
+    sticky = 1;
+    for (i = 0u; i < selector->child_count; ++i) {
+      if (!selector_refresh_match_sticky(&selector->children[i])) {
+        sticky = 0;
+      }
+    }
+    break;
+  case LQL_SELECTOR_KIND_NOT:
+    sticky = 0;
+    for (i = 0u; i < selector->child_count; ++i) {
+      (void)selector_refresh_match_sticky(&selector->children[i]);
+    }
+    break;
+  default:
+    sticky = 1;
+    break;
+  }
+  selector->match_sticky_once_true = sticky;
+  return sticky;
+}
+
 static void selector_clear_predicates(lql_selector_parser *ctx,
                                       lql_selector *selector) {
   ctx->allocator->destroy(ctx->allocator, (void *)selector->predicates);
@@ -1600,6 +1634,7 @@ static int finalize_selector(lql_selector_parser *ctx, lql_selector *selector) {
   assign_hit_indexes(selector, &selector->hit_count);
   selector_refresh_derived_lengths(selector);
   selector_refresh_predicate_features(selector);
+  selector_refresh_match_sticky(selector);
   if (!prepare_selector_paths(ctx, selector)) {
     return 0;
   }
