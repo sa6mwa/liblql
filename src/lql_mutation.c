@@ -102,6 +102,15 @@ static int mutation_frame_array_segment(const mutation_path_frame *frame,
   return (frame->array_segment_bits & (1UL << index)) != 0u;
 }
 
+static int
+mutation_frame_array_segment_known(const mutation_path_frame *frame,
+                                   size_t index) {
+  if (frame->array_segments != NULL) {
+    return frame->array_segments[index] ? 1 : 0;
+  }
+  return (frame->array_segment_bits & (1UL << index)) != 0u;
+}
+
 static void mutation_frame_set_array_segment(mutation_path_frame *frame,
                                              size_t index) {
   if (frame == NULL || index >= frame->segment_count) {
@@ -1549,7 +1558,7 @@ static int virtual_path_segment_matches(const mutation_path *item_path,
     return stream_path_segment_matches(
         item_path->segment_kinds[item_index], item_path->segments[item_index],
         item_path->segment_lens[item_index], &parent->segments[actual_index],
-        mutation_frame_array_segment(frame, actual_index));
+        mutation_frame_array_segment_known(frame, actual_index));
   }
   segment.data = key;
   segment.len = key_len;
@@ -1606,11 +1615,11 @@ static int value_path_segment_is_array_from_frame(
     return 0;
   }
   if (frame->segment_count == path->segment_count) {
-    return mutation_frame_array_segment(frame, index);
+    return mutation_frame_array_segment_known(frame, index);
   }
   if (frame->segment_count + 1u == path->segment_count) {
     if (index < frame->segment_count) {
-      return mutation_frame_array_segment(frame, index);
+      return mutation_frame_array_segment_known(frame, index);
     }
     return frame->container == 'a';
   }
@@ -1703,7 +1712,7 @@ static int stream_path_prefix_matches(const mutation_path *item_path,
     if (!stream_path_segment_matches(
             item_path->segment_kinds[i], item_path->segments[i],
             item_path->segment_lens[i], &path->segments[i],
-            mutation_frame_array_segment(frame, i))) {
+            mutation_frame_array_segment_known(frame, i))) {
       return 0;
     }
   }
@@ -1719,7 +1728,7 @@ static int stream_path_prefix_matches_known(const mutation_path *item_path,
     if (!stream_path_segment_matches(
             item_path->segment_kinds[i], item_path->segments[i],
             item_path->segment_lens[i], &path->segments[i],
-            mutation_frame_array_segment(frame, i))) {
+            mutation_frame_array_segment_known(frame, i))) {
       return 0;
     }
   }
@@ -2191,7 +2200,7 @@ static int mutation_descends_from_virtual_object(
     if (!stream_path_segment_matches(
             item->path.segment_kinds[i], item->path.segments[i],
             item->path.segment_lens[i], &parent->segments[i],
-            mutation_frame_array_segment(frame, i))) {
+            mutation_frame_array_segment_known(frame, i))) {
       return 0;
     }
   }
