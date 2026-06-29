@@ -1062,17 +1062,16 @@ static int resolve_since_macro(lql_since_macro macro, lql_temporal *out) {
 }
 
 static void observe_prepared_contains_value(eval_doc *doc, const char *value,
+                                            size_t value_len,
                                             int is_container, int is_null) {
   const lql_selector **items;
   const lql_selector *selector;
   size_t i;
   size_t count;
-  size_t value_len;
   int ignore_case;
 
   items = scalar_family_begin(doc, LQL_EVAL_FAMILY_CONTAINS);
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_CONTAINS];
-  value_len = is_container || is_null ? 0u : strlen(value);
   for (i = 0u; i < count; ++i) {
     selector = items[i];
     if (selector->any_count == 0u && !selector->value_set &&
@@ -1103,17 +1102,16 @@ static void observe_prepared_contains_value(eval_doc *doc, const char *value,
 }
 
 static void observe_prepared_prefix_value(eval_doc *doc, const char *value,
-                                          int is_container, int is_null) {
+                                          size_t value_len, int is_container,
+                                          int is_null) {
   const lql_selector **items;
   const lql_selector *selector;
   size_t i;
   size_t count;
   size_t n;
-  size_t value_len;
 
   items = scalar_family_begin(doc, LQL_EVAL_FAMILY_PREFIX);
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_PREFIX];
-  value_len = is_container || is_null ? 0u : strlen(value);
   for (i = 0u; i < count; ++i) {
     selector = items[i];
     if (!selector->value_set && selector->value == NULL) {
@@ -1134,7 +1132,8 @@ static void observe_prepared_prefix_value(eval_doc *doc, const char *value,
 }
 
 static void observe_prepared_exact_value(eval_doc *doc, const char *value,
-                                         int is_container, int is_null) {
+                                         size_t value_len, int is_container,
+                                         int is_null) {
   const lql_selector **items;
   const lql_selector *selector;
   const char *needle;
@@ -1142,11 +1141,9 @@ static void observe_prepared_exact_value(eval_doc *doc, const char *value,
   size_t j;
   size_t count;
   size_t needle_len;
-  size_t value_len;
 
   items = scalar_family_begin(doc, LQL_EVAL_FAMILY_EXACT);
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_EXACT];
-  value_len = is_container || is_null ? 0u : strlen(value);
   for (i = 0u; i < count; ++i) {
     selector = items[i];
     if (selector->kind == LQL_SELECTOR_KIND_NE && is_null) {
@@ -2063,18 +2060,28 @@ static void observe_prepared_value(eval_doc *doc, const char *value,
                                    int is_number, int is_container,
                                    int is_null) {
   unsigned int features;
+  size_t value_len;
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return;
   }
   features = doc->scalar_path_features;
+  value_len = 0u;
+  if ((features & (LQL_SELECTOR_FEATURE_CONTAINS |
+                   LQL_SELECTOR_FEATURE_PREFIX |
+                   LQL_SELECTOR_FEATURE_EXACT)) != 0u) {
+    value_len = is_container || is_null ? 0u : strlen(value);
+  }
   if ((features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
-    observe_prepared_contains_value(doc, value, is_container, is_null);
+    observe_prepared_contains_value(doc, value, value_len, is_container,
+                                    is_null);
   }
   if ((features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prepared_prefix_value(doc, value, is_container, is_null);
+    observe_prepared_prefix_value(doc, value, value_len, is_container,
+                                  is_null);
   }
   if ((features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
-    observe_prepared_exact_value(doc, value, is_container, is_null);
+    observe_prepared_exact_value(doc, value, value_len, is_container,
+                                 is_null);
   }
   if ((features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
     observe_prepared_temporal_value(doc, value, is_container, is_null);
