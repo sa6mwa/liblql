@@ -32,6 +32,8 @@ typedef struct eval_doc {
   const lql_selector *selector;
   unsigned char *hits;
   size_t hits_cap;
+  unsigned char *stream_misses;
+  size_t stream_misses_cap;
   char *val_buf;
   size_t val_len;
   size_t val_cap;
@@ -209,6 +211,8 @@ static void destroy_doc(eval_doc *doc) {
   if (doc->borrowed_scratch && doc->impl != NULL) {
     doc->impl->eval_hits = doc->hits;
     doc->impl->eval_hits_cap = doc->hits_cap;
+    doc->impl->eval_stream_misses = doc->stream_misses;
+    doc->impl->eval_stream_misses_cap = doc->stream_misses_cap;
     doc->impl->eval_val_buf = doc->val_buf;
     doc->impl->eval_val_cap = doc->val_cap;
     doc->impl->eval_container_types = doc->container_types;
@@ -217,6 +221,7 @@ static void destroy_doc(eval_doc *doc) {
     doc->impl->eval_scratch_in_use = 0;
   } else {
     doc->allocator->destroy(doc->allocator, doc->hits);
+    doc->allocator->destroy(doc->allocator, doc->stream_misses);
     doc->allocator->destroy(doc->allocator, doc->val_buf);
     doc->allocator->destroy(doc->allocator, doc->container_types);
     doc->allocator->destroy(doc->allocator, doc->container_depths);
@@ -227,6 +232,7 @@ static void destroy_doc(eval_doc *doc) {
 static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   lql_impl *impl;
   unsigned char *next_hits;
+  unsigned char *next_stream_misses;
   memset(doc, 0, sizeof(*doc));
   doc->allocator = lql_allocator_from_receiver(self);
   impl = self == NULL ? NULL : (lql_impl *)self->impl;
@@ -240,6 +246,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     doc->borrowed_scratch = 1;
     doc->hits = impl->eval_hits;
     doc->hits_cap = impl->eval_hits_cap;
+    doc->stream_misses = impl->eval_stream_misses;
+    doc->stream_misses_cap = impl->eval_stream_misses_cap;
     doc->val_buf = impl->eval_val_buf;
     doc->val_cap = impl->eval_val_cap;
     doc->container_types = impl->eval_container_types;
@@ -247,6 +255,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     doc->container_cap = impl->eval_container_cap;
     impl->eval_hits = NULL;
     impl->eval_hits_cap = 0u;
+    impl->eval_stream_misses = NULL;
+    impl->eval_stream_misses_cap = 0u;
     impl->eval_val_buf = NULL;
     impl->eval_val_cap = 0u;
     impl->eval_container_types = NULL;
@@ -265,6 +275,17 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
       doc->hits_cap = selector->hit_count;
     }
     memset(doc->hits, 0, selector->hit_count);
+    if (doc->stream_misses_cap < selector->hit_count) {
+      next_stream_misses = (unsigned char *)doc->allocator->realloc(
+          doc->allocator, doc->stream_misses, selector->hit_count);
+      if (next_stream_misses == NULL) {
+        destroy_doc(doc);
+        return 0;
+      }
+      doc->stream_misses = next_stream_misses;
+      doc->stream_misses_cap = selector->hit_count;
+    }
+    memset(doc->stream_misses, 0, selector->hit_count);
   }
   return 1;
 }
@@ -272,6 +293,7 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
 static void reset_doc(eval_doc *doc) {
   if (doc->selector != NULL && doc->selector->hit_count != 0u) {
     memset(doc->hits, 0, doc->selector->hit_count);
+    memset(doc->stream_misses, 0, doc->selector->hit_count);
   }
   doc->val_len = 0u;
   if (doc->val_buf != NULL && doc->val_cap != 0u) {
@@ -816,9 +838,6 @@ static int selector_exact_requires_scalar_buffer(const lql_selector *selector) {
   if (selector->value_is_temporal) {
     return selector_prefix_value_len(selector) > LQL_EVAL_TEMPORAL_CAP;
   }
-  if (selector_prefix_value_len(selector) > LQL_EVAL_EXACT_CAP) {
-    return 1;
-  }
   return 0;
 }
 
@@ -827,7 +846,6 @@ static int selector_string_buffer_required(const eval_doc *doc,
                                            const lonejson_value_path *path) {
   size_t i;
   size_t max_needle;
-  size_t prefix_len;
   size_t exact_len;
 
   if (selector == NULL) {
@@ -854,8 +872,7 @@ static int selector_string_buffer_required(const eval_doc *doc,
     return max_needle > LQL_EVAL_CONTAINS_TAIL_CAP + 1u;
   case LQL_SELECTOR_KIND_PREFIX:
   case LQL_SELECTOR_KIND_IPREFIX:
-    prefix_len = selector_prefix_value_len(selector);
-    return prefix_len > LQL_EVAL_PREFIX_CAP;
+    return 0;
   case LQL_SELECTOR_KIND_IN:
     exact_len = selector_in_max_value_len(selector);
     return exact_len > LQL_EVAL_EXACT_CAP;
@@ -944,7 +961,7 @@ static int selector_prefix_stream_interested(const eval_doc *doc,
   }
   value_len = selector_prefix_value_len(selector);
   if (value_len > LQL_EVAL_PREFIX_CAP) {
-    return 0;
+    value_len = LQL_EVAL_PREFIX_CAP;
   }
   if (value_len > *prefix_need) {
     *prefix_need = value_len;
@@ -989,15 +1006,15 @@ static int selector_exact_stream_interested(const eval_doc *doc,
     if (selector->value_is_temporal) {
       return 0;
     }
-    if (selector_exact_requires_scalar_buffer(selector)) {
-      return 0;
-    }
     value_len = selector_prefix_value_len(selector);
   } else {
     value_len = selector_in_max_value_len(selector);
     if (value_len > LQL_EVAL_EXACT_CAP) {
       return 0;
     }
+  }
+  if (value_len > LQL_EVAL_EXACT_CAP) {
+    value_len = LQL_EVAL_EXACT_CAP;
   }
   if (value_len > *exact_need) {
     *exact_need = value_len;
@@ -1144,7 +1161,7 @@ static void observe_contains_stream_begin(eval_doc *doc,
   size_t i;
   size_t j;
 
-  if (selector == NULL || doc->hits == NULL) {
+  if (selector == NULL || doc->hits == NULL || doc->stream_misses == NULL) {
     return;
   }
   if (!selector_is_predicate(selector)) {
@@ -1180,7 +1197,7 @@ static void observe_prefix_stream_begin(eval_doc *doc,
                                         const lonejson_value_path *path) {
   size_t i;
 
-  if (selector == NULL || doc->hits == NULL) {
+  if (selector == NULL || doc->hits == NULL || doc->stream_misses == NULL) {
     return;
   }
   if (!selector_is_predicate(selector)) {
@@ -1196,6 +1213,111 @@ static void observe_prefix_stream_begin(eval_doc *doc,
   }
   if (!selector->value_set && selector->value == NULL) {
     doc->hits[selector->hit_index] = 1u;
+  }
+}
+
+static int literal_chunk_matches(const char *literal, size_t literal_len,
+                                 size_t offset, const char *data, size_t len,
+                                 int ignore_case, size_t limit_len) {
+  size_t i;
+  size_t compare_len;
+
+  if (offset >= limit_len) {
+    return 1;
+  }
+  compare_len = limit_len - offset;
+  if (compare_len > len) {
+    compare_len = len;
+  }
+  if (offset + compare_len > literal_len) {
+    return 0;
+  }
+  for (i = 0u; i < compare_len; ++i) {
+    if (ignore_case) {
+      if (tolower((unsigned char)data[i]) !=
+          tolower((unsigned char)literal[offset + i])) {
+        return 0;
+      }
+    } else if (data[i] != literal[offset + i]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static void observe_prefix_stream_chunk(eval_doc *doc,
+                                        const lql_selector *selector,
+                                        const lonejson_value_path *path,
+                                        const char *data, size_t len) {
+  size_t i;
+  size_t offset;
+  size_t value_len;
+  int ignore_case;
+
+  if (selector == NULL || doc->hits == NULL || doc->stream_misses == NULL ||
+      doc->scalar_len < len) {
+    return;
+  }
+  if (!selector_is_predicate(selector)) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      observe_prefix_stream_chunk(doc, &selector->children[i], path, data, len);
+    }
+    return;
+  }
+  if ((selector->kind != LQL_SELECTOR_KIND_PREFIX &&
+       selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
+      !path_matches(doc, selector->field, path) ||
+      doc->hits[selector->hit_index] != 0u ||
+      doc->stream_misses[selector->hit_index] != 0u) {
+    return;
+  }
+  value_len = selector_prefix_value_len(selector);
+  if (value_len == 0u) {
+    return;
+  }
+  offset = doc->scalar_len - len;
+  ignore_case =
+      selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case;
+  if (!literal_chunk_matches(selector->value == NULL ? "" : selector->value,
+                             value_len, offset, data, len, ignore_case,
+                             value_len)) {
+    doc->stream_misses[selector->hit_index] = 1u;
+  }
+}
+
+static void observe_exact_stream_chunk(eval_doc *doc,
+                                       const lql_selector *selector,
+                                       const lonejson_value_path *path,
+                                       const char *data, size_t len) {
+  size_t i;
+  size_t offset;
+  size_t value_len;
+  const char *value;
+
+  if (selector == NULL || doc->hits == NULL || doc->stream_misses == NULL ||
+      doc->scalar_len < len) {
+    return;
+  }
+  if (!selector_is_predicate(selector)) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      observe_exact_stream_chunk(doc, &selector->children[i], path, data, len);
+    }
+    return;
+  }
+  if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
+       selector->kind != LQL_SELECTOR_KIND_NE) ||
+      selector->value_is_temporal ||
+      !path_matches(doc, selector->field, path) ||
+      doc->hits[selector->hit_index] != 0u ||
+      doc->stream_misses[selector->hit_index] != 0u) {
+    return;
+  }
+  value = selector->value == NULL ? "" : selector->value;
+  value_len = strlen(value);
+  offset = doc->scalar_len - len;
+  if (!literal_chunk_matches(value, value_len, offset, data, len, 0,
+                             value_len)) {
+    doc->stream_misses[selector->hit_index] = 1u;
   }
 }
 
@@ -1242,22 +1364,26 @@ static void observe_prefix_stream_end(eval_doc *doc,
     return;
   }
   value_len = selector_prefix_value_len(selector);
-  if (doc->scalar_len < value_len || doc->prefix_len < value_len) {
+  if (doc->scalar_len < value_len ||
+      doc->stream_misses[selector->hit_index] != 0u) {
     return;
   }
-  ignore_case =
-      selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case;
-  if (ignore_case) {
-    if (ascii_case_equal_prefix(doc->prefix_buf,
-                                selector->value == NULL ? "" : selector->value,
-                                value_len)) {
-      doc->hits[selector->hit_index] = 1u;
+  if (value_len <= doc->prefix_len) {
+    ignore_case =
+        selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case;
+    if (ignore_case &&
+        !ascii_case_equal_prefix(doc->prefix_buf,
+                                 selector->value == NULL ? "" : selector->value,
+                                 value_len)) {
+      return;
     }
-  } else if (memcmp(doc->prefix_buf,
-                    selector->value == NULL ? "" : selector->value,
-                    value_len) == 0) {
-    doc->hits[selector->hit_index] = 1u;
+    if (!ignore_case &&
+        memcmp(doc->prefix_buf, selector->value == NULL ? "" : selector->value,
+               value_len) != 0) {
+      return;
+    }
   }
+  doc->hits[selector->hit_index] = 1u;
 }
 
 static void observe_exact_stream_end(eval_doc *doc,
@@ -1288,12 +1414,16 @@ static void observe_exact_stream_end(eval_doc *doc,
     value = selector->value == NULL ? "" : selector->value;
     value_len = strlen(value);
     if (selector->kind == LQL_SELECTOR_KIND_EQ &&
-        doc->scalar_len == value_len && doc->prefix_len >= value_len &&
-        memcmp(doc->prefix_buf, value, value_len) == 0) {
+        doc->scalar_len == value_len &&
+        doc->stream_misses[selector->hit_index] == 0u &&
+        (value_len > doc->prefix_len ||
+         memcmp(doc->prefix_buf, value, value_len) == 0)) {
       doc->hits[selector->hit_index] = 1u;
     } else if (selector->kind == LQL_SELECTOR_KIND_NE &&
-               (doc->scalar_len != value_len || doc->prefix_len < value_len ||
-                memcmp(doc->prefix_buf, value, value_len) != 0)) {
+               (doc->scalar_len != value_len ||
+                doc->stream_misses[selector->hit_index] != 0u ||
+                (value_len <= doc->prefix_len &&
+                 memcmp(doc->prefix_buf, value, value_len) != 0))) {
       doc->hits[selector->hit_index] = 1u;
     }
     return;
@@ -1759,6 +1889,10 @@ static lonejson_status on_string_begin(void *user,
   doc->prefix_need = 0u;
   doc->prefix_buf[0] = '\0';
   numeric_stream_reset(doc);
+  if (doc->selector != NULL && doc->selector->hit_count != 0u &&
+      doc->stream_misses != NULL) {
+    memset(doc->stream_misses, 0, doc->selector->hit_count);
+  }
   doc->scalar_interested = scalar_path_buffer_required(doc, path);
   if (!doc->scalar_interested) {
     observe_scalar_exists_begin(doc, doc->selector, path);
@@ -1800,10 +1934,14 @@ static lonejson_status on_string_chunk(void *user,
       contains_stream_update_tail(doc, data, len);
     }
     if (doc->scalar_stream_prefix) {
+      observe_prefix_stream_chunk(doc, doc->selector, path, data, len);
       prefix_stream_update(doc, data, len);
     }
     if (doc->scalar_stream_exact && !doc->scalar_stream_prefix) {
+      observe_exact_stream_chunk(doc, doc->selector, path, data, len);
       prefix_stream_update(doc, data, len);
+    } else if (doc->scalar_stream_exact) {
+      observe_exact_stream_chunk(doc, doc->selector, path, data, len);
     }
     if (doc->scalar_stream_temporal && !doc->scalar_stream_prefix &&
         !doc->scalar_stream_exact) {

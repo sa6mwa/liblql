@@ -172,17 +172,22 @@ spooling handles rather than total input size.
 Selected scalar predicates must not silently materialize full values when their
 semantics can be decided incrementally. `contains` and `icontains` string
 predicates evaluate from lonejson scalar chunks with bounded suffix state for
-cross-chunk matches. `prefix` and `iprefix` predicates retain only a bounded
-leading slice sufficient to decide the prefix. Non-temporal `eq`, public
-inequality (`!=`), and `in` predicates also evaluate from a bounded leading
-slice plus scalar length. Temporal equality fallback, temporal inequality,
-`date`, and datetime `range` predicates evaluate from bounded scalar text plus
-scalar length. Numeric `range` predicates evaluate number chunks with a bounded
-leading slice, a small significant-digit window, and decimal/exponent counters;
-liblql must not allocate storage proportional to the selected number text.
-Whole-scalar buffering is acceptable only for selector literals that exceed the
-bounded streaming evaluator caps, and those cases must remain explicit
-fallbacks rather than hidden streaming-looking materialization.
+cross-chunk matches. `prefix` and `iprefix` predicates compare chunks directly
+against selector-owned literals and retain only a bounded leading slice for
+short-literal fast paths. Non-temporal `eq` and public inequality (`!=`) also
+compare chunks directly against selector-owned literals plus scalar length.
+`in` predicates evaluate from a bounded leading slice plus scalar length when
+all alternatives fit the exact-match cap. Temporal equality fallback, temporal
+inequality, `date`, and datetime `range` predicates evaluate from bounded
+scalar text plus scalar length. Numeric `range` predicates evaluate number
+chunks with a bounded leading slice, a small significant-digit window, and
+decimal/exponent counters; liblql must not allocate storage proportional to the
+selected number text.
+Whole-scalar buffering is acceptable only for long `contains`/`icontains`
+needles, long `in` alternatives, or explicit unknown/default fallback cases
+whose semantics have not yet been given a bounded streaming evaluator. Those
+cases must remain documented fallbacks rather than hidden streaming-looking
+materialization.
 
 As of lonejson `v0.35.2`, the path-value visitor used by liblql still enforces
 a small raw JSON number-token limit and performs bounded internal allocation for

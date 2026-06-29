@@ -33,6 +33,9 @@ typedef struct memory_reader {
 static void counting_destroy(lql_allocator *self, void *ptr);
 static int make_blob_doc(char *buf, size_t capacity, size_t blob_len);
 static int make_number_doc(char *buf, size_t capacity, size_t digit_len);
+static int make_long_literal_expr(char *buf, size_t capacity,
+                                  const char *prefix, size_t literal_len,
+                                  const char *suffix);
 
 static void counting_record_alloc(counting_allocator *counter, size_t size) {
   ++counter->alloc_count;
@@ -1084,6 +1087,23 @@ static int make_number_doc(char *buf, size_t capacity, size_t digit_len) {
   return 1;
 }
 
+static int make_long_literal_expr(char *buf, size_t capacity,
+                                  const char *prefix, size_t literal_len,
+                                  const char *suffix) {
+  size_t prefix_len;
+  size_t suffix_len;
+
+  prefix_len = strlen(prefix);
+  suffix_len = strlen(suffix);
+  if (capacity <= prefix_len + literal_len + suffix_len) {
+    return 0;
+  }
+  memcpy(buf, prefix, prefix_len);
+  memset(buf + prefix_len, 'x', literal_len);
+  memcpy(buf + prefix_len + literal_len, suffix, suffix_len + 1u);
+  return 1;
+}
+
 static int project_blob_doc(lql *ctx, lql_projection *projection,
                             const char *json, counting_allocator *counter,
                             size_t *out_delta) {
@@ -1599,6 +1619,102 @@ static int expect_selector_not_equal_large_blob_allocation_stable(void) {
   return 0;
 }
 
+static int expect_selector_long_literal_allocation_stable(void) {
+  static char small_doc[128];
+  static char large_doc[70064];
+  static char expr[10064];
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  int matched;
+  size_t small_peak;
+
+  if (!make_blob_doc(small_doc, sizeof(small_doc), 32u) ||
+      !make_blob_doc(large_doc, sizeof(large_doc), 69800u)) {
+    printf("selector long literal fixture construction failed\n");
+    return 1;
+  }
+
+#define RUN_LONG_LITERAL_CASE(label, expr_prefix, expr_suffix, expect_small,   \
+                              expect_large)                                    \
+  do {                                                                         \
+    if (!make_long_literal_expr(expr, sizeof(expr), (expr_prefix), 9000u,      \
+                                (expr_suffix))) {                              \
+      printf("selector long literal expression construction failed: %s\n",     \
+             (label));                                                         \
+      return 1;                                                                \
+    }                                                                          \
+    counting_allocator_init(&counter);                                         \
+    ctx = NULL;                                                                \
+    lql_error_init(&error);                                                    \
+    st = lql_new_with_allocator(&ctx, &counter.api, &error);                   \
+    if (st != LQL_STATUS_OK || ctx == NULL) {                                  \
+      printf("selector long literal receiver failed: %s\n", error.message);    \
+      return 1;                                                                \
+    }                                                                          \
+    selector = NULL;                                                           \
+    lql_error_init(&error);                                                    \
+    st = ctx->selector_parse(ctx, expr, &selector, &error);                    \
+    if (st != LQL_STATUS_OK || selector == NULL) {                             \
+      printf("selector long literal parse failed: %s: %s\n", (label),          \
+             error.message);                                                   \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+    matched = !(expect_small);                                                 \
+    lql_error_init(&error);                                                    \
+    st = ctx->matches_json(ctx, selector, small_doc, strlen(small_doc),        \
+                           &matched, &error);                                  \
+    if (st != LQL_STATUS_OK || matched != (expect_small)) {                    \
+      printf("selector long literal small eval failed: %s: %s\n", (label),     \
+             error.message);                                                   \
+      ctx->selector_destroy(ctx, selector);                                    \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+    small_peak = counter.peak_outstanding_bytes;                               \
+    matched = !(expect_large);                                                 \
+    lql_error_init(&error);                                                    \
+    st = ctx->matches_json(ctx, selector, large_doc, strlen(large_doc),        \
+                           &matched, &error);                                  \
+    if (st != LQL_STATUS_OK || matched != (expect_large)) {                    \
+      printf("selector long literal large eval failed: %s: %s\n", (label),     \
+             error.message);                                                   \
+      ctx->selector_destroy(ctx, selector);                                    \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+    if (counter.peak_outstanding_bytes > small_peak + 32768u) {                \
+      printf("selector long literal peak grew with input: %s small=%lu "       \
+             "large=%lu\n",                                                    \
+             (label), (unsigned long)small_peak,                               \
+             (unsigned long)counter.peak_outstanding_bytes);                   \
+      ctx->selector_destroy(ctx, selector);                                    \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+    ctx->selector_destroy(ctx, selector);                                      \
+    ctx->destroy(ctx);                                                         \
+    if (counter.outstanding != 0u || counter.destroy_count == 0u) {            \
+      printf("selector long literal cleanup imbalance: %s outstanding=%lu "    \
+             "destroys=%lu\n",                                                 \
+             (label), (unsigned long)counter.outstanding,                      \
+             (unsigned long)counter.destroy_count);                            \
+      return 1;                                                                \
+    }                                                                          \
+  } while (0)
+
+  RUN_LONG_LITERAL_CASE("exact", "eq{field=/blob,value=", "}", 0, 0);
+  RUN_LONG_LITERAL_CASE("not-equal", "/blob!=", "", 1, 1);
+  RUN_LONG_LITERAL_CASE("prefix", "prefix{field=/blob,value=", "}", 0, 1);
+
+#undef RUN_LONG_LITERAL_CASE
+
+  return 0;
+}
+
 static int expect_selector_temporal_large_blob_allocation_stable(void) {
   static char small_doc[128];
   static char large_doc[70064];
@@ -1889,6 +2005,7 @@ int main(void) {
   failures += expect_selector_exact_large_blob_allocation_stable();
   failures += expect_selector_in_large_blob_allocation_stable();
   failures += expect_selector_not_equal_large_blob_allocation_stable();
+  failures += expect_selector_long_literal_allocation_stable();
   failures += expect_selector_temporal_large_blob_allocation_stable();
   failures += expect_selector_numeric_range_large_number_allocation_stable();
   failures += expect_projection_success_uses_allocator();

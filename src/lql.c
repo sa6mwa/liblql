@@ -261,6 +261,7 @@ static void receiver_destroy(lql *self) {
       impl->eval_runtime = NULL;
     }
     allocator->destroy(allocator, impl->eval_hits);
+    allocator->destroy(allocator, impl->eval_stream_misses);
     allocator->destroy(allocator, impl->eval_val_buf);
     allocator->destroy(allocator, impl->eval_container_types);
     allocator->destroy(allocator, impl->eval_container_depths);
