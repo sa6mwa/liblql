@@ -48,6 +48,7 @@ typedef struct mutation_item {
   char *value;
   double delta;
   int time_value;
+  int can_create_missing_object;
   mutation_file_mode file_mode;
   char *file_path;
 } mutation_item;
@@ -888,6 +889,8 @@ static int split_path(mutation_parse_context *ctx, const char *raw,
 static int append_item(mutation_parse_context *ctx, lql_mutation_plan *plan,
                        mutation_item *item) {
   mutation_item *next;
+  item->can_create_missing_object =
+      item->kind != MUTATION_REMOVE && !item->path.has_wildcard;
   next = (mutation_item *)ctx->allocator->realloc(
       ctx->allocator, plan->items, sizeof(plan->items[0]) * (plan->count + 1u));
   if (next == NULL) {
@@ -2167,8 +2170,7 @@ mutation_requires_missing_object_key_value(mutation_stream_state *state,
     frame = current_path_frame(state, parent);
     for (i = 0u; i < state->plan->count; ++i) {
       item = &state->plan->items[i];
-      if (state->applied[i] || item->kind == MUTATION_REMOVE ||
-          item->path.has_wildcard ||
+      if (state->applied[i] || !item->can_create_missing_object ||
           !mutation_descends_from_object(item, parent, frame) ||
           state->prefix_seen_depth[i] > parent->segment_count) {
         continue;
@@ -2180,8 +2182,7 @@ mutation_requires_missing_object_key_value(mutation_stream_state *state,
   depth = parent == NULL ? 0u : parent->segment_count + 1u;
   for (i = 0u; i < state->plan->count; ++i) {
     item = &state->plan->items[i];
-    if (state->applied[i] || item->kind == MUTATION_REMOVE ||
-        item->path.has_wildcard ||
+    if (state->applied[i] || !item->can_create_missing_object ||
         !mutation_descends_from_virtual_object(
             item, parent, frame, state->key_buf, state->key_len) ||
         state->prefix_seen_depth[i] > depth) {
@@ -2223,8 +2224,7 @@ write_missing_object_key_value(mutation_stream_state *state,
   }
   for (i = 0u; i < state->plan->count; ++i) {
     item = &state->plan->items[i];
-    if (state->applied[i] || item->kind == MUTATION_REMOVE ||
-        item->path.has_wildcard ||
+    if (state->applied[i] || !item->can_create_missing_object ||
         !mutation_descends_from_virtual_object(
             item, parent, frame, state->key_buf, state->key_len) ||
         state->prefix_seen_depth[i] > depth) {
@@ -2412,8 +2412,7 @@ write_missing_object_mutations(mutation_stream_state *state,
   frame = current_path_frame(state, path);
   for (i = 0u; i < state->plan->count; ++i) {
     item = &state->plan->items[i];
-    if (state->applied[i] || item->kind == MUTATION_REMOVE ||
-        item->path.has_wildcard ||
+    if (state->applied[i] || !item->can_create_missing_object ||
         !mutation_descends_from_object(item, path, frame) ||
         state->prefix_seen_depth[i] > path->segment_count) {
       continue;
@@ -2956,8 +2955,7 @@ static lql_status mutate_reader_with_supported_plan(
   }
   if (st == LONEJSON_STATUS_OK) {
     for (i = 0u; i < plan->count; ++i) {
-      if (!state.applied[i] && plan->items[i].kind != MUTATION_REMOVE &&
-          !plan->items[i].path.has_wildcard) {
+      if (!state.applied[i] && plan->items[i].can_create_missing_object) {
         st = LONEJSON_STATUS_CALLBACK_FAILED;
         lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                       "mutation path could not be applied without "
