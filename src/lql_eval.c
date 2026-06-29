@@ -2658,6 +2658,25 @@ static int eval_copy_range(FILE *in, FILE *out, lql_uint64 size) {
   return 1;
 }
 
+static int eval_copy_range_unlocked_output(FILE *in, FILE *out,
+                                           lql_uint64 size) {
+  char buf[8192];
+  size_t want;
+  size_t got;
+  while (size != 0u) {
+    want = size > (lql_uint64)sizeof(buf) ? sizeof(buf) : (size_t)size;
+    got = fread(buf, 1u, want, in);
+    if (got == 0u) {
+      return 0;
+    }
+    if (!eval_file_write_unlocked(out, buf, got)) {
+      return 0;
+    }
+    size -= (lql_uint64)got;
+  }
+  return 1;
+}
+
 static int eval_copy_fd_range_unlocked(int fd, lql_uint64 offset, FILE *out,
                                        lql_uint64 size) {
   char buf[8192];
@@ -3181,17 +3200,6 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
     return LONEJSON_CANDIDATE_STOP;
   }
   return LONEJSON_CANDIDATE_CONTINUE;
-}
-
-static lonejson_status file_sink(void *user, const void *data, size_t len,
-                                 lonejson_error *error) {
-  FILE *out;
-  (void)error;
-  out = (FILE *)user;
-  if (!eval_file_write(out, data, len)) {
-    return LONEJSON_STATUS_IO_ERROR;
-  }
-  return LONEJSON_STATUS_OK;
 }
 
 static lonejson_status file_sink_unlocked(void *user, const void *data,
@@ -3950,11 +3958,14 @@ static lql_status payload_write_json_method(lql *self,
   }
   if (payload->kind == LQL_PAYLOAD_SPOOLED && payload->spooled != NULL) {
     memset(&lj_error, 0, sizeof(lj_error));
+    flockfile(out);
     if (lonejson_spooled_write_to_sink(
-            (const lonejson_spooled *)payload->spooled, file_sink, out,
-            &lj_error) == LONEJSON_STATUS_OK) {
+            (const lonejson_spooled *)payload->spooled, file_sink_unlocked,
+            out, &lj_error) == LONEJSON_STATUS_OK) {
+      funlockfile(out);
       return LQL_STATUS_OK;
     }
+    funlockfile(out);
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
@@ -3971,7 +3982,10 @@ static lql_status payload_write_json_method(lql *self,
                     "failed to write seekable payload range");
       return LQL_STATUS_JSON_ERROR;
     }
-    copy_ok = eval_copy_range(payload->source, out, payload->size);
+    flockfile(out);
+    copy_ok =
+        eval_copy_range_unlocked_output(payload->source, out, payload->size);
+    funlockfile(out);
     if (fseeko(payload->source, current, SEEK_SET) != 0 || !copy_ok) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR,
                     "failed to write seekable payload range");

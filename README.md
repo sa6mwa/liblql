@@ -128,6 +128,9 @@ branches without adding output caches or materialized buffers.
 Internal spooled rewrite passes use the same output-lock shape for spooled
 payload copies and candidate separators, keeping public payload APIs unchanged
 while removing repeated stdio lock traffic from source/file rewrite paths.
+Public `FILE *` payload copies also hold the caller-provided output lock once
+while copying spooled or seekable payload bytes, preserving the public payload
+API while avoiding repeated output-side lock branches.
 Callback-source decision streams inspect one bounded prefix chunk and use
 no-capture parsing for ordinary non-array streams, while preserving sink capture
 for root-array recursion on non-seekable inputs.

@@ -1789,8 +1789,9 @@ Current implementation status:
   separators, reducing repeated stdio lock overhead without bypassing the
   public FILE output contract or adding output buffering. Internal spooled
   rewrite paths use the same lock/unlocked-write shape for candidate payload
-  copies and separators while public payload-writing APIs keep their normal
-  FILE behavior;
+  copies and separators. Public `FILE *` payload-writing APIs keep their normal
+  ownership and error contract but also use the same scoped output lock for
+  spooled and seekable payload byte copies;
 - callback-source plus-value, projection, and mutation paths are now profiled
   as dominated by lonejson candidate spooling/replay for non-seekable streams.
   Sparse selectors need predicate-gated candidate capture so discarded
