@@ -132,6 +132,14 @@ typedef enum lql_since_macro {
 #define LQL_SELECTOR_FEATURE_NUMERIC_RANGE 0x10u
 #define LQL_SELECTOR_FEATURE_EXISTS 0x20u
 
+#define LQL_EVAL_FAMILY_CONTAINS 0u
+#define LQL_EVAL_FAMILY_PREFIX 1u
+#define LQL_EVAL_FAMILY_EXACT 2u
+#define LQL_EVAL_FAMILY_TEMPORAL 3u
+#define LQL_EVAL_FAMILY_NUMERIC_RANGE 4u
+#define LQL_EVAL_FAMILY_EXISTS 5u
+#define LQL_EVAL_FAMILY_COUNT 6u
+
 #define LQL_FIELD_SEGMENT_LITERAL 0u
 #define LQL_FIELD_SEGMENT_OBJECT_WILDCARD 1u
 #define LQL_FIELD_SEGMENT_ARRAY_WILDCARD 2u
@@ -204,6 +212,7 @@ struct lql_selector {
   unsigned int observer_feature;
   size_t observer_contains_tail_need;
   size_t observer_prefix_need;
+  unsigned char observer_family;
   unsigned int predicate_features;
   int match_sticky_once_true;
   size_t hit_index;

@@ -22,13 +22,6 @@
 #include <unistd.h>
 
 #define LQL_SOURCE_PREFIX_CAP 4096u
-#define LQL_EVAL_FAMILY_CONTAINS 0u
-#define LQL_EVAL_FAMILY_PREFIX 1u
-#define LQL_EVAL_FAMILY_EXACT 2u
-#define LQL_EVAL_FAMILY_TEMPORAL 3u
-#define LQL_EVAL_FAMILY_NUMERIC_RANGE 4u
-#define LQL_EVAL_FAMILY_EXISTS 5u
-#define LQL_EVAL_FAMILY_COUNT 6u
 #define LQL_EVAL_FEATURE_PREFIX_CAPTURE 0x80000000u
 #define LQL_QUERY_LIMIT_MATCHES 0x01u
 #define LQL_QUERY_LIMIT_CANDIDATES 0x02u
@@ -956,27 +949,15 @@ static const lql_selector **scalar_family_begin(eval_doc *doc,
   return doc->scalar_family_predicates + family * doc->scalar_family_stride;
 }
 
-static void scalar_family_append(eval_doc *doc, unsigned int feature,
-                                 const lql_selector *selector) {
+static void scalar_family_append(eval_doc *doc, const lql_selector *selector) {
   size_t family;
   size_t count;
   const lql_selector **items;
 
-  if (feature == LQL_SELECTOR_FEATURE_CONTAINS) {
-    family = LQL_EVAL_FAMILY_CONTAINS;
-  } else if (feature == LQL_SELECTOR_FEATURE_PREFIX) {
-    family = LQL_EVAL_FAMILY_PREFIX;
-  } else if (feature == LQL_SELECTOR_FEATURE_EXACT) {
-    family = LQL_EVAL_FAMILY_EXACT;
-  } else if (feature == LQL_SELECTOR_FEATURE_TEMPORAL) {
-    family = LQL_EVAL_FAMILY_TEMPORAL;
-  } else if (feature == LQL_SELECTOR_FEATURE_NUMERIC_RANGE) {
-    family = LQL_EVAL_FAMILY_NUMERIC_RANGE;
-  } else if (feature == LQL_SELECTOR_FEATURE_EXISTS) {
-    family = LQL_EVAL_FAMILY_EXISTS;
-  } else {
+  if (selector == NULL || selector->observer_family >= LQL_EVAL_FAMILY_COUNT) {
     return;
   }
+  family = selector->observer_family;
   items = scalar_family_begin(doc, family);
   if (items == NULL) {
     return;
@@ -1039,7 +1020,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
           stream_miss_clear(doc, selector);
         }
         doc->scalar_path_features |= feature;
-        scalar_family_append(doc, feature, selector);
+        scalar_family_append(doc, selector);
         if (selector->observer_contains_tail_need > doc->contains_tail_need) {
           doc->contains_tail_need = selector->observer_contains_tail_need;
         }
@@ -1064,7 +1045,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
         stream_miss_clear(doc, selector);
       }
       doc->scalar_path_features |= feature;
-      scalar_family_append(doc, feature, selector);
+      scalar_family_append(doc, selector);
       if (selector->observer_contains_tail_need > doc->contains_tail_need) {
         doc->contains_tail_need = selector->observer_contains_tail_need;
       }
