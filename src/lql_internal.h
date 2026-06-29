@@ -194,7 +194,7 @@ struct lql_selector {
   struct lql_selector *children;
   size_t child_count;
   const struct lql_selector **predicates;
-  const struct lql_selector **predicate_depth_order;
+  size_t *predicate_depth_indexes;
   size_t *predicate_depth_offsets;
   size_t predicate_count;
   size_t predicate_min_segment_count;

@@ -997,6 +997,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
   unsigned int feature;
   size_t end;
   size_t i;
+  size_t predicate_index;
   size_t start;
 
   root = doc->selector;
@@ -1015,14 +1016,39 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
   predicates = doc->predicates;
   start = 0u;
   end = doc->predicate_count;
-  if (root->predicate_depth_order != NULL &&
+  if (root->predicate_depth_indexes != NULL &&
       root->predicate_depth_offsets != NULL) {
-    if (path == NULL || path->segment_count > root->predicate_max_segment_count) {
+    if (path == NULL ||
+        path->segment_count > root->predicate_max_segment_count) {
       return;
     }
-    predicates = root->predicate_depth_order;
     start = root->predicate_depth_offsets[path->segment_count];
     end = root->predicate_depth_offsets[path->segment_count + 1u];
+    for (i = start; i < end; ++i) {
+      predicate_index = root->predicate_depth_indexes[i];
+      selector = root->predicates[predicate_index];
+      if (hit_marked(doc, selector)) {
+        continue;
+      }
+      feature = selector->observer_feature;
+      if (feature_mask != 0u && (feature & feature_mask) == 0u) {
+        continue;
+      }
+      if (selector_path_matches(doc, selector, path)) {
+        if (doc->stream_misses != NULL) {
+          stream_miss_clear(doc, selector);
+        }
+        doc->scalar_path_features |= feature;
+        scalar_family_append(doc, feature, selector);
+        if (selector->observer_contains_tail_need > doc->contains_tail_need) {
+          doc->contains_tail_need = selector->observer_contains_tail_need;
+        }
+        if (selector->observer_prefix_need > doc->prefix_need) {
+          doc->prefix_need = selector->observer_prefix_need;
+        }
+      }
+    }
+    return;
   }
   for (i = start; i < end; ++i) {
     selector = predicates[i];
