@@ -329,6 +329,29 @@ callback-source projection and mutation replay paths with true single-pass
 source transforms. That is the remaining dependency-owned performance path for
 dense non-seekable candidate transforms.
 
+## Chunked Number Writer
+
+The standalone CR for this dependency feature is
+[`docs/lonejson-cr-chunked-number-writer.md`](lonejson-cr-chunked-number-writer.md).
+
+LoneJSON visitors expose number values as begin/chunk/end callbacks, but the
+writer currently exposes only complete-token number emission through
+`lonejson_writer_number_text()`. liblql projection and mutation therefore keep
+bounded inline number buffers and spill to the receiver allocator for unusually
+long pass-through number tokens. That is correct and bounded, but it is still
+not the final C-native streaming shape because straight pass-through should not
+require liblql-owned token materialization.
+
+liblql must not bypass lonejson by writing raw number bytes directly into the
+output stream. LoneJSON owns writer state, separators, scalar validation, and
+error reporting. The missing dependency feature is a lonejson-owned chunked
+number writer that mirrors visitor chunking while validating and committing the
+number token through normal writer rules.
+
+Once lonejson exposes this surface, liblql can remove pass-through number
+buffering from projection and mutation callbacks while preserving bounded
+buffering only for numeric mutation targets that must be parsed or modified.
+
 ## Seekable Matched Mutation
 
 Seekable file mutation is a separate performance path from non-seekable source
