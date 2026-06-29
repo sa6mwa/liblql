@@ -217,6 +217,10 @@ hit-index bitmap across chunk and end observers. That scratch is bounded by the
 selector predicate count and must not depend on selected scalar length.
 Scalar path-match scratch should use generation or epoch marks so scalar begin
 does not clear the full selector hit set for every scalar value.
+The scalar path-prepare pass should also derive the active observer-family bits
+and scalar scratch sizes for the current path. Scalar begin must not perform
+separate full predicate-list walks for contains, prefix, exact, temporal, and
+numeric-range discovery after it has already prepared path matches.
 Candidate hit state, stream-miss state, and `in` alternative state should also
 use generation or epoch marks so candidate reset is O(1) in steady state. Full
 scratch clears are allowed at query setup and on epoch wraparound; they must

@@ -83,6 +83,9 @@ result once at scalar begin and reuses that hit-index bitmap across chunk and
 end observers.
 Scalar path-match scratch uses epoch marks, so repeated scalar callbacks do not
 clear the full selector hit set in the hot path.
+The same scalar path-prepare pass also records the active observer families and
+scratch sizes for that scalar, so scalar begin does not perform separate
+contains, prefix, exact, temporal, and numeric-range predicate discovery walks.
 Candidate hit, stream-miss, and `in` alternative scratch also use candidate
 epoch marks, so candidate reset is O(1) in steady state instead of clearing
 selector-sized buffers for every candidate.
