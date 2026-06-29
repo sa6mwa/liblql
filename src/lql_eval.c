@@ -485,11 +485,32 @@ static void pop_container(eval_doc *doc, const lonejson_value_path *path) {
 static int ascii_case_equal_prefix(const char *a, const char *b, size_t n) {
   size_t i;
   for (i = 0u; i < n; ++i) {
-    if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i])) {
+    unsigned char ca;
+    unsigned char cb;
+    ca = (unsigned char)a[i];
+    cb = (unsigned char)b[i];
+    if (ca >= (unsigned char)'A' && ca <= (unsigned char)'Z') {
+      ca = (unsigned char)(ca + ((unsigned char)'a' - (unsigned char)'A'));
+    }
+    if (cb >= (unsigned char)'A' && cb <= (unsigned char)'Z') {
+      cb = (unsigned char)(cb + ((unsigned char)'a' - (unsigned char)'A'));
+    }
+    if (ca != cb) {
       return 0;
     }
   }
   return 1;
+}
+
+static unsigned char ascii_lower_byte(unsigned char c) {
+  if (c >= (unsigned char)'A' && c <= (unsigned char)'Z') {
+    return (unsigned char)(c + ((unsigned char)'a' - (unsigned char)'A'));
+  }
+  return c;
+}
+
+static int ascii_is_digit(unsigned char c) {
+  return c >= (unsigned char)'0' && c <= (unsigned char)'9';
 }
 
 static int contains_case_len(const char *haystack, size_t h, const char *needle,
@@ -508,7 +529,7 @@ static int contains_case_len(const char *haystack, size_t h, const char *needle,
   if (n > h) {
     return 0;
   }
-  first = ignore_case ? (unsigned char)tolower((unsigned char)needle[0])
+  first = ignore_case ? ascii_lower_byte((unsigned char)needle[0])
                       : (unsigned char)needle[0];
   if (!ignore_case) {
     cursor = haystack;
@@ -527,7 +548,7 @@ static int contains_case_len(const char *haystack, size_t h, const char *needle,
     return 0;
   }
   for (i = 0u; i + n <= h; ++i) {
-    if ((unsigned char)tolower((unsigned char)haystack[i]) != first) {
+    if (ascii_lower_byte((unsigned char)haystack[i]) != first) {
       continue;
     }
     if (ascii_case_equal_prefix(haystack + i, needle, n)) {
@@ -571,7 +592,7 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
         return 1;
       }
       stack_firsts[j] =
-          ignore_case ? (unsigned char)tolower((unsigned char)needles[j][0])
+          ignore_case ? ascii_lower_byte((unsigned char)needles[j][0])
                       : (unsigned char)needles[j][0];
     }
     firsts = stack_firsts;
@@ -588,7 +609,7 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
                                  (unsigned char)(1u << (raw_ch & 7u))) == 0u) {
       continue;
     }
-    hay_ch = ignore_case ? (unsigned char)tolower(raw_ch) : raw_ch;
+    hay_ch = ignore_case ? ascii_lower_byte(raw_ch) : raw_ch;
     for (j = 0u; j < count; ++j) {
       if (hay_ch != firsts[j]) {
         continue;
@@ -1245,8 +1266,8 @@ static int literal_chunk_matches(const char *literal, size_t literal_len,
   }
   for (i = 0u; i < compare_len; ++i) {
     if (ignore_case) {
-      if (tolower((unsigned char)data[i]) !=
-          tolower((unsigned char)literal[offset + i])) {
+      if (ascii_lower_byte((unsigned char)data[i]) !=
+          ascii_lower_byte((unsigned char)literal[offset + i])) {
         return 0;
       }
     } else if (data[i] != literal[offset + i]) {
@@ -1606,7 +1627,7 @@ static void numeric_stream_update(eval_doc *doc, const char *data, size_t len) {
       if (c == '-' && doc->number_exp_value == 0L) {
         doc->number_exp_negative = 1;
       } else if (c == '+' && doc->number_exp_value == 0L) {
-      } else if (isdigit(c)) {
+      } else if (ascii_is_digit(c)) {
         if (doc->number_exp_value < LQL_EVAL_NUMERIC_EXP_CAP) {
           doc->number_exp_value = doc->number_exp_value * 10L + (long)(c - '0');
           if (doc->number_exp_value > LQL_EVAL_NUMERIC_EXP_CAP) {
@@ -1622,7 +1643,7 @@ static void numeric_stream_update(eval_doc *doc, const char *data, size_t len) {
       doc->number_after_decimal = 1;
     } else if (c == 'e' || c == 'E') {
       doc->number_in_exp = 1;
-    } else if (isdigit(c)) {
+    } else if (ascii_is_digit(c)) {
       if (!doc->number_after_decimal) {
         ++doc->number_int_digits;
       }
@@ -1716,8 +1737,8 @@ static int contains_stream_boundary_scan(const char *tail, size_t tail_len,
       }
       b = (unsigned char)needle[i];
       if (ignore_case) {
-        a = (unsigned char)tolower(a);
-        b = (unsigned char)tolower(b);
+        a = ascii_lower_byte(a);
+        b = ascii_lower_byte(b);
       }
       if (a != b) {
         matched = 0;

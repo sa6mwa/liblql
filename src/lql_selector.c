@@ -15,6 +15,20 @@ typedef struct lql_selector_parser {
   lql_allocator *allocator;
 } lql_selector_parser;
 
+static unsigned char ascii_lower_byte(unsigned char c) {
+  if (c >= (unsigned char)'A' && c <= (unsigned char)'Z') {
+    return (unsigned char)(c + ((unsigned char)'a' - (unsigned char)'A'));
+  }
+  return c;
+}
+
+static unsigned char ascii_upper_byte(unsigned char c) {
+  if (c >= (unsigned char)'a' && c <= (unsigned char)'z') {
+    return (unsigned char)(c - ((unsigned char)'a' - (unsigned char)'A'));
+  }
+  return c;
+}
+
 static char *lql_strndup_local(lql_selector_parser *ctx, const char *src,
                                size_t len) {
   char *out;
@@ -102,14 +116,14 @@ static int selector_any_push(lql_selector_parser *ctx, lql_selector *selector,
   selector->any_firsts[selector->any_count] =
       len == 0u ? 0u : (unsigned char)item[0];
   selector->any_ifirsts[selector->any_count] =
-      len == 0u ? 0u : (unsigned char)tolower((unsigned char)item[0]);
+      len == 0u ? 0u : ascii_lower_byte((unsigned char)item[0]);
   if (len > 0u) {
     unsigned char first;
     unsigned char ifirst;
     unsigned char iupper;
     first = (unsigned char)item[0];
-    ifirst = (unsigned char)tolower((unsigned char)item[0]);
-    iupper = (unsigned char)toupper((unsigned char)ifirst);
+    ifirst = ascii_lower_byte((unsigned char)item[0]);
+    iupper = ascii_upper_byte(ifirst);
     selector->any_first_bitmap[first >> 3] =
         (unsigned char)(selector->any_first_bitmap[first >> 3] |
                         (unsigned char)(1u << (first & 7u)));
@@ -623,7 +637,8 @@ static int parse_number_literal(const char *decoded, double *out) {
 
 static int ascii_equal_ignore_case(const char *a, const char *b) {
   while (*a != '\0' && *b != '\0') {
-    if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
+    if (ascii_lower_byte((unsigned char)*a) !=
+        ascii_lower_byte((unsigned char)*b)) {
       return 0;
     }
     ++a;
