@@ -622,9 +622,10 @@ Suggested staged gates:
   must not grow with total input size, candidate size, match count, or result
   set size;
 - C library steady-state records are gated by
-  `LQL_BENCH_MAX_C_STEADY_STATE_NS_PER_BYTE`, defaulting to a deliberately loose
-  ceiling of `5000` ns/byte so pathological regressions fail without treating Go
-  as the performance baseline;
+  `LQL_BENCH_MAX_C_STEADY_STATE_NS_PER_BYTE`, defaulting to a conservative
+  C-native ceiling of `500` ns/byte. This leaves substantial headroom over
+  current source-spooling-heavy smoke rows while still failing severe
+  regressions without treating Go as the performance baseline;
 - C library plus-value/open-read modes must prove callback-scoped payload
   access without candidate retention and must have a documented C-native
   baseline distinct from CLI-mediated `clql` timing;

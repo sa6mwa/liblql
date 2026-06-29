@@ -5,7 +5,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 log=${LQL_BENCH_LOCKD_PERF_LOG:-$root/build/bench-lockd-perf-check.jsonl}
 count=${LQL_BENCH_LOCKD_PERF_COUNT:-4096}
 c_max=${LQL_BENCH_MAX_C_PEAK_RSS_BYTES:-134217728}
-c_max_ns_per_byte=${LQL_BENCH_MAX_C_STEADY_STATE_NS_PER_BYTE:-5000}
+c_max_ns_per_byte=${LQL_BENCH_MAX_C_STEADY_STATE_NS_PER_BYTE:-500}
 file_max_ns_per_byte=${LQL_BENCH_LOCKD_FILE_MAX_NS_PER_BYTE:-$c_max_ns_per_byte}
 contains_any_max_ratio=${LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_RATIO:-1.10}
 contains_any_max_delta=${LQL_BENCH_LOCKD_CONTAINS_ANY_MAX_NS_DELTA:-2.00}

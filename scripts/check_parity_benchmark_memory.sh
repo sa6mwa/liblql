@@ -5,7 +5,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 go_bin="${GO:-go}"
 log=${1:-}
 c_max=${LQL_BENCH_MAX_C_PEAK_RSS_BYTES:-134217728}
-c_max_ns_per_byte=${LQL_BENCH_MAX_C_STEADY_STATE_NS_PER_BYTE:-5000}
+c_max_ns_per_byte=${LQL_BENCH_MAX_C_STEADY_STATE_NS_PER_BYTE:-500}
 lua_max=${LQL_BENCH_MAX_LUA_PEAK_RSS_BYTES:-$c_max}
 require_lua_rss=${LQL_BENCH_REQUIRE_LUA_RSS:-0}
 
