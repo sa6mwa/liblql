@@ -89,6 +89,8 @@ contains, prefix, exact, temporal, and numeric-range predicate discovery walks.
 It also records a compact current-scalar predicate list. Scalar chunk/end
 observers and boolean/null scalar observers walk that list instead of
 rediscovering path matches or scanning the full selector predicate set.
+`contains.any` selectors also carry fixed first-byte lookup masks so scalar
+scans reject impossible bytes without walking every alternative.
 Candidate hit, stream-miss, and `in` alternative scratch also use candidate
 epoch marks, so candidate reset is O(1) in steady state instead of clearing
 selector-sized buffers for every candidate.

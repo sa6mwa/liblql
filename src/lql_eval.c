@@ -516,12 +516,15 @@ static int contains_case_len(const char *haystack, size_t h, const char *needle,
 
 static int contains_any_case_len(const char *haystack, size_t h, char **needles,
                                  const size_t *needle_lens, size_t count,
-                                 const unsigned char *firsts, int ignore_case) {
+                                 const unsigned char *firsts,
+                                 const unsigned char *first_bitmap,
+                                 int ignore_case) {
   unsigned char stack_firsts[32];
   size_t i;
   size_t j;
   size_t n;
   unsigned char hay_ch;
+  unsigned char raw_ch;
   if (count == 0u) {
     return 0;
   }
@@ -546,9 +549,19 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
     }
     firsts = stack_firsts;
   }
+  for (j = 0u; j < count; ++j) {
+    if ((needle_lens == NULL && needles[j][0] == '\0') ||
+        (needle_lens != NULL && needle_lens[j] == 0u)) {
+      return 1;
+    }
+  }
   for (i = 0u; i < h; ++i) {
-    hay_ch = ignore_case ? (unsigned char)tolower((unsigned char)haystack[i])
-                         : (unsigned char)haystack[i];
+    raw_ch = (unsigned char)haystack[i];
+    if (first_bitmap != NULL && (first_bitmap[raw_ch >> 3] &
+                                 (unsigned char)(1u << (raw_ch & 7u))) == 0u) {
+      continue;
+    }
+    hay_ch = ignore_case ? (unsigned char)tolower(raw_ch) : raw_ch;
     for (j = 0u; j < count; ++j) {
       if (hay_ch != firsts[j]) {
         continue;
@@ -978,6 +991,8 @@ static void observe_matched_selector(eval_doc *doc,
                                 selector->any_lens, selector->any_count,
                                 ignore_case ? selector->any_ifirsts
                                             : selector->any_firsts,
+                                ignore_case ? selector->any_ifirst_bitmap
+                                            : selector->any_first_bitmap,
                                 ignore_case)) {
         hit_mark(doc, selector);
       }
@@ -1063,16 +1078,6 @@ static void observe_matched_selector(eval_doc *doc,
   default:
     break;
   }
-}
-
-static void observe_selector(eval_doc *doc, const lql_selector *selector,
-                             const lonejson_value_path *path, const char *value,
-                             int is_number, int is_container, int is_null) {
-  if (selector == NULL || !selector_path_matches(doc, selector, path)) {
-    return;
-  }
-  observe_matched_selector(doc, selector, value, is_number, is_container,
-                           is_null);
 }
 
 static size_t selector_contains_max_needle(const lql_selector *selector) {
@@ -1680,13 +1685,14 @@ static int contains_stream_scan(const char *tail, size_t tail_len,
 static int contains_any_stream_scan(const char *tail, size_t tail_len,
                                     const char *data, size_t len,
                                     char **needles, const size_t *needle_lens,
-                                    const unsigned char *firsts, size_t count,
-                                    int ignore_case) {
+                                    const unsigned char *firsts,
+                                    const unsigned char *first_bitmap,
+                                    size_t count, int ignore_case) {
   size_t i;
   size_t needle_len;
 
   if (contains_any_case_len(data, len, needles, needle_lens, count, firsts,
-                            ignore_case)) {
+                            first_bitmap, ignore_case)) {
     return 1;
   }
   if (tail_len == 0u || len == 0u) {
@@ -1736,6 +1742,8 @@ static void observe_contains_stream_chunk(eval_doc *doc,
                    contains_tail_data(doc), doc->contains_tail_len, data, len,
                    selector->any, selector->any_lens,
                    ignore_case ? selector->any_ifirsts : selector->any_firsts,
+                   ignore_case ? selector->any_ifirst_bitmap
+                               : selector->any_first_bitmap,
                    selector->any_count, ignore_case)) {
       hit_mark(doc, selector);
     }
@@ -1808,8 +1816,10 @@ static void observe_value(eval_doc *doc, const lonejson_value_path *path,
     return;
   }
   for (i = 0u; i < doc->predicate_count; ++i) {
-    observe_selector(doc, doc->predicates[i], path, value, is_number,
-                     is_container, is_null);
+    if (selector_path_matches(doc, doc->predicates[i], path)) {
+      observe_matched_selector(doc, doc->predicates[i], value, is_number,
+                               is_container, is_null);
+    }
   }
 }
 

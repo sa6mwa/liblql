@@ -136,6 +136,8 @@ struct lql_selector {
   size_t *any_lens;
   unsigned char *any_firsts;
   unsigned char *any_ifirsts;
+  unsigned char any_first_bitmap[32];
+  unsigned char any_ifirst_bitmap[32];
   size_t any_count;
   size_t any_max_len;
   char *range_gt_text;

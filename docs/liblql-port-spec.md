@@ -226,6 +226,10 @@ receiver-owned scratch. Scalar begin, chunk, and end observers, including
 boolean and null scalar observers, should iterate that current-path list instead
 of rescanning the full selector predicate list or rechecking path matches for
 every scalar callback.
+`contains.any` and `icontains.any` selectors should carry selector-owned
+first-byte lookup masks so no-match scalar scans can reject most bytes in O(1)
+without checking every alternative. The masks are parse-time selector metadata,
+not runtime candidate allocation.
 Candidate hit state, stream-miss state, and `in` alternative state should also
 use generation or epoch marks so candidate reset is O(1) in steady state. Full
 scratch clears are allowed at query setup and on epoch wraparound; they must

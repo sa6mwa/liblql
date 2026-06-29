@@ -103,6 +103,23 @@ static int selector_any_push(lql_selector_parser *ctx, lql_selector *selector,
       len == 0u ? 0u : (unsigned char)item[0];
   selector->any_ifirsts[selector->any_count] =
       len == 0u ? 0u : (unsigned char)tolower((unsigned char)item[0]);
+  if (len > 0u) {
+    unsigned char first;
+    unsigned char ifirst;
+    unsigned char iupper;
+    first = (unsigned char)item[0];
+    ifirst = (unsigned char)tolower((unsigned char)item[0]);
+    iupper = (unsigned char)toupper((unsigned char)ifirst);
+    selector->any_first_bitmap[first >> 3] =
+        (unsigned char)(selector->any_first_bitmap[first >> 3] |
+                        (unsigned char)(1u << (first & 7u)));
+    selector->any_ifirst_bitmap[ifirst >> 3] =
+        (unsigned char)(selector->any_ifirst_bitmap[ifirst >> 3] |
+                        (unsigned char)(1u << (ifirst & 7u)));
+    selector->any_ifirst_bitmap[iupper >> 3] =
+        (unsigned char)(selector->any_ifirst_bitmap[iupper >> 3] |
+                        (unsigned char)(1u << (iupper & 7u)));
+  }
   ++selector->any_count;
   return 1;
 }
@@ -1390,7 +1407,8 @@ static size_t selector_refresh_cached_lengths(lql_selector *selector) {
   return max_in;
 }
 
-static unsigned int selector_refresh_predicate_features(lql_selector *selector) {
+static unsigned int
+selector_refresh_predicate_features(lql_selector *selector) {
   unsigned int features;
   size_t i;
 
@@ -1419,8 +1437,9 @@ static unsigned int selector_refresh_predicate_features(lql_selector *selector) 
     features |= LQL_SELECTOR_FEATURE_EXACT;
     break;
   case LQL_SELECTOR_KIND_RANGE:
-    features |= selector->range_is_temporal ? LQL_SELECTOR_FEATURE_TEMPORAL
-                                            : LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
+    features |= selector->range_is_temporal
+                    ? LQL_SELECTOR_FEATURE_TEMPORAL
+                    : LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
     break;
   case LQL_SELECTOR_KIND_DATE:
     features |= LQL_SELECTOR_FEATURE_TEMPORAL;
@@ -2509,6 +2528,8 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->any_lens = NULL;
   dst->any_firsts = NULL;
   dst->any_ifirsts = NULL;
+  memset(dst->any_first_bitmap, 0, sizeof(dst->any_first_bitmap));
+  memset(dst->any_ifirst_bitmap, 0, sizeof(dst->any_ifirst_bitmap));
   dst->any_count = 0u;
   dst->range_gt_text = NULL;
   dst->range_gte_text = NULL;
