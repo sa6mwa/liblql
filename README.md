@@ -104,6 +104,9 @@ selector-sized buffers for every candidate.
 Receiver-owned evaluator scratch carries those epochs across warmed queries, so
 query setup does not clear selector-sized hit and stream-state arrays unless
 scratch grows or an epoch wraps.
+Seekable mutation setup initializes only live mutation state and plan scratch,
+not the full inline frame reserve. Path frames are assigned when pushed, so this
+removes per-candidate zeroing without adding retained candidate state.
 Callback-source decision streams inspect one bounded prefix chunk and use
 no-capture parsing for ordinary non-array streams, while preserving sink capture
 for root-array recursion on non-seekable inputs.

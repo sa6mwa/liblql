@@ -280,6 +280,10 @@ runtime warmup, repeated projection or seekable candidate mutation must not
 attempt receiver allocation. This does not permit retaining candidate payloads
 or full JSON documents; it only permits bounded per-receiver parser/writer
 scratch reuse.
+Seekable mutation setup should initialize only live state and the plan scratch
+entries used by the current plan. Inline path-frame reserves must be assigned
+on push rather than cleared wholesale per candidate; this is reduced zeroing,
+not allocator reuse or candidate caching.
 
 As of lonejson `v0.35.2`, the path-value visitor used by liblql still enforces
 a small raw JSON number-token limit and performs bounded internal allocation for

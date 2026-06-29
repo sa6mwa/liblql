@@ -10,6 +10,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <lonejson.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -188,6 +189,10 @@ typedef struct mutation_parse_context {
   const lql_mutation_parse_options *options;
   lql_error *error;
 } mutation_parse_context;
+
+static void mutation_stream_state_init(mutation_stream_state *state) {
+  memset(state, 0, offsetof(mutation_stream_state, inline_path_frames));
+}
 
 static void mutation_path_cleanup(lql *self, mutation_path *path) {
   lql_allocator *allocator;
@@ -2988,9 +2993,9 @@ static int mutation_state_init_plan_scratch(mutation_stream_state *state,
     state->applied = state->inline_applied;
     state->prefix_seen_depth = state->inline_prefix_seen_depth;
     state->plan_scratch_alloc = NULL;
-    memset(state->applied, 0, sizeof(state->inline_applied));
+    memset(state->applied, 0, sizeof(state->applied[0]) * plan->count);
     memset(state->prefix_seen_depth, 0,
-           sizeof(state->inline_prefix_seen_depth));
+           sizeof(state->prefix_seen_depth[0]) * plan->count);
     return 1;
   }
   max_size = (size_t)-1;
@@ -3061,7 +3066,7 @@ static lql_status mutate_reader_with_supported_plan(
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
-  memset(&state, 0, sizeof(state));
+  mutation_stream_state_init(&state);
   state.allocator = lql_allocator_from_receiver(self);
   if (state.allocator == NULL) {
     lql_lonejson_release(self, runtime, runtime_pooled);
