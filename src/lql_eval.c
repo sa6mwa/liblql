@@ -3337,6 +3337,8 @@ static lql_status payload_write_json_method(lql *self,
                                             const lql_payload *payload,
                                             FILE *out, lql_error *error) {
   lonejson_error lj_error;
+  off_t current;
+  int copy_ok;
   if (payload == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "payload and output file are required");
@@ -3351,6 +3353,27 @@ static lql_status payload_write_json_method(lql *self,
     }
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
+  }
+  if (payload->kind == LQL_PAYLOAD_SEEKABLE_RANGE &&
+      payload->source != NULL) {
+    current = ftello(payload->source);
+    if (current < (off_t)0) {
+      lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                    "failed to record source position");
+      return LQL_STATUS_UNSUPPORTED;
+    }
+    if (!payload_seek_u64(payload->source, payload->offset)) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "failed to write seekable payload range");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    copy_ok = eval_copy_range(payload->source, out, payload->size);
+    if (fseeko(payload->source, current, SEEK_SET) != 0 || !copy_ok) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "failed to write seekable payload range");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    return LQL_STATUS_OK;
   }
   return self->payload_write_json_sink(self, payload, payload_file_write, out,
                                        error);
