@@ -83,6 +83,7 @@ typedef struct mutation_path_frame {
 #define MUTATION_FRAME_INLINE_BITS (sizeof(unsigned long) * CHAR_BIT)
 #define MUTATION_FRAME_INLINE_COUNT 32u
 #define MUTATION_PLAN_INLINE_COUNT 16u
+#define MUTATION_NUM_INLINE_CAP 64u
 
 static int mutation_frame_array_segment(const mutation_path_frame *frame,
                                         size_t index) {
@@ -121,6 +122,7 @@ typedef struct mutation_stream_state {
   size_t key_len;
   char *num_buf;
   size_t num_len;
+  char inline_num_buf[MUTATION_NUM_INLINE_CAP];
   int *applied;
   size_t *prefix_seen_depth;
   size_t source_depth;
@@ -549,6 +551,59 @@ static int append_buf(mutation_stream_state *state, char **buf, size_t *len,
   *len += n;
   next[*len] = '\0';
   *buf = next;
+  return 1;
+}
+
+static void mutation_num_reset(mutation_stream_state *state) {
+  if (state == NULL) {
+    return;
+  }
+  if (state->num_buf != NULL && state->num_buf != state->inline_num_buf) {
+    state->allocator->destroy(state->allocator, state->num_buf);
+  }
+  state->num_buf = NULL;
+  state->num_len = 0u;
+}
+
+static int mutation_num_append(mutation_stream_state *state, const char *data,
+                               size_t n) {
+  char *next;
+  size_t next_len;
+  if (state == NULL || data == NULL) {
+    return 0;
+  }
+  if (n > (size_t)-1 - state->num_len - 1u) {
+    return 0;
+  }
+  next_len = state->num_len + n;
+  if (state->num_buf == NULL || state->num_buf == state->inline_num_buf) {
+    if (next_len + 1u <= MUTATION_NUM_INLINE_CAP) {
+      if (state->num_buf == NULL) {
+        state->num_buf = state->inline_num_buf;
+      }
+      memcpy(state->inline_num_buf + state->num_len, data, n);
+      state->num_len = next_len;
+      state->inline_num_buf[state->num_len] = '\0';
+      return 1;
+    }
+    next = (char *)state->allocator->alloc(state->allocator, next_len + 1u);
+    if (next == NULL) {
+      return 0;
+    }
+    if (state->num_len != 0u) {
+      memcpy(next, state->inline_num_buf, state->num_len);
+    }
+  } else {
+    next = (char *)state->allocator->realloc(state->allocator, state->num_buf,
+                                             next_len + 1u);
+    if (next == NULL) {
+      return 0;
+    }
+  }
+  memcpy(next + state->num_len, data, n);
+  state->num_len = next_len;
+  next[state->num_len] = '\0';
+  state->num_buf = next;
   return 1;
 }
 
@@ -2282,9 +2337,7 @@ begin_array_value_mutation(mutation_stream_state *state,
   state->active_increment = 1;
   state->active_keyed = 0;
   state->active_index = index;
-  state->allocator->destroy(state->allocator, state->num_buf);
-  state->num_buf = NULL;
-  state->num_len = 0u;
+  mutation_num_reset(state);
   return LONEJSON_STATUS_OK;
 }
 
@@ -2506,9 +2559,7 @@ static lonejson_status mutation_key_end(void *user,
       state->active_increment = 1;
       state->active_keyed = 1;
       state->active_index = index;
-      state->allocator->destroy(state->allocator, state->num_buf);
-      state->num_buf = NULL;
-      state->num_len = 0u;
+      mutation_num_reset(state);
     }
     return LONEJSON_STATUS_OK;
   }
@@ -2550,9 +2601,7 @@ static lonejson_status mutation_key_end(void *user,
     state->active_increment = 1;
     state->active_keyed = 1;
     state->active_index = index;
-    state->allocator->destroy(state->allocator, state->num_buf);
-    state->num_buf = NULL;
-    state->num_len = 0u;
+    mutation_num_reset(state);
     return LONEJSON_STATUS_OK;
   }
   return lonejson_writer_key(&state->writer, state->key_buf, state->key_len,
@@ -2628,14 +2677,10 @@ static lonejson_status mutation_number_begin(void *user,
         skipped_earlier_increment_index(state, path, &state->active_index)) {
       state->active_increment = 1;
       state->active_keyed = 0;
-      state->allocator->destroy(state->allocator, state->num_buf);
-      state->num_buf = NULL;
-      state->num_len = 0u;
+      mutation_num_reset(state);
       return LONEJSON_STATUS_OK;
     }
-    state->allocator->destroy(state->allocator, state->num_buf);
-    state->num_buf = NULL;
-    state->num_len = 0u;
+    mutation_num_reset(state);
     return LONEJSON_STATUS_OK;
   }
   if (begin_array_value_mutation(state, path, error, &matched_value) !=
@@ -2645,9 +2690,7 @@ static lonejson_status mutation_number_begin(void *user,
   if (matched_value) {
     return LONEJSON_STATUS_OK;
   }
-  state->allocator->destroy(state->allocator, state->num_buf);
-  state->num_buf = NULL;
-  state->num_len = 0u;
+  mutation_num_reset(state);
   return LONEJSON_STATUS_OK;
 }
 
@@ -2660,13 +2703,12 @@ static lonejson_status mutation_number_chunk(void *user,
   (void)error;
   state = (mutation_stream_state *)user;
   if (state->skipping) {
-    if (state->active_increment &&
-        !append_buf(state, &state->num_buf, &state->num_len, data, len)) {
+    if (state->active_increment && !mutation_num_append(state, data, len)) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
     return LONEJSON_STATUS_OK;
   }
-  return append_buf(state, &state->num_buf, &state->num_len, data, len)
+  return mutation_num_append(state, data, len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
 }
@@ -2912,7 +2954,7 @@ static lql_status mutate_reader_with_supported_plan(
   lonejson_writer_cleanup(&state.writer);
   mutation_cleanup_path_frames(&state);
   state.allocator->destroy(state.allocator, state.key_buf);
-  state.allocator->destroy(state.allocator, state.num_buf);
+  mutation_num_reset(&state);
   mutation_state_cleanup_plan_scratch(&state);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
