@@ -1935,9 +1935,10 @@ static lonejson_status on_string_begin(void *user,
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;
   doc->prefix_need = 0u;
-  doc->prefix_buf[0] = '\0';
-  numeric_stream_reset(doc);
   scalar_path_match_prepare(doc, path);
+  if (doc->prefix_need != 0u) {
+    doc->prefix_buf[0] = '\0';
+  }
   observe_scalar_exists_begin(doc, doc->selector, path);
   doc->scalar_stream_features =
       doc->scalar_path_features &
@@ -2035,9 +2036,12 @@ static lonejson_status on_number_begin(void *user,
   doc->scalar_stream_features |=
       doc->scalar_path_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
   if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
-          0u &&
-      doc->prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
-    doc->prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
+      0u) {
+    numeric_stream_reset(doc);
+    if (doc->prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
+      doc->prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
+      doc->prefix_buf[0] = '\0';
+    }
   }
   return LONEJSON_STATUS_OK;
 }
