@@ -3158,19 +3158,34 @@ static lonejson_status file_sink(void *user, const void *data, size_t len,
   return LONEJSON_STATUS_OK;
 }
 
+static lonejson_status file_sink_unlocked(void *user, const void *data,
+                                          size_t len, lonejson_error *error) {
+  FILE *out;
+  (void)error;
+  out = (FILE *)user;
+  if (!eval_file_write_unlocked(out, data, len)) {
+    return LONEJSON_STATUS_IO_ERROR;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status write_spooled_payload(FILE *out,
                                              const lonejson_spooled *spooled,
-                                             int compact, lonejson *runtime,
+                                             int compact,
+                                             lonejson_status (*sink)(
+                                                 void *, const void *, size_t,
+                                                 lonejson_error *),
+                                             lonejson *runtime,
                                              lonejson_error *error) {
   lonejson_writer writer;
   lonejson_status st;
   int writer_initialized;
 
   if (!compact) {
-    return lonejson_spooled_write_to_sink(spooled, file_sink, out, error);
+    return lonejson_spooled_write_to_sink(spooled, sink, out, error);
   }
   writer_initialized = 0;
-  st = lonejson_writer_init_sink(runtime, &writer, file_sink, out, error);
+  st = lonejson_writer_init_sink(runtime, &writer, sink, out, error);
   if (st == LONEJSON_STATUS_OK) {
     writer_initialized = 1;
     st = lonejson_writer_json_value_spooled(&writer, spooled, error);
@@ -3454,7 +3469,7 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
         } else if (state->doc.root_kind != '{') {
           write_status = write_spooled_payload(
               state->out, candidate->payload_spool, state->compact,
-              state->compact_runtime, error);
+              file_sink_unlocked, state->compact_runtime, error);
           if (write_status != LONEJSON_STATUS_OK) {
             reset_doc(&state->doc);
             return LONEJSON_CANDIDATE_ERROR;
@@ -3482,7 +3497,7 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
       } else {
         write_status = write_spooled_payload(
             state->out, candidate->payload_spool, state->compact,
-            state->compact_runtime, error);
+            file_sink_unlocked, state->compact_runtime, error);
         if (write_status != LONEJSON_STATUS_OK) {
           reset_doc(&state->doc);
           return LONEJSON_CANDIDATE_ERROR;
@@ -3515,14 +3530,15 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
     } else {
       write_status =
           write_spooled_payload(state->out, candidate->payload_spool,
-                                state->compact, state->compact_runtime, error);
+                                state->compact, file_sink_unlocked,
+                                state->compact_runtime, error);
       if (write_status != LONEJSON_STATUS_OK) {
         reset_doc(&state->doc);
         return LONEJSON_CANDIDATE_ERROR;
       }
       wrote_output = 1;
     }
-    if (wrote_output && fputc('\n', state->out) == EOF) {
+    if (wrote_output && !eval_file_putc_unlocked(state->out, '\n')) {
       reset_doc(&state->doc);
       return LONEJSON_CANDIDATE_ERROR;
     }
@@ -4727,8 +4743,10 @@ static lql_status execute_query_file_range_spooled_matches(
   options.candidate_begin = on_spooled_candidate_begin;
   options.candidate_end = on_spooled_candidate_end;
   options.candidate_user = &state;
+  flockfile(out);
   st = lonejson_visit_candidates_reader(runtime, eval_limited_file_read,
                                         &reader, &options, &lj_error);
+  funlockfile(out);
   if (state.compact_runtime != NULL) {
     lonejson_free(state.compact_runtime);
   }
@@ -4821,8 +4839,10 @@ static lql_status execute_query_source_spooled_rewrite(
   options.candidate_begin = on_spooled_candidate_begin;
   options.candidate_end = on_spooled_candidate_end;
   options.candidate_user = &state;
+  flockfile(out);
   st = lonejson_visit_candidates_reader(runtime, source_reader_read_plain,
                                         &adapter, &options, &lj_error);
+  funlockfile(out);
   if (state.compact_runtime != NULL) {
     lonejson_free(state.compact_runtime);
   }
