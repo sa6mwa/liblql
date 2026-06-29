@@ -1709,6 +1709,9 @@ static int expect_selector_long_literal_allocation_stable(void) {
   RUN_LONG_LITERAL_CASE("exact", "eq{field=/blob,value=", "}", 0, 0);
   RUN_LONG_LITERAL_CASE("not-equal", "/blob!=", "", 1, 1);
   RUN_LONG_LITERAL_CASE("prefix", "prefix{field=/blob,value=", "}", 0, 1);
+  RUN_LONG_LITERAL_CASE("contains", "contains{field=/blob,value=", "}", 0, 1);
+  RUN_LONG_LITERAL_CASE("contains-any", "contains{field=/blob,any=missing|",
+                        "}", 0, 1);
 
 #undef RUN_LONG_LITERAL_CASE
 

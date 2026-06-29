@@ -46,6 +46,8 @@ struct lql_impl {
   size_t eval_hits_cap;
   unsigned char *eval_stream_misses;
   size_t eval_stream_misses_cap;
+  char *eval_contains_tail_buf;
+  size_t eval_contains_tail_cap;
   char *eval_val_buf;
   size_t eval_val_cap;
   int *eval_container_types;

@@ -46,6 +46,8 @@ typedef struct eval_doc {
   size_t scalar_len;
   size_t contains_tail_len;
   size_t contains_tail_need;
+  char *contains_tail_buf;
+  size_t contains_tail_cap;
   char contains_tail[LQL_EVAL_CONTAINS_TAIL_CAP];
   size_t prefix_len;
   size_t prefix_need;
@@ -213,6 +215,8 @@ static void destroy_doc(eval_doc *doc) {
     doc->impl->eval_hits_cap = doc->hits_cap;
     doc->impl->eval_stream_misses = doc->stream_misses;
     doc->impl->eval_stream_misses_cap = doc->stream_misses_cap;
+    doc->impl->eval_contains_tail_buf = doc->contains_tail_buf;
+    doc->impl->eval_contains_tail_cap = doc->contains_tail_cap;
     doc->impl->eval_val_buf = doc->val_buf;
     doc->impl->eval_val_cap = doc->val_cap;
     doc->impl->eval_container_types = doc->container_types;
@@ -222,6 +226,7 @@ static void destroy_doc(eval_doc *doc) {
   } else {
     doc->allocator->destroy(doc->allocator, doc->hits);
     doc->allocator->destroy(doc->allocator, doc->stream_misses);
+    doc->allocator->destroy(doc->allocator, doc->contains_tail_buf);
     doc->allocator->destroy(doc->allocator, doc->val_buf);
     doc->allocator->destroy(doc->allocator, doc->container_types);
     doc->allocator->destroy(doc->allocator, doc->container_depths);
@@ -248,6 +253,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     doc->hits_cap = impl->eval_hits_cap;
     doc->stream_misses = impl->eval_stream_misses;
     doc->stream_misses_cap = impl->eval_stream_misses_cap;
+    doc->contains_tail_buf = impl->eval_contains_tail_buf;
+    doc->contains_tail_cap = impl->eval_contains_tail_cap;
     doc->val_buf = impl->eval_val_buf;
     doc->val_cap = impl->eval_val_cap;
     doc->container_types = impl->eval_container_types;
@@ -257,6 +264,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     impl->eval_hits_cap = 0u;
     impl->eval_stream_misses = NULL;
     impl->eval_stream_misses_cap = 0u;
+    impl->eval_contains_tail_buf = NULL;
+    impl->eval_contains_tail_cap = 0u;
     impl->eval_val_buf = NULL;
     impl->eval_val_cap = 0u;
     impl->eval_container_types = NULL;
@@ -335,6 +344,36 @@ static int append_buf(eval_doc *doc, char **buf, size_t *len, const char *data,
   memcpy(*buf + *len, data, n);
   *len += n;
   (*buf)[*len] = '\0';
+  return 1;
+}
+
+static char *contains_tail_data(eval_doc *doc) {
+  if (doc->contains_tail_need <= LQL_EVAL_CONTAINS_TAIL_CAP) {
+    return doc->contains_tail;
+  }
+  return doc->contains_tail_buf;
+}
+
+static int ensure_contains_tail(eval_doc *doc) {
+  char *next;
+  size_t next_cap;
+
+  if (doc->contains_tail_need <= LQL_EVAL_CONTAINS_TAIL_CAP ||
+      doc->contains_tail_need <= doc->contains_tail_cap) {
+    return 1;
+  }
+  next_cap = doc->contains_tail_cap == 0u ? LQL_EVAL_CONTAINS_TAIL_CAP * 2u
+                                          : doc->contains_tail_cap;
+  while (next_cap < doc->contains_tail_need) {
+    next_cap *= 2u;
+  }
+  next = (char *)doc->allocator->realloc(doc->allocator, doc->contains_tail_buf,
+                                         next_cap);
+  if (next == NULL) {
+    return 0;
+  }
+  doc->contains_tail_buf = next;
+  doc->contains_tail_cap = next_cap;
   return 1;
 }
 
@@ -845,7 +884,6 @@ static int selector_string_buffer_required(const eval_doc *doc,
                                            const lql_selector *selector,
                                            const lonejson_value_path *path) {
   size_t i;
-  size_t max_needle;
   size_t exact_len;
 
   if (selector == NULL) {
@@ -868,8 +906,7 @@ static int selector_string_buffer_required(const eval_doc *doc,
     return selector_exact_requires_scalar_buffer(selector);
   case LQL_SELECTOR_KIND_CONTAINS:
   case LQL_SELECTOR_KIND_ICONTAINS:
-    max_needle = selector_contains_max_needle(selector);
-    return max_needle > LQL_EVAL_CONTAINS_TAIL_CAP + 1u;
+    return 0;
   case LQL_SELECTOR_KIND_PREFIX:
   case LQL_SELECTOR_KIND_IPREFIX:
     return 0;
@@ -919,9 +956,6 @@ static int selector_contains_stream_interested(const eval_doc *doc,
     return 0;
   }
   max_needle = selector_contains_max_needle(selector);
-  if (max_needle > LQL_EVAL_CONTAINS_TAIL_CAP + 1u) {
-    return 0;
-  }
   if (max_needle > 1u && max_needle - 1u > *tail_need) {
     *tail_need = max_needle - 1u;
   }
@@ -1659,9 +1693,13 @@ static int contains_stream_scan(const char *tail, size_t tail_len,
                                 const char *data, size_t len,
                                 const char *needle, size_t needle_len,
                                 int ignore_case) {
-  char boundary[LQL_EVAL_CONTAINS_TAIL_CAP * 2u];
-  size_t prefix_len;
-  size_t boundary_len;
+  size_t start;
+  size_t i;
+  size_t tail_pos;
+  size_t data_pos;
+  unsigned char a;
+  unsigned char b;
+  int matched;
 
   if (contains_case_len(data, len, needle, needle_len, ignore_case)) {
     return 1;
@@ -1669,27 +1707,42 @@ static int contains_stream_scan(const char *tail, size_t tail_len,
   if (tail_len == 0u || len == 0u || needle_len <= 1u) {
     return 0;
   }
-  prefix_len = len;
-  if (prefix_len > needle_len - 1u) {
-    prefix_len = needle_len - 1u;
+  for (start = 0u; start < tail_len; ++start) {
+    if (tail_len - start >= needle_len || tail_len - start + len < needle_len) {
+      continue;
+    }
+    matched = 1;
+    for (i = 0u; i < needle_len; ++i) {
+      tail_pos = start + i;
+      if (tail_pos < tail_len) {
+        a = (unsigned char)tail[tail_pos];
+      } else {
+        data_pos = tail_pos - tail_len;
+        a = (unsigned char)data[data_pos];
+      }
+      b = (unsigned char)needle[i];
+      if (ignore_case) {
+        a = (unsigned char)tolower(a);
+        b = (unsigned char)tolower(b);
+      }
+      if (a != b) {
+        matched = 0;
+        break;
+      }
+    }
+    if (matched) {
+      return 1;
+    }
   }
-  if (tail_len + prefix_len > sizeof(boundary)) {
-    return 0;
-  }
-  memcpy(boundary, tail, tail_len);
-  memcpy(boundary + tail_len, data, prefix_len);
-  boundary_len = tail_len + prefix_len;
-  return contains_case_len(boundary, boundary_len, needle, needle_len,
-                           ignore_case);
+  return 0;
 }
 
 static int contains_any_stream_scan(const char *tail, size_t tail_len,
                                     const char *data, size_t len,
                                     char **needles, const size_t *needle_lens,
                                     size_t count, int ignore_case) {
-  char boundary[LQL_EVAL_CONTAINS_TAIL_CAP * 2u];
-  size_t prefix_len;
-  size_t boundary_len;
+  size_t i;
+  size_t needle_len;
 
   if (contains_any_case_len(data, len, needles, needle_lens, count,
                             ignore_case)) {
@@ -1698,15 +1751,14 @@ static int contains_any_stream_scan(const char *tail, size_t tail_len,
   if (tail_len == 0u || len == 0u) {
     return 0;
   }
-  prefix_len = len;
-  if (prefix_len > LQL_EVAL_CONTAINS_TAIL_CAP) {
-    prefix_len = LQL_EVAL_CONTAINS_TAIL_CAP;
+  for (i = 0u; i < count; ++i) {
+    needle_len = needle_lens == NULL ? strlen(needles[i]) : needle_lens[i];
+    if (contains_stream_scan(tail, tail_len, data, len, needles[i], needle_len,
+                             ignore_case)) {
+      return 1;
+    }
   }
-  memcpy(boundary, tail, tail_len);
-  memcpy(boundary + tail_len, data, prefix_len);
-  boundary_len = tail_len + prefix_len;
-  return contains_any_case_len(boundary, boundary_len, needles, needle_lens,
-                               count, ignore_case);
+  return 0;
 }
 
 static void observe_contains_stream_chunk(eval_doc *doc,
@@ -1737,13 +1789,13 @@ static void observe_contains_stream_chunk(eval_doc *doc,
       selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case;
   if (selector->any_count == 0u) {
     value_len = selector->value == NULL ? 0u : strlen(selector->value);
-    if (contains_stream_scan(doc->contains_tail, doc->contains_tail_len, data,
-                             len,
+    if (contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
+                             data, len,
                              selector->value == NULL ? "" : selector->value,
                              value_len, ignore_case)) {
       doc->hits[selector->hit_index] = 1u;
     }
-  } else if (contains_any_stream_scan(doc->contains_tail,
+  } else if (contains_any_stream_scan(contains_tail_data(doc),
                                       doc->contains_tail_len, data, len,
                                       selector->any, selector->any_lens,
                                       selector->any_count, ignore_case)) {
@@ -1753,7 +1805,8 @@ static void observe_contains_stream_chunk(eval_doc *doc,
 
 static void contains_stream_update_tail(eval_doc *doc, const char *data,
                                         size_t len) {
-  char boundary[LQL_EVAL_CONTAINS_TAIL_CAP * 2u];
+  char *tail;
+  size_t drop_len;
   size_t total_len;
   size_t keep_len;
 
@@ -1761,20 +1814,32 @@ static void contains_stream_update_tail(eval_doc *doc, const char *data,
     doc->contains_tail_len = 0u;
     return;
   }
+  tail = contains_tail_data(doc);
+  if (tail == NULL) {
+    doc->contains_tail_len = 0u;
+    return;
+  }
   if (len >= doc->contains_tail_need) {
-    memcpy(doc->contains_tail, data + len - doc->contains_tail_need,
-           doc->contains_tail_need);
+    memcpy(tail, data + len - doc->contains_tail_need, doc->contains_tail_need);
     doc->contains_tail_len = doc->contains_tail_need;
     return;
   }
-  memcpy(boundary, doc->contains_tail, doc->contains_tail_len);
-  memcpy(boundary + doc->contains_tail_len, data, len);
   total_len = doc->contains_tail_len + len;
   keep_len = total_len;
   if (keep_len > doc->contains_tail_need) {
     keep_len = doc->contains_tail_need;
   }
-  memcpy(doc->contains_tail, boundary + total_len - keep_len, keep_len);
+  if (total_len > keep_len) {
+    drop_len = total_len - keep_len;
+    if (drop_len >= doc->contains_tail_len) {
+      memcpy(tail, data + drop_len - doc->contains_tail_len, keep_len);
+      doc->contains_tail_len = keep_len;
+      return;
+    }
+    memmove(tail, tail + drop_len, doc->contains_tail_len - drop_len);
+    doc->contains_tail_len -= drop_len;
+  }
+  memcpy(tail + doc->contains_tail_len, data, len);
   doc->contains_tail_len = keep_len;
 }
 
@@ -1906,6 +1971,9 @@ static lonejson_status on_string_begin(void *user,
         scalar_path_temporal_stream_interested(doc, path, &doc->prefix_need);
     doc->scalar_stream_numeric_range = 0;
     if (doc->scalar_stream_contains) {
+      if (!ensure_contains_tail(doc)) {
+        return LONEJSON_STATUS_ALLOCATION_FAILED;
+      }
       observe_contains_stream_begin(doc, doc->selector, path);
     }
     if (doc->scalar_stream_prefix) {
