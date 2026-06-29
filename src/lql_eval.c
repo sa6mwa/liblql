@@ -25,6 +25,7 @@
 #define LQL_EVAL_NUMERIC_PREFIX_CAP 64u
 #define LQL_EVAL_NUMERIC_SIG_CAP 32u
 #define LQL_EVAL_NUMERIC_EXP_CAP 1000000L
+#define LQL_SOURCE_PREFIX_CAP 4096u
 
 typedef struct eval_doc {
   lql_allocator *allocator;
@@ -2214,6 +2215,9 @@ typedef struct source_reader_adapter {
   void *user;
   int error_code;
   lql_uint64 total_read;
+  unsigned char prefix[LQL_SOURCE_PREFIX_CAP];
+  size_t prefix_len;
+  size_t prefix_offset;
 } source_reader_adapter;
 
 typedef struct eval_limited_file_reader {
@@ -2332,9 +2336,21 @@ source_reader_read(void *user, unsigned char *buffer, size_t capacity) {
   source_reader_adapter *adapter;
   lql_read_result lql_result;
   lonejson_read_result result;
+  size_t prefix_available;
+  size_t copy_len;
 
   result = lonejson_default_read_result();
   adapter = (source_reader_adapter *)user;
+  if (adapter->prefix_offset < adapter->prefix_len) {
+    prefix_available = adapter->prefix_len - adapter->prefix_offset;
+    copy_len = prefix_available < capacity ? prefix_available : capacity;
+    if (copy_len != 0u) {
+      memcpy(buffer, adapter->prefix + adapter->prefix_offset, copy_len);
+      adapter->prefix_offset += copy_len;
+      result.bytes_read = copy_len;
+      return result;
+    }
+  }
   lql_result = adapter->read(adapter->user, buffer, capacity);
   if (lql_result.bytes_read > capacity) {
     adapter->error_code = 1;
@@ -2350,6 +2366,41 @@ source_reader_read(void *user, unsigned char *buffer, size_t capacity) {
   adapter->total_read += (lql_uint64)lql_result.bytes_read;
   result.eof = lql_result.eof;
   return result;
+}
+
+static int source_reader_prefix_capture(source_reader_adapter *adapter,
+                                        int *out_capture_needed) {
+  lql_read_result lql_result;
+  size_t i;
+  unsigned char ch;
+
+  *out_capture_needed = 1;
+  adapter->prefix_len = 0u;
+  adapter->prefix_offset = 0u;
+  lql_result =
+      adapter->read(adapter->user, adapter->prefix, sizeof(adapter->prefix));
+  if (lql_result.bytes_read > sizeof(adapter->prefix)) {
+    adapter->error_code = 1;
+    return 0;
+  }
+  if (lql_result.error_code != 0) {
+    adapter->error_code = lql_result.error_code;
+    return 0;
+  }
+  adapter->prefix_len = lql_result.bytes_read;
+  adapter->total_read += (lql_uint64)lql_result.bytes_read;
+  if (adapter->prefix_len == 0u) {
+    return 1;
+  }
+  for (i = 0u; i < adapter->prefix_len; ++i) {
+    ch = adapter->prefix[i];
+    if (ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t') {
+      continue;
+    }
+    *out_capture_needed = ch == '[';
+    return 1;
+  }
+  return 1;
 }
 
 static void query_finish_file_bytes(lql_query_result *result, FILE *file) {
@@ -3687,6 +3738,7 @@ static lql_status execute_query_source_decisions_with_base(
   int runtime_cached;
   query_stream_state state;
   source_reader_adapter adapter;
+  int capture_needed;
 
   memset(&state, 0, sizeof(state));
   state.receiver = self;
@@ -3714,11 +3766,27 @@ static lql_status execute_query_source_decisions_with_base(
   adapter.user = read_user;
   adapter.error_code = 0;
   adapter.total_read = 0u;
+  adapter.prefix_len = 0u;
+  adapter.prefix_offset = 0u;
+  capture_needed = 1;
+  if (!source_reader_prefix_capture(&adapter, &capture_needed)) {
+    destroy_doc(&state.doc);
+    lql_lonejson_release(self, runtime, runtime_cached);
+    if (out_result != NULL) {
+      *out_result = state.result;
+    }
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, "query source reader failed");
+    return LQL_STATUS_JSON_ERROR;
+  }
   init_eval_visitor(&visitor);
   options = lonejson_default_candidate_stream_options();
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SINK;
-  options.payload_sink = query_source_decision_payload_sink;
-  options.payload_sink_user = &state;
+  if (capture_needed) {
+    options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SINK;
+    options.payload_sink = query_source_decision_payload_sink;
+    options.payload_sink_user = &state;
+  } else {
+    options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  }
   options.path_visitor = &visitor;
   options.visitor_user = &state.doc;
   options.candidate_begin = on_candidate_begin;

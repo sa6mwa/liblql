@@ -97,6 +97,9 @@ selector-sized buffers for every candidate.
 Receiver-owned evaluator scratch carries those epochs across warmed queries, so
 query setup does not clear selector-sized hit and stream-state arrays unless
 scratch grows or an epoch wraps.
+Callback-source decision streams inspect one bounded prefix chunk and use
+no-capture parsing for ordinary non-array streams, while preserving sink capture
+for root-array recursion on non-seekable inputs.
 The C allocator contract tests warm representative query paths, freeze the
 receiver allocator, and then rerun candidate scans; any attempted liblql-owned
 allocation in the warmed decision hot path fails `make test`.

@@ -593,6 +593,10 @@ a JSON parser workaround:
   they are parsed and use callback-scoped spooled replay only for nested
   top-level array candidates because non-seekable sources cannot be rewound by
   offset;
+- callback-source decision streams may inspect one bounded prefix chunk to route
+  ordinary non-array streams through lonejson `CAPTURE_NONE`; if the prefix is
+  empty, all whitespace, or starts with `[`, they must retain sink capture so
+  root-array recursion remains correct;
 - non-seekable plus-value paths use callback-scoped spooled handles and caller
   sinks rather than contiguous candidate materialization.
 
