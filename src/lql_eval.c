@@ -1137,6 +1137,7 @@ static void observe_prepared_contains_value(eval_doc *doc, const char *value,
 
   items = scalar_family_begin(doc, LQL_EVAL_FAMILY_CONTAINS);
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_CONTAINS];
+  value_len = is_container || is_null ? 0u : strlen(value);
   for (i = 0u; i < count; ++i) {
     selector = items[i];
     if (selector->any_count == 0u && !selector->value_set &&
@@ -1147,7 +1148,6 @@ static void observe_prepared_contains_value(eval_doc *doc, const char *value,
     if (is_container || is_null) {
       continue;
     }
-    value_len = strlen(value);
     ignore_case =
         selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case;
     if (selector->any_count == 0u) {
@@ -1175,9 +1175,11 @@ static void observe_prepared_prefix_value(eval_doc *doc, const char *value,
   size_t i;
   size_t count;
   size_t n;
+  size_t value_len;
 
   items = scalar_family_begin(doc, LQL_EVAL_FAMILY_PREFIX);
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_PREFIX];
+  value_len = is_container || is_null ? 0u : strlen(value);
   for (i = 0u; i < count; ++i) {
     selector = items[i];
     if (!selector->value_set && selector->value == NULL) {
@@ -1188,7 +1190,7 @@ static void observe_prepared_prefix_value(eval_doc *doc, const char *value,
       continue;
     }
     n = selector->value_len;
-    if (strlen(value) >= n &&
+    if (value_len >= n &&
         (selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case
              ? ascii_case_equal_prefix(value, selector->value, n)
              : memcmp(value, selector->value, n) == 0)) {
@@ -1205,9 +1207,12 @@ static void observe_prepared_exact_value(eval_doc *doc, const char *value,
   size_t i;
   size_t j;
   size_t count;
+  size_t needle_len;
+  size_t value_len;
 
   items = scalar_family_begin(doc, LQL_EVAL_FAMILY_EXACT);
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_EXACT];
+  value_len = is_container || is_null ? 0u : strlen(value);
   for (i = 0u; i < count; ++i) {
     selector = items[i];
     if (selector->kind == LQL_SELECTOR_KIND_NE && is_null) {
@@ -1218,20 +1223,26 @@ static void observe_prepared_exact_value(eval_doc *doc, const char *value,
       continue;
     }
     if (selector->kind == LQL_SELECTOR_KIND_EQ) {
-      if (strcmp(value, selector->value == NULL ? "" : selector->value) == 0) {
+      needle = selector->value == NULL ? "" : selector->value;
+      if (value_len == selector->value_len &&
+          (value_len == 0u || memcmp(value, needle, value_len) == 0)) {
         hit_mark(doc, selector);
       }
       continue;
     }
     if (selector->kind == LQL_SELECTOR_KIND_NE) {
-      if (strcmp(value, selector->value == NULL ? "" : selector->value) != 0) {
+      needle = selector->value == NULL ? "" : selector->value;
+      if (value_len != selector->value_len ||
+          (value_len != 0u && memcmp(value, needle, value_len) != 0)) {
         hit_mark(doc, selector);
       }
       continue;
     }
     for (j = 0u; j < selector->any_count; ++j) {
       needle = selector->any[j];
-      if (strcmp(value, needle) == 0) {
+      needle_len = selector->any_lens[j];
+      if (value_len == needle_len &&
+          (value_len == 0u || memcmp(value, needle, value_len) == 0)) {
         hit_mark(doc, selector);
         break;
       }
@@ -1388,8 +1399,7 @@ static void observe_contains_stream_begin(eval_doc *doc,
       continue;
     }
     for (j = 0u; j < selector->any_count; ++j) {
-      if ((selector->any_lens == NULL && selector->any[j][0] == '\0') ||
-          (selector->any_lens != NULL && selector->any_lens[j] == 0u)) {
+      if (selector->any_lens[j] == 0u) {
         hit_mark(doc, selector);
         break;
       }
@@ -1552,8 +1562,7 @@ static void observe_exact_stream_chunk(eval_doc *doc,
       for (j = 0u; j < selector->any_count; ++j) {
         if (matches[j] == doc->candidate_epoch) {
           value = selector->any[j];
-          value_len = selector->any_lens == NULL ? strlen(value)
-                                                 : selector->any_lens[j];
+          value_len = selector->any_lens[j];
           if (offset >= value_len) {
             matches[j] = 0u;
             continue;
@@ -1691,8 +1700,7 @@ static void observe_exact_stream_end(eval_doc *doc,
     matches = in_match_row(doc, selector);
     for (j = 0u; j < selector->any_count; ++j) {
       value = selector->any[j];
-      value_len =
-          selector->any_lens == NULL ? strlen(value) : selector->any_lens[j];
+      value_len = selector->any_lens[j];
       if (doc->scalar_len == value_len &&
           ((matches != NULL && matches[j] == doc->candidate_epoch) ||
            (value_len <= doc->prefix_len &&
