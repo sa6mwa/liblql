@@ -32,6 +32,11 @@ typedef struct memory_reader {
   size_t chunk_size;
 } memory_reader;
 
+typedef struct seekable_match_counts {
+  FILE *file;
+  size_t matched;
+} seekable_match_counts;
+
 static void counting_destroy(lql_allocator *self, void *ptr);
 static int make_blob_doc(char *buf, size_t capacity, size_t blob_len);
 static int make_number_doc(char *buf, size_t capacity, size_t digit_len);
@@ -228,6 +233,23 @@ static lql_status count_spooled_match(void *user,
     return LQL_STATUS_JSON_ERROR;
   }
   ++*matched;
+  return LQL_STATUS_OK;
+}
+
+static lql_status count_seekable_match(void *user,
+                                       const lql_query_match *match) {
+  seekable_match_counts *counts;
+
+  counts = (seekable_match_counts *)user;
+  if (counts == NULL || match == NULL ||
+      match->payload.kind != LQL_PAYLOAD_SEEKABLE_RANGE ||
+      match->payload.source != counts->file || match->payload.size == 0u ||
+      match->payload.size != match->decision.size ||
+      match->payload.offset != match->decision.offset ||
+      match->payload.index != match->decision.index) {
+    return LQL_STATUS_JSON_ERROR;
+  }
+  ++counts->matched;
   return LQL_STATUS_OK;
 }
 
@@ -430,6 +452,137 @@ static int expect_file_decisions_steady_state_has_no_receiver_alloc(void) {
   ctx->destroy(ctx);
   if (counter.outstanding != 0u || counter.destroy_count == 0u) {
     printf("file decision allocator cleanup imbalance: outstanding=%lu "
+           "destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
+static int expect_file_matches_steady_state_has_no_receiver_alloc(void) {
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  FILE *file;
+  const char *json;
+  lql_query_result result;
+  seekable_match_counts counts;
+  size_t alloc_attempts_after_second_warmup;
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("file match receiver failed: %s\n", error.message);
+    return 1;
+  }
+  selector = NULL;
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error);
+  if (st != LQL_STATUS_OK || selector == NULL) {
+    printf("file match selector parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  file = tmpfile();
+  if (file == NULL) {
+    printf("file match tmpfile failed\n");
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  json = "{\"status\":\"open\",\"message\":\"hello\"}\n"
+         "{\"status\":\"closed\",\"message\":\"bye\"}\n";
+  if (fwrite(json, 1u, strlen(json), file) != strlen(json)) {
+    printf("file match fixture write failed\n");
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  if (fseek(file, 0L, SEEK_SET) != 0) {
+    printf("file match first seek failed\n");
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  counts.file = file;
+  counts.matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_file_matches(ctx, selector, file, count_seekable_match,
+                               &counts, &result, &error);
+  if (st != LQL_STATUS_OK || counts.matched != 1u ||
+      result.candidates_seen != 2u || result.candidates_matched != 1u) {
+    printf("file match first warmup failed: %s\n", error.message);
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  if (fseek(file, 0L, SEEK_SET) != 0) {
+    printf("file match second seek failed\n");
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  counts.matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_file_matches(ctx, selector, file, count_seekable_match,
+                               &counts, &result, &error);
+  if (st != LQL_STATUS_OK || counts.matched != 1u ||
+      result.candidates_seen != 2u || result.candidates_matched != 1u) {
+    printf("file match second warmup failed: %s\n", error.message);
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  alloc_attempts_after_second_warmup = counter.alloc_attempt_count;
+  counting_allocator_freeze(&counter);
+  if (fseek(file, 0L, SEEK_SET) != 0) {
+    printf("file match steady seek failed\n");
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  counts.matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_file_matches(ctx, selector, file, count_seekable_match,
+                               &counts, &result, &error);
+  fclose(file);
+  if (st != LQL_STATUS_OK || counts.matched != 1u ||
+      result.candidates_seen != 2u || result.candidates_matched != 1u) {
+    printf("file match steady eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.alloc_attempt_count != alloc_attempts_after_second_warmup) {
+    printf("file match steady eval attempted allocation: before=%lu after=%lu\n",
+           (unsigned long)alloc_attempts_after_second_warmup,
+           (unsigned long)counter.alloc_attempt_count);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("file match allocator cleanup imbalance: outstanding=%lu "
            "destroys=%lu\n",
            (unsigned long)counter.outstanding,
            (unsigned long)counter.destroy_count);
@@ -2302,6 +2455,7 @@ int main(void) {
   failures = 0;
   failures += expect_selector_success_uses_allocator();
   failures += expect_file_decisions_steady_state_has_no_receiver_alloc();
+  failures += expect_file_matches_steady_state_has_no_receiver_alloc();
   failures += expect_source_decisions_steady_state_has_no_receiver_alloc();
   failures +=
       expect_compound_source_decisions_steady_state_has_no_receiver_alloc();
