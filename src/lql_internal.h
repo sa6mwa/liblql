@@ -46,7 +46,7 @@ struct lql_impl {
   size_t eval_hits_cap;
   unsigned char *eval_stream_misses;
   size_t eval_stream_misses_cap;
-  unsigned char *eval_scalar_path_matches;
+  unsigned int *eval_scalar_path_matches;
   size_t eval_scalar_path_matches_cap;
   unsigned char *eval_in_matches;
   size_t eval_in_matches_cap;

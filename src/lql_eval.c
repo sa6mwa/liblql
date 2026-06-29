@@ -34,8 +34,9 @@ typedef struct eval_doc {
   size_t hits_cap;
   unsigned char *stream_misses;
   size_t stream_misses_cap;
-  unsigned char *scalar_path_matches;
+  unsigned int *scalar_path_matches;
   size_t scalar_path_matches_cap;
+  unsigned int scalar_path_epoch;
   unsigned char *in_matches;
   size_t in_matches_cap;
   size_t in_match_stride;
@@ -246,7 +247,7 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   lql_impl *impl;
   unsigned char *next_hits;
   unsigned char *next_stream_misses;
-  unsigned char *next_scalar_path_matches;
+  unsigned int *next_scalar_path_matches;
   unsigned char *next_in_matches;
   size_t in_match_need;
   memset(doc, 0, sizeof(*doc));
@@ -312,8 +313,9 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     }
     memset(doc->stream_misses, 0, selector->hit_count);
     if (doc->scalar_path_matches_cap < selector->hit_count) {
-      next_scalar_path_matches = (unsigned char *)doc->allocator->realloc(
-          doc->allocator, doc->scalar_path_matches, selector->hit_count);
+      next_scalar_path_matches = (unsigned int *)doc->allocator->realloc(
+          doc->allocator, doc->scalar_path_matches,
+          sizeof(*doc->scalar_path_matches) * selector->hit_count);
       if (next_scalar_path_matches == NULL) {
         destroy_doc(doc);
         return 0;
@@ -321,7 +323,9 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
       doc->scalar_path_matches = next_scalar_path_matches;
       doc->scalar_path_matches_cap = selector->hit_count;
     }
-    memset(doc->scalar_path_matches, 0, selector->hit_count);
+    memset(doc->scalar_path_matches, 0,
+           sizeof(*doc->scalar_path_matches) * selector->hit_count);
+    doc->scalar_path_epoch = 1u;
     if (doc->in_match_stride != 0u) {
       in_match_need = selector->hit_count * doc->in_match_stride;
       if (doc->in_matches_cap < in_match_need) {
@@ -346,7 +350,6 @@ static void reset_doc(eval_doc *doc) {
   if (doc->selector != NULL && doc->selector->hit_count != 0u) {
     memset(doc->hits, 0, doc->selector->hit_count);
     memset(doc->stream_misses, 0, doc->selector->hit_count);
-    memset(doc->scalar_path_matches, 0, doc->selector->hit_count);
     if (doc->in_matches != NULL && doc->in_match_stride != 0u) {
       memset(doc->in_matches, 0,
              doc->selector->hit_count * doc->in_match_stride);
@@ -677,11 +680,19 @@ static void scalar_path_match_prepare(eval_doc *doc,
       doc->scalar_path_matches == NULL) {
     return;
   }
-  memset(doc->scalar_path_matches, 0, doc->selector->hit_count);
+  ++doc->scalar_path_epoch;
+  if (doc->scalar_path_epoch == 0u) {
+    memset(doc->scalar_path_matches, 0,
+           sizeof(*doc->scalar_path_matches) * doc->selector->hit_count);
+    doc->scalar_path_epoch = 1u;
+  }
   for (i = 0u; i < doc->predicate_count; ++i) {
     selector = doc->predicates[i];
     if (selector_path_matches(doc, selector, path)) {
-      doc->scalar_path_matches[selector->hit_index] = 1u;
+      doc->scalar_path_matches[selector->hit_index] = doc->scalar_path_epoch;
+      if (doc->stream_misses != NULL) {
+        doc->stream_misses[selector->hit_index] = 0u;
+      }
     }
   }
 }
@@ -697,7 +708,8 @@ static int scalar_selector_path_matches(const eval_doc *doc,
     return selector_path_matches(doc, selector, path);
   }
   (void)path;
-  return doc->scalar_path_matches[selector->hit_index] != 0u;
+  return doc->scalar_path_matches[selector->hit_index] ==
+         doc->scalar_path_epoch;
 }
 
 static int selector_is_predicate(const lql_selector *selector) {
@@ -1878,10 +1890,6 @@ static lonejson_status on_string_begin(void *user,
   doc->prefix_need = 0u;
   doc->prefix_buf[0] = '\0';
   numeric_stream_reset(doc);
-  if (doc->selector != NULL && doc->selector->hit_count != 0u &&
-      doc->stream_misses != NULL) {
-    memset(doc->stream_misses, 0, doc->selector->hit_count);
-  }
   scalar_path_match_prepare(doc, path);
   observe_scalar_exists_begin(doc, doc->selector, path);
   doc->scalar_stream_contains = scalar_path_contains_stream_interested(

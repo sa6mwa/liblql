@@ -79,6 +79,8 @@ families when a selector cannot use them.
 For string and number values, the evaluator caches each predicate's path-match
 result once at scalar begin and reuses that hit-index bitmap across chunk and
 end observers.
+Scalar path-match scratch uses epoch marks, so repeated scalar callbacks do not
+clear the full selector hit set in the hot path.
 `clql -m -f` composes mutation and projection in Go-compatible order by
 projecting each output candidate first, then mutating the projected value for
 matched candidates; this uses a callback-scoped temp-file spill for the

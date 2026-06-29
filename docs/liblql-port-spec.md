@@ -212,6 +212,8 @@ For scalar string and number callbacks, the evaluator may cache predicate
 path-match results once at scalar begin in receiver-owned scratch and reuse that
 hit-index bitmap across chunk and end observers. That scratch is bounded by the
 selector predicate count and must not depend on selected scalar length.
+Scalar path-match scratch should use generation or epoch marks so scalar begin
+does not clear the full selector hit set for every scalar value.
 
 As of lonejson `v0.35.2`, the path-value visitor used by liblql still enforces
 a small raw JSON number-token limit and performs bounded internal allocation for
