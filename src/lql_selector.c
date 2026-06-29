@@ -791,7 +791,7 @@ static int set_date_bound(lql_selector_parser *ctx, lql_selector *selector,
   return 1;
 }
 
-static void cache_selector_value_temporal(lql_selector *selector);
+static void prepare_selector_value_temporal(lql_selector *selector);
 
 static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
                                    lql_selector_kind kind,
@@ -1073,7 +1073,7 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
                   "date selector requires at least one bound");
     goto fail_after_tokens;
   }
-  cache_selector_value_temporal(selector);
+  prepare_selector_value_temporal(selector);
   dispose_seen_key_values(ctx, seen_field, seen_value, seen_any,
                           seen_ignore_case, seen_gt, seen_gte, seen_lt,
                           seen_lte, seen_after, seen_before, seen_since);
@@ -1117,7 +1117,7 @@ static int string_predicate_is_match_all_alias(lql_selector_kind kind,
   return 0;
 }
 
-static void cache_selector_value_temporal(lql_selector *selector) {
+static void prepare_selector_value_temporal(lql_selector *selector) {
   selector->value_is_temporal = 0;
   if ((selector->kind == LQL_SELECTOR_KIND_EQ ||
        selector->kind == LQL_SELECTOR_KIND_NE) &&
@@ -1264,7 +1264,7 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
       memset(&child, 0, sizeof(child));
       child = *out;
       child.kind = LQL_SELECTOR_KIND_EQ;
-      cache_selector_value_temporal(&child);
+      prepare_selector_value_temporal(&child);
       memset(out, 0, sizeof(*out));
       out->children = (lql_selector *)ctx->allocator->calloc(
           ctx->allocator, 1u, sizeof(lql_selector));
@@ -1300,7 +1300,7 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
       out->kind = LQL_SELECTOR_KIND_EQ;
     }
     if (out->kind == LQL_SELECTOR_KIND_EQ) {
-      cache_selector_value_temporal(out);
+      prepare_selector_value_temporal(out);
     }
     ctx->allocator->destroy(ctx->allocator, copy);
     return LQL_STATUS_OK;
@@ -1393,7 +1393,7 @@ static void collect_predicates(const lql_selector *selector,
   }
 }
 
-static size_t selector_refresh_cached_lengths(lql_selector *selector) {
+static size_t selector_refresh_derived_lengths(lql_selector *selector) {
   size_t i;
   size_t child_max;
   size_t max_in;
@@ -1413,7 +1413,7 @@ static size_t selector_refresh_cached_lengths(lql_selector *selector) {
   }
   max_in = selector->kind == LQL_SELECTOR_KIND_IN ? selector->any_count : 0u;
   for (i = 0u; i < selector->child_count; ++i) {
-    child_max = selector_refresh_cached_lengths(&selector->children[i]);
+    child_max = selector_refresh_derived_lengths(&selector->children[i]);
     if (child_max > max_in) {
       max_in = child_max;
     }
@@ -1598,7 +1598,7 @@ static int finalize_selector(lql_selector_parser *ctx, lql_selector *selector) {
   selector->hit_count = 0u;
   selector_clear_predicates(ctx, selector);
   assign_hit_indexes(selector, &selector->hit_count);
-  selector_refresh_cached_lengths(selector);
+  selector_refresh_derived_lengths(selector);
   selector_refresh_predicate_features(selector);
   if (!prepare_selector_paths(ctx, selector)) {
     return 0;
@@ -1964,7 +1964,7 @@ static lql_status selector_json_validate_predicate(selector_json_state *state,
                   "date selector requires at least one bound");
     return LQL_STATUS_PARSE_ERROR;
   }
-  cache_selector_value_temporal(selector);
+  prepare_selector_value_temporal(selector);
   return LQL_STATUS_OK;
 }
 
@@ -3016,7 +3016,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
     selector.value_set = term->value_present ? 1 : 0;
   }
   selector.ignore_case = term->ignore_case ? 1 : 0;
-  cache_selector_value_temporal(&selector);
+  prepare_selector_value_temporal(&selector);
   return selector_build_result(&ctx, &selector, out, error);
 }
 

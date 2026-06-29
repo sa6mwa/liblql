@@ -3297,14 +3297,14 @@ static lql_status eval_selector_buffer(lql *self, const lql_selector *selector,
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
   lonejson_status st;
-  int runtime_cached;
+  int runtime_pooled;
   eval_doc doc;
 
   if (!init_doc(&doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime_cached = 0;
-  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&doc);
@@ -3316,13 +3316,13 @@ static lql_status eval_selector_buffer(lql *self, const lql_selector *selector,
   if (st != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&doc);
-    lql_lonejson_release(self, runtime, runtime_cached);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     return LQL_STATUS_JSON_ERROR;
   }
   *out_matched = selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL ||
                  eval_selector_tree(selector, &doc);
   destroy_doc(&doc);
-  lql_lonejson_release(self, runtime, runtime_cached);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   return LQL_STATUS_OK;
 }
 
@@ -3731,7 +3731,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   lonejson_path_value_visitor visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
-  int runtime_cached;
+  int runtime_pooled;
   query_stream_state state;
 
   memset(&state, 0, sizeof(state));
@@ -3750,8 +3750,8 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime_cached = 0;
-  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -3768,7 +3768,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
-    lql_lonejson_release(self, runtime, runtime_cached);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     if (out_result != NULL) {
       *out_result = state.result;
     }
@@ -3782,7 +3782,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   }
   query_finish_file_bytes(&state.result, file);
   destroy_doc(&state.doc);
-  lql_lonejson_release(self, runtime, runtime_cached);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   if (out_result != NULL) {
     *out_result = state.result;
   }
@@ -3799,7 +3799,7 @@ static lql_status execute_query_file_range_decisions(
   lonejson_path_value_visitor visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
-  int runtime_cached;
+  int runtime_pooled;
   query_stream_state state;
   eval_pread_range_reader reader;
 
@@ -3819,8 +3819,8 @@ static lql_status execute_query_file_range_decisions(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime_cached = 0;
-  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -3829,7 +3829,7 @@ static lql_status execute_query_file_range_decisions(
   reader.fd = fileno(file);
   if (reader.fd < 0) {
     destroy_doc(&state.doc);
-    lql_lonejson_release(self, runtime, runtime_cached);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
                   "failed to access input range descriptor");
     return LQL_STATUS_JSON_ERROR;
@@ -3848,7 +3848,7 @@ static lql_status execute_query_file_range_decisions(
   st = lonejson_visit_candidates_reader(runtime, eval_pread_range, &reader,
                                         &options, &lj_error);
   destroy_doc(&state.doc);
-  lql_lonejson_release(self, runtime, runtime_cached);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   if (st != LONEJSON_STATUS_OK) {
     if (out_result != NULL) {
       *out_result = state.result;
@@ -3876,7 +3876,7 @@ static lql_status execute_query_file_matches(
   lonejson_path_value_visitor visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
-  int runtime_cached;
+  int runtime_pooled;
   query_stream_state state;
 
   memset(&state, 0, sizeof(state));
@@ -3895,8 +3895,8 @@ static lql_status execute_query_file_matches(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime_cached = 0;
-  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -3913,7 +3913,7 @@ static lql_status execute_query_file_matches(
   st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
-    lql_lonejson_release(self, runtime, runtime_cached);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     if (out_result != NULL) {
       *out_result = state.result;
     }
@@ -3927,7 +3927,7 @@ static lql_status execute_query_file_matches(
   }
   query_finish_file_bytes(&state.result, file);
   destroy_doc(&state.doc);
-  lql_lonejson_release(self, runtime, runtime_cached);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   if (out_result != NULL) {
     *out_result = state.result;
   }
@@ -3944,7 +3944,7 @@ static lql_status execute_query_file_range_matches(
   lonejson_path_value_visitor visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
-  int runtime_cached;
+  int runtime_pooled;
   query_stream_state state;
   eval_pread_range_reader reader;
 
@@ -3964,8 +3964,8 @@ static lql_status execute_query_file_range_matches(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime_cached = 0;
-  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -3974,7 +3974,7 @@ static lql_status execute_query_file_range_matches(
   reader.fd = fileno(file);
   if (reader.fd < 0) {
     destroy_doc(&state.doc);
-    lql_lonejson_release(self, runtime, runtime_cached);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
                   "failed to access input range descriptor");
     return LQL_STATUS_JSON_ERROR;
@@ -3993,7 +3993,7 @@ static lql_status execute_query_file_range_matches(
   st = lonejson_visit_candidates_reader(runtime, eval_pread_range, &reader,
                                         &options, &lj_error);
   destroy_doc(&state.doc);
-  lql_lonejson_release(self, runtime, runtime_cached);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   if (st != LONEJSON_STATUS_OK) {
     if (out_result != NULL) {
       *out_result = state.result;
@@ -4031,7 +4031,7 @@ static lql_status execute_query_source_decisions_with_base(
   lonejson_path_value_visitor visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
-  int runtime_cached;
+  int runtime_pooled;
   query_stream_state state;
   source_reader_adapter adapter;
   int capture_needed;
@@ -4051,8 +4051,8 @@ static lql_status execute_query_source_decisions_with_base(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime_cached = 0;
-  runtime = lql_lonejson_acquire(self, &runtime_cached, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -4065,7 +4065,7 @@ static lql_status execute_query_source_decisions_with_base(
   capture_needed = 1;
   if (!source_reader_prefix_capture(&adapter, &capture_needed)) {
     destroy_doc(&state.doc);
-    lql_lonejson_release(self, runtime, runtime_cached);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     if (out_result != NULL) {
       *out_result = state.result;
     }
@@ -4095,7 +4095,7 @@ static lql_status execute_query_source_decisions_with_base(
   if (st != LONEJSON_STATUS_OK) {
     query_stream_state_cleanup_capture(&state);
     destroy_doc(&state.doc);
-    lql_lonejson_release(self, runtime, runtime_cached);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     if (out_result != NULL) {
       *out_result = state.result;
     }
@@ -4115,7 +4115,7 @@ static lql_status execute_query_source_decisions_with_base(
   }
   query_stream_state_cleanup_capture(&state);
   destroy_doc(&state.doc);
-  lql_lonejson_release(self, runtime, runtime_cached);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   if (out_result != NULL) {
     *out_result = state.result;
   }

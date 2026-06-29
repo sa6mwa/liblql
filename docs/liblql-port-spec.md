@@ -48,8 +48,10 @@ Implementation guidance:
 - Public C APIs should follow C idioms: stable receiver structs, enum tags,
   out-parameters, borrowed `const char *` views with lengths where needed, and
   caller-visible ownership rules.
-- Implementation internals may keep optimized compiled plans, indexes, caches,
-  or streaming execution traits, but those are below the public AST contract.
+- Implementation internals may keep optimized compiled plans, finalized selector
+  metadata, or streaming execution traits, but those are below the public AST
+  contract. These internals must reduce repeated parsing, allocation, or branch
+  work; they must not become candidate/result caches or a parallel public AST.
 - Lua should expose the same high-value AST capabilities as idiomatic Lua
   userdata backed by the public C API. Table conversion helpers are optional
   convenience facades; Lua must not own a second AST representation, duplicate
@@ -199,23 +201,23 @@ decoded path segments without reparsing path text for every scalar callback. It
 must be rebuilt during selector finalization, cloned as selector-owned state,
 and cleaned up with the selector; recursive or escaped paths must continue to
 use the general matcher.
-Selectors must also cache the flattened predicate pointer list during
+Selectors must also retain the flattened predicate pointer list during
 finalization. Evaluation setup must borrow that selector-owned list and must not
 walk compound selector trees per candidate to rebuild predicate scratch.
-Selector finalization must cache literal lengths, max `any` literal length, and
+Selector finalization must derive literal lengths, max `any` literal length, and
 max `in` fanout; scalar observers must use those selector-owned facts instead
 of recomputing string lengths or walking the selector tree per candidate.
-Selectors with `any` alternatives must also cache raw and case-folded first-byte
+Selectors with `any` alternatives must also retain raw and case-folded first-byte
 metadata so `contains.any` observers do not rebuild needle scan metadata per
 scalar chunk.
-Selector finalization must also cache predicate feature bits for contains,
+Selector finalization must also derive predicate feature bits for contains,
 prefix, exact, temporal, numeric-range, and exists families. Scalar evaluation
 must use those bits to skip whole observer families when the selector cannot
 match through that family.
-For scalar string and number callbacks, the evaluator may cache predicate
+For scalar string and number callbacks, the evaluator may prepare predicate
 path-match results once at scalar begin in receiver-owned scratch and reuse that
-hit-index bitmap across chunk and end observers. That scratch is bounded by the
-selector predicate count and must not depend on selected scalar length.
+bounded hit-index state across chunk and end observers. That scratch is bounded
+by the selector predicate count and must not depend on selected scalar length.
 Scalar path-match scratch should use generation or epoch marks so scalar begin
 does not clear the full selector hit set for every scalar value.
 The scalar path-prepare pass should also derive the active observer-family bits
@@ -294,10 +296,10 @@ The public selector API must use these C idioms:
   `or`, plus one child for `not`.
 - Term views expose field paths, explicit value presence, value text, `any`
   lists, `ignoreCase`, `exists` path text, range bounds, date bounds, and
-  date-since macro/literal state without exposing internal temporal caches.
+  date-since macro/literal state without exposing internal temporal state.
 - Range bounds expose whether they are numeric or datetime text. Datetime text
   should preserve the selector literal used to build the AST; parsed temporal
-  caches are implementation detail.
+  state is implementation detail.
 - Date bounds expose raw selector strings for `value`, `since`, `after`,
   `before`, `gt`, `gte`, `lt`, and `lte`, plus a macro enum for recognized
   `since` values where useful.
@@ -1413,7 +1415,7 @@ Current implementation status:
   behavior, and malformed parser regression inputs that must return normally
   without crashing;
 - C temporal selector coverage is based on observable parse/evaluation
-  behavior rather than Go's internal temporal cache helpers. The C tests cover
+  behavior rather than Go's internal temporal state helpers. The C tests cover
   date-only equality, naive UTC datetimes, nanosecond precision, timezone
   offset normalization, temporal ranges, and stable current-date macro
   behavior through public selector matching;

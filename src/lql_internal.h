@@ -72,10 +72,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
                                                       lql_error *error);
 LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
                                                lonejson_error *error);
-LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_acquire(lql *self, int *out_cached,
+LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_acquire(lql *self, int *out_pooled,
                                                    lonejson_error *error);
 LQL_INTERNAL_SYMBOL void lql_lonejson_release(lql *self, lonejson *runtime,
-                                              int cached);
+                                              int pooled);
 LQL_INTERNAL_SYMBOL void lql_eval_methods_install(lql *ctx);
 LQL_INTERNAL_SYMBOL void lql_project_methods_install(lql *ctx);
 LQL_INTERNAL_SYMBOL void lql_mutation_methods_install(lql *ctx);

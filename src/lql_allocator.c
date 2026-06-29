@@ -265,12 +265,12 @@ static lonejson *lql_lonejson_new_pooled(lql *self, lonejson_error *error) {
   return lonejson_new(&config, error);
 }
 
-LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_acquire(lql *self, int *out_cached,
+LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_acquire(lql *self, int *out_pooled,
                                                    lonejson_error *error) {
   lql_impl *impl;
 
-  if (out_cached != NULL) {
-    *out_cached = 0;
+  if (out_pooled != NULL) {
+    *out_pooled = 0;
   }
   if (self == NULL || self->impl == NULL) {
     if (error != NULL) {
@@ -288,8 +288,8 @@ LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_acquire(lql *self, int *out_cached,
       }
     }
     impl->eval_runtime_in_use = 1;
-    if (out_cached != NULL) {
-      *out_cached = 1;
+    if (out_pooled != NULL) {
+      *out_pooled = 1;
     }
     return impl->eval_runtime;
   }
@@ -297,13 +297,13 @@ LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_acquire(lql *self, int *out_cached,
 }
 
 LQL_INTERNAL_SYMBOL void lql_lonejson_release(lql *self, lonejson *runtime,
-                                              int cached) {
+                                              int pooled) {
   lql_impl *impl;
 
   if (runtime == NULL) {
     return;
   }
-  if (cached && self != NULL && self->impl != NULL) {
+  if (pooled && self != NULL && self->impl != NULL) {
     impl = (lql_impl *)self->impl;
     if (impl->eval_runtime == runtime) {
       impl->eval_runtime_in_use = 0;

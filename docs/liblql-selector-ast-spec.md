@@ -67,7 +67,7 @@ The implementation rules are:
 
 In practical C terms, the eventual private fields may still be hidden from the
 installed header, may use tagged unions, arrays, child pointers, or arena-owned
-payloads, and may carry parsed temporal caches. Those are representation
+payloads, and may carry parsed temporal state. Those are representation
 choices. The architectural boundary is that they are fields or helper payloads
 of the `lql_selector` AST, not a separate AST that `lql_selector` merely wraps.
 
@@ -170,8 +170,9 @@ evaluation:
 - date `since` macro/literal state.
 
 Builder validation must reject invalid combinations at the same public semantic
-boundary as Go. Implementation-only caches or compiled programs must be derived
-from `lql_selector` after construction, not required for tree ownership.
+boundary as Go. Implementation-only execution metadata or compiled programs
+must be derived from `lql_selector` after construction, not required for tree
+ownership.
 
 ## JSON Shape
 
