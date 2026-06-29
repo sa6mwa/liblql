@@ -1777,13 +1777,16 @@ Current implementation status:
   already-locked region, including seekable candidate range copies and
   separators, reducing repeated stdio lock overhead without bypassing the
   public FILE output contract or adding output buffering;
-- source-backed projection and mutation are now profiled as dominated by
-  lonejson candidate spooling/replay for dense non-seekable streams. The
-  required final performance step is a lonejson single-pass candidate transform
-  visitor that lets selector observation and projection/mutation writing share
-  one validated parse; liblql must not emulate that with full-candidate
-  buffering, temp-file staging, selector/result caches, or a second JSON
-  parser. The dependency need is tracked in
+- callback-source plus-value, projection, and mutation paths are now profiled
+  as dominated by lonejson candidate spooling/replay for non-seekable streams.
+  Sparse selectors need predicate-gated candidate capture so discarded
+  candidates are not spooled before selector truth is known. Dense projection
+  and mutation need a lonejson single-pass candidate transform visitor that
+  lets selector observation and projection/mutation writing share one validated
+  parse; liblql must not emulate either feature with full-candidate buffering,
+  temp-file staging, selector/result caches, or a second JSON parser. The
+  dependency needs are tracked in
+  `docs/lonejson-cr-predicate-gated-candidate-capture.md` and
   `docs/lonejson-cr-single-pass-candidate-transform.md` and summarized in
   `docs/liblql-dependency-gaps.md`;
 - seekable matched-object mutation uses candidate offsets, no-capture parsing,

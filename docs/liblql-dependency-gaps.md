@@ -160,6 +160,9 @@ delivery; liblql should not bypass lonejson with a second JSON tokenizer.
 
 ## Predicate-Gated Candidate Capture
 
+The standalone CR for this dependency feature is
+[`docs/lonejson-cr-predicate-gated-candidate-capture.md`](lonejson-cr-predicate-gated-candidate-capture.md).
+
 Seekable liblql candidate streams can avoid candidate capture: lonejson reports
 64-bit candidate offsets and byte sizes, and liblql can reread a matched range
 with `pread()` without disturbing the active parser cursor. Callback-source
