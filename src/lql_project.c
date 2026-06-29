@@ -38,6 +38,9 @@ typedef struct projection_path {
   size_t segment_count;
 } projection_path;
 
+#define PROJECTION_KEY_INLINE_CAP 128u
+#define PROJECTION_NUM_INLINE_CAP 64u
+
 typedef struct projection_parse_context {
   lql *self;
   lql_allocator *allocator;
@@ -50,8 +53,10 @@ typedef struct projection_state {
   lonejson_error *error;
   char *key_buf;
   size_t key_len;
+  char inline_key_buf[PROJECTION_KEY_INLINE_CAP];
   char *num_buf;
   size_t num_len;
+  char inline_num_buf[PROJECTION_NUM_INLINE_CAP];
   size_t capture_depth;
   int capturing;
   int in_string;
@@ -483,19 +488,85 @@ static const projection_path *selected_path(const lql_projection *projection,
   return NULL;
 }
 
-static int append_buf(projection_state *state, char **buf, size_t *len,
-                      const char *data, size_t n) {
+static void projection_inline_buf_reset(projection_state *state, char **buf,
+                                        size_t *len, char *inline_buf) {
+  if (state == NULL || buf == NULL || len == NULL) {
+    return;
+  }
+  if (*buf != NULL && *buf != inline_buf) {
+    state->allocator->destroy(state->allocator, *buf);
+  }
+  *buf = NULL;
+  *len = 0u;
+}
+
+static int projection_inline_buf_append(projection_state *state, char **buf,
+                                        size_t *len, char *inline_buf,
+                                        size_t inline_cap, const char *data,
+                                        size_t n) {
   char *next;
-  next = (char *)state->allocator->realloc(state->allocator, *buf,
-                                           *len + n + 1u);
-  if (next == NULL) {
+  size_t next_len;
+  if (state == NULL || buf == NULL || len == NULL || inline_buf == NULL ||
+      data == NULL) {
     return 0;
   }
+  if (n > (size_t)-1 - *len - 1u) {
+    return 0;
+  }
+  next_len = *len + n;
+  if (*buf == NULL || *buf == inline_buf) {
+    if (next_len + 1u <= inline_cap) {
+      if (*buf == NULL) {
+        *buf = inline_buf;
+      }
+      memcpy(inline_buf + *len, data, n);
+      *len = next_len;
+      inline_buf[*len] = '\0';
+      return 1;
+    }
+    next = (char *)state->allocator->alloc(state->allocator, next_len + 1u);
+    if (next == NULL) {
+      return 0;
+    }
+    if (*len != 0u) {
+      memcpy(next, inline_buf, *len);
+    }
+  } else {
+    next = (char *)state->allocator->realloc(state->allocator, *buf,
+                                             next_len + 1u);
+    if (next == NULL) {
+      return 0;
+    }
+  }
+  memcpy(next + *len, data, n);
+  *len = next_len;
+  next[*len] = '\0';
   *buf = next;
-  memcpy(*buf + *len, data, n);
-  *len += n;
-  (*buf)[*len] = '\0';
   return 1;
+}
+
+static void projection_key_reset(projection_state *state) {
+  projection_inline_buf_reset(state, &state->key_buf, &state->key_len,
+                              state->inline_key_buf);
+}
+
+static int projection_key_append(projection_state *state, const char *data,
+                                 size_t n) {
+  return projection_inline_buf_append(
+      state, &state->key_buf, &state->key_len, state->inline_key_buf,
+      sizeof(state->inline_key_buf), data, n);
+}
+
+static void projection_num_reset(projection_state *state) {
+  projection_inline_buf_reset(state, &state->num_buf, &state->num_len,
+                              state->inline_num_buf);
+}
+
+static int projection_num_append(projection_state *state, const char *data,
+                                 size_t n) {
+  return projection_inline_buf_append(
+      state, &state->num_buf, &state->num_len, state->inline_num_buf,
+      sizeof(state->inline_num_buf), data, n);
 }
 
 static size_t common_open_prefix(const projection_state *state,
@@ -756,9 +827,7 @@ static lonejson_status on_object_key_begin(void *user,
   (void)path;
   (void)error;
   state = (projection_state *)user;
-  state->allocator->destroy(state->allocator, state->key_buf);
-  state->key_buf = NULL;
-  state->key_len = 0u;
+  projection_key_reset(state);
   return LONEJSON_STATUS_OK;
 }
 
@@ -773,7 +842,7 @@ static lonejson_status on_object_key_chunk(void *user,
   if (!state->capturing) {
     return LONEJSON_STATUS_OK;
   }
-  return append_buf(state, &state->key_buf, &state->key_len, data, len)
+  return projection_key_append(state, data, len)
              ? LONEJSON_STATUS_OK
              : LONEJSON_STATUS_ALLOCATION_FAILED;
 }
@@ -864,9 +933,7 @@ static lonejson_status on_number_begin(void *user,
     state->root_seen = 1;
     state->root_is_object = 0;
   }
-  state->allocator->destroy(state->allocator, state->num_buf);
-  state->num_buf = NULL;
-  state->num_len = 0u;
+  projection_num_reset(state);
   state->in_number =
       state->capturing || selected_path(state->projection, path) != NULL;
   return LONEJSON_STATUS_OK;
@@ -881,7 +948,7 @@ static lonejson_status on_number_chunk(void *user,
   (void)error;
   state = (projection_state *)user;
   if (state->in_number &&
-      !append_buf(state, &state->num_buf, &state->num_len, data, len)) {
+      !projection_num_append(state, data, len)) {
     return LONEJSON_STATUS_ALLOCATION_FAILED;
   }
   return LONEJSON_STATUS_OK;
@@ -977,8 +1044,12 @@ static void projection_state_cleanup(projection_state *state) {
   if (state == NULL || state->allocator == NULL) {
     return;
   }
-  state->allocator->destroy(state->allocator, state->key_buf);
-  state->allocator->destroy(state->allocator, state->num_buf);
+  if (state->key_buf != state->inline_key_buf) {
+    state->allocator->destroy(state->allocator, state->key_buf);
+  }
+  if (state->num_buf != state->inline_num_buf) {
+    state->allocator->destroy(state->allocator, state->num_buf);
+  }
   state->allocator->destroy(state->allocator, state->open_kind);
   state->allocator->destroy(state->allocator, state->open_array_next);
   state->key_buf = NULL;
