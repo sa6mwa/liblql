@@ -2198,9 +2198,14 @@ static lonejson_status mutation_push_path_frame(mutation_stream_state *state,
   if (frame.segment_count != 0u) {
     parent = mutation_parent_frame(state);
     if (parent != NULL) {
-      for (i = 0u; i < parent->segment_count && i < frame.segment_count; ++i) {
-        if (mutation_frame_array_segment(parent, i)) {
-          mutation_frame_set_array_segment(&frame, i);
+      if (frame.array_segments == NULL && parent->array_segments == NULL) {
+        frame.array_segment_bits = parent->array_segment_bits;
+      } else {
+        for (i = 0u; i < parent->segment_count && i < frame.segment_count;
+             ++i) {
+          if (mutation_frame_array_segment(parent, i)) {
+            mutation_frame_set_array_segment(&frame, i);
+          }
         }
       }
       if (frame.segment_count > parent->segment_count &&
