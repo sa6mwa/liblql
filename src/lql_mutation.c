@@ -1719,6 +1719,22 @@ static int stream_path_prefix_matches(const mutation_path *item_path,
   return 1;
 }
 
+static int stream_path_prefix_matches_known(const mutation_path *item_path,
+                                            const lonejson_value_path *path,
+                                            const mutation_path_frame *frame,
+                                            size_t depth) {
+  size_t i;
+  for (i = 0u; i < depth; ++i) {
+    if (!stream_path_segment_matches(
+            item_path->segment_kinds[i], item_path->segments[i],
+            item_path->segment_lens[i], &path->segments[i],
+            mutation_frame_array_segment(frame, i))) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int mutation_key_matches_path(const mutation_item *item,
                                      const lonejson_value_path *parent,
                                      const mutation_path_frame *frame,
@@ -2584,14 +2600,14 @@ static lonejson_status mutation_key_end(void *user,
     return LONEJSON_STATUS_OK;
   }
   frame = current_path_frame(state, path);
-  if (path != NULL) {
+  if (path != NULL && frame != NULL) {
     depth = path->segment_count;
     next_depth = depth + 1u;
     for (i = 0u; i < state->plan->count; ++i) {
       item = &state->plan->items[i];
       if (state->prefix_seen_depth[i] >= next_depth ||
           item->path.segment_count <= depth ||
-          !stream_path_prefix_matches(&item->path, path, frame)) {
+          !stream_path_prefix_matches_known(&item->path, path, frame, depth)) {
         continue;
       }
       next_kind = item->path.segment_kinds[depth];
