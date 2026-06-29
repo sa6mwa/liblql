@@ -1768,6 +1768,10 @@ Current implementation status:
   mutation plans such as nested set operations, reducing branches in the
   mutation visitor without introducing candidate/result caching or hidden
   materialization;
+- seekable file mutation with `matches_only` skips unmatched non-array
+  candidates before compact rewrite fallback. That keeps zero-match mutation on
+  the `CAPTURE_NONE` candidate scan path and avoids spooled writer replay for
+  candidates that cannot be emitted;
 - source-backed projection and mutation are now profiled as dominated by
   lonejson candidate spooling/replay for dense non-seekable streams. The
   required final performance step is a lonejson single-pass candidate transform

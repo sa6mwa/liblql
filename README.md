@@ -107,6 +107,10 @@ scratch grows or an epoch wraps.
 Seekable mutation setup initializes only live mutation state and plan scratch,
 not the full inline frame reserve. Path frames are assigned when pushed, so this
 removes per-candidate zeroing without adding retained candidate state.
+Seekable file candidate mutation skips unmatched non-array candidates before
+compact rewrite fallback when `matches_only` is enabled. This keeps zero-match
+mutation on the no-capture scan path instead of routing misses through spooled
+writer replay.
 Callback-source decision streams inspect one bounded prefix chunk and use
 no-capture parsing for ordinary non-array streams, while preserving sink capture
 for root-array recursion on non-seekable inputs.

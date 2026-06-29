@@ -3680,6 +3680,16 @@ on_file_mutation_candidate_end(void *user,
   matched = state->selector == NULL ||
             state->selector->kind == LQL_SELECTOR_KIND_ALL ||
             eval_selector_tree(state->selector, &state->doc);
+  if (!matched && state->matches_only) {
+    state->result.candidates_seen++;
+    state->result.bytes_read = offset + size;
+    reset_doc(&state->doc);
+    if (query_result_stop_if_limited(&state->result, &state->options,
+                                     state->limit_flags)) {
+      return LONEJSON_CANDIDATE_STOP;
+    }
+    return LONEJSON_CANDIDATE_CONTINUE;
+  }
   if (state->compact && (!matched || state->doc.root_kind != '{')) {
     nested_options = query_remaining_options(&state->options, &state->result);
     memset(&nested_result, 0, sizeof(nested_result));
