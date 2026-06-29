@@ -2166,6 +2166,12 @@ static lonejson_status write_synthetic_subtree(mutation_stream_state *state,
                                                size_t depth,
                                                lonejson_error *error);
 
+typedef struct mutation_missing_object_match {
+  size_t index;
+  size_t depth;
+  int virtual_object;
+} mutation_missing_object_match;
+
 static int mutation_descends_from_virtual_object(
     const mutation_item *item, const lonejson_value_path *parent,
     const mutation_path_frame *frame, const char *key, size_t key_len) {
@@ -2197,8 +2203,9 @@ static int mutation_descends_from_virtual_object(
 }
 
 static int
-mutation_requires_missing_object_key_value(mutation_stream_state *state,
-                                           const lonejson_value_path *parent) {
+mutation_find_missing_object_key_value(mutation_stream_state *state,
+                                       const lonejson_value_path *parent,
+                                       mutation_missing_object_match *match) {
   size_t i;
   size_t depth;
   const mutation_item *item;
@@ -2208,10 +2215,13 @@ mutation_requires_missing_object_key_value(mutation_stream_state *state,
     for (i = 0u; i < state->plan->count; ++i) {
       item = &state->plan->items[i];
       if (state->applied[i] || !item->can_create_missing_object ||
-          !mutation_descends_from_object(item, parent, frame) ||
-          state->prefix_seen_depth[i] > parent->segment_count) {
+          state->prefix_seen_depth[i] > parent->segment_count ||
+          !mutation_descends_from_object(item, parent, frame)) {
         continue;
       }
+      match->index = i;
+      match->depth = parent->segment_count;
+      match->virtual_object = 0;
       return 1;
     }
   }
@@ -2220,11 +2230,14 @@ mutation_requires_missing_object_key_value(mutation_stream_state *state,
   for (i = 0u; i < state->plan->count; ++i) {
     item = &state->plan->items[i];
     if (state->applied[i] || !item->can_create_missing_object ||
+        state->prefix_seen_depth[i] > depth ||
         !mutation_descends_from_virtual_object(
-            item, parent, frame, state->key_buf, state->key_len) ||
-        state->prefix_seen_depth[i] > depth) {
+            item, parent, frame, state->key_buf, state->key_len)) {
       continue;
     }
+    match->index = i;
+    match->depth = depth;
+    match->virtual_object = 1;
     return 1;
   }
   return 0;
@@ -2233,38 +2246,37 @@ mutation_requires_missing_object_key_value(mutation_stream_state *state,
 static lonejson_status
 write_missing_object_key_value(mutation_stream_state *state,
                                const lonejson_value_path *parent,
+                               const mutation_missing_object_match *match,
                                lonejson_error *error) {
   size_t i;
   size_t depth;
   const mutation_item *item;
   const mutation_path_frame *frame;
-  if (parent != NULL && parent->segment_count != 0u) {
-    if (lonejson_writer_begin_object(&state->writer, error) !=
-        LONEJSON_STATUS_OK) {
-      return LONEJSON_STATUS_CALLBACK_FAILED;
-    }
-    if (write_missing_object_mutations(state, parent, error) !=
-        LONEJSON_STATUS_OK) {
-      return LONEJSON_STATUS_CALLBACK_FAILED;
-    }
-    if (lonejson_writer_end_object(&state->writer, error) !=
-        LONEJSON_STATUS_OK) {
-      return LONEJSON_STATUS_CALLBACK_FAILED;
-    }
-    return LONEJSON_STATUS_OK;
+  if (match == NULL || match->index >= state->plan->count) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   frame = current_path_frame(state, parent);
-  depth = parent == NULL ? 0u : parent->segment_count + 1u;
+  depth = match->depth;
   if (lonejson_writer_begin_object(&state->writer, error) !=
       LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
-  for (i = 0u; i < state->plan->count; ++i) {
+  if (write_synthetic_subtree(state, &state->plan->items[match->index], depth,
+                              error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  for (i = match->index + 1u; i < state->plan->count; ++i) {
     item = &state->plan->items[i];
     if (state->applied[i] || !item->can_create_missing_object ||
-        !mutation_descends_from_virtual_object(
-            item, parent, frame, state->key_buf, state->key_len) ||
         state->prefix_seen_depth[i] > depth) {
+      continue;
+    }
+    if (match->virtual_object) {
+      if (!mutation_descends_from_virtual_object(
+              item, parent, frame, state->key_buf, state->key_len)) {
+        continue;
+      }
+    } else if (!mutation_descends_from_object(item, parent, frame)) {
       continue;
     }
     if (write_synthetic_subtree(state, item, depth, error) !=
@@ -2495,6 +2507,7 @@ static lonejson_status mutation_array_begin(void *user,
                                             lonejson_error *error) {
   mutation_stream_state *state;
   lonejson_status frame_status;
+  mutation_missing_object_match missing;
   int matched_value;
   state = (mutation_stream_state *)user;
   if (state->active_increment) {
@@ -2534,8 +2547,8 @@ static lonejson_status mutation_array_begin(void *user,
     return LONEJSON_STATUS_OK;
   }
   if (state->source_depth != 0u && !state->skipping &&
-      mutation_requires_missing_object_key_value(state, path)) {
-    if (write_missing_object_key_value(state, path, error) !=
+      mutation_find_missing_object_key_value(state, path, &missing)) {
+    if (write_missing_object_key_value(state, path, &missing, error) !=
         LONEJSON_STATUS_OK) {
       mutation_pop_path_frame(state);
       return LONEJSON_STATUS_CALLBACK_FAILED;
