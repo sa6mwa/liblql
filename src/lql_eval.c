@@ -2256,6 +2256,10 @@ static lonejson_status on_string_begin(void *user,
   doc->prefix_len = 0u;
   doc->prefix_need = 0u;
   scalar_path_match_prepare(doc, path);
+  if (doc->scalar_path_features == 0u) {
+    doc->scalar_stream_features = 0u;
+    return LONEJSON_STATUS_OK;
+  }
   if (doc->prefix_need != 0u) {
     doc->prefix_buf[0] = '\0';
   }
@@ -2290,6 +2294,9 @@ static lonejson_status on_string_chunk(void *user,
                                        lonejson_error *error) {
   eval_doc *doc = (eval_doc *)user;
   (void)error;
+  if (doc->scalar_stream_features == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
   doc->scalar_len += len;
   if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
     observe_contains_stream_chunk(doc, doc->selector, path, data, len);
