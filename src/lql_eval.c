@@ -26,6 +26,7 @@
 #define LQL_EVAL_NUMERIC_SIG_CAP 32u
 #define LQL_EVAL_NUMERIC_EXP_CAP 1000000L
 #define LQL_SOURCE_PREFIX_CAP 4096u
+#define LQL_EVAL_FEATURE_PREFIX_CAPTURE 0x80000000u
 
 typedef struct eval_doc {
   lql_allocator *allocator;
@@ -1993,6 +1994,11 @@ static lonejson_status on_string_begin(void *user,
       doc->scalar_path_features &
       (LQL_SELECTOR_FEATURE_CONTAINS | LQL_SELECTOR_FEATURE_PREFIX |
        LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL);
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) == 0u &&
+      (doc->scalar_stream_features &
+       (LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL)) != 0u) {
+    doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
+  }
   if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
     if (!ensure_contains_tail(doc)) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
@@ -2023,23 +2029,10 @@ static lonejson_status on_string_chunk(void *user,
     observe_prefix_stream_chunk(doc, doc->selector, path, data, len);
     prefix_stream_update(doc, data, len);
   }
-  if ((doc->scalar_stream_features &
-       (LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_PREFIX)) ==
-      LQL_SELECTOR_FEATURE_EXACT) {
-    observe_exact_stream_chunk(doc, doc->selector, path, data, len);
-    prefix_stream_update(doc, data, len);
-  } else if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
     observe_exact_stream_chunk(doc, doc->selector, path, data, len);
   }
-  if ((doc->scalar_stream_features &
-       (LQL_SELECTOR_FEATURE_TEMPORAL | LQL_SELECTOR_FEATURE_PREFIX |
-        LQL_SELECTOR_FEATURE_EXACT)) == LQL_SELECTOR_FEATURE_TEMPORAL) {
-    prefix_stream_update(doc, data, len);
-  }
-  if ((doc->scalar_stream_features &
-       (LQL_SELECTOR_FEATURE_NUMERIC_RANGE | LQL_SELECTOR_FEATURE_PREFIX |
-        LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL)) ==
-      LQL_SELECTOR_FEATURE_NUMERIC_RANGE) {
+  if ((doc->scalar_stream_features & LQL_EVAL_FEATURE_PREFIX_CAPTURE) != 0u) {
     prefix_stream_update(doc, data, len);
   }
   return LONEJSON_STATUS_OK;
@@ -2086,6 +2079,11 @@ static lonejson_status on_number_begin(void *user,
       doc->scalar_path_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
   if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
       0u) {
+    if ((doc->scalar_stream_features &
+         (LQL_SELECTOR_FEATURE_PREFIX | LQL_SELECTOR_FEATURE_EXACT |
+          LQL_SELECTOR_FEATURE_TEMPORAL)) == 0u) {
+      doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
+    }
     numeric_stream_reset(doc);
     if (doc->prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
       doc->prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
