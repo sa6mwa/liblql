@@ -389,8 +389,10 @@ static void reset_doc(eval_doc *doc) {
     ++doc->candidate_epoch;
     if (doc->candidate_epoch == 0u) {
       memset(doc->hits, 0, sizeof(*doc->hits) * doc->selector->hit_count);
-      memset(doc->stream_misses, 0,
-             sizeof(*doc->stream_misses) * doc->selector->hit_count);
+      if (doc->stream_misses != NULL) {
+        memset(doc->stream_misses, 0,
+               sizeof(*doc->stream_misses) * doc->selector->hit_count);
+      }
       if (doc->in_matches != NULL && doc->in_match_stride != 0u) {
         memset(doc->in_matches, 0,
                sizeof(*doc->in_matches) * doc->selector->hit_count *
