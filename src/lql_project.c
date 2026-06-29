@@ -1160,6 +1160,7 @@ static lql_status lql_project_reader(lql *self,
   lonejson_path_value_visitor visitor;
   projection_state state;
   lonejson_status st;
+  int runtime_pooled;
   if (projection == NULL || reader_fn == NULL || out == NULL ||
       out_found == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -1167,7 +1168,8 @@ static lql_status lql_project_reader(lql *self,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   *out_found = 0;
-  runtime = lql_lonejson_new(self, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
@@ -1175,7 +1177,7 @@ static lql_status lql_project_reader(lql *self,
   memset(&state, 0, sizeof(state));
   state.allocator = lql_allocator_from_receiver(self);
   if (state.allocator == NULL) {
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "projection receiver allocator required");
     return LQL_STATUS_INVALID_ARGUMENT;
@@ -1186,7 +1188,7 @@ static lql_status lql_project_reader(lql *self,
   if (lonejson_writer_init_sink(runtime, &state.writer, file_sink, out,
                                 &lj_error) != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     projection_state_cleanup(&state);
     return LQL_STATUS_JSON_ERROR;
   }
@@ -1196,7 +1198,7 @@ static lql_status lql_project_reader(lql *self,
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
                   "projection source must be a JSON object");
     lonejson_writer_cleanup(&state.writer);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     projection_state_cleanup(&state);
     return LQL_STATUS_JSON_ERROR;
   }
@@ -1211,7 +1213,7 @@ static lql_status lql_project_reader(lql *self,
   }
   *out_found = state.found;
   lonejson_writer_cleanup(&state.writer);
-  lonejson_free(runtime);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   projection_state_cleanup(&state);
   if (st != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
@@ -1295,8 +1297,10 @@ static lql_status compact_reader(lql *self, lonejson_reader_fn read,
   lonejson_error lj_error;
   lonejson_writer writer;
   lonejson_status st;
+  int runtime_pooled;
 
-  runtime = lql_lonejson_new(self, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
@@ -1304,7 +1308,7 @@ static lql_status compact_reader(lql *self, lonejson_reader_fn read,
   if (lonejson_writer_init_sink(runtime, &writer, file_sink, out, &lj_error) !=
       LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     return LQL_STATUS_JSON_ERROR;
   }
   st = lonejson_writer_json_value_reader(&writer, read, read_user, &lj_error);
@@ -1312,7 +1316,7 @@ static lql_status compact_reader(lql *self, lonejson_reader_fn read,
     st = lonejson_writer_finish(&writer, &lj_error);
   }
   lonejson_writer_cleanup(&writer);
-  lonejson_free(runtime);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   if (st != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
@@ -1368,13 +1372,15 @@ static lql_status compact_json_method(lql *self,
   lonejson_error lj_error;
   lonejson_writer writer;
   lonejson_status st;
+  int runtime_pooled;
 
   if (json == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "json and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  runtime = lql_lonejson_new(self, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
@@ -1382,7 +1388,7 @@ static lql_status compact_json_method(lql *self,
   if (lonejson_writer_init_sink(runtime, &writer, file_sink, out, &lj_error) !=
       LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     return LQL_STATUS_JSON_ERROR;
   }
   st = lonejson_writer_json_value_buffer(&writer, json, json_len, &lj_error);
@@ -1390,7 +1396,7 @@ static lql_status compact_json_method(lql *self,
     st = lonejson_writer_finish(&writer, &lj_error);
   }
   lonejson_writer_cleanup(&writer);
-  lonejson_free(runtime);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   if (st != LONEJSON_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;

@@ -163,13 +163,17 @@ Mature public liblql paths are expected to be C-native: bounded-memory by
 design and substantially faster than Go except where measurements are dominated
 by documented external costs such as process startup or disk I/O. Behavioral
 benchmark parity and C performance acceptance are separate gates.
+Performance work favors reducing hot-path branches, repeated selector walks,
+copies, and allocator traffic. liblql does not use selector/result caches or
+hidden full-document materialization to make streaming paths appear faster.
 Selected-scalar query predicates use bounded streaming state in liblql rather
 than full selected-value buffers, including numeric `range`; the current
 lonejson visitor still imposes a small raw number-token limit documented in
 `docs/liblql-dependency-gaps.md`.
 The fast C test gate also proves the warmed decision hot path does not attempt
 receiver allocation for file, callback-source, root-array source, compound, and
-mixed scalar-observer selectors.
+mixed scalar-observer selectors. Warmed projection and seekable candidate
+mutation paths are covered by the same no-receiver-allocation contract.
 
 Common verification targets:
 

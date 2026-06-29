@@ -1952,6 +1952,84 @@ static int expect_projection_unselected_large_blob_allocation_stable(void) {
   return 0;
 }
 
+static int expect_projection_steady_state_has_no_receiver_alloc(void) {
+  counting_allocator counter;
+  lql *ctx;
+  lql_projection *projection;
+  const char *fields[1];
+  lql_error error;
+  lql_status st;
+  FILE *out;
+  int found;
+  size_t frozen_attempts;
+  static const char json[] =
+      "{\"id\":\"a\",\"blob\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}";
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("projection steady receiver failed: %s\n", error.message);
+    return 1;
+  }
+  fields[0] = "/id";
+  projection = NULL;
+  lql_error_init(&error);
+  st = ctx->projection_parse(ctx, fields, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK || projection == NULL) {
+    printf("projection steady parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+#define RUN_PROJECTION_STEADY(label)                                           \
+  do {                                                                         \
+    out = tmpfile();                                                           \
+    if (out == NULL) {                                                         \
+      printf("projection steady output tmpfile failed: %s\n", (label));       \
+      ctx->projection_destroy(ctx, projection);                                \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+    found = 0;                                                                 \
+    lql_error_init(&error);                                                    \
+    st = ctx->project_json(ctx, projection, json, strlen(json), out, &found,   \
+                           &error);                                            \
+    fclose(out);                                                               \
+    if (st != LQL_STATUS_OK || !found) {                                       \
+      printf("projection steady run failed (%s): %s\n", (label),              \
+             error.message);                                                   \
+      ctx->projection_destroy(ctx, projection);                                \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+  } while (0)
+
+  RUN_PROJECTION_STEADY("warmup-1");
+  RUN_PROJECTION_STEADY("warmup-2");
+  frozen_attempts = counter.alloc_attempt_count;
+  counting_allocator_freeze(&counter);
+  RUN_PROJECTION_STEADY("frozen");
+#undef RUN_PROJECTION_STEADY
+  if (counter.alloc_attempt_count != frozen_attempts) {
+    printf("projection steady receiver allocation attempted: before=%lu "
+           "after=%lu\n",
+           (unsigned long)frozen_attempts,
+           (unsigned long)counter.alloc_attempt_count);
+    ctx->projection_destroy(ctx, projection);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  ctx->projection_destroy(ctx, projection);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u) {
+    printf("projection steady cleanup imbalance: outstanding=%lu\n",
+           (unsigned long)counter.outstanding);
+    return 1;
+  }
+  return 0;
+}
+
 static int expect_selector_contains_large_blob_allocation_stable(void) {
   static char small_doc[128];
   static char large_doc[70064];
@@ -2748,6 +2826,7 @@ int main(void) {
   failures += expect_selector_numeric_range_large_number_allocation_stable();
   failures += expect_projection_success_uses_allocator();
   failures += expect_projection_unselected_large_blob_allocation_stable();
+  failures += expect_projection_steady_state_has_no_receiver_alloc();
   failures += expect_projection_parse_failure_cleans_allocator();
   failures += expect_mutation_success_uses_allocator();
   failures += expect_mutation_unselected_large_blob_allocation_stable();
