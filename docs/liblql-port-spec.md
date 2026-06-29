@@ -1763,6 +1763,11 @@ Current implementation status:
   observer branches; the same allocator gate freezes the receiver after
   projection warmup and seekable candidate mutation warmup, proving those
   supported hot paths do not allocate through the receiver in steady state;
+- selector evaluation reuses prepared scalar-family slices and current-scalar
+  metadata instead of repeating broad predicate scans. Contains, prefix, and
+  exact observers share one scalar text length per value, and selectors whose
+  truth is sticky once true reuse the candidate's already-observed positive
+  match at finalization instead of walking the selector tree again;
 - mutation execution derives a private literal-only path trait at plan parse
   time and uses it to bypass recursive virtual-key matching for common literal
   mutation plans such as nested set operations, reducing branches in the
@@ -1776,7 +1781,10 @@ Current implementation status:
   the rewrite pass. Linux builds use unlocked stdio writes inside that
   already-locked region, including seekable candidate range copies and
   separators, reducing repeated stdio lock overhead without bypassing the
-  public FILE output contract or adding output buffering;
+  public FILE output contract or adding output buffering. Internal spooled
+  rewrite paths use the same lock/unlocked-write shape for candidate payload
+  copies and separators while public payload-writing APIs keep their normal
+  FILE behavior;
 - callback-source plus-value, projection, and mutation paths are now profiled
   as dominated by lonejson candidate spooling/replay for non-seekable streams.
   Sparse selectors need predicate-gated candidate capture so discarded

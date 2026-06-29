@@ -104,6 +104,11 @@ selector-sized buffers for every candidate.
 Receiver-owned evaluator scratch carries those epochs across warmed queries, so
 query setup does not clear selector-sized hit and stream-state arrays unless
 scratch grows or an epoch wraps.
+Scalar value observers compute each current scalar's text length once when
+contains, prefix, or exact families need it, rather than rescanning the same
+value separately for each observer family. For selectors whose truth is sticky
+once true, candidate finalization reuses the already-observed positive match
+state instead of walking the selector tree again at candidate end.
 Seekable mutation setup initializes only live mutation state and plan scratch,
 not the full inline frame reserve. Path frames are assigned when pushed, so this
 removes per-candidate zeroing without adding retained candidate state.
@@ -117,6 +122,9 @@ existing FILE API and streaming directly to the caller's output. Linux builds
 use unlocked stdio writes inside that already-locked region, including
 seekable candidate range copies and separators, avoiding per-write lock
 branches without adding output caches or materialized buffers.
+Internal spooled rewrite passes use the same output-lock shape for spooled
+payload copies and candidate separators, keeping public payload APIs unchanged
+while removing repeated stdio lock traffic from source/file rewrite paths.
 Callback-source decision streams inspect one bounded prefix chunk and use
 no-capture parsing for ordinary non-array streams, while preserving sink capture
 for root-array recursion on non-seekable inputs.
