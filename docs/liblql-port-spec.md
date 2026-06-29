@@ -1749,6 +1749,13 @@ Current implementation status:
   mutation plans such as nested set operations, reducing branches in the
   mutation visitor without introducing candidate/result caching or hidden
   materialization;
+- source-backed projection and mutation are now profiled as dominated by
+  lonejson candidate spooling/replay for dense non-seekable streams. The
+  required final performance step is a lonejson single-pass candidate transform
+  visitor that lets selector observation and projection/mutation writing share
+  one validated parse; liblql must not emulate that with full-candidate
+  buffering, temp-file staging, or a second JSON parser. The dependency need is
+  tracked in `docs/liblql-dependency-gaps.md`;
 - current local lifecycle confidence has passed `make test-all`,
   `make bench-check`, `make bench-memory-check`, `make bench-1g-check`,
   `make package-verify`, `make release-matrix`, and clean `make release` on

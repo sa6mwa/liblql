@@ -241,3 +241,76 @@ plus-value, projection, and matches-only mutation paths that currently use
 all-candidate spooled capture with selector-gated retain/discard. That is the
 remaining dependency-owned performance path for sparse non-seekable candidate
 streams.
+
+## Single-Pass Candidate Transform Visitors
+
+The predicate-gated capture feature above removes wasted replay work for sparse
+selectors. It does not solve dense or all-match transforms where every
+candidate is retained. Current callback-source projection and candidate
+mutation have to parse each candidate once for selector evaluation while
+lonejson spools the candidate bytes, then parse the spooled candidate again to
+project or mutate it. Local `perf` profiles on `lonejson v0.35.2` show the
+dominant cost in these paths is `lonejson_spooled_append`, allocator growth
+under that append path, and replay/write work, not liblql selector or mutation
+dispatch.
+
+That two-pass shape is semantically correct and bounded, but it is not the
+final C-native performance shape for dense non-seekable source transforms.
+liblql must not "fix" it by retaining whole candidates itself, building a
+parallel JSON parser, materializing projection state as full JSON values, or
+using temporary files as a hidden staging layer. The missing capability is a
+lonejson-owned way for one parse of a candidate to feed multiple path-aware
+consumers and a writer.
+
+The required lonejson follow-up is a candidate-stream transform mode that lets a
+consumer attach more than one path-aware visitor to the same candidate parse, or
+otherwise compose visitor pipelines so selector evaluation and projection or
+mutation output can happen from the same validated token stream.
+
+Required semantics:
+
+- The parser validates and frames each candidate once.
+- The same candidate parse can drive selector-style observation and one
+  transform writer without replaying candidate bytes through a second parser.
+- The transform side can suppress, replace, or pass through the current value
+  according to callback decisions while preserving normal JSON writer
+  validation and escaping rules.
+- The API preserves existing candidate metadata: index, stream offset, byte
+  size, payload size when applicable, stop/error propagation, and fragmented
+  reader behavior.
+- Memory remains bounded by parser stack, writer state, selector/projection/
+  mutation scratch, and configured current-value buffers. Retaining the whole
+  source, all candidates, or all matched outputs is not allowed.
+- Existing candidate capture modes keep their current behavior. This feature is
+  an additional single-pass transform surface, not a semantic change to
+  `CAPTURE_SPOOLED`.
+
+Non-goals:
+
+- Do not add liblql-specific selector or mutation knowledge to lonejson.
+- Do not require byte-identical Go JSON output.
+- Do not expose raw parser internals that make downstream libraries implement
+  their own JSON tokenizer or serializer.
+- Do not make this feature depend on seekable input; the main need is
+  callback-source streams that cannot rewind.
+
+Validation needed in lonejson:
+
+- dense-match projection fixture proves one parse can select and write
+  projected output without candidate spooling or replay;
+- dense-match mutation fixture proves one parse can mutate matched object
+  candidates and pass through or suppress others according to caller policy;
+- sparse-match fixture composes cleanly with retain/discard behavior if both
+  features are present;
+- fragmented reader fixtures prove transform output is independent of input
+  chunk boundaries;
+- stop and callback failure propagate without emitting later candidates;
+- malformed JSON after prior complete candidates preserves prior callbacks and
+  reports the parse error;
+- peak memory is independent of total source size and does not grow with the
+  number of candidates.
+
+Once lonejson exposes this surface, liblql can replace the current
+callback-source projection and mutation replay paths with true single-pass
+source transforms. That is the remaining dependency-owned performance path for
+dense non-seekable candidate transforms.
