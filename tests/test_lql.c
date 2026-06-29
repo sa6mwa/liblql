@@ -7234,6 +7234,18 @@ static void expect_selector_match_api(void) {
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":10}", 0);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":20}", 1);
   expect_match("range{field=/progress,gt=10,lte=20}", "{\"progress\":21}", 0);
+  expect_match("range{field=/n,gt=1}",
+               "{\"n\":99999999999999999999999999999999999999999999999999999"
+               "999999999999999999999999999}",
+               1);
+  expect_match("range{field=/n,lt=-1}",
+               "{\"n\":-9999999999999999999999999999999999999999999999999999"
+               "99999999999999999999999999}",
+               1);
+  expect_match("range{field=/n,gt=0,lt=1}",
+               "{\"n\":0.00000000000000000000000000000000000000000000000000"
+               "0000000000000000000009}",
+               1);
   expect_match("range{field=/"
                "timestamp,gte=2026-03-05T10:28:21Z,lt=2026-03-05T10:30:00Z}",
                "{\"timestamp\":\"2026-03-05T10:29:00Z\"}", 1);

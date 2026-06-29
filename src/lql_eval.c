@@ -22,6 +22,9 @@
 #define LQL_EVAL_PREFIX_CAP 8192u
 #define LQL_EVAL_EXACT_CAP 8192u
 #define LQL_EVAL_TEMPORAL_CAP 8192u
+#define LQL_EVAL_NUMERIC_PREFIX_CAP 64u
+#define LQL_EVAL_NUMERIC_SIG_CAP 32u
+#define LQL_EVAL_NUMERIC_EXP_CAP 1000000L
 
 typedef struct eval_doc {
   lql_allocator *allocator;
@@ -37,6 +40,7 @@ typedef struct eval_doc {
   int scalar_stream_prefix;
   int scalar_stream_exact;
   int scalar_stream_temporal;
+  int scalar_stream_numeric_range;
   size_t scalar_len;
   size_t contains_tail_len;
   size_t contains_tail_need;
@@ -44,6 +48,18 @@ typedef struct eval_doc {
   size_t prefix_len;
   size_t prefix_need;
   char prefix_buf[LQL_EVAL_PREFIX_CAP + 1u];
+  int number_negative;
+  int number_after_decimal;
+  int number_in_exp;
+  int number_exp_negative;
+  int number_nonzero_seen;
+  int number_first_sig_integer;
+  int number_sig_truncated;
+  size_t number_int_digits;
+  size_t number_frac_leading_zeros;
+  size_t number_sig_len;
+  long number_exp_value;
+  char number_sig[LQL_EVAL_NUMERIC_SIG_CAP + 1u];
   int *container_types;
   size_t *container_depths;
   size_t container_count;
@@ -266,6 +282,7 @@ static void reset_doc(eval_doc *doc) {
   doc->scalar_stream_prefix = 0;
   doc->scalar_stream_exact = 0;
   doc->scalar_stream_temporal = 0;
+  doc->scalar_stream_numeric_range = 0;
   doc->scalar_len = 0u;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
@@ -843,7 +860,7 @@ static int selector_string_buffer_required(const eval_doc *doc,
     exact_len = selector_in_max_value_len(selector);
     return exact_len > LQL_EVAL_EXACT_CAP;
   case LQL_SELECTOR_KIND_RANGE:
-    return !selector->range_is_temporal;
+    return 0;
   case LQL_SELECTOR_KIND_DATE:
     return 0;
   case LQL_SELECTOR_KIND_EXISTS:
@@ -1003,8 +1020,8 @@ static int selector_temporal_stream_interested(const eval_doc *doc,
     found = 0;
     for (i = 0u; i < selector->child_count; ++i) {
       child_temporal_need = 0u;
-      if (selector_temporal_stream_interested(doc, &selector->children[i],
-                                              path, &child_temporal_need)) {
+      if (selector_temporal_stream_interested(doc, &selector->children[i], path,
+                                              &child_temporal_need)) {
         found = 1;
         if (child_temporal_need > *temporal_need) {
           *temporal_need = child_temporal_need;
@@ -1035,6 +1052,36 @@ static int selector_temporal_stream_interested(const eval_doc *doc,
   return 0;
 }
 
+static int selector_numeric_range_stream_interested(
+    const eval_doc *doc, const lql_selector *selector,
+    const lonejson_value_path *path, size_t *prefix_need) {
+  size_t i;
+  int found;
+
+  if (selector == NULL) {
+    return 0;
+  }
+  if (!selector_is_predicate(selector)) {
+    found = 0;
+    for (i = 0u; i < selector->child_count; ++i) {
+      if (selector_numeric_range_stream_interested(doc, &selector->children[i],
+                                                   path, prefix_need)) {
+        found = 1;
+      }
+    }
+    return found;
+  }
+  if (selector->kind != LQL_SELECTOR_KIND_RANGE ||
+      selector->range_is_temporal ||
+      !path_matches(doc, selector->field, path)) {
+    return 0;
+  }
+  if (*prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
+    *prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
+  }
+  return 1;
+}
+
 static int scalar_path_buffer_required(const eval_doc *doc,
                                        const lonejson_value_path *path) {
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
@@ -1049,34 +1096,46 @@ static int scalar_path_contains_stream_interested(
     return 0;
   }
   return selector_contains_stream_interested(doc, doc->selector, path,
-                                            tail_need);
+                                             tail_need);
 }
 
-static int scalar_path_prefix_stream_interested(
-    const eval_doc *doc, const lonejson_value_path *path, size_t *prefix_need) {
+static int scalar_path_prefix_stream_interested(const eval_doc *doc,
+                                                const lonejson_value_path *path,
+                                                size_t *prefix_need) {
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return 0;
   }
   return selector_prefix_stream_interested(doc, doc->selector, path,
-                                          prefix_need);
+                                           prefix_need);
 }
 
-static int scalar_path_exact_stream_interested(
-    const eval_doc *doc, const lonejson_value_path *path, size_t *exact_need) {
+static int scalar_path_exact_stream_interested(const eval_doc *doc,
+                                               const lonejson_value_path *path,
+                                               size_t *exact_need) {
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return 0;
   }
   return selector_exact_stream_interested(doc, doc->selector, path, exact_need);
 }
 
-static int scalar_path_temporal_stream_interested(
-    const eval_doc *doc, const lonejson_value_path *path,
-    size_t *temporal_need) {
+static int
+scalar_path_temporal_stream_interested(const eval_doc *doc,
+                                       const lonejson_value_path *path,
+                                       size_t *temporal_need) {
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return 0;
   }
   return selector_temporal_stream_interested(doc, doc->selector, path,
-                                            temporal_need);
+                                             temporal_need);
+}
+
+static int scalar_path_numeric_range_stream_interested(
+    const eval_doc *doc, const lonejson_value_path *path, size_t *prefix_need) {
+  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return 0;
+  }
+  return selector_numeric_range_stream_interested(doc, doc->selector, path,
+                                                  prefix_need);
 }
 
 static void observe_contains_stream_begin(eval_doc *doc,
@@ -1186,12 +1245,11 @@ static void observe_prefix_stream_end(eval_doc *doc,
   if (doc->scalar_len < value_len || doc->prefix_len < value_len) {
     return;
   }
-  ignore_case = selector->kind == LQL_SELECTOR_KIND_IPREFIX ||
-                selector->ignore_case;
+  ignore_case =
+      selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case;
   if (ignore_case) {
     if (ascii_case_equal_prefix(doc->prefix_buf,
-                                selector->value == NULL ? "" :
-                                                          selector->value,
+                                selector->value == NULL ? "" : selector->value,
                                 value_len)) {
       doc->hits[selector->hit_index] = 1u;
     }
@@ -1242,8 +1300,8 @@ static void observe_exact_stream_end(eval_doc *doc,
   }
   for (i = 0u; i < selector->any_count; ++i) {
     value = selector->any[i];
-    value_len = selector->any_lens == NULL ? strlen(value) :
-                                             selector->any_lens[i];
+    value_len =
+        selector->any_lens == NULL ? strlen(value) : selector->any_lens[i];
     if (doc->scalar_len == value_len && doc->prefix_len >= value_len &&
         memcmp(doc->prefix_buf, value, value_len) == 0) {
       doc->hits[selector->hit_index] = 1u;
@@ -1339,6 +1397,134 @@ static void observe_temporal_stream_end(eval_doc *doc,
   }
 }
 
+static void numeric_stream_reset(eval_doc *doc) {
+  doc->number_negative = 0;
+  doc->number_after_decimal = 0;
+  doc->number_in_exp = 0;
+  doc->number_exp_negative = 0;
+  doc->number_nonzero_seen = 0;
+  doc->number_first_sig_integer = 0;
+  doc->number_sig_truncated = 0;
+  doc->number_int_digits = 0u;
+  doc->number_frac_leading_zeros = 0u;
+  doc->number_sig_len = 0u;
+  doc->number_exp_value = 0L;
+  doc->number_sig[0] = '\0';
+}
+
+static void numeric_stream_record_digit(eval_doc *doc, char c) {
+  if (!doc->number_nonzero_seen) {
+    if (c == '0') {
+      if (doc->number_after_decimal) {
+        ++doc->number_frac_leading_zeros;
+      }
+      return;
+    }
+    doc->number_nonzero_seen = 1;
+    doc->number_first_sig_integer = !doc->number_after_decimal;
+  }
+  if (doc->number_sig_len < LQL_EVAL_NUMERIC_SIG_CAP) {
+    doc->number_sig[doc->number_sig_len] = c;
+    ++doc->number_sig_len;
+    doc->number_sig[doc->number_sig_len] = '\0';
+  } else {
+    doc->number_sig_truncated = 1;
+  }
+}
+
+static void numeric_stream_update(eval_doc *doc, const char *data, size_t len) {
+  size_t i;
+  unsigned char c;
+
+  for (i = 0u; i < len; ++i) {
+    c = (unsigned char)data[i];
+    if (doc->number_in_exp) {
+      if (c == '-' && doc->number_exp_value == 0L) {
+        doc->number_exp_negative = 1;
+      } else if (c == '+' && doc->number_exp_value == 0L) {
+      } else if (isdigit(c)) {
+        if (doc->number_exp_value < LQL_EVAL_NUMERIC_EXP_CAP) {
+          doc->number_exp_value = doc->number_exp_value * 10L + (long)(c - '0');
+          if (doc->number_exp_value > LQL_EVAL_NUMERIC_EXP_CAP) {
+            doc->number_exp_value = LQL_EVAL_NUMERIC_EXP_CAP;
+          }
+        }
+      }
+      continue;
+    }
+    if (c == '-') {
+      doc->number_negative = 1;
+    } else if (c == '.') {
+      doc->number_after_decimal = 1;
+    } else if (c == 'e' || c == 'E') {
+      doc->number_in_exp = 1;
+    } else if (isdigit(c)) {
+      if (!doc->number_after_decimal) {
+        ++doc->number_int_digits;
+      }
+      numeric_stream_record_digit(doc, (char)c);
+    }
+  }
+}
+
+static double numeric_stream_value(const eval_doc *doc) {
+  char number_buf[96];
+  long exp10;
+  long explicit_exp;
+
+  if (doc->scalar_len == doc->prefix_len) {
+    return strtod(doc->prefix_buf, NULL);
+  }
+  if (!doc->number_nonzero_seen || doc->number_sig_len == 0u) {
+    return doc->number_negative ? -0.0 : 0.0;
+  }
+  explicit_exp =
+      doc->number_exp_negative ? -doc->number_exp_value : doc->number_exp_value;
+  if (doc->number_first_sig_integer) {
+    if (doc->number_int_digits > doc->number_sig_len) {
+      exp10 = (long)(doc->number_int_digits - doc->number_sig_len);
+    } else {
+      exp10 = -(long)(doc->number_sig_len - doc->number_int_digits);
+    }
+  } else {
+    exp10 = -(long)(doc->number_frac_leading_zeros + doc->number_sig_len);
+  }
+  exp10 += explicit_exp;
+  sprintf(number_buf, "%s%se%ld", doc->number_negative ? "-" : "",
+          doc->number_sig, exp10);
+  return strtod(number_buf, NULL);
+}
+
+static void observe_numeric_range_stream_end(eval_doc *doc,
+                                             const lql_selector *selector,
+                                             const lonejson_value_path *path) {
+  size_t i;
+  double number;
+
+  if (selector == NULL || doc->hits == NULL) {
+    return;
+  }
+  if (!selector_is_predicate(selector)) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      observe_numeric_range_stream_end(doc, &selector->children[i], path);
+    }
+    return;
+  }
+  if (selector->kind != LQL_SELECTOR_KIND_RANGE ||
+      selector->range_is_temporal ||
+      !path_matches(doc, selector->field, path) ||
+      doc->hits[selector->hit_index] != 0u) {
+    return;
+  }
+  number = numeric_stream_value(doc);
+  if ((!selector->has_range_gt || number > selector->range_gt) &&
+      (!selector->has_range_gte || number >= selector->range_gte) &&
+      (!selector->has_range_lt || number < selector->range_lt) &&
+      (!selector->has_range_lte || number <= selector->range_lte)) {
+    doc->hits[selector->hit_index] = 1u;
+  }
+}
+
 static int contains_stream_scan(const char *tail, size_t tail_len,
                                 const char *data, size_t len,
                                 const char *needle, size_t needle_len,
@@ -1369,9 +1555,8 @@ static int contains_stream_scan(const char *tail, size_t tail_len,
 
 static int contains_any_stream_scan(const char *tail, size_t tail_len,
                                     const char *data, size_t len,
-                                    char **needles,
-                                    const size_t *needle_lens, size_t count,
-                                    int ignore_case) {
+                                    char **needles, const size_t *needle_lens,
+                                    size_t count, int ignore_case) {
   char boundary[LQL_EVAL_CONTAINS_TAIL_CAP * 2u];
   size_t prefix_len;
   size_t boundary_len;
@@ -1418,13 +1603,13 @@ static void observe_contains_stream_chunk(eval_doc *doc,
       doc->hits[selector->hit_index] != 0u) {
     return;
   }
-  ignore_case = selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
-                selector->ignore_case;
+  ignore_case =
+      selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case;
   if (selector->any_count == 0u) {
     value_len = selector->value == NULL ? 0u : strlen(selector->value);
     if (contains_stream_scan(doc->contains_tail, doc->contains_tail_len, data,
-                             len, selector->value == NULL ? "" :
-                                                               selector->value,
+                             len,
+                             selector->value == NULL ? "" : selector->value,
                              value_len, ignore_case)) {
       doc->hits[selector->hit_index] = 1u;
     }
@@ -1573,17 +1758,19 @@ static lonejson_status on_string_begin(void *user,
   doc->prefix_len = 0u;
   doc->prefix_need = 0u;
   doc->prefix_buf[0] = '\0';
+  numeric_stream_reset(doc);
   doc->scalar_interested = scalar_path_buffer_required(doc, path);
   if (!doc->scalar_interested) {
     observe_scalar_exists_begin(doc, doc->selector, path);
     doc->scalar_stream_contains = scalar_path_contains_stream_interested(
         doc, path, &doc->contains_tail_need);
-    doc->scalar_stream_prefix = scalar_path_prefix_stream_interested(
-        doc, path, &doc->prefix_need);
-    doc->scalar_stream_exact = scalar_path_exact_stream_interested(
-        doc, path, &doc->prefix_need);
-    doc->scalar_stream_temporal = scalar_path_temporal_stream_interested(
-        doc, path, &doc->prefix_need);
+    doc->scalar_stream_prefix =
+        scalar_path_prefix_stream_interested(doc, path, &doc->prefix_need);
+    doc->scalar_stream_exact =
+        scalar_path_exact_stream_interested(doc, path, &doc->prefix_need);
+    doc->scalar_stream_temporal =
+        scalar_path_temporal_stream_interested(doc, path, &doc->prefix_need);
+    doc->scalar_stream_numeric_range = 0;
     if (doc->scalar_stream_contains) {
       observe_contains_stream_begin(doc, doc->selector, path);
     }
@@ -1595,6 +1782,7 @@ static lonejson_status on_string_begin(void *user,
     doc->scalar_stream_prefix = 0;
     doc->scalar_stream_exact = 0;
     doc->scalar_stream_temporal = 0;
+    doc->scalar_stream_numeric_range = 0;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -1619,6 +1807,10 @@ static lonejson_status on_string_chunk(void *user,
     }
     if (doc->scalar_stream_temporal && !doc->scalar_stream_prefix &&
         !doc->scalar_stream_exact) {
+      prefix_stream_update(doc, data, len);
+    }
+    if (doc->scalar_stream_numeric_range && !doc->scalar_stream_prefix &&
+        !doc->scalar_stream_exact && !doc->scalar_stream_temporal) {
       prefix_stream_update(doc, data, len);
     }
     return LONEJSON_STATUS_OK;
@@ -1659,6 +1851,7 @@ static lonejson_status on_string_end(void *user,
   doc->scalar_stream_prefix = 0;
   doc->scalar_stream_exact = 0;
   doc->scalar_stream_temporal = 0;
+  doc->scalar_stream_numeric_range = 0;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;
@@ -1669,14 +1862,38 @@ static lonejson_status on_string_end(void *user,
 static lonejson_status on_number_begin(void *user,
                                        const lonejson_value_path *path,
                                        lonejson_error *error) {
-  return on_string_begin(user, path, error);
+  eval_doc *doc;
+  lonejson_status st;
+
+  st = on_string_begin(user, path, error);
+  if (st != LONEJSON_STATUS_OK) {
+    return st;
+  }
+  doc = (eval_doc *)user;
+  if (!doc->scalar_interested) {
+    doc->scalar_stream_numeric_range =
+        scalar_path_numeric_range_stream_interested(doc, path,
+                                                    &doc->prefix_need);
+  }
+  return LONEJSON_STATUS_OK;
 }
 
 static lonejson_status on_number_chunk(void *user,
                                        const lonejson_value_path *path,
                                        const char *data, size_t len,
                                        lonejson_error *error) {
-  return on_string_chunk(user, path, data, len, error);
+  eval_doc *doc;
+  lonejson_status st;
+
+  st = on_string_chunk(user, path, data, len, error);
+  if (st != LONEJSON_STATUS_OK) {
+    return st;
+  }
+  doc = (eval_doc *)user;
+  if (!doc->scalar_interested && doc->scalar_stream_numeric_range) {
+    numeric_stream_update(doc, data, len);
+  }
+  return LONEJSON_STATUS_OK;
 }
 
 static lonejson_status on_number_end(void *user,
@@ -1699,6 +1916,9 @@ static lonejson_status on_number_end(void *user,
     if (doc->scalar_stream_temporal) {
       observe_temporal_stream_end(doc, doc->selector, path);
     }
+    if (doc->scalar_stream_numeric_range) {
+      observe_numeric_range_stream_end(doc, doc->selector, path);
+    }
   }
   doc->val_len = 0u;
   doc->scalar_len = 0u;
@@ -1710,6 +1930,7 @@ static lonejson_status on_number_end(void *user,
   doc->scalar_stream_prefix = 0;
   doc->scalar_stream_exact = 0;
   doc->scalar_stream_temporal = 0;
+  doc->scalar_stream_numeric_range = 0;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;

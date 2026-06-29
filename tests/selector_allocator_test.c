@@ -32,6 +32,7 @@ typedef struct memory_reader {
 
 static void counting_destroy(lql_allocator *self, void *ptr);
 static int make_blob_doc(char *buf, size_t capacity, size_t blob_len);
+static int make_number_doc(char *buf, size_t capacity, size_t digit_len);
 
 static void counting_record_alloc(counting_allocator *counter, size_t size) {
   ++counter->alloc_count;
@@ -1064,6 +1065,25 @@ static int make_blob_doc(char *buf, size_t capacity, size_t blob_len) {
   return 1;
 }
 
+static int make_number_doc(char *buf, size_t capacity, size_t digit_len) {
+  const char *prefix;
+  const char *suffix;
+  size_t prefix_len;
+  size_t suffix_len;
+
+  prefix = "{\"n\":";
+  suffix = "}";
+  prefix_len = strlen(prefix);
+  suffix_len = strlen(suffix);
+  if (digit_len == 0u || capacity <= prefix_len + digit_len + suffix_len) {
+    return 0;
+  }
+  memcpy(buf, prefix, prefix_len);
+  memset(buf + prefix_len, '9', digit_len);
+  memcpy(buf + prefix_len + digit_len, suffix, suffix_len + 1u);
+  return 1;
+}
+
 static int project_blob_doc(lql *ctx, lql_projection *projection,
                             const char *json, counting_allocator *counter,
                             size_t *out_delta) {
@@ -1291,8 +1311,8 @@ static int expect_selector_prefix_large_blob_allocation_stable(void) {
   }
   selector = NULL;
   lql_error_init(&error);
-  st = ctx->selector_parse(ctx, "iprefix{field=/blob,value=xx}",
-                           &selector, &error);
+  st = ctx->selector_parse(ctx, "iprefix{field=/blob,value=xx}", &selector,
+                           &error);
   if (st != LQL_STATUS_OK || selector == NULL) {
     printf("selector prefix blob parse failed: %s\n", error.message);
     ctx->destroy(ctx);
@@ -1449,8 +1469,8 @@ static int expect_selector_in_large_blob_allocation_stable(void) {
   }
   selector = NULL;
   lql_error_init(&error);
-  st = ctx->selector_parse(ctx, "in{field=/blob,any=missing|other}",
-                           &selector, &error);
+  st = ctx->selector_parse(ctx, "in{field=/blob,any=missing|other}", &selector,
+                           &error);
   if (st != LQL_STATUS_OK || selector == NULL) {
     printf("selector in blob parse failed: %s\n", error.message);
     ctx->destroy(ctx);
@@ -1738,6 +1758,83 @@ static int expect_selector_temporal_large_blob_allocation_stable(void) {
   return 0;
 }
 
+static int expect_selector_numeric_range_large_number_allocation_stable(void) {
+  static char small_doc[128];
+  static char large_doc[512];
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *selector;
+  lql_error error;
+  lql_status st;
+  int matched;
+  size_t small_peak;
+
+  if (!make_number_doc(small_doc, sizeof(small_doc), 3u) ||
+      !make_number_doc(large_doc, sizeof(large_doc), 200u)) {
+    printf("selector numeric range fixture construction failed\n");
+    return 1;
+  }
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("selector numeric range receiver failed: %s\n", error.message);
+    return 1;
+  }
+  selector = NULL;
+  lql_error_init(&error);
+  st = ctx->selector_parse(ctx, "range{field=/n,gt=1}", &selector, &error);
+  if (st != LQL_STATUS_OK || selector == NULL) {
+    printf("selector numeric range parse failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  matched = 0;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, selector, small_doc, strlen(small_doc), &matched,
+                         &error);
+  if (st != LQL_STATUS_OK || !matched) {
+    printf("selector numeric range small eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  small_peak = counter.peak_outstanding_bytes;
+
+  matched = 0;
+  lql_error_init(&error);
+  st = ctx->matches_json(ctx, selector, large_doc, strlen(large_doc), &matched,
+                         &error);
+  if (st != LQL_STATUS_OK || !matched) {
+    printf("selector numeric range large eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.peak_outstanding_bytes > small_peak + 16384u) {
+    printf("selector numeric range peak grew with input: small=%lu large=%lu\n",
+           (unsigned long)small_peak,
+           (unsigned long)counter.peak_outstanding_bytes);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("selector numeric range allocator cleanup imbalance: "
+           "outstanding=%lu destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
 static int expect_projection_parse_failure_cleans_allocator(void) {
   counting_allocator counter;
   lql *ctx;
@@ -1793,6 +1890,7 @@ int main(void) {
   failures += expect_selector_in_large_blob_allocation_stable();
   failures += expect_selector_not_equal_large_blob_allocation_stable();
   failures += expect_selector_temporal_large_blob_allocation_stable();
+  failures += expect_selector_numeric_range_large_number_allocation_stable();
   failures += expect_projection_success_uses_allocator();
   failures += expect_projection_unselected_large_blob_allocation_stable();
   failures += expect_projection_parse_failure_cleans_allocator();

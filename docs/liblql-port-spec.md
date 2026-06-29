@@ -177,10 +177,20 @@ leading slice sufficient to decide the prefix. Non-temporal `eq`, public
 inequality (`!=`), and `in` predicates also evaluate from a bounded leading
 slice plus scalar length. Temporal equality fallback, temporal inequality,
 `date`, and datetime `range` predicates evaluate from bounded scalar text plus
-scalar length. Whole-scalar buffering is acceptable only for predicates whose
-semantics currently require the complete scalar text, currently numeric range
-parsing, or for selector literals that exceed the bounded streaming evaluator
-caps.
+scalar length. Numeric `range` predicates evaluate number chunks with a bounded
+leading slice, a small significant-digit window, and decimal/exponent counters;
+liblql must not allocate storage proportional to the selected number text.
+Whole-scalar buffering is acceptable only for selector literals that exceed the
+bounded streaming evaluator caps, and those cases must remain explicit
+fallbacks rather than hidden streaming-looking materialization.
+
+As of lonejson `v0.35.2`, the path-value visitor used by liblql still enforces
+a small raw JSON number-token limit and performs bounded internal allocation for
+number-token parsing. That is a dependency limitation, not permission for
+liblql to copy selected numeric values. Full arbitrarily large numeric-token
+support requires a lonejson public visitor mode that can stream raw number
+tokens without token-size-proportional allocation and with a configurable
+64-bit byte limit.
 
 ## Selector AST Public API
 

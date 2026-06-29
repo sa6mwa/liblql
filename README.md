@@ -117,6 +117,10 @@ Mature public liblql paths are expected to be C-native: bounded-memory by
 design and substantially faster than Go except where measurements are dominated
 by documented external costs such as process startup or disk I/O. Behavioral
 benchmark parity and C performance acceptance are separate gates.
+Selected-scalar query predicates use bounded streaming state in liblql rather
+than full selected-value buffers, including numeric `range`; the current
+lonejson visitor still imposes a small raw number-token limit documented in
+`docs/liblql-dependency-gaps.md`.
 
 Common verification targets:
 

@@ -136,3 +136,24 @@ ambiguous inputs. liblql should not add an alternate JSON parser or
 pre-normalization layer to mimic these edge cases. If exact Go stdlib
 compatibility is required later, lonejson needs an explicit compatibility mode
 with documented semantics for these cases.
+
+## Large Numeric Token Streaming
+
+liblql numeric `range` evaluation is implemented as a bounded streaming
+consumer of lonejson number chunks: it keeps a small leading slice for ordinary
+`strtod()` parity, plus a fixed significant-digit window and decimal/exponent
+state for oversized tokens. liblql must not materialize the selected number
+text.
+
+The remaining limitation is in lonejson `v0.35.2`: the public path-value visitor
+currently rejects raw JSON number tokens above its internal maximum byte limit,
+and raising the public config field beyond that limit is not safe on the
+current release. A 200-byte accepted token also shows bounded lonejson-owned
+allocation before liblql receives the completed numeric scalar. Therefore
+arbitrarily large numeric-token range matching is not proven end to end yet.
+
+The required lonejson follow-up is a public arbitrary-value/path-value visitor
+mode that streams raw number-token chunks with a caller-configurable 64-bit byte
+limit and no allocation proportional to the number token. That feature belongs
+in lonejson because lonejson owns JSON tokenization, validation, and visitor
+delivery; liblql should not bypass lonejson with a second JSON tokenizer.
