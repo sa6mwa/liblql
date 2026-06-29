@@ -75,6 +75,8 @@ typedef struct projection_state {
 struct lql_projection {
   projection_path *paths;
   size_t path_count;
+  size_t min_segment_count;
+  size_t max_segment_count;
 };
 
 static int seek_u64(FILE *file, lql_uint64 offset) {
@@ -451,8 +453,18 @@ static int add_path(projection_parse_context *ctx, lql_projection *projection,
     return 0;
   }
   projection->paths = next;
+  if (projection->path_count == 0u ||
+      path->segment_count < projection->min_segment_count) {
+    projection->min_segment_count = path->segment_count;
+  }
+  if (path->segment_count > projection->max_segment_count) {
+    projection->max_segment_count = path->segment_count;
+  }
   projection->paths[projection->path_count++] = *path;
   path->segments = NULL;
+  path->segment_lens = NULL;
+  path->segment_is_array_index = NULL;
+  path->array_indexes = NULL;
   path->segment_count = 0u;
   return 1;
 }
@@ -477,8 +489,15 @@ static int value_path_matches(const lonejson_value_path *value_path,
 static const projection_path *selected_path(const lql_projection *projection,
                                             const lonejson_value_path *path) {
   size_t i;
-  if (projection == NULL) {
+  if (projection == NULL || path == NULL ||
+      path->segment_count < projection->min_segment_count ||
+      path->segment_count > projection->max_segment_count) {
     return NULL;
+  }
+  if (projection->path_count == 1u) {
+    return value_path_matches(path, &projection->paths[0])
+               ? &projection->paths[0]
+               : NULL;
   }
   for (i = 0u; i < projection->path_count; ++i) {
     if (value_path_matches(path, &projection->paths[i])) {
