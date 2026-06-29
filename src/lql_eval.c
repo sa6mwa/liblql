@@ -829,7 +829,6 @@ static void stream_miss_clear(eval_doc *doc, const lql_selector *selector);
 static int hit_marked(const eval_doc *doc, const lql_selector *selector);
 static int eval_selector_tree(const lql_selector *selector,
                               const eval_doc *doc);
-static size_t selector_prefix_value_len(const lql_selector *selector);
 
 static int selector_path_matches(const eval_doc *doc,
                                  const lql_selector *selector,
@@ -1117,8 +1116,8 @@ static void observe_prepared_contains_value(eval_doc *doc, const char *value,
         selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case;
     if (selector->any_count == 0u) {
       if (contains_case_len(value, value_len,
-                            selector->value == NULL ? "" : selector->value,
-                            selector->value_len, ignore_case)) {
+                            selector->value_data, selector->value_len,
+                            ignore_case)) {
         hit_mark(doc, selector);
       }
     } else if (contains_any_case_len(
@@ -1188,7 +1187,7 @@ static void observe_prepared_exact_value(eval_doc *doc, const char *value,
       continue;
     }
     if (selector->kind == LQL_SELECTOR_KIND_EQ) {
-      needle = selector->value == NULL ? "" : selector->value;
+      needle = selector->value_data;
       if (value_len == selector->value_len &&
           (value_len == 0u || memcmp(value, needle, value_len) == 0)) {
         hit_mark(doc, selector);
@@ -1196,7 +1195,7 @@ static void observe_prepared_exact_value(eval_doc *doc, const char *value,
       continue;
     }
     if (selector->kind == LQL_SELECTOR_KIND_NE) {
-      needle = selector->value == NULL ? "" : selector->value;
+      needle = selector->value_data;
       if (value_len != selector->value_len ||
           (value_len != 0u && memcmp(value, needle, value_len) != 0)) {
         hit_mark(doc, selector);
@@ -1329,13 +1328,6 @@ static void observe_prepared_exists_value(eval_doc *doc, int is_null) {
   for (i = 0u; i < count; ++i) {
     hit_mark(doc, items[i]);
   }
-}
-
-static size_t selector_prefix_value_len(const lql_selector *selector) {
-  if (selector->value == NULL) {
-    return 0u;
-  }
-  return selector->value_len;
 }
 
 static void observe_contains_stream_begin(eval_doc *doc,
@@ -1477,15 +1469,14 @@ static void observe_prefix_stream_chunk(eval_doc *doc,
     if (hit_marked(doc, selector) || stream_miss_marked(doc, selector)) {
       continue;
     }
-    value_len = selector_prefix_value_len(selector);
+    value_len = selector->value_len;
     if (value_len == 0u) {
       continue;
     }
     ignore_case =
         selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case;
-    if (!literal_chunk_matches(selector->value == NULL ? "" : selector->value,
-                               value_len, offset, data, len, ignore_case,
-                               value_len)) {
+    if (!literal_chunk_matches(selector->value_data, value_len, offset, data,
+                               len, ignore_case, value_len)) {
       stream_miss_mark(doc, selector);
     }
   }
@@ -1540,7 +1531,7 @@ static void observe_exact_stream_chunk(eval_doc *doc,
       }
       continue;
     }
-    value = selector->value == NULL ? "" : selector->value;
+    value = selector->value_data;
     value_len = selector->value_len;
     if (offset >= value_len) {
       if (selector->kind == LQL_SELECTOR_KIND_NE) {
@@ -1598,7 +1589,7 @@ static void observe_prefix_stream_end(eval_doc *doc,
     if (hit_marked(doc, selector)) {
       continue;
     }
-    value_len = selector_prefix_value_len(selector);
+    value_len = selector->value_len;
     if (doc->scalar_len < value_len || stream_miss_marked(doc, selector)) {
       continue;
     }
@@ -1606,14 +1597,12 @@ static void observe_prefix_stream_end(eval_doc *doc,
       ignore_case =
           selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case;
       if (ignore_case &&
-          !ascii_case_equal_prefix(
-              doc->prefix_buf, selector->value == NULL ? "" : selector->value,
-              value_len)) {
+          !ascii_case_equal_prefix(doc->prefix_buf, selector->value_data,
+                                   value_len)) {
         continue;
       }
-      if (!ignore_case && memcmp(doc->prefix_buf,
-                                 selector->value == NULL ? "" : selector->value,
-                                 value_len) != 0) {
+      if (!ignore_case &&
+          memcmp(doc->prefix_buf, selector->value_data, value_len) != 0) {
         continue;
       }
     }
@@ -1631,6 +1620,7 @@ static void observe_exact_stream_end(eval_doc *doc,
   size_t count;
   const char *value;
   unsigned int *matches;
+  int missed;
 
   (void)selector;
   (void)path;
@@ -1646,16 +1636,16 @@ static void observe_exact_stream_end(eval_doc *doc,
     }
     if (selector->kind == LQL_SELECTOR_KIND_EQ ||
         selector->kind == LQL_SELECTOR_KIND_NE) {
-      value = selector->value == NULL ? "" : selector->value;
+      value = selector->value_data;
       value_len = selector->value_len;
+      missed = stream_miss_marked(doc, selector);
       if (selector->kind == LQL_SELECTOR_KIND_EQ &&
-          doc->scalar_len == value_len && !stream_miss_marked(doc, selector) &&
+          doc->scalar_len == value_len && !missed &&
           (value_len > doc->prefix_len ||
            memcmp(doc->prefix_buf, value, value_len) == 0)) {
         hit_mark(doc, selector);
       } else if (selector->kind == LQL_SELECTOR_KIND_NE &&
-                 (doc->scalar_len != value_len ||
-                  stream_miss_marked(doc, selector) ||
+                 (doc->scalar_len != value_len || missed ||
                   (value_len <= doc->prefix_len &&
                    memcmp(doc->prefix_buf, value, value_len) != 0))) {
         hit_mark(doc, selector);
@@ -2028,8 +2018,7 @@ static void observe_contains_stream_chunk(eval_doc *doc,
     if (selector->any_count == 0u) {
       value_len = selector->value_len;
       if (contains_stream_scan(tail, doc->contains_tail_len, data, len,
-                               selector->value == NULL ? "" : selector->value,
-                               value_len, ignore_case)) {
+                               selector->value_data, value_len, ignore_case)) {
         hit_mark(doc, selector);
       }
     } else if (selector->any_count == 1u) {

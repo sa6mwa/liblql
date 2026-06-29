@@ -1402,6 +1402,7 @@ static size_t selector_refresh_derived_lengths(lql_selector *selector) {
     return 0u;
   }
   selector->value_len = selector->value == NULL ? 0u : strlen(selector->value);
+  selector->value_data = selector->value == NULL ? "" : selector->value;
   selector->any_max_len = 0u;
   for (i = 0u; i < selector->any_count; ++i) {
     size_t len;
@@ -2705,6 +2706,7 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   *dst = *src;
   dst->field = NULL;
   dst->value = NULL;
+  dst->value_data = "";
   dst->any = NULL;
   dst->any_lens = NULL;
   dst->any_firsts = NULL;

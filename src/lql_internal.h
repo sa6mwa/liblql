@@ -149,6 +149,7 @@ struct lql_selector {
   lql_selector_kind kind;
   char *field;
   char *value;
+  const char *value_data;
   int value_set;
   int value_is_temporal;
   size_t value_len;
