@@ -46,9 +46,6 @@ typedef struct eval_doc {
   size_t hits_cap;
   unsigned int *stream_misses;
   size_t stream_misses_cap;
-  const lql_selector **scalar_path_predicates;
-  size_t scalar_path_predicates_cap;
-  size_t scalar_path_predicate_count;
   const lql_selector **scalar_family_predicates;
   size_t scalar_family_predicates_cap;
   size_t scalar_family_stride;
@@ -236,9 +233,6 @@ static void destroy_doc(eval_doc *doc) {
     doc->impl->eval_hits_cap = doc->hits_cap;
     doc->impl->eval_stream_misses = doc->stream_misses;
     doc->impl->eval_stream_misses_cap = doc->stream_misses_cap;
-    doc->impl->eval_scalar_path_predicates = doc->scalar_path_predicates;
-    doc->impl->eval_scalar_path_predicates_cap =
-        doc->scalar_path_predicates_cap;
     doc->impl->eval_scalar_family_predicates = doc->scalar_family_predicates;
     doc->impl->eval_scalar_family_predicates_cap =
         doc->scalar_family_predicates_cap;
@@ -252,7 +246,6 @@ static void destroy_doc(eval_doc *doc) {
   } else {
     doc->allocator->destroy(doc->allocator, doc->hits);
     doc->allocator->destroy(doc->allocator, doc->stream_misses);
-    doc->allocator->destroy(doc->allocator, doc->scalar_path_predicates);
     doc->allocator->destroy(doc->allocator, doc->scalar_family_predicates);
     doc->allocator->destroy(doc->allocator, doc->in_matches);
     doc->allocator->destroy(doc->allocator, doc->contains_tail_buf);
@@ -265,7 +258,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   lql_impl *impl;
   unsigned int *next_hits;
   unsigned int *next_stream_misses;
-  const lql_selector **next_scalar_path_predicates;
   const lql_selector **next_scalar_family_predicates;
   unsigned int *next_in_matches;
   size_t in_match_need;
@@ -289,8 +281,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     doc->hits_cap = impl->eval_hits_cap;
     doc->stream_misses = impl->eval_stream_misses;
     doc->stream_misses_cap = impl->eval_stream_misses_cap;
-    doc->scalar_path_predicates = impl->eval_scalar_path_predicates;
-    doc->scalar_path_predicates_cap = impl->eval_scalar_path_predicates_cap;
     doc->scalar_family_predicates = impl->eval_scalar_family_predicates;
     doc->scalar_family_predicates_cap =
         impl->eval_scalar_family_predicates_cap;
@@ -304,8 +294,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     impl->eval_hits_cap = 0u;
     impl->eval_stream_misses = NULL;
     impl->eval_stream_misses_cap = 0u;
-    impl->eval_scalar_path_predicates = NULL;
-    impl->eval_scalar_path_predicates_cap = 0u;
     impl->eval_scalar_family_predicates = NULL;
     impl->eval_scalar_family_predicates_cap = 0u;
     impl->eval_in_matches = NULL;
@@ -353,18 +341,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     if (clear_stream_misses && doc->stream_misses != NULL) {
       memset(doc->stream_misses, 0,
              sizeof(*doc->stream_misses) * doc->stream_misses_cap);
-    }
-    if (doc->scalar_path_predicates_cap < selector->predicate_count) {
-      next_scalar_path_predicates =
-          (const lql_selector **)doc->allocator->realloc(
-              doc->allocator, doc->scalar_path_predicates,
-              sizeof(*doc->scalar_path_predicates) * selector->predicate_count);
-      if (next_scalar_path_predicates == NULL) {
-        destroy_doc(doc);
-        return 0;
-      }
-      doc->scalar_path_predicates = next_scalar_path_predicates;
-      doc->scalar_path_predicates_cap = selector->predicate_count;
     }
     if (selector->predicate_count >
         ((size_t)-1) / LQL_EVAL_FAMILY_COUNT) {
@@ -433,7 +409,6 @@ static void reset_doc(eval_doc *doc) {
   }
   doc->scalar_stream_features = 0u;
   doc->scalar_path_features = 0u;
-  doc->scalar_path_predicate_count = 0u;
   memset(doc->scalar_family_counts, 0, sizeof(doc->scalar_family_counts));
   doc->scalar_len = 0u;
   doc->contains_tail_len = 0u;
@@ -1032,11 +1007,10 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
   size_t max_needle;
 
   if (doc->selector == NULL || doc->selector->hit_count == 0u ||
-      doc->scalar_path_predicates == NULL) {
+      doc->scalar_family_predicates == NULL) {
     return;
   }
   doc->scalar_path_features = 0u;
-  doc->scalar_path_predicate_count = 0u;
   memset(doc->scalar_family_counts, 0, sizeof(doc->scalar_family_counts));
   if (doc->candidate_matched && doc->selector->match_sticky_once_true) {
     return;
@@ -1054,12 +1028,6 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
       continue;
     }
     if (selector_path_matches(doc, selector, path)) {
-      if (doc->scalar_path_predicates != NULL &&
-          doc->scalar_path_predicate_count < doc->scalar_path_predicates_cap) {
-        doc->scalar_path_predicates[doc->scalar_path_predicate_count] =
-            selector;
-        ++doc->scalar_path_predicate_count;
-      }
       if (doc->stream_misses != NULL) {
         stream_miss_clear(doc, selector);
       }
@@ -1197,94 +1165,66 @@ static int resolve_since_macro(lql_since_macro macro, lql_temporal *out) {
   }
 }
 
-static void observe_matched_selector(eval_doc *doc,
-                                     const lql_selector *selector,
-                                     const char *value, int is_number,
-                                     int is_container, int is_null) {
-  size_t n;
-  size_t j;
+static void observe_prepared_contains_value(eval_doc *doc, const char *value,
+                                            int is_container, int is_null) {
+  const lql_selector **items;
+  const lql_selector *selector;
+  size_t i;
+  size_t count;
   size_t value_len;
-  double number;
-  lql_temporal temporal;
-  lql_temporal since_macro;
-  const char *needle;
   int ignore_case;
-  if (selector == NULL) {
-    return;
-  }
-  if (doc->hits == NULL) {
-    return;
-  }
-  switch (selector->kind) {
-  case LQL_SELECTOR_KIND_EQ:
-    if (is_container || is_null) {
-      break;
-    }
-    if (strcmp(value, selector->value == NULL ? "" : selector->value) == 0) {
-      hit_mark(doc, selector);
-    } else if (selector->value_is_temporal &&
-               lql_parse_temporal_literal(value, &temporal) &&
-               lql_temporal_equal(&temporal, &selector->temporal_eq)) {
-      hit_mark(doc, selector);
-    }
-    break;
-  case LQL_SELECTOR_KIND_NE:
-    if (is_container) {
-      break;
-    }
-    if (is_null) {
-      hit_mark(doc, selector);
-      break;
-    }
-    if (strcmp(value, selector->value == NULL ? "" : selector->value) != 0 &&
-        !(selector->value_is_temporal &&
-          lql_parse_temporal_literal(value, &temporal) &&
-          lql_temporal_equal(&temporal, &selector->temporal_eq))) {
-      hit_mark(doc, selector);
-    }
-    break;
-  case LQL_SELECTOR_KIND_CONTAINS:
-  case LQL_SELECTOR_KIND_ICONTAINS:
+
+  items = scalar_family_begin(doc, LQL_EVAL_FAMILY_CONTAINS);
+  count = doc->scalar_family_counts[LQL_EVAL_FAMILY_CONTAINS];
+  for (i = 0u; i < count; ++i) {
+    selector = items[i];
     if (selector->any_count == 0u && !selector->value_set &&
         selector->value == NULL) {
       hit_mark(doc, selector);
-      break;
+      continue;
     }
     if (is_container || is_null) {
-      break;
+      continue;
     }
+    value_len = strlen(value);
+    ignore_case =
+        selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case;
     if (selector->any_count == 0u) {
-      value_len = strlen(value);
       if (contains_case_len(value, value_len,
                             selector->value == NULL ? "" : selector->value,
-                            selector->value_len,
-                            selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
-                                selector->ignore_case)) {
+                            selector->value_len, ignore_case)) {
         hit_mark(doc, selector);
       }
-    } else {
-      value_len = strlen(value);
-      ignore_case = selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
-                    selector->ignore_case;
-      if (contains_any_case_len(value, value_len, selector->any,
-                                selector->any_lens, selector->any_count,
-                                ignore_case ? selector->any_ifirsts
-                                            : selector->any_firsts,
-                                ignore_case ? selector->any_ifirst_bitmap
-                                            : selector->any_first_bitmap,
-                                ignore_case)) {
-        hit_mark(doc, selector);
-      }
+    } else if (contains_any_case_len(
+                   value, value_len, selector->any, selector->any_lens,
+                   selector->any_count,
+                   ignore_case ? selector->any_ifirsts : selector->any_firsts,
+                   ignore_case ? selector->any_ifirst_bitmap
+                               : selector->any_first_bitmap,
+                   ignore_case)) {
+      hit_mark(doc, selector);
     }
-    break;
-  case LQL_SELECTOR_KIND_PREFIX:
-  case LQL_SELECTOR_KIND_IPREFIX:
+  }
+}
+
+static void observe_prepared_prefix_value(eval_doc *doc, const char *value,
+                                          int is_container, int is_null) {
+  const lql_selector **items;
+  const lql_selector *selector;
+  size_t i;
+  size_t count;
+  size_t n;
+
+  items = scalar_family_begin(doc, LQL_EVAL_FAMILY_PREFIX);
+  count = doc->scalar_family_counts[LQL_EVAL_FAMILY_PREFIX];
+  for (i = 0u; i < count; ++i) {
+    selector = items[i];
     if (!selector->value_set && selector->value == NULL) {
       hit_mark(doc, selector);
-      break;
+      continue;
     }
     if (is_container || is_null) {
-      break;
+      continue;
     }
     n = selector->value_len;
     if (strlen(value) >= n &&
@@ -1293,10 +1233,85 @@ static void observe_matched_selector(eval_doc *doc,
              : memcmp(value, selector->value, n) == 0)) {
       hit_mark(doc, selector);
     }
-    break;
-  case LQL_SELECTOR_KIND_RANGE:
-    if (!is_container && !is_null && selector->range_is_temporal) {
-      if (lql_parse_temporal_literal(value, &temporal) &&
+  }
+}
+
+static void observe_prepared_exact_value(eval_doc *doc, const char *value,
+                                         int is_container, int is_null) {
+  const lql_selector **items;
+  const lql_selector *selector;
+  const char *needle;
+  size_t i;
+  size_t j;
+  size_t count;
+
+  items = scalar_family_begin(doc, LQL_EVAL_FAMILY_EXACT);
+  count = doc->scalar_family_counts[LQL_EVAL_FAMILY_EXACT];
+  for (i = 0u; i < count; ++i) {
+    selector = items[i];
+    if (selector->kind == LQL_SELECTOR_KIND_NE && is_null) {
+      hit_mark(doc, selector);
+      continue;
+    }
+    if (is_container || is_null) {
+      continue;
+    }
+    if (selector->kind == LQL_SELECTOR_KIND_EQ) {
+      if (strcmp(value, selector->value == NULL ? "" : selector->value) == 0) {
+        hit_mark(doc, selector);
+      }
+      continue;
+    }
+    if (selector->kind == LQL_SELECTOR_KIND_NE) {
+      if (strcmp(value, selector->value == NULL ? "" : selector->value) != 0) {
+        hit_mark(doc, selector);
+      }
+      continue;
+    }
+    for (j = 0u; j < selector->any_count; ++j) {
+      needle = selector->any[j];
+      if (strcmp(value, needle) == 0) {
+        hit_mark(doc, selector);
+        break;
+      }
+    }
+  }
+}
+
+static void observe_prepared_temporal_value(eval_doc *doc, const char *value,
+                                            int is_container, int is_null) {
+  const lql_selector **items;
+  const lql_selector *selector;
+  size_t i;
+  size_t count;
+  lql_temporal temporal;
+  lql_temporal since_macro;
+  int parsed;
+
+  if (is_container || is_null) {
+    return;
+  }
+  items = scalar_family_begin(doc, LQL_EVAL_FAMILY_TEMPORAL);
+  count = doc->scalar_family_counts[LQL_EVAL_FAMILY_TEMPORAL];
+  if (count == 0u) {
+    return;
+  }
+  parsed = lql_parse_temporal_literal(value, &temporal);
+  for (i = 0u; i < count; ++i) {
+    selector = items[i];
+    switch (selector->kind) {
+    case LQL_SELECTOR_KIND_EQ:
+      if (parsed && lql_temporal_equal(&temporal, &selector->temporal_eq)) {
+        hit_mark(doc, selector);
+      }
+      break;
+    case LQL_SELECTOR_KIND_NE:
+      if (!parsed || !lql_temporal_equal(&temporal, &selector->temporal_eq)) {
+        hit_mark(doc, selector);
+      }
+      break;
+    case LQL_SELECTOR_KIND_RANGE:
+      if (parsed &&
           (!selector->has_temporal_gt ||
            lql_temporal_compare(&temporal, &selector->temporal_gt) > 0) &&
           (!selector->has_temporal_gte ||
@@ -1307,55 +1322,75 @@ static void observe_matched_selector(eval_doc *doc,
            lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
         hit_mark(doc, selector);
       }
-    } else if (!is_container && !is_null && is_number) {
-      number = strtod(value, NULL);
-      if ((!selector->has_range_gt || number > selector->range_gt) &&
-          (!selector->has_range_gte || number >= selector->range_gte) &&
-          (!selector->has_range_lt || number < selector->range_lt) &&
-          (!selector->has_range_lte || number <= selector->range_lte)) {
+      break;
+    case LQL_SELECTOR_KIND_DATE:
+      if (parsed &&
+          (selector->since_macro == LQL_SINCE_NONE ||
+           resolve_since_macro(selector->since_macro, &since_macro)) &&
+          (!selector->has_temporal_eq ||
+           lql_temporal_equal(&temporal, &selector->temporal_eq)) &&
+          (selector->since_macro == LQL_SINCE_NONE ||
+           lql_temporal_compare(&temporal, &since_macro) >= 0) &&
+          (!selector->has_temporal_gt ||
+           lql_temporal_compare(&temporal, &selector->temporal_gt) > 0) &&
+          (!selector->has_temporal_gte ||
+           lql_temporal_compare(&temporal, &selector->temporal_gte) >= 0) &&
+          (!selector->has_temporal_lt ||
+           lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
+          (!selector->has_temporal_lte ||
+           lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
         hit_mark(doc, selector);
       }
-    }
-    break;
-  case LQL_SELECTOR_KIND_DATE:
-    if (!is_container && !is_null &&
-        (selector->since_macro == LQL_SINCE_NONE ||
-         resolve_since_macro(selector->since_macro, &since_macro)) &&
-        lql_parse_temporal_literal(value, &temporal) &&
-        (!selector->has_temporal_eq ||
-         lql_temporal_equal(&temporal, &selector->temporal_eq)) &&
-        (selector->since_macro == LQL_SINCE_NONE ||
-         lql_temporal_compare(&temporal, &since_macro) >= 0) &&
-        (!selector->has_temporal_gt ||
-         lql_temporal_compare(&temporal, &selector->temporal_gt) > 0) &&
-        (!selector->has_temporal_gte ||
-         lql_temporal_compare(&temporal, &selector->temporal_gte) >= 0) &&
-        (!selector->has_temporal_lt ||
-         lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
-        (!selector->has_temporal_lte ||
-         lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
-      hit_mark(doc, selector);
-    }
-    break;
-  case LQL_SELECTOR_KIND_IN:
-    if (is_container || is_null) {
+      break;
+    default:
       break;
     }
-    for (j = 0u; j < selector->any_count; ++j) {
-      needle = selector->any[j];
-      if (strcmp(value, needle) == 0) {
-        hit_mark(doc, selector);
-        break;
-      }
-    }
-    break;
-  case LQL_SELECTOR_KIND_EXISTS:
-    if (!is_null) {
+  }
+}
+
+static void observe_prepared_numeric_range_value(eval_doc *doc,
+                                                 const char *value,
+                                                 int is_number,
+                                                 int is_container,
+                                                 int is_null) {
+  const lql_selector **items;
+  const lql_selector *selector;
+  size_t i;
+  size_t count;
+  double number;
+
+  if (!is_number || is_container || is_null) {
+    return;
+  }
+  items = scalar_family_begin(doc, LQL_EVAL_FAMILY_NUMERIC_RANGE);
+  count = doc->scalar_family_counts[LQL_EVAL_FAMILY_NUMERIC_RANGE];
+  if (count == 0u) {
+    return;
+  }
+  number = strtod(value, NULL);
+  for (i = 0u; i < count; ++i) {
+    selector = items[i];
+    if ((!selector->has_range_gt || number > selector->range_gt) &&
+        (!selector->has_range_gte || number >= selector->range_gte) &&
+        (!selector->has_range_lt || number < selector->range_lt) &&
+        (!selector->has_range_lte || number <= selector->range_lte)) {
       hit_mark(doc, selector);
     }
-    break;
-  default:
-    break;
+  }
+}
+
+static void observe_prepared_exists_value(eval_doc *doc, int is_null) {
+  const lql_selector **items;
+  size_t i;
+  size_t count;
+
+  if (is_null) {
+    return;
+  }
+  items = scalar_family_begin(doc, LQL_EVAL_FAMILY_EXISTS);
+  count = doc->scalar_family_counts[LQL_EVAL_FAMILY_EXISTS];
+  for (i = 0u; i < count; ++i) {
+    hit_mark(doc, items[i]);
   }
 }
 
@@ -2155,17 +2190,16 @@ static void prefix_stream_update(eval_doc *doc, const char *data, size_t len) {
 static void observe_prepared_value(eval_doc *doc, const char *value,
                                    int is_number, int is_container,
                                    int is_null) {
-  const lql_selector *selector;
-  size_t i;
-
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return;
   }
-  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
-    selector = doc->scalar_path_predicates[i];
-    observe_matched_selector(doc, selector, value, is_number, is_container,
-                             is_null);
-  }
+  observe_prepared_contains_value(doc, value, is_container, is_null);
+  observe_prepared_prefix_value(doc, value, is_container, is_null);
+  observe_prepared_exact_value(doc, value, is_container, is_null);
+  observe_prepared_temporal_value(doc, value, is_container, is_null);
+  observe_prepared_numeric_range_value(doc, value, is_number, is_container,
+                                       is_null);
+  observe_prepared_exists_value(doc, is_null);
 }
 
 static void observe_container_value(eval_doc *doc,

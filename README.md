@@ -83,16 +83,13 @@ result once at scalar begin and reuses that hit-index bitmap across chunk and
 end observers.
 Scalar path-match scratch uses epoch marks, so repeated scalar callbacks do not
 clear the full selector hit set in the hot path.
-The same scalar path-prepare pass also records the active observer families and
-scratch sizes for that scalar, so scalar begin does not perform separate
-contains, prefix, exact, temporal, and numeric-range predicate discovery walks.
-It also records a compact current-scalar predicate list. Scalar chunk/end
-observers and boolean/null scalar observers walk that list instead of
-rediscovering path matches or scanning the full selector predicate set.
-For streaming string and number values, the same prepare pass partitions the
-current-path predicates into contains, prefix, exact, temporal, numeric-range,
-and exists slices so each chunk/end observer skips unrelated selector families
-without cache lookup or result memoization.
+The same scalar path-prepare pass also records the active observer families,
+scratch sizes, and bounded contains, prefix, exact, temporal, numeric-range, and
+exists slices for that scalar. Scalar begin, chunk/end, boolean/null, and
+container observers iterate only their family slice instead of rediscovering
+path matches, scanning the full selector predicate set, or branching away
+unrelated selector families. These slices are current-path scratch, not cache
+lookup or result memoization.
 `contains.any` selectors also carry fixed first-byte lookup masks so scalar
 scans reject impossible bytes without walking every alternative.
 Candidate hit, stream-miss, and `in` alternative scratch also use candidate

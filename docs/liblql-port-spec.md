@@ -237,17 +237,14 @@ The scalar path-prepare pass should also derive the active observer-family bits
 and scalar scratch sizes for the current path. Scalar begin must not perform
 separate full predicate-list walks for contains, prefix, exact, temporal, and
 numeric-range discovery after it has already prepared path matches.
-That same prepare pass should retain a compact current-scalar predicate list in
-receiver-owned scratch. Scalar begin, chunk, and end observers, including
-boolean and null scalar observers, should iterate that current-path list instead
-of rescanning the full selector predicate list or rechecking path matches for
-every scalar callback.
-For streaming string and number values, the prepare pass should also partition
-the current-path predicates into bounded observer-family slices for contains,
-prefix, exact, temporal, numeric-range, and exists. Chunk and end observers
-should iterate only their family slice. This is receiver-owned scratch derived
-from the already prepared path; it is not a selector-result cache and must not
-introduce invalidation or coherence checks.
+That same prepare pass should partition current-path predicates into bounded
+observer-family slices for contains, prefix, exact, temporal, numeric-range,
+and exists. Scalar begin, chunk, and end observers, including boolean, null,
+and container observers, should iterate only their family slice instead of
+rescanning the full selector predicate list, rechecking path matches for every
+scalar callback, or branching away unrelated selector families. This is
+receiver-owned scratch derived from the already prepared path; it is not a
+selector-result cache and must not introduce invalidation or coherence checks.
 Object and array begin observers should use the same prepared-path machinery
 with a container-capable observer-family mask (`exists`, empty `contains`, and
 empty `prefix`) so container callbacks do not run a separate full predicate
