@@ -253,6 +253,9 @@ scan or branch through scalar-only observer families.
 first-byte lookup masks so no-match scalar scans can reject most bytes in O(1)
 without checking every alternative. The masks are parse-time selector metadata,
 not runtime candidate allocation.
+Small case-sensitive `contains.any` selectors should use the same literal
+scanner as the equivalent explicit OR form when that produces fewer hot-path
+branches. This is a branch-shape optimization, not selector-result caching.
 Candidate hit state, stream-miss state, and `in` alternative state should also
 use generation or epoch marks so candidate reset is O(1) in steady state. Full
 scratch clears are allowed at query setup and on epoch wraparound; they must

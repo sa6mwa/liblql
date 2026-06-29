@@ -589,6 +589,15 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
     n = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
     return contains_case_len(haystack, h, needles[0], n, ignore_case);
   }
+  if (!ignore_case && count <= 3u) {
+    for (j = 0u; j < count; ++j) {
+      n = needle_lens == NULL ? strlen(needles[j]) : needle_lens[j];
+      if (contains_case_len(haystack, h, needles[j], n, 0)) {
+        return 1;
+      }
+    }
+    return 0;
+  }
   if (count == 2u) {
     n = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
     n0 = n;
