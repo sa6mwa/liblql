@@ -753,8 +753,14 @@ static lonejson_status on_object_begin(void *user,
     state->root_seen = 1;
     state->root_is_object = 1;
   }
+  if (state->capturing) {
+    return lonejson_writer_begin_object(&state->writer, state->error) ==
+                   LONEJSON_STATUS_OK
+               ? LONEJSON_STATUS_OK
+               : LONEJSON_STATUS_CALLBACK_FAILED;
+  }
   projected_path = selected_path(state->projection, path);
-  if (projected_path != NULL && !state->capturing) {
+  if (projected_path != NULL) {
     if (projection_key(state, projected_path) != LONEJSON_STATUS_OK ||
         lonejson_writer_begin_object(&state->writer, state->error) !=
             LONEJSON_STATUS_OK) {
@@ -763,11 +769,6 @@ static lonejson_status on_object_begin(void *user,
     state->capturing = 1;
     state->capture_depth = path->segment_count;
     return LONEJSON_STATUS_OK;
-  }
-  if (state->capturing &&
-      lonejson_writer_begin_object(&state->writer, state->error) !=
-          LONEJSON_STATUS_OK) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -802,8 +803,14 @@ static lonejson_status on_array_begin(void *user,
     state->root_seen = 1;
     state->root_is_object = 0;
   }
+  if (state->capturing) {
+    return lonejson_writer_begin_array(&state->writer, state->error) ==
+                   LONEJSON_STATUS_OK
+               ? LONEJSON_STATUS_OK
+               : LONEJSON_STATUS_CALLBACK_FAILED;
+  }
   projected_path = selected_path(state->projection, path);
-  if (projected_path != NULL && !state->capturing) {
+  if (projected_path != NULL) {
     if (projection_key(state, projected_path) != LONEJSON_STATUS_OK ||
         lonejson_writer_begin_array(&state->writer, state->error) !=
             LONEJSON_STATUS_OK) {
@@ -812,11 +819,6 @@ static lonejson_status on_array_begin(void *user,
     state->capturing = 1;
     state->capture_depth = path->segment_count;
     return LONEJSON_STATUS_OK;
-  }
-  if (state->capturing &&
-      lonejson_writer_begin_array(&state->writer, state->error) !=
-          LONEJSON_STATUS_OK) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -846,7 +848,9 @@ static lonejson_status on_object_key_begin(void *user,
   (void)path;
   (void)error;
   state = (projection_state *)user;
-  projection_key_reset(state);
+  if (state->capturing) {
+    projection_key_reset(state);
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -892,17 +896,19 @@ static lonejson_status on_string_begin(void *user,
     state->root_seen = 1;
     state->root_is_object = 0;
   }
-  projected_path = selected_path(state->projection, path);
-  if (projected_path != NULL && !state->capturing) {
-    if (projection_key(state, projected_path) != LONEJSON_STATUS_OK ||
-        lonejson_writer_string_begin(&state->writer, state->error) !=
-            LONEJSON_STATUS_OK) {
+  if (state->capturing) {
+    if (lonejson_writer_string_begin(&state->writer, state->error) !=
+        LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
     state->in_string = 1;
-  } else if (state->capturing) {
-    if (lonejson_writer_string_begin(&state->writer, state->error) !=
-        LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_OK;
+  }
+  projected_path = selected_path(state->projection, path);
+  if (projected_path != NULL) {
+    if (projection_key(state, projected_path) != LONEJSON_STATUS_OK ||
+        lonejson_writer_string_begin(&state->writer, state->error) !=
+            LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
     state->in_string = 1;
@@ -952,9 +958,15 @@ static lonejson_status on_number_begin(void *user,
     state->root_seen = 1;
     state->root_is_object = 0;
   }
-  projection_num_reset(state);
-  state->in_number =
-      state->capturing || selected_path(state->projection, path) != NULL;
+  if (state->capturing) {
+    projection_num_reset(state);
+    state->in_number = 1;
+    return LONEJSON_STATUS_OK;
+  }
+  state->in_number = selected_path(state->projection, path) != NULL;
+  if (state->in_number) {
+    projection_num_reset(state);
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -984,14 +996,20 @@ static lonejson_status on_number_end(void *user,
     state->root_seen = 1;
     state->root_is_object = 0;
   }
-  projected_path = selected_path(state->projection, path);
-  if (projected_path != NULL && !state->capturing &&
-      projection_key(state, projected_path) != LONEJSON_STATUS_OK) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
+  if (!state->in_number) {
+    return LONEJSON_STATUS_OK;
   }
-  if (state->in_number && lonejson_writer_number_text(
-                              &state->writer, state->num_buf, state->num_len,
-                              state->error) != LONEJSON_STATUS_OK) {
+  if (!state->capturing) {
+    projected_path = selected_path(state->projection, path);
+    if (projected_path == NULL ||
+        projection_key(state, projected_path) != LONEJSON_STATUS_OK) {
+      state->in_number = 0;
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+  }
+  if (lonejson_writer_number_text(&state->writer, state->num_buf,
+                                  state->num_len,
+                                  state->error) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   state->in_number = 0;
@@ -1008,12 +1026,18 @@ static lonejson_status on_boolean(void *user, const lonejson_value_path *path,
     state->root_seen = 1;
     state->root_is_object = 0;
   }
+  if (state->capturing) {
+    return lonejson_writer_bool(&state->writer, value, state->error) ==
+                   LONEJSON_STATUS_OK
+               ? LONEJSON_STATUS_OK
+               : LONEJSON_STATUS_CALLBACK_FAILED;
+  }
   projected_path = selected_path(state->projection, path);
-  if (projected_path != NULL && !state->capturing &&
+  if (projected_path != NULL &&
       projection_key(state, projected_path) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
-  if ((state->capturing || projected_path != NULL) &&
+  if (projected_path != NULL &&
       lonejson_writer_bool(&state->writer, value, state->error) !=
           LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
@@ -1027,12 +1051,18 @@ static lonejson_status on_null(void *user, const lonejson_value_path *path,
   const projection_path *projected_path;
   (void)error;
   state = (projection_state *)user;
+  if (state->capturing) {
+    return lonejson_writer_null(&state->writer, state->error) ==
+                   LONEJSON_STATUS_OK
+               ? LONEJSON_STATUS_OK
+               : LONEJSON_STATUS_CALLBACK_FAILED;
+  }
   projected_path = selected_path(state->projection, path);
-  if (projected_path != NULL && !state->capturing &&
+  if (projected_path != NULL &&
       projection_key(state, projected_path) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
-  if ((state->capturing || projected_path != NULL) &&
+  if (projected_path != NULL &&
       lonejson_writer_null(&state->writer, state->error) !=
           LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
