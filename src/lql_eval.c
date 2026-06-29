@@ -550,6 +550,10 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
   if (count == 0u) {
     return 0;
   }
+  if (count == 1u) {
+    n = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
+    return contains_case_len(haystack, h, needles[0], n, ignore_case);
+  }
   if (firsts == NULL &&
       count > sizeof(stack_firsts) / sizeof(stack_firsts[0])) {
     for (j = 0u; j < count; ++j) {
@@ -1742,6 +1746,11 @@ static int contains_any_stream_scan(const char *tail, size_t tail_len,
   size_t i;
   size_t needle_len;
 
+  if (count == 1u) {
+    needle_len = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
+    return contains_stream_scan(tail, tail_len, data, len, needles[0],
+                                needle_len, ignore_case);
+  }
   if (contains_any_case_len(data, len, needles, needle_lens, count, firsts,
                             first_bitmap, ignore_case)) {
     return 1;
