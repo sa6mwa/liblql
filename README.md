@@ -64,21 +64,21 @@ selected scalar. The hot path has no liblql-owned full-scalar buffer fallback.
 During evaluation, liblql derives a borrowed flat predicate view from the
 `lql_selector` AST so scalar callbacks do not repeatedly recurse through the
 selector tree; this is execution scratch, not a second selector model.
-Selectors also cache compiled field-path segment offsets and segment kinds into
+Selectors also precompute field-path segment offsets and segment kinds into
 their normalized field strings, so common absolute paths and simple wildcard
 segments match lonejson decoded path segments without reparsing JSON-pointer
 text in the hot path. Recursive or escaped paths still use the general matcher.
-Selectors cache the flattened predicate pointer list during finalization, so
-evaluation setup does not walk compound selector trees for each candidate.
-Selector finalization also caches literal lengths, max `any` literal length, and
-max `in` fanout so scalar observers use selector-owned facts instead of
+Selectors finalize the flattened predicate pointer list once, so evaluation
+setup does not walk compound selector trees for each candidate.
+Selector finalization also records literal lengths, max `any` literal length,
+and max `in` fanout so scalar observers use selector-owned facts instead of
 recomputing them per candidate.
-`any` alternatives also cache raw and case-folded first bytes so
+`any` alternatives also record raw and case-folded first bytes so
 `contains.any` scanning does not rebuild needle metadata per scalar chunk.
 It also records predicate feature bits, allowing scalar evaluation to skip
 entire contains, prefix, exact, temporal, numeric-range, and exists observer
 families when a selector cannot use them.
-For string and number values, the evaluator caches each predicate's path-match
+For string and number values, the evaluator derives each predicate's path-match
 result once at scalar begin and reuses that hit-index bitmap across chunk and
 end observers.
 Scalar path-match scratch uses epoch marks, so repeated scalar callbacks do not

@@ -527,7 +527,7 @@ static int contains_case_len(const char *haystack, size_t h, const char *needle,
       if (cursor == NULL) {
         return 0;
       }
-      if (memcmp(cursor, needle, n) == 0) {
+      if (n == 1u || memcmp(cursor + 1, needle + 1, n - 1u) == 0) {
         return 1;
       }
       ++cursor;
@@ -538,7 +538,8 @@ static int contains_case_len(const char *haystack, size_t h, const char *needle,
     if (ascii_lower_byte((unsigned char)haystack[i]) != first) {
       continue;
     }
-    if (ascii_case_equal_prefix(haystack + i, needle, n)) {
+    if (n == 1u ||
+        ascii_case_equal_prefix(haystack + i + 1u, needle + 1u, n - 1u)) {
       return 1;
     }
   }
@@ -554,8 +555,14 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
   size_t i;
   size_t j;
   size_t n;
+  size_t n0;
+  size_t n1;
+  size_t n2;
   unsigned char hay_ch;
   unsigned char raw_ch;
+  unsigned char f0;
+  unsigned char f1;
+  unsigned char f2;
   if (count == 0u) {
     return 0;
   }
@@ -565,23 +572,88 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
   }
   if (count == 2u) {
     n = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
-    if (contains_case_len(haystack, h, needles[0], n, ignore_case)) {
+    n0 = n;
+    n1 = needle_lens == NULL ? strlen(needles[1]) : needle_lens[1];
+    if (n0 == 0u || n1 == 0u) {
       return 1;
     }
-    n = needle_lens == NULL ? strlen(needles[1]) : needle_lens[1];
-    return contains_case_len(haystack, h, needles[1], n, ignore_case);
+    f0 = firsts == NULL ? (unsigned char)needles[0][0] : firsts[0];
+    f1 = firsts == NULL ? (unsigned char)needles[1][0] : firsts[1];
+    if (ignore_case && firsts == NULL) {
+      f0 = ascii_lower_byte(f0);
+      f1 = ascii_lower_byte(f1);
+    }
+    for (i = 0u; i < h; ++i) {
+      raw_ch = (unsigned char)haystack[i];
+      hay_ch = ignore_case ? ascii_lower_byte(raw_ch) : raw_ch;
+      if (hay_ch == f0 && n0 <= h - i &&
+          (n0 == 1u ||
+           (ignore_case
+                ? ascii_case_equal_prefix(haystack + i + 1u, needles[0] + 1u,
+                                          n0 - 1u)
+                : memcmp(haystack + i + 1u, needles[0] + 1u, n0 - 1u) ==
+                      0))) {
+        return 1;
+      }
+      if (hay_ch == f1 && n1 <= h - i &&
+          (n1 == 1u ||
+           (ignore_case
+                ? ascii_case_equal_prefix(haystack + i + 1u, needles[1] + 1u,
+                                          n1 - 1u)
+                : memcmp(haystack + i + 1u, needles[1] + 1u, n1 - 1u) ==
+                      0))) {
+        return 1;
+      }
+    }
+    return 0;
   }
   if (count == 3u) {
-    n = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
-    if (contains_case_len(haystack, h, needles[0], n, ignore_case)) {
+    n0 = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
+    n1 = needle_lens == NULL ? strlen(needles[1]) : needle_lens[1];
+    n2 = needle_lens == NULL ? strlen(needles[2]) : needle_lens[2];
+    if (n0 == 0u || n1 == 0u || n2 == 0u) {
       return 1;
     }
-    n = needle_lens == NULL ? strlen(needles[1]) : needle_lens[1];
-    if (contains_case_len(haystack, h, needles[1], n, ignore_case)) {
-      return 1;
+    f0 = firsts == NULL ? (unsigned char)needles[0][0] : firsts[0];
+    f1 = firsts == NULL ? (unsigned char)needles[1][0] : firsts[1];
+    f2 = firsts == NULL ? (unsigned char)needles[2][0] : firsts[2];
+    if (ignore_case && firsts == NULL) {
+      f0 = ascii_lower_byte(f0);
+      f1 = ascii_lower_byte(f1);
+      f2 = ascii_lower_byte(f2);
     }
-    n = needle_lens == NULL ? strlen(needles[2]) : needle_lens[2];
-    return contains_case_len(haystack, h, needles[2], n, ignore_case);
+    for (i = 0u; i < h; ++i) {
+      raw_ch = (unsigned char)haystack[i];
+      hay_ch = ignore_case ? ascii_lower_byte(raw_ch) : raw_ch;
+      if (hay_ch == f0 && n0 <= h - i &&
+          (n0 == 1u ||
+           (ignore_case
+                ? ascii_case_equal_prefix(haystack + i + 1u, needles[0] + 1u,
+                                          n0 - 1u)
+                : memcmp(haystack + i + 1u, needles[0] + 1u, n0 - 1u) ==
+                      0))) {
+        return 1;
+      }
+      if (hay_ch == f1 && n1 <= h - i &&
+          (n1 == 1u ||
+           (ignore_case
+                ? ascii_case_equal_prefix(haystack + i + 1u, needles[1] + 1u,
+                                          n1 - 1u)
+                : memcmp(haystack + i + 1u, needles[1] + 1u, n1 - 1u) ==
+                      0))) {
+        return 1;
+      }
+      if (hay_ch == f2 && n2 <= h - i &&
+          (n2 == 1u ||
+           (ignore_case
+                ? ascii_case_equal_prefix(haystack + i + 1u, needles[2] + 1u,
+                                          n2 - 1u)
+                : memcmp(haystack + i + 1u, needles[2] + 1u, n2 - 1u) ==
+                      0))) {
+        return 1;
+      }
+    }
+    return 0;
   }
   if (firsts == NULL &&
       count > sizeof(stack_firsts) / sizeof(stack_firsts[0])) {
@@ -626,11 +698,15 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
       if (n > h - i) {
         continue;
       }
+      if (n == 1u) {
+        return 1;
+      }
       if (ignore_case) {
-        if (ascii_case_equal_prefix(haystack + i, needles[j], n)) {
+        if (ascii_case_equal_prefix(haystack + i + 1u, needles[j] + 1u,
+                                    n - 1u)) {
           return 1;
         }
-      } else if (memcmp(haystack + i, needles[j], n) == 0) {
+      } else if (memcmp(haystack + i + 1u, needles[j] + 1u, n - 1u) == 0) {
         return 1;
       }
     }
