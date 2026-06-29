@@ -3764,12 +3764,9 @@ static lql_status execute_query_source_decisions_with_base(
     return LQL_STATUS_JSON_ERROR;
   }
   state.capture_runtime = runtime;
+  memset(&adapter, 0, sizeof(adapter));
   adapter.read = read;
   adapter.user = read_user;
-  adapter.error_code = 0;
-  adapter.total_read = 0u;
-  adapter.prefix_len = 0u;
-  adapter.prefix_offset = 0u;
   capture_needed = 1;
   if (!source_reader_prefix_capture(&adapter, &capture_needed)) {
     destroy_doc(&state.doc);
@@ -3860,10 +3857,9 @@ static lql_status execute_query_source_spooled_matches(
     destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
+  memset(&adapter, 0, sizeof(adapter));
   adapter.read = read;
   adapter.user = read_user;
-  adapter.error_code = 0;
-  adapter.total_read = 0u;
   init_eval_visitor(&visitor);
   options = lonejson_default_candidate_stream_options();
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
