@@ -222,9 +222,10 @@ and scalar scratch sizes for the current path. Scalar begin must not perform
 separate full predicate-list walks for contains, prefix, exact, temporal, and
 numeric-range discovery after it has already prepared path matches.
 That same prepare pass should retain a compact current-scalar predicate list in
-receiver-owned scratch. Scalar begin, chunk, and end observers should iterate
-that current-path list instead of rescanning the full selector predicate list or
-rechecking path matches for every scalar chunk.
+receiver-owned scratch. Scalar begin, chunk, and end observers, including
+boolean and null scalar observers, should iterate that current-path list instead
+of rescanning the full selector predicate list or rechecking path matches for
+every scalar callback.
 Candidate hit state, stream-miss state, and `in` alternative state should also
 use generation or epoch marks so candidate reset is O(1) in steady state. Full
 scratch clears are allowed at query setup and on epoch wraparound; they must

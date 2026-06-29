@@ -902,9 +902,10 @@ static int resolve_since_macro(lql_since_macro macro, lql_temporal *out) {
   }
 }
 
-static void observe_selector(eval_doc *doc, const lql_selector *selector,
-                             const lonejson_value_path *path, const char *value,
-                             int is_number, int is_container, int is_null) {
+static void observe_matched_selector(eval_doc *doc,
+                                     const lql_selector *selector,
+                                     const char *value, int is_number,
+                                     int is_container, int is_null) {
   size_t n;
   size_t j;
   size_t value_len;
@@ -919,7 +920,7 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
   if (!selector_is_predicate(selector)) {
     return;
   }
-  if (doc->hits == NULL || !selector_path_matches(doc, selector, path)) {
+  if (doc->hits == NULL) {
     return;
   }
   switch (selector->kind) {
@@ -1062,6 +1063,16 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
   default:
     break;
   }
+}
+
+static void observe_selector(eval_doc *doc, const lql_selector *selector,
+                             const lonejson_value_path *path, const char *value,
+                             int is_number, int is_container, int is_null) {
+  if (selector == NULL || !selector_path_matches(doc, selector, path)) {
+    return;
+  }
+  observe_matched_selector(doc, selector, value, is_number, is_container,
+                           is_null);
 }
 
 static size_t selector_contains_max_needle(const lql_selector *selector) {
@@ -1802,6 +1813,20 @@ static void observe_value(eval_doc *doc, const lonejson_value_path *path,
   }
 }
 
+static void observe_prepared_scalar_value(eval_doc *doc, const char *value,
+                                          int is_number, int is_null) {
+  const lql_selector *selector;
+  size_t i;
+
+  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return;
+  }
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
+    observe_matched_selector(doc, selector, value, is_number, 0, is_null);
+  }
+}
+
 static int eval_selector_tree(const lql_selector *selector,
                               const eval_doc *doc) {
   size_t i;
@@ -2048,7 +2073,8 @@ static lonejson_status on_boolean(void *user, const lonejson_value_path *path,
   if (path->segment_count == 0u) {
     doc->root_kind = 'b';
   }
-  observe_value(doc, path, value ? "true" : "false", 0, 0, 0);
+  scalar_path_match_prepare(doc, path);
+  observe_prepared_scalar_value(doc, value ? "true" : "false", 0, 0);
   return LONEJSON_STATUS_OK;
 }
 
@@ -2059,7 +2085,8 @@ static lonejson_status on_null(void *user, const lonejson_value_path *path,
   if (path->segment_count == 0u) {
     doc->root_kind = '0';
   }
-  observe_value(doc, path, "", 0, 0, 1);
+  scalar_path_match_prepare(doc, path);
+  observe_prepared_scalar_value(doc, "", 0, 1);
   return LONEJSON_STATUS_OK;
 }
 
