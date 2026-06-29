@@ -956,35 +956,6 @@ static int selector_path_depth_possible(const lql_selector *selector,
          path->segment_count <= selector->predicate_max_segment_count;
 }
 
-static unsigned int selector_observer_feature(const lql_selector *selector) {
-  if (selector == NULL) {
-    return 0u;
-  }
-  switch (selector->kind) {
-  case LQL_SELECTOR_KIND_CONTAINS:
-  case LQL_SELECTOR_KIND_ICONTAINS:
-    return LQL_SELECTOR_FEATURE_CONTAINS;
-  case LQL_SELECTOR_KIND_PREFIX:
-  case LQL_SELECTOR_KIND_IPREFIX:
-    return LQL_SELECTOR_FEATURE_PREFIX;
-  case LQL_SELECTOR_KIND_EQ:
-  case LQL_SELECTOR_KIND_NE:
-    return selector->value_is_temporal ? LQL_SELECTOR_FEATURE_TEMPORAL
-                                       : LQL_SELECTOR_FEATURE_EXACT;
-  case LQL_SELECTOR_KIND_IN:
-    return LQL_SELECTOR_FEATURE_EXACT;
-  case LQL_SELECTOR_KIND_RANGE:
-    return selector->range_is_temporal ? LQL_SELECTOR_FEATURE_TEMPORAL
-                                       : LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
-  case LQL_SELECTOR_KIND_DATE:
-    return LQL_SELECTOR_FEATURE_TEMPORAL;
-  case LQL_SELECTOR_KIND_EXISTS:
-    return LQL_SELECTOR_FEATURE_EXISTS;
-  default:
-    return 0u;
-  }
-}
-
 static const lql_selector **scalar_family_begin(eval_doc *doc,
                                                 size_t family) {
   if (doc == NULL || doc->scalar_family_predicates == NULL ||
@@ -1052,7 +1023,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
     if (hit_marked(doc, selector)) {
       continue;
     }
-    feature = selector_observer_feature(selector);
+    feature = selector == NULL ? 0u : selector->observer_feature;
     if (feature_mask != 0u && (feature & feature_mask) == 0u) {
       continue;
     }
