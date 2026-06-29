@@ -35,12 +35,9 @@ typedef struct eval_doc {
   size_t hits_cap;
   unsigned int *stream_misses;
   size_t stream_misses_cap;
-  unsigned int *scalar_path_matches;
-  size_t scalar_path_matches_cap;
   const lql_selector **scalar_path_predicates;
   size_t scalar_path_predicates_cap;
   size_t scalar_path_predicate_count;
-  unsigned int scalar_path_epoch;
   unsigned int *in_matches;
   size_t in_matches_cap;
   size_t in_match_stride;
@@ -235,21 +232,10 @@ static void destroy_doc(eval_doc *doc) {
       }
       doc->impl->eval_candidate_epoch = 1u;
     }
-    doc->impl->eval_scalar_path_epoch = doc->scalar_path_epoch + 1u;
-    if (doc->impl->eval_scalar_path_epoch == 0u) {
-      if (doc->scalar_path_matches != NULL) {
-        memset(doc->scalar_path_matches, 0,
-               sizeof(*doc->scalar_path_matches) *
-                   doc->scalar_path_matches_cap);
-      }
-      doc->impl->eval_scalar_path_epoch = 1u;
-    }
     doc->impl->eval_hits = doc->hits;
     doc->impl->eval_hits_cap = doc->hits_cap;
     doc->impl->eval_stream_misses = doc->stream_misses;
     doc->impl->eval_stream_misses_cap = doc->stream_misses_cap;
-    doc->impl->eval_scalar_path_matches = doc->scalar_path_matches;
-    doc->impl->eval_scalar_path_matches_cap = doc->scalar_path_matches_cap;
     doc->impl->eval_scalar_path_predicates = doc->scalar_path_predicates;
     doc->impl->eval_scalar_path_predicates_cap =
         doc->scalar_path_predicates_cap;
@@ -263,7 +249,6 @@ static void destroy_doc(eval_doc *doc) {
   } else {
     doc->allocator->destroy(doc->allocator, doc->hits);
     doc->allocator->destroy(doc->allocator, doc->stream_misses);
-    doc->allocator->destroy(doc->allocator, doc->scalar_path_matches);
     doc->allocator->destroy(doc->allocator, doc->scalar_path_predicates);
     doc->allocator->destroy(doc->allocator, doc->in_matches);
     doc->allocator->destroy(doc->allocator, doc->contains_tail_buf);
@@ -276,13 +261,12 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   lql_impl *impl;
   unsigned int *next_hits;
   unsigned int *next_stream_misses;
-  unsigned int *next_scalar_path_matches;
   const lql_selector **next_scalar_path_predicates;
   unsigned int *next_in_matches;
   size_t in_match_need;
+  unsigned int streaming_miss_features;
   int clear_hits;
   int clear_stream_misses;
-  int clear_scalar_path_matches;
   int clear_in_matches;
   memset(doc, 0, sizeof(*doc));
   doc->allocator = lql_allocator_from_receiver(self);
@@ -299,8 +283,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     doc->hits_cap = impl->eval_hits_cap;
     doc->stream_misses = impl->eval_stream_misses;
     doc->stream_misses_cap = impl->eval_stream_misses_cap;
-    doc->scalar_path_matches = impl->eval_scalar_path_matches;
-    doc->scalar_path_matches_cap = impl->eval_scalar_path_matches_cap;
     doc->scalar_path_predicates = impl->eval_scalar_path_predicates;
     doc->scalar_path_predicates_cap = impl->eval_scalar_path_predicates_cap;
     doc->in_matches = impl->eval_in_matches;
@@ -313,8 +295,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     impl->eval_hits_cap = 0u;
     impl->eval_stream_misses = NULL;
     impl->eval_stream_misses_cap = 0u;
-    impl->eval_scalar_path_matches = NULL;
-    impl->eval_scalar_path_matches_cap = 0u;
     impl->eval_scalar_path_predicates = NULL;
     impl->eval_scalar_path_predicates_cap = 0u;
     impl->eval_in_matches = NULL;
@@ -327,7 +307,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   if (selector != NULL && selector->hit_count != 0u) {
     clear_hits = !doc->borrowed_scratch;
     clear_stream_misses = !doc->borrowed_scratch;
-    clear_scalar_path_matches = !doc->borrowed_scratch;
     clear_in_matches = !doc->borrowed_scratch;
     doc->in_match_stride = selector->max_in_alternative_count;
     if (doc->hits_cap < selector->hit_count) {
@@ -344,7 +323,11 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     if (clear_hits) {
       memset(doc->hits, 0, sizeof(*doc->hits) * doc->hits_cap);
     }
-    if (doc->stream_misses_cap < selector->hit_count) {
+    streaming_miss_features =
+        selector->predicate_features &
+        (LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_PREFIX);
+    if (streaming_miss_features != 0u &&
+        doc->stream_misses_cap < selector->hit_count) {
       next_stream_misses = (unsigned int *)doc->allocator->realloc(
           doc->allocator, doc->stream_misses,
           sizeof(*doc->stream_misses) * selector->hit_count);
@@ -356,25 +339,9 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
       doc->stream_misses_cap = selector->hit_count;
       clear_stream_misses = 1;
     }
-    if (clear_stream_misses) {
+    if (clear_stream_misses && doc->stream_misses != NULL) {
       memset(doc->stream_misses, 0,
              sizeof(*doc->stream_misses) * doc->stream_misses_cap);
-    }
-    if (doc->scalar_path_matches_cap < selector->hit_count) {
-      next_scalar_path_matches = (unsigned int *)doc->allocator->realloc(
-          doc->allocator, doc->scalar_path_matches,
-          sizeof(*doc->scalar_path_matches) * selector->hit_count);
-      if (next_scalar_path_matches == NULL) {
-        destroy_doc(doc);
-        return 0;
-      }
-      doc->scalar_path_matches = next_scalar_path_matches;
-      doc->scalar_path_matches_cap = selector->hit_count;
-      clear_scalar_path_matches = 1;
-    }
-    if (clear_scalar_path_matches) {
-      memset(doc->scalar_path_matches, 0,
-             sizeof(*doc->scalar_path_matches) * doc->scalar_path_matches_cap);
     }
     if (doc->scalar_path_predicates_cap < selector->predicate_count) {
       next_scalar_path_predicates =
@@ -414,10 +381,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
       doc->borrowed_scratch && impl != NULL && impl->eval_candidate_epoch != 0u
           ? impl->eval_candidate_epoch
           : 1u;
-  doc->scalar_path_epoch = doc->borrowed_scratch && impl != NULL &&
-                                   impl->eval_scalar_path_epoch != 0u
-                               ? impl->eval_scalar_path_epoch
-                               : 1u;
   return 1;
 }
 
@@ -812,7 +775,7 @@ static void scalar_path_match_prepare(eval_doc *doc,
   size_t max_needle;
 
   if (doc->selector == NULL || doc->selector->hit_count == 0u ||
-      doc->scalar_path_matches == NULL) {
+      doc->scalar_path_predicates == NULL) {
     return;
   }
   doc->scalar_path_features = 0u;
@@ -820,16 +783,9 @@ static void scalar_path_match_prepare(eval_doc *doc,
   if (!selector_path_depth_possible(doc->selector, path)) {
     return;
   }
-  ++doc->scalar_path_epoch;
-  if (doc->scalar_path_epoch == 0u) {
-    memset(doc->scalar_path_matches, 0,
-           sizeof(*doc->scalar_path_matches) * doc->selector->hit_count);
-    doc->scalar_path_epoch = 1u;
-  }
   for (i = 0u; i < doc->predicate_count; ++i) {
     selector = doc->predicates[i];
     if (selector_path_matches(doc, selector, path)) {
-      doc->scalar_path_matches[selector->hit_index] = doc->scalar_path_epoch;
       if (doc->scalar_path_predicates != NULL &&
           doc->scalar_path_predicate_count < doc->scalar_path_predicates_cap) {
         doc->scalar_path_predicates[doc->scalar_path_predicate_count] =
@@ -1161,7 +1117,7 @@ static void observe_contains_stream_begin(eval_doc *doc,
 
   (void)selector;
   (void)path;
-  if (doc->hits == NULL || doc->stream_misses == NULL) {
+  if (doc->hits == NULL) {
     return;
   }
   for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
