@@ -33,6 +33,7 @@ typedef struct mutation_path {
   unsigned char *segment_kinds;
   size_t *segment_lens;
   size_t segment_count;
+  int has_wildcard;
 } mutation_path;
 
 #define MUTATION_PATH_LITERAL 0u
@@ -177,6 +178,7 @@ static void mutation_path_cleanup(lql *self, mutation_path *path) {
   path->segment_kinds = NULL;
   path->segment_lens = NULL;
   path->segment_count = 0u;
+  path->has_wildcard = 0;
 }
 
 static void mutation_item_cleanup(lql *self, mutation_item *item) {
@@ -801,6 +803,9 @@ static int path_add_segment(mutation_parse_context *ctx, mutation_path *path,
   path->segments[path->segment_count] = segment;
   path->segment_kinds[path->segment_count] = kind;
   path->segment_lens[path->segment_count] = len;
+  if (kind != MUTATION_PATH_LITERAL) {
+    path->has_wildcard = 1;
+  }
   ++path->segment_count;
   return 1;
 }
@@ -941,6 +946,7 @@ static int prepend_path(mutation_parse_context *ctx, mutation_item *item,
   item->path.segment_kinds = segment_kinds;
   item->path.segment_lens = segment_lens;
   item->path.segment_count = count;
+  item->path.has_wildcard = prefix->has_wildcard || item->path.has_wildcard;
   return 1;
 fail:
   for (i = 0u; i < count; ++i) {
@@ -1450,19 +1456,6 @@ static int mutation_is_stream_path_supported(const mutation_item *item) {
   return 1;
 }
 
-static int mutation_path_has_wildcard(const mutation_path *path) {
-  size_t i;
-  if (path == NULL) {
-    return 0;
-  }
-  for (i = 0u; i < path->segment_count; ++i) {
-    if (path->segment_kinds[i] != MUTATION_PATH_LITERAL) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
 static int mutation_paths_equal(const mutation_path *a,
                                 const mutation_path *b) {
   size_t i;
@@ -1510,8 +1503,8 @@ static int mutation_plan_supports_stream_paths(const lql_mutation_plan *plan) {
       if (mutation_paths_equal(&plan->items[i].path, &plan->items[j].path)) {
         return 0;
       }
-      if (!mutation_path_has_wildcard(&plan->items[i].path) &&
-          !mutation_path_has_wildcard(&plan->items[j].path) &&
+      if (!plan->items[i].path.has_wildcard &&
+          !plan->items[j].path.has_wildcard &&
           (mutation_path_is_prefix(&plan->items[i].path,
                                    &plan->items[j].path) ||
            mutation_path_is_prefix(&plan->items[j].path,
@@ -2175,7 +2168,7 @@ mutation_requires_missing_object_key_value(mutation_stream_state *state,
     for (i = 0u; i < state->plan->count; ++i) {
       item = &state->plan->items[i];
       if (state->applied[i] || item->kind == MUTATION_REMOVE ||
-          mutation_path_has_wildcard(&item->path) ||
+          item->path.has_wildcard ||
           !mutation_descends_from_object(item, parent, frame) ||
           state->prefix_seen_depth[i] > parent->segment_count) {
         continue;
@@ -2188,7 +2181,7 @@ mutation_requires_missing_object_key_value(mutation_stream_state *state,
   for (i = 0u; i < state->plan->count; ++i) {
     item = &state->plan->items[i];
     if (state->applied[i] || item->kind == MUTATION_REMOVE ||
-        mutation_path_has_wildcard(&item->path) ||
+        item->path.has_wildcard ||
         !mutation_descends_from_virtual_object(
             item, parent, frame, state->key_buf, state->key_len) ||
         state->prefix_seen_depth[i] > depth) {
@@ -2231,7 +2224,7 @@ write_missing_object_key_value(mutation_stream_state *state,
   for (i = 0u; i < state->plan->count; ++i) {
     item = &state->plan->items[i];
     if (state->applied[i] || item->kind == MUTATION_REMOVE ||
-        mutation_path_has_wildcard(&item->path) ||
+        item->path.has_wildcard ||
         !mutation_descends_from_virtual_object(
             item, parent, frame, state->key_buf, state->key_len) ||
         state->prefix_seen_depth[i] > depth) {
@@ -2420,7 +2413,7 @@ write_missing_object_mutations(mutation_stream_state *state,
   for (i = 0u; i < state->plan->count; ++i) {
     item = &state->plan->items[i];
     if (state->applied[i] || item->kind == MUTATION_REMOVE ||
-        mutation_path_has_wildcard(&item->path) ||
+        item->path.has_wildcard ||
         !mutation_descends_from_object(item, path, frame) ||
         state->prefix_seen_depth[i] > path->segment_count) {
       continue;
@@ -2964,7 +2957,7 @@ static lql_status mutate_reader_with_supported_plan(
   if (st == LONEJSON_STATUS_OK) {
     for (i = 0u; i < plan->count; ++i) {
       if (!state.applied[i] && plan->items[i].kind != MUTATION_REMOVE &&
-          !mutation_path_has_wildcard(&plan->items[i].path)) {
+          !plan->items[i].path.has_wildcard) {
         st = LONEJSON_STATUS_CALLBACK_FAILED;
         lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                       "mutation path could not be applied without "
