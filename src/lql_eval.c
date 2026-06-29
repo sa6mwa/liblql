@@ -2133,16 +2133,30 @@ static void prefix_stream_update(eval_doc *doc, const char *data, size_t len) {
 static void observe_prepared_value(eval_doc *doc, const char *value,
                                    int is_number, int is_container,
                                    int is_null) {
+  unsigned int features;
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return;
   }
-  observe_prepared_contains_value(doc, value, is_container, is_null);
-  observe_prepared_prefix_value(doc, value, is_container, is_null);
-  observe_prepared_exact_value(doc, value, is_container, is_null);
-  observe_prepared_temporal_value(doc, value, is_container, is_null);
-  observe_prepared_numeric_range_value(doc, value, is_number, is_container,
-                                       is_null);
-  observe_prepared_exists_value(doc, is_null);
+  features = doc->scalar_path_features;
+  if ((features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
+    observe_prepared_contains_value(doc, value, is_container, is_null);
+  }
+  if ((features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
+    observe_prepared_prefix_value(doc, value, is_container, is_null);
+  }
+  if ((features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
+    observe_prepared_exact_value(doc, value, is_container, is_null);
+  }
+  if ((features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
+    observe_prepared_temporal_value(doc, value, is_container, is_null);
+  }
+  if ((features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) != 0u) {
+    observe_prepared_numeric_range_value(doc, value, is_number, is_container,
+                                         is_null);
+  }
+  if ((features & LQL_SELECTOR_FEATURE_EXISTS) != 0u) {
+    observe_prepared_exists_value(doc, is_null);
+  }
 }
 
 static void observe_container_value(eval_doc *doc,
