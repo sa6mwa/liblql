@@ -2185,7 +2185,8 @@ static lonejson_status mutation_push_path_frame(mutation_stream_state *state,
   mutation_path_frame frame;
   size_t i;
   (void)error;
-  memset(&frame, 0, sizeof(frame));
+  frame.array_segments = NULL;
+  frame.array_segment_bits = 0ul;
   frame.container = container;
   frame.segment_count = path == NULL ? 0u : path->segment_count;
   if (frame.segment_count > MUTATION_FRAME_INLINE_BITS) {
