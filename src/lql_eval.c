@@ -991,24 +991,41 @@ static void scalar_family_append(eval_doc *doc, unsigned int feature,
 
 static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
                                unsigned int feature_mask) {
+  const lql_selector *root;
   const lql_selector *selector;
+  const lql_selector *const *predicates;
   unsigned int feature;
+  size_t end;
   size_t i;
+  size_t start;
 
-  if (doc->selector == NULL || doc->selector->hit_count == 0u ||
+  root = doc->selector;
+  if (root == NULL || root->hit_count == 0u ||
       doc->scalar_family_predicates == NULL) {
     return;
   }
   doc->scalar_path_features = 0u;
   memset(doc->scalar_family_counts, 0, sizeof(doc->scalar_family_counts));
-  if (doc->candidate_matched && doc->selector->match_sticky_once_true) {
+  if (doc->candidate_matched && root->match_sticky_once_true) {
     return;
   }
-  if (!selector_path_depth_possible(doc->selector, path)) {
+  if (!selector_path_depth_possible(root, path)) {
     return;
   }
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
+  predicates = doc->predicates;
+  start = 0u;
+  end = doc->predicate_count;
+  if (root->predicate_depth_order != NULL &&
+      root->predicate_depth_offsets != NULL) {
+    if (path == NULL || path->segment_count > root->predicate_max_segment_count) {
+      return;
+    }
+    predicates = root->predicate_depth_order;
+    start = root->predicate_depth_offsets[path->segment_count];
+    end = root->predicate_depth_offsets[path->segment_count + 1u];
+  }
+  for (i = start; i < end; ++i) {
+    selector = predicates[i];
     if (hit_marked(doc, selector)) {
       continue;
     }

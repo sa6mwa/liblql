@@ -1531,7 +1531,12 @@ static int selector_refresh_match_sticky(lql_selector *selector) {
 static void selector_clear_predicates(lql_selector_parser *ctx,
                                       lql_selector *selector) {
   ctx->allocator->destroy(ctx->allocator, (void *)selector->predicates);
+  ctx->allocator->destroy(ctx->allocator,
+                          (void *)selector->predicate_depth_order);
+  ctx->allocator->destroy(ctx->allocator, selector->predicate_depth_offsets);
   selector->predicates = NULL;
+  selector->predicate_depth_order = NULL;
+  selector->predicate_depth_offsets = NULL;
   selector->predicate_count = 0u;
   selector->predicate_min_segment_count = 0u;
   selector->predicate_max_segment_count = 0u;
@@ -1646,6 +1651,60 @@ static int prepare_selector_paths(lql_selector_parser *ctx,
   return 1;
 }
 
+static int prepare_predicate_depth_order(lql_selector_parser *ctx,
+                                         lql_selector *selector) {
+  size_t *cursor;
+  size_t i;
+  size_t depth;
+  int ok;
+
+  if (selector == NULL || selector->predicate_count == 0u ||
+      selector->predicate_has_variable_path) {
+    return 1;
+  }
+  cursor = NULL;
+  selector->predicate_depth_offsets =
+      (size_t *)ctx->allocator->calloc(ctx->allocator,
+                                       selector->predicate_max_segment_count +
+                                           2u,
+                                       sizeof(size_t));
+  selector->predicate_depth_order =
+      (const lql_selector **)ctx->allocator->calloc(
+          ctx->allocator, selector->predicate_count,
+          sizeof(selector->predicate_depth_order[0]));
+  if (selector->predicate_depth_offsets == NULL ||
+      selector->predicate_depth_order == NULL) {
+    return 0;
+  }
+  cursor = (size_t *)ctx->allocator->calloc(
+      ctx->allocator, selector->predicate_max_segment_count + 1u,
+      sizeof(cursor[0]));
+  if (cursor == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < selector->predicate_count; ++i) {
+    depth = selector->predicates[i]->field_segment_count;
+    ++selector->predicate_depth_offsets[depth + 1u];
+  }
+  for (i = 1u; i <= selector->predicate_max_segment_count + 1u; ++i) {
+    selector->predicate_depth_offsets[i] +=
+        selector->predicate_depth_offsets[i - 1u];
+  }
+  memcpy(cursor, selector->predicate_depth_offsets,
+         sizeof(cursor[0]) * (selector->predicate_max_segment_count + 1u));
+  ok = 1;
+  for (i = 0u; i < selector->predicate_count; ++i) {
+    depth = selector->predicates[i]->field_segment_count;
+    if (cursor[depth] >= selector->predicate_depth_offsets[depth + 1u]) {
+      ok = 0;
+      break;
+    }
+    selector->predicate_depth_order[cursor[depth]++] = selector->predicates[i];
+  }
+  ctx->allocator->destroy(ctx->allocator, cursor);
+  return ok;
+}
+
 static int finalize_selector(lql_selector_parser *ctx, lql_selector *selector) {
   size_t predicate_count;
   size_t i;
@@ -1688,7 +1747,10 @@ static int finalize_selector(lql_selector_parser *ctx, lql_selector *selector) {
     }
     ++direct_count;
   }
-  return predicate_count == selector->hit_count;
+  if (predicate_count != selector->hit_count) {
+    return 0;
+  }
+  return prepare_predicate_depth_order(ctx, selector);
 }
 
 static int append_selector(lql_selector_parser *ctx, lql_selector *parent,
@@ -2662,6 +2724,8 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->field_path_direct = 0;
   dst->field_path_literal = 0;
   dst->predicates = NULL;
+  dst->predicate_depth_order = NULL;
+  dst->predicate_depth_offsets = NULL;
   dst->predicate_count = 0u;
   dst->predicate_min_segment_count = 0u;
   dst->predicate_max_segment_count = 0u;

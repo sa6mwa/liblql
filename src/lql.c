@@ -317,6 +317,8 @@ LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
   allocator->destroy(allocator, selector->field_segment_lens);
   allocator->destroy(allocator, selector->field_segment_kinds);
   allocator->destroy(allocator, (void *)selector->predicates);
+  allocator->destroy(allocator, (void *)selector->predicate_depth_order);
+  allocator->destroy(allocator, selector->predicate_depth_offsets);
   for (i = 0u; i < selector->child_count; ++i) {
     lql_selector_cleanup(self, &selector->children[i]);
   }
