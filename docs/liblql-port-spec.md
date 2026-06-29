@@ -198,6 +198,10 @@ absolute paths against lonejson decoded path segments without reparsing path
 text for every scalar callback. It must be rebuilt during selector
 finalization, cloned as selector-owned state, and cleaned up with the selector;
 wildcard, recursive, or escaped paths must continue to use the general matcher.
+For scalar string and number callbacks, the evaluator may cache predicate
+path-match results once at scalar begin in receiver-owned scratch and reuse that
+hit-index bitmap across chunk and end observers. That scratch is bounded by the
+selector predicate count and must not depend on selected scalar length.
 
 As of lonejson `v0.35.2`, the path-value visitor used by liblql still enforces
 a small raw JSON number-token limit and performs bounded internal allocation for
