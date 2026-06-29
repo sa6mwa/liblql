@@ -73,6 +73,9 @@ evaluation setup does not walk compound selector trees for each candidate.
 Selector finalization also caches literal lengths, max `any` literal length, and
 max `in` fanout so scalar observers use selector-owned facts instead of
 recomputing them per candidate.
+It also records predicate feature bits, allowing scalar evaluation to skip
+entire contains, prefix, exact, temporal, numeric-range, and exists observer
+families when a selector cannot use them.
 For string and number values, the evaluator caches each predicate's path-match
 result once at scalar begin and reuses that hit-index bitmap across chunk and
 end observers.

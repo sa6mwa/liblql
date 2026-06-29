@@ -204,6 +204,10 @@ walk compound selector trees per candidate to rebuild predicate scratch.
 Selector finalization must cache literal lengths, max `any` literal length, and
 max `in` fanout; scalar observers must use those selector-owned facts instead
 of recomputing string lengths or walking the selector tree per candidate.
+Selector finalization must also cache predicate feature bits for contains,
+prefix, exact, temporal, numeric-range, and exists families. Scalar evaluation
+must use those bits to skip whole observer families when the selector cannot
+match through that family.
 For scalar string and number callbacks, the evaluator may cache predicate
 path-match results once at scalar begin in receiver-owned scratch and reuse that
 hit-index bitmap across chunk and end observers. That scratch is bounded by the

@@ -115,6 +115,13 @@ typedef enum lql_since_macro {
   LQL_SINCE_YESTERDAY
 } lql_since_macro;
 
+#define LQL_SELECTOR_FEATURE_CONTAINS 0x01u
+#define LQL_SELECTOR_FEATURE_PREFIX 0x02u
+#define LQL_SELECTOR_FEATURE_EXACT 0x04u
+#define LQL_SELECTOR_FEATURE_TEMPORAL 0x08u
+#define LQL_SELECTOR_FEATURE_NUMERIC_RANGE 0x10u
+#define LQL_SELECTOR_FEATURE_EXISTS 0x20u
+
 struct lql_selector {
   lql_selector_kind kind;
   char *field;
@@ -168,6 +175,7 @@ struct lql_selector {
   const struct lql_selector **predicates;
   size_t predicate_count;
   size_t max_in_alternative_count;
+  unsigned int predicate_features;
   size_t hit_index;
   size_t hit_count;
 };

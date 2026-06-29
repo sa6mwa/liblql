@@ -916,7 +916,9 @@ static int scalar_path_contains_stream_interested(
   size_t max_needle;
   int found;
 
-  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
+  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL ||
+      (doc->selector->predicate_features & LQL_SELECTOR_FEATURE_CONTAINS) ==
+          0u) {
     return 0;
   }
   found = 0;
@@ -944,6 +946,9 @@ static int scalar_path_prefix_stream_interested(const eval_doc *doc,
   int found;
 
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return 0;
+  }
+  if ((doc->selector->predicate_features & LQL_SELECTOR_FEATURE_PREFIX) == 0u) {
     return 0;
   }
   found = 0;
@@ -974,6 +979,9 @@ static int scalar_path_exact_stream_interested(const eval_doc *doc,
   int found;
 
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return 0;
+  }
+  if ((doc->selector->predicate_features & LQL_SELECTOR_FEATURE_EXACT) == 0u) {
     return 0;
   }
   found = 0;
@@ -1012,6 +1020,10 @@ scalar_path_temporal_stream_interested(const eval_doc *doc,
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return 0;
   }
+  if ((doc->selector->predicate_features & LQL_SELECTOR_FEATURE_TEMPORAL) ==
+      0u) {
+    return 0;
+  }
   found = 0;
   for (i = 0u; i < doc->predicate_count; ++i) {
     selector = doc->predicates[i];
@@ -1039,7 +1051,9 @@ static int scalar_path_numeric_range_stream_interested(
   size_t i;
   int found;
 
-  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
+  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL ||
+      (doc->selector->predicate_features &
+       LQL_SELECTOR_FEATURE_NUMERIC_RANGE) == 0u) {
     return 0;
   }
   found = 0;
@@ -1266,7 +1280,9 @@ static void observe_scalar_exists_begin(eval_doc *doc,
   size_t i;
 
   (void)selector;
-  if (doc->hits == NULL) {
+  if (doc->hits == NULL || doc->selector == NULL ||
+      (doc->selector->predicate_features & LQL_SELECTOR_FEATURE_EXISTS) ==
+          0u) {
     return;
   }
   for (i = 0u; i < doc->predicate_count; ++i) {

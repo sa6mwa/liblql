@@ -1370,6 +1370,54 @@ static size_t selector_refresh_cached_lengths(lql_selector *selector) {
   return max_in;
 }
 
+static unsigned int selector_refresh_predicate_features(lql_selector *selector) {
+  unsigned int features;
+  size_t i;
+
+  if (selector == NULL) {
+    return 0u;
+  }
+  features = 0u;
+  switch (selector->kind) {
+  case LQL_SELECTOR_KIND_CONTAINS:
+  case LQL_SELECTOR_KIND_ICONTAINS:
+    features |= LQL_SELECTOR_FEATURE_CONTAINS;
+    break;
+  case LQL_SELECTOR_KIND_PREFIX:
+  case LQL_SELECTOR_KIND_IPREFIX:
+    features |= LQL_SELECTOR_FEATURE_PREFIX;
+    break;
+  case LQL_SELECTOR_KIND_EQ:
+  case LQL_SELECTOR_KIND_NE:
+    if (selector->value_is_temporal) {
+      features |= LQL_SELECTOR_FEATURE_TEMPORAL;
+    } else {
+      features |= LQL_SELECTOR_FEATURE_EXACT;
+    }
+    break;
+  case LQL_SELECTOR_KIND_IN:
+    features |= LQL_SELECTOR_FEATURE_EXACT;
+    break;
+  case LQL_SELECTOR_KIND_RANGE:
+    features |= selector->range_is_temporal ? LQL_SELECTOR_FEATURE_TEMPORAL
+                                            : LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
+    break;
+  case LQL_SELECTOR_KIND_DATE:
+    features |= LQL_SELECTOR_FEATURE_TEMPORAL;
+    break;
+  case LQL_SELECTOR_KIND_EXISTS:
+    features |= LQL_SELECTOR_FEATURE_EXISTS;
+    break;
+  default:
+    break;
+  }
+  for (i = 0u; i < selector->child_count; ++i) {
+    features |= selector_refresh_predicate_features(&selector->children[i]);
+  }
+  selector->predicate_features = features;
+  return features;
+}
+
 static void selector_clear_predicates(lql_selector_parser *ctx,
                                       lql_selector *selector) {
   ctx->allocator->destroy(ctx->allocator, (void *)selector->predicates);
@@ -1474,6 +1522,7 @@ static int finalize_selector(lql_selector_parser *ctx, lql_selector *selector) {
   selector_clear_predicates(ctx, selector);
   assign_hit_indexes(selector, &selector->hit_count);
   selector_refresh_cached_lengths(selector);
+  selector_refresh_predicate_features(selector);
   if (!prepare_selector_paths(ctx, selector)) {
     return 0;
   }
@@ -2460,6 +2509,7 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->value_len = 0u;
   dst->any_max_len = 0u;
   dst->max_in_alternative_count = 0u;
+  dst->predicate_features = 0u;
   if (!clone_string(ctx, src->field, &dst->field) ||
       !clone_string(ctx, src->value, &dst->value) ||
       !clone_string(ctx, src->range_gt_text, &dst->range_gt_text) ||
