@@ -27,6 +27,9 @@
 #define LQL_EVAL_NUMERIC_EXP_CAP 1000000L
 #define LQL_SOURCE_PREFIX_CAP 4096u
 #define LQL_EVAL_FEATURE_PREFIX_CAPTURE 0x80000000u
+#define LQL_QUERY_LIMIT_MATCHES 0x01u
+#define LQL_QUERY_LIMIT_CANDIDATES 0x02u
+#define LQL_QUERY_LIMIT_BYTES 0x04u
 
 typedef struct eval_doc {
   lql_allocator *allocator;
@@ -2230,6 +2233,7 @@ typedef struct query_stream_state {
   lql_uint64 index_base;
   const lql_selector *selector;
   lql_query_options options;
+  unsigned int limit_flags;
   lql_query_decision_fn on_decision;
   void *user;
   lql_query_result result;
@@ -2270,6 +2274,7 @@ typedef struct spooled_match_state {
   const lql_projection *projection;
   const lql_mutation_plan *mutation_plan;
   lql_query_options options;
+  unsigned int limit_flags;
   int matches_only;
   int expand_arrays;
   lonejson *compact_runtime;
@@ -2283,6 +2288,7 @@ typedef struct source_spooled_match_state {
   lql *receiver;
   const lql_selector *selector;
   lql_query_options options;
+  unsigned int limit_flags;
   lql_query_match_fn on_match;
   void *user;
   lql_query_result result;
@@ -2291,6 +2297,24 @@ typedef struct source_spooled_match_state {
 } source_spooled_match_state;
 
 static int query_limit_enabled(lql_uint64 limit) { return limit != 0u; }
+
+static unsigned int query_limit_flags(const lql_query_options *options) {
+  unsigned int flags;
+  flags = 0u;
+  if (options == NULL) {
+    return flags;
+  }
+  if (options->max_matches != 0u) {
+    flags |= LQL_QUERY_LIMIT_MATCHES;
+  }
+  if (options->max_candidates != 0u) {
+    flags |= LQL_QUERY_LIMIT_CANDIDATES;
+  }
+  if (options->max_bytes_read != 0u) {
+    flags |= LQL_QUERY_LIMIT_BYTES;
+  }
+  return flags;
+}
 
 static lql_query_options
 query_remaining_options(const lql_query_options *options,
@@ -2574,6 +2598,33 @@ static void query_stop(query_stream_state *state,
   state->result.stop_reason = reason;
 }
 
+static int query_result_stop_if_limited(lql_query_result *result,
+                                        const lql_query_options *options,
+                                        unsigned int limit_flags) {
+  if (limit_flags == 0u) {
+    return 0;
+  }
+  if ((limit_flags & LQL_QUERY_LIMIT_MATCHES) != 0u &&
+      result->candidates_matched >= options->max_matches) {
+    result->stopped_early = 1;
+    result->stop_reason = LQL_QUERY_STOP_MATCH_LIMIT;
+    return 1;
+  }
+  if ((limit_flags & LQL_QUERY_LIMIT_CANDIDATES) != 0u &&
+      result->candidates_seen >= options->max_candidates) {
+    result->stopped_early = 1;
+    result->stop_reason = LQL_QUERY_STOP_CANDIDATE_LIMIT;
+    return 1;
+  }
+  if ((limit_flags & LQL_QUERY_LIMIT_BYTES) != 0u &&
+      result->bytes_read >= options->max_bytes_read) {
+    result->stopped_early = 1;
+    result->stop_reason = LQL_QUERY_STOP_BYTE_LIMIT;
+    return 1;
+  }
+  return 0;
+}
+
 static void query_stream_state_cleanup_capture(query_stream_state *state) {
   if (state != NULL && state->array_spool_initialized) {
     state->array_spool.cleanup(&state->array_spool);
@@ -2687,19 +2738,8 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
       state->callback_status = st;
       return LONEJSON_CANDIDATE_ERROR;
     }
-    if (query_limit_enabled(state->options.max_matches) &&
-        state->result.candidates_matched >= state->options.max_matches) {
-      query_stop(state, LQL_QUERY_STOP_MATCH_LIMIT);
-      return LONEJSON_CANDIDATE_STOP;
-    }
-    if (query_limit_enabled(state->options.max_candidates) &&
-        state->result.candidates_seen >= state->options.max_candidates) {
-      query_stop(state, LQL_QUERY_STOP_CANDIDATE_LIMIT);
-      return LONEJSON_CANDIDATE_STOP;
-    }
-    if (query_limit_enabled(state->options.max_bytes_read) &&
-        state->result.bytes_read >= state->options.max_bytes_read) {
-      query_stop(state, LQL_QUERY_STOP_BYTE_LIMIT);
+    if (query_result_stop_if_limited(&state->result, &state->options,
+                                     state->limit_flags)) {
       return LONEJSON_CANDIDATE_STOP;
     }
     return LONEJSON_CANDIDATE_CONTINUE;
@@ -2730,19 +2770,8 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
       state->callback_status = st;
       return LONEJSON_CANDIDATE_ERROR;
     }
-    if (query_limit_enabled(state->options.max_matches) &&
-        state->result.candidates_matched >= state->options.max_matches) {
-      query_stop(state, LQL_QUERY_STOP_MATCH_LIMIT);
-      return LONEJSON_CANDIDATE_STOP;
-    }
-    if (query_limit_enabled(state->options.max_candidates) &&
-        state->result.candidates_seen >= state->options.max_candidates) {
-      query_stop(state, LQL_QUERY_STOP_CANDIDATE_LIMIT);
-      return LONEJSON_CANDIDATE_STOP;
-    }
-    if (query_limit_enabled(state->options.max_bytes_read) &&
-        state->result.bytes_read >= state->options.max_bytes_read) {
-      query_stop(state, LQL_QUERY_STOP_BYTE_LIMIT);
+    if (query_result_stop_if_limited(&state->result, &state->options,
+                                     state->limit_flags)) {
       return LONEJSON_CANDIDATE_STOP;
     }
     return LONEJSON_CANDIDATE_CONTINUE;
@@ -2771,19 +2800,8 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
     state->callback_status = st;
     return LONEJSON_CANDIDATE_ERROR;
   }
-  if (query_limit_enabled(state->options.max_matches) &&
-      state->result.candidates_matched >= state->options.max_matches) {
-    query_stop(state, LQL_QUERY_STOP_MATCH_LIMIT);
-    return LONEJSON_CANDIDATE_STOP;
-  }
-  if (query_limit_enabled(state->options.max_candidates) &&
-      state->result.candidates_seen >= state->options.max_candidates) {
-    query_stop(state, LQL_QUERY_STOP_CANDIDATE_LIMIT);
-    return LONEJSON_CANDIDATE_STOP;
-  }
-  if (query_limit_enabled(state->options.max_bytes_read) &&
-      state->result.bytes_read >= state->options.max_bytes_read) {
-    query_stop(state, LQL_QUERY_STOP_BYTE_LIMIT);
+  if (query_result_stop_if_limited(&state->result, &state->options,
+                                   state->limit_flags)) {
     return LONEJSON_CANDIDATE_STOP;
   }
   return LONEJSON_CANDIDATE_CONTINUE;
@@ -3000,22 +3018,8 @@ on_source_spooled_candidate_end(void *user,
     }
   }
   reset_doc(&state->doc);
-  if (query_limit_enabled(state->options.max_matches) &&
-      state->result.candidates_matched >= state->options.max_matches) {
-    state->result.stopped_early = 1;
-    state->result.stop_reason = LQL_QUERY_STOP_MATCH_LIMIT;
-    return LONEJSON_CANDIDATE_STOP;
-  }
-  if (query_limit_enabled(state->options.max_candidates) &&
-      state->result.candidates_seen >= state->options.max_candidates) {
-    state->result.stopped_early = 1;
-    state->result.stop_reason = LQL_QUERY_STOP_CANDIDATE_LIMIT;
-    return LONEJSON_CANDIDATE_STOP;
-  }
-  if (query_limit_enabled(state->options.max_bytes_read) &&
-      state->result.bytes_read >= state->options.max_bytes_read) {
-    state->result.stopped_early = 1;
-    state->result.stop_reason = LQL_QUERY_STOP_BYTE_LIMIT;
+  if (query_result_stop_if_limited(&state->result, &state->options,
+                                   state->limit_flags)) {
     return LONEJSON_CANDIDATE_STOP;
   }
   (void)error;
@@ -3185,22 +3189,8 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
   state->result.bytes_read =
       (lql_uint64)(candidate->stream_offset + candidate->byte_size);
   reset_doc(&state->doc);
-  if (query_limit_enabled(state->options.max_matches) &&
-      state->result.candidates_matched >= state->options.max_matches) {
-    state->result.stopped_early = 1;
-    state->result.stop_reason = LQL_QUERY_STOP_MATCH_LIMIT;
-    return LONEJSON_CANDIDATE_STOP;
-  }
-  if (query_limit_enabled(state->options.max_candidates) &&
-      state->result.candidates_seen >= state->options.max_candidates) {
-    state->result.stopped_early = 1;
-    state->result.stop_reason = LQL_QUERY_STOP_CANDIDATE_LIMIT;
-    return LONEJSON_CANDIDATE_STOP;
-  }
-  if (query_limit_enabled(state->options.max_bytes_read) &&
-      state->result.bytes_read >= state->options.max_bytes_read) {
-    state->result.stopped_early = 1;
-    state->result.stop_reason = LQL_QUERY_STOP_BYTE_LIMIT;
+  if (query_result_stop_if_limited(&state->result, &state->options,
+                                   state->limit_flags)) {
     return LONEJSON_CANDIDATE_STOP;
   }
   return LONEJSON_CANDIDATE_CONTINUE;
@@ -3673,6 +3663,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   if (query_options != NULL) {
     state.options = *query_options;
   }
+  state.limit_flags = query_limit_flags(&state.options);
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
@@ -3741,6 +3732,7 @@ static lql_status execute_query_file_range_decisions(
   if (query_options != NULL) {
     state.options = *query_options;
   }
+  state.limit_flags = query_limit_flags(&state.options);
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
@@ -3826,6 +3818,7 @@ static lql_status execute_query_source_decisions_with_base(
   if (query_options != NULL) {
     state.options = *query_options;
   }
+  state.limit_flags = query_limit_flags(&state.options);
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
@@ -3921,6 +3914,7 @@ static lql_status execute_query_source_spooled_matches(
   if (query_options != NULL) {
     state.options = *query_options;
   }
+  state.limit_flags = query_limit_flags(&state.options);
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
@@ -4008,6 +4002,7 @@ static lql_status execute_query_file_range_spooled_matches(
   if (query_options != NULL) {
     state.options = *query_options;
   }
+  state.limit_flags = query_limit_flags(&state.options);
   lql_error_init(&state.projection_error);
   lql_error_init(&state.mutation_error);
   if (!init_doc(&state.doc, self, selector)) {
@@ -4099,6 +4094,7 @@ static lql_status execute_query_source_spooled_rewrite(
   if (query_options != NULL) {
     state.options = *query_options;
   }
+  state.limit_flags = query_limit_flags(&state.options);
   lql_error_init(&state.projection_error);
   lql_error_init(&state.mutation_error);
   memset(&adapter, 0, sizeof(adapter));
