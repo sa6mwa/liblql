@@ -124,7 +124,10 @@ bench benchmarks: build-debug
 
 bench-check: build-debug build-bench-release
 	@mkdir -p build
-	@LQL_BENCH_SUITE=smoke ./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --check --require go,c,lua > build/bench-check.jsonl
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
+	  LQL_BENCH_SUITE=smoke \
+	  ./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --check --require go,c,lua > build/bench-check.jsonl
 	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
 	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
 	  ./scripts/check_lockd_perf_benchmark.sh
@@ -140,11 +143,15 @@ bench-lockd-perf-check: build-bench-release
 	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
 	  ./scripts/check_lockd_perf_benchmark.sh
 
-bench-memory-check: build-debug
-	@./scripts/check_parity_benchmark_large_memory.sh
+bench-memory-check: build-debug build-bench-release
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
+	  ./scripts/check_parity_benchmark_large_memory.sh
 
-bench-1g-check: build-debug
-	@./scripts/check_parity_benchmark_1g_memory.sh
+bench-1g-check: build-debug build-bench-release
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
+	  ./scripts/check_parity_benchmark_1g_memory.sh
 
 benchmarks-go:
 	@./scripts/run_parity_benchmarks.sh --impl go --format json

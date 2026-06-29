@@ -41,6 +41,18 @@ check_release_surface() {
     printf 'release surface: prerelease-hardening must include bench-1g-check\n' >&2
     exit 1
   fi
+  if ! grep -Eq '^bench-memory-check:.*build-bench-release' "$makefile" ||
+     ! grep -Eq '^bench-1g-check:.*build-bench-release' "$makefile"; then
+    printf 'release surface: memory benchmark gates must build optimized C helpers\n' >&2
+    exit 1
+  fi
+  if ! grep -F 'LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench' \
+      "$makefile" >/dev/null ||
+     ! grep -F 'LQL_BENCH_LIBRARY_DIR=build/bench-release' "$makefile" \
+      >/dev/null; then
+    printf 'release surface: benchmark gates must run optimized C helpers\n' >&2
+    exit 1
+  fi
 
   for required in 'scripts/clean.sh' 'test-all' 'bench-check' \
     'bench-memory-check' 'bench-1g-check' 'release-matrix'; do
@@ -104,6 +116,18 @@ release:
 	@./scripts/release_gate.sh
 print-release-assets:
 	@./scripts/package.sh print-release-assets
+bench-check: build-debug build-bench-release
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
+	  ./scripts/run_parity_benchmarks.sh
+bench-memory-check: build-debug build-bench-release
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
+	  ./scripts/check_parity_benchmark_large_memory.sh
+bench-1g-check: build-debug build-bench-release
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
+	  ./scripts/check_parity_benchmark_1g_memory.sh
 EOF
   cat >"$release_script" <<'EOF'
 #!/bin/sh
@@ -163,6 +187,22 @@ EOF
   if (check_release_surface "$makefile" "$release_script" \
     "$tmp/missing-darwin-install-name.cmake" >/dev/null 2>&1); then
     printf 'release surface fixture: expected missing Darwin install name to fail\n' >&2
+    exit 1
+  fi
+
+  sed 's/bench-memory-check: build-debug build-bench-release/bench-memory-check: build-debug/' \
+    "$makefile" >"$tmp/debug-memory-bench.mk"
+  if (check_release_surface "$tmp/debug-memory-bench.mk" "$release_script" \
+    "$cmakelists" >/dev/null 2>&1); then
+    printf 'release surface fixture: expected debug memory benchmark gate to fail\n' >&2
+    exit 1
+  fi
+
+  sed '/LQL_PAYLOAD_BENCH_PATH=build\/bench-release\/lql_payload_bench/d' \
+    "$makefile" >"$tmp/missing-bench-helper.mk"
+  if (check_release_surface "$tmp/missing-bench-helper.mk" "$release_script" \
+    "$cmakelists" >/dev/null 2>&1); then
+    printf 'release surface fixture: expected missing benchmark helper env to fail\n' >&2
     exit 1
   fi
 

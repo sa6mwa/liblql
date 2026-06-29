@@ -69,6 +69,9 @@ Current implementation status:
   benchmark schema.
 - `make bench-check` runs the current deterministic Go/C/Lua smoke gate and
   fails if candidate, match, payload-count, or payload-byte counts diverge. It
+  builds `build/bench-release/lql_payload_bench` and passes that optimized C
+  helper to the benchmark runner for C payload/performance rows; debug helpers
+  are not authoritative for C-native performance gates. It
   also runs deterministic negative checks proving candidate-count, match-count,
   payload-count, payload-byte, peak-RSS-limit, and
   missing-required-implementation failures are detected and validates benchmark
@@ -129,7 +132,9 @@ Current implementation status:
   `LQL_BENCH_MEMORY_COUNT`, `LQL_BENCH_MEMORY_BLOB_BYTES`, and
   `LQL_BENCH_MEMORY_MIN_BYTES`, so the same gate shape can be scaled toward the
   1 GiB/128 MiB requirement without changing the runner or weakening the normal
-  smoke gate. The same target also runs a separate Go/C-only mutation memory
+  smoke gate. The target builds and runs the optimized C benchmark helper for
+  C performance rows while preserving debug/test builds for normal unit
+  coverage. The same target also runs a separate Go/C-only mutation memory
   profile over the same generated fixture using `mutate_file_selector`,
   `mutate_file_plan`, and `mutate_source_selector`. Lua is deliberately
   excluded from this large mutation memory profile until the public Lua facade
