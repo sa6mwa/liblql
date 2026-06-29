@@ -1861,6 +1861,9 @@ static int contains_any_stream_scan(const char *tail, size_t tail_len,
   if (first_bitmap != NULL) {
     for (i = 0u; i < tail_len; ++i) {
       ch = (unsigned char)tail[i];
+      if (ignore_case) {
+        ch = ascii_lower_byte(ch);
+      }
       if ((first_bitmap[ch >> 3] & (unsigned char)(1u << (ch & 7u))) != 0u) {
         break;
       }

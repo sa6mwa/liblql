@@ -1580,6 +1580,50 @@ static void expect_source_stream(void) {
   }
 }
 
+static void expect_source_icontains_any_boundary_stream(void) {
+  static const char input[] = "{\"msg\":\"--Abc--\"}\n";
+  lql_selector *selector;
+  lql_query_result result;
+  stream_seen seen;
+  chunk_reader reader;
+  lql_error error;
+  lql_status st;
+
+  memset(&seen, 0, sizeof(seen));
+  memset(&reader, 0, sizeof(reader));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 1u;
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(
+      test_ctx, "icontains{field=/msg,any=zz|yy|xx|abc}", &selector, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("source icontains.any boundary parse failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  st = test_ctx->query_source_decisions(test_ctx, selector, read_chunk,
+                                        &reader, record_decision, &seen,
+                                        &result, &error);
+  test_ctx->selector_destroy(test_ctx, selector);
+  if (st != LQL_STATUS_OK) {
+    printf("source icontains.any boundary query failed: %s\n", error.message);
+    ++failures;
+    return;
+  }
+  if (reader.calls <= 1 || seen.calls != 1 || seen.matched != 1 ||
+      result.candidates_seen != (lql_uint64)1 ||
+      result.candidates_matched != (lql_uint64)1) {
+    printf("source icontains.any boundary mismatch reads=%d calls=%d "
+           "matched=%d seen=%lu result_matched=%lu\n",
+           reader.calls, seen.calls, seen.matched,
+           (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched);
+    ++failures;
+  }
+}
+
 static void expect_stream_large_irrelevant_scalar_api(void) {
   static const char prefix[] = "{\"blob\":\"";
   static const char chunk[] =
@@ -7053,6 +7097,9 @@ static void expect_sdk_contract_manifest(void) {
        expect_stream_mixed_scalar_candidates},
       {"streaming", "callback-source decision streams", expect_source_stream},
       {"streaming",
+       "case-insensitive contains-any across callback-source chunk boundaries",
+       expect_source_icontains_any_boundary_stream},
+      {"streaming",
        "large irrelevant scalar fields do not affect streaming "
        "selector results",
        expect_stream_large_irrelevant_scalar_api},
@@ -7127,7 +7174,7 @@ static void expect_sdk_contract_manifest(void) {
   };
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 14}, {"streaming", 13},
+      {"version", 1},      {"selector", 14}, {"streaming", 14},
       {"projection", 7},   {"compact", 2},  {"mutation", 20},
   };
   size_t i;
@@ -8813,6 +8860,7 @@ int main(void) {
   expect_stream_escaped_json_pointer_segments();
   expect_stream_mixed_scalar_candidates();
   expect_source_stream();
+  expect_source_icontains_any_boundary_stream();
   expect_stream_large_irrelevant_scalar_api();
   expect_source_spooled_payload_api();
   expect_stream_array_items();
