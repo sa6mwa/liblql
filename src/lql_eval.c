@@ -497,6 +497,9 @@ static int contains_case_len(const char *haystack, size_t h, const char *needle,
 static int contains_case_len(const char *haystack, size_t h, const char *needle,
                              size_t n, int ignore_case) {
   size_t i;
+  const char *cursor;
+  const char *end;
+  size_t remaining;
   unsigned char first;
   if (n == 0u) {
     return 1;
@@ -506,16 +509,27 @@ static int contains_case_len(const char *haystack, size_t h, const char *needle,
   }
   first = ignore_case ? (unsigned char)tolower((unsigned char)needle[0])
                       : (unsigned char)needle[0];
-  for (i = 0u; i + n <= h; ++i) {
-    if (ignore_case) {
-      if ((unsigned char)tolower((unsigned char)haystack[i]) != first) {
-        continue;
+  if (!ignore_case) {
+    cursor = haystack;
+    end = haystack + h - n + 1u;
+    while (cursor < end) {
+      remaining = (size_t)(end - cursor);
+      cursor = (const char *)memchr(cursor, first, remaining);
+      if (cursor == NULL) {
+        return 0;
       }
-      if (ascii_case_equal_prefix(haystack + i, needle, n)) {
+      if (memcmp(cursor, needle, n) == 0) {
         return 1;
       }
-    } else if ((unsigned char)haystack[i] == first &&
-               memcmp(haystack + i, needle, n) == 0) {
+      ++cursor;
+    }
+    return 0;
+  }
+  for (i = 0u; i + n <= h; ++i) {
+    if ((unsigned char)tolower((unsigned char)haystack[i]) != first) {
+      continue;
+    }
+    if (ascii_case_equal_prefix(haystack + i, needle, n)) {
       return 1;
     }
   }
