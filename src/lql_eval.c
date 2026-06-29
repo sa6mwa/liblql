@@ -722,6 +722,7 @@ static int path_matches(const eval_doc *doc, const char *pattern,
 }
 
 static void stream_miss_clear(eval_doc *doc, const lql_selector *selector);
+static int hit_marked(const eval_doc *doc, const lql_selector *selector);
 static size_t selector_contains_max_needle(const lql_selector *selector);
 static size_t selector_prefix_value_len(const lql_selector *selector);
 static size_t selector_in_max_value_len(const lql_selector *selector);
@@ -818,6 +819,9 @@ static void scalar_path_match_prepare(eval_doc *doc,
   }
   for (i = 0u; i < doc->predicate_count; ++i) {
     selector = doc->predicates[i];
+    if (hit_marked(doc, selector)) {
+      continue;
+    }
     if (selector_path_matches(doc, selector, path)) {
       if (doc->scalar_path_predicates != NULL &&
           doc->scalar_path_predicate_count < doc->scalar_path_predicates_cap) {
@@ -1898,6 +1902,9 @@ static void observe_value(eval_doc *doc, const lonejson_value_path *path,
     return;
   }
   for (i = 0u; i < doc->predicate_count; ++i) {
+    if (hit_marked(doc, doc->predicates[i])) {
+      continue;
+    }
     if (selector_path_matches(doc, doc->predicates[i], path)) {
       observe_matched_selector(doc, doc->predicates[i], value, is_number,
                                is_container, is_null);
