@@ -75,9 +75,8 @@ typedef struct eval_doc {
   long number_exp_value;
   char number_sig[LQL_EVAL_NUMERIC_SIG_CAP + 1u];
   int *container_types;
-  size_t *container_depths;
-  size_t container_count;
   size_t container_cap;
+  size_t container_high_water;
   char root_kind;
   int borrowed_scratch;
 } eval_doc;
@@ -222,6 +221,10 @@ static lql_status on_match_decision(void *user,
 }
 
 static void destroy_doc(eval_doc *doc) {
+  if (doc->container_types != NULL && doc->container_high_water != 0u) {
+    memset(doc->container_types, 0,
+           sizeof(doc->container_types[0]) * doc->container_high_water);
+  }
   if (doc->borrowed_scratch && doc->impl != NULL) {
     doc->impl->eval_candidate_epoch = doc->candidate_epoch + 1u;
     if (doc->impl->eval_candidate_epoch == 0u) {
@@ -261,7 +264,6 @@ static void destroy_doc(eval_doc *doc) {
     doc->impl->eval_contains_tail_buf = doc->contains_tail_buf;
     doc->impl->eval_contains_tail_cap = doc->contains_tail_cap;
     doc->impl->eval_container_types = doc->container_types;
-    doc->impl->eval_container_depths = doc->container_depths;
     doc->impl->eval_container_cap = doc->container_cap;
     doc->impl->eval_scratch_in_use = 0;
   } else {
@@ -272,7 +274,6 @@ static void destroy_doc(eval_doc *doc) {
     doc->allocator->destroy(doc->allocator, doc->in_matches);
     doc->allocator->destroy(doc->allocator, doc->contains_tail_buf);
     doc->allocator->destroy(doc->allocator, doc->container_types);
-    doc->allocator->destroy(doc->allocator, doc->container_depths);
   }
   memset(doc, 0, sizeof(*doc));
 }
@@ -313,7 +314,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     doc->contains_tail_buf = impl->eval_contains_tail_buf;
     doc->contains_tail_cap = impl->eval_contains_tail_cap;
     doc->container_types = impl->eval_container_types;
-    doc->container_depths = impl->eval_container_depths;
     doc->container_cap = impl->eval_container_cap;
     impl->eval_hits = NULL;
     impl->eval_hits_cap = 0u;
@@ -328,7 +328,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     impl->eval_contains_tail_buf = NULL;
     impl->eval_contains_tail_cap = 0u;
     impl->eval_container_types = NULL;
-    impl->eval_container_depths = NULL;
     impl->eval_container_cap = 0u;
   }
   if (selector != NULL && selector->hit_count != 0u) {
@@ -455,7 +454,6 @@ static void reset_doc(eval_doc *doc) {
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;
   doc->prefix_need = 0u;
-  doc->container_count = 0u;
   doc->root_kind = '\0';
 }
 
@@ -492,37 +490,40 @@ static int ensure_contains_tail(eval_doc *doc) {
 static lonejson_status
 push_container(eval_doc *doc, const lonejson_value_path *path, int type) {
   int *next_types;
-  size_t *next_depths;
+  size_t depth;
+  size_t old_cap;
   size_t next_cap;
-  if (doc->container_count == doc->container_cap) {
+  depth = path->segment_count;
+  if (depth >= doc->container_cap) {
+    old_cap = doc->container_cap;
     next_cap = doc->container_cap == 0u ? 8u : doc->container_cap * 2u;
+    while (depth >= next_cap) {
+      next_cap *= 2u;
+    }
     next_types = (int *)doc->allocator->realloc(
         doc->allocator, doc->container_types, sizeof(int) * next_cap);
     if (next_types == NULL) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
     doc->container_types = next_types;
-    next_depths = (size_t *)doc->allocator->realloc(
-        doc->allocator, doc->container_depths, sizeof(size_t) * next_cap);
-    if (next_depths == NULL) {
-      return LONEJSON_STATUS_ALLOCATION_FAILED;
-    }
-    doc->container_depths = next_depths;
+    memset(doc->container_types + old_cap, 0,
+           sizeof(doc->container_types[0]) * (next_cap - old_cap));
     doc->container_cap = next_cap;
   }
-  doc->container_types[doc->container_count] = type;
-  doc->container_depths[doc->container_count] = path->segment_count;
-  ++doc->container_count;
+  doc->container_types[depth] = type;
+  if (depth + 1u > doc->container_high_water) {
+    doc->container_high_water = depth + 1u;
+  }
   return LONEJSON_STATUS_OK;
 }
 
 static void pop_container(eval_doc *doc, const lonejson_value_path *path) {
-  if (doc->container_count == 0u) {
+  size_t depth;
+  depth = path->segment_count;
+  if (depth >= doc->container_cap) {
     return;
   }
-  if (doc->container_depths[doc->container_count - 1u] == path->segment_count) {
-    --doc->container_count;
-  }
+  doc->container_types[depth] = 0;
 }
 
 static int ascii_case_equal_prefix(const char *a, const char *b, size_t n) {
@@ -661,14 +662,11 @@ static int path_segment_matches(const char *start, size_t len,
 
 static int parent_container_type(const eval_doc *doc, size_t depth,
                                  int *out_type) {
-  size_t i;
-  for (i = doc->container_count; i > 0u; --i) {
-    if (doc->container_depths[i - 1u] == depth) {
-      *out_type = doc->container_types[i - 1u];
-      return 1;
-    }
+  if (depth >= doc->container_cap || doc->container_types[depth] == 0) {
+    return 0;
   }
-  return 0;
+  *out_type = doc->container_types[depth];
+  return 1;
 }
 
 static int pattern_segment_is(const char *start, size_t len, const char *lit) {

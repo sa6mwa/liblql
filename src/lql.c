@@ -267,7 +267,6 @@ static void receiver_destroy(lql *self) {
     allocator->destroy(allocator, impl->eval_in_matches);
     allocator->destroy(allocator, impl->eval_contains_tail_buf);
     allocator->destroy(allocator, impl->eval_container_types);
-    allocator->destroy(allocator, impl->eval_container_depths);
     block = impl->eval_pool_all;
     while (block != NULL) {
       next_block = block->all_next;
