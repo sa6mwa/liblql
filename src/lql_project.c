@@ -75,7 +75,7 @@ typedef struct projection_state {
 
 struct lql_projection {
   projection_path *paths;
-  const projection_path **path_depth_order;
+  size_t *path_depth_indexes;
   size_t *path_depth_offsets;
   size_t path_count;
   size_t min_segment_count;
@@ -222,8 +222,7 @@ static int add_segment(projection_parse_context *ctx, projection_path *path,
   index = path->segment_count;
   is_array_index = parse_array_index(segment, &array_index);
   next_segments = (char **)ctx->allocator->realloc(
-      ctx->allocator, path->segments,
-      sizeof(path->segments[0]) * (index + 1u));
+      ctx->allocator, path->segments, sizeof(path->segments[0]) * (index + 1u));
   if (next_segments == NULL) {
     return 0;
   }
@@ -374,10 +373,8 @@ static int parse_projection_path(projection_parse_context *ctx, const char *raw,
   return out->segment_count != 0u;
 }
 
-static int projection_segments_equal(const projection_path *a,
-                                     size_t a_index,
-                                     const projection_path *b,
-                                     size_t b_index) {
+static int projection_segments_equal(const projection_path *a, size_t a_index,
+                                     const projection_path *b, size_t b_index) {
   return a->segment_lens[a_index] == b->segment_lens[b_index] &&
          memcmp(a->segments[a_index], b->segments[b_index],
                 a->segment_lens[a_index]) == 0;
@@ -482,17 +479,15 @@ static int finalize_projection_paths(projection_parse_context *ctx,
   if (projection == NULL || projection->path_count == 0u) {
     return 1;
   }
-  projection->path_depth_order =
-      (const projection_path **)ctx->allocator->calloc(
-          ctx->allocator, projection->path_count,
-          sizeof(projection->path_depth_order[0]));
-  if (projection->path_depth_order == NULL) {
+  projection->path_depth_indexes = (size_t *)ctx->allocator->calloc(
+      ctx->allocator, projection->path_count,
+      sizeof(projection->path_depth_indexes[0]));
+  if (projection->path_depth_indexes == NULL) {
     return 0;
   }
-  projection->path_depth_offsets =
-      (size_t *)ctx->allocator->calloc(ctx->allocator,
-                                       projection->max_segment_count + 2u,
-                                       sizeof(projection->path_depth_offsets[0]));
+  projection->path_depth_offsets = (size_t *)ctx->allocator->calloc(
+      ctx->allocator, projection->max_segment_count + 2u,
+      sizeof(projection->path_depth_offsets[0]));
   if (projection->path_depth_offsets == NULL) {
     return 0;
   }
@@ -511,7 +506,7 @@ static int finalize_projection_paths(projection_parse_context *ctx,
   for (i = 0u; i < projection->path_count; ++i) {
     depth = projection->paths[i].segment_count;
     offset = projection->path_depth_offsets[depth] + cursor[depth]++;
-    projection->path_depth_order[offset] = &projection->paths[i];
+    projection->path_depth_indexes[offset] = i;
   }
   ctx->allocator->destroy(ctx->allocator, cursor);
   return 1;
@@ -536,10 +531,10 @@ static int value_path_matches(const lonejson_value_path *value_path,
 
 static const projection_path *selected_path(const lql_projection *projection,
                                             const lonejson_value_path *path) {
-  const projection_path *candidate;
   size_t i;
   size_t start;
   size_t end;
+  size_t index;
   if (projection == NULL || path == NULL ||
       path->segment_count < projection->min_segment_count ||
       path->segment_count > projection->max_segment_count) {
@@ -550,14 +545,14 @@ static const projection_path *selected_path(const lql_projection *projection,
                ? &projection->paths[0]
                : NULL;
   }
-  if (projection->path_depth_order != NULL &&
+  if (projection->path_depth_indexes != NULL &&
       projection->path_depth_offsets != NULL) {
     start = projection->path_depth_offsets[path->segment_count];
     end = projection->path_depth_offsets[path->segment_count + 1u];
     for (i = start; i < end; ++i) {
-      candidate = projection->path_depth_order[i];
-      if (candidate != NULL && value_path_matches(path, candidate)) {
-        return candidate;
+      index = projection->path_depth_indexes[i];
+      if (value_path_matches(path, &projection->paths[index])) {
+        return &projection->paths[index];
       }
     }
     return NULL;
@@ -634,9 +629,9 @@ static void projection_key_reset(projection_state *state) {
 
 static int projection_key_append(projection_state *state, const char *data,
                                  size_t n) {
-  return projection_inline_buf_append(
-      state, &state->key_buf, &state->key_len, state->inline_key_buf,
-      sizeof(state->inline_key_buf), data, n);
+  return projection_inline_buf_append(state, &state->key_buf, &state->key_len,
+                                      state->inline_key_buf,
+                                      sizeof(state->inline_key_buf), data, n);
 }
 
 static void projection_num_reset(projection_state *state) {
@@ -646,9 +641,9 @@ static void projection_num_reset(projection_state *state) {
 
 static int projection_num_append(projection_state *state, const char *data,
                                  size_t n) {
-  return projection_inline_buf_append(
-      state, &state->num_buf, &state->num_len, state->inline_num_buf,
-      sizeof(state->inline_num_buf), data, n);
+  return projection_inline_buf_append(state, &state->num_buf, &state->num_len,
+                                      state->inline_num_buf,
+                                      sizeof(state->inline_num_buf), data, n);
 }
 
 static size_t common_open_prefix(const projection_state *state,
@@ -941,8 +936,8 @@ static lonejson_status on_object_key_end(void *user,
   (void)error;
   state = (projection_state *)user;
   if (state->capturing &&
-      lonejson_writer_key(&state->writer, state->key_buf,
-                          state->key_len, state->error) != LONEJSON_STATUS_OK) {
+      lonejson_writer_key(&state->writer, state->key_buf, state->key_len,
+                          state->error) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   return LONEJSON_STATUS_OK;
@@ -1045,8 +1040,7 @@ static lonejson_status on_number_chunk(void *user,
   (void)path;
   (void)error;
   state = (projection_state *)user;
-  if (state->in_number &&
-      !projection_num_append(state, data, len)) {
+  if (state->in_number && !projection_num_append(state, data, len)) {
     return LONEJSON_STATUS_ALLOCATION_FAILED;
   }
   return LONEJSON_STATUS_OK;
@@ -1174,9 +1168,10 @@ static void projection_state_cleanup(projection_state *state) {
   state->open_array_next = NULL;
 }
 
-static lql_status projection_parse_method(
-    lql *self, const char *const *fields, size_t field_count,
-    lql_projection **out, lql_error *error) {
+static lql_status projection_parse_method(lql *self, const char *const *fields,
+                                          size_t field_count,
+                                          lql_projection **out,
+                                          lql_error *error) {
   lql_allocator *allocator;
   projection_parse_context parse_ctx;
   lql_projection *projection;
@@ -1233,8 +1228,7 @@ static lql_status projection_parse_method(
   return LQL_STATUS_OK;
 }
 
-static void
-projection_destroy_method(lql *self, lql_projection *projection) {
+static void projection_destroy_method(lql *self, lql_projection *projection) {
   lql_allocator *allocator;
   size_t i;
   if (projection == NULL) {
@@ -1247,7 +1241,7 @@ projection_destroy_method(lql *self, lql_projection *projection) {
   for (i = 0u; i < projection->path_count; ++i) {
     projection_path_cleanup(self, &projection->paths[i]);
   }
-  allocator->destroy(allocator, projection->path_depth_order);
+  allocator->destroy(allocator, projection->path_depth_indexes);
   allocator->destroy(allocator, projection->path_depth_offsets);
   allocator->destroy(allocator, projection->paths);
   allocator->destroy(allocator, projection);
@@ -1325,9 +1319,11 @@ static lql_status lql_project_reader(lql *self,
   return LQL_STATUS_OK;
 }
 
-static lql_status project_file_range_method(
-    lql *self, const lql_projection *projection, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, int *out_found, lql_error *error) {
+static lql_status project_file_range_method(lql *self,
+                                            const lql_projection *projection,
+                                            FILE *file, lql_uint64 offset,
+                                            lql_uint64 size, FILE *out,
+                                            int *out_found, lql_error *error) {
   limited_file_reader reader;
   if (out_found != NULL) {
     *out_found = 0;
@@ -1348,9 +1344,11 @@ static lql_status project_file_range_method(
                             out_found, error);
 }
 
-static lql_status project_source_method(
-    lql *self, const lql_projection *projection, lql_read_fn read,
-    void *read_user, FILE *out, int *out_found, lql_error *error) {
+static lql_status project_source_method(lql *self,
+                                        const lql_projection *projection,
+                                        lql_read_fn read, void *read_user,
+                                        FILE *out, int *out_found,
+                                        lql_error *error) {
   projection_source_reader reader;
   lql_status st;
 
@@ -1374,9 +1372,11 @@ static lql_status project_source_method(
   return st;
 }
 
-static lql_status project_json_method(
-    lql *self, const lql_projection *projection, const char *json,
-    size_t json_len, FILE *out, int *out_found, lql_error *error) {
+static lql_status project_json_method(lql *self,
+                                      const lql_projection *projection,
+                                      const char *json, size_t json_len,
+                                      FILE *out, int *out_found,
+                                      lql_error *error) {
   buffer_reader reader;
 
   if (out_found != NULL) {
@@ -1394,8 +1394,7 @@ static lql_status project_json_method(
 }
 
 static lql_status compact_reader(lql *self, lonejson_reader_fn read,
-                                 void *read_user, FILE *out,
-                                 lql_error *error) {
+                                 void *read_user, FILE *out, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_writer writer;
@@ -1427,9 +1426,9 @@ static lql_status compact_reader(lql *self, lonejson_reader_fn read,
   return LQL_STATUS_OK;
 }
 
-static lql_status
-compact_file_range_method(lql *self, FILE *file, lql_uint64 offset,
-                            lql_uint64 size, FILE *out, lql_error *error) {
+static lql_status compact_file_range_method(lql *self, FILE *file,
+                                            lql_uint64 offset, lql_uint64 size,
+                                            FILE *out, lql_error *error) {
   limited_file_reader reader;
 
   if (file == NULL || out == NULL) {
@@ -1447,8 +1446,9 @@ compact_file_range_method(lql *self, FILE *file, lql_uint64 offset,
   return compact_reader(self, limited_read, &reader, out, error);
 }
 
-static lql_status compact_source_method(
-    lql *self, lql_read_fn read, void *read_user, FILE *out, lql_error *error) {
+static lql_status compact_source_method(lql *self, lql_read_fn read,
+                                        void *read_user, FILE *out,
+                                        lql_error *error) {
   projection_source_reader reader;
   lql_status st;
 
@@ -1467,10 +1467,9 @@ static lql_status compact_source_method(
   return st;
 }
 
-static lql_status compact_json_method(lql *self,
-                                                     const char *json,
-                                                     size_t json_len, FILE *out,
-                                                     lql_error *error) {
+static lql_status compact_json_method(lql *self, const char *json,
+                                      size_t json_len, FILE *out,
+                                      lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_writer writer;
