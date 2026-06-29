@@ -2760,10 +2760,12 @@ static lonejson_status write_synthetic_subtree(mutation_stream_state *state,
                                                size_t depth,
                                                lonejson_error *error) {
   size_t i;
+  size_t item_index;
   const mutation_item *item;
-  for (i = 0u; i < state->plan->count; ++i) {
-    item = &state->plan->items[i];
-    if (state->applied[i] || item->kind == MUTATION_REMOVE ||
+  for (i = 0u; i < state->plan->create_count; ++i) {
+    item_index = state->plan->create_indexes[i];
+    item = &state->plan->items[item_index];
+    if (state->applied[item_index] ||
         !mutation_items_share_prefix(anchor, item, depth) ||
         item->path.segment_count <= depth) {
       continue;
@@ -2774,7 +2776,7 @@ static lonejson_status write_synthetic_subtree(mutation_stream_state *state,
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
     if (item->path.segment_count == depth + 1u) {
-      if (write_synthetic_leaf_value(state, item, i, error) !=
+      if (write_synthetic_leaf_value(state, item, item_index, error) !=
           LONEJSON_STATUS_OK) {
         return LONEJSON_STATUS_CALLBACK_FAILED;
       }

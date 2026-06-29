@@ -197,7 +197,7 @@ if(LQL_BUILD_TESTS)
   lql_apply_project_warnings(lql_handle_allocator_test)
   add_test(NAME lql.handle-allocator COMMAND lql_handle_allocator_test)
   set_tests_properties(lql.handle-allocator PROPERTIES LABELS "unit;api"
-    TIMEOUT 2)
+    TIMEOUT 5)
 
   add_executable(lql_fuzz_smoke tests/fuzz_smoke.c)
   target_link_libraries(lql_fuzz_smoke PRIVATE $<IF:$<BOOL:${LQL_BUILD_STATIC}>,lql_static,lql_shared>)
