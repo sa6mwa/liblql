@@ -2174,6 +2174,9 @@ static void observe_container_value(eval_doc *doc,
     return;
   }
   path_match_prepare(doc, path, container_features);
+  if (doc->scalar_path_features == 0u) {
+    return;
+  }
   observe_prepared_value(doc, "", 0, 1, 0);
 }
 
@@ -2352,6 +2355,9 @@ static lonejson_status on_number_begin(void *user,
     return st;
   }
   doc = (eval_doc *)user;
+  if (doc->scalar_path_features == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
   doc->scalar_stream_features |=
       doc->scalar_path_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
   if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
@@ -2427,6 +2433,9 @@ static lonejson_status on_boolean(void *user, const lonejson_value_path *path,
     doc->root_kind = 'b';
   }
   scalar_path_match_prepare(doc, path);
+  if (doc->scalar_path_features == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
   observe_prepared_value(doc, value ? "true" : "false", 0, 0, 0);
   return LONEJSON_STATUS_OK;
 }
@@ -2439,6 +2448,9 @@ static lonejson_status on_null(void *user, const lonejson_value_path *path,
     doc->root_kind = '0';
   }
   scalar_path_match_prepare(doc, path);
+  if (doc->scalar_path_features == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
   observe_prepared_value(doc, "", 0, 0, 1);
   return LONEJSON_STATUS_OK;
 }
