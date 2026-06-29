@@ -1749,14 +1749,11 @@ static int contains_stream_boundary_scan(const char *tail, size_t tail_len,
                                          int ignore_case) {
   size_t start;
   size_t end;
-  size_t i;
-  size_t tail_pos;
-  size_t data_pos;
+  size_t data_part;
   size_t min_tail_len;
+  size_t tail_part;
   unsigned char a;
-  unsigned char b;
   unsigned char first;
-  int matched;
 
   if (tail_len == 0u || len == 0u || needle_len <= 1u) {
     return 0;
@@ -1788,26 +1785,24 @@ static int contains_stream_boundary_scan(const char *tail, size_t tail_len,
     if (a != first) {
       continue;
     }
-    matched = 1;
-    for (i = 1u; i < needle_len; ++i) {
-      tail_pos = start + i;
-      if (tail_pos < tail_len) {
-        a = (unsigned char)tail[tail_pos];
-      } else {
-        data_pos = tail_pos - tail_len;
-        a = (unsigned char)data[data_pos];
-      }
-      b = (unsigned char)needle[i];
+    tail_part = tail_len - start;
+    data_part = needle_len - tail_part;
+    if (tail_part > 1u) {
       if (ignore_case) {
-        a = ascii_lower_byte(a);
-        b = ascii_lower_byte(b);
-      }
-      if (a != b) {
-        matched = 0;
-        break;
+        if (!ascii_case_equal_prefix(tail + start + 1u, needle + 1u,
+                                     tail_part - 1u)) {
+          continue;
+        }
+      } else if (memcmp(tail + start + 1u, needle + 1u, tail_part - 1u) !=
+                 0) {
+        continue;
       }
     }
-    if (matched) {
+    if (ignore_case) {
+      if (ascii_case_equal_prefix(data, needle + tail_part, data_part)) {
+        return 1;
+      }
+    } else if (memcmp(data, needle + tail_part, data_part) == 0) {
       return 1;
     }
   }
