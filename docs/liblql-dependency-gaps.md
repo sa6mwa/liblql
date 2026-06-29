@@ -325,3 +325,35 @@ Once lonejson exposes this surface, liblql can replace the current
 callback-source projection and mutation replay paths with true single-pass
 source transforms. That is the remaining dependency-owned performance path for
 dense non-seekable candidate transforms.
+
+## Direct Writer Chunk Streaming
+
+The standalone CR for this dependency feature is
+[`docs/lonejson-cr-direct-writer-chunk-streaming.md`](lonejson-cr-direct-writer-chunk-streaming.md).
+
+Seekable file mutation is a separate performance path from non-seekable source
+transforms. liblql already uses lonejson candidate offsets with
+`LONEJSON_CANDIDATE_CAPTURE_NONE` for the root-object seekable mutation path:
+unmatched candidates are copied from the original file range, and matched
+objects are reread by offset and rewritten through the public lonejson writer.
+There is no candidate/result cache, no full-document materialization, and no
+candidate capture in that scanning path.
+
+Local profiles with lonejson `v0.35.2` still show the matched-object rewrite
+cost dominated by `lonejson_spooled_append`, `realloc`, and memory movement
+reached from `lonejson_writer_string_chunk()`. That is a dependency-owned
+writer implementation cost, not a reason for liblql to introduce caching or a
+second serializer.
+
+The required lonejson follow-up is direct sink-mode chunk streaming for
+chunked string writer output. `lonejson_writer_string_begin()`,
+`lonejson_writer_string_chunk()`, and `lonejson_writer_string_end()` should be
+able to validate, escape, and emit accepted string text chunks to the sink
+without building a full string, full candidate, or full output value in a
+`lonejson_spooled` buffer. Memory must remain bounded by writer state,
+parser/escape state, and configured chunk buffers, not by string length,
+candidate size, or output size.
+
+Once lonejson exposes or guarantees that behavior, liblql can keep the current
+seekable architecture and the release profiles should stop showing
+`lonejson_spooled_append` as the dominant matched-object mutation cost.

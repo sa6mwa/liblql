@@ -180,6 +180,13 @@ streaming paths appear faster. Receiver-owned scratch reuse is allowed only
 when it removes allocation or repeated derivation without changing the
 observable selector result and without adding invalidation logic to the hot
 path.
+The remaining dependency-owned performance work is documented as explicit
+lonejson CRs rather than hidden liblql workarounds. Non-seekable dense
+projection and mutation need single-pass candidate transforms, while seekable
+matched-object mutation needs sink-mode writer string chunks that do not route
+through full-string or full-candidate spooling. In both cases liblql must keep
+streaming behavior real and bounded, not add caches or materialized output
+buffers.
 Selected-scalar query predicates use bounded streaming state in liblql rather
 than full selected-value buffers, including numeric `range`; the current
 lonejson visitor still imposes a small raw number-token limit documented in
