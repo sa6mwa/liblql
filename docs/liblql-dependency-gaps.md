@@ -157,3 +157,87 @@ mode that streams raw number-token chunks with a caller-configurable 64-bit byte
 limit and no allocation proportional to the number token. That feature belongs
 in lonejson because lonejson owns JSON tokenization, validation, and visitor
 delivery; liblql should not bypass lonejson with a second JSON tokenizer.
+
+## Predicate-Gated Candidate Capture
+
+Seekable liblql candidate streams can avoid candidate capture: lonejson reports
+64-bit candidate offsets and byte sizes, and liblql can reread a matched range
+with `pread()` without disturbing the active parser cursor. Callback-source
+candidate streams do not have that option. When the public API must expose a
+matched payload handle, project a matched payload, or mutate matched candidates
+from a non-seekable source, liblql currently has to request
+`LONEJSON_CANDIDATE_CAPTURE_SPOOLED` for every candidate before selector truth
+is known.
+
+That is semantically correct and bounded in memory, but it is still unnecessary
+work for sparse selectors: unmatched candidates are spooled and then discarded.
+liblql must not "fix" this by retaining whole candidates itself, delaying output
+behind an undisclosed full buffer, using temporary files as a hidden substitute
+for streaming, or adding a second JSON parser. The missing capability is a
+lonejson-owned capture decision point integrated with candidate parsing.
+
+The required lonejson follow-up is a candidate-stream capture mode where a
+caller can decide, at candidate end, whether the current candidate's already
+validated bytes should be retained for callback-scoped replay. The important
+intent is not "make spooling conditional" as an implementation detail; the
+intent is to let a streaming visitor evaluate selector state while lonejson
+keeps only the minimal dependency-owned replay state needed to make an
+end-of-candidate retain/discard decision.
+
+Required semantics:
+
+- The parser still streams path/value visitor callbacks as candidate bytes are
+  consumed. liblql evaluates selectors from those callbacks.
+- At candidate end, lonejson invokes a caller decision callback after all
+  visitor state for that candidate is final but before any callback-scoped
+  payload handle is exposed or discarded.
+- If the callback says retain, the candidate end callback receives the same
+  kind of `lonejson_spooled` payload handle exposed by
+  `LONEJSON_CANDIDATE_CAPTURE_SPOOLED`.
+- If the callback says discard, no payload handle is exposed and lonejson
+  releases any dependency-owned replay state for that candidate before scanning
+  the next candidate.
+- The API must preserve candidate index, `stream_offset`, `byte_size`, and
+  `payload_size` semantics exactly.
+- The API must work for reader, buffer, file, path, and fd candidate streams,
+  including fragmented reader input.
+- Stop and error propagation from the decision callback must follow existing
+  candidate callback rules.
+- Memory must remain bounded by parser state, configured current-candidate
+  replay policy, and chunk buffers; retaining all candidates, the whole source,
+  or all matched results is not allowed.
+- The feature must be public and supported through the normal lonejson runtime
+  allocator and spool policy configuration.
+
+Non-goals:
+
+- Do not ask lonejson to understand liblql selectors.
+- Do not expose private parser internals or require liblql to replay token
+  events.
+- Do not make liblql manage partially captured JSON bytes.
+- Do not change existing `CAPTURE_NONE`, `CAPTURE_SINK`,
+  `CAPTURE_MEMORY`, or `CAPTURE_SPOOLED` behavior.
+- Do not require byte-identical pretty/compact output; the retained payload
+  must remain a valid replayable candidate with the same logical value, matching
+  the existing candidate capture contract.
+
+Validation needed in lonejson:
+
+- sparse-match fixture proves discarded candidates do not produce payload
+  handles;
+- dense-match fixture proves retained candidates replay identically to existing
+  spooled capture;
+- fragmented reader fixture proves the retain/discard decision works across
+  arbitrary chunk boundaries;
+- stop from the decision callback prevents scanning later candidates;
+- decision callback failure reports through the candidate-stream error surface;
+- retained payloads obey configured spool memory and max-byte policies;
+- discarded candidates do not leak temporary files or live allocation;
+- offsets and sizes are identical to existing candidate capture modes;
+- `CAPTURE_NONE` performance remains unchanged.
+
+Once lonejson exposes this surface, liblql can replace callback-source
+plus-value, projection, and matches-only mutation paths that currently use
+all-candidate spooled capture with selector-gated retain/discard. That is the
+remaining dependency-owned performance path for sparse non-seekable candidate
+streams.
