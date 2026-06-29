@@ -3054,12 +3054,14 @@ static lql_status mutate_reader_with_supported_plan(
   mutation_stream_state state;
   size_t i;
   int runtime_pooled;
+  int out_locked;
 
   if (plan == NULL || reader_fn == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "plan, reader, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
+  out_locked = 0;
   runtime_pooled = 0;
   runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
@@ -3087,6 +3089,8 @@ static lql_status mutate_reader_with_supported_plan(
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
+  flockfile(out);
+  out_locked = 1;
   init_mutation_visitor(&visitor);
   st = lonejson_visit_path_value_reader(runtime, reader_fn, reader_user,
                                         &visitor, &state, &lj_error);
@@ -3106,6 +3110,9 @@ static lql_status mutate_reader_with_supported_plan(
   }
   if (st == LONEJSON_STATUS_OK) {
     st = lonejson_writer_finish(&state.writer, &lj_error);
+  }
+  if (out_locked) {
+    funlockfile(out);
   }
   lonejson_writer_cleanup(&state.writer);
   mutation_cleanup_path_frames(&state);

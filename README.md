@@ -111,6 +111,9 @@ Seekable file candidate mutation skips unmatched non-array candidates before
 compact rewrite fallback when `matches_only` is enabled. This keeps zero-match
 mutation on the no-capture scan path instead of routing misses through spooled
 writer replay.
+Mutation writer passes hold the caller-provided `FILE *` lock once for the
+duration of the rewrite, reducing repeated stdio lock work while preserving the
+existing FILE API and streaming directly to the caller's output.
 Callback-source decision streams inspect one bounded prefix chunk and use
 no-capture parsing for ordinary non-array streams, while preserving sink capture
 for root-array recursion on non-seekable inputs.
