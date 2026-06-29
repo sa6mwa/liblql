@@ -48,11 +48,7 @@ typedef struct eval_doc {
   const lql_selector *const *predicates;
   size_t predicate_count;
   unsigned int scalar_path_features;
-  int scalar_stream_contains;
-  int scalar_stream_prefix;
-  int scalar_stream_exact;
-  int scalar_stream_temporal;
-  int scalar_stream_numeric_range;
+  unsigned int scalar_stream_features;
   size_t scalar_len;
   size_t contains_tail_len;
   size_t contains_tail_need;
@@ -440,11 +436,7 @@ static void reset_doc(eval_doc *doc) {
       doc->candidate_epoch = 1u;
     }
   }
-  doc->scalar_stream_contains = 0;
-  doc->scalar_stream_prefix = 0;
-  doc->scalar_stream_exact = 0;
-  doc->scalar_stream_temporal = 0;
-  doc->scalar_stream_numeric_range = 0;
+  doc->scalar_stream_features = 0u;
   doc->scalar_path_features = 0u;
   doc->scalar_path_predicate_count = 0u;
   doc->scalar_len = 0u;
@@ -1969,25 +1961,20 @@ static lonejson_status on_string_begin(void *user,
   numeric_stream_reset(doc);
   scalar_path_match_prepare(doc, path);
   observe_scalar_exists_begin(doc, doc->selector, path);
-  doc->scalar_stream_contains =
-      (doc->scalar_path_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u;
-  doc->scalar_stream_prefix =
-      (doc->scalar_path_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u;
-  doc->scalar_stream_exact =
-      (doc->scalar_path_features & LQL_SELECTOR_FEATURE_EXACT) != 0u;
-  doc->scalar_stream_temporal =
-      (doc->scalar_path_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u;
-  doc->scalar_stream_numeric_range = 0;
-  if (doc->scalar_stream_contains) {
+  doc->scalar_stream_features =
+      doc->scalar_path_features &
+      (LQL_SELECTOR_FEATURE_CONTAINS | LQL_SELECTOR_FEATURE_PREFIX |
+       LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL);
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
     if (!ensure_contains_tail(doc)) {
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
     observe_contains_stream_begin(doc, doc->selector, path);
   }
-  if (doc->scalar_stream_prefix) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
     observe_prefix_stream_begin(doc, doc->selector, path);
   }
-  if (doc->scalar_stream_exact) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
     observe_in_stream_begin(doc, doc->selector, path);
   }
   return LONEJSON_STATUS_OK;
@@ -2000,26 +1987,31 @@ static lonejson_status on_string_chunk(void *user,
   eval_doc *doc = (eval_doc *)user;
   (void)error;
   doc->scalar_len += len;
-  if (doc->scalar_stream_contains) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
     observe_contains_stream_chunk(doc, doc->selector, path, data, len);
     contains_stream_update_tail(doc, data, len);
   }
-  if (doc->scalar_stream_prefix) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
     observe_prefix_stream_chunk(doc, doc->selector, path, data, len);
     prefix_stream_update(doc, data, len);
   }
-  if (doc->scalar_stream_exact && !doc->scalar_stream_prefix) {
+  if ((doc->scalar_stream_features &
+       (LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_PREFIX)) ==
+      LQL_SELECTOR_FEATURE_EXACT) {
     observe_exact_stream_chunk(doc, doc->selector, path, data, len);
     prefix_stream_update(doc, data, len);
-  } else if (doc->scalar_stream_exact) {
+  } else if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
     observe_exact_stream_chunk(doc, doc->selector, path, data, len);
   }
-  if (doc->scalar_stream_temporal && !doc->scalar_stream_prefix &&
-      !doc->scalar_stream_exact) {
+  if ((doc->scalar_stream_features &
+       (LQL_SELECTOR_FEATURE_TEMPORAL | LQL_SELECTOR_FEATURE_PREFIX |
+        LQL_SELECTOR_FEATURE_EXACT)) == LQL_SELECTOR_FEATURE_TEMPORAL) {
     prefix_stream_update(doc, data, len);
   }
-  if (doc->scalar_stream_numeric_range && !doc->scalar_stream_prefix &&
-      !doc->scalar_stream_exact && !doc->scalar_stream_temporal) {
+  if ((doc->scalar_stream_features &
+       (LQL_SELECTOR_FEATURE_NUMERIC_RANGE | LQL_SELECTOR_FEATURE_PREFIX |
+        LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL)) ==
+      LQL_SELECTOR_FEATURE_NUMERIC_RANGE) {
     prefix_stream_update(doc, data, len);
   }
   return LONEJSON_STATUS_OK;
@@ -2033,21 +2025,17 @@ static lonejson_status on_string_end(void *user,
   if (path->segment_count == 0u) {
     doc->root_kind = 's';
   }
-  if (doc->scalar_stream_prefix) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
     observe_prefix_stream_end(doc, doc->selector, path);
   }
-  if (doc->scalar_stream_exact) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
     observe_exact_stream_end(doc, doc->selector, path);
   }
-  if (doc->scalar_stream_temporal) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
     observe_temporal_stream_end(doc, doc->selector, path);
   }
   doc->scalar_len = 0u;
-  doc->scalar_stream_contains = 0;
-  doc->scalar_stream_prefix = 0;
-  doc->scalar_stream_exact = 0;
-  doc->scalar_stream_temporal = 0;
-  doc->scalar_stream_numeric_range = 0;
+  doc->scalar_stream_features = 0u;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;
@@ -2066,9 +2054,10 @@ static lonejson_status on_number_begin(void *user,
     return st;
   }
   doc = (eval_doc *)user;
-  doc->scalar_stream_numeric_range =
-      (doc->scalar_path_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) != 0u;
-  if (doc->scalar_stream_numeric_range &&
+  doc->scalar_stream_features |=
+      doc->scalar_path_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
+          0u &&
       doc->prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
     doc->prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
   }
@@ -2087,7 +2076,8 @@ static lonejson_status on_number_chunk(void *user,
     return st;
   }
   doc = (eval_doc *)user;
-  if (doc->scalar_stream_numeric_range) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
+      0u) {
     numeric_stream_update(doc, data, len);
   }
   return LONEJSON_STATUS_OK;
@@ -2101,24 +2091,21 @@ static lonejson_status on_number_end(void *user,
   if (path->segment_count == 0u) {
     doc->root_kind = 'n';
   }
-  if (doc->scalar_stream_prefix) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
     observe_prefix_stream_end(doc, doc->selector, path);
   }
-  if (doc->scalar_stream_exact) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
     observe_exact_stream_end(doc, doc->selector, path);
   }
-  if (doc->scalar_stream_temporal) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
     observe_temporal_stream_end(doc, doc->selector, path);
   }
-  if (doc->scalar_stream_numeric_range) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
+      0u) {
     observe_numeric_range_stream_end(doc, doc->selector, path);
   }
   doc->scalar_len = 0u;
-  doc->scalar_stream_contains = 0;
-  doc->scalar_stream_prefix = 0;
-  doc->scalar_stream_exact = 0;
-  doc->scalar_stream_temporal = 0;
-  doc->scalar_stream_numeric_range = 0;
+  doc->scalar_stream_features = 0u;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;
