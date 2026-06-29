@@ -74,6 +74,8 @@ struct lql_mutation_plan {
   mutation_item *items;
   size_t *value_depth_indexes;
   size_t *value_depth_offsets;
+  size_t *key_depth_indexes;
+  size_t *key_depth_offsets;
   size_t count;
   size_t max_segment_count;
   int literal_only_paths;
@@ -100,14 +102,19 @@ static int mutation_plan_refresh_traits(lql_allocator *allocator,
   size_t depth;
   size_t offset;
   size_t *cursor;
+  size_t key_index_count;
   int literal_only;
   if (plan == NULL || allocator == NULL) {
     return 0;
   }
   allocator->destroy(allocator, plan->value_depth_indexes);
   allocator->destroy(allocator, plan->value_depth_offsets);
+  allocator->destroy(allocator, plan->key_depth_indexes);
+  allocator->destroy(allocator, plan->key_depth_offsets);
   plan->value_depth_indexes = NULL;
   plan->value_depth_offsets = NULL;
+  plan->key_depth_indexes = NULL;
+  plan->key_depth_offsets = NULL;
   plan->max_segment_count = 0u;
   plan->variable_depth_paths = 0;
   literal_only = plan->count != 0u;
@@ -163,6 +170,47 @@ static int mutation_plan_refresh_traits(lql_allocator *allocator,
     depth = plan->items[i].path.segment_count;
     offset = plan->value_depth_offsets[depth] + cursor[depth]++;
     plan->value_depth_indexes[offset] = i;
+  }
+  if (plan->literal_only_paths) {
+    key_index_count = 0u;
+    for (i = 0u; i < plan->count; ++i) {
+      if (key_index_count >
+          ((size_t)-1) - plan->items[i].path.segment_count) {
+        allocator->destroy(allocator, cursor);
+        return 0;
+      }
+      key_index_count += plan->items[i].path.segment_count;
+    }
+    plan->key_depth_offsets =
+        (size_t *)allocator->calloc(allocator, plan->max_segment_count + 1u,
+                                    sizeof(plan->key_depth_offsets[0]));
+    if (plan->key_depth_offsets == NULL) {
+      allocator->destroy(allocator, cursor);
+      return 0;
+    }
+    if (key_index_count != 0u) {
+      plan->key_depth_indexes = (size_t *)allocator->calloc(
+          allocator, key_index_count, sizeof(plan->key_depth_indexes[0]));
+      if (plan->key_depth_indexes == NULL) {
+        allocator->destroy(allocator, cursor);
+        return 0;
+      }
+    }
+    for (i = 0u; i < plan->count; ++i) {
+      for (depth = 0u; depth < plan->items[i].path.segment_count; ++depth) {
+        ++plan->key_depth_offsets[depth + 1u];
+      }
+    }
+    for (depth = 1u; depth <= plan->max_segment_count; ++depth) {
+      plan->key_depth_offsets[depth] += plan->key_depth_offsets[depth - 1u];
+      cursor[depth - 1u] = 0u;
+    }
+    for (i = 0u; i < plan->count; ++i) {
+      for (depth = 0u; depth < plan->items[i].path.segment_count; ++depth) {
+        offset = plan->key_depth_offsets[depth] + cursor[depth]++;
+        plan->key_depth_indexes[offset] = i;
+      }
+    }
   }
   allocator->destroy(allocator, cursor);
   return 1;
@@ -335,10 +383,14 @@ static void mutation_plan_cleanup_items(lql *self, lql_mutation_plan *plan) {
   }
   allocator->destroy(allocator, plan->value_depth_indexes);
   allocator->destroy(allocator, plan->value_depth_offsets);
+  allocator->destroy(allocator, plan->key_depth_indexes);
+  allocator->destroy(allocator, plan->key_depth_offsets);
   allocator->destroy(allocator, plan->items);
   plan->items = NULL;
   plan->value_depth_indexes = NULL;
   plan->value_depth_offsets = NULL;
+  plan->key_depth_indexes = NULL;
+  plan->key_depth_offsets = NULL;
   plan->count = 0u;
   plan->max_segment_count = 0u;
   plan->literal_only_paths = 0;
@@ -2227,6 +2279,9 @@ static int mutation_scan_key_literal_plan(mutation_stream_state *state,
                                           size_t *out) {
   const mutation_item *item;
   size_t i;
+  size_t start;
+  size_t end;
+  size_t item_index;
   size_t depth;
   size_t next_depth;
   int found;
@@ -2237,6 +2292,34 @@ static int mutation_scan_key_literal_plan(mutation_stream_state *state,
   }
 
   depth = path->segment_count;
+  if (state->plan->key_depth_offsets != NULL &&
+      state->plan->key_depth_indexes != NULL &&
+      depth < state->plan->max_segment_count) {
+    start = state->plan->key_depth_offsets[depth];
+    end = state->plan->key_depth_offsets[depth + 1u];
+    next_depth = depth + 1u;
+    found = 0;
+    for (i = start; i < end; ++i) {
+      item_index = state->plan->key_depth_indexes[i];
+      item = &state->plan->items[item_index];
+      if (item->path.segment_lens[depth] != key_len ||
+          memcmp(item->path.segments[depth], key, key_len) != 0) {
+        continue;
+      }
+      if (!stream_path_prefix_matches_known(&item->path, path, frame, depth)) {
+        continue;
+      }
+      if (state->prefix_seen_depth[item_index] < next_depth) {
+        state->prefix_seen_depth[item_index] = next_depth;
+      }
+      if (!found && item->path.segment_count == next_depth) {
+        *out = item_index;
+        found = 1;
+      }
+    }
+    return found;
+  }
+
   next_depth = depth + 1u;
   found = 0;
   for (i = 0u; i < state->plan->count; ++i) {
