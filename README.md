@@ -64,6 +64,10 @@ selected scalar. The hot path has no liblql-owned full-scalar buffer fallback.
 During evaluation, liblql derives a borrowed flat predicate view from the
 `lql_selector` AST so scalar callbacks do not repeatedly recurse through the
 selector tree; this is execution scratch, not a second selector model.
+Selectors also cache direct field-path segment offsets into their normalized
+field strings, so common absolute paths match lonejson decoded path segments
+without reparsing JSON-pointer text in the hot path. Wildcard, recursive, or
+escaped paths still use the general matcher.
 `clql -m -f` composes mutation and projection in Go-compatible order by
 projecting each output candidate first, then mutating the projected value for
 matched candidates; this uses a callback-scoped temp-file spill for the

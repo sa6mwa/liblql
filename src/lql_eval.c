@@ -689,6 +689,35 @@ static int path_matches(const eval_doc *doc, const char *pattern,
   return path_matches_from(doc, seg, path, 0u);
 }
 
+static int selector_path_matches(const eval_doc *doc,
+                                 const lql_selector *selector,
+                                 const lonejson_value_path *path) {
+  size_t i;
+  size_t offset;
+  size_t len;
+  const lonejson_path_segment *segment;
+
+  if (selector == NULL) {
+    return 0;
+  }
+  if (!selector->field_path_direct) {
+    return path_matches(doc, selector->field, path);
+  }
+  if (path == NULL || path->segment_count != selector->field_segment_count) {
+    return 0;
+  }
+  for (i = 0u; i < selector->field_segment_count; ++i) {
+    offset = selector->field_segment_offsets[i];
+    len = selector->field_segment_lens[i];
+    segment = &path->segments[i];
+    if (segment->len != len ||
+        memcmp(selector->field + offset, segment->data, len) != 0) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int selector_is_predicate(const lql_selector *selector) {
   switch (selector->kind) {
   case LQL_SELECTOR_KIND_EQ:
@@ -737,7 +766,7 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
   if (!selector_is_predicate(selector)) {
     return;
   }
-  if (doc->hits == NULL || !path_matches(doc, selector->field, path)) {
+  if (doc->hits == NULL || !selector_path_matches(doc, selector, path)) {
     return;
   }
   switch (selector->kind) {
@@ -937,7 +966,7 @@ static int scalar_path_contains_stream_interested(
     selector = doc->predicates[i];
     if ((selector->kind == LQL_SELECTOR_KIND_CONTAINS ||
          selector->kind == LQL_SELECTOR_KIND_ICONTAINS) &&
-        path_matches(doc, selector->field, path)) {
+        selector_path_matches(doc, selector, path)) {
       found = 1;
       max_needle = selector_contains_max_needle(selector);
       if (max_needle > 1u && max_needle - 1u > *tail_need) {
@@ -964,7 +993,7 @@ static int scalar_path_prefix_stream_interested(const eval_doc *doc,
     selector = doc->predicates[i];
     if ((selector->kind == LQL_SELECTOR_KIND_PREFIX ||
          selector->kind == LQL_SELECTOR_KIND_IPREFIX) &&
-        path_matches(doc, selector->field, path)) {
+        selector_path_matches(doc, selector, path)) {
       found = 1;
       value_len = selector_prefix_value_len(selector);
       if (value_len > LQL_EVAL_PREFIX_CAP) {
@@ -995,7 +1024,7 @@ static int scalar_path_exact_stream_interested(const eval_doc *doc,
     if ((selector->kind == LQL_SELECTOR_KIND_EQ ||
          selector->kind == LQL_SELECTOR_KIND_NE ||
          selector->kind == LQL_SELECTOR_KIND_IN) &&
-        !selector->value_is_temporal && path_matches(doc, selector->field, path)) {
+        !selector->value_is_temporal && selector_path_matches(doc, selector, path)) {
       found = 1;
       if (selector->kind == LQL_SELECTOR_KIND_IN) {
         value_len = selector_in_max_value_len(selector);
@@ -1027,7 +1056,7 @@ scalar_path_temporal_stream_interested(const eval_doc *doc,
   found = 0;
   for (i = 0u; i < doc->predicate_count; ++i) {
     selector = doc->predicates[i];
-    if (!path_matches(doc, selector->field, path)) {
+    if (!selector_path_matches(doc, selector, path)) {
       continue;
     }
     if (((selector->kind == LQL_SELECTOR_KIND_EQ ||
@@ -1058,7 +1087,7 @@ static int scalar_path_numeric_range_stream_interested(
   for (i = 0u; i < doc->predicate_count; ++i) {
     selector = doc->predicates[i];
     if (selector->kind == LQL_SELECTOR_KIND_RANGE &&
-        !selector->range_is_temporal && path_matches(doc, selector->field, path)) {
+        !selector->range_is_temporal && selector_path_matches(doc, selector, path)) {
       found = 1;
       if (*prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
         *prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
@@ -1082,7 +1111,7 @@ static void observe_contains_stream_begin(eval_doc *doc,
     selector = doc->predicates[i];
     if ((selector->kind != LQL_SELECTOR_KIND_CONTAINS &&
          selector->kind != LQL_SELECTOR_KIND_ICONTAINS) ||
-        !path_matches(doc, selector->field, path)) {
+        !selector_path_matches(doc, selector, path)) {
       continue;
     }
     if (selector->any_count == 0u) {
@@ -1116,7 +1145,7 @@ static void observe_prefix_stream_begin(eval_doc *doc,
     selector = doc->predicates[i];
     if ((selector->kind == LQL_SELECTOR_KIND_PREFIX ||
          selector->kind == LQL_SELECTOR_KIND_IPREFIX) &&
-        path_matches(doc, selector->field, path) && !selector->value_set &&
+        selector_path_matches(doc, selector, path) && !selector->value_set &&
         selector->value == NULL) {
       doc->hits[selector->hit_index] = 1u;
     }
@@ -1136,7 +1165,7 @@ static void observe_in_stream_begin(eval_doc *doc, const lql_selector *selector,
   for (i = 0u; i < doc->predicate_count; ++i) {
     selector = doc->predicates[i];
     if (selector->kind != LQL_SELECTOR_KIND_IN ||
-        !path_matches(doc, selector->field, path)) {
+        !selector_path_matches(doc, selector, path)) {
       continue;
     }
     matches = doc->in_matches + selector->hit_index * doc->in_match_stride;
@@ -1194,7 +1223,7 @@ static void observe_prefix_stream_chunk(eval_doc *doc,
     selector = doc->predicates[i];
     if ((selector->kind != LQL_SELECTOR_KIND_PREFIX &&
          selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
-        !path_matches(doc, selector->field, path) ||
+        !selector_path_matches(doc, selector, path) ||
         doc->hits[selector->hit_index] != 0u ||
         doc->stream_misses[selector->hit_index] != 0u) {
       continue;
@@ -1235,7 +1264,7 @@ static void observe_exact_stream_chunk(eval_doc *doc,
     if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
          selector->kind != LQL_SELECTOR_KIND_NE &&
          selector->kind != LQL_SELECTOR_KIND_IN) ||
-        selector->value_is_temporal || !path_matches(doc, selector->field, path) ||
+        selector->value_is_temporal || !selector_path_matches(doc, selector, path) ||
         doc->hits[selector->hit_index] != 0u ||
         doc->stream_misses[selector->hit_index] != 0u) {
       continue;
@@ -1282,7 +1311,7 @@ static void observe_scalar_exists_begin(eval_doc *doc,
   for (i = 0u; i < doc->predicate_count; ++i) {
     selector = doc->predicates[i];
     if (selector->kind == LQL_SELECTOR_KIND_EXISTS &&
-        path_matches(doc, selector->field, path)) {
+        selector_path_matches(doc, selector, path)) {
       doc->hits[selector->hit_index] = 1u;
     }
   }
@@ -1303,7 +1332,7 @@ static void observe_prefix_stream_end(eval_doc *doc,
     selector = doc->predicates[i];
     if ((selector->kind != LQL_SELECTOR_KIND_PREFIX &&
          selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
-        !path_matches(doc, selector->field, path) ||
+        !selector_path_matches(doc, selector, path) ||
         doc->hits[selector->hit_index] != 0u) {
       continue;
     }
@@ -1350,7 +1379,7 @@ static void observe_exact_stream_end(eval_doc *doc,
     if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
          selector->kind != LQL_SELECTOR_KIND_NE &&
          selector->kind != LQL_SELECTOR_KIND_IN) ||
-        !path_matches(doc, selector->field, path) ||
+        !selector_path_matches(doc, selector, path) ||
         doc->hits[selector->hit_index] != 0u) {
       continue;
     }
@@ -1409,7 +1438,7 @@ static void observe_temporal_stream_end(eval_doc *doc,
            lql_parse_temporal_literal(doc->prefix_buf, &temporal);
   for (i = 0u; i < doc->predicate_count; ++i) {
     selector = doc->predicates[i];
-    if (!path_matches(doc, selector->field, path) ||
+    if (!selector_path_matches(doc, selector, path) ||
         doc->hits[selector->hit_index] != 0u) {
       continue;
     }
@@ -1590,7 +1619,7 @@ static void observe_numeric_range_stream_end(eval_doc *doc,
     selector = doc->predicates[i];
     if (selector->kind != LQL_SELECTOR_KIND_RANGE ||
         selector->range_is_temporal ||
-        !path_matches(doc, selector->field, path) ||
+        !selector_path_matches(doc, selector, path) ||
         doc->hits[selector->hit_index] != 0u) {
       continue;
     }
@@ -1691,7 +1720,7 @@ static void observe_contains_stream_chunk(eval_doc *doc,
     selector = doc->predicates[i];
     if ((selector->kind != LQL_SELECTOR_KIND_CONTAINS &&
          selector->kind != LQL_SELECTOR_KIND_ICONTAINS) ||
-        !path_matches(doc, selector->field, path) ||
+        !selector_path_matches(doc, selector, path) ||
         doc->hits[selector->hit_index] != 0u) {
       continue;
     }

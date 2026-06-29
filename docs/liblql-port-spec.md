@@ -192,6 +192,12 @@ The evaluator may derive receiver-owned execution scratch from `lql_selector`
 for performance, such as a flat borrowed predicate view used by scalar
 callbacks. That scratch must remain selector-derived, bounded by selector
 shape, and must not become a parallel selector AST or public representation.
+Selectors may also retain selector-owned direct-path metadata, such as segment
+offsets into normalized field strings. This metadata exists to match common
+absolute paths against lonejson decoded path segments without reparsing path
+text for every scalar callback. It must be rebuilt during selector
+finalization, cloned as selector-owned state, and cleaned up with the selector;
+wildcard, recursive, or escaped paths must continue to use the general matcher.
 
 As of lonejson `v0.35.2`, the path-value visitor used by liblql still enforces
 a small raw JSON number-token limit and performs bounded internal allocation for

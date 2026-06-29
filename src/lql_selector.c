@@ -1316,6 +1316,103 @@ static void assign_hit_indexes(lql_selector *selector, size_t *next) {
   }
 }
 
+static int selector_segment_is(const char *start, size_t len,
+                               const char *literal) {
+  return strlen(literal) == len && memcmp(start, literal, len) == 0;
+}
+
+static void selector_clear_path_metadata(lql_selector_parser *ctx,
+                                         lql_selector *selector) {
+  ctx->allocator->destroy(ctx->allocator, selector->field_segment_offsets);
+  ctx->allocator->destroy(ctx->allocator, selector->field_segment_lens);
+  selector->field_segment_offsets = NULL;
+  selector->field_segment_lens = NULL;
+  selector->field_segment_count = 0u;
+  selector->field_path_direct = 0;
+}
+
+static int selector_prepare_one_path(lql_selector_parser *ctx,
+                                     lql_selector *selector) {
+  const char *seg;
+  const char *slash;
+  size_t count;
+  size_t i;
+  size_t len;
+  size_t offset;
+
+  selector_clear_path_metadata(ctx, selector);
+  if (selector->field == NULL || selector->field[0] != '/') {
+    return 1;
+  }
+  if (strcmp(selector->field, "/") == 0) {
+    selector->field_path_direct = 1;
+    return 1;
+  }
+  count = 1u;
+  for (i = 1u; selector->field[i] != '\0'; ++i) {
+    if (selector->field[i] == '/') {
+      ++count;
+    }
+  }
+  selector->field_segment_offsets =
+      (size_t *)ctx->allocator->calloc(ctx->allocator, count, sizeof(size_t));
+  selector->field_segment_lens =
+      (size_t *)ctx->allocator->calloc(ctx->allocator, count, sizeof(size_t));
+  if (selector->field_segment_offsets == NULL ||
+      selector->field_segment_lens == NULL) {
+    selector_clear_path_metadata(ctx, selector);
+    return 0;
+  }
+  seg = selector->field + 1;
+  count = 0u;
+  while (*seg != '\0') {
+    slash = strchr(seg, '/');
+    len = slash == NULL ? strlen(seg) : (size_t)(slash - seg);
+    if (selector_segment_is(seg, len, "*") ||
+        selector_segment_is(seg, len, "[]") ||
+        selector_segment_is(seg, len, "**") ||
+        selector_segment_is(seg, len, "...") || memchr(seg, '~', len) != NULL) {
+      selector_clear_path_metadata(ctx, selector);
+      return 1;
+    }
+    offset = (size_t)(seg - selector->field);
+    selector->field_segment_offsets[count] = offset;
+    selector->field_segment_lens[count] = len;
+    ++count;
+    if (slash == NULL) {
+      break;
+    }
+    seg = slash + 1;
+  }
+  selector->field_segment_count = count;
+  selector->field_path_direct = 1;
+  return 1;
+}
+
+static int prepare_selector_paths(lql_selector_parser *ctx,
+                                  lql_selector *selector) {
+  size_t i;
+  if (selector == NULL) {
+    return 1;
+  }
+  if (selector_is_predicate(selector) &&
+      !selector_prepare_one_path(ctx, selector)) {
+    return 0;
+  }
+  for (i = 0u; i < selector->child_count; ++i) {
+    if (!prepare_selector_paths(ctx, &selector->children[i])) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int finalize_selector(lql_selector_parser *ctx, lql_selector *selector) {
+  selector->hit_count = 0u;
+  assign_hit_indexes(selector, &selector->hit_count);
+  return prepare_selector_paths(ctx, selector);
+}
+
 static int append_selector(lql_selector_parser *ctx, lql_selector *parent,
                        lql_selector *child) {
   lql_selector *next;
@@ -2198,8 +2295,12 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_json_internal(
     allocator->destroy(allocator, state.selector);
     return st;
   }
-  state.selector->hit_count = 0u;
-  assign_hit_indexes(state.selector, &state.selector->hit_count);
+  if (!finalize_selector(&state.parser, state.selector)) {
+    lql_selector_cleanup(self, state.selector);
+    allocator->destroy(allocator, state.selector);
+    lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+    return LQL_STATUS_NO_MEMORY;
+  }
   *out = state.selector;
   return LQL_STATUS_OK;
 }
@@ -2235,8 +2336,12 @@ static lql_status selector_from_built_root(lql_selector_parser *ctx,
   }
   *selector = *root;
   memset(root, 0, sizeof(*root));
-  selector->hit_count = 0u;
-  assign_hit_indexes(selector, &selector->hit_count);
+  if (!finalize_selector(ctx, selector)) {
+    lql_selector_cleanup(ctx->receiver, selector);
+    ctx->allocator->destroy(ctx->allocator, selector);
+    lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+    return LQL_STATUS_NO_MEMORY;
+  }
   *out = selector;
   return LQL_STATUS_OK;
 }
@@ -2273,6 +2378,10 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->date_gte_text = NULL;
   dst->date_lt_text = NULL;
   dst->date_lte_text = NULL;
+  dst->field_segment_offsets = NULL;
+  dst->field_segment_lens = NULL;
+  dst->field_segment_count = 0u;
+  dst->field_path_direct = 0;
   if (!clone_string(ctx, src->field, &dst->field) ||
       !clone_string(ctx, src->value, &dst->value) ||
       !clone_string(ctx, src->range_gt_text, &dst->range_gt_text) ||
@@ -3287,8 +3396,12 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
     ctx->allocator->destroy(ctx->allocator, selector);
     return st;
   }
-  selector->hit_count = 0u;
-  assign_hit_indexes(selector, &selector->hit_count);
+  if (!finalize_selector(ctx, selector)) {
+    lql_selector_cleanup(ctx->receiver, selector);
+    ctx->allocator->destroy(ctx->allocator, selector);
+    lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+    return LQL_STATUS_NO_MEMORY;
+  }
   *out = selector;
   return LQL_STATUS_OK;
 }

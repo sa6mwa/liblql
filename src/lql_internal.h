@@ -157,6 +157,10 @@ struct lql_selector {
   int has_temporal_lte;
   int range_is_temporal;
   lql_since_macro since_macro;
+  size_t *field_segment_offsets;
+  size_t *field_segment_lens;
+  size_t field_segment_count;
+  int field_path_direct;
   struct lql_selector *children;
   size_t child_count;
   size_t hit_index;
