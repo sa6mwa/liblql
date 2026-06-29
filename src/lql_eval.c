@@ -1870,6 +1870,12 @@ static void observe_value(eval_doc *doc, const lonejson_value_path *path,
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
     return;
   }
+  if (is_container &&
+      (doc->selector->predicate_features &
+       (LQL_SELECTOR_FEATURE_EXISTS | LQL_SELECTOR_FEATURE_CONTAINS |
+        LQL_SELECTOR_FEATURE_PREFIX)) == 0u) {
+    return;
+  }
   if (!selector_path_depth_possible(doc->selector, path)) {
     return;
   }
