@@ -50,6 +50,8 @@ struct lql_impl {
   size_t eval_stream_misses_cap;
   const struct lql_selector **eval_scalar_path_predicates;
   size_t eval_scalar_path_predicates_cap;
+  const struct lql_selector **eval_scalar_family_predicates;
+  size_t eval_scalar_family_predicates_cap;
   unsigned int *eval_in_matches;
   size_t eval_in_matches_cap;
   char *eval_contains_tail_buf;
