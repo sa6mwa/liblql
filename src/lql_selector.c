@@ -1482,6 +1482,7 @@ static void selector_clear_path_metadata(lql_selector_parser *ctx,
   selector->field_segment_kinds = NULL;
   selector->field_segment_count = 0u;
   selector->field_path_direct = 0;
+  selector->field_path_literal = 0;
 }
 
 static int selector_prepare_one_path(lql_selector_parser *ctx,
@@ -1499,6 +1500,7 @@ static int selector_prepare_one_path(lql_selector_parser *ctx,
   }
   if (strcmp(selector->field, "/") == 0) {
     selector->field_path_direct = 1;
+    selector->field_path_literal = 1;
     return 1;
   }
   count = 1u;
@@ -1521,6 +1523,7 @@ static int selector_prepare_one_path(lql_selector_parser *ctx,
   }
   seg = selector->field + 1;
   count = 0u;
+  selector->field_path_literal = 1;
   while (*seg != '\0') {
     slash = strchr(seg, '/');
     len = slash == NULL ? strlen(seg) : (size_t)(slash - seg);
@@ -1533,10 +1536,13 @@ static int selector_prepare_one_path(lql_selector_parser *ctx,
     selector->field_segment_lens[count] = len;
     if (selector_segment_is(seg, len, "*")) {
       selector->field_segment_kinds[count] = LQL_FIELD_SEGMENT_OBJECT_WILDCARD;
+      selector->field_path_literal = 0;
     } else if (selector_segment_is(seg, len, "[]")) {
       selector->field_segment_kinds[count] = LQL_FIELD_SEGMENT_ARRAY_WILDCARD;
+      selector->field_path_literal = 0;
     } else if (selector_segment_is(seg, len, "**")) {
       selector->field_segment_kinds[count] = LQL_FIELD_SEGMENT_ANY_WILDCARD;
+      selector->field_path_literal = 0;
     } else {
       selector->field_segment_kinds[count] = LQL_FIELD_SEGMENT_LITERAL;
     }
@@ -2582,6 +2588,7 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->field_segment_kinds = NULL;
   dst->field_segment_count = 0u;
   dst->field_path_direct = 0;
+  dst->field_path_literal = 0;
   dst->predicates = NULL;
   dst->predicate_count = 0u;
   dst->predicate_min_segment_count = 0u;
