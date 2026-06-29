@@ -32,6 +32,14 @@ typedef enum mutation_file_mode {
   MUTATION_FILE_BASE64
 } mutation_file_mode;
 
+typedef enum mutation_value_kind {
+  MUTATION_VALUE_STRING = 0,
+  MUTATION_VALUE_BOOL_TRUE,
+  MUTATION_VALUE_BOOL_FALSE,
+  MUTATION_VALUE_NULL,
+  MUTATION_VALUE_NUMBER
+} mutation_value_kind;
+
 typedef struct mutation_path {
   char **segments;
   unsigned char *segment_kinds;
@@ -50,6 +58,9 @@ typedef struct mutation_item {
   mutation_kind kind;
   mutation_path path;
   char *value;
+  size_t value_offset;
+  size_t value_len;
+  mutation_value_kind value_kind;
   double delta;
   int time_value;
   int can_create_missing_object;
@@ -302,26 +313,6 @@ static char *trimmed_dup_range(mutation_parse_context *ctx, const char *start,
   }
   len = (size_t)(end - start);
   out = (char *)ctx->allocator->alloc(ctx->allocator, len + 1u);
-  if (out == NULL) {
-    return NULL;
-  }
-  memcpy(out, start, len);
-  out[len] = '\0';
-  return out;
-}
-
-static char *trimmed_dup_runtime_range(mutation_stream_state *state,
-                                       const char *start, size_t len) {
-  const char *end;
-  char *out;
-  start = skip_space(start);
-  end = start + len;
-  while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' ||
-                         end[-1] == '\n')) {
-    --end;
-  }
-  len = (size_t)(end - start);
-  out = (char *)state->allocator->alloc(state->allocator, len + 1u);
   if (out == NULL) {
     return NULL;
   }
@@ -1021,20 +1012,45 @@ static int parse_number(const char *s, double *out) {
   return 1;
 }
 
-static int parse_number_slice(mutation_stream_state *state, const char *s,
+static int parse_number_slice(mutation_parse_context *ctx, const char *s,
                               size_t len, double *out) {
   char *copy;
   int ok;
-  copy = trimmed_dup_runtime_range(state, s, len);
+  copy = trimmed_dup_range(ctx, s, len);
   if (copy == NULL) {
     return 0;
   }
   ok = parse_number(copy, out);
-  state->allocator->destroy(state->allocator, copy);
+  ctx->allocator->destroy(ctx->allocator, copy);
   return ok;
 }
 
 static const char *unquoted_value(const char *value, size_t *out_len);
+
+static int classify_set_value(mutation_parse_context *ctx,
+                              mutation_item *item) {
+  const char *text;
+  size_t len;
+  double number;
+  if (ctx == NULL || item == NULL || item->value == NULL) {
+    return 0;
+  }
+  text = unquoted_value(item->value, &len);
+  item->value_offset = (size_t)(text - item->value);
+  item->value_len = len;
+  item->value_kind = MUTATION_VALUE_STRING;
+  if (ascii_equal_ignore_case_n(text, len, "true")) {
+    item->value_kind = MUTATION_VALUE_BOOL_TRUE;
+  } else if (ascii_equal_ignore_case_n(text, len, "false")) {
+    item->value_kind = MUTATION_VALUE_BOOL_FALSE;
+  } else if (ascii_equal_ignore_case_n(text, len, "null")) {
+    item->value_kind = MUTATION_VALUE_NULL;
+  } else if (parse_number_slice(ctx, text, len, &number)) {
+    (void)number;
+    item->value_kind = MUTATION_VALUE_NUMBER;
+  }
+  return 1;
+}
 
 static int parse_mutation_expr(mutation_parse_context *ctx, const char *expr,
                                lql_mutation_plan *plan);
@@ -1195,10 +1211,13 @@ static int parse_set_value(mutation_parse_context *ctx, char *value,
     }
     ctx->allocator->destroy(ctx->allocator, value);
     item->time_value = 1;
+    if (!classify_set_value(ctx, item)) {
+      return 0;
+    }
     return 1;
   }
   item->value = value;
-  return 1;
+  return classify_set_value(ctx, item);
 }
 
 static int parse_mutation_expr(mutation_parse_context *ctx, const char *raw,
@@ -1924,7 +1943,6 @@ static lonejson_status write_mutation_set_value(mutation_stream_state *state,
   const char *value;
   const char *text;
   size_t len;
-  double number;
   char number_buf[64];
   lonejson_source source;
   lonejson_status st;
@@ -1960,19 +1978,19 @@ static lonejson_status write_mutation_set_value(mutation_stream_state *state,
     return st;
   }
   value = item->value == NULL ? "" : item->value;
-  text = unquoted_value(value, &len);
-  if (ascii_equal_ignore_case_n(text, len, "true")) {
+  text = value + item->value_offset;
+  len = item->value_len;
+  switch (item->value_kind) {
+  case MUTATION_VALUE_BOOL_TRUE:
     return lonejson_writer_bool(&state->writer, 1, error);
-  }
-  if (ascii_equal_ignore_case_n(text, len, "false")) {
+  case MUTATION_VALUE_BOOL_FALSE:
     return lonejson_writer_bool(&state->writer, 0, error);
-  }
-  if (ascii_equal_ignore_case_n(text, len, "null")) {
+  case MUTATION_VALUE_NULL:
     return lonejson_writer_null(&state->writer, error);
-  }
-  if (parse_number_slice(state, text, len, &number)) {
-    (void)number;
+  case MUTATION_VALUE_NUMBER:
     return lonejson_writer_number_text(&state->writer, text, len, error);
+  default:
+    break;
   }
   if (item->kind == MUTATION_INCREMENT) {
     sprintf(number_buf, "%.17g", item->delta);
