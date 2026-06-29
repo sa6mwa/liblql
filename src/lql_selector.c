@@ -1462,6 +1462,9 @@ static void selector_clear_predicates(lql_selector_parser *ctx,
   ctx->allocator->destroy(ctx->allocator, (void *)selector->predicates);
   selector->predicates = NULL;
   selector->predicate_count = 0u;
+  selector->predicate_min_segment_count = 0u;
+  selector->predicate_max_segment_count = 0u;
+  selector->predicate_has_variable_path = 0;
 }
 
 static int selector_segment_is(const char *start, size_t len,
@@ -1568,6 +1571,9 @@ static int prepare_selector_paths(lql_selector_parser *ctx,
 
 static int finalize_selector(lql_selector_parser *ctx, lql_selector *selector) {
   size_t predicate_count;
+  size_t i;
+  size_t direct_count;
+  const lql_selector *predicate;
   selector->hit_count = 0u;
   selector_clear_predicates(ctx, selector);
   assign_hit_indexes(selector, &selector->hit_count);
@@ -1587,6 +1593,23 @@ static int finalize_selector(lql_selector_parser *ctx, lql_selector *selector) {
   predicate_count = 0u;
   collect_predicates(selector, selector->predicates, &predicate_count);
   selector->predicate_count = predicate_count;
+  direct_count = 0u;
+  for (i = 0u; i < predicate_count; ++i) {
+    predicate = selector->predicates[i];
+    if (predicate == NULL || !predicate->field_path_direct) {
+      selector->predicate_has_variable_path = 1;
+      continue;
+    }
+    if (direct_count == 0u ||
+        predicate->field_segment_count < selector->predicate_min_segment_count) {
+      selector->predicate_min_segment_count = predicate->field_segment_count;
+    }
+    if (predicate->field_segment_count >
+        selector->predicate_max_segment_count) {
+      selector->predicate_max_segment_count = predicate->field_segment_count;
+    }
+    ++direct_count;
+  }
   return predicate_count == selector->hit_count;
 }
 
@@ -2561,6 +2584,9 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->field_path_direct = 0;
   dst->predicates = NULL;
   dst->predicate_count = 0u;
+  dst->predicate_min_segment_count = 0u;
+  dst->predicate_max_segment_count = 0u;
+  dst->predicate_has_variable_path = 0;
   dst->value_len = 0u;
   dst->any_max_len = 0u;
   dst->max_in_alternative_count = 0u;

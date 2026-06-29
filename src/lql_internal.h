@@ -187,6 +187,9 @@ struct lql_selector {
   size_t child_count;
   const struct lql_selector **predicates;
   size_t predicate_count;
+  size_t predicate_min_segment_count;
+  size_t predicate_max_segment_count;
+  int predicate_has_variable_path;
   size_t max_in_alternative_count;
   unsigned int predicate_features;
   size_t hit_index;

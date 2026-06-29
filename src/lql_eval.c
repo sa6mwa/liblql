@@ -794,6 +794,16 @@ static int selector_path_matches(const eval_doc *doc,
   return 1;
 }
 
+static int selector_path_depth_possible(const lql_selector *selector,
+                                        const lonejson_value_path *path) {
+  if (selector == NULL || path == NULL || selector->hit_count == 0u ||
+      selector->predicate_has_variable_path) {
+    return 1;
+  }
+  return path->segment_count >= selector->predicate_min_segment_count &&
+         path->segment_count <= selector->predicate_max_segment_count;
+}
+
 static void scalar_path_match_prepare(eval_doc *doc,
                                       const lonejson_value_path *path) {
   const lql_selector *selector;
@@ -807,6 +817,9 @@ static void scalar_path_match_prepare(eval_doc *doc,
   }
   doc->scalar_path_features = 0u;
   doc->scalar_path_predicate_count = 0u;
+  if (!selector_path_depth_possible(doc->selector, path)) {
+    return;
+  }
   ++doc->scalar_path_epoch;
   if (doc->scalar_path_epoch == 0u) {
     memset(doc->scalar_path_matches, 0,
@@ -1855,6 +1868,9 @@ static void observe_value(eval_doc *doc, const lonejson_value_path *path,
   size_t i;
 
   if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return;
+  }
+  if (!selector_path_depth_possible(doc->selector, path)) {
     return;
   }
   for (i = 0u; i < doc->predicate_count; ++i) {
