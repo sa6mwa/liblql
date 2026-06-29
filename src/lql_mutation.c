@@ -1740,25 +1740,6 @@ static int mutation_descends_from_object(const mutation_item *item,
          stream_path_prefix_matches(&item->path, path, frame);
 }
 
-static int mutation_key_index(const lql_mutation_plan *plan,
-                              const lonejson_value_path *parent,
-                              const mutation_path_frame *frame, const char *key,
-                              size_t key_len, size_t *out) {
-  size_t i;
-  if (parent == NULL || frame == NULL ||
-      frame->segment_count != parent->segment_count) {
-    return 0;
-  }
-  for (i = 0u; i < plan->count; ++i) {
-    if (mutation_item_matches_virtual_key(&plan->items[i], parent, frame, key,
-                                          key_len)) {
-      *out = i;
-      return 1;
-    }
-  }
-  return 0;
-}
-
 static const char *unquoted_value(const char *value, size_t *out_len) {
   size_t len;
   len = strlen(value);
@@ -2021,6 +2002,47 @@ static int skipped_earlier_increment_key_index(
     }
   }
   return 0;
+}
+
+static int mutation_scan_key(mutation_stream_state *state,
+                             const lonejson_value_path *path,
+                             const mutation_path_frame *frame, const char *key,
+                             size_t key_len, size_t *out) {
+  const mutation_item *item;
+  size_t i;
+  size_t depth;
+  size_t next_depth;
+  unsigned char next_kind;
+  int found;
+
+  if (path == NULL || frame == NULL ||
+      frame->segment_count != path->segment_count) {
+    return 0;
+  }
+
+  depth = path->segment_count;
+  next_depth = depth + 1u;
+  found = 0;
+  for (i = 0u; i < state->plan->count; ++i) {
+    item = &state->plan->items[i];
+    if (state->prefix_seen_depth[i] < next_depth &&
+        item->path.segment_count > depth &&
+        stream_path_prefix_matches_known(&item->path, path, frame, depth)) {
+      next_kind = item->path.segment_kinds[depth];
+      if (next_kind == MUTATION_PATH_OBJECT_WILDCARD ||
+          (next_kind == MUTATION_PATH_LITERAL &&
+           item->path.segment_lens[depth] == key_len &&
+           memcmp(item->path.segments[depth], key, key_len) == 0)) {
+        state->prefix_seen_depth[i] = next_depth;
+      }
+    }
+    if (!found &&
+        mutation_item_matches_virtual_key(item, path, frame, key, key_len)) {
+      *out = i;
+      found = 1;
+    }
+  }
+  return found;
 }
 
 static const mutation_path_frame *
@@ -2582,10 +2604,6 @@ static lonejson_status mutation_key_end(void *user,
   const mutation_item *item;
   const mutation_path_frame *frame;
   size_t index;
-  size_t i;
-  size_t depth;
-  size_t next_depth;
-  unsigned char next_kind;
   state = (mutation_stream_state *)user;
   if (state->skipping) {
     frame = current_path_frame(state, path);
@@ -2599,28 +2617,8 @@ static lonejson_status mutation_key_end(void *user,
     return LONEJSON_STATUS_OK;
   }
   frame = current_path_frame(state, path);
-  if (path != NULL && frame != NULL) {
-    depth = path->segment_count;
-    next_depth = depth + 1u;
-    for (i = 0u; i < state->plan->count; ++i) {
-      item = &state->plan->items[i];
-      if (state->prefix_seen_depth[i] >= next_depth ||
-          item->path.segment_count <= depth ||
-          !stream_path_prefix_matches_known(&item->path, path, frame, depth)) {
-        continue;
-      }
-      next_kind = item->path.segment_kinds[depth];
-      if (next_kind == MUTATION_PATH_OBJECT_WILDCARD ||
-          (next_kind == MUTATION_PATH_LITERAL &&
-           item->path.segment_lens[depth] == state->key_len &&
-           memcmp(item->path.segments[depth], state->key_buf,
-                  state->key_len) == 0)) {
-        state->prefix_seen_depth[i] = next_depth;
-      }
-    }
-  }
-  if (mutation_key_index(state->plan, path, frame, state->key_buf,
-                         state->key_len, &index)) {
+  if (mutation_scan_key(state, path, frame, state->key_buf, state->key_len,
+                        &index)) {
     item = &state->plan->items[index];
     if (item->kind == MUTATION_REMOVE) {
       state->applied[index] = 1;
