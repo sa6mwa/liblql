@@ -167,27 +167,27 @@ In particular, streaming query APIs must not copy, concatenate, retain, or
 materialize complete candidate payloads behind the caller's back.
 The ideal is zero allocation during steady-state query execution. Where
 allocation is unavoidable, it must be explicit, bounded, and attributable to
-selector state, caller-provided buffers, small parser state, or documented
-spooling handles rather than total input size.
+selector state, caller-provided buffers, small parser state, selector-sized
+stream scratch, or documented spooling handles rather than total input size.
 Selected scalar predicates must not silently materialize full values when their
-semantics can be decided incrementally. `contains` and `icontains` string
-predicates evaluate from lonejson scalar chunks with a reusable suffix window
-sized by the selector's longest needle, so cross-chunk matches do not require a
-selected-scalar buffer. `prefix` and `iprefix` predicates compare chunks
-directly against selector-owned literals and retain only a bounded leading
-slice for short-literal fast paths. Non-temporal `eq` and public inequality
-(`!=`) also compare chunks directly against selector-owned literals plus scalar
-length. `in` predicates keep selector-sized live/dead state per alternative and
-compare chunks directly against selector-owned alternatives. Temporal equality
-fallback, temporal inequality, `date`, and datetime `range` predicates evaluate
-from bounded scalar text plus scalar length. Numeric `range` predicates
-evaluate number chunks with a bounded leading slice, a small significant-digit
-window, and decimal/exponent counters; liblql must not allocate storage
-proportional to the selected number text.
-Whole-scalar buffering is acceptable only for explicit unknown/default fallback
-cases whose semantics have not yet been given a bounded streaming evaluator.
-Those cases must remain documented fallbacks rather than hidden
-streaming-looking materialization.
+semantics can be decided incrementally. The query evaluator must not have a
+selected-scalar buffer for strings or numbers, including unknown/default
+selector kinds. Unknown selector kinds are invalid internal states and must not
+be made to look supported by materializing selected values.
+
+`contains` and `icontains` string predicates evaluate from lonejson scalar
+chunks with a reusable suffix window sized by the selector's longest needle, so
+cross-chunk matches do not require a selected-scalar buffer. `prefix` and
+`iprefix` predicates compare chunks directly against selector-owned literals and
+retain only a bounded leading slice for short-literal fast paths. Non-temporal
+`eq` and public inequality (`!=`) also compare chunks directly against
+selector-owned literals plus scalar length. `in` predicates keep selector-sized
+live/dead state per alternative and compare chunks directly against
+selector-owned alternatives. Temporal equality fallback, temporal inequality,
+`date`, and datetime `range` predicates evaluate from bounded scalar text plus
+scalar length. Numeric `range` predicates evaluate number chunks with a bounded
+leading slice, a small significant-digit window, and decimal/exponent counters;
+liblql must not allocate storage proportional to the selected number text.
 
 As of lonejson `v0.35.2`, the path-value visitor used by liblql still enforces
 a small raw JSON number-token limit and performs bounded internal allocation for

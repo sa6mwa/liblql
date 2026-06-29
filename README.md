@@ -57,6 +57,10 @@ receiver methods that inspect the parsed selector handle without allocation.
 Allocator wrapper functions are not part of the public API. Project-owned
 allocation flows through the active receiver's allocator, and `make test`
 rejects direct runtime allocator calls outside the allocator module.
+Query execution is chunk-driven for selected string and number predicates:
+`contains`, `prefix`, `eq`, `!=`, `in`, temporal comparison, and numeric range
+matching use bounded selector-sized stream scratch rather than materializing the
+selected scalar. The hot path has no liblql-owned full-scalar buffer fallback.
 `clql -m -f` composes mutation and projection in Go-compatible order by
 projecting each output candidate first, then mutating the projected value for
 matched candidates; this uses a callback-scoped temp-file spill for the
