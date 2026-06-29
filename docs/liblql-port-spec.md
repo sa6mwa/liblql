@@ -204,6 +204,9 @@ walk compound selector trees per candidate to rebuild predicate scratch.
 Selector finalization must cache literal lengths, max `any` literal length, and
 max `in` fanout; scalar observers must use those selector-owned facts instead
 of recomputing string lengths or walking the selector tree per candidate.
+Selectors with `any` alternatives must also cache raw and case-folded first-byte
+metadata so `contains.any` observers do not rebuild needle scan metadata per
+scalar chunk.
 Selector finalization must also cache predicate feature bits for contains,
 prefix, exact, temporal, numeric-range, and exists families. Scalar evaluation
 must use those bits to skip whole observer families when the selector cannot
@@ -214,6 +217,10 @@ hit-index bitmap across chunk and end observers. That scratch is bounded by the
 selector predicate count and must not depend on selected scalar length.
 Scalar path-match scratch should use generation or epoch marks so scalar begin
 does not clear the full selector hit set for every scalar value.
+Candidate hit state, stream-miss state, and `in` alternative state should also
+use generation or epoch marks so candidate reset is O(1) in steady state. Full
+scratch clears are allowed at query setup and on epoch wraparound; they must
+not occur once per candidate.
 
 As of lonejson `v0.35.2`, the path-value visitor used by liblql still enforces
 a small raw JSON number-token limit and performs bounded internal allocation for

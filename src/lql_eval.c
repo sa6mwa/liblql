@@ -30,16 +30,17 @@ typedef struct eval_doc {
   lql_allocator *allocator;
   lql_impl *impl;
   const lql_selector *selector;
-  unsigned char *hits;
+  unsigned int *hits;
   size_t hits_cap;
-  unsigned char *stream_misses;
+  unsigned int *stream_misses;
   size_t stream_misses_cap;
   unsigned int *scalar_path_matches;
   size_t scalar_path_matches_cap;
   unsigned int scalar_path_epoch;
-  unsigned char *in_matches;
+  unsigned int *in_matches;
   size_t in_matches_cap;
   size_t in_match_stride;
+  unsigned int candidate_epoch;
   const lql_selector *const *predicates;
   size_t predicate_count;
   int scalar_stream_contains;
@@ -245,10 +246,10 @@ static void destroy_doc(eval_doc *doc) {
 
 static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   lql_impl *impl;
-  unsigned char *next_hits;
-  unsigned char *next_stream_misses;
+  unsigned int *next_hits;
+  unsigned int *next_stream_misses;
   unsigned int *next_scalar_path_matches;
-  unsigned char *next_in_matches;
+  unsigned int *next_in_matches;
   size_t in_match_need;
   memset(doc, 0, sizeof(*doc));
   doc->allocator = lql_allocator_from_receiver(self);
@@ -291,8 +292,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   if (selector != NULL && selector->hit_count != 0u) {
     doc->in_match_stride = selector->max_in_alternative_count;
     if (doc->hits_cap < selector->hit_count) {
-      next_hits = (unsigned char *)doc->allocator->realloc(
-          doc->allocator, doc->hits, selector->hit_count);
+      next_hits = (unsigned int *)doc->allocator->realloc(
+          doc->allocator, doc->hits, sizeof(*doc->hits) * selector->hit_count);
       if (next_hits == NULL) {
         destroy_doc(doc);
         return 0;
@@ -300,10 +301,11 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
       doc->hits = next_hits;
       doc->hits_cap = selector->hit_count;
     }
-    memset(doc->hits, 0, selector->hit_count);
+    memset(doc->hits, 0, sizeof(*doc->hits) * selector->hit_count);
     if (doc->stream_misses_cap < selector->hit_count) {
-      next_stream_misses = (unsigned char *)doc->allocator->realloc(
-          doc->allocator, doc->stream_misses, selector->hit_count);
+      next_stream_misses = (unsigned int *)doc->allocator->realloc(
+          doc->allocator, doc->stream_misses,
+          sizeof(*doc->stream_misses) * selector->hit_count);
       if (next_stream_misses == NULL) {
         destroy_doc(doc);
         return 0;
@@ -311,7 +313,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
       doc->stream_misses = next_stream_misses;
       doc->stream_misses_cap = selector->hit_count;
     }
-    memset(doc->stream_misses, 0, selector->hit_count);
+    memset(doc->stream_misses, 0,
+           sizeof(*doc->stream_misses) * selector->hit_count);
     if (doc->scalar_path_matches_cap < selector->hit_count) {
       next_scalar_path_matches = (unsigned int *)doc->allocator->realloc(
           doc->allocator, doc->scalar_path_matches,
@@ -329,8 +332,9 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     if (doc->in_match_stride != 0u) {
       in_match_need = selector->hit_count * doc->in_match_stride;
       if (doc->in_matches_cap < in_match_need) {
-        next_in_matches = (unsigned char *)doc->allocator->realloc(
-            doc->allocator, doc->in_matches, in_match_need);
+        next_in_matches = (unsigned int *)doc->allocator->realloc(
+            doc->allocator, doc->in_matches,
+            sizeof(*doc->in_matches) * in_match_need);
         if (next_in_matches == NULL) {
           destroy_doc(doc);
           return 0;
@@ -338,21 +342,28 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
         doc->in_matches = next_in_matches;
         doc->in_matches_cap = in_match_need;
       }
-      memset(doc->in_matches, 0, in_match_need);
+      memset(doc->in_matches, 0, sizeof(*doc->in_matches) * in_match_need);
     }
     doc->predicates = selector->predicates;
     doc->predicate_count = selector->predicate_count;
   }
+  doc->candidate_epoch = 1u;
   return 1;
 }
 
 static void reset_doc(eval_doc *doc) {
   if (doc->selector != NULL && doc->selector->hit_count != 0u) {
-    memset(doc->hits, 0, doc->selector->hit_count);
-    memset(doc->stream_misses, 0, doc->selector->hit_count);
-    if (doc->in_matches != NULL && doc->in_match_stride != 0u) {
-      memset(doc->in_matches, 0,
-             doc->selector->hit_count * doc->in_match_stride);
+    ++doc->candidate_epoch;
+    if (doc->candidate_epoch == 0u) {
+      memset(doc->hits, 0, sizeof(*doc->hits) * doc->selector->hit_count);
+      memset(doc->stream_misses, 0,
+             sizeof(*doc->stream_misses) * doc->selector->hit_count);
+      if (doc->in_matches != NULL && doc->in_match_stride != 0u) {
+        memset(doc->in_matches, 0,
+               sizeof(*doc->in_matches) * doc->selector->hit_count *
+                   doc->in_match_stride);
+      }
+      doc->candidate_epoch = 1u;
     }
   }
   doc->scalar_stream_contains = 0;
@@ -478,8 +489,9 @@ static int contains_case_len(const char *haystack, size_t h, const char *needle,
 
 static int contains_any_case_len(const char *haystack, size_t h, char **needles,
                                  const size_t *needle_lens, size_t count,
+                                 const unsigned char *firsts,
                                  int ignore_case) {
-  unsigned char firsts[32];
+  unsigned char stack_firsts[32];
   size_t i;
   size_t j;
   size_t n;
@@ -487,7 +499,8 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
   if (count == 0u) {
     return 0;
   }
-  if (count > sizeof(firsts) / sizeof(firsts[0])) {
+  if (firsts == NULL &&
+      count > sizeof(stack_firsts) / sizeof(stack_firsts[0])) {
     for (j = 0u; j < count; ++j) {
       if (contains_case_len(haystack, h, needles[j], needle_lens[j],
                             ignore_case)) {
@@ -496,13 +509,16 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
     }
     return 0;
   }
-  for (j = 0u; j < count; ++j) {
-    if (needle_lens[j] == 0u) {
-      return 1;
+  if (firsts == NULL) {
+    for (j = 0u; j < count; ++j) {
+      if (needle_lens[j] == 0u) {
+        return 1;
+      }
+      stack_firsts[j] =
+          ignore_case ? (unsigned char)tolower((unsigned char)needles[j][0])
+                      : (unsigned char)needles[j][0];
     }
-    firsts[j] = ignore_case
-                    ? (unsigned char)tolower((unsigned char)needles[j][0])
-                    : (unsigned char)needles[j][0];
+    firsts = stack_firsts;
   }
   for (i = 0u; i < h; ++i) {
     hay_ch = ignore_case ? (unsigned char)tolower((unsigned char)haystack[i])
@@ -642,6 +658,8 @@ static int path_matches(const eval_doc *doc, const char *pattern,
   return path_matches_from(doc, seg, path, 0u);
 }
 
+static void stream_miss_clear(eval_doc *doc, const lql_selector *selector);
+
 static int selector_path_matches(const eval_doc *doc,
                                  const lql_selector *selector,
                                  const lonejson_value_path *path) {
@@ -691,7 +709,7 @@ static void scalar_path_match_prepare(eval_doc *doc,
     if (selector_path_matches(doc, selector, path)) {
       doc->scalar_path_matches[selector->hit_index] = doc->scalar_path_epoch;
       if (doc->stream_misses != NULL) {
-        doc->stream_misses[selector->hit_index] = 0u;
+        stream_miss_clear(doc, selector);
       }
     }
   }
@@ -710,6 +728,54 @@ static int scalar_selector_path_matches(const eval_doc *doc,
   (void)path;
   return doc->scalar_path_matches[selector->hit_index] ==
          doc->scalar_path_epoch;
+}
+
+static void hit_mark(eval_doc *doc, const lql_selector *selector) {
+  if (doc != NULL && selector != NULL && doc->hits != NULL &&
+      selector->hit_index < doc->hits_cap) {
+    doc->hits[selector->hit_index] = doc->candidate_epoch;
+  }
+}
+
+static int hit_marked(const eval_doc *doc, const lql_selector *selector) {
+  return doc != NULL && selector != NULL && doc->hits != NULL &&
+         selector->hit_index < doc->hits_cap &&
+         doc->hits[selector->hit_index] == doc->candidate_epoch;
+}
+
+static void stream_miss_mark(eval_doc *doc, const lql_selector *selector) {
+  if (doc != NULL && selector != NULL && doc->stream_misses != NULL &&
+      selector->hit_index < doc->stream_misses_cap) {
+    doc->stream_misses[selector->hit_index] = doc->candidate_epoch;
+  }
+}
+
+static void stream_miss_clear(eval_doc *doc, const lql_selector *selector) {
+  if (doc != NULL && selector != NULL && doc->stream_misses != NULL &&
+      selector->hit_index < doc->stream_misses_cap) {
+    doc->stream_misses[selector->hit_index] = 0u;
+  }
+}
+
+static int stream_miss_marked(const eval_doc *doc,
+                              const lql_selector *selector) {
+  return doc != NULL && selector != NULL && doc->stream_misses != NULL &&
+         selector->hit_index < doc->stream_misses_cap &&
+         doc->stream_misses[selector->hit_index] == doc->candidate_epoch;
+}
+
+static unsigned int *in_match_row(eval_doc *doc,
+                                  const lql_selector *selector) {
+  size_t offset;
+  if (doc == NULL || selector == NULL || doc->in_matches == NULL ||
+      doc->in_match_stride == 0u) {
+    return NULL;
+  }
+  offset = selector->hit_index * doc->in_match_stride;
+  if (offset + doc->in_match_stride > doc->in_matches_cap) {
+    return NULL;
+  }
+  return doc->in_matches + offset;
 }
 
 static int selector_is_predicate(const lql_selector *selector) {
@@ -769,11 +835,11 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
       break;
     }
     if (strcmp(value, selector->value == NULL ? "" : selector->value) == 0) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
     } else if (selector->value_is_temporal &&
                lql_parse_temporal_literal(value, &temporal) &&
                lql_temporal_equal(&temporal, &selector->temporal_eq)) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
     }
     break;
   case LQL_SELECTOR_KIND_NE:
@@ -781,21 +847,21 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
       break;
     }
     if (is_null) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
       break;
     }
     if (strcmp(value, selector->value == NULL ? "" : selector->value) != 0 &&
         !(selector->value_is_temporal &&
           lql_parse_temporal_literal(value, &temporal) &&
           lql_temporal_equal(&temporal, &selector->temporal_eq))) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
     }
     break;
   case LQL_SELECTOR_KIND_CONTAINS:
   case LQL_SELECTOR_KIND_ICONTAINS:
     if (selector->any_count == 0u && !selector->value_set &&
         selector->value == NULL) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
       break;
     }
     if (is_container || is_null) {
@@ -808,7 +874,7 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
                             selector->value_len,
                             selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
                                 selector->ignore_case)) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       }
     } else {
       value_len = strlen(value);
@@ -816,15 +882,17 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
                     selector->ignore_case;
       if (contains_any_case_len(value, value_len, selector->any,
                                 selector->any_lens, selector->any_count,
+                                ignore_case ? selector->any_ifirsts
+                                            : selector->any_firsts,
                                 ignore_case)) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       }
     }
     break;
   case LQL_SELECTOR_KIND_PREFIX:
   case LQL_SELECTOR_KIND_IPREFIX:
     if (!selector->value_set && selector->value == NULL) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
       break;
     }
     if (is_container || is_null) {
@@ -835,7 +903,7 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
         (selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case
              ? ascii_case_equal_prefix(value, selector->value, n)
              : memcmp(value, selector->value, n) == 0)) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
     }
     break;
   case LQL_SELECTOR_KIND_RANGE:
@@ -849,7 +917,7 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
            lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
           (!selector->has_temporal_lte ||
            lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       }
     } else if (!is_container && !is_null && is_number) {
       number = strtod(value, NULL);
@@ -857,7 +925,7 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
           (!selector->has_range_gte || number >= selector->range_gte) &&
           (!selector->has_range_lt || number < selector->range_lt) &&
           (!selector->has_range_lte || number <= selector->range_lte)) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       }
     }
     break;
@@ -878,7 +946,7 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
          lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
         (!selector->has_temporal_lte ||
          lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
     }
     break;
   case LQL_SELECTOR_KIND_IN:
@@ -888,14 +956,14 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
     for (j = 0u; j < selector->any_count; ++j) {
       needle = selector->any[j];
       if (strcmp(value, needle) == 0) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
         break;
       }
     }
     break;
   case LQL_SELECTOR_KIND_EXISTS:
     if (!is_null) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
     }
     break;
   default:
@@ -1102,16 +1170,16 @@ static void observe_contains_stream_begin(eval_doc *doc,
     }
     if (selector->any_count == 0u) {
       if (!selector->value_set && selector->value == NULL) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       } else if (selector->value == NULL || selector->value[0] == '\0') {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       }
       continue;
     }
     for (j = 0u; j < selector->any_count; ++j) {
       if ((selector->any_lens == NULL && selector->any[j][0] == '\0') ||
           (selector->any_lens != NULL && selector->any_lens[j] == 0u)) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
         break;
       }
     }
@@ -1133,7 +1201,7 @@ static void observe_prefix_stream_begin(eval_doc *doc,
          selector->kind == LQL_SELECTOR_KIND_IPREFIX) &&
         scalar_selector_path_matches(doc, selector, path) &&
         !selector->value_set && selector->value == NULL) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
     }
   }
 }
@@ -1142,7 +1210,7 @@ static void observe_in_stream_begin(eval_doc *doc, const lql_selector *selector,
                                     const lonejson_value_path *path) {
   size_t i;
   size_t j;
-  unsigned char *matches;
+  unsigned int *matches;
 
   (void)selector;
   if (doc->in_matches == NULL || doc->in_match_stride == 0u) {
@@ -1154,9 +1222,12 @@ static void observe_in_stream_begin(eval_doc *doc, const lql_selector *selector,
         !scalar_selector_path_matches(doc, selector, path)) {
       continue;
     }
-    matches = doc->in_matches + selector->hit_index * doc->in_match_stride;
+    matches = in_match_row(doc, selector);
+    if (matches == NULL) {
+      continue;
+    }
     for (j = 0u; j < selector->any_count; ++j) {
-      matches[j] = 1u;
+      matches[j] = doc->candidate_epoch;
     }
   }
 }
@@ -1210,8 +1281,8 @@ static void observe_prefix_stream_chunk(eval_doc *doc,
     if ((selector->kind != LQL_SELECTOR_KIND_PREFIX &&
          selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
         !scalar_selector_path_matches(doc, selector, path) ||
-        doc->hits[selector->hit_index] != 0u ||
-        doc->stream_misses[selector->hit_index] != 0u) {
+        hit_marked(doc, selector) ||
+        stream_miss_marked(doc, selector)) {
       continue;
     }
     value_len = selector_prefix_value_len(selector);
@@ -1223,7 +1294,7 @@ static void observe_prefix_stream_chunk(eval_doc *doc,
     if (!literal_chunk_matches(selector->value == NULL ? "" : selector->value,
                                value_len, offset, data, len, ignore_case,
                                value_len)) {
-      doc->stream_misses[selector->hit_index] = 1u;
+      stream_miss_mark(doc, selector);
     }
   }
 }
@@ -1237,7 +1308,7 @@ static void observe_exact_stream_chunk(eval_doc *doc,
   size_t offset;
   size_t value_len;
   const char *value;
-  unsigned char *matches;
+  unsigned int *matches;
 
   (void)selector;
   if (doc->hits == NULL || doc->stream_misses == NULL ||
@@ -1252,20 +1323,18 @@ static void observe_exact_stream_chunk(eval_doc *doc,
          selector->kind != LQL_SELECTOR_KIND_IN) ||
         selector->value_is_temporal ||
         !scalar_selector_path_matches(doc, selector, path) ||
-        doc->hits[selector->hit_index] != 0u ||
-        doc->stream_misses[selector->hit_index] != 0u) {
+        hit_marked(doc, selector) ||
+        stream_miss_marked(doc, selector)) {
       continue;
     }
     if (selector->kind == LQL_SELECTOR_KIND_IN) {
       matches =
-          doc->in_matches == NULL || doc->in_match_stride == 0u
-              ? NULL
-              : doc->in_matches + selector->hit_index * doc->in_match_stride;
+          in_match_row(doc, selector);
       if (matches == NULL) {
         continue;
       }
       for (j = 0u; j < selector->any_count; ++j) {
-        if (matches[j] != 0u) {
+        if (matches[j] == doc->candidate_epoch) {
           value = selector->any[j];
           value_len = selector->any_lens == NULL ? strlen(value)
                                                  : selector->any_lens[j];
@@ -1281,7 +1350,7 @@ static void observe_exact_stream_chunk(eval_doc *doc,
     value_len = selector->value_len;
     if (!literal_chunk_matches(value, value_len, offset, data, len, 0,
                                value_len)) {
-      doc->stream_misses[selector->hit_index] = 1u;
+      stream_miss_mark(doc, selector);
     }
   }
 }
@@ -1301,7 +1370,7 @@ static void observe_scalar_exists_begin(eval_doc *doc,
     selector = doc->predicates[i];
     if (selector->kind == LQL_SELECTOR_KIND_EXISTS &&
         scalar_selector_path_matches(doc, selector, path)) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
     }
   }
 }
@@ -1322,12 +1391,12 @@ static void observe_prefix_stream_end(eval_doc *doc,
     if ((selector->kind != LQL_SELECTOR_KIND_PREFIX &&
          selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
         !scalar_selector_path_matches(doc, selector, path) ||
-        doc->hits[selector->hit_index] != 0u) {
+        hit_marked(doc, selector)) {
       continue;
     }
     value_len = selector_prefix_value_len(selector);
     if (doc->scalar_len < value_len ||
-        doc->stream_misses[selector->hit_index] != 0u) {
+        stream_miss_marked(doc, selector)) {
       continue;
     }
     if (value_len <= doc->prefix_len) {
@@ -1345,7 +1414,7 @@ static void observe_prefix_stream_end(eval_doc *doc,
         continue;
       }
     }
-    doc->hits[selector->hit_index] = 1u;
+    hit_mark(doc, selector);
   }
 }
 
@@ -1356,7 +1425,7 @@ static void observe_exact_stream_end(eval_doc *doc,
   size_t j;
   size_t value_len;
   const char *value;
-  unsigned char *matches;
+  unsigned int *matches;
 
   (void)selector;
   if (doc->hits == NULL) {
@@ -1368,7 +1437,7 @@ static void observe_exact_stream_end(eval_doc *doc,
          selector->kind != LQL_SELECTOR_KIND_NE &&
          selector->kind != LQL_SELECTOR_KIND_IN) ||
         !scalar_selector_path_matches(doc, selector, path) ||
-        doc->hits[selector->hit_index] != 0u) {
+        hit_marked(doc, selector)) {
       continue;
     }
     if (selector->kind == LQL_SELECTOR_KIND_EQ ||
@@ -1377,32 +1446,30 @@ static void observe_exact_stream_end(eval_doc *doc,
       value_len = selector->value_len;
       if (selector->kind == LQL_SELECTOR_KIND_EQ &&
           doc->scalar_len == value_len &&
-          doc->stream_misses[selector->hit_index] == 0u &&
+          !stream_miss_marked(doc, selector) &&
           (value_len > doc->prefix_len ||
            memcmp(doc->prefix_buf, value, value_len) == 0)) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       } else if (selector->kind == LQL_SELECTOR_KIND_NE &&
                  (doc->scalar_len != value_len ||
-                  doc->stream_misses[selector->hit_index] != 0u ||
+                  stream_miss_marked(doc, selector) ||
                   (value_len <= doc->prefix_len &&
                    memcmp(doc->prefix_buf, value, value_len) != 0))) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       }
       continue;
     }
     matches =
-        doc->in_matches == NULL || doc->in_match_stride == 0u
-            ? NULL
-            : doc->in_matches + selector->hit_index * doc->in_match_stride;
+        in_match_row(doc, selector);
     for (j = 0u; j < selector->any_count; ++j) {
       value = selector->any[j];
       value_len =
           selector->any_lens == NULL ? strlen(value) : selector->any_lens[j];
       if (doc->scalar_len == value_len &&
-          ((matches != NULL && matches[j] != 0u) ||
+          ((matches != NULL && matches[j] == doc->candidate_epoch) ||
            (value_len <= doc->prefix_len &&
             memcmp(doc->prefix_buf, value, value_len) == 0))) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
         break;
       }
     }
@@ -1427,7 +1494,7 @@ static void observe_temporal_stream_end(eval_doc *doc,
   for (i = 0u; i < doc->predicate_count; ++i) {
     selector = doc->predicates[i];
     if (!scalar_selector_path_matches(doc, selector, path) ||
-        doc->hits[selector->hit_index] != 0u) {
+        hit_marked(doc, selector)) {
       continue;
     }
     if (selector->kind != LQL_SELECTOR_KIND_EQ &&
@@ -1448,12 +1515,12 @@ static void observe_temporal_stream_end(eval_doc *doc,
     switch (selector->kind) {
     case LQL_SELECTOR_KIND_EQ:
       if (parsed && lql_temporal_equal(&temporal, &selector->temporal_eq)) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       }
       break;
     case LQL_SELECTOR_KIND_NE:
       if (!parsed || !lql_temporal_equal(&temporal, &selector->temporal_eq)) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       }
       break;
     case LQL_SELECTOR_KIND_RANGE:
@@ -1466,7 +1533,7 @@ static void observe_temporal_stream_end(eval_doc *doc,
            lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
           (!selector->has_temporal_lte ||
            lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       }
       break;
     case LQL_SELECTOR_KIND_DATE:
@@ -1485,7 +1552,7 @@ static void observe_temporal_stream_end(eval_doc *doc,
            lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
           (!selector->has_temporal_lte ||
            lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       }
       break;
     default:
@@ -1608,14 +1675,14 @@ static void observe_numeric_range_stream_end(eval_doc *doc,
     if (selector->kind != LQL_SELECTOR_KIND_RANGE ||
         selector->range_is_temporal ||
         !scalar_selector_path_matches(doc, selector, path) ||
-        doc->hits[selector->hit_index] != 0u) {
+        hit_marked(doc, selector)) {
       continue;
     }
     if ((!selector->has_range_gt || number > selector->range_gt) &&
         (!selector->has_range_gte || number >= selector->range_gte) &&
         (!selector->has_range_lt || number < selector->range_lt) &&
         (!selector->has_range_lte || number <= selector->range_lte)) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
     }
   }
 }
@@ -1679,11 +1746,12 @@ static int contains_stream_scan(const char *tail, size_t tail_len,
 static int contains_any_stream_scan(const char *tail, size_t tail_len,
                                     const char *data, size_t len,
                                     char **needles, const size_t *needle_lens,
-                                    size_t count, int ignore_case) {
+                                    const unsigned char *firsts, size_t count,
+                                    int ignore_case) {
   size_t i;
   size_t needle_len;
 
-  if (contains_any_case_len(data, len, needles, needle_lens, count,
+  if (contains_any_case_len(data, len, needles, needle_lens, count, firsts,
                             ignore_case)) {
     return 1;
   }
@@ -1717,7 +1785,7 @@ static void observe_contains_stream_chunk(eval_doc *doc,
     if ((selector->kind != LQL_SELECTOR_KIND_CONTAINS &&
          selector->kind != LQL_SELECTOR_KIND_ICONTAINS) ||
         !scalar_selector_path_matches(doc, selector, path) ||
-        doc->hits[selector->hit_index] != 0u) {
+        hit_marked(doc, selector)) {
       continue;
     }
     ignore_case =
@@ -1728,13 +1796,15 @@ static void observe_contains_stream_chunk(eval_doc *doc,
                                data, len,
                                selector->value == NULL ? "" : selector->value,
                                value_len, ignore_case)) {
-        doc->hits[selector->hit_index] = 1u;
+        hit_mark(doc, selector);
       }
     } else if (contains_any_stream_scan(contains_tail_data(doc),
                                         doc->contains_tail_len, data, len,
                                         selector->any, selector->any_lens,
+                                        ignore_case ? selector->any_ifirsts
+                                                    : selector->any_firsts,
                                         selector->any_count, ignore_case)) {
-      doc->hits[selector->hit_index] = 1u;
+      hit_mark(doc, selector);
     }
   }
 }
@@ -1835,7 +1905,7 @@ static int eval_selector_tree(const lql_selector *selector,
                ? 1
                : !eval_selector_tree(&selector->children[0], doc);
   default:
-    return doc->hits != NULL && doc->hits[selector->hit_index] != 0u;
+    return doc->hits != NULL && hit_marked(doc, selector);
   }
 }
 

@@ -73,6 +73,8 @@ evaluation setup does not walk compound selector trees for each candidate.
 Selector finalization also caches literal lengths, max `any` literal length, and
 max `in` fanout so scalar observers use selector-owned facts instead of
 recomputing them per candidate.
+`any` alternatives also cache raw and case-folded first bytes so
+`contains.any` scanning does not rebuild needle metadata per scalar chunk.
 It also records predicate feature bits, allowing scalar evaluation to skip
 entire contains, prefix, exact, temporal, numeric-range, and exists observer
 families when a selector cannot use them.
@@ -81,6 +83,9 @@ result once at scalar begin and reuses that hit-index bitmap across chunk and
 end observers.
 Scalar path-match scratch uses epoch marks, so repeated scalar callbacks do not
 clear the full selector hit set in the hot path.
+Candidate hit, stream-miss, and `in` alternative scratch also use candidate
+epoch marks, so candidate reset is O(1) in steady state instead of clearing
+selector-sized buffers for every candidate.
 `clql -m -f` composes mutation and projection in Go-compatible order by
 projecting each output candidate first, then mutating the projected value for
 matched candidates; this uses a callback-scoped temp-file spill for the

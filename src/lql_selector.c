@@ -65,6 +65,8 @@ static int selector_any_push(lql_selector_parser *ctx, lql_selector *selector,
                              char *item) {
   char **next;
   size_t *next_lens;
+  unsigned char *next_firsts;
+  unsigned char *next_ifirsts;
   size_t len;
   len = strlen(item);
   next = (char **)ctx->allocator->realloc(ctx->allocator, selector->any,
@@ -81,8 +83,26 @@ static int selector_any_push(lql_selector_parser *ctx, lql_selector *selector,
     return 0;
   }
   selector->any_lens = next_lens;
+  next_firsts = (unsigned char *)ctx->allocator->realloc(
+      ctx->allocator, selector->any_firsts,
+      sizeof(unsigned char) * (selector->any_count + 1u));
+  if (next_firsts == NULL) {
+    return 0;
+  }
+  selector->any_firsts = next_firsts;
+  next_ifirsts = (unsigned char *)ctx->allocator->realloc(
+      ctx->allocator, selector->any_ifirsts,
+      sizeof(unsigned char) * (selector->any_count + 1u));
+  if (next_ifirsts == NULL) {
+    return 0;
+  }
+  selector->any_ifirsts = next_ifirsts;
   selector->any[selector->any_count] = item;
   selector->any_lens[selector->any_count] = len;
+  selector->any_firsts[selector->any_count] =
+      len == 0u ? 0u : (unsigned char)item[0];
+  selector->any_ifirsts[selector->any_count] =
+      len == 0u ? 0u : (unsigned char)tolower((unsigned char)item[0]);
   ++selector->any_count;
   return 1;
 }
@@ -2487,6 +2507,8 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->value = NULL;
   dst->any = NULL;
   dst->any_lens = NULL;
+  dst->any_firsts = NULL;
+  dst->any_ifirsts = NULL;
   dst->any_count = 0u;
   dst->range_gt_text = NULL;
   dst->range_gte_text = NULL;

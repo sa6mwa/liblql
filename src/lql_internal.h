@@ -42,13 +42,13 @@ struct lql_impl {
   lql_pool_block *eval_pool_free;
   lonejson *eval_runtime;
   int eval_runtime_in_use;
-  unsigned char *eval_hits;
+  unsigned int *eval_hits;
   size_t eval_hits_cap;
-  unsigned char *eval_stream_misses;
+  unsigned int *eval_stream_misses;
   size_t eval_stream_misses_cap;
   unsigned int *eval_scalar_path_matches;
   size_t eval_scalar_path_matches_cap;
-  unsigned char *eval_in_matches;
+  unsigned int *eval_in_matches;
   size_t eval_in_matches_cap;
   char *eval_contains_tail_buf;
   size_t eval_contains_tail_cap;
@@ -132,6 +132,8 @@ struct lql_selector {
   int ignore_case;
   char **any;
   size_t *any_lens;
+  unsigned char *any_firsts;
+  unsigned char *any_ifirsts;
   size_t any_count;
   size_t any_max_len;
   char *range_gt_text;
