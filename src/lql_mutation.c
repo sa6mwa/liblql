@@ -1590,16 +1590,6 @@ static int virtual_path_matches_from(const mutation_path *item_path,
   return actual_index == actual_count;
 }
 
-static int mutation_item_matches_virtual_key(const mutation_item *item,
-                                             const lonejson_value_path *parent,
-                                             const mutation_path_frame *frame,
-                                             const char *key, size_t key_len) {
-  return parent != NULL && frame != NULL &&
-         frame->segment_count == parent->segment_count &&
-         virtual_path_matches_from(&item->path, 0u, parent, frame, key, key_len,
-                                   0u);
-}
-
 static const mutation_path_frame *
 current_value_path_frame(const mutation_stream_state *state) {
   if (state == NULL || state->path_frame_count == 0u) {
@@ -1735,11 +1725,12 @@ static int stream_path_prefix_matches_known(const mutation_path *item_path,
   return 1;
 }
 
-static int mutation_key_matches_path(const mutation_item *item,
-                                     const lonejson_value_path *parent,
-                                     const mutation_path_frame *frame,
-                                     const char *key, size_t key_len) {
-  return mutation_item_matches_virtual_key(item, parent, frame, key, key_len);
+static int mutation_item_matches_virtual_key(const mutation_item *item,
+                                             const lonejson_value_path *parent,
+                                             const mutation_path_frame *frame,
+                                             const char *key, size_t key_len) {
+  return virtual_path_matches_from(&item->path, 0u, parent, frame, key, key_len,
+                                   0u);
 }
 
 static int mutation_descends_from_object(const mutation_item *item,
@@ -1754,9 +1745,13 @@ static int mutation_key_index(const lql_mutation_plan *plan,
                               const mutation_path_frame *frame, const char *key,
                               size_t key_len, size_t *out) {
   size_t i;
+  if (parent == NULL || frame == NULL ||
+      frame->segment_count != parent->segment_count) {
+    return 0;
+  }
   for (i = 0u; i < plan->count; ++i) {
-    if (mutation_key_matches_path(&plan->items[i], parent, frame, key,
-                                  key_len)) {
+    if (mutation_item_matches_virtual_key(&plan->items[i], parent, frame, key,
+                                          key_len)) {
       *out = i;
       return 1;
     }
@@ -2013,10 +2008,14 @@ static int skipped_earlier_increment_key_index(
   if (state == NULL || !state->skipping || !state->skip_has_mask) {
     return 0;
   }
+  if (parent == NULL || frame == NULL ||
+      frame->segment_count != parent->segment_count) {
+    return 0;
+  }
   for (i = 0u; i < state->skip_mask_index; ++i) {
     item = &state->plan->items[i];
     if (item->kind == MUTATION_INCREMENT &&
-        mutation_key_matches_path(item, parent, frame, key, key_len)) {
+        mutation_item_matches_virtual_key(item, parent, frame, key, key_len)) {
       *out = i;
       return 1;
     }
