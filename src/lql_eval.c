@@ -36,6 +36,9 @@ typedef struct eval_doc {
   size_t stream_misses_cap;
   unsigned int *scalar_path_matches;
   size_t scalar_path_matches_cap;
+  const lql_selector **scalar_path_predicates;
+  size_t scalar_path_predicates_cap;
+  size_t scalar_path_predicate_count;
   unsigned int scalar_path_epoch;
   unsigned int *in_matches;
   size_t in_matches_cap;
@@ -225,6 +228,9 @@ static void destroy_doc(eval_doc *doc) {
     doc->impl->eval_stream_misses_cap = doc->stream_misses_cap;
     doc->impl->eval_scalar_path_matches = doc->scalar_path_matches;
     doc->impl->eval_scalar_path_matches_cap = doc->scalar_path_matches_cap;
+    doc->impl->eval_scalar_path_predicates = doc->scalar_path_predicates;
+    doc->impl->eval_scalar_path_predicates_cap =
+        doc->scalar_path_predicates_cap;
     doc->impl->eval_in_matches = doc->in_matches;
     doc->impl->eval_in_matches_cap = doc->in_matches_cap;
     doc->impl->eval_contains_tail_buf = doc->contains_tail_buf;
@@ -237,6 +243,7 @@ static void destroy_doc(eval_doc *doc) {
     doc->allocator->destroy(doc->allocator, doc->hits);
     doc->allocator->destroy(doc->allocator, doc->stream_misses);
     doc->allocator->destroy(doc->allocator, doc->scalar_path_matches);
+    doc->allocator->destroy(doc->allocator, doc->scalar_path_predicates);
     doc->allocator->destroy(doc->allocator, doc->in_matches);
     doc->allocator->destroy(doc->allocator, doc->contains_tail_buf);
     doc->allocator->destroy(doc->allocator, doc->container_types);
@@ -250,6 +257,7 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   unsigned int *next_hits;
   unsigned int *next_stream_misses;
   unsigned int *next_scalar_path_matches;
+  const lql_selector **next_scalar_path_predicates;
   unsigned int *next_in_matches;
   size_t in_match_need;
   memset(doc, 0, sizeof(*doc));
@@ -269,6 +277,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     doc->stream_misses_cap = impl->eval_stream_misses_cap;
     doc->scalar_path_matches = impl->eval_scalar_path_matches;
     doc->scalar_path_matches_cap = impl->eval_scalar_path_matches_cap;
+    doc->scalar_path_predicates = impl->eval_scalar_path_predicates;
+    doc->scalar_path_predicates_cap = impl->eval_scalar_path_predicates_cap;
     doc->in_matches = impl->eval_in_matches;
     doc->in_matches_cap = impl->eval_in_matches_cap;
     doc->contains_tail_buf = impl->eval_contains_tail_buf;
@@ -282,6 +292,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     impl->eval_stream_misses_cap = 0u;
     impl->eval_scalar_path_matches = NULL;
     impl->eval_scalar_path_matches_cap = 0u;
+    impl->eval_scalar_path_predicates = NULL;
+    impl->eval_scalar_path_predicates_cap = 0u;
     impl->eval_in_matches = NULL;
     impl->eval_in_matches_cap = 0u;
     impl->eval_contains_tail_buf = NULL;
@@ -330,6 +342,18 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     memset(doc->scalar_path_matches, 0,
            sizeof(*doc->scalar_path_matches) * selector->hit_count);
     doc->scalar_path_epoch = 1u;
+    if (doc->scalar_path_predicates_cap < selector->predicate_count) {
+      next_scalar_path_predicates =
+          (const lql_selector **)doc->allocator->realloc(
+              doc->allocator, doc->scalar_path_predicates,
+              sizeof(*doc->scalar_path_predicates) * selector->predicate_count);
+      if (next_scalar_path_predicates == NULL) {
+        destroy_doc(doc);
+        return 0;
+      }
+      doc->scalar_path_predicates = next_scalar_path_predicates;
+      doc->scalar_path_predicates_cap = selector->predicate_count;
+    }
     if (doc->in_match_stride != 0u) {
       in_match_need = selector->hit_count * doc->in_match_stride;
       if (doc->in_matches_cap < in_match_need) {
@@ -373,6 +397,7 @@ static void reset_doc(eval_doc *doc) {
   doc->scalar_stream_temporal = 0;
   doc->scalar_stream_numeric_range = 0;
   doc->scalar_path_features = 0u;
+  doc->scalar_path_predicate_count = 0u;
   doc->scalar_len = 0u;
   doc->contains_tail_len = 0u;
   doc->contains_tail_need = 0u;
@@ -491,8 +516,7 @@ static int contains_case_len(const char *haystack, size_t h, const char *needle,
 
 static int contains_any_case_len(const char *haystack, size_t h, char **needles,
                                  const size_t *needle_lens, size_t count,
-                                 const unsigned char *firsts,
-                                 int ignore_case) {
+                                 const unsigned char *firsts, int ignore_case) {
   unsigned char stack_firsts[32];
   size_t i;
   size_t j;
@@ -706,6 +730,7 @@ static void scalar_path_match_prepare(eval_doc *doc,
     return;
   }
   doc->scalar_path_features = 0u;
+  doc->scalar_path_predicate_count = 0u;
   ++doc->scalar_path_epoch;
   if (doc->scalar_path_epoch == 0u) {
     memset(doc->scalar_path_matches, 0,
@@ -716,6 +741,12 @@ static void scalar_path_match_prepare(eval_doc *doc,
     selector = doc->predicates[i];
     if (selector_path_matches(doc, selector, path)) {
       doc->scalar_path_matches[selector->hit_index] = doc->scalar_path_epoch;
+      if (doc->scalar_path_predicates != NULL &&
+          doc->scalar_path_predicate_count < doc->scalar_path_predicates_cap) {
+        doc->scalar_path_predicates[doc->scalar_path_predicate_count] =
+            selector;
+        ++doc->scalar_path_predicate_count;
+      }
       if (doc->stream_misses != NULL) {
         stream_miss_clear(doc, selector);
       }
@@ -793,21 +824,6 @@ static void scalar_path_match_prepare(eval_doc *doc,
   }
 }
 
-static int scalar_selector_path_matches(const eval_doc *doc,
-                                        const lql_selector *selector,
-                                        const lonejson_value_path *path) {
-  if (selector == NULL) {
-    return 0;
-  }
-  if (doc->scalar_path_matches == NULL ||
-      selector->hit_index >= doc->scalar_path_matches_cap) {
-    return selector_path_matches(doc, selector, path);
-  }
-  (void)path;
-  return doc->scalar_path_matches[selector->hit_index] ==
-         doc->scalar_path_epoch;
-}
-
 static void hit_mark(eval_doc *doc, const lql_selector *selector) {
   if (doc != NULL && selector != NULL && doc->hits != NULL &&
       selector->hit_index < doc->hits_cap) {
@@ -842,8 +858,7 @@ static int stream_miss_marked(const eval_doc *doc,
          doc->stream_misses[selector->hit_index] == doc->candidate_epoch;
 }
 
-static unsigned int *in_match_row(eval_doc *doc,
-                                  const lql_selector *selector) {
+static unsigned int *in_match_row(eval_doc *doc, const lql_selector *selector) {
   size_t offset;
   if (doc == NULL || selector == NULL || doc->in_matches == NULL ||
       doc->in_match_stride == 0u) {
@@ -1074,14 +1089,14 @@ static void observe_contains_stream_begin(eval_doc *doc,
   size_t j;
 
   (void)selector;
+  (void)path;
   if (doc->hits == NULL || doc->stream_misses == NULL) {
     return;
   }
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
     if ((selector->kind != LQL_SELECTOR_KIND_CONTAINS &&
-         selector->kind != LQL_SELECTOR_KIND_ICONTAINS) ||
-        !scalar_selector_path_matches(doc, selector, path)) {
+         selector->kind != LQL_SELECTOR_KIND_ICONTAINS)) {
       continue;
     }
     if (selector->any_count == 0u) {
@@ -1108,14 +1123,14 @@ static void observe_prefix_stream_begin(eval_doc *doc,
   size_t i;
 
   (void)selector;
+  (void)path;
   if (doc->hits == NULL || doc->stream_misses == NULL) {
     return;
   }
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
     if ((selector->kind == LQL_SELECTOR_KIND_PREFIX ||
          selector->kind == LQL_SELECTOR_KIND_IPREFIX) &&
-        scalar_selector_path_matches(doc, selector, path) &&
         !selector->value_set && selector->value == NULL) {
       hit_mark(doc, selector);
     }
@@ -1129,13 +1144,13 @@ static void observe_in_stream_begin(eval_doc *doc, const lql_selector *selector,
   unsigned int *matches;
 
   (void)selector;
+  (void)path;
   if (doc->in_matches == NULL || doc->in_match_stride == 0u) {
     return;
   }
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
-    if (selector->kind != LQL_SELECTOR_KIND_IN ||
-        !scalar_selector_path_matches(doc, selector, path)) {
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
+    if (selector->kind != LQL_SELECTOR_KIND_IN) {
       continue;
     }
     matches = in_match_row(doc, selector);
@@ -1187,18 +1202,17 @@ static void observe_prefix_stream_chunk(eval_doc *doc,
   int ignore_case;
 
   (void)selector;
+  (void)path;
   if (doc->hits == NULL || doc->stream_misses == NULL ||
       doc->scalar_len < len) {
     return;
   }
   offset = doc->scalar_len - len;
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
     if ((selector->kind != LQL_SELECTOR_KIND_PREFIX &&
          selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
-        !scalar_selector_path_matches(doc, selector, path) ||
-        hit_marked(doc, selector) ||
-        stream_miss_marked(doc, selector)) {
+        hit_marked(doc, selector) || stream_miss_marked(doc, selector)) {
       continue;
     }
     value_len = selector_prefix_value_len(selector);
@@ -1227,25 +1241,23 @@ static void observe_exact_stream_chunk(eval_doc *doc,
   unsigned int *matches;
 
   (void)selector;
+  (void)path;
   if (doc->hits == NULL || doc->stream_misses == NULL ||
       doc->scalar_len < len) {
     return;
   }
   offset = doc->scalar_len - len;
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
     if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
          selector->kind != LQL_SELECTOR_KIND_NE &&
          selector->kind != LQL_SELECTOR_KIND_IN) ||
-        selector->value_is_temporal ||
-        !scalar_selector_path_matches(doc, selector, path) ||
-        hit_marked(doc, selector) ||
+        selector->value_is_temporal || hit_marked(doc, selector) ||
         stream_miss_marked(doc, selector)) {
       continue;
     }
     if (selector->kind == LQL_SELECTOR_KIND_IN) {
-      matches =
-          in_match_row(doc, selector);
+      matches = in_match_row(doc, selector);
       if (matches == NULL) {
         continue;
       }
@@ -1277,15 +1289,14 @@ static void observe_scalar_exists_begin(eval_doc *doc,
   size_t i;
 
   (void)selector;
+  (void)path;
   if (doc->hits == NULL || doc->selector == NULL ||
-      (doc->selector->predicate_features & LQL_SELECTOR_FEATURE_EXISTS) ==
-          0u) {
+      (doc->selector->predicate_features & LQL_SELECTOR_FEATURE_EXISTS) == 0u) {
     return;
   }
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
-    if (selector->kind == LQL_SELECTOR_KIND_EXISTS &&
-        scalar_selector_path_matches(doc, selector, path)) {
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
+    if (selector->kind == LQL_SELECTOR_KIND_EXISTS) {
       hit_mark(doc, selector);
     }
   }
@@ -1299,20 +1310,19 @@ static void observe_prefix_stream_end(eval_doc *doc,
   int ignore_case;
 
   (void)selector;
+  (void)path;
   if (doc->hits == NULL) {
     return;
   }
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
     if ((selector->kind != LQL_SELECTOR_KIND_PREFIX &&
          selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
-        !scalar_selector_path_matches(doc, selector, path) ||
         hit_marked(doc, selector)) {
       continue;
     }
     value_len = selector_prefix_value_len(selector);
-    if (doc->scalar_len < value_len ||
-        stream_miss_marked(doc, selector)) {
+    if (doc->scalar_len < value_len || stream_miss_marked(doc, selector)) {
       continue;
     }
     if (value_len <= doc->prefix_len) {
@@ -1344,15 +1354,15 @@ static void observe_exact_stream_end(eval_doc *doc,
   unsigned int *matches;
 
   (void)selector;
+  (void)path;
   if (doc->hits == NULL) {
     return;
   }
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
     if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
          selector->kind != LQL_SELECTOR_KIND_NE &&
          selector->kind != LQL_SELECTOR_KIND_IN) ||
-        !scalar_selector_path_matches(doc, selector, path) ||
         hit_marked(doc, selector)) {
       continue;
     }
@@ -1361,8 +1371,7 @@ static void observe_exact_stream_end(eval_doc *doc,
       value = selector->value == NULL ? "" : selector->value;
       value_len = selector->value_len;
       if (selector->kind == LQL_SELECTOR_KIND_EQ &&
-          doc->scalar_len == value_len &&
-          !stream_miss_marked(doc, selector) &&
+          doc->scalar_len == value_len && !stream_miss_marked(doc, selector) &&
           (value_len > doc->prefix_len ||
            memcmp(doc->prefix_buf, value, value_len) == 0)) {
         hit_mark(doc, selector);
@@ -1375,8 +1384,7 @@ static void observe_exact_stream_end(eval_doc *doc,
       }
       continue;
     }
-    matches =
-        in_match_row(doc, selector);
+    matches = in_match_row(doc, selector);
     for (j = 0u; j < selector->any_count; ++j) {
       value = selector->any[j];
       value_len =
@@ -1401,16 +1409,16 @@ static void observe_temporal_stream_end(eval_doc *doc,
   int parsed;
 
   (void)selector;
+  (void)path;
   if (doc->hits == NULL) {
     return;
   }
   parsed = doc->scalar_len == doc->prefix_len &&
            doc->prefix_len <= LQL_EVAL_TEMPORAL_CAP &&
            lql_parse_temporal_literal(doc->prefix_buf, &temporal);
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
-    if (!scalar_selector_path_matches(doc, selector, path) ||
-        hit_marked(doc, selector)) {
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
+    if (hit_marked(doc, selector)) {
       continue;
     }
     if (selector->kind != LQL_SELECTOR_KIND_EQ &&
@@ -1582,16 +1590,15 @@ static void observe_numeric_range_stream_end(eval_doc *doc,
   double number;
 
   (void)selector;
+  (void)path;
   if (doc->hits == NULL) {
     return;
   }
   number = numeric_stream_value(doc);
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
     if (selector->kind != LQL_SELECTOR_KIND_RANGE ||
-        selector->range_is_temporal ||
-        !scalar_selector_path_matches(doc, selector, path) ||
-        hit_marked(doc, selector)) {
+        selector->range_is_temporal || hit_marked(doc, selector)) {
       continue;
     }
     if ((!selector->has_range_gt || number > selector->range_gt) &&
@@ -1693,14 +1700,14 @@ static void observe_contains_stream_chunk(eval_doc *doc,
   int ignore_case;
 
   (void)selector;
+  (void)path;
   if (doc->hits == NULL) {
     return;
   }
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    selector = doc->predicates[i];
+  for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
+    selector = doc->scalar_path_predicates[i];
     if ((selector->kind != LQL_SELECTOR_KIND_CONTAINS &&
          selector->kind != LQL_SELECTOR_KIND_ICONTAINS) ||
-        !scalar_selector_path_matches(doc, selector, path) ||
         hit_marked(doc, selector)) {
       continue;
     }
@@ -1714,12 +1721,11 @@ static void observe_contains_stream_chunk(eval_doc *doc,
                                value_len, ignore_case)) {
         hit_mark(doc, selector);
       }
-    } else if (contains_any_stream_scan(contains_tail_data(doc),
-                                        doc->contains_tail_len, data, len,
-                                        selector->any, selector->any_lens,
-                                        ignore_case ? selector->any_ifirsts
-                                                    : selector->any_firsts,
-                                        selector->any_count, ignore_case)) {
+    } else if (contains_any_stream_scan(
+                   contains_tail_data(doc), doc->contains_tail_len, data, len,
+                   selector->any, selector->any_lens,
+                   ignore_case ? selector->any_ifirsts : selector->any_firsts,
+                   selector->any_count, ignore_case)) {
       hit_mark(doc, selector);
     }
   }
