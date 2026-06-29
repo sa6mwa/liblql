@@ -72,19 +72,52 @@ typedef struct mutation_item {
 
 struct lql_mutation_plan {
   mutation_item *items;
+  const mutation_item **value_depth_order;
+  size_t *value_depth_offsets;
   size_t count;
+  size_t max_segment_count;
   int literal_only_paths;
+  int variable_depth_paths;
 };
 
-static void mutation_plan_refresh_traits(lql_mutation_plan *plan) {
+static int mutation_path_has_ellipsis(const mutation_path *path) {
+  size_t i;
+  if (path == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < path->segment_count; ++i) {
+    if (path->segment_kinds[i] == MUTATION_PATH_ELLIPSIS) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int mutation_plan_refresh_traits(lql_allocator *allocator,
+                                        lql_mutation_plan *plan) {
   size_t i;
   size_t j;
+  size_t depth;
+  size_t offset;
+  size_t *cursor;
   int literal_only;
-  if (plan == NULL) {
-    return;
+  if (plan == NULL || allocator == NULL) {
+    return 0;
   }
+  allocator->destroy(allocator, plan->value_depth_order);
+  allocator->destroy(allocator, plan->value_depth_offsets);
+  plan->value_depth_order = NULL;
+  plan->value_depth_offsets = NULL;
+  plan->max_segment_count = 0u;
+  plan->variable_depth_paths = 0;
   literal_only = plan->count != 0u;
   for (i = 0u; i < plan->count && literal_only; ++i) {
+    if (plan->items[i].path.segment_count > plan->max_segment_count) {
+      plan->max_segment_count = plan->items[i].path.segment_count;
+    }
+    if (mutation_path_has_ellipsis(&plan->items[i].path)) {
+      plan->variable_depth_paths = 1;
+    }
     for (j = 0u; j < plan->items[i].path.segment_count; ++j) {
       if (plan->items[i].path.segment_kinds[j] != MUTATION_PATH_LITERAL) {
         literal_only = 0;
@@ -92,7 +125,47 @@ static void mutation_plan_refresh_traits(lql_mutation_plan *plan) {
       }
     }
   }
+  for (; i < plan->count; ++i) {
+    if (plan->items[i].path.segment_count > plan->max_segment_count) {
+      plan->max_segment_count = plan->items[i].path.segment_count;
+    }
+    if (mutation_path_has_ellipsis(&plan->items[i].path)) {
+      plan->variable_depth_paths = 1;
+    }
+  }
   plan->literal_only_paths = literal_only;
+  if (plan->count == 0u || plan->variable_depth_paths) {
+    return 1;
+  }
+  plan->value_depth_order = (const mutation_item **)allocator->calloc(
+      allocator, plan->count, sizeof(plan->value_depth_order[0]));
+  if (plan->value_depth_order == NULL) {
+    return 0;
+  }
+  plan->value_depth_offsets =
+      (size_t *)allocator->calloc(allocator, plan->max_segment_count + 2u,
+                                  sizeof(plan->value_depth_offsets[0]));
+  if (plan->value_depth_offsets == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < plan->count; ++i) {
+    ++plan->value_depth_offsets[plan->items[i].path.segment_count + 1u];
+  }
+  for (depth = 1u; depth <= plan->max_segment_count + 1u; ++depth) {
+    plan->value_depth_offsets[depth] += plan->value_depth_offsets[depth - 1u];
+  }
+  cursor = (size_t *)allocator->calloc(allocator, plan->max_segment_count + 1u,
+                                       sizeof(cursor[0]));
+  if (cursor == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < plan->count; ++i) {
+    depth = plan->items[i].path.segment_count;
+    offset = plan->value_depth_offsets[depth] + cursor[depth]++;
+    plan->value_depth_order[offset] = &plan->items[i];
+  }
+  allocator->destroy(allocator, cursor);
+  return 1;
 }
 
 typedef struct limited_file_reader {
@@ -139,9 +212,8 @@ static int mutation_frame_array_segment(const mutation_path_frame *frame,
   return (frame->array_segment_bits & (1UL << index)) != 0u;
 }
 
-static int
-mutation_frame_array_segment_known(const mutation_path_frame *frame,
-                                   size_t index) {
+static int mutation_frame_array_segment_known(const mutation_path_frame *frame,
+                                              size_t index) {
   if (frame->array_segments != NULL) {
     return frame->array_segments[index] ? 1 : 0;
   }
@@ -261,10 +333,16 @@ static void mutation_plan_cleanup_items(lql *self, lql_mutation_plan *plan) {
   for (i = 0u; i < plan->count; ++i) {
     mutation_item_cleanup(self, &plan->items[i]);
   }
+  allocator->destroy(allocator, plan->value_depth_order);
+  allocator->destroy(allocator, plan->value_depth_offsets);
   allocator->destroy(allocator, plan->items);
   plan->items = NULL;
+  plan->value_depth_order = NULL;
+  plan->value_depth_offsets = NULL;
   plan->count = 0u;
+  plan->max_segment_count = 0u;
   plan->literal_only_paths = 0;
+  plan->variable_depth_paths = 0;
 }
 
 static void string_list_cleanup(mutation_parse_context *ctx,
@@ -652,9 +730,9 @@ static int mutation_key_append(mutation_stream_state *state, const char *data,
   if (state == NULL) {
     return 0;
   }
-  return mutation_inline_buf_append(
-      state, &state->key_buf, &state->key_len, state->inline_key_buf,
-      MUTATION_KEY_INLINE_CAP, data, n);
+  return mutation_inline_buf_append(state, &state->key_buf, &state->key_len,
+                                    state->inline_key_buf,
+                                    MUTATION_KEY_INLINE_CAP, data, n);
 }
 
 static void mutation_num_reset(mutation_stream_state *state) {
@@ -670,9 +748,9 @@ static int mutation_num_append(mutation_stream_state *state, const char *data,
   if (state == NULL) {
     return 0;
   }
-  return mutation_inline_buf_append(
-      state, &state->num_buf, &state->num_len, state->inline_num_buf,
-      MUTATION_NUM_INLINE_CAP, data, n);
+  return mutation_inline_buf_append(state, &state->num_buf, &state->num_len,
+                                    state->inline_num_buf,
+                                    MUTATION_NUM_INLINE_CAP, data, n);
 }
 
 static int add_string(mutation_parse_context *ctx, string_list *list,
@@ -1460,7 +1538,10 @@ static lql_status mutation_plan_parse_with_options_method(
                   "no valid field mutations parsed");
     return LQL_STATUS_PARSE_ERROR;
   }
-  mutation_plan_refresh_traits(plan);
+  if (!mutation_plan_refresh_traits(allocator, plan)) {
+    self->mutation_plan_destroy(self, plan);
+    return LQL_STATUS_NO_MEMORY;
+  }
   *out = plan;
   return LQL_STATUS_OK;
 }
@@ -1674,9 +1755,10 @@ current_value_path_frame(const mutation_stream_state *state) {
   return &state->path_frames[state->path_frame_count - 1u];
 }
 
-static int value_path_segment_is_array_from_frame(
-    const mutation_path_frame *frame, const lonejson_value_path *path,
-    size_t index) {
+static int
+value_path_segment_is_array_from_frame(const mutation_path_frame *frame,
+                                       const lonejson_value_path *path,
+                                       size_t index) {
   if (frame == NULL || path == NULL || index >= path->segment_count) {
     return 0;
   }
@@ -1702,12 +1784,11 @@ value_path_is_array_element_from_frame(const mutation_path_frame *frame,
                                                 path->segment_count - 1u);
 }
 
-static int
-value_path_item_matches_from_frame(const mutation_path_frame *frame,
-                                   const mutation_path *item_path,
-                                   size_t item_index,
-                                   const lonejson_value_path *path,
-                                   size_t path_index) {
+static int value_path_item_matches_from_frame(const mutation_path_frame *frame,
+                                              const mutation_path *item_path,
+                                              size_t item_index,
+                                              const lonejson_value_path *path,
+                                              size_t path_index) {
   size_t i;
   while (item_index < item_path->segment_count) {
     if (item_path->segment_kinds[item_index] == MUTATION_PATH_ELLIPSIS) {
@@ -1739,9 +1820,38 @@ value_path_item_matches_from_frame(const mutation_path_frame *frame,
 static int mutation_value_index(const mutation_stream_state *state,
                                 const lonejson_value_path *path, size_t *out) {
   size_t i;
+  size_t index;
+  size_t start;
+  size_t end;
   const mutation_path_frame *frame;
+  const mutation_item *item;
   frame = current_value_path_frame(state);
   if (!value_path_is_array_element_from_frame(frame, path)) {
+    return 0;
+  }
+  if (!state->plan->variable_depth_paths &&
+      state->plan->value_depth_order != NULL &&
+      state->plan->value_depth_offsets != NULL) {
+    if (path == NULL || path->segment_count > state->plan->max_segment_count) {
+      return 0;
+    }
+    start = state->plan->value_depth_offsets[path->segment_count];
+    end = state->plan->value_depth_offsets[path->segment_count + 1u];
+    for (i = start; i < end; ++i) {
+      item = state->plan->value_depth_order[i];
+      if (item == NULL) {
+        continue;
+      }
+      index = (size_t)(item - state->plan->items);
+      if (index >= state->plan->count) {
+        continue;
+      }
+      if (value_path_item_matches_from_frame(frame, &item->path, 0u, path,
+                                             0u)) {
+        *out = index;
+        return 1;
+      }
+    }
     return 0;
   }
   for (i = 0u; i < state->plan->count; ++i) {
@@ -2118,10 +2228,11 @@ static int mutation_scan_key(mutation_stream_state *state,
   return found;
 }
 
-static int mutation_scan_key_literal_plan(
-    mutation_stream_state *state, const lonejson_value_path *path,
-    const mutation_path_frame *frame, const char *key, size_t key_len,
-    size_t *out) {
+static int mutation_scan_key_literal_plan(mutation_stream_state *state,
+                                          const lonejson_value_path *path,
+                                          const mutation_path_frame *frame,
+                                          const char *key, size_t key_len,
+                                          size_t *out) {
   const mutation_item *item;
   size_t i;
   size_t depth;
@@ -2363,11 +2474,9 @@ mutation_find_missing_object_key_value(mutation_stream_state *state,
   return 0;
 }
 
-static lonejson_status
-write_missing_object_key_value(mutation_stream_state *state,
-                               const lonejson_value_path *parent,
-                               const mutation_missing_object_match *match,
-                               lonejson_error *error) {
+static lonejson_status write_missing_object_key_value(
+    mutation_stream_state *state, const lonejson_value_path *parent,
+    const mutation_missing_object_match *match, lonejson_error *error) {
   size_t i;
   size_t depth;
   const mutation_item *item;
