@@ -50,8 +50,6 @@ struct lql_impl {
   size_t eval_scalar_path_matches_cap;
   unsigned char *eval_in_matches;
   size_t eval_in_matches_cap;
-  const lql_selector **eval_predicates;
-  size_t eval_predicates_cap;
   char *eval_contains_tail_buf;
   size_t eval_contains_tail_cap;
   int *eval_container_types;
@@ -165,6 +163,8 @@ struct lql_selector {
   int field_path_direct;
   struct lql_selector *children;
   size_t child_count;
+  const struct lql_selector **predicates;
+  size_t predicate_count;
   size_t hit_index;
   size_t hit_count;
 };

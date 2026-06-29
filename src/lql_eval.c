@@ -39,9 +39,8 @@ typedef struct eval_doc {
   unsigned char *in_matches;
   size_t in_matches_cap;
   size_t in_match_stride;
-  const lql_selector **predicates;
+  const lql_selector *const *predicates;
   size_t predicate_count;
-  size_t predicates_cap;
   int scalar_stream_contains;
   int scalar_stream_prefix;
   int scalar_stream_exact;
@@ -148,24 +147,6 @@ static size_t selector_max_in_alternative_count(const lql_selector *selector) {
   return max_count;
 }
 
-static void selector_collect_predicates(const lql_selector *selector,
-                                        const lql_selector **predicates,
-                                        size_t *count) {
-  size_t i;
-
-  if (selector == NULL) {
-    return;
-  }
-  if (selector_is_predicate(selector)) {
-    predicates[*count] = selector;
-    ++*count;
-    return;
-  }
-  for (i = 0u; i < selector->child_count; ++i) {
-    selector_collect_predicates(&selector->children[i], predicates, count);
-  }
-}
-
 static void clear_query_result(lql_query_result *out_result) {
   if (out_result != NULL) {
     memset(out_result, 0, sizeof(*out_result));
@@ -261,8 +242,6 @@ static void destroy_doc(eval_doc *doc) {
     doc->impl->eval_scalar_path_matches_cap = doc->scalar_path_matches_cap;
     doc->impl->eval_in_matches = doc->in_matches;
     doc->impl->eval_in_matches_cap = doc->in_matches_cap;
-    doc->impl->eval_predicates = doc->predicates;
-    doc->impl->eval_predicates_cap = doc->predicates_cap;
     doc->impl->eval_contains_tail_buf = doc->contains_tail_buf;
     doc->impl->eval_contains_tail_cap = doc->contains_tail_cap;
     doc->impl->eval_container_types = doc->container_types;
@@ -274,7 +253,6 @@ static void destroy_doc(eval_doc *doc) {
     doc->allocator->destroy(doc->allocator, doc->stream_misses);
     doc->allocator->destroy(doc->allocator, doc->scalar_path_matches);
     doc->allocator->destroy(doc->allocator, doc->in_matches);
-    doc->allocator->destroy(doc->allocator, (void *)doc->predicates);
     doc->allocator->destroy(doc->allocator, doc->contains_tail_buf);
     doc->allocator->destroy(doc->allocator, doc->container_types);
     doc->allocator->destroy(doc->allocator, doc->container_depths);
@@ -308,8 +286,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     doc->scalar_path_matches_cap = impl->eval_scalar_path_matches_cap;
     doc->in_matches = impl->eval_in_matches;
     doc->in_matches_cap = impl->eval_in_matches_cap;
-    doc->predicates = impl->eval_predicates;
-    doc->predicates_cap = impl->eval_predicates_cap;
     doc->contains_tail_buf = impl->eval_contains_tail_buf;
     doc->contains_tail_cap = impl->eval_contains_tail_cap;
     doc->container_types = impl->eval_container_types;
@@ -323,8 +299,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     impl->eval_scalar_path_matches_cap = 0u;
     impl->eval_in_matches = NULL;
     impl->eval_in_matches_cap = 0u;
-    impl->eval_predicates = NULL;
-    impl->eval_predicates_cap = 0u;
     impl->eval_contains_tail_buf = NULL;
     impl->eval_contains_tail_cap = 0u;
     impl->eval_container_types = NULL;
@@ -380,21 +354,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
       }
       memset(doc->in_matches, 0, in_match_need);
     }
-    if (doc->predicates_cap < selector->hit_count) {
-      const lql_selector **next_predicates;
-      next_predicates = (const lql_selector **)doc->allocator->realloc(
-          doc->allocator, (void *)doc->predicates,
-          selector->hit_count * sizeof(doc->predicates[0]));
-      if (next_predicates == NULL) {
-        destroy_doc(doc);
-        return 0;
-      }
-      doc->predicates = next_predicates;
-      doc->predicates_cap = selector->hit_count;
-    }
-    doc->predicate_count = 0u;
-    selector_collect_predicates(selector, doc->predicates,
-                                &doc->predicate_count);
+    doc->predicates = selector->predicates;
+    doc->predicate_count = selector->predicate_count;
   }
   return 1;
 }
@@ -543,7 +504,6 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
                                  const size_t *needle_lens, size_t count,
                                  int ignore_case) {
   unsigned char firsts[32];
-  unsigned char first_present[256];
   size_t i;
   size_t j;
   size_t n;
@@ -560,7 +520,6 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
     }
     return 0;
   }
-  memset(first_present, 0, sizeof(first_present));
   for (j = 0u; j < count; ++j) {
     if (needle_lens[j] == 0u) {
       return 1;
@@ -568,20 +527,16 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
     firsts[j] = ignore_case
                     ? (unsigned char)tolower((unsigned char)needles[j][0])
                     : (unsigned char)needles[j][0];
-    first_present[firsts[j]] = 1u;
   }
   for (i = 0u; i < h; ++i) {
     hay_ch = ignore_case ? (unsigned char)tolower((unsigned char)haystack[i])
                          : (unsigned char)haystack[i];
-    if (!first_present[hay_ch]) {
-      continue;
-    }
     for (j = 0u; j < count; ++j) {
-      n = needle_lens[j];
-      if (n > h - i) {
+      if (hay_ch != firsts[j]) {
         continue;
       }
-      if (hay_ch != firsts[j]) {
+      n = needle_lens[j];
+      if (n > h - i) {
         continue;
       }
       if (ignore_case) {
@@ -1078,7 +1033,8 @@ static int scalar_path_exact_stream_interested(const eval_doc *doc,
     if ((selector->kind == LQL_SELECTOR_KIND_EQ ||
          selector->kind == LQL_SELECTOR_KIND_NE ||
          selector->kind == LQL_SELECTOR_KIND_IN) &&
-        !selector->value_is_temporal && scalar_selector_path_matches(doc, selector, path)) {
+        !selector->value_is_temporal &&
+        scalar_selector_path_matches(doc, selector, path)) {
       found = 1;
       if (selector->kind == LQL_SELECTOR_KIND_IN) {
         value_len = selector_in_max_value_len(selector);
@@ -1141,7 +1097,8 @@ static int scalar_path_numeric_range_stream_interested(
   for (i = 0u; i < doc->predicate_count; ++i) {
     selector = doc->predicates[i];
     if (selector->kind == LQL_SELECTOR_KIND_RANGE &&
-        !selector->range_is_temporal && scalar_selector_path_matches(doc, selector, path)) {
+        !selector->range_is_temporal &&
+        scalar_selector_path_matches(doc, selector, path)) {
       found = 1;
       if (*prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
         *prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
@@ -1199,8 +1156,8 @@ static void observe_prefix_stream_begin(eval_doc *doc,
     selector = doc->predicates[i];
     if ((selector->kind == LQL_SELECTOR_KIND_PREFIX ||
          selector->kind == LQL_SELECTOR_KIND_IPREFIX) &&
-        scalar_selector_path_matches(doc, selector, path) && !selector->value_set &&
-        selector->value == NULL) {
+        scalar_selector_path_matches(doc, selector, path) &&
+        !selector->value_set && selector->value == NULL) {
       doc->hits[selector->hit_index] = 1u;
     }
   }
@@ -1260,10 +1217,10 @@ static int literal_chunk_matches(const char *literal, size_t literal_len,
 
 static void observe_prefix_stream_chunk(eval_doc *doc,
                                         const lql_selector *selector,
-	                                        const lonejson_value_path *path,
-	                                        const char *data, size_t len) {
-	  size_t i;
-	  size_t offset;
+                                        const lonejson_value_path *path,
+                                        const char *data, size_t len) {
+  size_t i;
+  size_t offset;
   size_t value_len;
   int ignore_case;
 
@@ -1298,11 +1255,11 @@ static void observe_prefix_stream_chunk(eval_doc *doc,
 
 static void observe_exact_stream_chunk(eval_doc *doc,
                                        const lql_selector *selector,
-	                                       const lonejson_value_path *path,
-	                                       const char *data, size_t len) {
-	  size_t i;
-	  size_t j;
-	  size_t offset;
+                                       const lonejson_value_path *path,
+                                       const char *data, size_t len) {
+  size_t i;
+  size_t j;
+  size_t offset;
   size_t value_len;
   const char *value;
   unsigned char *matches;
@@ -1318,7 +1275,8 @@ static void observe_exact_stream_chunk(eval_doc *doc,
     if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
          selector->kind != LQL_SELECTOR_KIND_NE &&
          selector->kind != LQL_SELECTOR_KIND_IN) ||
-        selector->value_is_temporal || !scalar_selector_path_matches(doc, selector, path) ||
+        selector->value_is_temporal ||
+        !scalar_selector_path_matches(doc, selector, path) ||
         doc->hits[selector->hit_index] != 0u ||
         doc->stream_misses[selector->hit_index] != 0u) {
       continue;
@@ -1404,10 +1362,9 @@ static void observe_prefix_stream_end(eval_doc *doc,
               value_len)) {
         continue;
       }
-      if (!ignore_case &&
-          memcmp(doc->prefix_buf,
-                 selector->value == NULL ? "" : selector->value,
-                 value_len) != 0) {
+      if (!ignore_case && memcmp(doc->prefix_buf,
+                                 selector->value == NULL ? "" : selector->value,
+                                 value_len) != 0) {
         continue;
       }
     }
@@ -1456,10 +1413,10 @@ static void observe_exact_stream_end(eval_doc *doc,
       }
       continue;
     }
-    matches = doc->in_matches == NULL || doc->in_match_stride == 0u
-                  ? NULL
-                  : doc->in_matches +
-                        selector->hit_index * doc->in_match_stride;
+    matches =
+        doc->in_matches == NULL || doc->in_match_stride == 0u
+            ? NULL
+            : doc->in_matches + selector->hit_index * doc->in_match_stride;
     for (j = 0u; j < selector->any_count; ++j) {
       value = selector->any[j];
       value_len =
@@ -1686,10 +1643,10 @@ static void observe_numeric_range_stream_end(eval_doc *doc,
   }
 }
 
-static int contains_stream_scan(const char *tail, size_t tail_len,
-                                const char *data, size_t len,
-                                const char *needle, size_t needle_len,
-                                int ignore_case) {
+static int contains_stream_boundary_scan(const char *tail, size_t tail_len,
+                                         const char *data, size_t len,
+                                         const char *needle, size_t needle_len,
+                                         int ignore_case) {
   size_t start;
   size_t i;
   size_t tail_pos;
@@ -1698,9 +1655,6 @@ static int contains_stream_scan(const char *tail, size_t tail_len,
   unsigned char b;
   int matched;
 
-  if (contains_case_len(data, len, needle, needle_len, ignore_case)) {
-    return 1;
-  }
   if (tail_len == 0u || len == 0u || needle_len <= 1u) {
     return 0;
   }
@@ -1734,6 +1688,17 @@ static int contains_stream_scan(const char *tail, size_t tail_len,
   return 0;
 }
 
+static int contains_stream_scan(const char *tail, size_t tail_len,
+                                const char *data, size_t len,
+                                const char *needle, size_t needle_len,
+                                int ignore_case) {
+  if (contains_case_len(data, len, needle, needle_len, ignore_case)) {
+    return 1;
+  }
+  return contains_stream_boundary_scan(tail, tail_len, data, len, needle,
+                                       needle_len, ignore_case);
+}
+
 static int contains_any_stream_scan(const char *tail, size_t tail_len,
                                     const char *data, size_t len,
                                     char **needles, const size_t *needle_lens,
@@ -1750,8 +1715,8 @@ static int contains_any_stream_scan(const char *tail, size_t tail_len,
   }
   for (i = 0u; i < count; ++i) {
     needle_len = needle_lens == NULL ? strlen(needles[i]) : needle_lens[i];
-    if (contains_stream_scan(tail, tail_len, data, len, needles[i], needle_len,
-                             ignore_case)) {
+    if (contains_stream_boundary_scan(tail, tail_len, data, len, needles[i],
+                                      needle_len, ignore_case)) {
       return 1;
     }
   }

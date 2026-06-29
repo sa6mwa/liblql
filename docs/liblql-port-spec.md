@@ -198,6 +198,9 @@ absolute paths against lonejson decoded path segments without reparsing path
 text for every scalar callback. It must be rebuilt during selector
 finalization, cloned as selector-owned state, and cleaned up with the selector;
 wildcard, recursive, or escaped paths must continue to use the general matcher.
+Selectors must also cache the flattened predicate pointer list during
+finalization. Evaluation setup must borrow that selector-owned list and must not
+walk compound selector trees per candidate to rebuild predicate scratch.
 For scalar string and number callbacks, the evaluator may cache predicate
 path-match results once at scalar begin in receiver-owned scratch and reuse that
 hit-index bitmap across chunk and end observers. That scratch is bounded by the

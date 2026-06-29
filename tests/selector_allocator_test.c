@@ -514,6 +514,173 @@ static int expect_source_decisions_steady_state_has_no_receiver_alloc(void) {
 }
 
 static int
+expect_compound_source_decisions_steady_state_has_no_receiver_alloc(void) {
+  counting_allocator counter;
+  lql *ctx;
+  lql_selector *status_selector;
+  lql_selector *service_selector;
+  lql_selector *message_selector;
+  const lql_selector *children[3];
+  lql_selector *selector;
+  lql_selector_string_term term;
+  lql_error error;
+  lql_status st;
+  const char *json;
+  memory_reader reader;
+  lql_query_result result;
+  size_t matched;
+  size_t alloc_count_after_second_warmup;
+
+  counting_allocator_init(&counter);
+  ctx = NULL;
+  lql_error_init(&error);
+  st = lql_new_with_allocator(&ctx, &counter.api, &error);
+  if (st != LQL_STATUS_OK || ctx == NULL) {
+    printf("compound source decision receiver failed: %s\n", error.message);
+    return 1;
+  }
+
+  status_selector = NULL;
+  service_selector = NULL;
+  message_selector = NULL;
+  selector = NULL;
+
+  memset(&term, 0, sizeof(term));
+  term.field.data = "/status";
+  term.field.len = strlen(term.field.data);
+  term.value_present = 1;
+  term.value.data = "open";
+  term.value.len = strlen(term.value.data);
+  lql_error_init(&error);
+  st = ctx->selector_build_string(ctx, LQL_SELECTOR_NODE_EQ, &term, NULL,
+                                  &status_selector, &error);
+  if (st != LQL_STATUS_OK || status_selector == NULL) {
+    printf("compound status selector build failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  memset(&term, 0, sizeof(term));
+  term.field.data = "/service";
+  term.field.len = strlen(term.field.data);
+  term.value_present = 1;
+  term.value.data = "api";
+  term.value.len = strlen(term.value.data);
+  lql_error_init(&error);
+  st = ctx->selector_build_string(ctx, LQL_SELECTOR_NODE_EQ, &term, NULL,
+                                  &service_selector, &error);
+  if (st != LQL_STATUS_OK || service_selector == NULL) {
+    printf("compound service selector build failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, status_selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  memset(&term, 0, sizeof(term));
+  term.field.data = "/message";
+  term.field.len = strlen(term.field.data);
+  term.value_present = 1;
+  term.value.data = "ready";
+  term.value.len = strlen(term.value.data);
+  lql_error_init(&error);
+  st = ctx->selector_build_string(ctx, LQL_SELECTOR_NODE_PREFIX, &term, NULL,
+                                  &message_selector, &error);
+  if (st != LQL_STATUS_OK || message_selector == NULL) {
+    printf("compound message selector build failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, service_selector);
+    ctx->selector_destroy(ctx, status_selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  children[0] = status_selector;
+  children[1] = service_selector;
+  children[2] = message_selector;
+  lql_error_init(&error);
+  st = ctx->selector_build_compound(ctx, LQL_SELECTOR_NODE_AND, children, 3u,
+                                    &selector, &error);
+  ctx->selector_destroy(ctx, message_selector);
+  ctx->selector_destroy(ctx, service_selector);
+  ctx->selector_destroy(ctx, status_selector);
+  if (st != LQL_STATUS_OK || selector == NULL) {
+    printf("compound selector build failed: %s\n", error.message);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  json = "{\"status\":\"open\",\"service\":\"api\",\"message\":\"ready now\"}\n"
+         "{\"status\":\"open\",\"service\":\"worker\",\"message\":\"ready "
+         "later\"}\n";
+
+  reader.data = json;
+  reader.len = strlen(json);
+  reader.chunk_size = 9u;
+  reader.offset = 0u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("compound source decision first warmup failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  reader.offset = 0u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("compound source decision second warmup failed: %s\n",
+           error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  alloc_count_after_second_warmup = counter.alloc_count;
+
+  reader.offset = 0u;
+  matched = 0u;
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = ctx->query_source_decisions(ctx, selector, read_memory_chunk, &reader,
+                                   count_matched_decision, &matched, &result,
+                                   &error);
+  if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
+    printf("compound source decision steady eval failed: %s\n", error.message);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+  if (counter.alloc_count != alloc_count_after_second_warmup) {
+    printf("compound source decision steady eval allocated: before=%lu "
+           "after=%lu\n",
+           (unsigned long)alloc_count_after_second_warmup,
+           (unsigned long)counter.alloc_count);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  ctx->destroy(ctx);
+  if (counter.outstanding != 0u || counter.destroy_count == 0u) {
+    printf("compound source decision allocator cleanup imbalance: "
+           "outstanding=%lu destroys=%lu\n",
+           (unsigned long)counter.outstanding,
+           (unsigned long)counter.destroy_count);
+    return 1;
+  }
+  return 0;
+}
+
+static int
 expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
   counting_allocator counter;
   lql *ctx;
@@ -2000,6 +2167,8 @@ int main(void) {
   failures += expect_selector_success_uses_allocator();
   failures += expect_file_decisions_steady_state_has_no_receiver_alloc();
   failures += expect_source_decisions_steady_state_has_no_receiver_alloc();
+  failures +=
+      expect_compound_source_decisions_steady_state_has_no_receiver_alloc();
   failures +=
       expect_source_array_decisions_steady_state_has_no_receiver_alloc();
   failures += expect_source_spooled_match_peak_is_per_candidate_bounded();

@@ -68,6 +68,8 @@ Selectors also cache direct field-path segment offsets into their normalized
 field strings, so common absolute paths match lonejson decoded path segments
 without reparsing JSON-pointer text in the hot path. Wildcard, recursive, or
 escaped paths still use the general matcher.
+Selectors cache the flattened predicate pointer list during finalization, so
+evaluation setup does not walk compound selector trees for each candidate.
 For string and number values, the evaluator caches each predicate's path-match
 result once at scalar begin and reuses that hit-index bitmap across chunk and
 end observers.
