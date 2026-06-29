@@ -138,8 +138,9 @@ Current implementation status:
   without materializing whole candidates.
 - `make bench-1g-check` is the explicit 1 GiB/128 MiB profile. It uses the
   generated large NDJSON fixture and a focused C/Lua streaming profile covering
-  decision-only file-backed selection and callback-source plus-value selection.
-  The gate validates exact generated candidate/match/payload counts without
+  decision-only file-backed selection, seekable file-backed plus-value
+  selection, and callback-source plus-value selection. The gate validates exact
+  generated candidate/match/payload counts without
   asking Go to rescan the 1 GiB corpus, then applies the common RSS/time
   validator. Go remains the oracle for the broader medium-size parity benchmark
   gates where exhaustive mode coverage is practical. The 1 GiB gate writes
@@ -669,5 +670,6 @@ Add tests or smoke gates proving:
 - `make benchmarks-parity` fails if any required implementation is missing;
 - `make bench-check` runs a small deterministic matrix suitable for local
   confidence.
-- `make bench-1g-check` runs the explicit 1 GiB/128 MiB memory profile, with
-  reduced-size overrides available only for checking target wiring.
+- `make bench-1g-check` runs the explicit 1 GiB/128 MiB memory profile with
+  seekable file-backed and callback-source plus-value coverage; reduced-size
+  overrides are available only for checking target wiring.

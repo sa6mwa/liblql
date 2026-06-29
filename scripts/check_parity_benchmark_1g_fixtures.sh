@@ -40,14 +40,14 @@ function field_string(line, name, pattern) {
     print "1g fixture unexpectedly emitted Go records" > "/dev/stderr"
     exit 1
   }
-  if (mode != "decision_only_selector" && mode != "plus_value_source_selector") {
+  if (mode != "decision_only_selector" && mode != "plus_value_selector" && mode != "plus_value_source_selector") {
     printf "1g fixture emitted unexpected mode: %s\n", mode > "/dev/stderr"
     exit 1
   }
 }
 END {
   split("c lua", impls, " ")
-  split("decision_only_selector plus_value_source_selector", modes, " ")
+  split("decision_only_selector plus_value_selector plus_value_source_selector", modes, " ")
   split("warmup_included steady_state", submodes, " ")
   for (i in impls) {
     for (m in modes) {

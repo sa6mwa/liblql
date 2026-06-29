@@ -44,6 +44,7 @@ function field_number(line, name, pattern, value) {
   selector = field_string($0, "selector")
   mode = field_string($0, "mode")
   submode = field_string($0, "submode")
+  payload_source = field_string($0, "payload_source_type")
   bytes = field_number($0, "bytes_per_iter")
   candidates = field_number($0, "candidates")
   matches = field_number($0, "matches")
@@ -69,8 +70,24 @@ function field_number(line, name, pattern, value) {
     printf "1g benchmark decision-only payload mismatch: impl=%s submode=%s payloads=%d\n", impl, submode, payloads > "/dev/stderr"
     exit 1
   }
-  if (mode == "plus_value_source_selector" && payloads != expected_open) {
+  if ((mode == "plus_value_selector" || mode == "plus_value_source_selector") && payloads != expected_open) {
     printf "1g benchmark plus-value payload mismatch: impl=%s submode=%s got=%d want=%d\n", impl, submode, payloads, expected_open > "/dev/stderr"
+    exit 1
+  }
+  if (mode == "decision_only_selector" && payload_source != "none") {
+    printf "1g benchmark decision-only payload source mismatch: impl=%s submode=%s got=%s\n", impl, submode, payload_source > "/dev/stderr"
+    exit 1
+  }
+  if (mode == "plus_value_source_selector" && payload_source != "spooled") {
+    printf "1g benchmark callback-source payload source mismatch: impl=%s submode=%s got=%s\n", impl, submode, payload_source > "/dev/stderr"
+    exit 1
+  }
+  if (impl == "c" && mode == "plus_value_selector" && payload_source != "seekable_range") {
+    printf "1g benchmark C seekable payload source mismatch: submode=%s got=%s\n", submode, payload_source > "/dev/stderr"
+    exit 1
+  }
+  if (impl == "lua" && mode == "plus_value_selector" && payload_source != "lua_liblql") {
+    printf "1g benchmark Lua payload source mismatch: submode=%s got=%s\n", submode, payload_source > "/dev/stderr"
     exit 1
   }
 }
@@ -84,7 +101,7 @@ END {
     exit 1
   }
   split("c lua", impls, " ")
-  split("decision_only_selector plus_value_source_selector", modes, " ")
+  split("decision_only_selector plus_value_selector plus_value_source_selector", modes, " ")
   split("warmup_included steady_state", submodes, " ")
   for (i in impls) {
     for (m in modes) {

@@ -1079,6 +1079,7 @@ selected_modes() {
     one-gig)
       printf '%s\n' \
         decision_only_selector \
+        plus_value_selector \
         plus_value_source_selector
       ;;
     mutation-memory)
@@ -1111,7 +1112,7 @@ mode_applies_to_case() {
   case "$mode_profile" in
     one-gig)
       case "$selector_name:$mode" in
-        eq_status_open:decision_only_selector|eq_status_open:plus_value_source_selector)
+        eq_status_open:decision_only_selector|eq_status_open:plus_value_selector|eq_status_open:plus_value_source_selector)
           return 0
           ;;
         *)
