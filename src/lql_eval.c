@@ -825,8 +825,9 @@ static int path_matches(const eval_doc *doc, const char *pattern,
   return path_matches_from(doc, seg, path, 0u);
 }
 
-static void stream_miss_clear(eval_doc *doc, const lql_selector *selector);
-static int hit_marked(const eval_doc *doc, const lql_selector *selector);
+static void stream_miss_clear_fast(eval_doc *doc,
+                                   const lql_selector *selector);
+static int hit_marked_fast(const eval_doc *doc, const lql_selector *selector);
 static int eval_selector_tree(const lql_selector *selector,
                               const eval_doc *doc);
 
@@ -972,7 +973,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
     for (i = start; i < end; ++i) {
       predicate_index = root->predicate_depth_indexes[i];
       selector = root->predicates[predicate_index];
-      if (hit_marked(doc, selector)) {
+      if (hit_marked_fast(doc, selector)) {
         continue;
       }
       feature = selector->observer_feature;
@@ -981,7 +982,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
       }
       if (selector_path_matches(doc, selector, path)) {
         if (doc->stream_misses != NULL) {
-          stream_miss_clear(doc, selector);
+          stream_miss_clear_fast(doc, selector);
         }
         doc->scalar_path_features |= feature;
         scalar_family_append(doc, selector);
@@ -997,7 +998,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
   }
   for (i = start; i < end; ++i) {
     selector = predicates[i];
-    if (hit_marked(doc, selector)) {
+    if (hit_marked_fast(doc, selector)) {
       continue;
     }
     feature = selector == NULL ? 0u : selector->observer_feature;
@@ -1006,7 +1007,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
     }
     if (selector_path_matches(doc, selector, path)) {
       if (doc->stream_misses != NULL) {
-        stream_miss_clear(doc, selector);
+        stream_miss_clear_fast(doc, selector);
       }
       doc->scalar_path_features |= feature;
       scalar_family_append(doc, selector);
@@ -1025,56 +1026,36 @@ static void scalar_path_match_prepare(eval_doc *doc,
   path_match_prepare(doc, path, 0u);
 }
 
-static void hit_mark(eval_doc *doc, const lql_selector *selector) {
-  if (doc != NULL && selector != NULL && doc->hits != NULL &&
-      selector->hit_index < doc->hits_cap) {
-    doc->hits[selector->hit_index] = doc->candidate_epoch;
-    if (!doc->candidate_matched && doc->selector != NULL &&
-        doc->selector->match_sticky_once_true &&
-        eval_selector_tree(doc->selector, doc)) {
-      doc->candidate_matched = 1;
-    }
+static void hit_mark_fast(eval_doc *doc, const lql_selector *selector) {
+  doc->hits[selector->hit_index] = doc->candidate_epoch;
+  if (!doc->candidate_matched && doc->selector->match_sticky_once_true &&
+      eval_selector_tree(doc->selector, doc)) {
+    doc->candidate_matched = 1;
   }
 }
 
-static int hit_marked(const eval_doc *doc, const lql_selector *selector) {
-  return doc != NULL && selector != NULL && doc->hits != NULL &&
-         selector->hit_index < doc->hits_cap &&
-         doc->hits[selector->hit_index] == doc->candidate_epoch;
+static int hit_marked_fast(const eval_doc *doc, const lql_selector *selector) {
+  return doc->hits[selector->hit_index] == doc->candidate_epoch;
 }
 
-static void stream_miss_mark(eval_doc *doc, const lql_selector *selector) {
-  if (doc != NULL && selector != NULL && doc->stream_misses != NULL &&
-      selector->hit_index < doc->stream_misses_cap) {
-    doc->stream_misses[selector->hit_index] = doc->candidate_epoch;
-  }
+static void stream_miss_mark_fast(eval_doc *doc,
+                                  const lql_selector *selector) {
+  doc->stream_misses[selector->hit_index] = doc->candidate_epoch;
 }
 
-static void stream_miss_clear(eval_doc *doc, const lql_selector *selector) {
-  if (doc != NULL && selector != NULL && doc->stream_misses != NULL &&
-      selector->hit_index < doc->stream_misses_cap) {
-    doc->stream_misses[selector->hit_index] = 0u;
-  }
+static void stream_miss_clear_fast(eval_doc *doc,
+                                   const lql_selector *selector) {
+  doc->stream_misses[selector->hit_index] = 0u;
 }
 
-static int stream_miss_marked(const eval_doc *doc,
-                              const lql_selector *selector) {
-  return doc != NULL && selector != NULL && doc->stream_misses != NULL &&
-         selector->hit_index < doc->stream_misses_cap &&
-         doc->stream_misses[selector->hit_index] == doc->candidate_epoch;
+static int stream_miss_marked_fast(const eval_doc *doc,
+                                   const lql_selector *selector) {
+  return doc->stream_misses[selector->hit_index] == doc->candidate_epoch;
 }
 
-static unsigned int *in_match_row(eval_doc *doc, const lql_selector *selector) {
-  size_t offset;
-  if (doc == NULL || selector == NULL || doc->in_matches == NULL ||
-      doc->in_match_stride == 0u) {
-    return NULL;
-  }
-  offset = selector->hit_index * doc->in_match_stride;
-  if (offset + doc->in_match_stride > doc->in_matches_cap) {
-    return NULL;
-  }
-  return doc->in_matches + offset;
+static unsigned int *in_match_row_fast(eval_doc *doc,
+                                       const lql_selector *selector) {
+  return doc->in_matches + selector->hit_index * doc->in_match_stride;
 }
 
 static int resolve_since_macro(lql_since_macro macro, lql_temporal *out) {
@@ -1106,7 +1087,7 @@ static void observe_prepared_contains_value(eval_doc *doc, const char *value,
     selector = items[i];
     if (selector->any_count == 0u && !selector->value_set &&
         selector->value == NULL) {
-      hit_mark(doc, selector);
+      hit_mark_fast(doc, selector);
       continue;
     }
     if (is_container || is_null) {
@@ -1118,7 +1099,7 @@ static void observe_prepared_contains_value(eval_doc *doc, const char *value,
       if (contains_case_len(value, value_len,
                             selector->value_data, selector->value_len,
                             ignore_case)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
     } else if (contains_any_case_len(
                    value, value_len, selector->any, selector->any_lens,
@@ -1127,7 +1108,7 @@ static void observe_prepared_contains_value(eval_doc *doc, const char *value,
                    ignore_case ? selector->any_ifirst_bitmap
                                : selector->any_first_bitmap,
                    ignore_case)) {
-      hit_mark(doc, selector);
+      hit_mark_fast(doc, selector);
     }
   }
 }
@@ -1147,7 +1128,7 @@ static void observe_prepared_prefix_value(eval_doc *doc, const char *value,
   for (i = 0u; i < count; ++i) {
     selector = items[i];
     if (!selector->value_set && selector->value == NULL) {
-      hit_mark(doc, selector);
+      hit_mark_fast(doc, selector);
       continue;
     }
     if (is_container || is_null) {
@@ -1158,7 +1139,7 @@ static void observe_prepared_prefix_value(eval_doc *doc, const char *value,
         (selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case
              ? ascii_case_equal_prefix(value, selector->value, n)
              : memcmp(value, selector->value, n) == 0)) {
-      hit_mark(doc, selector);
+      hit_mark_fast(doc, selector);
     }
   }
 }
@@ -1180,7 +1161,7 @@ static void observe_prepared_exact_value(eval_doc *doc, const char *value,
   for (i = 0u; i < count; ++i) {
     selector = items[i];
     if (selector->kind == LQL_SELECTOR_KIND_NE && is_null) {
-      hit_mark(doc, selector);
+      hit_mark_fast(doc, selector);
       continue;
     }
     if (is_container || is_null) {
@@ -1190,7 +1171,7 @@ static void observe_prepared_exact_value(eval_doc *doc, const char *value,
       needle = selector->value_data;
       if (value_len == selector->value_len &&
           (value_len == 0u || memcmp(value, needle, value_len) == 0)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       continue;
     }
@@ -1198,7 +1179,7 @@ static void observe_prepared_exact_value(eval_doc *doc, const char *value,
       needle = selector->value_data;
       if (value_len != selector->value_len ||
           (value_len != 0u && memcmp(value, needle, value_len) != 0)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       continue;
     }
@@ -1207,7 +1188,7 @@ static void observe_prepared_exact_value(eval_doc *doc, const char *value,
       needle_len = selector->any_lens[j];
       if (value_len == needle_len &&
           (value_len == 0u || memcmp(value, needle, value_len) == 0)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
         break;
       }
     }
@@ -1238,12 +1219,12 @@ static void observe_prepared_temporal_value(eval_doc *doc, const char *value,
     switch (selector->kind) {
     case LQL_SELECTOR_KIND_EQ:
       if (parsed && lql_temporal_equal(&temporal, &selector->temporal_eq)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       break;
     case LQL_SELECTOR_KIND_NE:
       if (!parsed || !lql_temporal_equal(&temporal, &selector->temporal_eq)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       break;
     case LQL_SELECTOR_KIND_RANGE:
@@ -1256,7 +1237,7 @@ static void observe_prepared_temporal_value(eval_doc *doc, const char *value,
            lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
           (!selector->has_temporal_lte ||
            lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       break;
     case LQL_SELECTOR_KIND_DATE:
@@ -1275,7 +1256,7 @@ static void observe_prepared_temporal_value(eval_doc *doc, const char *value,
            lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
           (!selector->has_temporal_lte ||
            lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       break;
     default:
@@ -1310,7 +1291,7 @@ static void observe_prepared_numeric_range_value(eval_doc *doc,
         (!selector->has_range_gte || number >= selector->range_gte) &&
         (!selector->has_range_lt || number < selector->range_lt) &&
         (!selector->has_range_lte || number <= selector->range_lte)) {
-      hit_mark(doc, selector);
+      hit_mark_fast(doc, selector);
     }
   }
 }
@@ -1326,7 +1307,7 @@ static void observe_prepared_exists_value(eval_doc *doc, int is_null) {
   items = scalar_family_begin(doc, LQL_EVAL_FAMILY_EXISTS);
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_EXISTS];
   for (i = 0u; i < count; ++i) {
-    hit_mark(doc, items[i]);
+    hit_mark_fast(doc, items[i]);
   }
 }
 
@@ -1349,15 +1330,15 @@ static void observe_contains_stream_begin(eval_doc *doc,
     selector = items[i];
     if (selector->any_count == 0u) {
       if (!selector->value_set && selector->value == NULL) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       } else if (selector->value == NULL || selector->value[0] == '\0') {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       continue;
     }
     for (j = 0u; j < selector->any_count; ++j) {
       if (selector->any_lens[j] == 0u) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
         break;
       }
     }
@@ -1381,7 +1362,7 @@ static void observe_prefix_stream_begin(eval_doc *doc,
   for (i = 0u; i < count; ++i) {
     selector = items[i];
     if (!selector->value_set && selector->value == NULL) {
-      hit_mark(doc, selector);
+      hit_mark_fast(doc, selector);
     }
   }
 }
@@ -1406,10 +1387,7 @@ static void observe_in_stream_begin(eval_doc *doc, const lql_selector *selector,
     if (selector->kind != LQL_SELECTOR_KIND_IN) {
       continue;
     }
-    matches = in_match_row(doc, selector);
-    if (matches == NULL) {
-      continue;
-    }
+    matches = in_match_row_fast(doc, selector);
     for (j = 0u; j < selector->any_count; ++j) {
       matches[j] = doc->candidate_epoch;
     }
@@ -1466,7 +1444,8 @@ static void observe_prefix_stream_chunk(eval_doc *doc,
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_PREFIX];
   for (i = 0u; i < count; ++i) {
     selector = items[i];
-    if (hit_marked(doc, selector) || stream_miss_marked(doc, selector)) {
+    if (hit_marked_fast(doc, selector) ||
+        stream_miss_marked_fast(doc, selector)) {
       continue;
     }
     value_len = selector->value_len;
@@ -1477,7 +1456,7 @@ static void observe_prefix_stream_chunk(eval_doc *doc,
         selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case;
     if (!literal_chunk_matches(selector->value_data, value_len, offset, data,
                                len, ignore_case, value_len)) {
-      stream_miss_mark(doc, selector);
+      stream_miss_mark_fast(doc, selector);
     }
   }
 }
@@ -1506,15 +1485,12 @@ static void observe_exact_stream_chunk(eval_doc *doc,
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_EXACT];
   for (i = 0u; i < count; ++i) {
     selector = items[i];
-    if (hit_marked(doc, selector) ||
-        stream_miss_marked(doc, selector)) {
+    if (hit_marked_fast(doc, selector) ||
+        stream_miss_marked_fast(doc, selector)) {
       continue;
     }
     if (selector->kind == LQL_SELECTOR_KIND_IN) {
-      matches = in_match_row(doc, selector);
-      if (matches == NULL) {
-        continue;
-      }
+      matches = in_match_row_fast(doc, selector);
       for (j = 0u; j < selector->any_count; ++j) {
         if (matches[j] == doc->candidate_epoch) {
           value = selector->any[j];
@@ -1535,15 +1511,15 @@ static void observe_exact_stream_chunk(eval_doc *doc,
     value_len = selector->value_len;
     if (offset >= value_len) {
       if (selector->kind == LQL_SELECTOR_KIND_NE) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       } else {
-        stream_miss_mark(doc, selector);
+        stream_miss_mark_fast(doc, selector);
       }
       continue;
     }
     if (!literal_chunk_matches(value, value_len, offset, data, len, 0,
                                value_len)) {
-      stream_miss_mark(doc, selector);
+      stream_miss_mark_fast(doc, selector);
     }
   }
 }
@@ -1564,7 +1540,7 @@ static void observe_scalar_exists_begin(eval_doc *doc,
   items = scalar_family_begin(doc, LQL_EVAL_FAMILY_EXISTS);
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_EXISTS];
   for (i = 0u; i < count; ++i) {
-    hit_mark(doc, items[i]);
+    hit_mark_fast(doc, items[i]);
   }
 }
 
@@ -1586,11 +1562,12 @@ static void observe_prefix_stream_end(eval_doc *doc,
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_PREFIX];
   for (i = 0u; i < count; ++i) {
     selector = items[i];
-    if (hit_marked(doc, selector)) {
+    if (hit_marked_fast(doc, selector)) {
       continue;
     }
     value_len = selector->value_len;
-    if (doc->scalar_len < value_len || stream_miss_marked(doc, selector)) {
+    if (doc->scalar_len < value_len ||
+        stream_miss_marked_fast(doc, selector)) {
       continue;
     }
     if (value_len <= doc->prefix_len) {
@@ -1606,7 +1583,7 @@ static void observe_prefix_stream_end(eval_doc *doc,
         continue;
       }
     }
-    hit_mark(doc, selector);
+    hit_mark_fast(doc, selector);
   }
 }
 
@@ -1631,36 +1608,36 @@ static void observe_exact_stream_end(eval_doc *doc,
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_EXACT];
   for (i = 0u; i < count; ++i) {
     selector = items[i];
-    if (hit_marked(doc, selector)) {
+    if (hit_marked_fast(doc, selector)) {
       continue;
     }
     if (selector->kind == LQL_SELECTOR_KIND_EQ ||
         selector->kind == LQL_SELECTOR_KIND_NE) {
       value = selector->value_data;
       value_len = selector->value_len;
-      missed = stream_miss_marked(doc, selector);
+      missed = stream_miss_marked_fast(doc, selector);
       if (selector->kind == LQL_SELECTOR_KIND_EQ &&
           doc->scalar_len == value_len && !missed &&
           (value_len > doc->prefix_len ||
            memcmp(doc->prefix_buf, value, value_len) == 0)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       } else if (selector->kind == LQL_SELECTOR_KIND_NE &&
                  (doc->scalar_len != value_len || missed ||
                   (value_len <= doc->prefix_len &&
                    memcmp(doc->prefix_buf, value, value_len) != 0))) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       continue;
     }
-    matches = in_match_row(doc, selector);
+    matches = in_match_row_fast(doc, selector);
     for (j = 0u; j < selector->any_count; ++j) {
       value = selector->any[j];
       value_len = selector->any_lens[j];
       if (doc->scalar_len == value_len &&
-          ((matches != NULL && matches[j] == doc->candidate_epoch) ||
+          (matches[j] == doc->candidate_epoch ||
            (value_len <= doc->prefix_len &&
             memcmp(doc->prefix_buf, value, value_len) == 0))) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
         break;
       }
     }
@@ -1689,18 +1666,18 @@ static void observe_temporal_stream_end(eval_doc *doc,
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_TEMPORAL];
   for (i = 0u; i < count; ++i) {
     selector = items[i];
-    if (hit_marked(doc, selector)) {
+    if (hit_marked_fast(doc, selector)) {
       continue;
     }
     switch (selector->kind) {
     case LQL_SELECTOR_KIND_EQ:
       if (parsed && lql_temporal_equal(&temporal, &selector->temporal_eq)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       break;
     case LQL_SELECTOR_KIND_NE:
       if (!parsed || !lql_temporal_equal(&temporal, &selector->temporal_eq)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       break;
     case LQL_SELECTOR_KIND_RANGE:
@@ -1713,7 +1690,7 @@ static void observe_temporal_stream_end(eval_doc *doc,
            lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
           (!selector->has_temporal_lte ||
            lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       break;
     case LQL_SELECTOR_KIND_DATE:
@@ -1732,7 +1709,7 @@ static void observe_temporal_stream_end(eval_doc *doc,
            lql_temporal_compare(&temporal, &selector->temporal_lt) < 0) &&
           (!selector->has_temporal_lte ||
            lql_temporal_compare(&temporal, &selector->temporal_lte) <= 0)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
       break;
     default:
@@ -1857,14 +1834,14 @@ static void observe_numeric_range_stream_end(eval_doc *doc,
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_NUMERIC_RANGE];
   for (i = 0u; i < count; ++i) {
     selector = items[i];
-    if (hit_marked(doc, selector)) {
+    if (hit_marked_fast(doc, selector)) {
       continue;
     }
     if ((!selector->has_range_gt || number > selector->range_gt) &&
         (!selector->has_range_gte || number >= selector->range_gte) &&
         (!selector->has_range_lt || number < selector->range_lt) &&
         (!selector->has_range_lte || number <= selector->range_lte)) {
-      hit_mark(doc, selector);
+      hit_mark_fast(doc, selector);
     }
   }
 }
@@ -2010,7 +1987,7 @@ static void observe_contains_stream_chunk(eval_doc *doc,
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_CONTAINS];
   for (i = 0u; i < count; ++i) {
     selector = items[i];
-    if (hit_marked(doc, selector)) {
+    if (hit_marked_fast(doc, selector)) {
       continue;
     }
     ignore_case =
@@ -2019,13 +1996,13 @@ static void observe_contains_stream_chunk(eval_doc *doc,
       value_len = selector->value_len;
       if (contains_stream_scan(tail, doc->contains_tail_len, data, len,
                                selector->value_data, value_len, ignore_case)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
     } else if (selector->any_count == 1u) {
       if (contains_stream_scan(tail, doc->contains_tail_len, data, len,
                                selector->any[0], selector->any_lens[0],
                                ignore_case)) {
-        hit_mark(doc, selector);
+        hit_mark_fast(doc, selector);
       }
     } else if (contains_any_stream_scan(
                    tail, doc->contains_tail_len, data, len, selector->any,
@@ -2034,7 +2011,7 @@ static void observe_contains_stream_chunk(eval_doc *doc,
                    ignore_case ? selector->any_ifirst_bitmap
                                : selector->any_first_bitmap,
                    selector->any_count, ignore_case)) {
-      hit_mark(doc, selector);
+      hit_mark_fast(doc, selector);
     }
   }
 }
@@ -2171,7 +2148,7 @@ static int eval_selector_tree(const lql_selector *selector,
                ? 1
                : !eval_selector_tree(&selector->children[0], doc);
   default:
-    return doc->hits != NULL && hit_marked(doc, selector);
+    return doc->hits != NULL && hit_marked_fast(doc, selector);
   }
 }
 
