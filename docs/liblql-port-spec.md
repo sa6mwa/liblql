@@ -199,10 +199,14 @@ for performance, such as a flat borrowed predicate view used by scalar
 callbacks. That scratch must remain selector-derived, bounded by selector
 shape, and must not become a parallel selector AST, public representation,
 candidate cache, result cache, or selector-result memoization layer. Performance
-work should first reduce hot-path branching, repeated selector walks, copies,
-and allocator traffic. Runtime caches that trade memory, invalidation, or extra
-branches for hoped-for speed are not part of the design unless a future
-decision explicitly accepts that cost.
+work should first reduce hot-path branching, repeated selector walks, parse
+passes, copies, and allocator traffic. Runtime caches that trade memory,
+invalidation, or extra branches for hoped-for speed are not part of the design
+unless a future decision explicitly accepts that cost. Allowed reuse is limited
+to selector-owned parse-time facts and receiver-owned scratch/runtime state
+whose lifetime is already tied to the public receiver and whose use does not
+introduce cache lookup, eviction, coherence, or result-validity branches in the
+candidate hot path.
 Selectors may also retain selector-owned path metadata, such as segment offsets
 and simple segment-kind tags into normalized field strings. This metadata exists
 to match common absolute paths and simple wildcard segments against lonejson
@@ -545,7 +549,8 @@ whether every path segment is a literal. Those traits exist to select a simpler
 hot-path scanner for common literal set/remove/increment plans and avoid
 recursive wildcard/virtual-key matching branches when they cannot apply. They
 must remain derived from the canonical mutation plan, must not cache candidate
-results, and must not change wildcard, recursive, or array-wildcard semantics.
+results, must not add runtime invalidation checks, and must not change wildcard,
+recursive, or array-wildcard semantics.
 
 ## Streaming Query Scope
 

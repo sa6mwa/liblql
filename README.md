@@ -164,8 +164,12 @@ design and substantially faster than Go except where measurements are dominated
 by documented external costs such as process startup or disk I/O. Behavioral
 benchmark parity and C performance acceptance are separate gates.
 Performance work favors reducing hot-path branches, repeated selector walks,
-copies, and allocator traffic. liblql does not use selector/result caches or
-hidden full-document materialization to make streaming paths appear faster.
+copies, and allocator traffic. liblql does not use selector/result caches,
+candidate/result memoization, or hidden full-document materialization to make
+streaming paths appear faster. Receiver-owned scratch reuse is allowed only
+when it removes allocation or repeated derivation without changing the
+observable selector result and without adding invalidation logic to the hot
+path.
 Selected-scalar query predicates use bounded streaming state in liblql rather
 than full selected-value buffers, including numeric `range`; the current
 lonejson visitor still imposes a small raw number-token limit documented in

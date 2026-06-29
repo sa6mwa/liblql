@@ -258,7 +258,10 @@ That two-pass shape is semantically correct and bounded, but it is not the
 final C-native performance shape for dense non-seekable source transforms.
 liblql must not "fix" it by retaining whole candidates itself, building a
 parallel JSON parser, materializing projection state as full JSON values, or
-using temporary files as a hidden staging layer. The missing capability is a
+using temporary files as a hidden staging layer. It also must not add a
+selector-result, candidate, or transform-output cache to avoid replay: those
+would add memory growth, invalidation, and branch cost while failing to remove
+the fundamental extra parse/write pass. The missing capability is a
 lonejson-owned way for one parse of a candidate to feed multiple path-aware
 consumers and a writer.
 
@@ -275,6 +278,11 @@ Required semantics:
 - The transform side can suppress, replace, or pass through the current value
   according to callback decisions while preserving normal JSON writer
   validation and escaping rules.
+- The public surface must enable straight-line common-case dispatch for
+  pass-through and selected-value replacement. A design that forces downstream
+  consumers to perform per-token cache lookups, selector-result invalidation
+  checks, or replay bookkeeping in the candidate hot path does not satisfy the
+  performance intent.
 - The API preserves existing candidate metadata: index, stream offset, byte
   size, payload size when applicable, stop/error propagation, and fragmented
   reader behavior.
