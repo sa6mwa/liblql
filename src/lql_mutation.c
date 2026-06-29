@@ -74,6 +74,7 @@ typedef struct mutation_path_frame {
 
 #define MUTATION_FRAME_INLINE_BITS (sizeof(unsigned long) * CHAR_BIT)
 #define MUTATION_FRAME_INLINE_COUNT 32u
+#define MUTATION_PLAN_INLINE_COUNT 16u
 
 static int mutation_frame_array_segment(const mutation_path_frame *frame,
                                         size_t index) {
@@ -128,6 +129,8 @@ typedef struct mutation_stream_state {
   size_t path_frame_count;
   size_t path_frame_cap;
   mutation_path_frame inline_path_frames[MUTATION_FRAME_INLINE_COUNT];
+  int inline_applied[MUTATION_PLAN_INLINE_COUNT];
+  size_t inline_prefix_seen_depth[MUTATION_PLAN_INLINE_COUNT];
 } mutation_stream_state;
 
 typedef struct string_list {
@@ -2697,6 +2700,51 @@ static void init_mutation_visitor(lonejson_path_value_visitor *visitor) {
   visitor->null_value = mutation_null;
 }
 
+static int mutation_state_init_plan_scratch(mutation_stream_state *state,
+                                            const lql_mutation_plan *plan) {
+  if (state == NULL || plan == NULL) {
+    return 0;
+  }
+  if (plan->count <= MUTATION_PLAN_INLINE_COUNT) {
+    state->applied = state->inline_applied;
+    state->prefix_seen_depth = state->inline_prefix_seen_depth;
+    memset(state->applied, 0, sizeof(state->inline_applied));
+    memset(state->prefix_seen_depth, 0,
+           sizeof(state->inline_prefix_seen_depth));
+    return 1;
+  }
+  state->applied = (int *)state->allocator->calloc(
+      state->allocator, plan->count, sizeof(state->applied[0]));
+  state->prefix_seen_depth = (size_t *)state->allocator->calloc(
+      state->allocator, plan->count, sizeof(state->prefix_seen_depth[0]));
+  if (state->applied == NULL || state->prefix_seen_depth == NULL) {
+    if (state->applied != state->inline_applied) {
+      state->allocator->destroy(state->allocator, state->applied);
+    }
+    if (state->prefix_seen_depth != state->inline_prefix_seen_depth) {
+      state->allocator->destroy(state->allocator, state->prefix_seen_depth);
+    }
+    state->applied = NULL;
+    state->prefix_seen_depth = NULL;
+    return 0;
+  }
+  return 1;
+}
+
+static void mutation_state_cleanup_plan_scratch(mutation_stream_state *state) {
+  if (state == NULL) {
+    return;
+  }
+  if (state->applied != state->inline_applied) {
+    state->allocator->destroy(state->allocator, state->applied);
+  }
+  if (state->prefix_seen_depth != state->inline_prefix_seen_depth) {
+    state->allocator->destroy(state->allocator, state->prefix_seen_depth);
+  }
+  state->applied = NULL;
+  state->prefix_seen_depth = NULL;
+}
+
 static lql_status mutate_reader_with_supported_plan(
     lql *self, const lql_mutation_plan *plan, lonejson_reader_fn reader_fn,
     void *reader_user, FILE *out, lql_error *error) {
@@ -2727,20 +2775,13 @@ static lql_status mutate_reader_with_supported_plan(
   }
   state.plan = plan;
   state.error = &lj_error;
-  state.applied = (int *)state.allocator->calloc(state.allocator, plan->count,
-                                                 sizeof(state.applied[0]));
-  state.prefix_seen_depth = (size_t *)state.allocator->calloc(
-      state.allocator, plan->count, sizeof(state.prefix_seen_depth[0]));
-  if (state.applied == NULL || state.prefix_seen_depth == NULL) {
-    state.allocator->destroy(state.allocator, state.applied);
-    state.allocator->destroy(state.allocator, state.prefix_seen_depth);
+  if (!mutation_state_init_plan_scratch(&state, plan)) {
     lonejson_free(runtime);
     return LQL_STATUS_NO_MEMORY;
   }
   if (lonejson_writer_init_sink(runtime, &state.writer, file_sink, out,
                                 &lj_error) != LONEJSON_STATUS_OK) {
-    state.allocator->destroy(state.allocator, state.applied);
-    state.allocator->destroy(state.allocator, state.prefix_seen_depth);
+    mutation_state_cleanup_plan_scratch(&state);
     lonejson_free(runtime);
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
@@ -2770,8 +2811,7 @@ static lql_status mutate_reader_with_supported_plan(
   mutation_cleanup_path_frames(&state);
   state.allocator->destroy(state.allocator, state.key_buf);
   state.allocator->destroy(state.allocator, state.num_buf);
-  state.allocator->destroy(state.allocator, state.applied);
-  state.allocator->destroy(state.allocator, state.prefix_seen_depth);
+  mutation_state_cleanup_plan_scratch(&state);
   lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
     if (error != NULL && error->code == LQL_STATUS_UNSUPPORTED) {
