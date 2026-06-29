@@ -62,6 +62,8 @@ typedef struct mutation_item {
   size_t value_len;
   mutation_value_kind value_kind;
   double delta;
+  char delta_text[64];
+  size_t delta_text_len;
   int time_value;
   int can_create_missing_object;
   mutation_file_mode file_mode;
@@ -938,6 +940,15 @@ static int append_item(mutation_parse_context *ctx, lql_mutation_plan *plan,
   return 1;
 }
 
+static void mutation_item_set_delta(mutation_item *item, double delta) {
+  if (item == NULL) {
+    return;
+  }
+  item->delta = delta;
+  sprintf(item->delta_text, "%.17g", delta);
+  item->delta_text_len = strlen(item->delta_text);
+}
+
 static int prepend_path(mutation_parse_context *ctx, mutation_item *item,
                         const mutation_path *prefix) {
   char **segments;
@@ -1308,7 +1319,7 @@ static int parse_mutation_expr(mutation_parse_context *ctx, const char *raw,
     delta = expr[len - 2u] == '+' ? 1.0 : -1.0;
     expr[len - 2u] = '\0';
     item.kind = MUTATION_INCREMENT;
-    item.delta = delta;
+    mutation_item_set_delta(&item, delta);
     if (!split_path(ctx, expr, &item.path) || !append_item(ctx, plan, &item)) {
       mutation_item_cleanup(ctx->self, &item);
       ctx->allocator->destroy(ctx->allocator, expr);
@@ -1371,7 +1382,7 @@ static int parse_mutation_expr(mutation_parse_context *ctx, const char *raw,
       return 0;
     }
     item.kind = MUTATION_INCREMENT;
-    item.delta = delta;
+    mutation_item_set_delta(&item, delta);
     ctx->allocator->destroy(ctx->allocator, value);
   } else if (!parse_set_value(ctx, value, time_mode, &item)) {
     ctx->allocator->destroy(ctx->allocator, value);
@@ -1943,7 +1954,6 @@ static lonejson_status write_mutation_set_value(mutation_stream_state *state,
   const char *value;
   const char *text;
   size_t len;
-  char number_buf[64];
   lonejson_source source;
   lonejson_status st;
   mutation_file_mode file_mode;
@@ -1993,9 +2003,8 @@ static lonejson_status write_mutation_set_value(mutation_stream_state *state,
     break;
   }
   if (item->kind == MUTATION_INCREMENT) {
-    sprintf(number_buf, "%.17g", item->delta);
-    return lonejson_writer_number_text(&state->writer, number_buf,
-                                       strlen(number_buf), error);
+    return lonejson_writer_number_text(&state->writer, item->delta_text,
+                                       item->delta_text_len, error);
   }
   return lonejson_writer_string(&state->writer, text, len, error);
 }
@@ -2470,11 +2479,9 @@ static lonejson_status write_synthetic_leaf_value(mutation_stream_state *state,
                                                   const mutation_item *item,
                                                   size_t index,
                                                   lonejson_error *error) {
-  char number_buf[64];
   if (item->kind == MUTATION_INCREMENT) {
-    sprintf(number_buf, "%.17g", item->delta);
-    if (lonejson_writer_number_text(&state->writer, number_buf,
-                                    strlen(number_buf),
+    if (lonejson_writer_number_text(&state->writer, item->delta_text,
+                                    item->delta_text_len,
                                     error) != LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
