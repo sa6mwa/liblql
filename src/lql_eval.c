@@ -1376,13 +1376,12 @@ static int literal_chunk_matches(const char *literal, size_t literal_len,
   if (offset + compare_len > literal_len) {
     return 0;
   }
+  if (!ignore_case) {
+    return memcmp(data, literal + offset, compare_len) == 0;
+  }
   for (i = 0u; i < compare_len; ++i) {
-    if (ignore_case) {
-      if (ascii_lower_byte((unsigned char)data[i]) !=
-          ascii_lower_byte((unsigned char)literal[offset + i])) {
-        return 0;
-      }
-    } else if (data[i] != literal[offset + i]) {
+    if (ascii_lower_byte((unsigned char)data[i]) !=
+        ascii_lower_byte((unsigned char)literal[offset + i])) {
       return 0;
     }
   }
