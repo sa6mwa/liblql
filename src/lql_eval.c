@@ -1746,6 +1746,7 @@ static int contains_any_stream_scan(const char *tail, size_t tail_len,
                                     size_t count, int ignore_case) {
   size_t i;
   size_t needle_len;
+  unsigned char ch;
 
   if (count == 1u) {
     needle_len = needle_lens == NULL ? strlen(needles[0]) : needle_lens[0];
@@ -1758,6 +1759,17 @@ static int contains_any_stream_scan(const char *tail, size_t tail_len,
   }
   if (tail_len == 0u || len == 0u) {
     return 0;
+  }
+  if (first_bitmap != NULL) {
+    for (i = 0u; i < tail_len; ++i) {
+      ch = (unsigned char)tail[i];
+      if ((first_bitmap[ch >> 3] & (unsigned char)(1u << (ch & 7u))) != 0u) {
+        break;
+      }
+    }
+    if (i == tail_len) {
+      return 0;
+    }
   }
   for (i = 0u; i < count; ++i) {
     needle_len = needle_lens == NULL ? strlen(needles[i]) : needle_lens[i];
@@ -2323,9 +2335,33 @@ static int eval_copy_range(FILE *in, FILE *out, lql_uint64 size) {
 }
 
 static lonejson_read_result
-source_reader_read(void *user, unsigned char *buffer, size_t capacity) {
+source_reader_read_plain(void *user, unsigned char *buffer, size_t capacity) {
   source_reader_adapter *adapter;
   lql_read_result lql_result;
+  lonejson_read_result result;
+
+  result = lonejson_default_read_result();
+  adapter = (source_reader_adapter *)user;
+  lql_result = adapter->read(adapter->user, buffer, capacity);
+  if (lql_result.bytes_read > capacity) {
+    adapter->error_code = 1;
+    result.error_code = 1;
+    return result;
+  }
+  if (lql_result.error_code != 0) {
+    adapter->error_code = lql_result.error_code;
+    result.error_code = lql_result.error_code;
+    return result;
+  }
+  result.bytes_read = lql_result.bytes_read;
+  adapter->total_read += (lql_uint64)lql_result.bytes_read;
+  result.eof = lql_result.eof;
+  return result;
+}
+
+static lonejson_read_result
+source_reader_read(void *user, unsigned char *buffer, size_t capacity) {
+  source_reader_adapter *adapter;
   lonejson_read_result result;
   size_t prefix_available;
   size_t copy_len;
@@ -2342,21 +2378,7 @@ source_reader_read(void *user, unsigned char *buffer, size_t capacity) {
       return result;
     }
   }
-  lql_result = adapter->read(adapter->user, buffer, capacity);
-  if (lql_result.bytes_read > capacity) {
-    adapter->error_code = 1;
-    result.error_code = 1;
-    return result;
-  }
-  if (lql_result.error_code != 0) {
-    adapter->error_code = lql_result.error_code;
-    result.error_code = lql_result.error_code;
-    return result;
-  }
-  result.bytes_read = lql_result.bytes_read;
-  adapter->total_read += (lql_uint64)lql_result.bytes_read;
-  result.eof = lql_result.eof;
-  return result;
+  return source_reader_read_plain(user, buffer, capacity);
 }
 
 static int source_reader_prefix_capture(source_reader_adapter *adapter,
@@ -3868,8 +3890,8 @@ static lql_status execute_query_source_spooled_matches(
   options.candidate_begin = on_source_spooled_candidate_begin;
   options.candidate_end = on_source_spooled_candidate_end;
   options.candidate_user = &state;
-  st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
-                                        &options, &lj_error);
+  st = lonejson_visit_candidates_reader(runtime, source_reader_read_plain,
+                                        &adapter, &options, &lj_error);
   if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||
       state.callback_status != LQL_STATUS_OK) {
     query_finish_source_bytes(&state.result, &adapter);
@@ -4057,8 +4079,8 @@ static lql_status execute_query_source_spooled_rewrite(
   options.candidate_begin = on_spooled_candidate_begin;
   options.candidate_end = on_spooled_candidate_end;
   options.candidate_user = &state;
-  st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
-                                        &options, &lj_error);
+  st = lonejson_visit_candidates_reader(runtime, source_reader_read_plain,
+                                        &adapter, &options, &lj_error);
   if (state.compact_runtime != NULL) {
     lonejson_free(state.compact_runtime);
   }
