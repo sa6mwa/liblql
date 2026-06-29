@@ -371,8 +371,8 @@ static int expect_file_decisions_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  json = "{\"status\":\"open\",\"message\":\"hello\"}\n"
-         "{\"status\":\"closed\",\"message\":\"bye\"}\n";
+  json = "[{\"status\":\"open\",\"message\":\"hello\"},"
+         "{\"status\":\"closed\",\"message\":\"bye\"}]";
   if (fwrite(json, 1u, strlen(json), file) != strlen(json)) {
     printf("file decision fixture write failed\n");
     fclose(file);
@@ -495,8 +495,8 @@ static int expect_file_matches_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  json = "{\"status\":\"open\",\"message\":\"hello\"}\n"
-         "{\"status\":\"closed\",\"message\":\"bye\"}\n";
+  json = "[{\"status\":\"open\",\"message\":\"hello\"},"
+         "{\"status\":\"closed\",\"message\":\"bye\"}]";
   if (fwrite(json, 1u, strlen(json), file) != strlen(json)) {
     printf("file match fixture write failed\n");
     fclose(file);

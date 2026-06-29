@@ -3838,6 +3838,7 @@ static lql_status execute_query_file_range_decisions(
   reader.remaining = size;
   init_eval_visitor(&visitor);
   options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   options.path_visitor = &visitor;
   options.visitor_user = &state.doc;
@@ -3982,6 +3983,7 @@ static lql_status execute_query_file_range_matches(
   reader.remaining = size;
   init_eval_visitor(&visitor);
   options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   options.path_visitor = &visitor;
   options.visitor_user = &state.doc;

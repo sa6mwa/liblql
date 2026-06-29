@@ -1708,8 +1708,9 @@ Current implementation status:
   gate because bounded-memory streaming is a product contract rather than an
   optional hardening check; the C allocator contract test also freezes the
   receiver allocator after warmup and rejects liblql-owned allocation attempts
-  in warmed decision-query hot paths, including a mixed selector that exercises
-  exact, contains-any, prefix, numeric range, and temporal observers together;
+  in warmed decision-query and seekable-match hot paths, including root-array
+  file range flattening and a mixed selector that exercises exact,
+  contains-any, prefix, numeric range, and temporal observers together;
 - current local lifecycle confidence has passed `make test-all`,
   `make bench-check`, `make bench-memory-check`, `make bench-1g-check`,
   `make package-verify`, `make release-matrix`, and clean `make release` on
