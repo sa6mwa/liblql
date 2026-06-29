@@ -73,6 +73,7 @@ typedef struct mutation_path_frame {
 } mutation_path_frame;
 
 #define MUTATION_FRAME_INLINE_BITS (sizeof(unsigned long) * CHAR_BIT)
+#define MUTATION_FRAME_INLINE_COUNT 32u
 
 static int mutation_frame_array_segment(const mutation_path_frame *frame,
                                         size_t index) {
@@ -125,6 +126,8 @@ typedef struct mutation_stream_state {
   size_t active_index;
   mutation_path_frame *path_frames;
   size_t path_frame_count;
+  size_t path_frame_cap;
+  mutation_path_frame inline_path_frames[MUTATION_FRAME_INLINE_COUNT];
 } mutation_stream_state;
 
 typedef struct string_list {
@@ -1838,13 +1841,49 @@ mutation_parent_frame(const mutation_stream_state *state) {
   return &state->path_frames[state->path_frame_count - 1u];
 }
 
+static int mutation_ensure_path_frame_capacity(mutation_stream_state *state) {
+  mutation_path_frame *next;
+  size_t next_cap;
+
+  if (state == NULL) {
+    return 0;
+  }
+  if (state->path_frames == NULL) {
+    state->path_frames = state->inline_path_frames;
+    state->path_frame_cap = MUTATION_FRAME_INLINE_COUNT;
+  }
+  if (state->path_frame_count < state->path_frame_cap) {
+    return 1;
+  }
+  next_cap = state->path_frame_cap * 2u;
+  if (next_cap <= state->path_frame_cap) {
+    return 0;
+  }
+  if (state->path_frames == state->inline_path_frames) {
+    next = (mutation_path_frame *)state->allocator->alloc(
+        state->allocator, sizeof(next[0]) * next_cap);
+    if (next == NULL) {
+      return 0;
+    }
+    memcpy(next, state->path_frames, sizeof(next[0]) * state->path_frame_count);
+  } else {
+    next = (mutation_path_frame *)state->allocator->realloc(
+        state->allocator, state->path_frames, sizeof(next[0]) * next_cap);
+    if (next == NULL) {
+      return 0;
+    }
+  }
+  state->path_frames = next;
+  state->path_frame_cap = next_cap;
+  return 1;
+}
+
 static lonejson_status mutation_push_path_frame(mutation_stream_state *state,
                                                 const lonejson_value_path *path,
                                                 char container,
                                                 lonejson_error *error) {
   const mutation_path_frame *parent;
   mutation_path_frame frame;
-  mutation_path_frame *next;
   size_t i;
   (void)error;
   memset(&frame, 0, sizeof(frame));
@@ -1871,14 +1910,10 @@ static lonejson_status mutation_push_path_frame(mutation_stream_state *state,
       }
     }
   }
-  next = (mutation_path_frame *)state->allocator->realloc(
-      state->allocator, state->path_frames,
-      sizeof(state->path_frames[0]) * (state->path_frame_count + 1u));
-  if (next == NULL) {
+  if (!mutation_ensure_path_frame_capacity(state)) {
     state->allocator->destroy(state->allocator, frame.array_segments);
     return LONEJSON_STATUS_ALLOCATION_FAILED;
   }
-  state->path_frames = next;
   state->path_frames[state->path_frame_count++] = frame;
   return LONEJSON_STATUS_OK;
 }
@@ -1892,8 +1927,11 @@ static void mutation_pop_path_frame(mutation_stream_state *state) {
       state->allocator,
       state->path_frames[state->path_frame_count].array_segments);
   if (state->path_frame_count == 0u) {
-    state->allocator->destroy(state->allocator, state->path_frames);
+    if (state->path_frames != state->inline_path_frames) {
+      state->allocator->destroy(state->allocator, state->path_frames);
+    }
     state->path_frames = NULL;
+    state->path_frame_cap = 0u;
   }
 }
 
