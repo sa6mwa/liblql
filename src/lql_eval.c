@@ -133,8 +133,6 @@ static lql_status execute_query_source_spooled_rewrite(
     const lql_query_options *query_options, lql_query_result *out_result,
     lql_error *error);
 
-static int selector_is_predicate(const lql_selector *selector);
-
 static void clear_query_result(lql_query_result *out_result) {
   if (out_result != NULL) {
     memset(out_result, 0, sizeof(*out_result));
@@ -957,24 +955,6 @@ static unsigned int *in_match_row(eval_doc *doc, const lql_selector *selector) {
   return doc->in_matches + offset;
 }
 
-static int selector_is_predicate(const lql_selector *selector) {
-  switch (selector->kind) {
-  case LQL_SELECTOR_KIND_EQ:
-  case LQL_SELECTOR_KIND_NE:
-  case LQL_SELECTOR_KIND_CONTAINS:
-  case LQL_SELECTOR_KIND_ICONTAINS:
-  case LQL_SELECTOR_KIND_PREFIX:
-  case LQL_SELECTOR_KIND_IPREFIX:
-  case LQL_SELECTOR_KIND_RANGE:
-  case LQL_SELECTOR_KIND_DATE:
-  case LQL_SELECTOR_KIND_IN:
-  case LQL_SELECTOR_KIND_EXISTS:
-    return 1;
-  default:
-    return 0;
-  }
-}
-
 static int resolve_since_macro(lql_since_macro macro, lql_temporal *out) {
   switch (macro) {
   case LQL_SINCE_NOW:
@@ -1001,9 +981,6 @@ static void observe_matched_selector(eval_doc *doc,
   const char *needle;
   int ignore_case;
   if (selector == NULL) {
-    return;
-  }
-  if (!selector_is_predicate(selector)) {
     return;
   }
   if (doc->hits == NULL) {
