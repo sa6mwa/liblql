@@ -313,6 +313,7 @@ LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
   allocator->destroy(allocator, selector->date_lte_text);
   allocator->destroy(allocator, selector->field_segment_offsets);
   allocator->destroy(allocator, selector->field_segment_lens);
+  allocator->destroy(allocator, selector->field_segment_kinds);
   allocator->destroy(allocator, (void *)selector->predicates);
   for (i = 0u; i < selector->child_count; ++i) {
     lql_selector_cleanup(self, &selector->children[i]);

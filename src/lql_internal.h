@@ -124,6 +124,11 @@ typedef enum lql_since_macro {
 #define LQL_SELECTOR_FEATURE_NUMERIC_RANGE 0x10u
 #define LQL_SELECTOR_FEATURE_EXISTS 0x20u
 
+#define LQL_FIELD_SEGMENT_LITERAL 0u
+#define LQL_FIELD_SEGMENT_OBJECT_WILDCARD 1u
+#define LQL_FIELD_SEGMENT_ARRAY_WILDCARD 2u
+#define LQL_FIELD_SEGMENT_ANY_WILDCARD 3u
+
 struct lql_selector {
   lql_selector_kind kind;
   char *field;
@@ -174,6 +179,7 @@ struct lql_selector {
   lql_since_macro since_macro;
   size_t *field_segment_offsets;
   size_t *field_segment_lens;
+  unsigned char *field_segment_kinds;
   size_t field_segment_count;
   int field_path_direct;
   struct lql_selector *children;

@@ -1473,8 +1473,10 @@ static void selector_clear_path_metadata(lql_selector_parser *ctx,
                                          lql_selector *selector) {
   ctx->allocator->destroy(ctx->allocator, selector->field_segment_offsets);
   ctx->allocator->destroy(ctx->allocator, selector->field_segment_lens);
+  ctx->allocator->destroy(ctx->allocator, selector->field_segment_kinds);
   selector->field_segment_offsets = NULL;
   selector->field_segment_lens = NULL;
+  selector->field_segment_kinds = NULL;
   selector->field_segment_count = 0u;
   selector->field_path_direct = 0;
 }
@@ -1506,8 +1508,11 @@ static int selector_prepare_one_path(lql_selector_parser *ctx,
       (size_t *)ctx->allocator->calloc(ctx->allocator, count, sizeof(size_t));
   selector->field_segment_lens =
       (size_t *)ctx->allocator->calloc(ctx->allocator, count, sizeof(size_t));
+  selector->field_segment_kinds = (unsigned char *)ctx->allocator->calloc(
+      ctx->allocator, count, sizeof(unsigned char));
   if (selector->field_segment_offsets == NULL ||
-      selector->field_segment_lens == NULL) {
+      selector->field_segment_lens == NULL ||
+      selector->field_segment_kinds == NULL) {
     selector_clear_path_metadata(ctx, selector);
     return 0;
   }
@@ -1516,16 +1521,22 @@ static int selector_prepare_one_path(lql_selector_parser *ctx,
   while (*seg != '\0') {
     slash = strchr(seg, '/');
     len = slash == NULL ? strlen(seg) : (size_t)(slash - seg);
-    if (selector_segment_is(seg, len, "*") ||
-        selector_segment_is(seg, len, "[]") ||
-        selector_segment_is(seg, len, "**") ||
-        selector_segment_is(seg, len, "...") || memchr(seg, '~', len) != NULL) {
+    if (selector_segment_is(seg, len, "...") || memchr(seg, '~', len) != NULL) {
       selector_clear_path_metadata(ctx, selector);
       return 1;
     }
     offset = (size_t)(seg - selector->field);
     selector->field_segment_offsets[count] = offset;
     selector->field_segment_lens[count] = len;
+    if (selector_segment_is(seg, len, "*")) {
+      selector->field_segment_kinds[count] = LQL_FIELD_SEGMENT_OBJECT_WILDCARD;
+    } else if (selector_segment_is(seg, len, "[]")) {
+      selector->field_segment_kinds[count] = LQL_FIELD_SEGMENT_ARRAY_WILDCARD;
+    } else if (selector_segment_is(seg, len, "**")) {
+      selector->field_segment_kinds[count] = LQL_FIELD_SEGMENT_ANY_WILDCARD;
+    } else {
+      selector->field_segment_kinds[count] = LQL_FIELD_SEGMENT_LITERAL;
+    }
     ++count;
     if (slash == NULL) {
       break;
@@ -2545,6 +2556,7 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->date_lte_text = NULL;
   dst->field_segment_offsets = NULL;
   dst->field_segment_lens = NULL;
+  dst->field_segment_kinds = NULL;
   dst->field_segment_count = 0u;
   dst->field_path_direct = 0;
   dst->predicates = NULL;

@@ -708,6 +708,7 @@ static int selector_path_matches(const eval_doc *doc,
   size_t i;
   size_t offset;
   size_t len;
+  int parent_type;
   const lonejson_path_segment *segment;
 
   if (selector == NULL) {
@@ -723,9 +724,31 @@ static int selector_path_matches(const eval_doc *doc,
     offset = selector->field_segment_offsets[i];
     len = selector->field_segment_lens[i];
     segment = &path->segments[i];
-    if (segment->len != len ||
-        memcmp(selector->field + offset, segment->data, len) != 0) {
-      return 0;
+    switch (selector->field_segment_kinds == NULL
+                ? LQL_FIELD_SEGMENT_LITERAL
+                : selector->field_segment_kinds[i]) {
+    case LQL_FIELD_SEGMENT_OBJECT_WILDCARD:
+      if (!parent_container_type(doc, i, &parent_type) || parent_type != '{') {
+        return 0;
+      }
+      break;
+    case LQL_FIELD_SEGMENT_ARRAY_WILDCARD:
+      if (!parent_container_type(doc, i, &parent_type) || parent_type != '[') {
+        return 0;
+      }
+      break;
+    case LQL_FIELD_SEGMENT_ANY_WILDCARD:
+      if (!parent_container_type(doc, i, &parent_type) ||
+          (parent_type != '{' && parent_type != '[')) {
+        return 0;
+      }
+      break;
+    default:
+      if (segment->len != len ||
+          memcmp(selector->field + offset, segment->data, len) != 0) {
+        return 0;
+      }
+      break;
     }
   }
   return 1;

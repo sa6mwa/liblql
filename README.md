@@ -64,10 +64,10 @@ selected scalar. The hot path has no liblql-owned full-scalar buffer fallback.
 During evaluation, liblql derives a borrowed flat predicate view from the
 `lql_selector` AST so scalar callbacks do not repeatedly recurse through the
 selector tree; this is execution scratch, not a second selector model.
-Selectors also cache direct field-path segment offsets into their normalized
-field strings, so common absolute paths match lonejson decoded path segments
-without reparsing JSON-pointer text in the hot path. Wildcard, recursive, or
-escaped paths still use the general matcher.
+Selectors also cache compiled field-path segment offsets and segment kinds into
+their normalized field strings, so common absolute paths and simple wildcard
+segments match lonejson decoded path segments without reparsing JSON-pointer
+text in the hot path. Recursive or escaped paths still use the general matcher.
 Selectors cache the flattened predicate pointer list during finalization, so
 evaluation setup does not walk compound selector trees for each candidate.
 Selector finalization also caches literal lengths, max `any` literal length, and

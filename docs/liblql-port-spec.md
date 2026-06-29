@@ -192,12 +192,13 @@ The evaluator may derive receiver-owned execution scratch from `lql_selector`
 for performance, such as a flat borrowed predicate view used by scalar
 callbacks. That scratch must remain selector-derived, bounded by selector
 shape, and must not become a parallel selector AST or public representation.
-Selectors may also retain selector-owned direct-path metadata, such as segment
-offsets into normalized field strings. This metadata exists to match common
-absolute paths against lonejson decoded path segments without reparsing path
-text for every scalar callback. It must be rebuilt during selector
-finalization, cloned as selector-owned state, and cleaned up with the selector;
-wildcard, recursive, or escaped paths must continue to use the general matcher.
+Selectors may also retain selector-owned path metadata, such as segment offsets
+and simple segment-kind tags into normalized field strings. This metadata exists
+to match common absolute paths and simple wildcard segments against lonejson
+decoded path segments without reparsing path text for every scalar callback. It
+must be rebuilt during selector finalization, cloned as selector-owned state,
+and cleaned up with the selector; recursive or escaped paths must continue to
+use the general matcher.
 Selectors must also cache the flattened predicate pointer list during
 finalization. Evaluation setup must borrow that selector-owned list and must not
 walk compound selector trees per candidate to rebuild predicate scratch.
