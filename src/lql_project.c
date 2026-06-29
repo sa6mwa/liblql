@@ -32,6 +32,9 @@ typedef struct projection_source_reader {
 
 typedef struct projection_path {
   char **segments;
+  size_t *segment_lens;
+  unsigned char *segment_is_array_index;
+  size_t *array_indexes;
   size_t segment_count;
 } projection_path;
 
@@ -190,7 +193,7 @@ static int parse_array_index(const char *field, size_t *out) {
 
 static char path_container_kind(const projection_path *path, size_t index) {
   if (index + 1u < path->segment_count &&
-      segment_is_array_index(path->segments[index + 1u])) {
+      path->segment_is_array_index[index + 1u]) {
     return 'a';
   }
   return 'o';
@@ -198,15 +201,49 @@ static char path_container_kind(const projection_path *path, size_t index) {
 
 static int add_segment(projection_parse_context *ctx, projection_path *path,
                        char *segment) {
-  char **next;
-  next = (char **)ctx->allocator->realloc(
+  char **next_segments;
+  size_t *next_lens;
+  unsigned char *next_is_array_index;
+  size_t *next_array_indexes;
+  size_t index;
+  int is_array_index;
+  size_t array_index;
+
+  index = path->segment_count;
+  is_array_index = parse_array_index(segment, &array_index);
+  next_segments = (char **)ctx->allocator->realloc(
       ctx->allocator, path->segments,
-      sizeof(path->segments[0]) * (path->segment_count + 1u));
-  if (next == NULL) {
+      sizeof(path->segments[0]) * (index + 1u));
+  if (next_segments == NULL) {
     return 0;
   }
-  path->segments = next;
-  path->segments[path->segment_count++] = segment;
+  path->segments = next_segments;
+  next_lens = (size_t *)ctx->allocator->realloc(
+      ctx->allocator, path->segment_lens,
+      sizeof(path->segment_lens[0]) * (index + 1u));
+  if (next_lens == NULL) {
+    return 0;
+  }
+  path->segment_lens = next_lens;
+  next_is_array_index = (unsigned char *)ctx->allocator->realloc(
+      ctx->allocator, path->segment_is_array_index,
+      sizeof(path->segment_is_array_index[0]) * (index + 1u));
+  if (next_is_array_index == NULL) {
+    return 0;
+  }
+  path->segment_is_array_index = next_is_array_index;
+  next_array_indexes = (size_t *)ctx->allocator->realloc(
+      ctx->allocator, path->array_indexes,
+      sizeof(path->array_indexes[0]) * (index + 1u));
+  if (next_array_indexes == NULL) {
+    return 0;
+  }
+  path->array_indexes = next_array_indexes;
+  path->segments[index] = segment;
+  path->segment_lens[index] = strlen(segment);
+  path->segment_is_array_index[index] = is_array_index ? 1u : 0u;
+  path->array_indexes[index] = is_array_index ? array_index : 0u;
+  path->segment_count = index + 1u;
   return 1;
 }
 
@@ -254,7 +291,13 @@ static void projection_path_cleanup(lql *self, projection_path *path) {
     allocator->destroy(allocator, path->segments[i]);
   }
   allocator->destroy(allocator, path->segments);
+  allocator->destroy(allocator, path->segment_lens);
+  allocator->destroy(allocator, path->segment_is_array_index);
+  allocator->destroy(allocator, path->array_indexes);
   path->segments = NULL;
+  path->segment_lens = NULL;
+  path->segment_is_array_index = NULL;
+  path->array_indexes = NULL;
   path->segment_count = 0u;
 }
 
@@ -297,18 +340,16 @@ static int parse_projection_path(projection_parse_context *ctx, const char *raw,
       projection_path_cleanup(ctx->self, out);
       return 0;
     }
-    if (out->segment_count == 0u && segment_is_array_index(decoded)) {
-      ctx->allocator->destroy(ctx->allocator, decoded);
-      projection_path_cleanup(ctx->self, out);
-      return 0;
-    }
-    if (segment_is_array_index(decoded)) {
-      size_t index;
-      if (!parse_array_index(decoded, &index)) {
+    if (parse_array_index(decoded, &len)) {
+      if (out->segment_count == 0u) {
         ctx->allocator->destroy(ctx->allocator, decoded);
         projection_path_cleanup(ctx->self, out);
         return 0;
       }
+    } else if (segment_is_array_index(decoded)) {
+      ctx->allocator->destroy(ctx->allocator, decoded);
+      projection_path_cleanup(ctx->self, out);
+      return 0;
     }
     if (!add_segment(ctx, out, decoded)) {
       ctx->allocator->destroy(ctx->allocator, decoded);
@@ -323,6 +364,15 @@ static int parse_projection_path(projection_parse_context *ctx, const char *raw,
   return out->segment_count != 0u;
 }
 
+static int projection_segments_equal(const projection_path *a,
+                                     size_t a_index,
+                                     const projection_path *b,
+                                     size_t b_index) {
+  return a->segment_lens[a_index] == b->segment_lens[b_index] &&
+         memcmp(a->segments[a_index], b->segments[b_index],
+                a->segment_lens[a_index]) == 0;
+}
+
 static int projection_paths_equal(const projection_path *a,
                                   const projection_path *b) {
   size_t i;
@@ -330,7 +380,7 @@ static int projection_paths_equal(const projection_path *a,
     return 0;
   }
   for (i = 0u; i < a->segment_count; ++i) {
-    if (strcmp(a->segments[i], b->segments[i]) != 0) {
+    if (!projection_segments_equal(a, i, b, i)) {
       return 0;
     }
   }
@@ -344,7 +394,7 @@ static int projection_path_is_prefix(const projection_path *prefix,
     return 0;
   }
   for (i = 0u; i < prefix->segment_count; ++i) {
-    if (strcmp(prefix->segments[i], path->segments[i]) != 0) {
+    if (!projection_segments_equal(prefix, i, path, i)) {
       return 0;
     }
   }
@@ -359,7 +409,7 @@ static int projection_paths_have_container_conflict(const projection_path *a,
   a_parent_count = a->segment_count == 0u ? 0u : a->segment_count - 1u;
   b_parent_count = b->segment_count == 0u ? 0u : b->segment_count - 1u;
   for (i = 0u; i < a_parent_count && i < b_parent_count; ++i) {
-    if (strcmp(a->segments[i], b->segments[i]) != 0) {
+    if (!projection_segments_equal(a, i, b, i)) {
       return 0;
     }
     if (path_container_kind(a, i) != path_container_kind(b, i)) {
@@ -410,7 +460,7 @@ static int value_path_matches(const lonejson_value_path *value_path,
     return 0;
   }
   for (i = 0u; i < projection_path->segment_count; ++i) {
-    if (strlen(projection_path->segments[i]) != value_path->segments[i].len ||
+    if (projection_path->segment_lens[i] != value_path->segments[i].len ||
         memcmp(projection_path->segments[i], value_path->segments[i].data,
                value_path->segments[i].len) != 0) {
       return 0;
@@ -454,8 +504,7 @@ static size_t common_open_prefix(const projection_state *state,
   size_t common;
   common = 0u;
   while (common < state->open_count && common < parent_count &&
-         strcmp(state->open_path->segments[common], path->segments[common]) ==
-             0 &&
+         projection_segments_equal(state->open_path, common, path, common) &&
          state->open_kind[common] == path_container_kind(path, common)) {
     ++common;
   }
@@ -514,12 +563,7 @@ static int ensure_open_capacity(projection_state *state, size_t need) {
 }
 
 static lonejson_status write_array_index_prefix(projection_state *state,
-                                                size_t level,
-                                                const char *segment) {
-  size_t index;
-  if (!parse_array_index(segment, &index)) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
-  }
+                                                size_t level, size_t index) {
   while (state->open_array_next[level] < index) {
     if (lonejson_writer_null(&state->writer, state->error) !=
         LONEJSON_STATUS_OK) {
@@ -539,17 +583,18 @@ static lonejson_status write_member_prefix(projection_state *state,
                                            size_t index) {
   if (index == 0u) {
     if (lonejson_writer_key(&state->writer, path->segments[index],
-                            strlen(path->segments[index]),
+                            path->segment_lens[index],
                             state->error) != LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
     return LONEJSON_STATUS_OK;
   }
   if (state->open_kind[index - 1u] == 'a') {
-    return write_array_index_prefix(state, index - 1u, path->segments[index]);
+    return write_array_index_prefix(state, index - 1u,
+                                    path->array_indexes[index]);
   }
   if (lonejson_writer_key(&state->writer, path->segments[index],
-                          strlen(path->segments[index]),
+                          path->segment_lens[index],
                           state->error) != LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
