@@ -82,6 +82,7 @@ typedef struct eval_doc {
   int *container_types;
   size_t container_cap;
   size_t container_high_water;
+  int track_container_types;
   char root_kind;
   int candidate_matched;
   int borrowed_scratch;
@@ -262,6 +263,7 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   unsigned int *next_in_matches;
   size_t in_match_need;
   size_t family_need;
+  size_t i;
   unsigned int streaming_miss_features;
   int clear_hits;
   int clear_stream_misses;
@@ -382,6 +384,15 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     }
     doc->predicates = selector->predicates;
     doc->predicate_count = selector->predicate_count;
+    doc->track_container_types = selector->predicate_has_variable_path;
+    for (i = 0u; i < selector->predicate_count &&
+                 !doc->track_container_types;
+         ++i) {
+      if (selector->predicates[i] == NULL ||
+          !selector->predicates[i]->field_path_literal) {
+        doc->track_container_types = 1;
+      }
+    }
   }
   doc->candidate_epoch =
       doc->borrowed_scratch && impl != NULL && impl->eval_candidate_epoch != 0u
@@ -455,6 +466,9 @@ push_container(eval_doc *doc, const lonejson_value_path *path, int type) {
   size_t depth;
   size_t old_cap;
   size_t next_cap;
+  if (!doc->track_container_types) {
+    return LONEJSON_STATUS_OK;
+  }
   depth = path->segment_count;
   if (depth >= doc->container_cap) {
     old_cap = doc->container_cap;
@@ -481,6 +495,9 @@ push_container(eval_doc *doc, const lonejson_value_path *path, int type) {
 
 static void pop_container(eval_doc *doc, const lonejson_value_path *path) {
   size_t depth;
+  if (!doc->track_container_types) {
+    return;
+  }
   depth = path->segment_count;
   if (depth >= doc->container_cap) {
     return;
@@ -2504,6 +2521,14 @@ static void init_eval_visitor(lonejson_path_value_visitor *visitor) {
   visitor->null_value = on_null;
 }
 
+static void configure_eval_visitor_for_doc(lonejson_path_value_visitor *visitor,
+                                           const eval_doc *doc) {
+  if (visitor != NULL && doc != NULL && !doc->track_container_types) {
+    visitor->object_end = NULL;
+    visitor->array_end = NULL;
+  }
+}
+
 typedef struct query_stream_state {
   lql *receiver;
   FILE *file;
@@ -3298,6 +3323,7 @@ static lonejson_status write_spooled_array_candidates(
   }
   cursor = *spooled;
   init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
   options.path_visitor = &visitor;
@@ -3765,6 +3791,7 @@ static lql_status execute_mutate_file_range_candidates_fast(
   reader.offset = offset;
   reader.remaining = size;
   init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   options.path_visitor = &visitor;
@@ -3812,6 +3839,7 @@ static lql_status eval_selector_buffer(lql *self, const lql_selector *selector,
     return LQL_STATUS_JSON_ERROR;
   }
   init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &doc);
   st = lonejson_visit_path_value_buffer(runtime, json, json_len, &visitor, &doc,
                                         &lj_error);
   if (st != LONEJSON_STATUS_OK) {
@@ -4259,6 +4287,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
     return LQL_STATUS_JSON_ERROR;
   }
   init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   options.path_visitor = &visitor;
@@ -4338,6 +4367,7 @@ static lql_status execute_query_file_range_decisions(
   reader.offset = offset;
   reader.remaining = size;
   init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
   options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
@@ -4404,6 +4434,7 @@ static lql_status execute_query_file_matches(
     return LQL_STATUS_JSON_ERROR;
   }
   init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   options.path_visitor = &visitor;
@@ -4483,6 +4514,7 @@ static lql_status execute_query_file_range_matches(
   reader.offset = offset;
   reader.remaining = size;
   init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
   options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
@@ -4574,6 +4606,7 @@ static lql_status execute_query_source_decisions_with_base(
     return LQL_STATUS_JSON_ERROR;
   }
   init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
   if (capture_needed) {
     options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SINK;
@@ -4658,6 +4691,7 @@ static lql_status execute_query_source_spooled_matches(
   adapter.read = read;
   adapter.user = read_user;
   init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
   options.path_visitor = &visitor;
@@ -4756,6 +4790,7 @@ static lql_status execute_query_file_range_spooled_matches(
   reader.file = file;
   reader.remaining = size;
   init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
   options.path_visitor = &visitor;
@@ -4849,6 +4884,7 @@ static lql_status execute_query_source_spooled_rewrite(
     }
   }
   init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
   options.path_visitor = &visitor;

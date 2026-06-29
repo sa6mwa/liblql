@@ -68,6 +68,9 @@ Selectors also precompute field-path segment offsets and segment kinds into
 their normalized field strings, so common absolute paths and simple wildcard
 segments match lonejson decoded path segments without reparsing JSON-pointer
 text in the hot path. Recursive or escaped paths still use the general matcher.
+Literal-only selector paths also skip evaluator container-type stack tracking
+and disable object/array end callbacks, because wildcard and recursive path
+matching are the selector forms that need parent container types.
 Selectors finalize the flattened predicate pointer list once, so evaluation
 setup does not walk compound selector trees for each candidate.
 Selector finalization also records literal lengths, max `any` literal length,

@@ -214,6 +214,10 @@ decoded path segments without reparsing path text for every scalar callback. It
 must be rebuilt during selector finalization, cloned as selector-owned state,
 and cleaned up with the selector; recursive or escaped paths must continue to
 use the general matcher.
+When every predicate path is literal, scalar evaluation must skip
+container-type stack tracking and should not register object/array end
+callbacks. Wildcard, recursive, and other general path forms must retain that
+tracking because parent container type is part of their matching semantics.
 Selectors must also retain the flattened predicate pointer list during
 finalization. Evaluation setup must borrow that selector-owned list and must not
 walk compound selector trees per candidate to rebuild predicate scratch.
