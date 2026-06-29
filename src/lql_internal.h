@@ -15,6 +15,14 @@ typedef struct lql_allocator lql_allocator;
 typedef struct lql_impl lql_impl;
 typedef struct lql_pool_block lql_pool_block;
 
+#define LQL_EVAL_CONTAINS_TAIL_CAP 8192u
+#define LQL_EVAL_PREFIX_CAP 8192u
+#define LQL_EVAL_EXACT_CAP 8192u
+#define LQL_EVAL_TEMPORAL_CAP 8192u
+#define LQL_EVAL_NUMERIC_PREFIX_CAP 64u
+#define LQL_EVAL_NUMERIC_SIG_CAP 32u
+#define LQL_EVAL_NUMERIC_EXP_CAP 1000000L
+
 struct lql_pool_block {
   union {
     void *ptr;
@@ -192,6 +200,8 @@ struct lql_selector {
   int predicate_has_variable_path;
   size_t max_in_alternative_count;
   unsigned int observer_feature;
+  size_t observer_contains_tail_need;
+  size_t observer_prefix_need;
   unsigned int predicate_features;
   int match_sticky_once_true;
   size_t hit_index;

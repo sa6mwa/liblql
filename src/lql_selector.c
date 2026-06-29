@@ -1425,6 +1425,7 @@ static size_t selector_refresh_derived_lengths(lql_selector *selector) {
 static unsigned int
 selector_refresh_predicate_features(lql_selector *selector) {
   unsigned int features;
+  size_t need;
   size_t i;
 
   if (selector == NULL) {
@@ -1432,33 +1433,52 @@ selector_refresh_predicate_features(lql_selector *selector) {
   }
   features = 0u;
   selector->observer_feature = 0u;
+  selector->observer_contains_tail_need = 0u;
+  selector->observer_prefix_need = 0u;
   switch (selector->kind) {
   case LQL_SELECTOR_KIND_CONTAINS:
   case LQL_SELECTOR_KIND_ICONTAINS:
     selector->observer_feature = LQL_SELECTOR_FEATURE_CONTAINS;
+    need = selector->any_count == 0u ? selector->value_len
+                                     : selector->any_max_len;
+    selector->observer_contains_tail_need = need > 1u ? need - 1u : 0u;
     break;
   case LQL_SELECTOR_KIND_PREFIX:
   case LQL_SELECTOR_KIND_IPREFIX:
     selector->observer_feature = LQL_SELECTOR_FEATURE_PREFIX;
+    selector->observer_prefix_need =
+        selector->value_len > LQL_EVAL_PREFIX_CAP ? LQL_EVAL_PREFIX_CAP
+                                                  : selector->value_len;
     break;
   case LQL_SELECTOR_KIND_EQ:
   case LQL_SELECTOR_KIND_NE:
     if (selector->value_is_temporal) {
       selector->observer_feature = LQL_SELECTOR_FEATURE_TEMPORAL;
+      selector->observer_prefix_need = LQL_EVAL_TEMPORAL_CAP;
     } else {
       selector->observer_feature = LQL_SELECTOR_FEATURE_EXACT;
+      selector->observer_prefix_need =
+          selector->value_len > LQL_EVAL_EXACT_CAP ? LQL_EVAL_EXACT_CAP
+                                                   : selector->value_len;
     }
     break;
   case LQL_SELECTOR_KIND_IN:
     selector->observer_feature = LQL_SELECTOR_FEATURE_EXACT;
+    selector->observer_prefix_need =
+        selector->any_max_len > LQL_EVAL_EXACT_CAP ? LQL_EVAL_EXACT_CAP
+                                                   : selector->any_max_len;
     break;
   case LQL_SELECTOR_KIND_RANGE:
     selector->observer_feature = selector->range_is_temporal
                                      ? LQL_SELECTOR_FEATURE_TEMPORAL
                                      : LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
+    if (selector->range_is_temporal) {
+      selector->observer_prefix_need = LQL_EVAL_TEMPORAL_CAP;
+    }
     break;
   case LQL_SELECTOR_KIND_DATE:
     selector->observer_feature = LQL_SELECTOR_FEATURE_TEMPORAL;
+    selector->observer_prefix_need = LQL_EVAL_TEMPORAL_CAP;
     break;
   case LQL_SELECTOR_KIND_EXISTS:
     selector->observer_feature = LQL_SELECTOR_FEATURE_EXISTS;
@@ -2650,6 +2670,8 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->any_max_len = 0u;
   dst->max_in_alternative_count = 0u;
   dst->observer_feature = 0u;
+  dst->observer_contains_tail_need = 0u;
+  dst->observer_prefix_need = 0u;
   dst->predicate_features = 0u;
   if (!clone_string(ctx, src->field, &dst->field) ||
       !clone_string(ctx, src->value, &dst->value) ||

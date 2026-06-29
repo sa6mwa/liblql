@@ -21,13 +21,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define LQL_EVAL_CONTAINS_TAIL_CAP 8192u
-#define LQL_EVAL_PREFIX_CAP 8192u
-#define LQL_EVAL_EXACT_CAP 8192u
-#define LQL_EVAL_TEMPORAL_CAP 8192u
-#define LQL_EVAL_NUMERIC_PREFIX_CAP 64u
-#define LQL_EVAL_NUMERIC_SIG_CAP 32u
-#define LQL_EVAL_NUMERIC_EXP_CAP 1000000L
 #define LQL_SOURCE_PREFIX_CAP 4096u
 #define LQL_EVAL_FAMILY_CONTAINS 0u
 #define LQL_EVAL_FAMILY_PREFIX 1u
@@ -878,9 +871,7 @@ static void stream_miss_clear(eval_doc *doc, const lql_selector *selector);
 static int hit_marked(const eval_doc *doc, const lql_selector *selector);
 static int eval_selector_tree(const lql_selector *selector,
                               const eval_doc *doc);
-static size_t selector_contains_max_needle(const lql_selector *selector);
 static size_t selector_prefix_value_len(const lql_selector *selector);
-static size_t selector_in_max_value_len(const lql_selector *selector);
 
 static int selector_path_matches(const eval_doc *doc,
                                  const lql_selector *selector,
@@ -1003,8 +994,6 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
   const lql_selector *selector;
   unsigned int feature;
   size_t i;
-  size_t value_len;
-  size_t max_needle;
 
   if (doc->selector == NULL || doc->selector->hit_count == 0u ||
       doc->scalar_family_predicates == NULL) {
@@ -1033,63 +1022,11 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
       }
       doc->scalar_path_features |= feature;
       scalar_family_append(doc, feature, selector);
-      switch (selector->kind) {
-      case LQL_SELECTOR_KIND_CONTAINS:
-      case LQL_SELECTOR_KIND_ICONTAINS:
-        max_needle = selector_contains_max_needle(selector);
-        if (max_needle > 1u && max_needle - 1u > doc->contains_tail_need) {
-          doc->contains_tail_need = max_needle - 1u;
-        }
-        break;
-      case LQL_SELECTOR_KIND_PREFIX:
-      case LQL_SELECTOR_KIND_IPREFIX:
-        value_len = selector_prefix_value_len(selector);
-        if (value_len > LQL_EVAL_PREFIX_CAP) {
-          value_len = LQL_EVAL_PREFIX_CAP;
-        }
-        if (value_len > doc->prefix_need) {
-          doc->prefix_need = value_len;
-        }
-        break;
-      case LQL_SELECTOR_KIND_EQ:
-      case LQL_SELECTOR_KIND_NE:
-        if (selector->value_is_temporal) {
-          if (LQL_EVAL_TEMPORAL_CAP > doc->prefix_need) {
-            doc->prefix_need = LQL_EVAL_TEMPORAL_CAP;
-          }
-        } else {
-          value_len = selector_prefix_value_len(selector);
-          if (value_len > LQL_EVAL_EXACT_CAP) {
-            value_len = LQL_EVAL_EXACT_CAP;
-          }
-          if (value_len > doc->prefix_need) {
-            doc->prefix_need = value_len;
-          }
-        }
-        break;
-      case LQL_SELECTOR_KIND_IN:
-        value_len = selector_in_max_value_len(selector);
-        if (value_len > LQL_EVAL_EXACT_CAP) {
-          value_len = LQL_EVAL_EXACT_CAP;
-        }
-        if (value_len > doc->prefix_need) {
-          doc->prefix_need = value_len;
-        }
-        break;
-      case LQL_SELECTOR_KIND_RANGE:
-        if (selector->range_is_temporal) {
-          if (LQL_EVAL_TEMPORAL_CAP > doc->prefix_need) {
-            doc->prefix_need = LQL_EVAL_TEMPORAL_CAP;
-          }
-        }
-        break;
-      case LQL_SELECTOR_KIND_DATE:
-        if (LQL_EVAL_TEMPORAL_CAP > doc->prefix_need) {
-          doc->prefix_need = LQL_EVAL_TEMPORAL_CAP;
-        }
-        break;
-      default:
-        break;
+      if (selector->observer_contains_tail_need > doc->contains_tail_need) {
+        doc->contains_tail_need = selector->observer_contains_tail_need;
+      }
+      if (selector->observer_prefix_need > doc->prefix_need) {
+        doc->prefix_need = selector->observer_prefix_need;
       }
     }
   }
@@ -1394,22 +1331,11 @@ static void observe_prepared_exists_value(eval_doc *doc, int is_null) {
   }
 }
 
-static size_t selector_contains_max_needle(const lql_selector *selector) {
-  if (selector->any_count == 0u) {
-    return selector->value_len;
-  }
-  return selector->any_max_len;
-}
-
 static size_t selector_prefix_value_len(const lql_selector *selector) {
   if (selector->value == NULL) {
     return 0u;
   }
   return selector->value_len;
-}
-
-static size_t selector_in_max_value_len(const lql_selector *selector) {
-  return selector->any_max_len;
 }
 
 static void observe_contains_stream_begin(eval_doc *doc,
