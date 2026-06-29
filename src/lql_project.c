@@ -75,6 +75,8 @@ typedef struct projection_state {
 
 struct lql_projection {
   projection_path *paths;
+  const projection_path **path_depth_order;
+  size_t *path_depth_offsets;
   size_t path_count;
   size_t min_segment_count;
   size_t max_segment_count;
@@ -470,6 +472,51 @@ static int add_path(projection_parse_context *ctx, lql_projection *projection,
   return 1;
 }
 
+static int finalize_projection_paths(projection_parse_context *ctx,
+                                     lql_projection *projection) {
+  size_t depth;
+  size_t i;
+  size_t offset;
+  size_t *cursor;
+
+  if (projection == NULL || projection->path_count == 0u) {
+    return 1;
+  }
+  projection->path_depth_order =
+      (const projection_path **)ctx->allocator->calloc(
+          ctx->allocator, projection->path_count,
+          sizeof(projection->path_depth_order[0]));
+  if (projection->path_depth_order == NULL) {
+    return 0;
+  }
+  projection->path_depth_offsets =
+      (size_t *)ctx->allocator->calloc(ctx->allocator,
+                                       projection->max_segment_count + 2u,
+                                       sizeof(projection->path_depth_offsets[0]));
+  if (projection->path_depth_offsets == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < projection->path_count; ++i) {
+    ++projection->path_depth_offsets[projection->paths[i].segment_count + 1u];
+  }
+  for (depth = 1u; depth <= projection->max_segment_count + 1u; ++depth) {
+    projection->path_depth_offsets[depth] +=
+        projection->path_depth_offsets[depth - 1u];
+  }
+  cursor = (size_t *)ctx->allocator->calloc(
+      ctx->allocator, projection->max_segment_count + 1u, sizeof(cursor[0]));
+  if (cursor == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < projection->path_count; ++i) {
+    depth = projection->paths[i].segment_count;
+    offset = projection->path_depth_offsets[depth] + cursor[depth]++;
+    projection->path_depth_order[offset] = &projection->paths[i];
+  }
+  ctx->allocator->destroy(ctx->allocator, cursor);
+  return 1;
+}
+
 static int value_path_matches(const lonejson_value_path *value_path,
                               const projection_path *projection_path) {
   size_t i;
@@ -489,7 +536,10 @@ static int value_path_matches(const lonejson_value_path *value_path,
 
 static const projection_path *selected_path(const lql_projection *projection,
                                             const lonejson_value_path *path) {
+  const projection_path *candidate;
   size_t i;
+  size_t start;
+  size_t end;
   if (projection == NULL || path == NULL ||
       path->segment_count < projection->min_segment_count ||
       path->segment_count > projection->max_segment_count) {
@@ -499,6 +549,18 @@ static const projection_path *selected_path(const lql_projection *projection,
     return value_path_matches(path, &projection->paths[0])
                ? &projection->paths[0]
                : NULL;
+  }
+  if (projection->path_depth_order != NULL &&
+      projection->path_depth_offsets != NULL) {
+    start = projection->path_depth_offsets[path->segment_count];
+    end = projection->path_depth_offsets[path->segment_count + 1u];
+    for (i = start; i < end; ++i) {
+      candidate = projection->path_depth_order[i];
+      if (candidate != NULL && value_path_matches(path, candidate)) {
+        return candidate;
+      }
+    }
+    return NULL;
   }
   for (i = 0u; i < projection->path_count; ++i) {
     if (value_path_matches(path, &projection->paths[i])) {
@@ -1163,6 +1225,10 @@ static lql_status projection_parse_method(
     lql_set_error(error, LQL_STATUS_PARSE_ERROR, "projection fields required");
     return LQL_STATUS_PARSE_ERROR;
   }
+  if (!finalize_projection_paths(&parse_ctx, projection)) {
+    self->projection_destroy(self, projection);
+    return LQL_STATUS_NO_MEMORY;
+  }
   *out = projection;
   return LQL_STATUS_OK;
 }
@@ -1181,6 +1247,8 @@ projection_destroy_method(lql *self, lql_projection *projection) {
   for (i = 0u; i < projection->path_count; ++i) {
     projection_path_cleanup(self, &projection->paths[i]);
   }
+  allocator->destroy(allocator, projection->path_depth_order);
+  allocator->destroy(allocator, projection->path_depth_offsets);
   allocator->destroy(allocator, projection->paths);
   allocator->destroy(allocator, projection);
 }
