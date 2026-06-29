@@ -180,6 +180,7 @@ be made to look supported by materializing selected values.
 `contains` and `icontains` string predicates evaluate from lonejson scalar
 chunks with a reusable suffix window sized by the selector's longest needle, so
 cross-chunk matches do not require a selected-scalar buffer. Boundary checks
+must iterate only suffix offsets that can cross the current chunk boundary, and
 must reject impossible suffix offsets by first byte before entering full literal
 comparison, using the predicate's case-folding mode before probing first-byte
 metadata. `prefix` and `iprefix` predicates compare chunks directly against

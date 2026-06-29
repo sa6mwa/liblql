@@ -1748,9 +1748,11 @@ static int contains_stream_boundary_scan(const char *tail, size_t tail_len,
                                          const char *needle, size_t needle_len,
                                          int ignore_case) {
   size_t start;
+  size_t end;
   size_t i;
   size_t tail_pos;
   size_t data_pos;
+  size_t min_tail_len;
   unsigned char a;
   unsigned char b;
   unsigned char first;
@@ -1759,14 +1761,26 @@ static int contains_stream_boundary_scan(const char *tail, size_t tail_len,
   if (tail_len == 0u || len == 0u || needle_len <= 1u) {
     return 0;
   }
+  if (tail_len + len < needle_len) {
+    return 0;
+  }
+  start = tail_len >= needle_len ? tail_len - needle_len + 1u : 0u;
+  end = tail_len;
+  if (needle_len > len) {
+    min_tail_len = needle_len - len;
+    if (min_tail_len > tail_len) {
+      return 0;
+    }
+    end = tail_len - min_tail_len + 1u;
+  }
+  if (start >= end) {
+    return 0;
+  }
   first = (unsigned char)needle[0];
   if (ignore_case) {
     first = ascii_lower_byte(first);
   }
-  for (start = 0u; start < tail_len; ++start) {
-    if (tail_len - start >= needle_len || tail_len - start + len < needle_len) {
-      continue;
-    }
+  for (; start < end; ++start) {
     a = (unsigned char)tail[start];
     if (ignore_case) {
       a = ascii_lower_byte(a);
