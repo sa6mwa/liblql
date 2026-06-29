@@ -56,7 +56,27 @@ typedef struct mutation_item {
 struct lql_mutation_plan {
   mutation_item *items;
   size_t count;
+  int literal_only_paths;
 };
+
+static void mutation_plan_refresh_traits(lql_mutation_plan *plan) {
+  size_t i;
+  size_t j;
+  int literal_only;
+  if (plan == NULL) {
+    return;
+  }
+  literal_only = plan->count != 0u;
+  for (i = 0u; i < plan->count && literal_only; ++i) {
+    for (j = 0u; j < plan->items[i].path.segment_count; ++j) {
+      if (plan->items[i].path.segment_kinds[j] != MUTATION_PATH_LITERAL) {
+        literal_only = 0;
+        break;
+      }
+    }
+  }
+  plan->literal_only_paths = literal_only;
+}
 
 typedef struct limited_file_reader {
   FILE *file;
@@ -223,6 +243,7 @@ static void mutation_plan_cleanup_items(lql *self, lql_mutation_plan *plan) {
   allocator->destroy(allocator, plan->items);
   plan->items = NULL;
   plan->count = 0u;
+  plan->literal_only_paths = 0;
 }
 
 static void string_list_cleanup(mutation_parse_context *ctx,
@@ -1395,6 +1416,7 @@ static lql_status mutation_plan_parse_with_options_method(
                   "no valid field mutations parsed");
     return LQL_STATUS_PARSE_ERROR;
   }
+  mutation_plan_refresh_traits(plan);
   *out = plan;
   return LQL_STATUS_OK;
 }
@@ -2055,6 +2077,47 @@ static int mutation_scan_key(mutation_stream_state *state,
   return found;
 }
 
+static int mutation_scan_key_literal_plan(
+    mutation_stream_state *state, const lonejson_value_path *path,
+    const mutation_path_frame *frame, const char *key, size_t key_len,
+    size_t *out) {
+  const mutation_item *item;
+  size_t i;
+  size_t depth;
+  size_t next_depth;
+  int found;
+
+  if (path == NULL || frame == NULL ||
+      frame->segment_count != path->segment_count) {
+    return 0;
+  }
+
+  depth = path->segment_count;
+  next_depth = depth + 1u;
+  found = 0;
+  for (i = 0u; i < state->plan->count; ++i) {
+    item = &state->plan->items[i];
+    if (item->path.segment_count <= depth) {
+      continue;
+    }
+    if (item->path.segment_lens[depth] != key_len ||
+        memcmp(item->path.segments[depth], key, key_len) != 0) {
+      continue;
+    }
+    if (!stream_path_prefix_matches_known(&item->path, path, frame, depth)) {
+      continue;
+    }
+    if (state->prefix_seen_depth[i] < next_depth) {
+      state->prefix_seen_depth[i] = next_depth;
+    }
+    if (!found && item->path.segment_count == next_depth) {
+      *out = i;
+      found = 1;
+    }
+  }
+  return found;
+}
+
 static const mutation_path_frame *
 mutation_parent_frame(const mutation_stream_state *state) {
   if (state == NULL || state->path_frame_count == 0u) {
@@ -2640,8 +2703,11 @@ static lonejson_status mutation_key_end(void *user,
     return LONEJSON_STATUS_OK;
   }
   frame = current_path_frame(state, path);
-  if (mutation_scan_key(state, path, frame, state->key_buf, state->key_len,
-                        &index)) {
+  if ((state->plan->literal_only_paths
+           ? mutation_scan_key_literal_plan(state, path, frame, state->key_buf,
+                                            state->key_len, &index)
+           : mutation_scan_key(state, path, frame, state->key_buf,
+                               state->key_len, &index))) {
     item = &state->plan->items[index];
     if (item->kind == MUTATION_REMOVE) {
       state->applied[index] = 1;

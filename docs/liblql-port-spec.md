@@ -540,6 +540,13 @@ they must reject invalid UTF-8 and NUL bytes instead of silently emitting an
 invalid JSON string. `file:` auto mode may classify non-text payloads as
 base64-backed values.
 
+Mutation plans may derive private parse-time traits for execution, such as
+whether every path segment is a literal. Those traits exist to select a simpler
+hot-path scanner for common literal set/remove/increment plans and avoid
+recursive wildcard/virtual-key matching branches when they cannot apply. They
+must remain derived from the canonical mutation plan, must not cache candidate
+results, and must not change wildcard, recursive, or array-wildcard semantics.
+
 ## Streaming Query Scope
 
 Streaming query is a core requirement.
@@ -1737,6 +1744,11 @@ Current implementation status:
   observer branches; the same allocator gate freezes the receiver after
   projection warmup and seekable candidate mutation warmup, proving those
   supported hot paths do not allocate through the receiver in steady state;
+- mutation execution derives a private literal-only path trait at plan parse
+  time and uses it to bypass recursive virtual-key matching for common literal
+  mutation plans such as nested set operations, reducing branches in the
+  mutation visitor without introducing candidate/result caching or hidden
+  materialization;
 - current local lifecycle confidence has passed `make test-all`,
   `make bench-check`, `make bench-memory-check`, `make bench-1g-check`,
   `make package-verify`, `make release-matrix`, and clean `make release` on
