@@ -229,6 +229,10 @@ receiver-owned scratch. Scalar begin, chunk, and end observers, including
 boolean and null scalar observers, should iterate that current-path list instead
 of rescanning the full selector predicate list or rechecking path matches for
 every scalar callback.
+Object and array begin observers should use the same prepared-path machinery
+with a container-capable observer-family mask (`exists`, empty `contains`, and
+empty `prefix`) so container callbacks do not run a separate full predicate
+scan or branch through scalar-only observer families.
 `contains.any` and `icontains.any` selectors should carry selector-owned
 first-byte lookup masks so no-match scalar scans can reject most bytes in O(1)
 without checking every alternative. The masks are parse-time selector metadata,
@@ -1712,7 +1716,10 @@ Current implementation status:
   receiver allocator after warmup and rejects liblql-owned allocation attempts
   in warmed decision-query and seekable-match hot paths, including root-array
   file range flattening and a mixed selector that exercises exact,
-  contains-any, prefix, numeric range, and temporal observers together;
+  contains-any, prefix, numeric range, and temporal observers together, plus a
+  nested container-observer selector that exercises `exists`, container
+  `contains`, and container `prefix` without falling back to scalar-only
+  observer branches;
 - current local lifecycle confidence has passed `make test-all`,
   `make bench-check`, `make bench-memory-check`, `make bench-1g-check`,
   `make package-verify`, `make release-matrix`, and clean `make release` on

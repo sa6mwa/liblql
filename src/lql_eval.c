@@ -830,9 +830,39 @@ static int selector_path_depth_possible(const lql_selector *selector,
          path->segment_count <= selector->predicate_max_segment_count;
 }
 
-static void scalar_path_match_prepare(eval_doc *doc,
-                                      const lonejson_value_path *path) {
+static unsigned int selector_observer_feature(const lql_selector *selector) {
+  if (selector == NULL) {
+    return 0u;
+  }
+  switch (selector->kind) {
+  case LQL_SELECTOR_KIND_CONTAINS:
+  case LQL_SELECTOR_KIND_ICONTAINS:
+    return LQL_SELECTOR_FEATURE_CONTAINS;
+  case LQL_SELECTOR_KIND_PREFIX:
+  case LQL_SELECTOR_KIND_IPREFIX:
+    return LQL_SELECTOR_FEATURE_PREFIX;
+  case LQL_SELECTOR_KIND_EQ:
+  case LQL_SELECTOR_KIND_NE:
+    return selector->value_is_temporal ? LQL_SELECTOR_FEATURE_TEMPORAL
+                                       : LQL_SELECTOR_FEATURE_EXACT;
+  case LQL_SELECTOR_KIND_IN:
+    return LQL_SELECTOR_FEATURE_EXACT;
+  case LQL_SELECTOR_KIND_RANGE:
+    return selector->range_is_temporal ? LQL_SELECTOR_FEATURE_TEMPORAL
+                                       : LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
+  case LQL_SELECTOR_KIND_DATE:
+    return LQL_SELECTOR_FEATURE_TEMPORAL;
+  case LQL_SELECTOR_KIND_EXISTS:
+    return LQL_SELECTOR_FEATURE_EXISTS;
+  default:
+    return 0u;
+  }
+}
+
+static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
+                               unsigned int feature_mask) {
   const lql_selector *selector;
+  unsigned int feature;
   size_t i;
   size_t value_len;
   size_t max_needle;
@@ -851,6 +881,10 @@ static void scalar_path_match_prepare(eval_doc *doc,
     if (hit_marked(doc, selector)) {
       continue;
     }
+    feature = selector_observer_feature(selector);
+    if (feature_mask != 0u && (feature & feature_mask) == 0u) {
+      continue;
+    }
     if (selector_path_matches(doc, selector, path)) {
       if (doc->scalar_path_predicates != NULL &&
           doc->scalar_path_predicate_count < doc->scalar_path_predicates_cap) {
@@ -861,10 +895,10 @@ static void scalar_path_match_prepare(eval_doc *doc,
       if (doc->stream_misses != NULL) {
         stream_miss_clear(doc, selector);
       }
+      doc->scalar_path_features |= feature;
       switch (selector->kind) {
       case LQL_SELECTOR_KIND_CONTAINS:
       case LQL_SELECTOR_KIND_ICONTAINS:
-        doc->scalar_path_features |= LQL_SELECTOR_FEATURE_CONTAINS;
         max_needle = selector_contains_max_needle(selector);
         if (max_needle > 1u && max_needle - 1u > doc->contains_tail_need) {
           doc->contains_tail_need = max_needle - 1u;
@@ -872,7 +906,6 @@ static void scalar_path_match_prepare(eval_doc *doc,
         break;
       case LQL_SELECTOR_KIND_PREFIX:
       case LQL_SELECTOR_KIND_IPREFIX:
-        doc->scalar_path_features |= LQL_SELECTOR_FEATURE_PREFIX;
         value_len = selector_prefix_value_len(selector);
         if (value_len > LQL_EVAL_PREFIX_CAP) {
           value_len = LQL_EVAL_PREFIX_CAP;
@@ -884,12 +917,10 @@ static void scalar_path_match_prepare(eval_doc *doc,
       case LQL_SELECTOR_KIND_EQ:
       case LQL_SELECTOR_KIND_NE:
         if (selector->value_is_temporal) {
-          doc->scalar_path_features |= LQL_SELECTOR_FEATURE_TEMPORAL;
           if (LQL_EVAL_TEMPORAL_CAP > doc->prefix_need) {
             doc->prefix_need = LQL_EVAL_TEMPORAL_CAP;
           }
         } else {
-          doc->scalar_path_features |= LQL_SELECTOR_FEATURE_EXACT;
           value_len = selector_prefix_value_len(selector);
           if (value_len > LQL_EVAL_EXACT_CAP) {
             value_len = LQL_EVAL_EXACT_CAP;
@@ -900,7 +931,6 @@ static void scalar_path_match_prepare(eval_doc *doc,
         }
         break;
       case LQL_SELECTOR_KIND_IN:
-        doc->scalar_path_features |= LQL_SELECTOR_FEATURE_EXACT;
         value_len = selector_in_max_value_len(selector);
         if (value_len > LQL_EVAL_EXACT_CAP) {
           value_len = LQL_EVAL_EXACT_CAP;
@@ -911,28 +941,26 @@ static void scalar_path_match_prepare(eval_doc *doc,
         break;
       case LQL_SELECTOR_KIND_RANGE:
         if (selector->range_is_temporal) {
-          doc->scalar_path_features |= LQL_SELECTOR_FEATURE_TEMPORAL;
           if (LQL_EVAL_TEMPORAL_CAP > doc->prefix_need) {
             doc->prefix_need = LQL_EVAL_TEMPORAL_CAP;
           }
-        } else {
-          doc->scalar_path_features |= LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
         }
         break;
       case LQL_SELECTOR_KIND_DATE:
-        doc->scalar_path_features |= LQL_SELECTOR_FEATURE_TEMPORAL;
         if (LQL_EVAL_TEMPORAL_CAP > doc->prefix_need) {
           doc->prefix_need = LQL_EVAL_TEMPORAL_CAP;
         }
-        break;
-      case LQL_SELECTOR_KIND_EXISTS:
-        doc->scalar_path_features |= LQL_SELECTOR_FEATURE_EXISTS;
         break;
       default:
         break;
       }
     }
   }
+}
+
+static void scalar_path_match_prepare(eval_doc *doc,
+                                      const lonejson_value_path *path) {
+  path_match_prepare(doc, path, 0u);
 }
 
 static void hit_mark(eval_doc *doc, const lql_selector *selector) {
@@ -1959,36 +1987,9 @@ static void prefix_stream_update(eval_doc *doc, const char *data, size_t len) {
   }
 }
 
-static void observe_value(eval_doc *doc, const lonejson_value_path *path,
-                          const char *value, int is_number, int is_container,
-                          int is_null) {
-  size_t i;
-
-  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
-    return;
-  }
-  if (is_container &&
-      (doc->selector->predicate_features &
-       (LQL_SELECTOR_FEATURE_EXISTS | LQL_SELECTOR_FEATURE_CONTAINS |
-        LQL_SELECTOR_FEATURE_PREFIX)) == 0u) {
-    return;
-  }
-  if (!selector_path_depth_possible(doc->selector, path)) {
-    return;
-  }
-  for (i = 0u; i < doc->predicate_count; ++i) {
-    if (hit_marked(doc, doc->predicates[i])) {
-      continue;
-    }
-    if (selector_path_matches(doc, doc->predicates[i], path)) {
-      observe_matched_selector(doc, doc->predicates[i], value, is_number,
-                               is_container, is_null);
-    }
-  }
-}
-
-static void observe_prepared_scalar_value(eval_doc *doc, const char *value,
-                                          int is_number, int is_null) {
+static void observe_prepared_value(eval_doc *doc, const char *value,
+                                   int is_number, int is_container,
+                                   int is_null) {
   const lql_selector *selector;
   size_t i;
 
@@ -1997,8 +1998,27 @@ static void observe_prepared_scalar_value(eval_doc *doc, const char *value,
   }
   for (i = 0u; i < doc->scalar_path_predicate_count; ++i) {
     selector = doc->scalar_path_predicates[i];
-    observe_matched_selector(doc, selector, value, is_number, 0, is_null);
+    observe_matched_selector(doc, selector, value, is_number, is_container,
+                             is_null);
   }
+}
+
+static void observe_container_value(eval_doc *doc,
+                                    const lonejson_value_path *path) {
+  unsigned int container_features;
+
+  if (doc->selector == NULL || doc->selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return;
+  }
+  container_features = doc->selector->predicate_features &
+                       (LQL_SELECTOR_FEATURE_EXISTS |
+                        LQL_SELECTOR_FEATURE_CONTAINS |
+                        LQL_SELECTOR_FEATURE_PREFIX);
+  if (container_features == 0u) {
+    return;
+  }
+  path_match_prepare(doc, path, container_features);
+  observe_prepared_value(doc, "", 0, 1, 0);
 }
 
 static int eval_selector_tree(const lql_selector *selector,
@@ -2038,7 +2058,7 @@ static lonejson_status on_object_begin(void *user,
   if (path->segment_count == 0u) {
     doc->root_kind = '{';
   }
-  observe_value(doc, path, "", 0, 1, 0);
+  observe_container_value(doc, path);
   return push_container(doc, path, '{');
 }
 
@@ -2058,7 +2078,7 @@ static lonejson_status on_array_begin(void *user,
   if (path->segment_count == 0u) {
     doc->root_kind = '[';
   }
-  observe_value(doc, path, "", 0, 1, 0);
+  observe_container_value(doc, path);
   return push_container(doc, path, '[');
 }
 
@@ -2244,7 +2264,7 @@ static lonejson_status on_boolean(void *user, const lonejson_value_path *path,
     doc->root_kind = 'b';
   }
   scalar_path_match_prepare(doc, path);
-  observe_prepared_scalar_value(doc, value ? "true" : "false", 0, 0);
+  observe_prepared_value(doc, value ? "true" : "false", 0, 0, 0);
   return LONEJSON_STATUS_OK;
 }
 
@@ -2256,7 +2276,7 @@ static lonejson_status on_null(void *user, const lonejson_value_path *path,
     doc->root_kind = '0';
   }
   scalar_path_match_prepare(doc, path);
-  observe_prepared_scalar_value(doc, "", 0, 1);
+  observe_prepared_value(doc, "", 0, 0, 1);
   return LONEJSON_STATUS_OK;
 }
 
