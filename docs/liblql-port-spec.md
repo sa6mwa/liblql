@@ -1786,12 +1786,11 @@ Current implementation status:
   `docs/liblql-dependency-gaps.md`;
 - seekable matched-object mutation uses candidate offsets, no-capture parsing,
   and `pread()` range rereads, so liblql does not need candidate capture or
-  runtime caches for that path. Current release profiles instead show
-  dependency-owned writer chunk cost under `lonejson_writer_string_chunk()`,
-  including `lonejson_spooled_append` and allocator growth. The required
-  follow-up is direct sink-mode chunk streaming in lonejson, tracked in
-  `docs/lonejson-cr-direct-writer-chunk-streaming.md`; liblql must not replace
-  this with a hidden output buffer, downstream JSON escaping, or a
+  runtime caches for that path. Current release profiles show that matched
+  seekable mutation stays on direct writer output without candidate spooling;
+  remaining work there is C-owned branch, syscall, and stdio overhead
+  reduction inside the existing streaming architecture. liblql must not
+  replace this with a hidden output buffer, downstream JSON escaping, or a
   selector/result cache;
 - current local lifecycle confidence has passed `make test-all`,
   `make bench-check`, `make bench-memory-check`, `make bench-1g-check`,

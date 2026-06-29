@@ -189,11 +189,13 @@ observable selector result and without adding invalidation logic to the hot
 path.
 The remaining dependency-owned performance work is documented as explicit
 lonejson CRs rather than hidden liblql workarounds. Non-seekable dense
-projection and mutation need single-pass candidate transforms, while seekable
-matched-object mutation needs sink-mode writer string chunks that do not route
-through full-string or full-candidate spooling. In both cases liblql must keep
-streaming behavior real and bounded, not add caches or materialized output
-buffers.
+projection and mutation need single-pass candidate transforms so selector
+observation and output rewriting can share one validated parse. Seekable
+matched-object mutation already uses no-capture candidate offsets and direct
+writer output; remaining work there is C-owned branch, syscall, and stdio
+overhead reduction inside the existing streaming architecture. In all cases
+liblql must keep streaming behavior real and bounded, not add caches or
+materialized output buffers.
 Selected-scalar query predicates use bounded streaming state in liblql rather
 than full selected-value buffers, including numeric `range`; the current
 lonejson visitor still imposes a small raw number-token limit documented in

@@ -326,10 +326,7 @@ callback-source projection and mutation replay paths with true single-pass
 source transforms. That is the remaining dependency-owned performance path for
 dense non-seekable candidate transforms.
 
-## Direct Writer Chunk Streaming
-
-The standalone CR for this dependency feature is
-[`docs/lonejson-cr-direct-writer-chunk-streaming.md`](lonejson-cr-direct-writer-chunk-streaming.md).
+## Seekable Matched Mutation
 
 Seekable file mutation is a separate performance path from non-seekable source
 transforms. liblql already uses lonejson candidate offsets with
@@ -339,21 +336,11 @@ objects are reread by offset and rewritten through the public lonejson writer.
 There is no candidate/result cache, no full-document materialization, and no
 candidate capture in that scanning path.
 
-Local profiles with lonejson `v0.35.2` still show the matched-object rewrite
-cost dominated by `lonejson_spooled_append`, `realloc`, and memory movement
-reached from `lonejson_writer_string_chunk()`. That is a dependency-owned
-writer implementation cost, not a reason for liblql to introduce caching or a
-second serializer.
-
-The required lonejson follow-up is direct sink-mode chunk streaming for
-chunked string writer output. `lonejson_writer_string_begin()`,
-`lonejson_writer_string_chunk()`, and `lonejson_writer_string_end()` should be
-able to validate, escape, and emit accepted string text chunks to the sink
-without building a full string, full candidate, or full output value in a
-`lonejson_spooled` buffer. Memory must remain bounded by writer state,
-parser/escape state, and configured chunk buffers, not by string length,
-candidate size, or output size.
-
-Once lonejson exposes or guarantees that behavior, liblql can keep the current
-seekable architecture and the release profiles should stop showing
-`lonejson_spooled_append` as the dominant matched-object mutation cost.
+Earlier local profiling conflated this path with an unmatched compact fallback
+that could route through writer replay. After the C-side `matches_only`
+miss-skip and output-lock fixes, seekable matched-object mutation profiles no
+longer identify `lonejson_spooled_append()` as the dominant cost. The current
+work is therefore not a lonejson direct-writer CR. It remains C-owned
+performance work: reduce branches, syscalls, stdio lock traffic, and repeated
+state checks while preserving the same no-capture, no-cache, no-materialization
+architecture.
