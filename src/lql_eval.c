@@ -1321,6 +1321,10 @@ static void observe_exact_stream_chunk(eval_doc *doc,
           value = selector->any[j];
           value_len = selector->any_lens == NULL ? strlen(value)
                                                  : selector->any_lens[j];
+          if (offset >= value_len) {
+            matches[j] = 0u;
+            continue;
+          }
           if (!literal_chunk_matches(value, value_len, offset, data, len, 0,
                                      value_len)) {
             matches[j] = 0u;
@@ -1331,6 +1335,14 @@ static void observe_exact_stream_chunk(eval_doc *doc,
     }
     value = selector->value == NULL ? "" : selector->value;
     value_len = selector->value_len;
+    if (offset >= value_len) {
+      if (selector->kind == LQL_SELECTOR_KIND_NE) {
+        hit_mark(doc, selector);
+      } else {
+        stream_miss_mark(doc, selector);
+      }
+      continue;
+    }
     if (!literal_chunk_matches(value, value_len, offset, data, len, 0,
                                value_len)) {
       stream_miss_mark(doc, selector);
