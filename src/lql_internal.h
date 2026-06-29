@@ -121,10 +121,12 @@ struct lql_selector {
   char *value;
   int value_set;
   int value_is_temporal;
+  size_t value_len;
   int ignore_case;
   char **any;
   size_t *any_lens;
   size_t any_count;
+  size_t any_max_len;
   char *range_gt_text;
   char *range_gte_text;
   char *range_lt_text;
@@ -165,6 +167,7 @@ struct lql_selector {
   size_t child_count;
   const struct lql_selector **predicates;
   size_t predicate_count;
+  size_t max_in_alternative_count;
   size_t hit_index;
   size_t hit_count;
 };

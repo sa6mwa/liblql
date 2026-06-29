@@ -1341,6 +1341,35 @@ static void collect_predicates(const lql_selector *selector,
   }
 }
 
+static size_t selector_refresh_cached_lengths(lql_selector *selector) {
+  size_t i;
+  size_t child_max;
+  size_t max_in;
+
+  if (selector == NULL) {
+    return 0u;
+  }
+  selector->value_len = selector->value == NULL ? 0u : strlen(selector->value);
+  selector->any_max_len = 0u;
+  for (i = 0u; i < selector->any_count; ++i) {
+    size_t len;
+    len = selector->any_lens == NULL ? strlen(selector->any[i])
+                                     : selector->any_lens[i];
+    if (len > selector->any_max_len) {
+      selector->any_max_len = len;
+    }
+  }
+  max_in = selector->kind == LQL_SELECTOR_KIND_IN ? selector->any_count : 0u;
+  for (i = 0u; i < selector->child_count; ++i) {
+    child_max = selector_refresh_cached_lengths(&selector->children[i]);
+    if (child_max > max_in) {
+      max_in = child_max;
+    }
+  }
+  selector->max_in_alternative_count = max_in;
+  return max_in;
+}
+
 static void selector_clear_predicates(lql_selector_parser *ctx,
                                       lql_selector *selector) {
   ctx->allocator->destroy(ctx->allocator, (void *)selector->predicates);
@@ -1444,6 +1473,7 @@ static int finalize_selector(lql_selector_parser *ctx, lql_selector *selector) {
   selector->hit_count = 0u;
   selector_clear_predicates(ctx, selector);
   assign_hit_indexes(selector, &selector->hit_count);
+  selector_refresh_cached_lengths(selector);
   if (!prepare_selector_paths(ctx, selector)) {
     return 0;
   }
@@ -2427,6 +2457,9 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->field_path_direct = 0;
   dst->predicates = NULL;
   dst->predicate_count = 0u;
+  dst->value_len = 0u;
+  dst->any_max_len = 0u;
+  dst->max_in_alternative_count = 0u;
   if (!clone_string(ctx, src->field, &dst->field) ||
       !clone_string(ctx, src->value, &dst->value) ||
       !clone_string(ctx, src->range_gt_text, &dst->range_gt_text) ||

@@ -129,24 +129,6 @@ static lql_status execute_query_source_spooled_rewrite(
 
 static int selector_is_predicate(const lql_selector *selector);
 
-static size_t selector_max_in_alternative_count(const lql_selector *selector) {
-  size_t i;
-  size_t max_count;
-  size_t child_count;
-
-  if (selector == NULL) {
-    return 0u;
-  }
-  max_count = selector->kind == LQL_SELECTOR_KIND_IN ? selector->any_count : 0u;
-  for (i = 0u; i < selector->child_count; ++i) {
-    child_count = selector_max_in_alternative_count(&selector->children[i]);
-    if (child_count > max_count) {
-      max_count = child_count;
-    }
-  }
-  return max_count;
-}
-
 static void clear_query_result(lql_query_result *out_result) {
   if (out_result != NULL) {
     memset(out_result, 0, sizeof(*out_result));
@@ -306,7 +288,7 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     impl->eval_container_cap = 0u;
   }
   if (selector != NULL && selector->hit_count != 0u) {
-    doc->in_match_stride = selector_max_in_alternative_count(selector);
+    doc->in_match_stride = selector->max_in_alternative_count;
     if (doc->hits_cap < selector->hit_count) {
       next_hits = (unsigned char *)doc->allocator->realloc(
           doc->allocator, doc->hits, selector->hit_count);
@@ -462,15 +444,6 @@ static int ascii_case_equal_prefix(const char *a, const char *b, size_t n) {
 
 static int contains_case_len(const char *haystack, size_t h, const char *needle,
                              size_t n, int ignore_case);
-
-static int contains_case(const char *haystack, const char *needle,
-                         int ignore_case) {
-  size_t h;
-  size_t n;
-  h = strlen(haystack);
-  n = strlen(needle);
-  return contains_case_len(haystack, h, needle, n, ignore_case);
-}
 
 static int contains_case_len(const char *haystack, size_t h, const char *needle,
                              size_t n, int ignore_case) {
@@ -817,9 +790,12 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
       break;
     }
     if (selector->any_count == 0u) {
-      if (contains_case(value, selector->value == NULL ? "" : selector->value,
-                        selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
-                            selector->ignore_case)) {
+      value_len = strlen(value);
+      if (contains_case_len(value, value_len,
+                            selector->value == NULL ? "" : selector->value,
+                            selector->value_len,
+                            selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
+                                selector->ignore_case)) {
         doc->hits[selector->hit_index] = 1u;
       }
     } else {
@@ -842,7 +818,7 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
     if (is_container || is_null) {
       break;
     }
-    n = strlen(selector->value == NULL ? "" : selector->value);
+    n = selector->value_len;
     if (strlen(value) >= n &&
         (selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case
              ? ascii_case_equal_prefix(value, selector->value, n)
@@ -916,48 +892,21 @@ static void observe_selector(eval_doc *doc, const lql_selector *selector,
 }
 
 static size_t selector_contains_max_needle(const lql_selector *selector) {
-  size_t i;
-  size_t max_len;
-  size_t len;
-
-  max_len = 0u;
   if (selector->any_count == 0u) {
-    if (selector->value != NULL) {
-      max_len = strlen(selector->value);
-    }
-    return max_len;
+    return selector->value_len;
   }
-  for (i = 0u; i < selector->any_count; ++i) {
-    len = selector->any_lens == NULL ? strlen(selector->any[i])
-                                     : selector->any_lens[i];
-    if (len > max_len) {
-      max_len = len;
-    }
-  }
-  return max_len;
+  return selector->any_max_len;
 }
 
 static size_t selector_prefix_value_len(const lql_selector *selector) {
   if (selector->value == NULL) {
     return 0u;
   }
-  return strlen(selector->value);
+  return selector->value_len;
 }
 
 static size_t selector_in_max_value_len(const lql_selector *selector) {
-  size_t i;
-  size_t max_len;
-  size_t len;
-
-  max_len = 0u;
-  for (i = 0u; i < selector->any_count; ++i) {
-    len = selector->any_lens == NULL ? strlen(selector->any[i])
-                                     : selector->any_lens[i];
-    if (len > max_len) {
-      max_len = len;
-    }
-  }
-  return max_len;
+  return selector->any_max_len;
 }
 
 static int scalar_path_contains_stream_interested(
@@ -1303,7 +1252,7 @@ static void observe_exact_stream_chunk(eval_doc *doc,
       continue;
     }
     value = selector->value == NULL ? "" : selector->value;
-    value_len = strlen(value);
+    value_len = selector->value_len;
     if (!literal_chunk_matches(value, value_len, offset, data, len, 0,
                                value_len)) {
       doc->stream_misses[selector->hit_index] = 1u;
@@ -1397,7 +1346,7 @@ static void observe_exact_stream_end(eval_doc *doc,
     if (selector->kind == LQL_SELECTOR_KIND_EQ ||
         selector->kind == LQL_SELECTOR_KIND_NE) {
       value = selector->value == NULL ? "" : selector->value;
-      value_len = strlen(value);
+      value_len = selector->value_len;
       if (selector->kind == LQL_SELECTOR_KIND_EQ &&
           doc->scalar_len == value_len &&
           doc->stream_misses[selector->hit_index] == 0u &&
@@ -1746,7 +1695,7 @@ static void observe_contains_stream_chunk(eval_doc *doc,
     ignore_case =
         selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case;
     if (selector->any_count == 0u) {
-      value_len = selector->value == NULL ? 0u : strlen(selector->value);
+      value_len = selector->value_len;
       if (contains_stream_scan(contains_tail_data(doc), doc->contains_tail_len,
                                data, len,
                                selector->value == NULL ? "" : selector->value,

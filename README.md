@@ -70,6 +70,9 @@ without reparsing JSON-pointer text in the hot path. Wildcard, recursive, or
 escaped paths still use the general matcher.
 Selectors cache the flattened predicate pointer list during finalization, so
 evaluation setup does not walk compound selector trees for each candidate.
+Selector finalization also caches literal lengths, max `any` literal length, and
+max `in` fanout so scalar observers use selector-owned facts instead of
+recomputing them per candidate.
 For string and number values, the evaluator caches each predicate's path-match
 result once at scalar begin and reuses that hit-index bitmap across chunk and
 end observers.
