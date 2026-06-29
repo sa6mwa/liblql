@@ -30,8 +30,16 @@ typedef enum mutation_file_mode {
 
 typedef struct mutation_path {
   char **segments;
+  unsigned char *segment_kinds;
+  size_t *segment_lens;
   size_t segment_count;
 } mutation_path;
+
+#define MUTATION_PATH_LITERAL 0u
+#define MUTATION_PATH_OBJECT_WILDCARD 1u
+#define MUTATION_PATH_ARRAY_WILDCARD 2u
+#define MUTATION_PATH_RECURSIVE 3u
+#define MUTATION_PATH_ELLIPSIS 4u
 
 typedef struct mutation_item {
   mutation_kind kind;
@@ -159,7 +167,11 @@ static void mutation_path_cleanup(lql *self, mutation_path *path) {
     allocator->destroy(allocator, path->segments[i]);
   }
   allocator->destroy(allocator, path->segments);
+  allocator->destroy(allocator, path->segment_kinds);
+  allocator->destroy(allocator, path->segment_lens);
   path->segments = NULL;
+  path->segment_kinds = NULL;
+  path->segment_lens = NULL;
   path->segment_count = 0u;
 }
 
@@ -665,6 +677,24 @@ static char *decode_path_segment(mutation_parse_context *ctx, const char *src,
 static int path_add_segment(mutation_parse_context *ctx, mutation_path *path,
                             char *segment) {
   char **next;
+  unsigned char *next_kinds;
+  size_t *next_lens;
+  size_t len;
+  unsigned char kind;
+
+  len = strlen(segment);
+  kind = MUTATION_PATH_LITERAL;
+  if (len == 1u && segment[0] == '*') {
+    kind = MUTATION_PATH_OBJECT_WILDCARD;
+  } else if (len == 2u && segment[0] == '[' && segment[1] == ']') {
+    kind = MUTATION_PATH_ARRAY_WILDCARD;
+  } else if (len == 2u && segment[0] == '*' && segment[1] == '*') {
+    kind = MUTATION_PATH_RECURSIVE;
+  } else if (len == 3u && segment[0] == '.' && segment[1] == '.' &&
+             segment[2] == '.') {
+    kind = MUTATION_PATH_ELLIPSIS;
+  }
+
   next = (char **)ctx->allocator->realloc(ctx->allocator, path->segments,
                                           sizeof(path->segments[0]) *
                                               (path->segment_count + 1u));
@@ -672,7 +702,24 @@ static int path_add_segment(mutation_parse_context *ctx, mutation_path *path,
     return 0;
   }
   path->segments = next;
-  path->segments[path->segment_count++] = segment;
+  next_kinds = (unsigned char *)ctx->allocator->realloc(
+      ctx->allocator, path->segment_kinds,
+      sizeof(path->segment_kinds[0]) * (path->segment_count + 1u));
+  if (next_kinds == NULL) {
+    return 0;
+  }
+  path->segment_kinds = next_kinds;
+  next_lens = (size_t *)ctx->allocator->realloc(
+      ctx->allocator, path->segment_lens,
+      sizeof(path->segment_lens[0]) * (path->segment_count + 1u));
+  if (next_lens == NULL) {
+    return 0;
+  }
+  path->segment_lens = next_lens;
+  path->segments[path->segment_count] = segment;
+  path->segment_kinds[path->segment_count] = kind;
+  path->segment_lens[path->segment_count] = len;
+  ++path->segment_count;
   return 1;
 }
 
@@ -768,6 +815,8 @@ static int append_item(mutation_parse_context *ctx, lql_mutation_plan *plan,
 static int prepend_path(mutation_parse_context *ctx, mutation_item *item,
                         const mutation_path *prefix) {
   char **segments;
+  unsigned char *segment_kinds;
+  size_t *segment_lens;
   size_t i;
   size_t count;
   count = prefix->segment_count + item->path.segment_count;
@@ -776,24 +825,47 @@ static int prepend_path(mutation_parse_context *ctx, mutation_item *item,
   if (segments == NULL) {
     return 0;
   }
+  segment_kinds = (unsigned char *)ctx->allocator->calloc(
+      ctx->allocator, count, sizeof(segment_kinds[0]));
+  if (segment_kinds == NULL) {
+    ctx->allocator->destroy(ctx->allocator, segments);
+    return 0;
+  }
+  segment_lens = (size_t *)ctx->allocator->calloc(ctx->allocator, count,
+                                                  sizeof(segment_lens[0]));
+  if (segment_lens == NULL) {
+    ctx->allocator->destroy(ctx->allocator, segment_kinds);
+    ctx->allocator->destroy(ctx->allocator, segments);
+    return 0;
+  }
   for (i = 0u; i < prefix->segment_count; ++i) {
     segments[i] = ctx->allocator->strdup(ctx->allocator, prefix->segments[i]);
     if (segments[i] == NULL) {
       goto fail;
     }
+    segment_kinds[i] = prefix->segment_kinds[i];
+    segment_lens[i] = prefix->segment_lens[i];
   }
   for (i = 0u; i < item->path.segment_count; ++i) {
     segments[prefix->segment_count + i] = item->path.segments[i];
+    segment_kinds[prefix->segment_count + i] = item->path.segment_kinds[i];
+    segment_lens[prefix->segment_count + i] = item->path.segment_lens[i];
     item->path.segments[i] = NULL;
   }
   ctx->allocator->destroy(ctx->allocator, item->path.segments);
+  ctx->allocator->destroy(ctx->allocator, item->path.segment_kinds);
+  ctx->allocator->destroy(ctx->allocator, item->path.segment_lens);
   item->path.segments = segments;
+  item->path.segment_kinds = segment_kinds;
+  item->path.segment_lens = segment_lens;
   item->path.segment_count = count;
   return 1;
 fail:
   for (i = 0u; i < count; ++i) {
     ctx->allocator->destroy(ctx->allocator, segments[i]);
   }
+  ctx->allocator->destroy(ctx->allocator, segment_lens);
+  ctx->allocator->destroy(ctx->allocator, segment_kinds);
   ctx->allocator->destroy(ctx->allocator, segments);
   return 0;
 }
@@ -1256,10 +1328,7 @@ static void mutation_plan_destroy_method(lql *self, lql_mutation_plan *plan) {
 
 static int mutation_is_root_field_supported(const mutation_item *item) {
   return item->path.segment_count == 1u && item->path.segments[0][0] != '\0' &&
-         strcmp(item->path.segments[0], "*") != 0 &&
-         strcmp(item->path.segments[0], "[]") != 0 &&
-         strcmp(item->path.segments[0], "**") != 0 &&
-         strcmp(item->path.segments[0], "...") != 0;
+         item->path.segment_kinds[0] == MUTATION_PATH_LITERAL;
 }
 
 static int mutation_plan_supports_root_fields(const lql_mutation_plan *plan) {
@@ -1274,8 +1343,11 @@ static int mutation_plan_supports_root_fields(const lql_mutation_plan *plan) {
     }
     for (j = i + 1u; j < plan->count; ++j) {
       if (plan->items[j].path.segment_count == 1u &&
-          strcmp(plan->items[i].path.segments[0],
-                 plan->items[j].path.segments[0]) == 0) {
+          plan->items[i].path.segment_lens[0] ==
+              plan->items[j].path.segment_lens[0] &&
+          memcmp(plan->items[i].path.segments[0],
+                 plan->items[j].path.segments[0],
+                 plan->items[i].path.segment_lens[0]) == 0) {
         return 0;
       }
     }
@@ -1302,10 +1374,7 @@ static int mutation_path_has_wildcard(const mutation_path *path) {
     return 0;
   }
   for (i = 0u; i < path->segment_count; ++i) {
-    if (strcmp(path->segments[i], "*") == 0 ||
-        strcmp(path->segments[i], "[]") == 0 ||
-        strcmp(path->segments[i], "**") == 0 ||
-        strcmp(path->segments[i], "...") == 0) {
+    if (path->segment_kinds[i] != MUTATION_PATH_LITERAL) {
       return 1;
     }
   }
@@ -1319,7 +1388,9 @@ static int mutation_paths_equal(const mutation_path *a,
     return 0;
   }
   for (i = 0u; i < a->segment_count; ++i) {
-    if (strcmp(a->segments[i], b->segments[i]) != 0) {
+    if (a->segment_kinds[i] != b->segment_kinds[i] ||
+        a->segment_lens[i] != b->segment_lens[i] ||
+        memcmp(a->segments[i], b->segments[i], a->segment_lens[i]) != 0) {
       return 0;
     }
   }
@@ -1333,7 +1404,10 @@ static int mutation_path_is_prefix(const mutation_path *prefix,
     return 0;
   }
   for (i = 0u; i < prefix->segment_count; ++i) {
-    if (strcmp(prefix->segments[i], path->segments[i]) != 0) {
+    if (prefix->segment_kinds[i] != path->segment_kinds[i] ||
+        prefix->segment_lens[i] != path->segment_lens[i] ||
+        memcmp(prefix->segments[i], path->segments[i],
+               prefix->segment_lens[i]) != 0) {
       return 0;
     }
   }
@@ -1367,20 +1441,22 @@ static int mutation_plan_supports_stream_paths(const lql_mutation_plan *plan) {
   return 1;
 }
 
-static int stream_path_segment_matches(const char *expected,
+static int stream_path_segment_matches(unsigned char expected_kind,
+                                       const char *expected,
+                                       size_t expected_len,
                                        const lonejson_path_segment *actual,
                                        int actual_is_array) {
-  if (strcmp(expected, "*") == 0) {
+  switch (expected_kind) {
+  case MUTATION_PATH_OBJECT_WILDCARD:
     return !actual_is_array;
-  }
-  if (strcmp(expected, "[]") == 0) {
+  case MUTATION_PATH_ARRAY_WILDCARD:
     return actual_is_array;
-  }
-  if (strcmp(expected, "**") == 0) {
+  case MUTATION_PATH_RECURSIVE:
     return 1;
+  default:
+    return expected_len == actual->len &&
+           memcmp(expected, actual->data, actual->len) == 0;
   }
-  return strlen(expected) == actual->len &&
-         memcmp(expected, actual->data, actual->len) == 0;
 }
 
 static int virtual_path_segment_matches(const mutation_path *item_path,
@@ -1392,13 +1468,15 @@ static int virtual_path_segment_matches(const mutation_path *item_path,
   lonejson_path_segment segment;
   if (actual_index < parent->segment_count) {
     return stream_path_segment_matches(
-        item_path->segments[item_index], &parent->segments[actual_index],
+        item_path->segment_kinds[item_index], item_path->segments[item_index],
+        item_path->segment_lens[item_index], &parent->segments[actual_index],
         mutation_frame_array_segment(frame, actual_index));
   }
   segment.data = key;
   segment.len = key_len;
-  return stream_path_segment_matches(item_path->segments[item_index], &segment,
-                                     0);
+  return stream_path_segment_matches(
+      item_path->segment_kinds[item_index], item_path->segments[item_index],
+      item_path->segment_lens[item_index], &segment, 0);
 }
 
 static int virtual_path_matches_from(const mutation_path *item_path,
@@ -1413,7 +1491,7 @@ static int virtual_path_matches_from(const mutation_path *item_path,
   if (item_index == item_path->segment_count) {
     return actual_index == actual_count;
   }
-  if (strcmp(item_path->segments[item_index], "...") == 0) {
+  if (item_path->segment_kinds[item_index] == MUTATION_PATH_ELLIPSIS) {
     if (item_index + 1u == item_path->segment_count) {
       return 1;
     }
@@ -1482,7 +1560,7 @@ static int value_path_item_matches_from(const mutation_stream_state *state,
   if (item_index == item_path->segment_count) {
     return path_index == path->segment_count;
   }
-  if (strcmp(item_path->segments[item_index], "...") == 0) {
+  if (item_path->segment_kinds[item_index] == MUTATION_PATH_ELLIPSIS) {
     if (item_index + 1u == item_path->segment_count) {
       return 1;
     }
@@ -1496,7 +1574,8 @@ static int value_path_item_matches_from(const mutation_stream_state *state,
   }
   if (path_index >= path->segment_count ||
       !stream_path_segment_matches(
-          item_path->segments[item_index], &path->segments[path_index],
+          item_path->segment_kinds[item_index], item_path->segments[item_index],
+          item_path->segment_lens[item_index], &path->segments[path_index],
           value_path_segment_is_array(state, path, path_index))) {
     return 0;
   }
@@ -1541,8 +1620,10 @@ static int stream_path_prefix_matches(const mutation_path *item_path,
     return 0;
   }
   for (i = 0u; i < path->segment_count; ++i) {
-    if (!stream_path_segment_matches(item_path->segments[i], &path->segments[i],
-                                     mutation_frame_array_segment(frame, i))) {
+    if (!stream_path_segment_matches(
+            item_path->segment_kinds[i], item_path->segments[i],
+            item_path->segment_lens[i], &path->segments[i],
+            mutation_frame_array_segment(frame, i))) {
       return 0;
     }
   }
@@ -1972,16 +2053,19 @@ static int mutation_descends_from_virtual_object(
     return 0;
   }
   for (i = 0u; i < parent->segment_count; ++i) {
-    if (!stream_path_segment_matches(item->path.segments[i],
-                                     &parent->segments[i],
-                                     mutation_frame_array_segment(frame, i))) {
+    if (!stream_path_segment_matches(
+            item->path.segment_kinds[i], item->path.segments[i],
+            item->path.segment_lens[i], &parent->segments[i],
+            mutation_frame_array_segment(frame, i))) {
       return 0;
     }
   }
   segment.data = key;
   segment.len = key_len;
-  return stream_path_segment_matches(item->path.segments[parent->segment_count],
-                                     &segment, 0);
+  return stream_path_segment_matches(
+      item->path.segment_kinds[parent->segment_count],
+      item->path.segments[parent->segment_count],
+      item->path.segment_lens[parent->segment_count], &segment, 0);
 }
 
 static int
@@ -2124,7 +2208,10 @@ static int mutation_items_share_prefix(const mutation_item *a,
     return 0;
   }
   for (i = 0u; i < depth; ++i) {
-    if (strcmp(a->path.segments[i], b->path.segments[i]) != 0) {
+    if (a->path.segment_kinds[i] != b->path.segment_kinds[i] ||
+        a->path.segment_lens[i] != b->path.segment_lens[i] ||
+        memcmp(a->path.segments[i], b->path.segments[i],
+               a->path.segment_lens[i]) != 0) {
       return 0;
     }
   }
@@ -2202,7 +2289,7 @@ static lonejson_status write_synthetic_subtree(mutation_stream_state *state,
       continue;
     }
     if (lonejson_writer_key(&state->writer, item->path.segments[depth],
-                            strlen(item->path.segments[depth]),
+                            item->path.segment_lens[depth],
                             error) != LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
@@ -2417,9 +2504,11 @@ static lonejson_status mutation_key_end(void *user,
     if (path != NULL &&
         state->plan->items[i].path.segment_count > path->segment_count &&
         stream_path_prefix_matches(&state->plan->items[i].path, path, frame) &&
-        (strcmp(state->plan->items[i].path.segments[path->segment_count],
-                "*") == 0 ||
-         (strlen(state->plan->items[i].path.segments[path->segment_count]) ==
+        (state->plan->items[i].path.segment_kinds[path->segment_count] ==
+             MUTATION_PATH_OBJECT_WILDCARD ||
+         (state->plan->items[i].path.segment_kinds[path->segment_count] ==
+              MUTATION_PATH_LITERAL &&
+          state->plan->items[i].path.segment_lens[path->segment_count] ==
               state->key_len &&
           memcmp(state->plan->items[i].path.segments[path->segment_count],
                  state->key_buf, state->key_len) == 0)) &&
