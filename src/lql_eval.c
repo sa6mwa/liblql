@@ -2145,6 +2145,18 @@ static int eval_selector_tree(const lql_selector *selector,
   }
 }
 
+static int eval_doc_matches(const lql_selector *selector,
+                            const eval_doc *doc) {
+  if (selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return 1;
+  }
+  if (doc != NULL && doc->candidate_matched &&
+      selector->match_sticky_once_true) {
+    return 1;
+  }
+  return eval_selector_tree(selector, doc);
+}
+
 static lonejson_status on_object_begin(void *user,
                                        const lonejson_value_path *path,
                                        lonejson_error *error) {
@@ -3084,9 +3096,7 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
     }
     return LONEJSON_CANDIDATE_CONTINUE;
   }
-  matched = state->selector == NULL ||
-            state->selector->kind == LQL_SELECTOR_KIND_ALL ||
-            eval_selector_tree(state->selector, &state->doc);
+  matched = eval_doc_matches(state->selector, &state->doc);
   if (matched) {
     state->result.candidates_matched++;
   }
@@ -3338,9 +3348,7 @@ on_source_spooled_candidate_end(void *user,
     }
     return LONEJSON_CANDIDATE_CONTINUE;
   }
-  matched = state->selector == NULL ||
-            state->selector->kind == LQL_SELECTOR_KIND_ALL ||
-            eval_selector_tree(state->selector, &state->doc);
+  matched = eval_doc_matches(state->selector, &state->doc);
   state->result.candidates_seen++;
   state->result.bytes_read =
       (lql_uint64)(candidate->stream_offset + candidate->byte_size);
@@ -3412,9 +3420,7 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
     }
     return LONEJSON_CANDIDATE_CONTINUE;
   }
-  matched = state->selector == NULL ||
-            state->selector->kind == LQL_SELECTOR_KIND_ALL ||
-            eval_selector_tree(state->selector, &state->doc);
+  matched = eval_doc_matches(state->selector, &state->doc);
   if (!matched && state->mutation_plan != NULL && state->matches_only) {
     state->result.candidates_seen++;
     state->result.bytes_read =
@@ -3609,9 +3615,7 @@ on_file_mutation_candidate_end(void *user,
     return LONEJSON_CANDIDATE_CONTINUE;
   }
 
-  matched = state->selector == NULL ||
-            state->selector->kind == LQL_SELECTOR_KIND_ALL ||
-            eval_selector_tree(state->selector, &state->doc);
+  matched = eval_doc_matches(state->selector, &state->doc);
   if (!matched && state->matches_only) {
     state->result.candidates_seen++;
     state->result.bytes_read = offset + size;
@@ -3793,8 +3797,7 @@ static lql_status eval_selector_buffer(lql *self, const lql_selector *selector,
     lql_lonejson_release(self, runtime, runtime_pooled);
     return LQL_STATUS_JSON_ERROR;
   }
-  *out_matched = selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL ||
-                 eval_selector_tree(selector, &doc);
+  *out_matched = eval_doc_matches(selector, &doc);
   destroy_doc(&doc);
   lql_lonejson_release(self, runtime, runtime_pooled);
   return LQL_STATUS_OK;
