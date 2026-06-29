@@ -3314,10 +3314,21 @@ static lql_status query_file_matches_with_options_method(
 static lql_status payload_write_json_method(lql *self,
                                             const lql_payload *payload,
                                             FILE *out, lql_error *error) {
+  lonejson_error lj_error;
   if (payload == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "payload and output file are required");
     return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (payload->kind == LQL_PAYLOAD_SPOOLED && payload->spooled != NULL) {
+    memset(&lj_error, 0, sizeof(lj_error));
+    if (lonejson_spooled_write_to_sink(
+            (const lonejson_spooled *)payload->spooled, file_sink, out,
+            &lj_error) == LONEJSON_STATUS_OK) {
+      return LQL_STATUS_OK;
+    }
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
   }
   return self->payload_write_json_sink(self, payload, payload_file_write, out,
                                        error);
