@@ -1,6 +1,9 @@
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200112L
 #endif
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE 1
+#endif
 #ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 500
 #endif
@@ -2690,6 +2693,32 @@ static int eval_file_size_u64(FILE *file, lql_uint64 *out) {
   return (off_t)(*out) == end;
 }
 
+static int eval_file_write(FILE *out, const void *data, size_t len) {
+  if (len == 0u) {
+    return 1;
+  }
+  return fwrite(data, 1u, len, out) == len;
+}
+
+static int eval_file_write_unlocked(FILE *out, const void *data, size_t len) {
+  if (len == 0u) {
+    return 1;
+  }
+#if defined(__linux__)
+  return fwrite_unlocked(data, 1u, len, out) == len;
+#else
+  return fwrite(data, 1u, len, out) == len;
+#endif
+}
+
+static int eval_file_putc_unlocked(FILE *out, int ch) {
+#if defined(__linux__)
+  return fputc_unlocked(ch, out) != EOF;
+#else
+  return fputc(ch, out) != EOF;
+#endif
+}
+
 static int eval_copy_range(FILE *in, FILE *out, lql_uint64 size) {
   char buf[8192];
   size_t want;
@@ -2700,7 +2729,7 @@ static int eval_copy_range(FILE *in, FILE *out, lql_uint64 size) {
     if (got == 0u) {
       return 0;
     }
-    if (fwrite(buf, 1u, got, out) != got) {
+    if (!eval_file_write(out, buf, got)) {
       return 0;
     }
     size -= (lql_uint64)got;
@@ -2708,8 +2737,8 @@ static int eval_copy_range(FILE *in, FILE *out, lql_uint64 size) {
   return 1;
 }
 
-static int eval_copy_fd_range(int fd, lql_uint64 offset, FILE *out,
-                              lql_uint64 size) {
+static int eval_copy_fd_range_unlocked(int fd, lql_uint64 offset, FILE *out,
+                                       lql_uint64 size) {
   char buf[8192];
   size_t want;
   ssize_t got;
@@ -2725,7 +2754,7 @@ static int eval_copy_fd_range(int fd, lql_uint64 offset, FILE *out,
     if (got <= (ssize_t)0) {
       return 0;
     }
-    if (fwrite(buf, 1u, (size_t)got, out) != (size_t)got) {
+    if (!eval_file_write_unlocked(out, buf, (size_t)got)) {
       return 0;
     }
     offset += (lql_uint64)got;
@@ -3240,7 +3269,7 @@ static lonejson_status file_sink(void *user, const void *data, size_t len,
   FILE *out;
   (void)error;
   out = (FILE *)user;
-  if (len != 0u && fwrite(data, 1u, len, out) != len) {
+  if (!eval_file_write(out, data, len)) {
     return LONEJSON_STATUS_IO_ERROR;
   }
   return LONEJSON_STATUS_OK;
@@ -3726,20 +3755,21 @@ on_file_mutation_candidate_end(void *user,
         return LONEJSON_CANDIDATE_ERROR;
       }
       wrote_output = 1;
-    } else if (!eval_copy_fd_range(state->fd, offset, state->out, size)) {
+    } else if (!eval_copy_fd_range_unlocked(state->fd, offset, state->out,
+                                            size)) {
       reset_doc(&state->doc);
       return LONEJSON_CANDIDATE_ERROR;
     } else {
       wrote_output = 1;
     }
   } else if (!state->matches_only) {
-    if (!eval_copy_fd_range(state->fd, offset, state->out, size)) {
+    if (!eval_copy_fd_range_unlocked(state->fd, offset, state->out, size)) {
       reset_doc(&state->doc);
       return LONEJSON_CANDIDATE_ERROR;
     }
     wrote_output = 1;
   }
-  if (wrote_output && fputc('\n', state->out) == EOF) {
+  if (wrote_output && !eval_file_putc_unlocked(state->out, '\n')) {
     reset_doc(&state->doc);
     return LONEJSON_CANDIDATE_ERROR;
   }
@@ -3809,8 +3839,10 @@ static lql_status execute_mutate_file_range_candidates_fast(
   options.candidate_begin = on_file_mutation_candidate_begin;
   options.candidate_end = on_file_mutation_candidate_end;
   options.candidate_user = &state;
+  flockfile(out);
   st = lonejson_visit_candidates_reader(runtime, eval_pread_range, &reader,
                                         &options, &lj_error);
+  funlockfile(out);
   destroy_doc(&state.doc);
   lql_lonejson_release(self, runtime, runtime_pooled);
   if (out_result != NULL) {
