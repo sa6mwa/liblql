@@ -129,6 +129,7 @@ typedef struct mutation_stream_state {
   char inline_num_buf[MUTATION_NUM_INLINE_CAP];
   int *applied;
   size_t *prefix_seen_depth;
+  void *plan_scratch_alloc;
   size_t source_depth;
   int root_seen;
   int root_is_object;
@@ -2896,32 +2897,58 @@ static void init_mutation_visitor(lonejson_path_value_visitor *visitor) {
 
 static int mutation_state_init_plan_scratch(mutation_stream_state *state,
                                             const lql_mutation_plan *plan) {
+  size_t max_size;
+  size_t count;
+  size_t applied_bytes;
+  size_t prefix_offset;
+  size_t prefix_bytes;
+  size_t align;
+  size_t rem;
+  size_t total_bytes;
+  char *scratch;
   if (state == NULL || plan == NULL) {
     return 0;
   }
   if (plan->count <= MUTATION_PLAN_INLINE_COUNT) {
     state->applied = state->inline_applied;
     state->prefix_seen_depth = state->inline_prefix_seen_depth;
+    state->plan_scratch_alloc = NULL;
     memset(state->applied, 0, sizeof(state->inline_applied));
     memset(state->prefix_seen_depth, 0,
            sizeof(state->inline_prefix_seen_depth));
     return 1;
   }
-  state->applied = (int *)state->allocator->calloc(
-      state->allocator, plan->count, sizeof(state->applied[0]));
-  state->prefix_seen_depth = (size_t *)state->allocator->calloc(
-      state->allocator, plan->count, sizeof(state->prefix_seen_depth[0]));
-  if (state->applied == NULL || state->prefix_seen_depth == NULL) {
-    if (state->applied != state->inline_applied) {
-      state->allocator->destroy(state->allocator, state->applied);
-    }
-    if (state->prefix_seen_depth != state->inline_prefix_seen_depth) {
-      state->allocator->destroy(state->allocator, state->prefix_seen_depth);
-    }
-    state->applied = NULL;
-    state->prefix_seen_depth = NULL;
+  max_size = (size_t)-1;
+  count = plan->count;
+  if (count > max_size / sizeof(state->applied[0]) ||
+      count > max_size / sizeof(state->prefix_seen_depth[0])) {
     return 0;
   }
+  applied_bytes = sizeof(state->applied[0]) * count;
+  prefix_bytes = sizeof(state->prefix_seen_depth[0]) * count;
+  align = sizeof(state->prefix_seen_depth[0]);
+  prefix_offset = applied_bytes;
+  rem = prefix_offset % align;
+  if (rem != 0u) {
+    if (prefix_offset > max_size - (align - rem)) {
+      return 0;
+    }
+    prefix_offset += align - rem;
+  }
+  if (prefix_offset > max_size - prefix_bytes) {
+    return 0;
+  }
+  total_bytes = prefix_offset + prefix_bytes;
+  scratch = (char *)state->allocator->calloc(state->allocator, 1u, total_bytes);
+  if (scratch == NULL) {
+    state->applied = NULL;
+    state->prefix_seen_depth = NULL;
+    state->plan_scratch_alloc = NULL;
+    return 0;
+  }
+  state->plan_scratch_alloc = scratch;
+  state->applied = (int *)scratch;
+  state->prefix_seen_depth = (size_t *)(void *)(scratch + prefix_offset);
   return 1;
 }
 
@@ -2929,14 +2956,12 @@ static void mutation_state_cleanup_plan_scratch(mutation_stream_state *state) {
   if (state == NULL) {
     return;
   }
-  if (state->applied != state->inline_applied) {
-    state->allocator->destroy(state->allocator, state->applied);
-  }
-  if (state->prefix_seen_depth != state->inline_prefix_seen_depth) {
-    state->allocator->destroy(state->allocator, state->prefix_seen_depth);
+  if (state->plan_scratch_alloc != NULL) {
+    state->allocator->destroy(state->allocator, state->plan_scratch_alloc);
   }
   state->applied = NULL;
   state->prefix_seen_depth = NULL;
+  state->plan_scratch_alloc = NULL;
 }
 
 static lql_status mutate_reader_with_supported_plan(
