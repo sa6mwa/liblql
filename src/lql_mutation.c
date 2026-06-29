@@ -2568,6 +2568,9 @@ static lonejson_status mutation_key_end(void *user,
   const mutation_path_frame *frame;
   size_t index;
   size_t i;
+  size_t depth;
+  size_t next_depth;
+  unsigned char next_kind;
   state = (mutation_stream_state *)user;
   if (state->skipping) {
     frame = current_path_frame(state, path);
@@ -2581,20 +2584,24 @@ static lonejson_status mutation_key_end(void *user,
     return LONEJSON_STATUS_OK;
   }
   frame = current_path_frame(state, path);
-  for (i = 0u; i < state->plan->count; ++i) {
-    if (path != NULL &&
-        state->plan->items[i].path.segment_count > path->segment_count &&
-        stream_path_prefix_matches(&state->plan->items[i].path, path, frame) &&
-        (state->plan->items[i].path.segment_kinds[path->segment_count] ==
-             MUTATION_PATH_OBJECT_WILDCARD ||
-         (state->plan->items[i].path.segment_kinds[path->segment_count] ==
-              MUTATION_PATH_LITERAL &&
-          state->plan->items[i].path.segment_lens[path->segment_count] ==
-              state->key_len &&
-          memcmp(state->plan->items[i].path.segments[path->segment_count],
-                 state->key_buf, state->key_len) == 0)) &&
-        state->prefix_seen_depth[i] < path->segment_count + 1u) {
-      state->prefix_seen_depth[i] = path->segment_count + 1u;
+  if (path != NULL) {
+    depth = path->segment_count;
+    next_depth = depth + 1u;
+    for (i = 0u; i < state->plan->count; ++i) {
+      item = &state->plan->items[i];
+      if (state->prefix_seen_depth[i] >= next_depth ||
+          item->path.segment_count <= depth ||
+          !stream_path_prefix_matches(&item->path, path, frame)) {
+        continue;
+      }
+      next_kind = item->path.segment_kinds[depth];
+      if (next_kind == MUTATION_PATH_OBJECT_WILDCARD ||
+          (next_kind == MUTATION_PATH_LITERAL &&
+           item->path.segment_lens[depth] == state->key_len &&
+           memcmp(item->path.segments[depth], state->key_buf,
+                  state->key_len) == 0)) {
+        state->prefix_seen_depth[i] = next_depth;
+      }
     }
   }
   if (mutation_key_index(state->plan, path, frame, state->key_buf,
