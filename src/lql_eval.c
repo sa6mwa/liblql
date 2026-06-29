@@ -914,24 +914,14 @@ static const lql_selector **scalar_family_begin(eval_doc *doc,
   return doc->scalar_family_predicates + family * doc->scalar_family_stride;
 }
 
-static void scalar_family_append(eval_doc *doc, const lql_selector *selector) {
+static void scalar_family_append_fast(eval_doc *doc,
+                                      const lql_selector *selector) {
   size_t family;
   size_t count;
-  const lql_selector **items;
-
-  if (selector == NULL || selector->observer_family >= LQL_EVAL_FAMILY_COUNT) {
-    return;
-  }
   family = selector->observer_family;
-  items = scalar_family_begin(doc, family);
-  if (items == NULL) {
-    return;
-  }
   count = doc->scalar_family_counts[family];
-  if (count >= doc->scalar_family_stride) {
-    return;
-  }
-  items[count] = selector;
+  doc->scalar_family_predicates[family * doc->scalar_family_stride + count] =
+      selector;
   doc->scalar_family_counts[family] = count + 1u;
 }
 
@@ -985,7 +975,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
           stream_miss_clear_fast(doc, selector);
         }
         doc->scalar_path_features |= feature;
-        scalar_family_append(doc, selector);
+        scalar_family_append_fast(doc, selector);
         if (selector->observer_contains_tail_need > doc->contains_tail_need) {
           doc->contains_tail_need = selector->observer_contains_tail_need;
         }
@@ -1001,7 +991,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
     if (hit_marked_fast(doc, selector)) {
       continue;
     }
-    feature = selector == NULL ? 0u : selector->observer_feature;
+    feature = selector->observer_feature;
     if (feature_mask != 0u && (feature & feature_mask) == 0u) {
       continue;
     }
@@ -1010,7 +1000,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
         stream_miss_clear_fast(doc, selector);
       }
       doc->scalar_path_features |= feature;
-      scalar_family_append(doc, selector);
+      scalar_family_append_fast(doc, selector);
       if (selector->observer_contains_tail_need > doc->contains_tail_need) {
         doc->contains_tail_need = selector->observer_contains_tail_need;
       }
