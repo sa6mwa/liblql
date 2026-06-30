@@ -2,7 +2,7 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INSTALL ?= install
 
-.PHONY: help deps-debug deps-release deps-cross build build-clql-static build-debug build-release build-bench-release install test test-debug parity-test test-all asan fuzz fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-gate perf-gate bench-lockd-perf-check bench-memory-check bench-1g-check benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version print-release-assets format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-clql-static build-debug build-release build-bench-release install test test-debug parity-test test-all asan fuzz fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-gate perf-gate bench-lockd-perf-check bench-memory-check bench-1g-check bench-freeze-baseline benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version print-release-assets format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -31,6 +31,7 @@ help:
 	  'make bench-lockd-perf-check run lockd-specific C performance gates' \
 	  'make bench-memory-check     run scalable streaming and C mutation memory gates' \
 	  'make bench-1g-check         run 1 GiB/128 MiB streaming memory gate' \
+	  'make bench-freeze-baseline  wait for quiet host and update committed benchmark baselines' \
 	  'make benchmarks-go          run Go benchmark implementation' \
 	  'make benchmarks-c           run C benchmark implementation' \
 	  'make benchmarks-lua         run Lua benchmark implementation' \
@@ -152,6 +153,11 @@ bench-1g-check: build-debug build-bench-release
 	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
 	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
 	  ./scripts/check_parity_benchmark_1g_memory.sh
+
+bench-freeze-baseline: build-debug build-bench-release
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
+	  ./scripts/bench_freeze_baseline.sh
 
 benchmarks-go:
 	@./scripts/run_parity_benchmarks.sh --impl go --format json

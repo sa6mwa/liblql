@@ -615,6 +615,11 @@ Performance thresholds should be added after:
 - thresholds are expressed as C-native ratios or guarded baselines with enough
   tolerance to avoid noisy failures.
 
+Committed baseline logs live under `bench/baselines/` and are refreshed with
+`make bench-freeze-baseline`. The freeze target waits for a quiet host load,
+runs the smoke, lockd, scalable memory, and 1 GiB benchmark profiles, validates
+the emitted JSON Lines records, and updates the baseline checksum manifest.
+
 Suggested staged gates:
 
 - Go/C/Lua behavior must match for supported selector classes;
@@ -683,3 +688,5 @@ Add tests or smoke gates proving:
 - `make bench-1g-check` runs the explicit 1 GiB/128 MiB memory profile with
   seekable file-backed and callback-source plus-value coverage; reduced-size
   overrides are available only for checking target wiring.
+- `make bench-freeze-baseline` refreshes the committed baseline logs only after
+  the host has stayed below the configured quiet-load threshold.

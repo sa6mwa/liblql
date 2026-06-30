@@ -232,6 +232,7 @@ make test-all
 make bench-check
 make bench-memory-check
 make bench-1g-check
+make bench-freeze-baseline
 make release-matrix
 make release
 ```
