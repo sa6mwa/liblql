@@ -297,6 +297,7 @@ typedef struct stream_seen {
 typedef struct payload_seen {
   int calls;
   int stop_after_first;
+  lql_uint64 indexes[4];
   lql_uint64 offsets[4];
   lql_uint64 sizes[4];
   FILE *out;
@@ -834,6 +835,7 @@ static lql_status record_payload(void *user, const lql_query_match *match) {
   lql_status st;
 
   if (seen->calls < 4) {
+    seen->indexes[seen->calls] = match->payload.index;
     seen->offsets[seen->calls] = match->payload.offset;
     seen->sizes[seen->calls] = match->payload.size;
   }
@@ -882,6 +884,7 @@ static lql_status record_spooled_payload(void *user,
   lql_status st;
 
   if (seen->calls < 4) {
+    seen->indexes[seen->calls] = match->payload.index;
     seen->offsets[seen->calls] = match->payload.offset;
     seen->sizes[seen->calls] = match->payload.size;
   }
@@ -2082,6 +2085,7 @@ static void expect_stream_nested_array_items(void) {
   memory_sink sink;
   chunk_reader reader;
   char buf[64];
+  const char *expected_payload;
   long end;
   size_t got;
   lql_error error;
@@ -2226,6 +2230,21 @@ static void expect_stream_nested_array_items(void) {
            "payload=%s\n",
            payload.calls, (unsigned long)result.candidates_seen,
            (unsigned long)result.candidates_matched, buf);
+    ++failures;
+  }
+  expected_payload = strstr(input, "{\"id\":\"b\"}");
+  if (expected_payload == NULL) {
+    printf("nested array expected payload fixture mismatch\n");
+    ++failures;
+  } else if (payload.indexes[0] != (lql_uint64)1 ||
+             payload.offsets[0] != (lql_uint64)(expected_payload - input) ||
+             payload.sizes[0] != (lql_uint64)strlen("{\"id\":\"b\"}")) {
+    printf("nested array source payload coordinates mismatch index=%lu "
+           "offset=%lu size=%lu expected_offset=%lu\n",
+           (unsigned long)payload.indexes[0],
+           (unsigned long)payload.offsets[0],
+           (unsigned long)payload.sizes[0],
+           (unsigned long)(expected_payload - input));
     ++failures;
   }
 }

@@ -119,6 +119,11 @@ static lql_status execute_query_source_spooled_matches(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *query_options, lql_query_match_fn on_match,
     void *user, lql_query_result *out_result, lql_error *error);
+static lql_status execute_query_source_spooled_matches_with_base(
+    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
+    lql_uint64 offset_base, lql_uint64 index_base,
+    const lql_query_options *query_options, lql_query_match_fn on_match,
+    void *user, lql_query_result *out_result, lql_error *error);
 static lql_status execute_query_file_range_spooled_matches(
     lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, int compact, const lql_projection *projection,
@@ -2533,6 +2538,8 @@ typedef struct file_mutation_range_state {
 typedef struct source_spooled_match_state {
   lql *receiver;
   const lql_selector *selector;
+  lql_uint64 offset_base;
+  lql_uint64 index_base;
   lql_query_options options;
   unsigned int limit_flags;
   lql_query_match_fn on_match;
@@ -2796,12 +2803,14 @@ static void query_finish_file_bytes(lql_query_result *result, FILE *file) {
   }
 }
 
-static void query_finish_source_bytes(lql_query_result *result,
-                                      const source_reader_adapter *adapter) {
+static void
+query_finish_source_bytes_with_base(lql_query_result *result,
+                                    const source_reader_adapter *adapter,
+                                    lql_uint64 offset_base) {
   if (result == NULL || adapter == NULL || result->stopped_early) {
     return;
   }
-  result->bytes_read = adapter->total_read;
+  result->bytes_read = offset_base + adapter->total_read;
 }
 
 static lonejson_read_result
@@ -3363,14 +3372,17 @@ on_source_spooled_candidate_end(void *user,
     nested_reader.cursor.read_offset = 0u;
     nested_options = query_remaining_options(&state->options, &state->result);
     memset(&nested_result, 0, sizeof(nested_result));
-    st = execute_query_source_spooled_matches(
+    st = execute_query_source_spooled_matches_with_base(
         state->receiver, state->selector, spooled_source_read, &nested_reader,
+        state->offset_base + (lql_uint64)candidate->stream_offset,
+        state->index_base + state->result.candidates_seen,
         &nested_options, state->on_match, state->user, &nested_result, NULL);
     reset_doc(&state->doc);
     state->result.candidates_seen += nested_result.candidates_seen;
     state->result.candidates_matched += nested_result.candidates_matched;
-    state->result.bytes_read =
-        (lql_uint64)(candidate->stream_offset + candidate->byte_size);
+    state->result.bytes_read = state->offset_base +
+                               (lql_uint64)candidate->stream_offset +
+                               (lql_uint64)candidate->byte_size;
     if (nested_result.stopped_early) {
       state->result.stopped_early = 1;
       state->result.stop_reason = nested_result.stop_reason;
@@ -3384,8 +3396,9 @@ on_source_spooled_candidate_end(void *user,
   }
   matched = eval_doc_matches(state->selector, &state->doc);
   state->result.candidates_seen++;
-  state->result.bytes_read =
-      (lql_uint64)(candidate->stream_offset + candidate->byte_size);
+  state->result.bytes_read = state->offset_base +
+                             (lql_uint64)candidate->stream_offset +
+                             (lql_uint64)candidate->byte_size;
   if (matched) {
     if (candidate->payload_spool == NULL) {
       reset_doc(&state->doc);
@@ -3393,8 +3406,9 @@ on_source_spooled_candidate_end(void *user,
     }
     memset(&match, 0, sizeof(match));
     match.decision.matched = 1;
-    match.decision.index = (lql_uint64)candidate->index;
-    match.decision.offset = (lql_uint64)candidate->stream_offset;
+    match.decision.index = state->index_base + (lql_uint64)candidate->index;
+    match.decision.offset =
+        state->offset_base + (lql_uint64)candidate->stream_offset;
     match.decision.size = (lql_uint64)candidate->byte_size;
     match.payload.kind = LQL_PAYLOAD_SPOOLED;
     match.payload.index = match.decision.index;
@@ -4612,7 +4626,7 @@ static lql_status execute_query_source_decisions_with_base(
                                         &options, &lj_error);
   if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||
       state.callback_status != LQL_STATUS_OK) {
-    query_finish_source_bytes(&state.result, &adapter);
+    query_finish_source_bytes_with_base(&state.result, &adapter, offset_base);
   }
   if (st != LONEJSON_STATUS_OK) {
     query_stream_state_cleanup_capture(&state);
@@ -4648,6 +4662,16 @@ static lql_status execute_query_source_spooled_matches(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     const lql_query_options *query_options, lql_query_match_fn on_match,
     void *user, lql_query_result *out_result, lql_error *error) {
+  return execute_query_source_spooled_matches_with_base(
+      self, selector, read, read_user, 0u, 0u, query_options, on_match, user,
+      out_result, error);
+}
+
+static lql_status execute_query_source_spooled_matches_with_base(
+    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
+    lql_uint64 offset_base, lql_uint64 index_base,
+    const lql_query_options *query_options, lql_query_match_fn on_match,
+    void *user, lql_query_result *out_result, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
@@ -4659,6 +4683,8 @@ static lql_status execute_query_source_spooled_matches(
   memset(&state, 0, sizeof(state));
   state.receiver = self;
   state.selector = selector;
+  state.offset_base = offset_base;
+  state.index_base = index_base;
   state.on_match = on_match;
   state.user = user;
   state.callback_status = LQL_STATUS_OK;
@@ -4691,7 +4717,7 @@ static lql_status execute_query_source_spooled_matches(
                                         &adapter, &options, &lj_error);
   if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||
       state.callback_status != LQL_STATUS_OK) {
-    query_finish_source_bytes(&state.result, &adapter);
+    query_finish_source_bytes_with_base(&state.result, &adapter, offset_base);
   }
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
