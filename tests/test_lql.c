@@ -6069,6 +6069,7 @@ static void expect_source_candidate_mutation_api(void) {
 static void expect_projected_candidate_mutation_api(void) {
   FILE *source;
   FILE *out;
+  FILE *nested_source;
   lql_error error;
   lql_status st;
   lql_selector *selector;
@@ -6086,9 +6087,14 @@ static void expect_projected_candidate_mutation_api(void) {
       "[{\"id\":\"a\",\"status\":\"open\",\"state\":{\"count\":1},"
       "\"drop\":true},{\"id\":\"b\",\"status\":\"closed\",\"state\":{\"count\":"
       "2},\"drop\":true}]";
+  static const char nested_doc[] =
+      "[[{\"id\":\"a\",\"status\":\"open\",\"state\":{\"count\":1}},"
+      "{\"id\":\"b\",\"status\":\"open\",\"state\":{\"count\":1}}],"
+      "{\"id\":\"c\",\"status\":\"open\",\"state\":{\"count\":1}}]";
 
   source = tmpfile();
   out = tmpfile();
+  nested_source = NULL;
   if (source == NULL || out == NULL) {
     printf("projected candidate mutation tmpfile failed\n");
     if (source != NULL) {
@@ -6204,6 +6210,59 @@ static void expect_projected_candidate_mutation_api(void) {
 
     fclose(out);
     out = tmpfile();
+    nested_source = tmpfile();
+    if (out == NULL || nested_source == NULL) {
+      printf("file projected nested candidate limit tmpfile failed\n");
+      ++failures;
+      if (nested_source != NULL) {
+        fclose(nested_source);
+        nested_source = NULL;
+      }
+    } else {
+      if (fwrite(nested_doc, 1u, strlen(nested_doc), nested_source) !=
+              strlen(nested_doc) ||
+          fflush(nested_source) != 0 || fseek(nested_source, 0L, SEEK_SET) !=
+                                             0) {
+        printf("file projected nested candidate limit source setup failed\n");
+        ++failures;
+      } else {
+        memset(&result, 0, sizeof(result));
+        memset(&options, 0, sizeof(options));
+        options.max_matches = 1u;
+        lql_error_init(&error);
+        st = test_ctx->mutate_file_range_projected_candidates_with_options(
+            test_ctx, selector, projection, plan, nested_source, 0u,
+            (lql_uint64)strlen(nested_doc), out, 1, 1, &options, &result,
+            &error);
+        if (st != LQL_STATUS_OK) {
+          printf("file projected nested candidate limit failed: %s\n",
+                 error.message);
+          ++failures;
+        } else if (result.candidates_seen != 1u ||
+                   result.candidates_matched != 1u ||
+                   !result.stopped_early ||
+                   result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT ||
+                   result.bytes_read == 0u) {
+          printf("file projected nested candidate limit result mismatch: "
+                 "seen=%lu matched=%lu stopped=%d reason=%d\n",
+                 (unsigned long)result.candidates_seen,
+                 (unsigned long)result.candidates_matched,
+                 result.stopped_early, (int)result.stop_reason);
+          ++failures;
+        } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                   strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") !=
+                       0) {
+          printf("file projected nested candidate limit output mismatch: %s\n",
+                 buf);
+          ++failures;
+        }
+      }
+      fclose(nested_source);
+      nested_source = NULL;
+    }
+
+    fclose(out);
+    out = tmpfile();
     if (out == NULL) {
       printf("source projected candidate preserve tmpfile failed\n");
       ++failures;
@@ -6275,6 +6334,48 @@ static void expect_projected_candidate_mutation_api(void) {
       } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                  strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") != 0) {
         printf("source projected candidate output mismatch: %s\n", buf);
+        ++failures;
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source projected nested candidate limit tmpfile failed\n");
+      ++failures;
+    } else {
+      memset(&reader, 0, sizeof(reader));
+      memset(&result, 0, sizeof(result));
+      memset(&options, 0, sizeof(options));
+      options.max_matches = 1u;
+      reader.data = nested_doc;
+      reader.len = strlen(nested_doc);
+      reader.chunk_size = 7u;
+      lql_error_init(&error);
+      st = test_ctx->mutate_source_projected_candidates_with_options(
+          test_ctx, selector, projection, plan, read_chunk, &reader, out, 1, 1,
+          &options, &result, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source projected nested candidate limit failed: %s\n",
+               error.message);
+        ++failures;
+      } else if (reader.calls <= 1) {
+        printf("source projected nested candidate limit did not fragment reads\n");
+        ++failures;
+      } else if (result.candidates_seen != 1u ||
+                 result.candidates_matched != 1u || !result.stopped_early ||
+                 result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT) {
+        printf("source projected nested candidate limit result mismatch: "
+               "seen=%lu matched=%lu stopped=%d reason=%d\n",
+               (unsigned long)result.candidates_seen,
+               (unsigned long)result.candidates_matched, result.stopped_early,
+               (int)result.stop_reason);
+        ++failures;
+      } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                 strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") !=
+                     0) {
+        printf("source projected nested candidate limit output mismatch: %s\n",
+               buf);
         ++failures;
       }
     }

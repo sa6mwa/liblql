@@ -87,6 +87,11 @@ check_release_surface() {
       printf 'release surface: Darwin runtime paths must be artifact-relative\n' >&2
       exit 1
     fi
+    if ! grep -F 'LQL_INSTALL requires LQL_BUILD_STATIC or LQL_BUILD_SHARED' \
+      "$cmakelists" >/dev/null; then
+      printf 'release surface: CMake must reject install with no library target\n' >&2
+      exit 1
+    fi
     for target in lql_common clql lql_payload_bench lql_match_example \
       lql_lua_core test_lql lql_handle_allocator_test lql_fuzz_smoke; do
       if grep -Eq "add_(library|executable)\\(${target}([[:space:]]|\\))" \
@@ -140,6 +145,11 @@ make release-matrix
 EOF
   cat >"$cmakelists" <<'EOF'
 set(LQL_PROJECT_WARNINGS -Wall -Wextra -Wpedantic -Werror)
+if(NOT LQL_BUILD_STATIC AND NOT LQL_BUILD_SHARED)
+  if(LQL_INSTALL)
+    message(FATAL_ERROR "LQL_INSTALL requires LQL_BUILD_STATIC or LQL_BUILD_SHARED")
+  endif()
+endif()
 if(LQL_TARGET_OS STREQUAL "darwin")
   set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 endif()
@@ -187,6 +197,14 @@ EOF
   if (check_release_surface "$makefile" "$release_script" \
     "$tmp/missing-darwin-install-name.cmake" >/dev/null 2>&1); then
     printf 'release surface fixture: expected missing Darwin install name to fail\n' >&2
+    exit 1
+  fi
+
+  sed '/LQL_INSTALL requires LQL_BUILD_STATIC or LQL_BUILD_SHARED/d' \
+    "$cmakelists" >"$tmp/missing-no-library-install-guard.cmake"
+  if (check_release_surface "$makefile" "$release_script" \
+    "$tmp/missing-no-library-install-guard.cmake" >/dev/null 2>&1); then
+    printf 'release surface fixture: expected missing no-library install guard to fail\n' >&2
     exit 1
   fi
 

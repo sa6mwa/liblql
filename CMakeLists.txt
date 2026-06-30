@@ -23,6 +23,19 @@ set(LQL_DIST_DIR "${CMAKE_SOURCE_DIR}/dist" CACHE PATH "Distribution output dire
 set(LQL_DEPENDENCY_MODE "bundled" CACHE STRING "Dependency mode: bundled, host, auto")
 set(LQL_VERSION_OVERRIDE "" CACHE STRING "Version override for release candidates")
 
+if(NOT LQL_BUILD_STATIC AND NOT LQL_BUILD_SHARED)
+  if(LQL_INSTALL)
+    message(FATAL_ERROR
+      "LQL_INSTALL requires LQL_BUILD_STATIC or LQL_BUILD_SHARED; "
+      "disable LQL_INSTALL for a binary-only local build")
+  endif()
+  if(LQL_BUILD_TESTS OR LQL_BUILD_EXAMPLES OR LQL_BUILD_BENCHMARKS OR LQL_BUILD_LUA_MODULE)
+    message(FATAL_ERROR
+      "tests, examples, benchmarks, and the Lua module require "
+      "LQL_BUILD_STATIC or LQL_BUILD_SHARED")
+  endif()
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(LqlVersion)
 include(LqlLonejson)
