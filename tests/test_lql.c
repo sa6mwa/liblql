@@ -1536,6 +1536,7 @@ static void expect_source_stream(void) {
   lql_query_result result;
   stream_seen seen;
   chunk_reader reader;
+  fail_after_reader one_shot_reader;
   lql_error error;
   lql_status st;
 
@@ -1558,9 +1559,9 @@ static void expect_source_stream(void) {
   st = test_ctx->query_source_decisions_with_options(
       test_ctx, selector, read_chunk, &reader, &options, record_decision, &seen,
       &result, &error);
-  test_ctx->selector_destroy(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("source stream query failed: %s\n", error.message);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
@@ -1581,6 +1582,32 @@ static void expect_source_stream(void) {
     printf("source stream ranges mismatch\n");
     ++failures;
   }
+
+  memset(&one_shot_reader, 0, sizeof(one_shot_reader));
+  memset(&seen, 0, sizeof(seen));
+  memset(&result, 0, sizeof(result));
+  one_shot_reader.data = input;
+  one_shot_reader.len = strlen(input);
+  one_shot_reader.chunk_size = strlen(input);
+  one_shot_reader.fail_offset = strlen(input);
+  lql_error_init(&error);
+  st = test_ctx->query_source_decisions(
+      test_ctx, selector, read_until_offset_then_fail, &one_shot_reader,
+      record_decision, &seen, &result, &error);
+  if (st != LQL_STATUS_OK || one_shot_reader.calls != 1 || seen.calls != 3 ||
+      seen.matched != 1 || result.candidates_seen != (lql_uint64)3 ||
+      result.candidates_matched != (lql_uint64)1 ||
+      result.bytes_read != (lql_uint64)strlen(input)) {
+    printf("source stream one-shot EOF mismatch: status=%s reads=%d "
+           "calls=%d matched=%d seen=%lu result_matched=%lu bytes=%lu "
+           "error=%s\n",
+           lql_status_string(st), one_shot_reader.calls, seen.calls,
+           seen.matched, (unsigned long)result.candidates_seen,
+           (unsigned long)result.candidates_matched,
+           (unsigned long)result.bytes_read, error.message);
+    ++failures;
+  }
+  test_ctx->selector_destroy(test_ctx, selector);
 }
 
 static void expect_source_icontains_any_boundary_stream(void) {

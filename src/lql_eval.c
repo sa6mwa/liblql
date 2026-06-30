@@ -2487,6 +2487,7 @@ typedef struct source_reader_adapter {
   unsigned char prefix[LQL_SOURCE_PREFIX_CAP];
   size_t prefix_len;
   size_t prefix_offset;
+  int prefix_eof;
 } source_reader_adapter;
 
 typedef struct eval_limited_file_reader {
@@ -2751,8 +2752,16 @@ source_reader_read(void *user, unsigned char *buffer, size_t capacity) {
       memcpy(buffer, adapter->prefix + adapter->prefix_offset, copy_len);
       adapter->prefix_offset += copy_len;
       result.bytes_read = copy_len;
+      if (adapter->prefix_offset == adapter->prefix_len &&
+          adapter->prefix_eof) {
+        result.eof = 1;
+      }
       return result;
     }
+  }
+  if (adapter->prefix_eof) {
+    result.eof = 1;
+    return result;
   }
   return source_reader_read_plain(user, buffer, capacity);
 }
@@ -2766,6 +2775,7 @@ static int source_reader_prefix_capture(source_reader_adapter *adapter,
   *out_capture_needed = 1;
   adapter->prefix_len = 0u;
   adapter->prefix_offset = 0u;
+  adapter->prefix_eof = 0;
   lql_result =
       adapter->read(adapter->user, adapter->prefix, sizeof(adapter->prefix));
   if (lql_result.bytes_read > sizeof(adapter->prefix)) {
@@ -2777,6 +2787,7 @@ static int source_reader_prefix_capture(source_reader_adapter *adapter,
     return 0;
   }
   adapter->prefix_len = lql_result.bytes_read;
+  adapter->prefix_eof = lql_result.eof;
   adapter->total_read += (lql_uint64)lql_result.bytes_read;
   if (adapter->prefix_len == 0u) {
     return 1;
