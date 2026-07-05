@@ -1007,8 +1007,8 @@ Current implementation status:
   previous private `lql_node`/`lql_term` authority has been removed.
   The Lua facade now exposes selector userdata backed by the public C selector
   API for parse, AST JSON import/export, traversal, builders, and query reuse.
-  Selector-library parity is still not complete until the remaining oracle
-  inventory audit is closed;
+  Selector-library parity is closed for the v0 public contract, with the
+  documented parser/framing exclusions in `docs/liblql-dependency-gaps.md`;
 - `make test` includes repository-boundary checks that fail if committed
   repository files reference the adjacent Go source checkout through
   `../lql`-style paths or workstation-local checkout paths; parity remains
