@@ -183,7 +183,8 @@ if(LQL_BUILD_LUA_MODULE)
         OUTPUT_NAME core
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lql"
         C_EXTENSIONS ON)
-      target_include_directories(lql_lua_core PRIVATE "${LQL_LUA_INCLUDE_DIR}")
+      target_include_directories(lql_lua_core SYSTEM
+        PRIVATE "${LQL_LUA_INCLUDE_DIR}")
       target_link_libraries(lql_lua_core PRIVATE ${LQL_LUA_LINK_TARGET})
       lql_apply_project_warnings(lql_lua_core)
     else()
