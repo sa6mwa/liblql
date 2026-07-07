@@ -2,20 +2,20 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-version=0.35.2
+version=0.37.0
 base_url=https://github.com/sa6mwa/lonejson/releases/download/v${version}
 targets="x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-linux-musl armhf-linux-gnu armhf-linux-musl arm64-apple-darwin"
 
 sha_for() {
   case "$1" in
-    # SHA-256 values are from the GitHub release asset digests for v0.35.2.
-    aarch64-linux-gnu) printf '%s\n' 5095cd5c7df634dee5ea41b442ed22229a249d22c6defac00e4d04023c70dec4 ;;
-    aarch64-linux-musl) printf '%s\n' e743f9b11688ef254fc58af43571d1bd694fdfda9dd32fc3b9721a039fb04b16 ;;
-    arm64-apple-darwin) printf '%s\n' cbc0b1965661da56162cb14832be03de5f466521448fb5df4b38383bd7b0c98a ;;
-    armhf-linux-gnu) printf '%s\n' 3c73be06a49b0706bb23eea08b8858f3b5ecfe5cff185a16f7b91247b4cd89ec ;;
-    armhf-linux-musl) printf '%s\n' b018782ec76b8829caaec6eec0a09eb8c26471f07f1c6ba939648c803a543dd1 ;;
-    x86_64-linux-gnu) printf '%s\n' 775f306a604cb8b3731d899f849d5eeeb4a2f561ccb3de4ea3cd5725514e7bc9 ;;
-    x86_64-linux-musl) printf '%s\n' 2d8224eb436be0d1c85c77cc2c223f57ac0bde68feb91c4c2ef3b01f9f57875d ;;
+    # SHA-256 values are from the GitHub release asset digests for v0.37.0.
+    aarch64-linux-gnu) printf '%s\n' fd1a1ab60c7b4ffe64bc59240a66b4b598daea766fa4e4e84d368ad538bc5f39 ;;
+    aarch64-linux-musl) printf '%s\n' d0a1c4053ebd2f2fa7c7edbcb4411e77aef96dac7f73a0be6a81bb215d4958d9 ;;
+    arm64-apple-darwin) printf '%s\n' d385f28c00bd25bfc5388ffa8e146e98831eebeab7f060e85b33a8960d7e4d60 ;;
+    armhf-linux-gnu) printf '%s\n' 6ebea5309d6026dbb9c0151562e48809f3abf9eb28a7bff553b2c00038a9ab54 ;;
+    armhf-linux-musl) printf '%s\n' 7c934e3aa1efcb184ddb1854e2932ace35ff173c29c9d5601ef40e1add6575cb ;;
+    x86_64-linux-gnu) printf '%s\n' 6245a791c0970e109bcea100c2c1f0962565ab21d7886d2d46eecc1f47f06c0a ;;
+    x86_64-linux-musl) printf '%s\n' c5ff2e49ee3bd40e7aef96b9719aa013ed53f80fe4894eaad3c4707e77842904 ;;
     *) return 1 ;;
   esac
 }

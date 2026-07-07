@@ -3554,14 +3554,21 @@ static void expect_buffered_projection_api(void) {
   static const char doc[] =
       "{\"id\":\"a\",\"count\":1,\"nested\":{\"x\":true},\"items\":[{\"sku\":"
       "\"A\"},{\"sku\":\"B\"}]}";
+  static const char long_number_doc[] =
+      "{\"big\":123456789012345678901234567890123456789012345678901234567890"
+      "12345678901234567890,\"id\":\"a\"}";
+  static const char long_number_expected[] =
+      "{\"big\":123456789012345678901234567890123456789012345678901234567890"
+      "12345678901234567890}";
   const char *fields[3];
   const char *missing[1];
+  const char *long_number_field[1];
   FILE *out;
   lql_projection *projection;
   lql_error error;
   lql_status st;
   int found;
-  char buf[128];
+  char buf[256];
   size_t len;
 
   out = tmpfile();
@@ -3599,6 +3606,36 @@ static void expect_buffered_projection_api(void) {
   }
   test_ctx->projection_destroy(test_ctx, projection);
   fclose(out);
+
+  out = tmpfile();
+  long_number_field[0] = "/big";
+  projection = NULL;
+  lql_error_init(&error);
+  st = test_ctx->projection_parse(test_ctx, long_number_field, 1u, &projection,
+                                  &error);
+  if (st != LQL_STATUS_OK || out == NULL) {
+    printf("buffered long-number projection setup failed\n");
+    ++failures;
+  } else {
+    found = 0;
+    st = test_ctx->project_json(test_ctx, projection, long_number_doc,
+                                strlen(long_number_doc), out, &found, &error);
+    if (st != LQL_STATUS_OK) {
+      printf("buffered long-number projection failed: %s\n", error.message);
+      ++failures;
+    } else if (!found) {
+      printf("buffered long-number projection expected found\n");
+      ++failures;
+    } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+               strcmp(buf, long_number_expected) != 0) {
+      printf("buffered long-number projection output mismatch: %s\n", buf);
+      ++failures;
+    }
+  }
+  test_ctx->projection_destroy(test_ctx, projection);
+  if (out != NULL) {
+    fclose(out);
+  }
 
   out = tmpfile();
   missing[0] = "/missing";
@@ -4890,7 +4927,9 @@ static void expect_path_mutation_api(void) {
   char buf[512];
   size_t len;
   static const char doc[] =
-      "{\"state\":{\"status\":\"open\",\"count\":1,\"old\":true},\"id\":\"a\"}";
+      "{\"state\":{\"status\":\"open\",\"count\":1,\"old\":true},\"big\":"
+      "123456789012345678901234567890123456789012345678901234567890"
+      "12345678901234567890,\"id\":\"a\"}";
 
   source = tmpfile();
   out = tmpfile();
@@ -4934,7 +4973,9 @@ static void expect_path_mutation_api(void) {
     } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                strcmp(buf, "{\"state\":{\"status\":\"done\",\"count\":2,"
                            "\"missing\":\"value\",\"updated\":\"2025-01-"
-                           "02T00:34:05.123456789Z\"},\"id\":\"a\","
+                           "02T00:34:05.123456789Z\"},\"big\":"
+                           "123456789012345678901234567890123456789012345678901234567890"
+                           "12345678901234567890,\"id\":\"a\","
                            "\"added\":{\"nested\":\"ok\",\"other\":2}}") != 0) {
       printf("path mutation output mismatch: %s\n", buf);
       ++failures;
@@ -5157,7 +5198,9 @@ static void expect_source_mutation_api(void) {
   char buf[256];
   size_t len;
   static const char doc[] =
-      "{\"state\":{\"status\":\"open\",\"count\":1,\"old\":true},\"id\":\"a\"}";
+      "{\"state\":{\"status\":\"open\",\"count\":1,\"old\":true},\"big\":"
+      "123456789012345678901234567890123456789012345678901234567890"
+      "12345678901234567890,\"id\":\"a\"}";
 
   out = tmpfile();
   if (out == NULL) {
@@ -5189,8 +5232,11 @@ static void expect_source_mutation_api(void) {
       printf("source mutation did not consume fragmented reads\n");
       ++failures;
     } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
-               strcmp(buf, "{\"state\":{\"status\":\"done\",\"count\":2,"
-                           "\"missing\":\"value\"},\"id\":\"a\"}") != 0) {
+               strcmp(buf,
+                      "{\"state\":{\"status\":\"done\",\"count\":2,"
+                      "\"missing\":\"value\"},\"big\":"
+                      "123456789012345678901234567890123456789012345678901234567890"
+                      "12345678901234567890,\"id\":\"a\"}") != 0) {
       printf("source mutation output mismatch: %s\n", buf);
       ++failures;
     }

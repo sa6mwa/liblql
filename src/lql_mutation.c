@@ -3077,15 +3077,17 @@ static lonejson_status mutation_number_begin(void *user,
     state->root_seen = 1;
     state->root_is_object = 0;
   }
+  if (state->active_increment) {
+    mutation_num_reset(state);
+    return LONEJSON_STATUS_OK;
+  }
   if (state->skipping) {
-    if (state->active_increment ||
-        skipped_earlier_increment_index(state, path, &state->active_index)) {
+    if (skipped_earlier_increment_index(state, path, &state->active_index)) {
       state->active_increment = 1;
       state->active_keyed = 0;
       mutation_num_reset(state);
       return LONEJSON_STATUS_OK;
     }
-    mutation_num_reset(state);
     return LONEJSON_STATUS_OK;
   }
   if (begin_array_value_mutation(state, path, error, &matched_value) !=
@@ -3095,8 +3097,7 @@ static lonejson_status mutation_number_begin(void *user,
   if (matched_value) {
     return LONEJSON_STATUS_OK;
   }
-  mutation_num_reset(state);
-  return LONEJSON_STATUS_OK;
+  return lonejson_writer_number_begin(&state->writer, error);
 }
 
 static lonejson_status mutation_number_chunk(void *user,
@@ -3112,6 +3113,9 @@ static lonejson_status mutation_number_chunk(void *user,
       return LONEJSON_STATUS_ALLOCATION_FAILED;
     }
     return LONEJSON_STATUS_OK;
+  }
+  if (!state->active_increment) {
+    return lonejson_writer_number_chunk(&state->writer, data, len, error);
   }
   return mutation_num_append(state, data, len)
              ? LONEJSON_STATUS_OK
@@ -3140,8 +3144,7 @@ static lonejson_status mutation_number_end(void *user,
     return finish_skip_value(state);
   }
   if (!state->active_increment) {
-    return lonejson_writer_number_text(&state->writer, state->num_buf,
-                                       state->num_len, error);
+    return lonejson_writer_number_end(&state->writer, error);
   }
   if (!parse_number(state->num_buf, &existing)) {
     return LONEJSON_STATUS_CALLBACK_FAILED;

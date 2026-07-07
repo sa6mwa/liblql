@@ -49,7 +49,7 @@ shape is intentionally outside the public candidate-stream contract. liblql must
 not emulate it by materializing the root array, spooling the whole input, or
 retaining all candidates.
 
-lonejson `v0.35.2` exposes useful pieces:
+lonejson `v0.37.0` exposes useful pieces:
 
 - `AUTO` framing for repeated top-level values;
 - `ARRAY_ITEMS` framing for one top-level array treated as item candidates;
@@ -119,7 +119,7 @@ streams to claim this additional Go-compatible input shape.
 
 The Go `pkt.systems/lql v0.17.1` stream parity corpus compares `QueryStream`
 against `encoding/json.Decoder`. Two observable edge cases from that corpus are
-not currently matched by lonejson `v0.35.2`:
+not currently matched by lonejson `v0.37.0`:
 
 - The string payload
   `{"id":"a","s":"line\n\t\u0001\u2028\u2029\ud800\udc00\ud800x"}`
@@ -145,7 +145,7 @@ consumer of lonejson number chunks: it keeps a small leading slice for ordinary
 state for oversized tokens. liblql must not materialize the selected number
 text.
 
-The remaining limitation is in lonejson `v0.35.2`: the public path-value visitor
+The remaining limitation is in lonejson `v0.37.0`: the public path-value visitor
 currently rejects raw JSON number tokens above its internal maximum byte limit,
 and raising the public config field beyond that limit is not safe on the
 current release. A 200-byte accepted token also shows bounded lonejson-owned
@@ -160,34 +160,36 @@ delivery; liblql should not bypass lonejson with a second JSON tokenizer.
 
 ## Predicate-Gated Candidate Capture
 
-The standalone CR for this dependency feature is
+The standalone CR for this dependency feature was
 [`docs/lonejson-cr-predicate-gated-candidate-capture.md`](lonejson-cr-predicate-gated-candidate-capture.md).
 
 Seekable liblql candidate streams can avoid candidate capture: lonejson reports
 64-bit candidate offsets and byte sizes, and liblql can reread a matched range
 with `pread()` without disturbing the active parser cursor. Callback-source
-candidate streams do not have that option. When the public API must expose a
-matched payload handle, project a matched payload, or mutate matched candidates
-from a non-seekable source, liblql currently has to request
-`LONEJSON_CANDIDATE_CAPTURE_SPOOLED` for every candidate before selector truth
-is known.
+candidate streams do not have that option.
 
-That is semantically correct and bounded in memory, but it is still unnecessary
-work for sparse selectors: unmatched candidates are spooled and then discarded.
-liblql must not "fix" this by retaining whole candidates itself, delaying output
-behind an undisclosed full buffer, using temporary files as a hidden substitute
-for streaming, or adding a second JSON parser. The missing capability is a
-lonejson-owned capture decision point integrated with candidate parsing.
+lonejson `v0.37.0` provides `LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED` plus a
+capture decision callback. liblql now uses that surface for callback-source
+matched payload queries: selector state is evaluated while the candidate is
+parsed, unmatched candidates are discarded before callback-scoped payload handles
+are exposed, and root-array candidates are retained so nested root-array
+flattening remains correct.
 
-The required lonejson follow-up is a candidate-stream capture mode where a
-caller can decide, at candidate end, whether the current candidate's already
+This closes the dependency-owned sparse matched-payload capture gap. Projection
+and mutation paths still use spooled replay until liblql consumes the
+single-pass transform API described below. liblql must not replace that remaining
+work with retained whole candidates, undisclosed output buffers, temporary files
+as hidden staging, or a second JSON parser.
+
+The now-available dependency capability is a candidate-stream capture mode where
+a caller can decide, at candidate end, whether the current candidate's already
 validated bytes should be retained for callback-scoped replay. The important
 intent is not "make spooling conditional" as an implementation detail; the
 intent is to let a streaming visitor evaluate selector state while lonejson
 keeps only the minimal dependency-owned replay state needed to make an
 end-of-candidate retain/discard decision.
 
-Required semantics:
+Required semantics, now represented by the lonejson `v0.37.0` surface:
 
 - The parser still streams path/value visitor callbacks as candidate bytes are
   consumed. liblql evaluates selectors from those callbacks.
@@ -224,7 +226,7 @@ Non-goals:
   must remain a valid replayable candidate with the same logical value, matching
   the existing candidate capture contract.
 
-Validation needed in lonejson:
+Validation expected in lonejson:
 
 - sparse-match fixture proves discarded candidates do not produce payload
   handles;
@@ -239,15 +241,13 @@ Validation needed in lonejson:
 - offsets and sizes are identical to existing candidate capture modes;
 - `CAPTURE_NONE` performance remains unchanged.
 
-Once lonejson exposes this surface, liblql can replace callback-source
-plus-value, projection, and matches-only mutation paths that currently use
-all-candidate spooled capture with selector-gated retain/discard. That is the
-remaining dependency-owned performance path for sparse non-seekable candidate
-streams.
+liblql has consumed this surface for callback-source matched payload queries.
+Projection and mutation remain tied to the transform integration below rather
+than a missing predicate-gated capture primitive.
 
 ## Single-Pass Candidate Transform Visitors
 
-The standalone CR for this dependency feature is
+The standalone CR for this dependency feature was
 [`docs/lonejson-cr-single-pass-candidate-transform.md`](lonejson-cr-single-pass-candidate-transform.md).
 
 The predicate-gated capture feature above removes wasted replay work for sparse
@@ -255,7 +255,7 @@ selectors. It does not solve dense or all-match transforms where every
 candidate is retained. Current callback-source projection and candidate
 mutation have to parse each candidate once for selector evaluation while
 lonejson spools the candidate bytes, then parse the spooled candidate again to
-project or mutate it. Local `perf` profiles on `lonejson v0.35.2` show the
+project or mutate it. Local `perf` profiles on `lonejson v0.35.2` showed the
 dominant cost in these paths is `lonejson_spooled_append`, allocator growth
 under that append path, and replay/write work, not liblql selector or mutation
 dispatch.
@@ -267,16 +267,14 @@ parallel JSON parser, materializing projection state as full JSON values, or
 using temporary files as a hidden staging layer. It also must not add a
 selector-result, candidate, or transform-output cache to avoid replay: those
 would add memory growth, invalidation, and branch cost while failing to remove
-the fundamental extra parse/write pass. The missing capability is a
-lonejson-owned way for one parse of a candidate to feed multiple path-aware
-consumers and a writer.
+the fundamental extra parse/write pass.
 
-The required lonejson follow-up is a candidate-stream transform mode that lets a
-consumer attach more than one path-aware visitor to the same candidate parse, or
-otherwise compose visitor pipelines so selector evaluation and projection or
-mutation output can happen from the same validated token stream.
+lonejson `v0.37.0` exposes a candidate transform surface. The remaining work is
+liblql integration: replace the current callback-source projection and mutation
+spooled replay paths with that single-pass transform API while preserving the
+existing streaming, writer, and error contracts.
 
-Required semantics:
+Required semantics for the liblql integration:
 
 - The parser validates and frames each candidate once.
 - The same candidate parse can drive selector-style observation and one
@@ -295,8 +293,8 @@ Required semantics:
 - Memory remains bounded by parser stack, writer state, selector/projection/
   mutation scratch, and configured current-value buffers. Retaining the whole
   source, all candidates, or all matched outputs is not allowed.
-- Existing candidate capture modes keep their current behavior. This feature is
-  an additional single-pass transform surface, not a semantic change to
+- Existing candidate capture modes keep their current behavior. The transform
+  surface is an additional single-pass path, not a semantic change to
   `CAPTURE_SPOOLED`.
 
 Non-goals:
@@ -308,7 +306,7 @@ Non-goals:
 - Do not make this feature depend on seekable input; the main need is
   callback-source streams that cannot rewind.
 
-Validation needed in lonejson:
+Validation needed in liblql when consuming the transform surface:
 
 - dense-match projection fixture proves one parse can select and write
   projected output without candidate spooling or replay;
@@ -324,33 +322,31 @@ Validation needed in lonejson:
 - peak memory is independent of total source size and does not grow with the
   number of candidates.
 
-Once lonejson exposes this surface, liblql can replace the current
-callback-source projection and mutation replay paths with true single-pass
-source transforms. That is the remaining dependency-owned performance path for
-dense non-seekable candidate transforms.
+This is no longer a dependency-owned missing API. It is the remaining liblql
+implementation path for dense non-seekable candidate transforms.
 
 ## Chunked Number Writer
 
-The standalone CR for this dependency feature is
+The standalone CR for this dependency feature was
 [`docs/lonejson-cr-chunked-number-writer.md`](lonejson-cr-chunked-number-writer.md).
 
 LoneJSON visitors expose number values as begin/chunk/end callbacks, but the
-writer currently exposes only complete-token number emission through
-`lonejson_writer_number_text()`. liblql projection and mutation therefore keep
-bounded inline number buffers and spill to the receiver allocator for unusually
-long pass-through number tokens. That is correct and bounded, but it is still
-not the final C-native streaming shape because straight pass-through should not
-require liblql-owned token materialization.
+writer only exposed complete-token number emission through
+`lonejson_writer_number_text()` before `v0.37.0`. liblql projection and mutation
+therefore kept bounded inline number buffers and spilled to the receiver
+allocator for unusually long pass-through number tokens. That was correct and
+bounded, but straight pass-through did not need liblql-owned token
+materialization once lonejson could validate and emit chunks directly.
 
 liblql must not bypass lonejson by writing raw number bytes directly into the
 output stream. LoneJSON owns writer state, separators, scalar validation, and
-error reporting. The missing dependency feature is a lonejson-owned chunked
-number writer that mirrors visitor chunking while validating and committing the
-number token through normal writer rules.
+error reporting.
 
-Once lonejson exposes this surface, liblql can remove pass-through number
-buffering from projection and mutation callbacks while preserving bounded
-buffering only for numeric mutation targets that must be parsed or modified.
+lonejson `v0.37.0` exposes `lonejson_writer_number_begin()`,
+`lonejson_writer_number_chunk()`, and `lonejson_writer_number_end()`. liblql now
+uses that surface for projection and mutation pass-through numbers. Bounded
+number buffering remains only for numeric mutation targets that must be parsed
+or modified, such as increment operations.
 
 ## Seekable Matched Mutation
 

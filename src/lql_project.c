@@ -39,7 +39,6 @@ typedef struct projection_path {
 } projection_path;
 
 #define PROJECTION_KEY_INLINE_CAP 128u
-#define PROJECTION_NUM_INLINE_CAP 64u
 
 typedef struct projection_parse_context {
   lql *self;
@@ -54,10 +53,6 @@ typedef struct projection_state {
   char *key_buf;
   size_t key_len;
   char inline_key_buf[PROJECTION_KEY_INLINE_CAP];
-  char *num_buf;
-  size_t num_len;
-  char inline_num_buf[PROJECTION_NUM_INLINE_CAP];
-  const projection_path *number_path;
   size_t capture_depth;
   int capturing;
   int in_string;
@@ -634,18 +629,6 @@ static int projection_key_append(projection_state *state, const char *data,
                                       sizeof(state->inline_key_buf), data, n);
 }
 
-static void projection_num_reset(projection_state *state) {
-  projection_inline_buf_reset(state, &state->num_buf, &state->num_len,
-                              state->inline_num_buf);
-}
-
-static int projection_num_append(projection_state *state, const char *data,
-                                 size_t n) {
-  return projection_inline_buf_append(state, &state->num_buf, &state->num_len,
-                                      state->inline_num_buf,
-                                      sizeof(state->inline_num_buf), data, n);
-}
-
 static size_t common_open_prefix(const projection_state *state,
                                  const projection_path *path,
                                  size_t parent_count) {
@@ -1018,16 +1001,21 @@ static lonejson_status on_number_begin(void *user,
     state->root_is_object = 0;
   }
   if (state->capturing) {
-    projection_num_reset(state);
-    state->number_path = NULL;
     state->in_number = 1;
-    return LONEJSON_STATUS_OK;
+    return lonejson_writer_number_begin(&state->writer, state->error) ==
+                   LONEJSON_STATUS_OK
+               ? LONEJSON_STATUS_OK
+               : LONEJSON_STATUS_CALLBACK_FAILED;
   }
   projected_path = selected_path(state->projection, path);
-  state->number_path = projected_path;
   state->in_number = projected_path != NULL;
   if (state->in_number) {
-    projection_num_reset(state);
+    if (projection_key(state, projected_path) != LONEJSON_STATUS_OK ||
+        lonejson_writer_number_begin(&state->writer, state->error) !=
+            LONEJSON_STATUS_OK) {
+      state->in_number = 0;
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
   }
   return LONEJSON_STATUS_OK;
 }
@@ -1040,8 +1028,10 @@ static lonejson_status on_number_chunk(void *user,
   (void)path;
   (void)error;
   state = (projection_state *)user;
-  if (state->in_number && !projection_num_append(state, data, len)) {
-    return LONEJSON_STATUS_ALLOCATION_FAILED;
+  if (state->in_number &&
+      lonejson_writer_number_chunk(&state->writer, data, len, state->error) !=
+          LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -1059,21 +1049,11 @@ static lonejson_status on_number_end(void *user,
   if (!state->in_number) {
     return LONEJSON_STATUS_OK;
   }
-  if (!state->capturing) {
-    if (state->number_path == NULL ||
-        projection_key(state, state->number_path) != LONEJSON_STATUS_OK) {
-      state->in_number = 0;
-      state->number_path = NULL;
-      return LONEJSON_STATUS_CALLBACK_FAILED;
-    }
-  }
-  if (lonejson_writer_number_text(&state->writer, state->num_buf,
-                                  state->num_len,
-                                  state->error) != LONEJSON_STATUS_OK) {
+  if (lonejson_writer_number_end(&state->writer, state->error) !=
+      LONEJSON_STATUS_OK) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   state->in_number = 0;
-  state->number_path = NULL;
   return LONEJSON_STATUS_OK;
 }
 
@@ -1157,13 +1137,9 @@ static void projection_state_cleanup(projection_state *state) {
   if (state->key_buf != state->inline_key_buf) {
     state->allocator->destroy(state->allocator, state->key_buf);
   }
-  if (state->num_buf != state->inline_num_buf) {
-    state->allocator->destroy(state->allocator, state->num_buf);
-  }
   state->allocator->destroy(state->allocator, state->open_kind);
   state->allocator->destroy(state->allocator, state->open_array_next);
   state->key_buf = NULL;
-  state->num_buf = NULL;
   state->open_kind = NULL;
   state->open_array_next = NULL;
 }

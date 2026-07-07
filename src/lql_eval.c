@@ -3368,6 +3368,21 @@ on_source_spooled_candidate_begin(void *user,
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
+static lonejson_candidate_capture_decision
+on_source_spooled_capture_decision(void *user,
+                                   const lonejson_candidate_info *candidate,
+                                   lonejson_error *error) {
+  source_spooled_match_state *state;
+  (void)candidate;
+  (void)error;
+  state = (source_spooled_match_state *)user;
+  if (state->doc.root_kind == '[' ||
+      eval_doc_matches(state->selector, &state->doc)) {
+    return LONEJSON_CANDIDATE_RETAIN;
+  }
+  return LONEJSON_CANDIDATE_DISCARD;
+}
+
 static lonejson_candidate_callback_result
 on_source_spooled_candidate_end(void *user,
                                 const lonejson_candidate_info *candidate,
@@ -4746,12 +4761,14 @@ static lql_status execute_query_source_spooled_matches_with_base(
   init_eval_visitor(&visitor);
   configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED;
   options.path_visitor = &visitor;
   options.visitor_user = &state.doc;
   options.candidate_begin = on_source_spooled_candidate_begin;
   options.candidate_end = on_source_spooled_candidate_end;
   options.candidate_user = &state;
+  options.capture_decision = on_source_spooled_capture_decision;
+  options.capture_decision_user = &state;
   st = lonejson_visit_candidates_reader(runtime, source_reader_read_plain,
                                         &adapter, &options, &lj_error);
   if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||

@@ -205,16 +205,15 @@ when it removes allocation or repeated derivation without changing the
 observable selector result and without adding invalidation logic to the hot
 path.
 The remaining dependency-owned performance work is documented as explicit
-lonejson CRs rather than hidden liblql workarounds. Non-seekable sparse
-plus-value/projection/mutation paths need predicate-gated candidate capture so
-discarded candidates are not spooled before selector truth is known.
-Non-seekable dense projection and mutation need single-pass candidate
-transforms so selector observation and output rewriting can share one validated
-parse. Seekable matched-object mutation already uses no-capture candidate
-offsets and direct writer output; remaining work there is C-owned branch,
-syscall, and stdio overhead reduction inside the existing streaming
-architecture. In all cases liblql must keep streaming behavior real and
-bounded, not add caches or materialized output buffers.
+lonejson CRs rather than hidden liblql workarounds. With lonejson `v0.37.0`,
+callback-source matched payload queries use predicate-gated spooled capture, so
+sparse unmatched candidates are discarded before payload handles are exposed.
+Projection and mutation pass-through numbers use lonejson's chunked number
+writer instead of liblql-owned complete-token buffers. Non-seekable dense
+projection and mutation still need the new single-pass candidate transform
+surface to replace the current spooled replay paths. In all cases liblql must
+keep streaming behavior real and bounded, not add caches or materialized output
+buffers.
 Selected-scalar query predicates use bounded streaming state in liblql rather
 than full selected-value buffers, including numeric `range`; the current
 lonejson visitor still imposes a small raw number-token limit documented in
