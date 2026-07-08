@@ -147,18 +147,19 @@ consumer of lonejson number chunks: it keeps a small leading slice for ordinary
 state for oversized tokens. liblql must not materialize the selected number
 text.
 
-The remaining limitation is in lonejson `v0.39.0`: the public path-value visitor
-currently rejects raw JSON number tokens above its internal maximum byte limit,
-and raising the public config field beyond that limit is not safe on the
-current release. A 200-byte accepted token also shows bounded lonejson-owned
-allocation before liblql receives the completed numeric scalar. Therefore
-arbitrarily large numeric-token range matching is not proven end to end yet.
+liblql now configures lonejson's public `json_value_max_number_bytes` runtime
+limit to 4096 bytes for receiver-owned parser runtimes. The C allocator gate
+proves 2048-digit numeric range matching succeeds without peak memory growing
+with the numeric token. This closes the previous 200-byte practical ceiling for
+the v0 contract.
 
-The required lonejson follow-up is a public arbitrary-value/path-value visitor
-mode that streams raw number-token chunks with a caller-configurable 64-bit byte
-limit and no allocation proportional to the number token. That feature belongs
-in lonejson because lonejson owns JSON tokenization, validation, and visitor
-delivery; liblql should not bypass lonejson with a second JSON tokenizer.
+The remaining limitation is only for truly arbitrary-size numeric tokens:
+raising the configured limit scales lonejson-owned parser workspace, so liblql
+does not claim unbounded numeric-token range matching. A future unbounded
+contract still needs a lonejson visitor mode that streams raw number-token
+chunks with a caller-configurable 64-bit byte limit and no allocation
+proportional to that limit. liblql must not bypass lonejson with a second JSON
+tokenizer to emulate that behavior.
 
 ## Predicate-Gated Candidate Capture
 

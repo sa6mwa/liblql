@@ -2842,7 +2842,7 @@ static int expect_selector_temporal_large_blob_allocation_stable(void) {
 
 static int expect_selector_numeric_range_large_number_allocation_stable(void) {
   static char small_doc[128];
-  static char large_doc[512];
+  static char large_doc[4096];
   counting_allocator counter;
   lql *ctx;
   lql_selector *selector;
@@ -2852,7 +2852,7 @@ static int expect_selector_numeric_range_large_number_allocation_stable(void) {
   size_t small_peak;
 
   if (!make_number_doc(small_doc, sizeof(small_doc), 3u) ||
-      !make_number_doc(large_doc, sizeof(large_doc), 200u)) {
+      !make_number_doc(large_doc, sizeof(large_doc), 2048u)) {
     printf("selector numeric range fixture construction failed\n");
     return 1;
   }

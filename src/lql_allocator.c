@@ -229,6 +229,7 @@ LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
   }
 
   config = lonejson_default_config();
+  config.json_value_max_number_bytes = 4096u;
   allocator = lonejson_default_allocator();
   allocator.malloc_fn = lonejson_lql_malloc;
   allocator.realloc_fn = lonejson_lql_realloc;
@@ -255,6 +256,7 @@ static lonejson *lql_lonejson_new_pooled(lql *self, lonejson_error *error) {
   impl = (lql_impl *)self->impl;
 
   config = lonejson_default_config();
+  config.json_value_max_number_bytes = 4096u;
   allocator = lonejson_default_allocator();
   allocator.malloc_fn = lonejson_eval_pool_malloc;
   allocator.realloc_fn = lonejson_eval_pool_realloc;

@@ -289,13 +289,13 @@ entries used by the current plan. Inline path-frame reserves must be assigned
 on push rather than cleared wholesale per candidate; this is reduced zeroing,
 not allocator reuse or candidate caching.
 
-As of lonejson `v0.39.0`, the path-value visitor used by liblql still enforces
-a small raw JSON number-token limit and performs bounded internal allocation for
-number-token parsing. That is a dependency limitation, not permission for
-liblql to copy selected numeric values. Full arbitrarily large numeric-token
-support requires a lonejson public visitor mode that can stream raw number
-tokens without token-size-proportional allocation and with a configurable
-64-bit byte limit.
+liblql configures lonejson receiver runtimes with a 4096-byte raw JSON
+number-token visitor limit. Numeric range matching remains a bounded streaming
+consumer of lonejson number chunks, and allocator tests prove a 2048-digit
+numeric token does not make peak memory grow with the token. Full arbitrarily
+large numeric-token support remains outside the v0 contract unless lonejson
+adds a public visitor mode that streams raw number tokens without
+token-size-proportional allocation.
 
 ## Selector AST Public API
 
