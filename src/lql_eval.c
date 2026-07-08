@@ -3383,6 +3383,26 @@ on_source_spooled_capture_decision(void *user,
   return LONEJSON_CANDIDATE_DISCARD;
 }
 
+static lonejson_candidate_capture_decision
+on_rewrite_spooled_capture_decision(void *user,
+                                    const lonejson_candidate_info *candidate,
+                                    lonejson_error *error) {
+  spooled_match_state *state;
+  int matched;
+  (void)candidate;
+  (void)error;
+  state = (spooled_match_state *)user;
+  matched = eval_doc_matches(state->selector, &state->doc);
+  if (matched) {
+    return LONEJSON_CANDIDATE_RETAIN;
+  }
+  if (!state->matches_only &&
+      (state->mutation_plan != NULL || state->projection != NULL)) {
+    return LONEJSON_CANDIDATE_RETAIN;
+  }
+  return LONEJSON_CANDIDATE_DISCARD;
+}
+
 static lonejson_candidate_callback_result
 on_source_spooled_candidate_end(void *user,
                                 const lonejson_candidate_info *candidate,
@@ -4913,6 +4933,7 @@ static lql_status execute_query_source_spooled_rewrite(
   lonejson_status st;
   spooled_match_state state;
   source_reader_adapter adapter;
+  int recursive_array_framing;
 
   if (read == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -4937,8 +4958,17 @@ static lql_status execute_query_source_spooled_rewrite(
   memset(&adapter, 0, sizeof(adapter));
   adapter.read = read;
   adapter.user = read_user;
+  recursive_array_framing = 0;
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
+  }
+  if (!source_reader_prefix_capture(&adapter, &recursive_array_framing)) {
+    if (out_result != NULL) {
+      *out_result = state.result;
+    }
+    destroy_doc(&state.doc);
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, "source read failed");
+    return LQL_STATUS_JSON_ERROR;
   }
   runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
@@ -4958,14 +4988,20 @@ static lql_status execute_query_source_spooled_rewrite(
   init_eval_visitor(&visitor);
   configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED;
+  if (recursive_array_framing) {
+    options.framing = LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS;
+    state.expand_arrays = 0;
+  }
   options.path_visitor = &visitor;
   options.visitor_user = &state.doc;
   options.candidate_begin = on_spooled_candidate_begin;
   options.candidate_end = on_spooled_candidate_end;
   options.candidate_user = &state;
+  options.capture_decision = on_rewrite_spooled_capture_decision;
+  options.capture_decision_user = &state;
   flockfile(out);
-  st = lonejson_visit_candidates_reader(runtime, source_reader_read_plain,
+  st = lonejson_visit_candidates_reader(runtime, source_reader_read,
                                         &adapter, &options, &lj_error);
   funlockfile(out);
   if (state.compact_runtime != NULL) {

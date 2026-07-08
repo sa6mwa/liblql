@@ -1,17 +1,28 @@
-set(LQL_LONEJSON_VERSION "0.37.0")
+set(LQL_LONEJSON_VERSION "0.38.0")
 option(LQL_LONEJSON_STATIC "Prefer the static lonejson imported target" OFF)
 
 if(NOT LQL_EXTERNAL_ROOT)
   set(LQL_EXTERNAL_ROOT "${CMAKE_SOURCE_DIR}/.cache/deps/${LQL_TARGET_ID}/lonejson")
 endif()
+if(NOT LQL_CPKT_ROOT)
+  set(LQL_CPKT_ROOT "${CMAKE_SOURCE_DIR}/.cache/deps/${LQL_TARGET_ID}/c.pkt.systems")
+endif()
 
 find_package(lonejson ${LQL_LONEJSON_VERSION} CONFIG QUIET PATHS "${LQL_EXTERNAL_ROOT}" NO_DEFAULT_PATH)
 if(LQL_LONEJSON_STATIC AND TARGET lonejson::lonejson_static)
+  if(EXISTS "${LQL_CPKT_ROOT}/lib")
+    set_property(TARGET lonejson::lonejson_static APPEND PROPERTY
+      INTERFACE_LINK_DIRECTORIES "${LQL_CPKT_ROOT}/lib")
+  endif()
   if(TARGET lonejson::lonejson)
     get_target_property(LQL_LONEJSON_STATIC_LOCATION
       lonejson::lonejson_static IMPORTED_LOCATION)
     set_property(TARGET lonejson::lonejson PROPERTY
       IMPORTED_LOCATION "${LQL_LONEJSON_STATIC_LOCATION}")
+    if(EXISTS "${LQL_CPKT_ROOT}/lib")
+      set_property(TARGET lonejson::lonejson APPEND PROPERTY
+        INTERFACE_LINK_DIRECTORIES "${LQL_CPKT_ROOT}/lib")
+    endif()
     unset(LQL_LONEJSON_STATIC_LOCATION)
   else()
     add_library(lonejson::lonejson ALIAS lonejson::lonejson_static)

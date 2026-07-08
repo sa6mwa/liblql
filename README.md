@@ -204,16 +204,19 @@ streaming paths appear faster. Receiver-owned scratch reuse is allowed only
 when it removes allocation or repeated derivation without changing the
 observable selector result and without adding invalidation logic to the hot
 path.
-The remaining dependency-owned performance work is documented as explicit
-lonejson CRs rather than hidden liblql workarounds. With lonejson `v0.37.0`,
-callback-source matched payload queries use predicate-gated spooled capture, so
-sparse unmatched candidates are discarded before payload handles are exposed.
-Projection and mutation pass-through numbers use lonejson's chunked number
-writer instead of liblql-owned complete-token buffers. Non-seekable dense
-projection and mutation still need the new single-pass candidate transform
-surface to replace the current spooled replay paths. In all cases liblql must
-keep streaming behavior real and bounded, not add caches or materialized output
-buffers.
+Dependency-owned streaming work is tracked as explicit lonejson CRs rather than
+hidden liblql workarounds. With lonejson `v0.38.0`, callback-source matched
+payload queries and selector-gated source mutation/projection use
+predicate-gated spooled capture, so sparse unmatched candidates are discarded
+before payload handles are exposed or replayed. Top-level root-array source
+mutation uses lonejson recursive candidate framing instead of liblql-owned
+nested-array replay scaffolding. Projection and mutation pass-through numbers
+use lonejson's chunked number writer instead of liblql-owned complete-token
+buffers. Dense non-seekable projection and mutation still retain and replay the
+current candidate; the remaining liblql performance work is to consume
+lonejson's V2 candidate transform writer path for those retained dense cases.
+In all cases liblql must keep streaming behavior real and bounded, not add
+caches or materialized output buffers.
 Selected-scalar query predicates use bounded streaming state in liblql rather
 than full selected-value buffers, including numeric `range`; the current
 lonejson visitor still imposes a small raw number-token limit documented in

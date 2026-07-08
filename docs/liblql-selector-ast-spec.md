@@ -224,7 +224,7 @@ string forms and arrays where the Go library accepts them.
 
 ## Lonejson Requirement
 
-Selector AST JSON parsing and serialization must use lonejson `v0.37.0`.
+Selector AST JSON parsing and serialization must use lonejson `v0.38.0`.
 liblql must not implement bespoke JSON parsing or escaping for selector AST
 payloads.
 
