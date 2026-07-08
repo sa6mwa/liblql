@@ -49,7 +49,7 @@ shape is intentionally outside the public candidate-stream contract. liblql must
 not emulate it by materializing the root array, spooling the whole input, or
 retaining all candidates.
 
-lonejson `v0.38.0` exposes useful pieces:
+lonejson `v0.39.0` exposes useful pieces:
 
 - `AUTO` framing for repeated top-level values;
 - `ARRAY_ITEMS` framing for one top-level array treated as item candidates;
@@ -121,7 +121,7 @@ streams to claim this additional Go-compatible input shape.
 
 The Go `pkt.systems/lql v0.17.1` stream parity corpus compares `QueryStream`
 against `encoding/json.Decoder`. Two observable edge cases from that corpus are
-not currently matched by lonejson `v0.38.0`:
+not currently matched by lonejson `v0.39.0`:
 
 - The string payload
   `{"id":"a","s":"line\n\t\u0001\u2028\u2029\ud800\udc00\ud800x"}`
@@ -147,7 +147,7 @@ consumer of lonejson number chunks: it keeps a small leading slice for ordinary
 state for oversized tokens. liblql must not materialize the selected number
 text.
 
-The remaining limitation is in lonejson `v0.38.0`: the public path-value visitor
+The remaining limitation is in lonejson `v0.39.0`: the public path-value visitor
 currently rejects raw JSON number tokens above its internal maximum byte limit,
 and raising the public config field beyond that limit is not safe on the
 current release. A 200-byte accepted token also shows bounded lonejson-owned
@@ -170,7 +170,7 @@ Seekable liblql candidate streams can avoid candidate capture: lonejson reports
 with `pread()` without disturbing the active parser cursor. Callback-source
 candidate streams do not have that option.
 
-lonejson `v0.38.0` provides `LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED` plus a
+lonejson `v0.39.0` provides `LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED` plus a
 capture decision callback. liblql now uses that surface for callback-source
 matched payload queries and selector-gated source mutation/projection replay:
 selector state is evaluated while the candidate is parsed, unmatched candidates
@@ -194,7 +194,7 @@ intent is to let a streaming visitor evaluate selector state while lonejson
 keeps only the minimal dependency-owned replay state needed to make an
 end-of-candidate retain/discard decision.
 
-Required semantics, now represented by the lonejson `v0.38.0` surface:
+Required semantics, now represented by the lonejson `v0.39.0` surface:
 
 - The parser still streams path/value visitor callbacks as candidate bytes are
   consumed. liblql evaluates selectors from those callbacks.
@@ -275,7 +275,7 @@ selector-result, candidate, or transform-output cache to avoid replay: those
 would add memory growth, invalidation, and branch cost while failing to remove
 the fundamental extra parse/write pass.
 
-lonejson `v0.38.0` exposes the V2 candidate transform surface, including
+lonejson `v0.39.0` exposes the V2 candidate transform surface, including
 explicit streaming and gated-spooled execution modes, recursive logical
 candidate metadata, old scalar policy, object insertion hooks, structural
 projection paths, transform replay counters, and

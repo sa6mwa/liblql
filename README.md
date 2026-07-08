@@ -205,7 +205,7 @@ when it removes allocation or repeated derivation without changing the
 observable selector result and without adding invalidation logic to the hot
 path.
 Dependency-owned streaming work is tracked as explicit lonejson CRs rather than
-hidden liblql workarounds. With lonejson `v0.38.0`, callback-source matched
+hidden liblql workarounds. With lonejson `v0.39.0`, callback-source matched
 payload queries and selector-gated source mutation/projection use
 predicate-gated spooled capture, so sparse unmatched candidates are discarded
 before payload handles are exposed or replayed. Top-level root-array source

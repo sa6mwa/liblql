@@ -1525,7 +1525,7 @@ EOF
 case "$1" in
   -L)
     printf '%s:\n' "$2"
-    printf '\t@rpath/liblonejson.21.dylib (compatibility version 21.0.0, current version 0.38.0)\n'
+    printf '\t@rpath/liblonejson.22.dylib (compatibility version 22.0.0, current version 0.39.0)\n'
     printf '\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)\n'
     ;;
   -l)
