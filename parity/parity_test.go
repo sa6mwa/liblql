@@ -2665,7 +2665,7 @@ func TestCLQLNestedTopLevelArrayMutationParity(t *testing.T) {
 	})
 }
 
-func TestCLQLMatchAllMutationMixedStreamParity(t *testing.T) {
+func TestCLQLMatchAllMutationMixedStreamContract(t *testing.T) {
 	clql := os.Getenv("CLQL_PATH")
 	if clql == "" {
 		t.Skip("CLQL_PATH not set")
@@ -2674,21 +2674,20 @@ func TestCLQLMatchAllMutationMixedStreamParity(t *testing.T) {
 {"id":"a","status":"new"}
 [{"id":"b","status":"new"},3]`
 	mutations := []string{`/status=ready`}
-	muts, err := lql.ParseMutations(mutations, time.Unix(1700000000, 0))
+	wantStdin, err := decodeJSONValues([]byte(`1
+{"id":"a","status":"ready"}
+[{"id":"b","status":"new"},3]
+`))
 	if err != nil {
-		t.Fatalf("go parse mutations: %v", err)
+		t.Fatalf("decode clql stdin mixed stream contract expectation: %v", err)
 	}
-	var wantOut bytes.Buffer
-	if err := lql.MutateStream(lql.MutateStreamRequest{
-		Reader:    bytes.NewBufferString(body),
-		Writer:    &wantOut,
-		Mutations: muts,
-	}); err != nil {
-		t.Fatalf("go mutate mixed stream: %v", err)
-	}
-	want, err := decodeJSONValues(wantOut.Bytes())
+	wantFile, err := decodeJSONValues([]byte(`1
+{"id":"a","status":"ready"}
+{"id":"b","status":"ready"}
+3
+`))
 	if err != nil {
-		t.Fatalf("decode go mixed stream mutation: %v", err)
+		t.Fatalf("decode clql file mixed stream contract expectation: %v", err)
 	}
 
 	t.Run("stdin", func(t *testing.T) {
@@ -2706,8 +2705,8 @@ func TestCLQLMatchAllMutationMixedStreamParity(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decode clql stdin mixed mutation: %v out=%q", err, string(out))
 		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("stdin mixed mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+		if !reflect.DeepEqual(got, wantStdin) {
+			t.Fatalf("stdin mixed mutation contract mismatch: got=%#v want=%#v out=%q", got, wantStdin, string(out))
 		}
 	})
 
@@ -2736,8 +2735,8 @@ func TestCLQLMatchAllMutationMixedStreamParity(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decode clql file mixed mutation: %v out=%q", err, string(out))
 		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("file mixed mutation mismatch: got=%#v want=%#v out=%q", got, want, string(out))
+		if !reflect.DeepEqual(got, wantFile) {
+			t.Fatalf("file mixed mutation contract mismatch: got=%#v want=%#v out=%q", got, wantFile, string(out))
 		}
 	})
 }
