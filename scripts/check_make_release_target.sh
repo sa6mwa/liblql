@@ -46,6 +46,10 @@ check_release_surface() {
     printf 'release surface: memory benchmark gates must build optimized C helpers\n' >&2
     exit 1
   fi
+  if ! grep -Eq '^bench-check:.*build-debug-lua' "$makefile"; then
+    printf 'release surface: Go/C/Lua benchmark gate must build debug-lua\n' >&2
+    exit 1
+  fi
   if ! grep -F 'LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench' \
       "$makefile" >/dev/null ||
      ! grep -F 'LQL_BENCH_LIBRARY_DIR=build/bench-release' "$makefile" \
@@ -121,7 +125,7 @@ release:
 	@./scripts/release_gate.sh
 print-release-assets:
 	@./scripts/package.sh print-release-assets
-bench-check: build-debug build-bench-release
+bench-check: build-debug build-debug-lua build-bench-release
 	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
 	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
 	  ./scripts/run_parity_benchmarks.sh
@@ -213,6 +217,14 @@ EOF
   if (check_release_surface "$tmp/debug-memory-bench.mk" "$release_script" \
     "$cmakelists" >/dev/null 2>&1); then
     printf 'release surface fixture: expected debug memory benchmark gate to fail\n' >&2
+    exit 1
+  fi
+
+  sed 's/bench-check: build-debug build-debug-lua build-bench-release/bench-check: build-debug build-bench-release/' \
+    "$makefile" >"$tmp/missing-lua-bench-preset.mk"
+  if (check_release_surface "$tmp/missing-lua-bench-preset.mk" "$release_script" \
+    "$cmakelists" >/dev/null 2>&1); then
+    printf 'release surface fixture: expected missing Lua benchmark preset to fail\n' >&2
     exit 1
   fi
 

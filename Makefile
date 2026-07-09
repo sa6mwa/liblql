@@ -2,7 +2,7 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INSTALL ?= install
 
-.PHONY: help deps-debug deps-release deps-cross build build-clql-static build-debug build-release build-bench-release install test test-debug parity-test test-all asan fuzz fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-gate perf-gate bench-lockd-perf-check bench-memory-check bench-1g-check bench-freeze-baseline benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version print-release-assets format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-clql-static build-debug build-debug-lua build-release build-bench-release install test test-debug parity-test test-all asan fuzz fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-gate perf-gate bench-lockd-perf-check bench-memory-check bench-1g-check bench-freeze-baseline benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version print-release-assets format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -11,6 +11,7 @@ help:
 	  'make deps-cross              fetch all release lonejson SDKs' \
 	  'make build                   build static clql, preferring musl then GNU' \
 	  'make build-debug             configure and build debug preset' \
+	  'make build-debug-lua         configure and build debug Lua preset' \
 	  'make build-release           configure and build host GNU release preset' \
 	  'make build-bench-release     configure and build optimized benchmark helpers' \
 	  'make install                 install built clql to $${PREFIX:-/usr/local}/bin' \
@@ -82,6 +83,10 @@ build-debug: deps-debug
 	@cmake --preset debug
 	@cmake --build --preset debug
 
+build-debug-lua: deps-debug
+	@cmake --preset debug-lua
+	@cmake --build --preset debug-lua
+
 build-release: deps-release
 	@cmake --preset x86_64-linux-gnu-release
 	@cmake --build --preset x86_64-linux-gnu-release
@@ -108,7 +113,7 @@ fuzz-smoke: build-debug
 
 fuzz: fuzz-smoke
 
-lua-test: build-debug
+lua-test: build-debug-lua
 	@./scripts/run_lua_tests.sh
 
 lua-rock:
@@ -116,14 +121,14 @@ lua-rock:
 
 lua-env:
 	@printf 'export LUA_PATH=%s/build/luarocks/share/lua/5.5/?.lua;%s/build/luarocks/share/lua/5.5/?/init.lua;%s/lua/?.lua;%s/lua/?/init.lua;;\n' "$$(pwd)" "$$(pwd)" "$$(pwd)" "$$(pwd)"
-	@printf 'export LUA_CPATH=%s/build/luarocks/lib/lua/5.5/?.so;%s/build/luarocks/lib/lua/5.5/?/core.so;%s/build/debug/?.so;%s/build/debug/?/core.so;;\n' "$$(pwd)" "$$(pwd)" "$$(pwd)" "$$(pwd)"
-	@printf 'export LD_LIBRARY_PATH=%s/build/debug:%s/.cache/deps/x86_64-linux-gnu/install/lib:$${LD_LIBRARY_PATH:-}\n' "$$(pwd)" "$$(pwd)"
-	@printf 'export DYLD_LIBRARY_PATH=%s/build/debug:%s/.cache/deps/x86_64-linux-gnu/install/lib:$${DYLD_LIBRARY_PATH:-}\n' "$$(pwd)" "$$(pwd)"
+	@printf 'export LUA_CPATH=%s/build/luarocks/lib/lua/5.5/?.so;%s/build/luarocks/lib/lua/5.5/?/core.so;%s/build/debug-lua/?.so;%s/build/debug-lua/?/core.so;;\n' "$$(pwd)" "$$(pwd)" "$$(pwd)" "$$(pwd)"
+	@printf 'export LD_LIBRARY_PATH=%s/build/debug-lua:%s/.cache/deps/x86_64-linux-gnu/install/lib:$${LD_LIBRARY_PATH:-}\n' "$$(pwd)" "$$(pwd)"
+	@printf 'export DYLD_LIBRARY_PATH=%s/build/debug-lua:%s/.cache/deps/x86_64-linux-gnu/install/lib:$${DYLD_LIBRARY_PATH:-}\n' "$$(pwd)" "$$(pwd)"
 
 bench benchmarks: build-debug
 	@./scripts/check_parity_benchmark_schema.sh
 
-bench-check: build-debug build-bench-release
+bench-check: build-debug build-debug-lua build-bench-release
 	@mkdir -p build
 	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
 	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
@@ -165,10 +170,10 @@ benchmarks-go:
 benchmarks-c: build-debug
 	@./scripts/run_parity_benchmarks.sh --impl c --format json
 
-benchmarks-lua:
+benchmarks-lua: build-debug-lua
 	@./scripts/run_parity_benchmarks.sh --impl lua --format json
 
-benchmarks-parity: build-debug
+benchmarks-parity: build-debug build-debug-lua
 	@mkdir -p build
 	@LQL_BENCH_SUITE=smoke ./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --check --require go,c,lua > build/benchmarks-parity.jsonl
 	@(cd parity && "$${GO:-go}" run ./cmd/benchvalidate --forbid-unsupported) < build/benchmarks-parity.jsonl

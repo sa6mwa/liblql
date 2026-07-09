@@ -59,7 +59,7 @@ go_bin="${GO:-go}"
 go_bench="${LQL_GO_BENCH_PATH:-$root/build/bench-tools/lqlbench}"
 go_bench_ready=0
 lua_bin="${LUA:-lua}"
-lua_module_dir="${LQL_LUA_MODULE_DIR:-$root/build/debug}"
+lua_module_dir="${LQL_LUA_MODULE_DIR:-$root/build/debug-lua}"
 bench_library_dir="${LQL_BENCH_LIBRARY_DIR:-$root/build/debug}"
 bench_dep_library_dir="${LQL_BENCH_DEP_LIBRARY_DIR:-$root/.cache/deps/x86_64-linux-gnu/install/lib}"
 time_bin="${LQL_BENCH_TIME:-/usr/bin/time}"
@@ -963,7 +963,7 @@ run_lua_mode() {
     return 1
   fi
   if [ ! -f "$lua_module_dir/lql/core.so" ]; then
-    emit_unsupported_impl "lua" "lql.core module not found; run make build-debug"
+    emit_unsupported_impl "lua" "lql.core module not found; run make build-debug-lua"
     return 1
   fi
   lua_time_mode=$(detect_time_mode)

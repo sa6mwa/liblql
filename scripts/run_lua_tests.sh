@@ -9,8 +9,9 @@ elif command -v lua5.5 >/dev/null 2>&1; then
 else
   lua_bin=lua
 fi
-lua_cpath="${LUA_CPATH:-$root/build/debug/?.so;$root/build/debug/?/core.so;;}"
-lib_path="$root/build/debug:$root/.cache/deps/x86_64-linux-gnu/install/lib"
+lua_module_dir="${LQL_LUA_MODULE_DIR:-$root/build/debug-lua}"
+lua_cpath="${LUA_CPATH:-$lua_module_dir/?.so;$lua_module_dir/?/core.so;;}"
+lib_path="$lua_module_dir:$root/.cache/deps/x86_64-linux-gnu/install/lib"
 
 if ! command -v "$lua_bin" >/dev/null 2>&1; then
   printf 'lua-test: lua executable not found: %s\n' "$lua_bin" >&2
@@ -26,8 +27,8 @@ if [ "${LQL_LUA_RUNTIME_CHECK_ONLY:-0}" = "1" ]; then
   exit 0
 fi
 
-if [ ! -f "$root/build/debug/lql/core.so" ]; then
-  printf 'lua-test: lql.core module not found; run make build-debug\n' >&2
+if [ ! -f "$lua_module_dir/lql/core.so" ]; then
+  printf 'lua-test: lql.core module not found in %s; run make build-debug-lua\n' "$lua_module_dir" >&2
   exit 1
 fi
 

@@ -69,9 +69,9 @@ Current implementation status:
   benchmark schema.
 - `make bench-check` runs the current deterministic Go/C/Lua smoke gate and
   fails if candidate, match, payload-count, or payload-byte counts diverge. It
-  builds `build/bench-release/lql_payload_bench` and passes that optimized C
-  helper to the benchmark runner for C payload/performance rows; debug helpers
-  are not authoritative for C-native performance gates. It
+  builds `debug-lua` for the Lua facade and
+  `build/bench-release/lql_payload_bench` for optimized C payload/performance
+  rows; debug helpers are not authoritative for C-native performance gates. It
   also runs deterministic negative checks proving candidate-count, match-count,
   payload-count, payload-byte, peak-RSS-limit, and
   missing-required-implementation failures are detected and validates benchmark

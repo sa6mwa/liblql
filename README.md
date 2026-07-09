@@ -180,7 +180,9 @@ make test
 `build/clql-static/clql`. On Linux it selects the host architecture and tries a
 musl toolchain first, falling back to the host GNU compiler when static linking
 is available. `make build-debug` keeps the normal debug SDK build used by the
-test and parity targets. `make install` installs that `clql` to
+test and parity targets, while `make build-debug-lua` builds the Lua-enabled
+debug preset used by Lua smoke and Go/C/Lua benchmark gates. `make install`
+installs that `clql` to
 `/usr/local/bin` by default; use `PREFIX`, `BINDIR`, or `DESTDIR` to stage or
 change the destination.
 

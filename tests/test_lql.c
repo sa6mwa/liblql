@@ -6050,6 +6050,77 @@ static void expect_source_candidate_mutation_api(void) {
     fclose(out);
     out = tmpfile();
     if (out == NULL) {
+      printf("source candidate mutation wrapped nested tmpfile failed\n");
+      ++failures;
+    } else {
+      lql_selector *wrapped_selector;
+      lql_mutation_plan *wrapped_plan;
+      const char *wrapped_mutation;
+      static const char wrapped_doc[] =
+          "{\"records\":[{\"id\":\"a\",\"service\":\"auth-api\"},"
+          "{\"id\":\"b\",\"service\":\"search-api\"}],\"source\":\"fixture\"}";
+      wrapped_selector = NULL;
+      wrapped_plan = NULL;
+      wrapped_mutation = "/bench/touched=true";
+      lql_error_init(&error);
+      st = test_ctx->selector_parse(
+          test_ctx, "contains{field=/records[]/service,value=auth}",
+          &wrapped_selector, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation wrapped selector failed: %s\n",
+               error.message);
+        ++failures;
+      }
+      lql_error_init(&error);
+      st = test_ctx->mutation_plan_parse(test_ctx, &wrapped_mutation, 1u,
+                                         &wrapped_plan, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation wrapped plan failed: %s\n",
+               error.message);
+        ++failures;
+      }
+      if (wrapped_selector != NULL && wrapped_plan != NULL) {
+        memset(&reader, 0, sizeof(reader));
+        reader.data = wrapped_doc;
+        reader.len = strlen(wrapped_doc);
+        reader.chunk_size = 7u;
+        memset(&result, 0, sizeof(result));
+        lql_error_init(&error);
+        st = test_ctx->mutate_source_candidates(
+            test_ctx, wrapped_selector, wrapped_plan, read_chunk, &reader, out,
+            1, 1, &result, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("source candidate mutation wrapped nested failed: %s\n",
+                 error.message);
+          ++failures;
+        } else if (reader.calls <= 1 || result.candidates_seen != 1u ||
+                   result.candidates_matched != 1u ||
+                   result.stopped_early || result.bytes_read == 0u) {
+          printf("source candidate mutation wrapped result mismatch: seen=%lu "
+                 "matched=%lu stopped=%d bytes=%lu reads=%d\n",
+                 (unsigned long)result.candidates_seen,
+                 (unsigned long)result.candidates_matched,
+                 result.stopped_early, (unsigned long)result.bytes_read,
+                 reader.calls);
+          ++failures;
+        } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                   strcmp(buf,
+                          "{\"records\":[{\"id\":\"a\",\"service\":"
+                          "\"auth-api\"},{\"id\":\"b\",\"service\":"
+                          "\"search-api\"}],\"source\":\"fixture\","
+                          "\"bench\":{\"touched\":true}}\n") != 0) {
+          printf("source candidate mutation wrapped output mismatch: %s\n",
+                 buf);
+          ++failures;
+        }
+      }
+      test_ctx->mutation_plan_destroy(test_ctx, wrapped_plan);
+      test_ctx->selector_destroy(test_ctx, wrapped_selector);
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
       printf("source candidate mutation read-fail tmpfile failed\n");
       ++failures;
     } else {

@@ -5923,7 +5923,6 @@ static lql_status execute_query_source_v2_transform(
   source_reader_adapter adapter;
   lql_allocator *allocator;
   int recursive_array_framing;
-  int runtime_pooled;
   (void)compact;
 
   if (read == NULL || out == NULL) {
@@ -5980,8 +5979,7 @@ static lql_status execute_query_source_v2_transform(
     lql_set_error(error, LQL_STATUS_JSON_ERROR, "source read failed");
     return LQL_STATUS_JSON_ERROR;
   }
-  runtime_pooled = 0;
-  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
+  runtime = lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     source_transform_free_projection_paths(allocator, projection_paths,
@@ -6041,7 +6039,7 @@ static lql_status execute_query_source_v2_transform(
   if (out_result != NULL) {
     *out_result = state.result;
   }
-  lql_lonejson_release(self, runtime, runtime_pooled);
+  lonejson_free(runtime);
   source_transform_free_projection_paths(allocator, projection_paths,
                                          projection_segments);
   source_transform_cleanup(&state);
