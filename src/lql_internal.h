@@ -125,6 +125,92 @@ typedef enum lql_since_macro {
   LQL_SINCE_YESTERDAY
 } lql_since_macro;
 
+typedef struct lql_projection_path {
+  char **segments;
+  size_t *segment_lens;
+  unsigned char *segment_is_array_index;
+  size_t *array_indexes;
+  size_t segment_count;
+} lql_projection_path;
+
+struct lql_projection {
+  lql_projection_path *paths;
+  size_t *path_depth_indexes;
+  size_t *path_depth_offsets;
+  size_t path_count;
+  size_t min_segment_count;
+  size_t max_segment_count;
+};
+
+typedef enum lql_mutation_kind {
+  LQL_MUTATION_SET = 0,
+  LQL_MUTATION_INCREMENT,
+  LQL_MUTATION_REMOVE
+} lql_mutation_kind;
+
+typedef enum lql_mutation_file_mode {
+  LQL_MUTATION_FILE_NONE = 0,
+  LQL_MUTATION_FILE_AUTO,
+  LQL_MUTATION_FILE_TEXT,
+  LQL_MUTATION_FILE_BASE64
+} lql_mutation_file_mode;
+
+typedef enum lql_mutation_value_kind {
+  LQL_MUTATION_VALUE_STRING = 0,
+  LQL_MUTATION_VALUE_BOOL_TRUE,
+  LQL_MUTATION_VALUE_BOOL_FALSE,
+  LQL_MUTATION_VALUE_NULL,
+  LQL_MUTATION_VALUE_NUMBER
+} lql_mutation_value_kind;
+
+typedef struct lql_mutation_path {
+  char **segments;
+  unsigned char *segment_kinds;
+  size_t *segment_lens;
+  size_t segment_count;
+  int has_wildcard;
+} lql_mutation_path;
+
+#define LQL_MUTATION_PATH_LITERAL 0u
+#define LQL_MUTATION_PATH_OBJECT_WILDCARD 1u
+#define LQL_MUTATION_PATH_ARRAY_WILDCARD 2u
+#define LQL_MUTATION_PATH_RECURSIVE 3u
+#define LQL_MUTATION_PATH_ELLIPSIS 4u
+
+typedef struct lql_mutation_item {
+  lql_mutation_kind kind;
+  lql_mutation_path path;
+  char *value;
+  size_t value_offset;
+  size_t value_len;
+  lql_mutation_value_kind value_kind;
+  double delta;
+  char delta_text[64];
+  size_t delta_text_len;
+  int time_value;
+  int can_create_missing_object;
+  lql_mutation_file_mode file_mode;
+  char *file_path;
+} lql_mutation_item;
+
+struct lql_mutation_plan {
+  lql_mutation_item *items;
+  size_t *value_depth_indexes;
+  size_t *value_depth_offsets;
+  size_t *key_depth_indexes;
+  size_t *key_depth_offsets;
+  size_t *create_indexes;
+  size_t create_count;
+  size_t count;
+  size_t max_segment_count;
+  int literal_only_paths;
+  int variable_depth_paths;
+};
+
+LQL_INTERNAL_SYMBOL lonejson_status lql_mutation_write_item_value(
+    lonejson_writer *writer, const lql_mutation_item *item,
+    lonejson_error *error);
+
 #define LQL_SELECTOR_FEATURE_CONTAINS 0x01u
 #define LQL_SELECTOR_FEATURE_PREFIX 0x02u
 #define LQL_SELECTOR_FEATURE_EXACT 0x04u

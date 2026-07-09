@@ -97,10 +97,11 @@ static lql_status execute_query_file_range_decisions(
     lql_uint64 size, lql_uint64 index_base,
     const lql_query_options *query_options, lql_query_decision_fn on_decision,
     void *user, lql_query_result *out_result, lql_error *error);
-static lql_status execute_query_file_matches(
-    lql *self, const lql_selector *selector, FILE *file,
-    const lql_query_options *query_options, lql_query_match_fn on_match,
-    void *user, lql_query_result *out_result, lql_error *error);
+static lql_status
+execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
+                           const lql_query_options *query_options,
+                           lql_query_match_fn on_match, void *user,
+                           lql_query_result *out_result, lql_error *error);
 static lql_status execute_query_file_range_matches(
     lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
     lql_uint64 size, lql_uint64 index_base,
@@ -130,7 +131,7 @@ static lql_status execute_query_file_range_spooled_matches(
     const lql_mutation_plan *mutation_plan, int matches_only,
     const lql_query_options *query_options, lql_query_result *out_result,
     lql_error *error);
-static lql_status execute_query_source_spooled_rewrite(
+static lql_status execute_query_source_v2_transform(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     FILE *out, int compact, const lql_projection *projection,
     const lql_mutation_plan *mutation_plan, int matches_only,
@@ -278,8 +279,7 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     doc->stream_misses = impl->eval_stream_misses;
     doc->stream_misses_cap = impl->eval_stream_misses_cap;
     doc->scalar_family_predicates = impl->eval_scalar_family_predicates;
-    doc->scalar_family_predicates_cap =
-        impl->eval_scalar_family_predicates_cap;
+    doc->scalar_family_predicates_cap = impl->eval_scalar_family_predicates_cap;
     doc->in_matches = impl->eval_in_matches;
     doc->in_matches_cap = impl->eval_in_matches_cap;
     doc->contains_tail_buf = impl->eval_contains_tail_buf;
@@ -338,8 +338,7 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
       memset(doc->stream_misses, 0,
              sizeof(*doc->stream_misses) * doc->stream_misses_cap);
     }
-    if (selector->predicate_count >
-        ((size_t)-1) / LQL_EVAL_FAMILY_COUNT) {
+    if (selector->predicate_count > ((size_t)-1) / LQL_EVAL_FAMILY_COUNT) {
       destroy_doc(doc);
       return 0;
     }
@@ -379,8 +378,7 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     doc->predicates = selector->predicates;
     doc->predicate_count = selector->predicate_count;
     doc->track_container_types = selector->predicate_has_variable_path;
-    for (i = 0u; i < selector->predicate_count &&
-                 !doc->track_container_types;
+    for (i = 0u; i < selector->predicate_count && !doc->track_container_types;
          ++i) {
       if (selector->predicates[i] == NULL ||
           !selector->predicates[i]->field_path_literal) {
@@ -623,8 +621,7 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
            (ignore_case
                 ? ascii_case_equal_prefix(haystack + i + 1u, needles[0] + 1u,
                                           n0 - 1u)
-                : memcmp(haystack + i + 1u, needles[0] + 1u, n0 - 1u) ==
-                      0))) {
+                : memcmp(haystack + i + 1u, needles[0] + 1u, n0 - 1u) == 0))) {
         return 1;
       }
       if (hay_ch == f1 && n1 <= h - i &&
@@ -632,8 +629,7 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
            (ignore_case
                 ? ascii_case_equal_prefix(haystack + i + 1u, needles[1] + 1u,
                                           n1 - 1u)
-                : memcmp(haystack + i + 1u, needles[1] + 1u, n1 - 1u) ==
-                      0))) {
+                : memcmp(haystack + i + 1u, needles[1] + 1u, n1 - 1u) == 0))) {
         return 1;
       }
     }
@@ -657,8 +653,7 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
            (ignore_case
                 ? ascii_case_equal_prefix(haystack + i + 1u, needles[0] + 1u,
                                           n0 - 1u)
-                : memcmp(haystack + i + 1u, needles[0] + 1u, n0 - 1u) ==
-                      0))) {
+                : memcmp(haystack + i + 1u, needles[0] + 1u, n0 - 1u) == 0))) {
         return 1;
       }
       if (hay_ch == f1 && n1 <= h - i &&
@@ -666,8 +661,7 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
            (ignore_case
                 ? ascii_case_equal_prefix(haystack + i + 1u, needles[1] + 1u,
                                           n1 - 1u)
-                : memcmp(haystack + i + 1u, needles[1] + 1u, n1 - 1u) ==
-                      0))) {
+                : memcmp(haystack + i + 1u, needles[1] + 1u, n1 - 1u) == 0))) {
         return 1;
       }
       if (hay_ch == f2 && n2 <= h - i &&
@@ -675,8 +669,7 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
            (ignore_case
                 ? ascii_case_equal_prefix(haystack + i + 1u, needles[2] + 1u,
                                           n2 - 1u)
-                : memcmp(haystack + i + 1u, needles[2] + 1u, n2 - 1u) ==
-                      0))) {
+                : memcmp(haystack + i + 1u, needles[2] + 1u, n2 - 1u) == 0))) {
         return 1;
       }
     }
@@ -690,8 +683,8 @@ static int contains_any_case_len(const char *haystack, size_t h, char **needles,
   for (i = 0u; i < h; ++i) {
     raw_ch = (unsigned char)haystack[i];
     hay_ch = ignore_case ? ascii_lower_byte(raw_ch) : raw_ch;
-    if ((first_bitmap[hay_ch >> 3] &
-         (unsigned char)(1u << (hay_ch & 7u))) == 0u) {
+    if ((first_bitmap[hay_ch >> 3] & (unsigned char)(1u << (hay_ch & 7u))) ==
+        0u) {
       continue;
     }
     for (j = 0u; j < count; ++j) {
@@ -830,8 +823,7 @@ static int path_matches(const eval_doc *doc, const char *pattern,
   return path_matches_from(doc, seg, path, 0u);
 }
 
-static void stream_miss_clear_fast(eval_doc *doc,
-                                   const lql_selector *selector);
+static void stream_miss_clear_fast(eval_doc *doc, const lql_selector *selector);
 static int hit_marked_fast(const eval_doc *doc, const lql_selector *selector);
 static int eval_selector_tree(const lql_selector *selector,
                               const eval_doc *doc);
@@ -910,8 +902,7 @@ static int selector_path_depth_possible(const lql_selector *selector,
          path->segment_count <= selector->predicate_max_segment_count;
 }
 
-static const lql_selector **scalar_family_begin(eval_doc *doc,
-                                                size_t family) {
+static const lql_selector **scalar_family_begin(eval_doc *doc, size_t family) {
   if (doc == NULL || doc->scalar_family_predicates == NULL ||
       doc->scalar_family_stride == 0u || family >= LQL_EVAL_FAMILY_COUNT) {
     return NULL;
@@ -1033,8 +1024,7 @@ static int hit_marked_fast(const eval_doc *doc, const lql_selector *selector) {
   return doc->hits[selector->hit_index] == doc->candidate_epoch;
 }
 
-static void stream_miss_mark_fast(eval_doc *doc,
-                                  const lql_selector *selector) {
+static void stream_miss_mark_fast(eval_doc *doc, const lql_selector *selector) {
   doc->stream_misses[selector->hit_index] = doc->candidate_epoch;
 }
 
@@ -1067,8 +1057,8 @@ static int resolve_since_macro(lql_since_macro macro, lql_temporal *out) {
 }
 
 static void observe_prepared_contains_value(eval_doc *doc, const char *value,
-                                            size_t value_len,
-                                            int is_container, int is_null) {
+                                            size_t value_len, int is_container,
+                                            int is_null) {
   const lql_selector **items;
   const lql_selector *selector;
   size_t i;
@@ -1089,18 +1079,17 @@ static void observe_prepared_contains_value(eval_doc *doc, const char *value,
     }
     ignore_case = selector->observer_ignore_case;
     if (selector->any_count == 0u) {
-      if (contains_case_len(value, value_len,
-                            selector->value_data, selector->value_len,
-                            ignore_case)) {
+      if (contains_case_len(value, value_len, selector->value_data,
+                            selector->value_len, ignore_case)) {
         hit_mark_fast(doc, selector);
       }
-    } else if (contains_any_case_len(
-                   value, value_len, selector->any, selector->any_lens,
-                   selector->any_count,
-                   ignore_case ? selector->any_ifirsts : selector->any_firsts,
-                   ignore_case ? selector->any_ifirst_bitmap
-                               : selector->any_first_bitmap,
-                   ignore_case)) {
+    } else if (contains_any_case_len(value, value_len, selector->any,
+                                     selector->any_lens, selector->any_count,
+                                     ignore_case ? selector->any_ifirsts
+                                                 : selector->any_firsts,
+                                     ignore_case ? selector->any_ifirst_bitmap
+                                                 : selector->any_first_bitmap,
+                                     ignore_case)) {
       hit_mark_fast(doc, selector);
     }
   }
@@ -1556,8 +1545,7 @@ static void observe_prefix_stream_end(eval_doc *doc,
       continue;
     }
     value_len = selector->value_len;
-    if (doc->scalar_len < value_len ||
-        stream_miss_marked_fast(doc, selector)) {
+    if (doc->scalar_len < value_len || stream_miss_marked_fast(doc, selector)) {
       continue;
     }
     if (value_len <= doc->prefix_len) {
@@ -1885,8 +1873,7 @@ static int contains_stream_boundary_scan(const char *tail, size_t tail_len,
                                      tail_part - 1u)) {
           continue;
         }
-      } else if (memcmp(tail + start + 1u, needle + 1u, tail_part - 1u) !=
-                 0) {
+      } else if (memcmp(tail + start + 1u, needle + 1u, tail_part - 1u) != 0) {
         continue;
       }
     }
@@ -2071,8 +2058,7 @@ static void observe_prepared_value(eval_doc *doc, const char *value,
   }
   features = doc->scalar_path_features;
   value_len = 0u;
-  if ((features & (LQL_SELECTOR_FEATURE_CONTAINS |
-                   LQL_SELECTOR_FEATURE_PREFIX |
+  if ((features & (LQL_SELECTOR_FEATURE_CONTAINS | LQL_SELECTOR_FEATURE_PREFIX |
                    LQL_SELECTOR_FEATURE_EXACT)) != 0u) {
     value_len = is_container || is_null ? 0u : strlen(value);
   }
@@ -2081,12 +2067,10 @@ static void observe_prepared_value(eval_doc *doc, const char *value,
                                     is_null);
   }
   if ((features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prepared_prefix_value(doc, value, value_len, is_container,
-                                  is_null);
+    observe_prepared_prefix_value(doc, value, value_len, is_container, is_null);
   }
   if ((features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
-    observe_prepared_exact_value(doc, value, value_len, is_container,
-                                 is_null);
+    observe_prepared_exact_value(doc, value, value_len, is_container, is_null);
   }
   if ((features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
     observe_prepared_temporal_value(doc, value, is_container, is_null);
@@ -2147,8 +2131,7 @@ static int eval_selector_tree(const lql_selector *selector,
   }
 }
 
-static int eval_doc_matches(const lql_selector *selector,
-                            const eval_doc *doc) {
+static int eval_doc_matches(const lql_selector *selector, const eval_doc *doc) {
   if (selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL) {
     return 1;
   }
@@ -2171,8 +2154,9 @@ static lonejson_status on_object_begin(void *user,
   return push_container(doc, path, '{');
 }
 
-static lonejson_status on_object_begin_root_only(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+on_object_begin_root_only(void *user, const lonejson_value_path *path,
+                          lonejson_error *error) {
   eval_doc *doc = (eval_doc *)user;
   (void)error;
   if (path->segment_count == 0u) {
@@ -2201,8 +2185,9 @@ static lonejson_status on_array_begin(void *user,
   return push_container(doc, path, '[');
 }
 
-static lonejson_status on_array_begin_root_only(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status on_array_begin_root_only(void *user,
+                                                const lonejson_value_path *path,
+                                                lonejson_error *error) {
   eval_doc *doc = (eval_doc *)user;
   (void)error;
   if (path->segment_count == 0u) {
@@ -2549,6 +2534,854 @@ typedef struct source_spooled_match_state {
   lql_status callback_status;
   eval_doc doc;
 } source_spooled_match_state;
+
+typedef struct transform_path_frame {
+  unsigned char *array_segments;
+  unsigned long array_segment_bits;
+  size_t segment_count;
+  char container;
+} transform_path_frame;
+
+#define TRANSFORM_FRAME_INLINE_BITS (sizeof(unsigned long) * CHAR_BIT)
+#define TRANSFORM_FRAME_INLINE_COUNT 32u
+
+typedef struct source_transform_policy {
+  int matched;
+  int emit_candidate;
+  int mutate_candidate;
+  int root_object;
+} source_transform_policy;
+
+typedef struct source_transform_state {
+  lql *receiver;
+  lql_allocator *allocator;
+  const lql_selector *selector;
+  const lql_projection *projection;
+  const lql_mutation_plan *mutation_plan;
+  lql_query_options options;
+  unsigned int limit_flags;
+  int matches_only;
+  lql_query_result result;
+  eval_doc doc;
+  lonejson_path_value_visitor eval_visitor;
+  transform_path_frame *frames;
+  size_t frame_count;
+  size_t frame_cap;
+  transform_path_frame inline_frames[TRANSFORM_FRAME_INLINE_COUNT];
+  int *applied;
+  int inline_applied[16];
+  void *applied_alloc;
+  size_t active_item;
+  int active_item_set;
+  int current_matched;
+  int current_matched_known;
+  int current_root_object;
+  int current_root_seen;
+  int current_output_enabled;
+  int transform_failed;
+  int gated_transform;
+  lql_status callback_status;
+  source_transform_policy current_policy;
+} source_transform_state;
+
+static int transform_frame_array_segment(const transform_path_frame *frame,
+                                         size_t index) {
+  if (frame == NULL || index >= frame->segment_count) {
+    return 0;
+  }
+  if (frame->array_segments != NULL) {
+    return frame->array_segments[index] ? 1 : 0;
+  }
+  if (index >= TRANSFORM_FRAME_INLINE_BITS) {
+    return 0;
+  }
+  return (frame->array_segment_bits & (1UL << index)) != 0u;
+}
+
+static void transform_frame_set_array_segment(transform_path_frame *frame,
+                                              size_t index) {
+  if (frame == NULL || index >= frame->segment_count) {
+    return;
+  }
+  if (frame->array_segments != NULL) {
+    frame->array_segments[index] = 1u;
+  } else if (index < TRANSFORM_FRAME_INLINE_BITS) {
+    frame->array_segment_bits |= 1UL << index;
+  }
+}
+
+static transform_path_frame *
+source_transform_parent_frame(source_transform_state *state) {
+  if (state == NULL || state->frame_count == 0u) {
+    return NULL;
+  }
+  return &state->frames[state->frame_count - 1u];
+}
+
+static int
+source_transform_ensure_frame_capacity(source_transform_state *state) {
+  transform_path_frame *next;
+  size_t next_cap;
+  if (state->frames == NULL) {
+    state->frames = state->inline_frames;
+    state->frame_cap = TRANSFORM_FRAME_INLINE_COUNT;
+  }
+  if (state->frame_count < state->frame_cap) {
+    return 1;
+  }
+  next_cap = state->frame_cap * 2u;
+  if (next_cap <= state->frame_cap) {
+    return 0;
+  }
+  if (state->frames == state->inline_frames) {
+    next = (transform_path_frame *)state->allocator->alloc(
+        state->allocator, sizeof(next[0]) * next_cap);
+    if (next == NULL) {
+      return 0;
+    }
+    memcpy(next, state->frames, sizeof(next[0]) * state->frame_count);
+  } else {
+    next = (transform_path_frame *)state->allocator->realloc(
+        state->allocator, state->frames, sizeof(next[0]) * next_cap);
+    if (next == NULL) {
+      return 0;
+    }
+  }
+  state->frames = next;
+  state->frame_cap = next_cap;
+  return 1;
+}
+
+static lonejson_status
+source_transform_push_frame(source_transform_state *state,
+                            const lonejson_value_path *path, char container) {
+  transform_path_frame frame;
+  transform_path_frame *parent;
+  size_t i;
+  memset(&frame, 0, sizeof(frame));
+  frame.container = container;
+  frame.segment_count = path == NULL ? 0u : path->segment_count;
+  if (frame.segment_count > TRANSFORM_FRAME_INLINE_BITS) {
+    frame.array_segments = (unsigned char *)state->allocator->calloc(
+        state->allocator, frame.segment_count, sizeof(frame.array_segments[0]));
+    if (frame.array_segments == NULL) {
+      return LONEJSON_STATUS_ALLOCATION_FAILED;
+    }
+  }
+  parent = source_transform_parent_frame(state);
+  if (parent != NULL && frame.segment_count != 0u) {
+    if (frame.array_segments == NULL && parent->array_segments == NULL) {
+      frame.array_segment_bits = parent->array_segment_bits;
+    } else {
+      for (i = 0u; i < parent->segment_count && i < frame.segment_count; ++i) {
+        if (transform_frame_array_segment(parent, i)) {
+          transform_frame_set_array_segment(&frame, i);
+        }
+      }
+    }
+    if (frame.segment_count > parent->segment_count &&
+        parent->container == 'a') {
+      transform_frame_set_array_segment(&frame, frame.segment_count - 1u);
+    }
+  }
+  if (!source_transform_ensure_frame_capacity(state)) {
+    state->allocator->destroy(state->allocator, frame.array_segments);
+    return LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  state->frames[state->frame_count++] = frame;
+  return LONEJSON_STATUS_OK;
+}
+
+static void source_transform_pop_frame(source_transform_state *state) {
+  if (state == NULL || state->frame_count == 0u) {
+    return;
+  }
+  --state->frame_count;
+  state->allocator->destroy(state->allocator,
+                            state->frames[state->frame_count].array_segments);
+  if (state->frame_count == 0u && state->frames != state->inline_frames) {
+    state->allocator->destroy(state->allocator, state->frames);
+    state->frames = NULL;
+    state->frame_cap = 0u;
+  }
+}
+
+static void source_transform_cleanup_frames(source_transform_state *state) {
+  while (state != NULL && state->frame_count != 0u) {
+    source_transform_pop_frame(state);
+  }
+}
+
+static int source_transform_path_segment_is_array_fallback(
+    const transform_path_frame *frame, const lonejson_value_path *path,
+    size_t index) {
+  if (frame == NULL || path == NULL || index >= path->segment_count) {
+    return 0;
+  }
+  if (frame->segment_count == path->segment_count) {
+    return transform_frame_array_segment(frame, index);
+  }
+  if (frame->segment_count + 1u == path->segment_count) {
+    if (index < frame->segment_count) {
+      return transform_frame_array_segment(frame, index);
+    }
+    return frame->container == 'a';
+  }
+  return 0;
+}
+
+static int source_transform_path_segment_is_array(
+    const lonejson_candidate_transform_event *event,
+    const transform_path_frame *frame, const lonejson_value_path *path,
+    size_t index) {
+  if (event != NULL && path != NULL && path->segment_count != 0u &&
+      index + 1u == path->segment_count) {
+    return event->relationship ==
+           LONEJSON_CANDIDATE_TRANSFORM_EVENT_ARRAY_ELEMENT;
+  }
+  return source_transform_path_segment_is_array_fallback(frame, path, index);
+}
+
+static int source_transform_segment_matches(unsigned char expected_kind,
+                                            const char *expected,
+                                            size_t expected_len,
+                                            const lonejson_path_segment *actual,
+                                            int actual_is_array) {
+  switch (expected_kind) {
+  case LQL_MUTATION_PATH_OBJECT_WILDCARD:
+    return !actual_is_array;
+  case LQL_MUTATION_PATH_ARRAY_WILDCARD:
+    return actual_is_array;
+  case LQL_MUTATION_PATH_RECURSIVE:
+    return 1;
+  default:
+    return expected_len == actual->len &&
+           memcmp(expected, actual->data, actual->len) == 0;
+  }
+}
+
+static int source_transform_path_matches_from(
+    const lonejson_candidate_transform_event *event,
+    const transform_path_frame *frame, const lql_mutation_path *item_path,
+    size_t item_index, const lonejson_value_path *path, size_t path_index) {
+  size_t i;
+  while (item_index < item_path->segment_count) {
+    if (item_path->segment_kinds[item_index] == LQL_MUTATION_PATH_ELLIPSIS) {
+      if (item_index + 1u == item_path->segment_count) {
+        return 1;
+      }
+      for (i = path_index; i <= path->segment_count; ++i) {
+        if (source_transform_path_matches_from(event, frame, item_path,
+                                               item_index + 1u, path, i)) {
+          return 1;
+        }
+      }
+      return 0;
+    }
+    if (path_index >= path->segment_count ||
+        !source_transform_segment_matches(
+            item_path->segment_kinds[item_index],
+            item_path->segments[item_index],
+            item_path->segment_lens[item_index], &path->segments[path_index],
+            source_transform_path_segment_is_array(event, frame, path,
+                                                   path_index))) {
+      return 0;
+    }
+    ++item_index;
+    ++path_index;
+  }
+  return path_index == path->segment_count;
+}
+
+static int source_transform_value_is_array_element(
+    const lonejson_candidate_transform_event *event,
+    const transform_path_frame *frame, const lonejson_value_path *path) {
+  if (event != NULL) {
+    return event->relationship ==
+           LONEJSON_CANDIDATE_TRANSFORM_EVENT_ARRAY_ELEMENT;
+  }
+  if (path == NULL || path->segment_count == 0u) {
+    return 0;
+  }
+  return source_transform_path_segment_is_array(NULL, frame, path,
+                                                path->segment_count - 1u);
+}
+
+static int
+source_transform_find_item(source_transform_state *state,
+                           const lonejson_candidate_transform_event *event,
+                           const lonejson_value_path *path, size_t *out) {
+  const transform_path_frame *frame;
+  size_t i;
+  size_t index;
+  size_t start;
+  size_t end;
+  frame = source_transform_parent_frame(state);
+  if (state == NULL || state->mutation_plan == NULL || path == NULL) {
+    return 0;
+  }
+  if (!state->mutation_plan->variable_depth_paths &&
+      state->mutation_plan->value_depth_indexes != NULL &&
+      state->mutation_plan->value_depth_offsets != NULL &&
+      path->segment_count <= state->mutation_plan->max_segment_count) {
+    start = state->mutation_plan->value_depth_offsets[path->segment_count];
+    end = state->mutation_plan->value_depth_offsets[path->segment_count + 1u];
+    for (i = start; i < end; ++i) {
+      index = state->mutation_plan->value_depth_indexes[i];
+      if (source_transform_path_matches_from(
+              event, frame, &state->mutation_plan->items[index].path, 0u, path,
+              0u)) {
+        *out = index;
+        return 1;
+      }
+    }
+    return 0;
+  }
+  for (i = 0u; i < state->mutation_plan->count; ++i) {
+    if (source_transform_path_matches_from(
+            event, frame, &state->mutation_plan->items[i].path, 0u, path, 0u)) {
+      *out = i;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int source_transform_path_is_parent_of_item(
+    const lonejson_candidate_transform_event *event,
+    const transform_path_frame *frame, const lql_mutation_item *item,
+    const lonejson_value_path *path) {
+  size_t i;
+  if (item == NULL || path == NULL ||
+      item->path.segment_count <= path->segment_count) {
+    return 0;
+  }
+  for (i = 0u; i < path->segment_count; ++i) {
+    if (!source_transform_segment_matches(
+            item->path.segment_kinds[i], item->path.segments[i],
+            item->path.segment_lens[i], &path->segments[i],
+            source_transform_path_segment_is_array(event, frame, path, i))) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int
+source_transform_item_child_key_available(const lql_mutation_item *item,
+                                          size_t depth) {
+  if (item == NULL || depth >= item->path.segment_count) {
+    return 0;
+  }
+  return item->path.segment_kinds[depth] == LQL_MUTATION_PATH_LITERAL;
+}
+
+static lonejson_status source_transform_write_item_value(
+    source_transform_state *state, const lql_mutation_item *item,
+    lonejson_writer *writer, lonejson_error *error) {
+  (void)state;
+  return lql_mutation_write_item_value(writer, item, error);
+}
+
+static lonejson_status
+source_transform_write_subtree(source_transform_state *state,
+                               const lql_mutation_item *anchor, size_t depth,
+                               lonejson_writer *writer, lonejson_error *error) {
+  const lql_mutation_item *item;
+  size_t i;
+  size_t item_index;
+  if (state == NULL || state->mutation_plan == NULL || anchor == NULL) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  for (i = 0u; i < state->mutation_plan->create_count; ++i) {
+    item_index = state->mutation_plan->create_indexes[i];
+    item = &state->mutation_plan->items[item_index];
+    if (state->applied[item_index] || item->path.segment_count <= depth ||
+        item->path.segment_count < anchor->path.segment_count ||
+        !source_transform_item_child_key_available(item, depth) ||
+        !source_transform_item_child_key_available(anchor, depth) ||
+        item->path.segment_lens[depth] != anchor->path.segment_lens[depth] ||
+        memcmp(item->path.segments[depth], anchor->path.segments[depth],
+               item->path.segment_lens[depth]) != 0) {
+      continue;
+    }
+    if (lonejson_writer_key(writer, item->path.segments[depth],
+                            item->path.segment_lens[depth],
+                            error) != LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (item->path.segment_count == depth + 1u) {
+      if (source_transform_write_item_value(state, item, writer, error) !=
+          LONEJSON_STATUS_OK) {
+        return LONEJSON_STATUS_CALLBACK_FAILED;
+      }
+      state->applied[item_index] = 1;
+    } else {
+      if (lonejson_writer_begin_object(writer, error) != LONEJSON_STATUS_OK ||
+          source_transform_write_subtree(state, item, depth + 1u, writer,
+                                         error) != LONEJSON_STATUS_OK ||
+          lonejson_writer_end_object(writer, error) != LONEJSON_STATUS_OK) {
+        return LONEJSON_STATUS_CALLBACK_FAILED;
+      }
+    }
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status source_transform_insert_missing(
+    void *user, const lonejson_candidate_transform_event *event,
+    lonejson_writer *writer, lonejson_error *error) {
+  source_transform_state *state;
+  const transform_path_frame *frame;
+  const lql_mutation_item *item;
+  size_t i;
+  size_t item_index;
+  state = (source_transform_state *)user;
+  if (state == NULL || state->mutation_plan == NULL || event == NULL ||
+      event->path == NULL ||
+      event->insert_phase != LONEJSON_CANDIDATE_TRANSFORM_INSERT_OBJECT_END ||
+      !state->current_output_enabled) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (event->candidate_policy != NULL &&
+      !((const source_transform_policy *)event->candidate_policy)
+           ->mutate_candidate) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (event->candidate_policy == NULL && !state->current_matched) {
+    return LONEJSON_STATUS_OK;
+  }
+  frame = source_transform_parent_frame(state);
+  for (i = 0u; i < state->mutation_plan->create_count; ++i) {
+    item_index = state->mutation_plan->create_indexes[i];
+    item = &state->mutation_plan->items[item_index];
+    if (state->applied[item_index] ||
+        !source_transform_path_is_parent_of_item(event, frame, item,
+                                                 event->path) ||
+        !source_transform_item_child_key_available(
+            item, event->path->segment_count)) {
+      continue;
+    }
+    if (source_transform_write_subtree(state, item, event->path->segment_count,
+                                       writer, error) != LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static int source_transform_parse_number(const char *data, size_t len,
+                                         double *out) {
+  char buf[128];
+  char *end;
+  double value;
+  if (data == NULL || out == NULL || len == 0u || len >= sizeof(buf)) {
+    return 0;
+  }
+  memcpy(buf, data, len);
+  buf[len] = '\0';
+  value = strtod(buf, &end);
+  if (end == buf || *end != '\0') {
+    return 0;
+  }
+  *out = value;
+  return 1;
+}
+
+static lonejson_status
+source_transform_replace(void *user,
+                         const lonejson_candidate_transform_event *event,
+                         lonejson_writer *writer, lonejson_error *error) {
+  source_transform_state *state;
+  const lql_mutation_item *item;
+  double existing;
+  double next_value;
+  char number_buf[64];
+  state = (source_transform_state *)user;
+  if (state == NULL || event == NULL || writer == NULL ||
+      !state->active_item_set || state->mutation_plan == NULL ||
+      state->active_item >= state->mutation_plan->count) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  item = &state->mutation_plan->items[state->active_item];
+  if (item->kind == LQL_MUTATION_REMOVE) {
+    state->applied[state->active_item] = 1;
+    return lonejson_writer_null(writer, error);
+  }
+  if (item->kind == LQL_MUTATION_INCREMENT) {
+    if (event->old_value == NULL ||
+        event->old_value->value_type != LONEJSON_VALUE_NUMBER ||
+        !source_transform_parse_number(event->old_value->data,
+                                       event->old_value->len, &existing)) {
+      if (error != NULL) {
+        error->code = LONEJSON_STATUS_CALLBACK_FAILED;
+        strcpy(error->message, "mutation increment target not numeric");
+      }
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    next_value = existing + item->delta;
+    sprintf(number_buf, "%.17g", next_value);
+    state->applied[state->active_item] = 1;
+    return lonejson_writer_number_text(writer, number_buf, strlen(number_buf),
+                                       error);
+  }
+  state->applied[state->active_item] = 1;
+  return source_transform_write_item_value(state, item, writer, error);
+}
+
+static lonejson_candidate_transform_action
+source_transform_decide(void *user,
+                        const lonejson_candidate_transform_event *event,
+                        lonejson_error *error) {
+  source_transform_state *state;
+  const lql_mutation_item *item;
+  size_t index;
+  int array_element;
+  (void)error;
+  state = (source_transform_state *)user;
+  if (state == NULL || event == NULL || event->path == NULL) {
+    return LONEJSON_CANDIDATE_TRANSFORM_ERROR;
+  }
+  if (state->gated_transform &&
+      event->phase == LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_SOURCE) {
+    return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+  }
+  state->active_item_set = 0;
+  if (event->path->segment_count == 0u) {
+    if (event->candidate_policy != NULL) {
+      const source_transform_policy *policy;
+      policy = (const source_transform_policy *)event->candidate_policy;
+      state->current_matched = policy->matched;
+      state->current_matched_known = 1;
+      state->current_output_enabled = policy->emit_candidate;
+      state->current_root_object =
+          policy->root_object || event->value_type == LONEJSON_VALUE_OBJECT;
+    } else {
+      if (state->selector != NULL) {
+        state->current_matched = eval_doc_matches(state->selector, &state->doc);
+        state->current_matched_known = 1;
+      } else if (!state->current_matched_known) {
+        state->current_matched = 1;
+        state->current_matched_known = 1;
+      }
+      state->current_output_enabled =
+          state->current_matched || !state->matches_only;
+      if (event->value_type == LONEJSON_VALUE_OBJECT) {
+        state->current_root_object = 1;
+      }
+    }
+    if (!state->current_output_enabled) {
+      return LONEJSON_CANDIDATE_TRANSFORM_DROP;
+    }
+    return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+  }
+  if (!state->current_output_enabled || !state->current_matched ||
+      state->mutation_plan == NULL || !state->current_root_object) {
+    return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+  }
+  if (event->candidate_policy != NULL &&
+      !((const source_transform_policy *)event->candidate_policy)
+           ->mutate_candidate) {
+    return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+  }
+  if (!source_transform_find_item(state, event, event->path, &index)) {
+    return LONEJSON_CANDIDATE_TRANSFORM_KEEP;
+  }
+  item = &state->mutation_plan->items[index];
+  state->active_item = index;
+  state->active_item_set = 1;
+  if (item->kind == LQL_MUTATION_REMOVE) {
+    array_element = source_transform_value_is_array_element(
+        event, source_transform_parent_frame(state), event->path);
+    state->applied[index] = 1;
+    return array_element ? LONEJSON_CANDIDATE_TRANSFORM_REPLACE
+                         : LONEJSON_CANDIDATE_TRANSFORM_DROP;
+  }
+  return LONEJSON_CANDIDATE_TRANSFORM_REPLACE;
+}
+
+static lonejson_status source_transform_observer_object_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_transform_state *state;
+  lonejson_status st;
+  state = (source_transform_state *)user;
+  st = state->eval_visitor.object_begin == NULL
+           ? LONEJSON_STATUS_OK
+           : state->eval_visitor.object_begin(&state->doc, path, error);
+  if (st != LONEJSON_STATUS_OK) {
+    return st;
+  }
+  if (path != NULL && path->segment_count == 0u) {
+    state->current_root_seen = 1;
+    state->current_root_object = 1;
+  }
+  return source_transform_push_frame(state, path, 'o');
+}
+
+static lonejson_status source_transform_observer_object_end(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_transform_state *state;
+  lonejson_status st;
+  state = (source_transform_state *)user;
+  st = state->eval_visitor.object_end == NULL
+           ? LONEJSON_STATUS_OK
+           : state->eval_visitor.object_end(&state->doc, path, error);
+  source_transform_pop_frame(state);
+  return st;
+}
+
+static lonejson_status source_transform_observer_array_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_transform_state *state;
+  lonejson_status st;
+  state = (source_transform_state *)user;
+  st = state->eval_visitor.array_begin == NULL
+           ? LONEJSON_STATUS_OK
+           : state->eval_visitor.array_begin(&state->doc, path, error);
+  if (st != LONEJSON_STATUS_OK) {
+    return st;
+  }
+  if (path != NULL && path->segment_count == 0u) {
+    state->current_root_seen = 1;
+    state->current_root_object = 0;
+  }
+  return source_transform_push_frame(state, path, 'a');
+}
+
+static lonejson_status
+source_transform_observer_array_end(void *user, const lonejson_value_path *path,
+                                    lonejson_error *error) {
+  source_transform_state *state;
+  lonejson_status st;
+  state = (source_transform_state *)user;
+  st = state->eval_visitor.array_end == NULL
+           ? LONEJSON_STATUS_OK
+           : state->eval_visitor.array_end(&state->doc, path, error);
+  source_transform_pop_frame(state);
+  return st;
+}
+
+static lonejson_status
+source_transform_observer_key_begin(void *user, const lonejson_value_path *path,
+                                    lonejson_error *error) {
+  source_transform_state *state;
+  state = (source_transform_state *)user;
+  return state->eval_visitor.object_key_begin == NULL
+             ? LONEJSON_STATUS_OK
+             : state->eval_visitor.object_key_begin(&state->doc, path, error);
+}
+
+static lonejson_status
+source_transform_observer_key_chunk(void *user, const lonejson_value_path *path,
+                                    const char *data, size_t len,
+                                    lonejson_error *error) {
+  source_transform_state *state;
+  state = (source_transform_state *)user;
+  return state->eval_visitor.object_key_chunk == NULL
+             ? LONEJSON_STATUS_OK
+             : state->eval_visitor.object_key_chunk(&state->doc, path, data,
+                                                    len, error);
+}
+
+static lonejson_status
+source_transform_observer_key_end(void *user, const lonejson_value_path *path,
+                                  lonejson_error *error) {
+  source_transform_state *state;
+  state = (source_transform_state *)user;
+  return state->eval_visitor.object_key_end == NULL
+             ? LONEJSON_STATUS_OK
+             : state->eval_visitor.object_key_end(&state->doc, path, error);
+}
+
+static lonejson_status source_transform_observer_string_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_transform_state *state;
+  state = (source_transform_state *)user;
+  if (path != NULL && path->segment_count == 0u) {
+    state->current_root_seen = 1;
+    state->current_root_object = 0;
+  }
+  return state->eval_visitor.string_begin == NULL
+             ? LONEJSON_STATUS_OK
+             : state->eval_visitor.string_begin(&state->doc, path, error);
+}
+
+static lonejson_status source_transform_observer_string_chunk(
+    void *user, const lonejson_value_path *path, const char *data, size_t len,
+    lonejson_error *error) {
+  source_transform_state *state;
+  state = (source_transform_state *)user;
+  return state->eval_visitor.string_chunk == NULL
+             ? LONEJSON_STATUS_OK
+             : state->eval_visitor.string_chunk(&state->doc, path, data, len,
+                                                error);
+}
+
+static lonejson_status source_transform_observer_string_end(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_transform_state *state;
+  state = (source_transform_state *)user;
+  return state->eval_visitor.string_end == NULL
+             ? LONEJSON_STATUS_OK
+             : state->eval_visitor.string_end(&state->doc, path, error);
+}
+
+static lonejson_status source_transform_observer_number_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_transform_state *state;
+  state = (source_transform_state *)user;
+  if (path != NULL && path->segment_count == 0u) {
+    state->current_root_seen = 1;
+    state->current_root_object = 0;
+  }
+  return state->eval_visitor.number_begin == NULL
+             ? LONEJSON_STATUS_OK
+             : state->eval_visitor.number_begin(&state->doc, path, error);
+}
+
+static lonejson_status source_transform_observer_number_chunk(
+    void *user, const lonejson_value_path *path, const char *data, size_t len,
+    lonejson_error *error) {
+  source_transform_state *state;
+  state = (source_transform_state *)user;
+  return state->eval_visitor.number_chunk == NULL
+             ? LONEJSON_STATUS_OK
+             : state->eval_visitor.number_chunk(&state->doc, path, data, len,
+                                                error);
+}
+
+static lonejson_status source_transform_observer_number_end(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_transform_state *state;
+  state = (source_transform_state *)user;
+  return state->eval_visitor.number_end == NULL
+             ? LONEJSON_STATUS_OK
+             : state->eval_visitor.number_end(&state->doc, path, error);
+}
+
+static lonejson_status
+source_transform_observer_boolean(void *user, const lonejson_value_path *path,
+                                  int value, lonejson_error *error) {
+  source_transform_state *state;
+  state = (source_transform_state *)user;
+  if (path != NULL && path->segment_count == 0u) {
+    state->current_root_seen = 1;
+    state->current_root_object = 0;
+  }
+  return state->eval_visitor.boolean_value == NULL
+             ? LONEJSON_STATUS_OK
+             : state->eval_visitor.boolean_value(&state->doc, path, value,
+                                                 error);
+}
+
+static lonejson_status
+source_transform_observer_null(void *user, const lonejson_value_path *path,
+                               lonejson_error *error) {
+  source_transform_state *state;
+  state = (source_transform_state *)user;
+  if (path != NULL && path->segment_count == 0u) {
+    state->current_root_seen = 1;
+    state->current_root_object = 0;
+  }
+  return state->eval_visitor.null_value == NULL
+             ? LONEJSON_STATUS_OK
+             : state->eval_visitor.null_value(&state->doc, path, error);
+}
+
+static void
+source_transform_init_observer(lonejson_path_value_visitor *visitor) {
+  *visitor = lonejson_default_path_value_visitor();
+  visitor->object_begin = source_transform_observer_object_begin;
+  visitor->object_end = source_transform_observer_object_end;
+  visitor->object_key_begin = source_transform_observer_key_begin;
+  visitor->object_key_chunk = source_transform_observer_key_chunk;
+  visitor->object_key_end = source_transform_observer_key_end;
+  visitor->array_begin = source_transform_observer_array_begin;
+  visitor->array_end = source_transform_observer_array_end;
+  visitor->string_begin = source_transform_observer_string_begin;
+  visitor->string_chunk = source_transform_observer_string_chunk;
+  visitor->string_end = source_transform_observer_string_end;
+  visitor->number_begin = source_transform_observer_number_begin;
+  visitor->number_chunk = source_transform_observer_number_chunk;
+  visitor->number_end = source_transform_observer_number_end;
+  visitor->boolean_value = source_transform_observer_boolean;
+  visitor->null_value = source_transform_observer_null;
+}
+
+static int source_transform_has_increment(const lql_mutation_plan *plan) {
+  size_t i;
+  if (plan == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < plan->count; ++i) {
+    if (plan->items[i].kind == LQL_MUTATION_INCREMENT) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static lonejson_candidate_transform_candidate_policy
+source_transform_candidate_decision(
+    void *user, const lonejson_candidate_info *candidate,
+    const lonejson_candidate_transform_candidate_info *transform_candidate,
+    lonejson_error *error) {
+  source_transform_state *state;
+  lonejson_candidate_transform_candidate_policy policy;
+  int matched;
+  (void)candidate;
+  (void)transform_candidate;
+  (void)error;
+  memset(&policy, 0, sizeof(policy));
+  state = (source_transform_state *)user;
+  if (state == NULL) {
+    policy.decision = LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_ERROR;
+    return policy;
+  }
+  matched = state->current_matched_known
+                ? state->current_matched
+                : eval_doc_matches(state->selector, &state->doc);
+  state->current_matched = matched;
+  state->current_matched_known = 1;
+  state->current_policy.matched = matched;
+  state->current_policy.emit_candidate = matched || !state->matches_only;
+  state->current_policy.mutate_candidate =
+      matched && state->mutation_plan != NULL;
+  state->current_policy.root_object = state->current_root_object;
+  if (!state->current_policy.emit_candidate) {
+    policy.decision = LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_DROP;
+    return policy;
+  }
+  policy.decision = LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_EMIT;
+  policy.candidate_policy = &state->current_policy;
+  return policy;
+}
+
+static lonejson_candidate_transform_old_scalar_mode
+source_transform_old_scalar(void *user,
+                            const lonejson_candidate_transform_event *event,
+                            lonejson_error *error) {
+  source_transform_state *state;
+  size_t index;
+  (void)error;
+  state = (source_transform_state *)user;
+  if (state == NULL || event == NULL || event->path == NULL ||
+      state->mutation_plan == NULL ||
+      event->value_type != LONEJSON_VALUE_NUMBER) {
+    return LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE;
+  }
+  if (event->candidate_policy != NULL &&
+      !((const source_transform_policy *)event->candidate_policy)
+           ->mutate_candidate) {
+    return LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE;
+  }
+  if (!source_transform_find_item(state, event, event->path, &index)) {
+    return LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE;
+  }
+  return state->mutation_plan->items[index].kind == LQL_MUTATION_INCREMENT
+             ? LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE
+             : LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE;
+}
 
 static int query_limit_enabled(lql_uint64 limit) { return limit != 0u; }
 
@@ -3233,14 +4066,10 @@ static lonejson_status file_sink_unlocked(void *user, const void *data,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status write_spooled_payload(FILE *out,
-                                             const lonejson_spooled *spooled,
-                                             int compact,
-                                             lonejson_status (*sink)(
-                                                 void *, const void *, size_t,
-                                                 lonejson_error *),
-                                             lonejson *runtime,
-                                             lonejson_error *error) {
+static lonejson_status write_spooled_payload(
+    FILE *out, const lonejson_spooled *spooled, int compact,
+    lonejson_status (*sink)(void *, const void *, size_t, lonejson_error *),
+    lonejson *runtime, lonejson_error *error) {
   lonejson_writer writer;
   lonejson_status st;
   int writer_initialized;
@@ -3383,26 +4212,6 @@ on_source_spooled_capture_decision(void *user,
   return LONEJSON_CANDIDATE_DISCARD;
 }
 
-static lonejson_candidate_capture_decision
-on_rewrite_spooled_capture_decision(void *user,
-                                    const lonejson_candidate_info *candidate,
-                                    lonejson_error *error) {
-  spooled_match_state *state;
-  int matched;
-  (void)candidate;
-  (void)error;
-  state = (spooled_match_state *)user;
-  matched = eval_doc_matches(state->selector, &state->doc);
-  if (matched) {
-    return LONEJSON_CANDIDATE_RETAIN;
-  }
-  if (!state->matches_only &&
-      (state->mutation_plan != NULL || state->projection != NULL)) {
-    return LONEJSON_CANDIDATE_RETAIN;
-  }
-  return LONEJSON_CANDIDATE_DISCARD;
-}
-
 static lonejson_candidate_callback_result
 on_source_spooled_candidate_end(void *user,
                                 const lonejson_candidate_info *candidate,
@@ -3425,8 +4234,8 @@ on_source_spooled_candidate_end(void *user,
     st = execute_query_source_spooled_matches_with_base(
         state->receiver, state->selector, spooled_source_read, &nested_reader,
         state->offset_base + (lql_uint64)candidate->stream_offset,
-        state->index_base + state->result.candidates_seen,
-        &nested_options, state->on_match, state->user, &nested_result, NULL);
+        state->index_base + state->result.candidates_seen, &nested_options,
+        state->on_match, state->user, &nested_result, NULL);
     reset_doc(&state->doc);
     state->result.candidates_seen += nested_result.candidates_seen;
     state->result.candidates_matched += nested_result.candidates_matched;
@@ -3656,10 +4465,9 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
       }
       wrote_output = 1;
     } else {
-      write_status =
-          write_spooled_payload(state->out, candidate->payload_spool,
-                                state->compact, file_sink_unlocked,
-                                state->compact_runtime, error);
+      write_status = write_spooled_payload(state->out, candidate->payload_spool,
+                                           state->compact, file_sink_unlocked,
+                                           state->compact_runtime, error);
       if (write_status != LONEJSON_STATUS_OK) {
         reset_doc(&state->doc);
         return LONEJSON_CANDIDATE_ERROR;
@@ -4048,8 +4856,8 @@ static lql_status payload_write_json_method(lql *self,
     memset(&lj_error, 0, sizeof(lj_error));
     flockfile(out);
     if (lonejson_spooled_write_to_sink(
-            (const lonejson_spooled *)payload->spooled, file_sink_unlocked,
-            out, &lj_error) == LONEJSON_STATUS_OK) {
+            (const lonejson_spooled *)payload->spooled, file_sink_unlocked, out,
+            &lj_error) == LONEJSON_STATUS_OK) {
       funlockfile(out);
       return LQL_STATUS_OK;
     }
@@ -4057,8 +4865,7 @@ static lql_status payload_write_json_method(lql *self,
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
-  if (payload->kind == LQL_PAYLOAD_SEEKABLE_RANGE &&
-      payload->source != NULL) {
+  if (payload->kind == LQL_PAYLOAD_SEEKABLE_RANGE && payload->source != NULL) {
     current = ftello(payload->source);
     if (current < (off_t)0) {
       lql_set_error(error, LQL_STATUS_UNSUPPORTED,
@@ -4210,8 +5017,8 @@ static lql_status mutate_file_range_candidates_method(
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   return execute_mutate_file_range_candidates_fast(
-      self, selector, plan, file, offset, size, out, compact, matches_only, NULL,
-      out_result, error);
+      self, selector, plan, file, offset, size, out, compact, matches_only,
+      NULL, out_result, error);
 }
 
 static lql_status mutate_file_range_candidates_with_options_method(
@@ -4273,9 +5080,9 @@ static lql_status mutate_source_candidates_method(
                   "plan, read, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_source_spooled_rewrite(
-      self, selector, read, read_user, out, compact, NULL, plan, matches_only,
-      NULL, out_result, error);
+  return execute_query_source_v2_transform(self, selector, read, read_user, out,
+                                           compact, NULL, plan, matches_only,
+                                           NULL, out_result, error);
 }
 
 static lql_status mutate_source_candidates_with_options_method(
@@ -4289,9 +5096,9 @@ static lql_status mutate_source_candidates_with_options_method(
                   "plan, read, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_source_spooled_rewrite(
-      self, selector, read, read_user, out, compact, NULL, plan, matches_only,
-      query_options, out_result, error);
+  return execute_query_source_v2_transform(self, selector, read, read_user, out,
+                                           compact, NULL, plan, matches_only,
+                                           query_options, out_result, error);
 }
 
 static lql_status mutate_source_projected_candidates_method(
@@ -4305,7 +5112,7 @@ static lql_status mutate_source_projected_candidates_method(
                   "projection, plan, read, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_source_spooled_rewrite(
+  return execute_query_source_v2_transform(
       self, selector, read, read_user, out, compact, projection, plan,
       matches_only, NULL, out_result, error);
 }
@@ -4321,7 +5128,7 @@ static lql_status mutate_source_projected_candidates_with_options_method(
                   "projection, plan, read, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_source_spooled_rewrite(
+  return execute_query_source_v2_transform(
       self, selector, read, read_user, out, compact, projection, plan,
       matches_only, query_options, out_result, error);
 }
@@ -4474,10 +5281,11 @@ static lql_status execute_query_file_range_decisions(
   return LQL_STATUS_OK;
 }
 
-static lql_status execute_query_file_matches(
-    lql *self, const lql_selector *selector, FILE *file,
-    const lql_query_options *query_options, lql_query_match_fn on_match,
-    void *user, lql_query_result *out_result, lql_error *error) {
+static lql_status
+execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
+                           const lql_query_options *query_options,
+                           lql_query_match_fn on_match, void *user,
+                           lql_query_result *out_result, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
@@ -4920,7 +5728,184 @@ static lql_status execute_query_file_range_spooled_matches(
   return LQL_STATUS_OK;
 }
 
-static lql_status execute_query_source_spooled_rewrite(
+static void source_transform_clear_applied(source_transform_state *state) {
+  if (state != NULL && state->applied != NULL && state->mutation_plan != NULL) {
+    memset(state->applied, 0,
+           sizeof(state->applied[0]) * state->mutation_plan->count);
+  }
+}
+
+static lonejson_candidate_callback_result
+source_transform_candidate_begin(void *user,
+                                 const lonejson_candidate_info *candidate,
+                                 lonejson_error *error) {
+  source_transform_state *state;
+  (void)candidate;
+  (void)error;
+  state = (source_transform_state *)user;
+  reset_doc(&state->doc);
+  source_transform_cleanup_frames(state);
+  source_transform_clear_applied(state);
+  memset(&state->current_policy, 0, sizeof(state->current_policy));
+  state->active_item = 0u;
+  state->active_item_set = 0;
+  state->current_matched = state->selector == NULL;
+  state->current_matched_known = state->selector == NULL;
+  state->current_root_object = 0;
+  state->current_root_seen = 0;
+  state->current_output_enabled =
+      state->selector == NULL || !state->matches_only;
+  state->transform_failed = 0;
+  return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static lonejson_candidate_callback_result
+source_transform_candidate_end(void *user,
+                               const lonejson_candidate_info *candidate,
+                               lonejson_error *error) {
+  source_transform_state *state;
+  int matched;
+  (void)error;
+  state = (source_transform_state *)user;
+  matched = state->current_matched_known
+                ? state->current_matched
+                : eval_doc_matches(state->selector, &state->doc);
+  state->current_matched = matched;
+  state->current_matched_known = 1;
+  ++state->result.candidates_seen;
+  state->result.bytes_read =
+      (lql_uint64)(candidate->stream_offset + candidate->byte_size);
+  if (matched) {
+    ++state->result.candidates_matched;
+  }
+  reset_doc(&state->doc);
+  source_transform_cleanup_frames(state);
+  if (query_result_stop_if_limited(&state->result, &state->options,
+                                   state->limit_flags)) {
+    return LONEJSON_CANDIDATE_STOP;
+  }
+  return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static int source_transform_alloc_applied(source_transform_state *state) {
+  size_t count;
+  if (state == NULL || state->mutation_plan == NULL) {
+    return 1;
+  }
+  count = state->mutation_plan->count;
+  if (count <=
+      sizeof(state->inline_applied) / sizeof(state->inline_applied[0])) {
+    state->applied = state->inline_applied;
+    state->applied_alloc = NULL;
+    memset(state->applied, 0, sizeof(state->applied[0]) * count);
+    return 1;
+  }
+  state->applied = (int *)state->allocator->calloc(state->allocator, count,
+                                                   sizeof(state->applied[0]));
+  state->applied_alloc = state->applied;
+  return state->applied != NULL;
+}
+
+static void source_transform_cleanup(source_transform_state *state) {
+  if (state == NULL) {
+    return;
+  }
+  source_transform_cleanup_frames(state);
+  if (state->applied_alloc != NULL) {
+    state->allocator->destroy(state->allocator, state->applied_alloc);
+  }
+  state->applied = NULL;
+  state->applied_alloc = NULL;
+}
+
+static int
+source_transform_projection_segment_count(const lql_projection *projection,
+                                          size_t *out) {
+  size_t i;
+  size_t count;
+  count = 0u;
+  if (projection == NULL) {
+    *out = 0u;
+    return 1;
+  }
+  for (i = 0u; i < projection->path_count; ++i) {
+    if (projection->paths[i].segment_count > ((size_t)-1) - count) {
+      return 0;
+    }
+    count += projection->paths[i].segment_count;
+  }
+  *out = count;
+  return 1;
+}
+
+static int source_transform_build_projection_paths(
+    lql_allocator *allocator, const lql_projection *projection,
+    lonejson_candidate_transform_projection_path **out_paths,
+    lonejson_candidate_transform_projection_segment **out_segments) {
+  lonejson_candidate_transform_projection_path *paths;
+  lonejson_candidate_transform_projection_segment *segments;
+  size_t segment_count;
+  size_t i;
+  size_t j;
+  size_t cursor;
+  if (out_paths != NULL) {
+    *out_paths = NULL;
+  }
+  if (out_segments != NULL) {
+    *out_segments = NULL;
+  }
+  if (projection == NULL || projection->path_count == 0u) {
+    return 1;
+  }
+  if (!source_transform_projection_segment_count(projection, &segment_count)) {
+    return 0;
+  }
+  paths = (lonejson_candidate_transform_projection_path *)allocator->calloc(
+      allocator, projection->path_count, sizeof(paths[0]));
+  if (paths == NULL) {
+    return 0;
+  }
+  segments =
+      (lonejson_candidate_transform_projection_segment *)allocator->calloc(
+          allocator, segment_count == 0u ? 1u : segment_count,
+          sizeof(segments[0]));
+  if (segments == NULL) {
+    allocator->destroy(allocator, paths);
+    return 0;
+  }
+  cursor = 0u;
+  for (i = 0u; i < projection->path_count; ++i) {
+    paths[i].segments = &segments[cursor];
+    paths[i].segment_count = projection->paths[i].segment_count;
+    for (j = 0u; j < projection->paths[i].segment_count; ++j) {
+      segments[cursor].kind =
+          projection->paths[i].segment_is_array_index[j]
+              ? LONEJSON_CANDIDATE_TRANSFORM_PROJECT_ARRAY_INDEX
+              : LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER;
+      segments[cursor].key = projection->paths[i].segments[j];
+      segments[cursor].key_len = projection->paths[i].segment_lens[j];
+      segments[cursor].index =
+          (lonejson_uint64)projection->paths[i].array_indexes[j];
+      ++cursor;
+    }
+  }
+  *out_paths = paths;
+  *out_segments = segments;
+  return 1;
+}
+
+static void source_transform_free_projection_paths(
+    lql_allocator *allocator,
+    lonejson_candidate_transform_projection_path *paths,
+    lonejson_candidate_transform_projection_segment *segments) {
+  if (allocator == NULL) {
+    return;
+  }
+  allocator->destroy(allocator, segments);
+  allocator->destroy(allocator, paths);
+}
+
+static lql_status execute_query_source_v2_transform(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     FILE *out, int compact, const lql_projection *projection,
     const lql_mutation_plan *mutation_plan, int matches_only,
@@ -4928,104 +5913,140 @@ static lql_status execute_query_source_spooled_rewrite(
     lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
-  lonejson_path_value_visitor visitor;
-  lonejson_candidate_stream_options options;
+  lonejson_path_value_visitor observer;
+  lonejson_candidate_transform_options options;
+  lonejson_candidate_transform_result transform_result;
+  lonejson_candidate_transform_projection_path *projection_paths;
+  lonejson_candidate_transform_projection_segment *projection_segments;
   lonejson_status st;
-  spooled_match_state state;
+  source_transform_state state;
   source_reader_adapter adapter;
+  lql_allocator *allocator;
   int recursive_array_framing;
+  int runtime_pooled;
+  (void)compact;
 
   if (read == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "read and output file are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "lql receiver allocator required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
   memset(&state, 0, sizeof(state));
+  memset(&adapter, 0, sizeof(adapter));
+  memset(&transform_result, 0, sizeof(transform_result));
+  projection_paths = NULL;
+  projection_segments = NULL;
   state.receiver = self;
+  state.allocator = allocator;
   state.selector = selector;
-  state.out = out;
-  state.compact = compact;
   state.projection = projection;
   state.mutation_plan = mutation_plan;
   state.matches_only = matches_only;
-  state.expand_arrays = 1;
+  state.callback_status = LQL_STATUS_OK;
   if (query_options != NULL) {
     state.options = *query_options;
   }
   state.limit_flags = query_limit_flags(&state.options);
-  lql_error_init(&state.projection_error);
-  lql_error_init(&state.mutation_error);
-  memset(&adapter, 0, sizeof(adapter));
   adapter.read = read;
   adapter.user = read_user;
   recursive_array_framing = 0;
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
+  if (!source_transform_alloc_applied(&state)) {
+    destroy_doc(&state.doc);
+    return LQL_STATUS_NO_MEMORY;
+  }
+  if (!source_transform_build_projection_paths(
+          allocator, projection, &projection_paths, &projection_segments)) {
+    source_transform_cleanup(&state);
+    destroy_doc(&state.doc);
+    return LQL_STATUS_NO_MEMORY;
+  }
   if (!source_reader_prefix_capture(&adapter, &recursive_array_framing)) {
     if (out_result != NULL) {
       *out_result = state.result;
     }
+    source_transform_free_projection_paths(allocator, projection_paths,
+                                           projection_segments);
+    source_transform_cleanup(&state);
     destroy_doc(&state.doc);
     lql_set_error(error, LQL_STATUS_JSON_ERROR, "source read failed");
     return LQL_STATUS_JSON_ERROR;
   }
-  runtime = lql_lonejson_new(self, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    source_transform_free_projection_paths(allocator, projection_paths,
+                                           projection_segments);
+    source_transform_cleanup(&state);
     destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
-  if (compact) {
-    state.compact_runtime = lql_lonejson_new(self, &lj_error);
-    if (state.compact_runtime == NULL) {
-      lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-      lonejson_free(runtime);
-      destroy_doc(&state.doc);
-      return LQL_STATUS_JSON_ERROR;
-    }
-  }
-  init_eval_visitor(&visitor);
-  configure_eval_visitor_for_doc(&visitor, &state.doc);
-  options = lonejson_default_candidate_stream_options();
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED;
-  if (recursive_array_framing) {
-    options.framing = LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS;
-    state.expand_arrays = 0;
-  }
-  options.path_visitor = &visitor;
-  options.visitor_user = &state.doc;
-  options.candidate_begin = on_spooled_candidate_begin;
-  options.candidate_end = on_spooled_candidate_end;
+  init_eval_visitor(&state.eval_visitor);
+  configure_eval_visitor_for_doc(&state.eval_visitor, &state.doc);
+  source_transform_init_observer(&observer);
+  memset(&options, 0, sizeof(options));
+  options.framing = recursive_array_framing
+                        ? LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS
+                        : LONEJSON_CANDIDATE_FRAMING_AUTO;
+  options.output_framing = LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON;
+  options.mode = selector == NULL && !matches_only
+                     ? LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING
+                     : LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
+  state.gated_transform =
+      options.mode == LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
+  options.old_scalar_mode =
+      source_transform_has_increment(mutation_plan)
+          ? LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE
+          : LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE;
+  options.sink = file_sink_unlocked;
+  options.sink_user = out;
+  options.observer = &observer;
+  options.observer_user = &state;
+  options.transform = source_transform_decide;
+  options.replace = source_transform_replace;
+  options.insert = source_transform_insert_missing;
+  options.projection_paths = projection_paths;
+  options.projection_path_count =
+      projection == NULL ? 0u : projection->path_count;
+  options.transform_user = &state;
+  options.candidate_begin = source_transform_candidate_begin;
+  options.candidate_end = source_transform_candidate_end;
   options.candidate_user = &state;
-  options.capture_decision = on_rewrite_spooled_capture_decision;
-  options.capture_decision_user = &state;
+  options.result = &transform_result;
+  if (projection != NULL && mutation_plan != NULL) {
+    options.composition =
+        LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_PROJECT_THEN_TRANSFORM;
+  }
+  options.old_scalar = source_transform_old_scalar;
+  options.old_scalar_user = &state;
+  options.candidate_decision = source_transform_candidate_decision;
+  options.candidate_decision_user = &state;
   flockfile(out);
-  st = lonejson_visit_candidates_reader(runtime, source_reader_read,
-                                        &adapter, &options, &lj_error);
+  st = lonejson_transform_candidates_reader(runtime, source_reader_read,
+                                            &adapter, &options, &lj_error);
   funlockfile(out);
-  if (state.compact_runtime != NULL) {
-    lonejson_free(state.compact_runtime);
+  if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||
+      state.callback_status != LQL_STATUS_OK) {
+    query_finish_source_bytes_with_base(&state.result, &adapter, 0u);
   }
   if (out_result != NULL) {
-    if (!state.result.stopped_early) {
-      state.result.bytes_read = adapter.total_read;
-    }
     *out_result = state.result;
   }
+  lql_lonejson_release(self, runtime, runtime_pooled);
+  source_transform_free_projection_paths(allocator, projection_paths,
+                                         projection_segments);
+  source_transform_cleanup(&state);
   destroy_doc(&state.doc);
-  lonejson_free(runtime);
   if (st != LONEJSON_STATUS_OK) {
-    if (state.mutation_error.code != LQL_STATUS_OK) {
-      lql_set_error(error, state.mutation_error.code,
-                    state.mutation_error.message);
-      return state.mutation_error.code;
-    }
-    if (state.projection_error.code != LQL_STATUS_OK) {
-      lql_set_error(error, state.projection_error.code,
-                    state.projection_error.message);
-      return state.projection_error.code;
-    }
     if (adapter.error_code != 0) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR, "source read failed");
       return LQL_STATUS_JSON_ERROR;

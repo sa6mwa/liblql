@@ -49,7 +49,7 @@ shape is intentionally outside the public candidate-stream contract. liblql must
 not emulate it by materializing the root array, spooling the whole input, or
 retaining all candidates.
 
-lonejson `v0.39.0` exposes useful pieces:
+lonejson `v0.40.0` exposes useful pieces:
 
 - `AUTO` framing for repeated top-level values;
 - `ARRAY_ITEMS` framing for one top-level array treated as item candidates;
@@ -121,7 +121,7 @@ streams to claim this additional Go-compatible input shape.
 
 The Go `pkt.systems/lql v0.17.1` stream parity corpus compares `QueryStream`
 against `encoding/json.Decoder`. Two observable edge cases from that corpus are
-not currently matched by lonejson `v0.39.0`:
+not currently matched by lonejson `v0.40.0`:
 
 - The string payload
   `{"id":"a","s":"line\n\t\u0001\u2028\u2029\ud800\udc00\ud800x"}`
@@ -171,7 +171,7 @@ Seekable liblql candidate streams can avoid candidate capture: lonejson reports
 with `pread()` without disturbing the active parser cursor. Callback-source
 candidate streams do not have that option.
 
-lonejson `v0.39.0` provides `LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED` plus a
+lonejson `v0.40.0` provides `LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED` plus a
 capture decision callback. liblql now uses that surface for callback-source
 matched payload queries and selector-gated source mutation/projection replay:
 selector state is evaluated while the candidate is parsed, unmatched candidates
@@ -179,13 +179,12 @@ are discarded before callback-scoped payload handles are exposed or replayed,
 and top-level array source mutation uses lonejson recursive logical candidate
 framing rather than liblql-owned nested-array replay scaffolding.
 
-This closes the dependency-owned sparse matched-payload capture gap and removes
-all-candidate spooling from sparse `matches_only` source mutation/projection.
-Dense retained candidates still replay through existing liblql projection and
-mutation writers until liblql consumes the single-pass transform API described
-below. liblql must not replace that remaining work with retained whole
-candidates outside lonejson, undisclosed output buffers, temporary files as
-hidden staging, or a second JSON parser.
+This closes the dependency-owned sparse matched-payload capture gap for payload
+queries. Source mutation/projection no longer uses this capture surface as its
+primary callback-source rewrite path; it now routes through the lonejson
+candidate transform API described below. liblql must not replace that transform
+path with retained whole candidates outside lonejson, undisclosed output
+buffers, temporary files as hidden staging, or a second JSON parser.
 
 The now-available dependency capability is a candidate-stream capture mode where
 a caller can decide, at candidate end, whether the current candidate's already
@@ -195,7 +194,7 @@ intent is to let a streaming visitor evaluate selector state while lonejson
 keeps only the minimal dependency-owned replay state needed to make an
 end-of-candidate retain/discard decision.
 
-Required semantics, now represented by the lonejson `v0.39.0` surface:
+Required semantics, now represented by the lonejson `v0.40.0` surface:
 
 - The parser still streams path/value visitor callbacks as candidate bytes are
   consumed. liblql evaluates selectors from those callbacks.
@@ -247,10 +246,9 @@ Validation expected in lonejson:
 - offsets and sizes are identical to existing candidate capture modes;
 - `CAPTURE_NONE` performance remains unchanged.
 
-liblql has consumed this surface for callback-source matched payload queries
-and sparse selector-gated source mutation/projection replay. Dense retained
-projection and mutation remain tied to the transform integration below rather
-than a missing predicate-gated capture primitive.
+liblql has consumed this surface for callback-source matched payload queries.
+Source mutation/projection replay has moved to the transform integration below
+rather than predicate-gated payload capture.
 
 ## Single-Pass Candidate Transform Visitors
 
@@ -276,14 +274,14 @@ selector-result, candidate, or transform-output cache to avoid replay: those
 would add memory growth, invalidation, and branch cost while failing to remove
 the fundamental extra parse/write pass.
 
-lonejson `v0.39.0` exposes the V2 candidate transform surface, including
-explicit streaming and gated-spooled execution modes, recursive logical
-candidate metadata, old scalar policy, object insertion hooks, structural
-projection paths, transform replay counters, and
-`LONEJSON_STATUS_UNSUPPORTED`. The remaining work is liblql integration:
-replace dense retained callback-source projection and mutation replay with that
-single-pass transform API while preserving the existing streaming, writer, and
-error contracts.
+lonejson `v0.40.0` exposes the candidate transform surface liblql needs:
+explicit streaming and gated-spooled execution modes, finalized gated
+candidate decisions with caller policy, recursive logical candidate metadata,
+project-then-transform composition, source/replay/projected event metadata,
+per-event old scalar policy, object insertion hooks, structural projection
+paths, transform replay counters, and `LONEJSON_STATUS_UNSUPPORTED`. liblql now
+uses that surface for callback-source source mutation and projected mutation
+while preserving the existing streaming, writer, and error contracts.
 
 Required semantics for the liblql integration:
 
@@ -317,7 +315,7 @@ Non-goals:
 - Do not make this feature depend on seekable input; the main need is
   callback-source streams that cannot rewind.
 
-Validation needed in liblql when consuming the transform surface:
+Validation covered in liblql for the transform surface:
 
 - dense-match projection fixture proves one parse can select and write
   projected output without candidate spooling or replay;
@@ -333,11 +331,13 @@ Validation needed in liblql when consuming the transform surface:
 - peak memory is independent of total source size and does not grow with the
   number of candidates.
 
-This is no longer a dependency-owned missing API. It is the remaining liblql
-implementation path for dense non-seekable candidate transforms. The current
-source mutation/projection path already uses lonejson-owned gated capture to
-avoid replaying discarded sparse candidates; it still reuses the existing
-liblql projection and mutation writers for retained candidates.
+This is no longer a dependency-owned missing API or a pending liblql
+integration path. The current source mutation/projected-mutation path uses
+lonejson-owned candidate transform execution, including gated decision/policy
+for late selectors and project-then-transform composition for projected
+mutation. Further work in this area should be treated as optimization or
+expanded public behavior, not as a blocker to removing liblql-owned
+callback-source replay/staging.
 
 ## Chunked Number Writer
 

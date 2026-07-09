@@ -30,13 +30,7 @@ typedef struct projection_source_reader {
   int error_code;
 } projection_source_reader;
 
-typedef struct projection_path {
-  char **segments;
-  size_t *segment_lens;
-  unsigned char *segment_is_array_index;
-  size_t *array_indexes;
-  size_t segment_count;
-} projection_path;
+typedef lql_projection_path projection_path;
 
 #define PROJECTION_KEY_INLINE_CAP 128u
 
@@ -67,15 +61,6 @@ typedef struct projection_state {
   size_t *open_array_next;
   size_t open_capacity;
 } projection_state;
-
-struct lql_projection {
-  projection_path *paths;
-  size_t *path_depth_indexes;
-  size_t *path_depth_offsets;
-  size_t path_count;
-  size_t min_segment_count;
-  size_t max_segment_count;
-};
 
 static int seek_u64(FILE *file, lql_uint64 offset) {
   off_t seek_offset;

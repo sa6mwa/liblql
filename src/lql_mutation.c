@@ -19,70 +19,29 @@
 #include <string.h>
 #include <sys/types.h>
 
-typedef enum mutation_kind {
-  MUTATION_SET = 0,
-  MUTATION_INCREMENT,
-  MUTATION_REMOVE
-} mutation_kind;
+typedef lql_mutation_kind mutation_kind;
+typedef lql_mutation_file_mode mutation_file_mode;
+typedef lql_mutation_value_kind mutation_value_kind;
+typedef lql_mutation_path mutation_path;
+typedef lql_mutation_item mutation_item;
 
-typedef enum mutation_file_mode {
-  MUTATION_FILE_NONE = 0,
-  MUTATION_FILE_AUTO,
-  MUTATION_FILE_TEXT,
-  MUTATION_FILE_BASE64
-} mutation_file_mode;
-
-typedef enum mutation_value_kind {
-  MUTATION_VALUE_STRING = 0,
-  MUTATION_VALUE_BOOL_TRUE,
-  MUTATION_VALUE_BOOL_FALSE,
-  MUTATION_VALUE_NULL,
-  MUTATION_VALUE_NUMBER
-} mutation_value_kind;
-
-typedef struct mutation_path {
-  char **segments;
-  unsigned char *segment_kinds;
-  size_t *segment_lens;
-  size_t segment_count;
-  int has_wildcard;
-} mutation_path;
-
-#define MUTATION_PATH_LITERAL 0u
-#define MUTATION_PATH_OBJECT_WILDCARD 1u
-#define MUTATION_PATH_ARRAY_WILDCARD 2u
-#define MUTATION_PATH_RECURSIVE 3u
-#define MUTATION_PATH_ELLIPSIS 4u
-
-typedef struct mutation_item {
-  mutation_kind kind;
-  mutation_path path;
-  char *value;
-  size_t value_offset;
-  size_t value_len;
-  mutation_value_kind value_kind;
-  double delta;
-  char delta_text[64];
-  size_t delta_text_len;
-  int time_value;
-  int can_create_missing_object;
-  mutation_file_mode file_mode;
-  char *file_path;
-} mutation_item;
-
-struct lql_mutation_plan {
-  mutation_item *items;
-  size_t *value_depth_indexes;
-  size_t *value_depth_offsets;
-  size_t *key_depth_indexes;
-  size_t *key_depth_offsets;
-  size_t *create_indexes;
-  size_t create_count;
-  size_t count;
-  size_t max_segment_count;
-  int literal_only_paths;
-  int variable_depth_paths;
-};
+#define MUTATION_SET LQL_MUTATION_SET
+#define MUTATION_INCREMENT LQL_MUTATION_INCREMENT
+#define MUTATION_REMOVE LQL_MUTATION_REMOVE
+#define MUTATION_FILE_NONE LQL_MUTATION_FILE_NONE
+#define MUTATION_FILE_AUTO LQL_MUTATION_FILE_AUTO
+#define MUTATION_FILE_TEXT LQL_MUTATION_FILE_TEXT
+#define MUTATION_FILE_BASE64 LQL_MUTATION_FILE_BASE64
+#define MUTATION_VALUE_STRING LQL_MUTATION_VALUE_STRING
+#define MUTATION_VALUE_BOOL_TRUE LQL_MUTATION_VALUE_BOOL_TRUE
+#define MUTATION_VALUE_BOOL_FALSE LQL_MUTATION_VALUE_BOOL_FALSE
+#define MUTATION_VALUE_NULL LQL_MUTATION_VALUE_NULL
+#define MUTATION_VALUE_NUMBER LQL_MUTATION_VALUE_NUMBER
+#define MUTATION_PATH_LITERAL LQL_MUTATION_PATH_LITERAL
+#define MUTATION_PATH_OBJECT_WILDCARD LQL_MUTATION_PATH_OBJECT_WILDCARD
+#define MUTATION_PATH_ARRAY_WILDCARD LQL_MUTATION_PATH_ARRAY_WILDCARD
+#define MUTATION_PATH_RECURSIVE LQL_MUTATION_PATH_RECURSIVE
+#define MUTATION_PATH_ELLIPSIS LQL_MUTATION_PATH_ELLIPSIS
 
 static int mutation_path_has_ellipsis(const mutation_path *path) {
   size_t i;
@@ -201,8 +160,7 @@ static int mutation_plan_refresh_traits(lql_allocator *allocator,
   if (plan->literal_only_paths) {
     key_index_count = 0u;
     for (i = 0u; i < plan->count; ++i) {
-      if (key_index_count >
-          ((size_t)-1) - plan->items[i].path.segment_count) {
+      if (key_index_count > ((size_t)-1) - plan->items[i].path.segment_count) {
         allocator->destroy(allocator, cursor);
         return 0;
       }
@@ -2132,9 +2090,9 @@ static int inspect_file_textlike(const char *path, lonejson_error *error,
   return expected == 0u ? 1 : 0;
 }
 
-static lonejson_status write_mutation_set_value(mutation_stream_state *state,
-                                                const mutation_item *item,
-                                                lonejson_error *error) {
+LQL_INTERNAL_SYMBOL lonejson_status lql_mutation_write_item_value(
+    lonejson_writer *writer, const lql_mutation_item *item,
+    lonejson_error *error) {
   const char *value;
   const char *text;
   size_t len;
@@ -2163,9 +2121,9 @@ static lonejson_status write_mutation_set_value(mutation_stream_state *state,
     st = lonejson_source_set_path(&source, item->file_path, error);
     if (st == LONEJSON_STATUS_OK) {
       if (file_mode == MUTATION_FILE_TEXT) {
-        st = lonejson_writer_source_text(&state->writer, &source, error);
+        st = lonejson_writer_source_text(writer, &source, error);
       } else {
-        st = lonejson_writer_source_base64(&state->writer, &source, error);
+        st = lonejson_writer_source_base64(writer, &source, error);
       }
     }
     lonejson_source_cleanup(&source);
@@ -2176,21 +2134,27 @@ static lonejson_status write_mutation_set_value(mutation_stream_state *state,
   len = item->value_len;
   switch (item->value_kind) {
   case MUTATION_VALUE_BOOL_TRUE:
-    return lonejson_writer_bool(&state->writer, 1, error);
+    return lonejson_writer_bool(writer, 1, error);
   case MUTATION_VALUE_BOOL_FALSE:
-    return lonejson_writer_bool(&state->writer, 0, error);
+    return lonejson_writer_bool(writer, 0, error);
   case MUTATION_VALUE_NULL:
-    return lonejson_writer_null(&state->writer, error);
+    return lonejson_writer_null(writer, error);
   case MUTATION_VALUE_NUMBER:
-    return lonejson_writer_number_text(&state->writer, text, len, error);
+    return lonejson_writer_number_text(writer, text, len, error);
   default:
     break;
   }
   if (item->kind == MUTATION_INCREMENT) {
-    return lonejson_writer_number_text(&state->writer, item->delta_text,
+    return lonejson_writer_number_text(writer, item->delta_text,
                                        item->delta_text_len, error);
   }
-  return lonejson_writer_string(&state->writer, text, len, error);
+  return lonejson_writer_string(writer, text, len, error);
+}
+
+static lonejson_status write_mutation_set_value(mutation_stream_state *state,
+                                                const mutation_item *item,
+                                                lonejson_error *error) {
+  return lql_mutation_write_item_value(&state->writer, item, error);
 }
 
 static lonejson_status finish_skip_value(mutation_stream_state *state) {
