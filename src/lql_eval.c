@@ -214,6 +214,35 @@ static lql_status copy_range_to_sink(FILE *in, lql_uint64 size,
   return LQL_STATUS_OK;
 }
 
+static lql_status copy_fd_range_to_sink(int fd, lql_uint64 offset,
+                                        lql_uint64 size, lql_write_fn write,
+                                        void *user) {
+  char buf[8192];
+  size_t want;
+  ssize_t got;
+  off_t pos;
+  lql_status st;
+
+  while (size != 0u) {
+    want = size > (lql_uint64)sizeof(buf) ? sizeof(buf) : (size_t)size;
+    pos = (off_t)offset;
+    if (pos < (off_t)0 || (lql_uint64)pos != offset) {
+      return LQL_STATUS_JSON_ERROR;
+    }
+    got = pread(fd, buf, want, pos);
+    if (got <= (ssize_t)0) {
+      return LQL_STATUS_JSON_ERROR;
+    }
+    st = write(user, buf, (size_t)got);
+    if (st != LQL_STATUS_OK) {
+      return st;
+    }
+    offset += (lql_uint64)got;
+    size -= (lql_uint64)got;
+  }
+  return LQL_STATUS_OK;
+}
+
 static lql_status payload_file_write(void *user, const void *data, size_t len) {
   FILE *out;
   out = (FILE *)user;
@@ -7607,6 +7636,7 @@ static lql_status payload_write_json_method(lql *self,
                                             FILE *out, lql_error *error) {
   lonejson_error lj_error;
   off_t current;
+  int fd;
   int copy_ok;
   if (payload == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -7627,6 +7657,16 @@ static lql_status payload_write_json_method(lql *self,
     return LQL_STATUS_JSON_ERROR;
   }
   if (payload->kind == LQL_PAYLOAD_SEEKABLE_RANGE && payload->source != NULL) {
+    fd = fileno(payload->source);
+    if (fd >= 0) {
+      if (copy_fd_range_to_sink(fd, payload->offset, payload->size,
+                                payload_file_write, out) == LQL_STATUS_OK) {
+        return LQL_STATUS_OK;
+      }
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "failed to write seekable payload range");
+      return LQL_STATUS_JSON_ERROR;
+    }
     current = ftello(payload->source);
     if (current < (off_t)0) {
       lql_set_error(error, LQL_STATUS_UNSUPPORTED,
@@ -7660,6 +7700,7 @@ static lql_status payload_write_json_sink_method(lql *self,
                                                  lql_error *error) {
   lql_payload_sink_adapter adapter;
   off_t current;
+  int fd;
   lql_status copy_status;
   (void)self;
   if (payload == NULL || write == NULL) {
@@ -7688,6 +7729,21 @@ static lql_status payload_write_json_sink_method(lql *self,
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                   "payload is not a seekable source range");
     return LQL_STATUS_UNSUPPORTED;
+  }
+  fd = fileno(payload->source);
+  if (fd >= 0) {
+    copy_status = copy_fd_range_to_sink(fd, payload->offset, payload->size,
+                                        write, write_user);
+    if (copy_status == LQL_STATUS_OK) {
+      return LQL_STATUS_OK;
+    }
+    if (copy_status == LQL_STATUS_JSON_ERROR) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "failed to write seekable payload range");
+    } else {
+      lql_set_error(error, copy_status, "payload sink write failed");
+    }
+    return copy_status;
   }
   current = ftello(payload->source);
   if (current < (off_t)0) {
