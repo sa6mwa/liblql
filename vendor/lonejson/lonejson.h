@@ -14293,22 +14293,56 @@ static lonejson_status lonejson__spooled_open_temp(lonejson_spooled *value,
   return LONEJSON_STATUS_OK;
 }
 
+static size_t
+lonejson__spooled_growth_capacity(const lonejson_spooled *value, size_t need) {
+  size_t cap;
+  size_t limit;
+
+  if (value == NULL) {
+    return need;
+  }
+  limit = value->memory_limit;
+  cap = value->memory_capacity == 0u ? 4096u : value->memory_capacity;
+  if (limit != 0u && cap > limit) {
+    cap = limit;
+  }
+  while (cap < need) {
+    if (limit != 0u && cap >= limit) {
+      return need;
+    }
+    if (cap > ((size_t)-1) / 2u) {
+      cap = need;
+      break;
+    }
+    cap *= 2u;
+    if (limit != 0u && cap > limit) {
+      cap = limit;
+    }
+  }
+  if (cap < need) {
+    cap = need;
+  }
+  return cap;
+}
+
 static lonejson_status lonejson__spooled_reserve_memory(lonejson_spooled *value,
                                                         size_t need,
                                                         lonejson_error *error) {
   unsigned char *next;
+  size_t capacity;
 
   if (need <= value->memory_capacity) {
     return LONEJSON_STATUS_OK;
   }
+  capacity = lonejson__spooled_growth_capacity(value, need);
   next = (unsigned char *)lonejson__owned_realloc(&value->allocator,
-                                                  value->memory, need);
+                                                  value->memory, capacity);
   if (next == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
                                0u, "failed to expand spooled in-memory prefix");
   }
   value->memory = next;
-  value->memory_capacity = need;
+  value->memory_capacity = capacity;
   return LONEJSON_STATUS_OK;
 }
 
@@ -14317,24 +14351,26 @@ lonejson__spooled_reserve_memory_parse(lonejson_parser *parser,
                                        lonejson_spooled *value, size_t need,
                                        lonejson_error *error) {
   unsigned char *next;
+  size_t capacity;
 
   if (need <= value->memory_capacity) {
     return LONEJSON_STATUS_OK;
   }
+  capacity = lonejson__spooled_growth_capacity(value, need);
   if (!lonejson__parser_alloc_can_grow(
           parser, lonejson__parser_alloc_counted_bytes(parser, value->memory),
-          need)) {
+          capacity)) {
     return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
                                "parse allocations exceed configured max bytes");
   }
   next = (unsigned char *)lonejson__owned_realloc_parse(parser, value->memory,
-                                                        need);
+                                                        capacity);
   if (next == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u,
                                0u, "failed to expand spooled in-memory prefix");
   }
   value->memory = next;
-  value->memory_capacity = need;
+  value->memory_capacity = capacity;
   return LONEJSON_STATUS_OK;
 }
 
@@ -18643,6 +18679,56 @@ static lonejson_status lonejson__json_read_key_match_any(
       fast_quote = (const unsigned char *)memchr(fast_span, '"', fast_available);
       if (fast_quote != NULL) {
         fast_len = (size_t)(fast_quote - fast_span);
+        if (out_index != NULL) {
+          for (i = 0u; i < key_count; ++i) {
+            if (key_lens[i] == fast_len &&
+                memcmp(keys[i], fast_span, fast_len) == 0 &&
+                memchr(keys[i], '\\', fast_len) == NULL &&
+                lonejson__json_control_offset((const unsigned char *)keys[i],
+                                              fast_len) == fast_len) {
+              if (io->limits.max_total_bytes != 0u &&
+                  io->total_bytes + fast_len > io->limits.max_total_bytes) {
+                return lonejson__set_error(
+                    io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                    "JSON value exceeds maximum total byte limit");
+              }
+              io->total_bytes += fast_len;
+              decoded_bytes = fast_len;
+              if (io->limits.max_key_bytes != 0u &&
+                  decoded_bytes > io->limits.max_key_bytes) {
+                return lonejson__set_error(
+                    io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                    "JSON object key exceeds maximum decoded byte limit");
+              }
+              *out_index = i;
+              if (fast_uses_read_buffer) {
+                io->cursor->read_buffer_off += fast_len;
+              } else {
+                io->cursor->buffer_off += fast_len;
+              }
+              if (io->raw_capture_spool != NULL) {
+                lonejson_status capture_status =
+                    lonejson__json_cursor_advance_span(io, fast_len);
+                if (capture_status != LONEJSON_STATUS_OK &&
+                    capture_status != LONEJSON_STATUS_TRUNCATED) {
+                  return capture_status;
+                }
+              }
+              ch = lonejson__json_cursor_getc(io);
+              if (ch == -2) {
+                return io->error ? io->error->code
+                                 : LONEJSON_STATUS_CALLBACK_FAILED;
+              }
+              if (ch != '"') {
+                return lonejson__set_error(io->error,
+                                           LONEJSON_STATUS_INVALID_JSON, 0u,
+                                           0u, 0u,
+                                           "unterminated JSON string");
+              }
+              return LONEJSON_STATUS_OK;
+            }
+          }
+        }
         fast_escape = (const unsigned char *)memchr(fast_span, '\\', fast_len);
         fast_control = lonejson__json_control_offset(fast_span, fast_len);
         if (fast_escape == NULL && fast_control == fast_len) {

@@ -4368,6 +4368,21 @@ static lonejson_status fast_multi_key_chunk(void *user, const char *data,
     return LONEJSON_STATUS_OK;
   }
   selector = doc->selector;
+  if (doc->fast_multi_key_len == 0u) {
+    for (i = 0u; i < selector->predicate_count; ++i) {
+      bit = (unsigned int)(1u << i);
+      if ((doc->fast_multi_key_candidates & bit) == 0u) {
+        continue;
+      }
+      if (len == selector->predicates[i]->field_segment_lens[0] &&
+          data == selector->predicates[i]->field +
+                      selector->predicates[i]->field_segment_offsets[0]) {
+        doc->fast_multi_key_candidates = bit;
+        doc->fast_multi_key_len = len;
+        return LONEJSON_STATUS_OK;
+      }
+    }
+  }
   for (i = 0u; i < selector->predicate_count; ++i) {
     bit = (unsigned int)(1u << i);
     if ((doc->fast_multi_key_candidates & bit) == 0u) {
