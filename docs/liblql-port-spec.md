@@ -574,9 +574,9 @@ recursive, or array-wildcard semantics.
 Streaming query is a core requirement.
 
 The design target is that very large JSON inputs remain queryable on very small
-machines. A 1 GB JSON input under a 128 MB process memory budget is the baseline
-acceptance profile; a 1 TB JSON input on an 8 MB embedded machine is the
-architectural stress model. These are not tuning goals: steady-state query
+machines. A 100 MiB JSON input under a 128 MB process memory budget is the
+baseline acceptance profile; a 1 TB JSON input on an 8 MB embedded machine is
+the architectural stress model. These are not tuning goals: steady-state query
 memory must be bounded by configured working buffers and parser/selector state,
 not by total input size, candidate size, match count, or result set size. The
 implementation must not require a complete candidate, complete stream, or

@@ -272,6 +272,8 @@ Generate the same deterministic datasets for all implementations:
 
 1. `large_ndjson`
    - repeated JSON objects separated by newlines;
+   - root arrays are not valid NDJSON candidate streams and must not appear in
+     parity or benchmark fixtures;
    - default count should mirror Go library benchmark scale:
      `LQL_BENCH_QUERY_NDJSON_COUNT`, fallback `20000`;
    - CLI-style benchmark may also support `LQL_BENCH_NDJSON_COUNT`, fallback
@@ -294,7 +296,7 @@ The generator should write dataset files under generated state such as
 unless explicitly producing a tiny checked-in smoke fixture.
 
 The benchmark suite must include a large-fixture profile that proves C and Lua
-can query a 1 GB JSON input while constrained to a 128 MB process memory
+can query a 100 MiB JSON input while constrained to a 128 MB process memory
 budget. This is the runnable gate, not the architectural ceiling: the design
 must also remain valid for a 1 TB JSON input on an 8 MB embedded machine by
 keeping steady-state memory independent of total input size, candidate size,
