@@ -155,14 +155,24 @@ static void print_u64(lql_uint64 value) {
   }
 }
 
-static lql_uint64 elapsed_ns(clock_t start, clock_t end) {
-  double seconds;
+static lql_uint64 elapsed_ns(const struct timespec *start,
+                             const struct timespec *end) {
+  time_t sec;
+  long nsec;
 
-  if (end <= start) {
+  if (start == NULL || end == NULL) {
     return 0u;
   }
-  seconds = (double)(end - start) / (double)CLOCKS_PER_SEC;
-  return (lql_uint64)(seconds * 1000000000.0);
+  sec = end->tv_sec - start->tv_sec;
+  nsec = end->tv_nsec - start->tv_nsec;
+  if (nsec < 0) {
+    --sec;
+    nsec += 1000000000L;
+  }
+  if (sec < (time_t)0) {
+    return 0u;
+  }
+  return (lql_uint64)sec * 1000000000u + (lql_uint64)nsec;
 }
 
 static lql_uint64 peak_rss_bytes(void) {
@@ -479,8 +489,8 @@ int main(int argc, char **argv) {
   const char *file_backed_mutation_exprs[1];
   lql_uint64 mutation_expr_count;
   char file_backed_mutation_expr[4096];
-  clock_t start;
-  clock_t end;
+  struct timespec start;
+  struct timespec end;
 
   if (argc != 4 && argc != 5 && argc != 6) {
     fprintf(stderr, "usage: lql_payload_bench MODE SELECTOR FIXTURE "
@@ -575,11 +585,25 @@ int main(int argc, char **argv) {
     }
   }
 
-  start = clock();
+  if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
+    fprintf(stderr, "lql_payload_bench: failed to read start clock\n");
+    fclose(fixture);
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
   st = run_payload_pass(ctx, mode, expr, selector_name, fixture, fixture_size,
                         selector, projection, mutation_exprs,
                         mutation_expr_count, &result, &counts, &error);
-  end = clock();
+  if (clock_gettime(CLOCK_MONOTONIC, &end) != 0) {
+    fprintf(stderr, "lql_payload_bench: failed to read end clock\n");
+    fclose(fixture);
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    ctx->destroy(ctx);
+    return 1;
+  }
   fclose(fixture);
   ctx->projection_destroy(ctx, projection);
   ctx->selector_destroy(ctx, selector);
@@ -605,7 +629,7 @@ int main(int argc, char **argv) {
   fputs(" payload_bytes=", stdout);
   print_u64(counts.payload_bytes);
   fputs(" elapsed_ns=", stdout);
-  print_u64(elapsed_ns(start, end));
+  print_u64(elapsed_ns(&start, &end));
   fputs(" peak_rss_bytes=", stdout);
   print_u64(peak_rss_bytes());
   fputc('\n', stdout);
