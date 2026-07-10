@@ -4078,6 +4078,13 @@ typedef struct source_spooled_match_state {
   eval_doc doc;
 } source_spooled_match_state;
 
+typedef struct source_mutate_spooled_match_state {
+  lql *receiver;
+  const lql_mutation_plan *mutation_plan;
+  FILE *out;
+  lql_error mutation_error;
+} source_mutate_spooled_match_state;
+
 typedef struct transform_path_frame {
   unsigned char *array_segments;
   unsigned long array_segment_bits;
@@ -7127,6 +7134,65 @@ static lql_status execute_query_source_spooled_matches_with_base(
   return LQL_STATUS_OK;
 }
 
+static lql_status mutate_spooled_match_payload(void *user,
+                                               const lql_query_match *match) {
+  source_mutate_spooled_match_state *state;
+  spooled_source_reader reader;
+  lql_status st;
+
+  state = (source_mutate_spooled_match_state *)user;
+  if (state == NULL || state->receiver == NULL ||
+      state->mutation_plan == NULL || state->out == NULL || match == NULL ||
+      match->payload.kind != LQL_PAYLOAD_SPOOLED ||
+      match->payload.spooled == NULL) {
+    if (state != NULL) {
+      lql_set_error(&state->mutation_error, LQL_STATUS_INVALID_ARGUMENT,
+                    "matched source payload is required");
+    }
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  reader.cursor = *(const lonejson_spooled *)match->payload.spooled;
+  reader.cursor.read_offset = 0u;
+  st = state->receiver->mutate_source_paths(
+      state->receiver, state->mutation_plan, spooled_source_read, &reader,
+      state->out, &state->mutation_error);
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  if (!eval_file_putc_unlocked(state->out, '\n')) {
+    lql_set_error(&state->mutation_error, LQL_STATUS_JSON_ERROR,
+                  "failed to write mutated source candidate");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status execute_mutate_source_matches_only_spooled(
+    lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
+    FILE *out, const lql_mutation_plan *mutation_plan,
+    const lql_query_options *query_options, lql_query_result *out_result,
+    lql_error *error) {
+  source_mutate_spooled_match_state state;
+  lql_status st;
+
+  memset(&state, 0, sizeof(state));
+  state.receiver = self;
+  state.mutation_plan = mutation_plan;
+  state.out = out;
+  lql_error_init(&state.mutation_error);
+  flockfile(out);
+  st = execute_query_source_spooled_matches(
+      self, selector, read, read_user, query_options,
+      mutate_spooled_match_payload, &state, out_result, error);
+  funlockfile(out);
+  if (st != LQL_STATUS_OK && state.mutation_error.code != LQL_STATUS_OK) {
+    lql_set_error(error, state.mutation_error.code,
+                  state.mutation_error.message);
+    return state.mutation_error.code;
+  }
+  return st;
+}
+
 static lql_status execute_query_file_range_spooled_matches(
     lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, int compact, const lql_projection *projection,
@@ -7430,6 +7496,13 @@ static lql_status execute_query_source_v2_transform(
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "read and output file are required");
     return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if ((selector_fast_flat_scalar_eligible(selector) ||
+       selector_fast_direct_scalar_eligible(selector)) &&
+      projection == NULL && mutation_plan != NULL && matches_only) {
+    return execute_mutate_source_matches_only_spooled(
+        self, selector, read, read_user, out, mutation_plan, query_options,
+        out_result, error);
   }
   allocator = lql_allocator_from_receiver(self);
   if (allocator == NULL) {
