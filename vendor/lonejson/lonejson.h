@@ -170,6 +170,7 @@ typedef unsigned long long lonejson_uint64;
 #define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR 1
 #define LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE 1
 #define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE 1
+#define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_FIRST_KEY 1
 
 #if defined(_MSC_VER)
 #define LONEJSON_SHORT_ALIAS_INLINE static __inline
@@ -2734,6 +2735,7 @@ typedef struct lonejson_candidate_stream_options {
   int *top_level_string_eq_matched;
   char *top_level_string_eq_root_kind;
   int top_level_string_eq_stop_after_match;
+  int top_level_string_eq_stop_after_first_key;
   lonejson_candidate_event_fn candidate_begin;
   lonejson_candidate_event_fn candidate_end;
   void *candidate_user;
@@ -19097,7 +19099,8 @@ static lonejson_status lonejson__json_read_string_eq(
 
 static lonejson_status lonejson__json_match_top_level_string_eq_object(
     lonejson__json_io *io, const char *key, size_t key_len, const char *value,
-    size_t value_len, int stop_after_match, int *matched) {
+    size_t value_len, int stop_after_match, int stop_after_first_key,
+    int *matched) {
   int ch;
   int first = 1;
   lonejson_status status;
@@ -19158,6 +19161,10 @@ static lonejson_status lonejson__json_match_top_level_string_eq_object(
           return lonejson__json_skip_object_tail_plain_after_value(io);
         }
       }
+      if (status == LONEJSON_STATUS_OK && stop_after_first_key) {
+        --io->depth;
+        return lonejson__json_skip_object_tail_plain_after_value(io);
+      }
     } else {
       ch = lonejson__json_cursor_getc(io);
       if (ch == -2) {
@@ -19166,6 +19173,10 @@ static lonejson_status lonejson__json_match_top_level_string_eq_object(
       }
       lonejson__json_cursor_ungetc(io, ch);
       status = lonejson__json_skip_value(io);
+      if (status == LONEJSON_STATUS_OK && key_match && stop_after_first_key) {
+        --io->depth;
+        return lonejson__json_skip_object_tail_plain_after_value(io);
+      }
     }
     --io->depth;
     if (status != LONEJSON_STATUS_OK) {
@@ -19178,8 +19189,8 @@ static lonejson_status lonejson__json_match_top_level_string_eq_object(
 static lonejson_status lonejson__json_match_top_level_string_eq_cursor(
     lonejson__json_cursor *cursor, const char *key, size_t key_len,
     const char *value, size_t value_len, const lonejson__value_limits *limits,
-    int stop_after_match, int *matched, char *root_kind,
-    lonejson_error *error) {
+    int stop_after_match, int stop_after_first_key, int *matched,
+    char *root_kind, lonejson_error *error) {
   lonejson__json_io io;
   lonejson__value_limits defaults;
   lonejson_status status;
@@ -19238,7 +19249,8 @@ static lonejson_status lonejson__json_match_top_level_string_eq_cursor(
         *root_kind = '{';
       }
       status = lonejson__json_match_top_level_string_eq_object(
-          &io, key, key_len, value, value_len, stop_after_match, matched);
+          &io, key, key_len, value, value_len, stop_after_match,
+          stop_after_first_key, matched);
     } else {
       if (root_kind != NULL && ch == '[') {
         *root_kind = '[';
@@ -34292,6 +34304,7 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
         scan->options->top_level_string_eq_value,
         scan->options->top_level_string_eq_value_len, scan->limits,
         scan->options->top_level_string_eq_stop_after_match,
+        scan->options->top_level_string_eq_stop_after_first_key,
         scan->options->top_level_string_eq_matched,
         scan->options->top_level_string_eq_root_kind, scan->error);
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
@@ -34345,6 +34358,7 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
         scan->options->top_level_string_eq_value,
         scan->options->top_level_string_eq_value_len, scan->limits,
         scan->options->top_level_string_eq_stop_after_match,
+        scan->options->top_level_string_eq_stop_after_first_key,
         scan->options->top_level_string_eq_matched,
         scan->options->top_level_string_eq_root_kind, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
@@ -34780,7 +34794,8 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
        local.top_level_string_eq_value_len != 0u ||
        local.top_level_string_eq_matched != NULL ||
        local.top_level_string_eq_root_kind != NULL ||
-       local.top_level_string_eq_stop_after_match)) {
+       local.top_level_string_eq_stop_after_match ||
+       local.top_level_string_eq_stop_after_first_key)) {
     return lonejson__set_error(
         error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
         "top-level string equality candidate scan options require a key");

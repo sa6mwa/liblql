@@ -4637,6 +4637,9 @@ static void enable_fast_top_level_string_eq_candidate(
   options->top_level_string_eq_matched = &doc->fast_exact_hit;
   options->top_level_string_eq_root_kind = &doc->root_kind;
   options->top_level_string_eq_stop_after_match = 1;
+#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_FIRST_KEY)
+  options->top_level_string_eq_stop_after_first_key = 1;
+#endif
 #else
   (void)options;
   (void)doc;
