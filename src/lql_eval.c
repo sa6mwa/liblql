@@ -675,11 +675,14 @@ static void reset_doc(eval_doc *doc) {
   doc->fast_recursive_key_active = 0;
   doc->fast_recursive_key_match = 0;
   doc->fast_recursive_next_value_target = 0;
-  memset(doc->fast_direct_match_stack, 0, sizeof(doc->fast_direct_match_stack));
-  memset(doc->fast_direct_array_index_stack, 0,
-         sizeof(doc->fast_direct_array_index_stack));
-  memset(doc->fast_direct_container_stack, 0,
-         sizeof(doc->fast_direct_container_stack));
+  if (selector_fast_direct_scalar_eligible(doc->selector)) {
+    memset(doc->fast_direct_match_stack, 0,
+           sizeof(doc->fast_direct_match_stack));
+    memset(doc->fast_direct_array_index_stack, 0,
+           sizeof(doc->fast_direct_array_index_stack));
+    memset(doc->fast_direct_container_stack, 0,
+           sizeof(doc->fast_direct_container_stack));
+  }
   doc->fast_multi_value_selector = NULL;
   doc->fast_multi_depth = 0u;
   doc->fast_multi_key_len = 0u;
