@@ -381,12 +381,6 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
     st = ctx->query_file_matches(ctx, run_selector, fixture, count_payload,
                                  counts, result, error);
   } else if (strcmp(mode, "plus_value_source_selector") == 0) {
-    sink = open_discard_sink();
-    if (sink == NULL) {
-      st = LQL_STATUS_JSON_ERROR;
-      goto done;
-    }
-    counts->sink = sink;
     st = ctx->query_source_spooled_matches(ctx, run_selector, read_bench_source,
                                            &source, count_spooled_payload,
                                            counts, result, error);
