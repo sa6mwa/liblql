@@ -165,6 +165,12 @@ Current implementation status:
   Go helper records report `ns_per_op`; `steady_state` performs one untimed
   warmup fixture pass before the measured pass. The schema validator requires
   supported Go records to report timing.
+- On Linux hosts with `taskset`, the parity runner pins Go and C benchmark
+  subprocesses to the first CPU permitted to the runner. This prevents the
+  compared implementations from landing on different cores during a single
+  run, and executes them adjacently for each dataset/selector/mode tuple.
+  Set `LQL_BENCH_CPU=<cpu-list>` to choose a permitted CPU or
+  `LQL_BENCH_CPU=off` to disable pinning where it is unsuitable.
 - the current executable dataset matrix covers NDJSON and single-root JSON
   object fixture shapes for both library-style and CLI-style record forms,
   plus a lockd-shaped NDJSON fixture with session, tab, event, operation,

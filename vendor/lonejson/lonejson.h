@@ -18196,40 +18196,117 @@ static lonejson_status lonejson__json_skip_string(lonejson__json_io *io,
 
 static lonejson_status lonejson__json_skip_number(lonejson__json_io *io,
                                                   int first) {
-  char stack_buf[256];
-  char *buffer = stack_buf;
-  size_t capacity = sizeof(stack_buf);
-  size_t len = 0u;
+  enum {
+    LONEJSON__NUMBER_INT_ZERO = 1,
+    LONEJSON__NUMBER_INT,
+    LONEJSON__NUMBER_FRACTION_START,
+    LONEJSON__NUMBER_FRACTION,
+    LONEJSON__NUMBER_EXPONENT_START,
+    LONEJSON__NUMBER_EXPONENT_SIGN,
+    LONEJSON__NUMBER_EXPONENT
+  };
+  int state;
+  size_t len = 1u;
   int ch = first;
-  int heap_buffer = 0;
   lonejson_status status;
 
-  status = lonejson__json_number_append(io, &buffer, &capacity, &heap_buffer,
-                                         len, (char)first);
-  if (status != LONEJSON_STATUS_OK) {
-    if (buffer != stack_buf) {
-      lonejson__owned_free(buffer);
-    }
-    return status;
+  if (first == '-') {
+    state = 0;
+  } else if (first == '0') {
+    state = LONEJSON__NUMBER_INT_ZERO;
+  } else if (first >= '1' && first <= '9') {
+    state = LONEJSON__NUMBER_INT;
+  } else {
+    return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                               0u, 0u, "invalid JSON number");
   }
-  ++len;
   ch = lonejson__json_cursor_getc_lookahead(io);
   while (ch >= 0 && (lonejson__is_digit(ch) || ch == '+' || ch == '-' ||
                      ch == '.' || ch == 'e' || ch == 'E')) {
     status = lonejson__json_enforce_total_limit(io);
     if (status != LONEJSON_STATUS_OK) {
-      if (buffer != stack_buf) {
-        lonejson__owned_free(buffer);
-      }
       return status;
     }
-    status = lonejson__json_number_append(io, &buffer, &capacity,
-                                           &heap_buffer, len, (char)ch);
-    if (status != LONEJSON_STATUS_OK) {
-      if (buffer != stack_buf) {
-        lonejson__owned_free(buffer);
+    if (len >= io->limits.max_number_bytes) {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                                 0u,
+                                 "JSON number exceeds maximum byte limit");
+    }
+    switch (state) {
+    case 0:
+      if (ch == '0') {
+        state = LONEJSON__NUMBER_INT_ZERO;
+      } else if (ch >= '1' && ch <= '9') {
+        state = LONEJSON__NUMBER_INT;
+      } else {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                   0u, 0u, 0u, "invalid JSON number");
       }
-      return status;
+      break;
+    case LONEJSON__NUMBER_INT_ZERO:
+      if (ch == '.') {
+        state = LONEJSON__NUMBER_FRACTION_START;
+      } else if (ch == 'e' || ch == 'E') {
+        state = LONEJSON__NUMBER_EXPONENT_START;
+      } else {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                   0u, 0u, 0u, "invalid JSON number");
+      }
+      break;
+    case LONEJSON__NUMBER_INT:
+      if (lonejson__is_digit(ch)) {
+        break;
+      }
+      if (ch == '.') {
+        state = LONEJSON__NUMBER_FRACTION_START;
+      } else if (ch == 'e' || ch == 'E') {
+        state = LONEJSON__NUMBER_EXPONENT_START;
+      } else {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                   0u, 0u, 0u, "invalid JSON number");
+      }
+      break;
+    case LONEJSON__NUMBER_FRACTION_START:
+      if (!lonejson__is_digit(ch)) {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                   0u, 0u, 0u, "invalid JSON number");
+      }
+      state = LONEJSON__NUMBER_FRACTION;
+      break;
+    case LONEJSON__NUMBER_FRACTION:
+      if (lonejson__is_digit(ch)) {
+        break;
+      }
+      if (ch == 'e' || ch == 'E') {
+        state = LONEJSON__NUMBER_EXPONENT_START;
+      } else {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                   0u, 0u, 0u, "invalid JSON number");
+      }
+      break;
+    case LONEJSON__NUMBER_EXPONENT_START:
+      if (ch == '+' || ch == '-') {
+        state = LONEJSON__NUMBER_EXPONENT_SIGN;
+      } else if (lonejson__is_digit(ch)) {
+        state = LONEJSON__NUMBER_EXPONENT;
+      } else {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                   0u, 0u, 0u, "invalid JSON number");
+      }
+      break;
+    case LONEJSON__NUMBER_EXPONENT_SIGN:
+      if (!lonejson__is_digit(ch)) {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                   0u, 0u, 0u, "invalid JSON number");
+      }
+      state = LONEJSON__NUMBER_EXPONENT;
+      break;
+    default:
+      if (!lonejson__is_digit(ch)) {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                   0u, 0u, 0u, "invalid JSON number");
+      }
+      break;
     }
     ++len;
     ch = lonejson__json_cursor_getc_lookahead(io);
@@ -18238,20 +18315,13 @@ static lonejson_status lonejson__json_skip_number(lonejson__json_io *io,
     lonejson__json_cursor_ungetc(io, ch);
   }
   if (ch == -2) {
-    if (buffer != stack_buf) {
-      lonejson__owned_free(buffer);
-    }
     return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
   }
-  if (!lonejson__is_valid_json_number(buffer, len)) {
-    if (buffer != stack_buf) {
-      lonejson__owned_free(buffer);
-    }
+  if (state == 0 || state == LONEJSON__NUMBER_FRACTION_START ||
+      state == LONEJSON__NUMBER_EXPONENT_START ||
+      state == LONEJSON__NUMBER_EXPONENT_SIGN) {
     return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
                                0u, "invalid JSON number");
-  }
-  if (buffer != stack_buf) {
-    lonejson__owned_free(buffer);
   }
   return LONEJSON_STATUS_OK;
 }

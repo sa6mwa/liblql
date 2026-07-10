@@ -64,6 +64,8 @@ bench_library_dir="${LQL_BENCH_LIBRARY_DIR:-$root/build/debug}"
 bench_dep_library_dir="${LQL_BENCH_DEP_LIBRARY_DIR:-$root/.cache/deps/x86_64-linux-gnu/install/lib}"
 time_bin="${LQL_BENCH_TIME:-/usr/bin/time}"
 require_lua_rss="${LQL_BENCH_REQUIRE_LUA_RSS:-0}"
+bench_cpu="${LQL_BENCH_CPU:-auto}"
+bench_taskset=""
 mkdir -p "$fixture_dir"
 ndjson_fixture="$fixture_dir/large_ndjson.jsonl"
 single_fixture="$fixture_dir/large_single_json.json"
@@ -84,6 +86,41 @@ inject_match_mismatch="${LQL_BENCH_INJECT_MATCH_MISMATCH:-0}"
 inject_payload_mismatch="${LQL_BENCH_INJECT_PAYLOAD_MISMATCH:-0}"
 inject_payload_byte_mismatch="${LQL_BENCH_INJECT_PAYLOAD_BYTE_MISMATCH:-0}"
 record_blob=""
+
+resolve_bench_cpu() {
+  detected=""
+  case "$bench_cpu" in
+    none|off)
+      return 0
+      ;;
+    auto)
+      if ! command -v taskset >/dev/null 2>&1; then
+        return 0
+      fi
+      detected=$(taskset -pc $$ 2>/dev/null |
+        sed -n 's/.*: \([0-9][0-9]*\).*/\1/p' | head -n 1)
+      if [ -z "$detected" ]; then
+        return 0
+      fi
+      bench_taskset=$detected
+      ;;
+    *)
+      if ! command -v taskset >/dev/null 2>&1; then
+        printf 'benchmark CPU pinning requested but taskset is unavailable\n' >&2
+        return 1
+      fi
+      bench_taskset=$bench_cpu
+      ;;
+  esac
+}
+
+run_bench_process() {
+  if [ -n "$bench_taskset" ]; then
+    taskset -c "$bench_taskset" "$@"
+  else
+    "$@"
+  fi
+}
 
 json_string() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -839,7 +876,8 @@ run_c_native_mode() {
     project_*) payload_source_type=projection ;;
   esac
   for submode in warmup_included steady_state; do
-    record=$("$payload_bench" "$mode" "$expr" "$fixture_path" "$selector_name" "$submode")
+    record=$(run_bench_process "$payload_bench" "$mode" "$expr" \
+      "$fixture_path" "$selector_name" "$submode")
     c_candidates=$(kv_field candidates "$record")
     c_matches=$(kv_field matches "$record")
     c_payloads=$(kv_field payloads "$record")
@@ -883,7 +921,7 @@ run_go_mode() {
     return 1
   fi
   for submode in warmup_included steady_state; do
-    record=$("$go_bench" \
+    record=$(run_bench_process "$go_bench" \
       --fixture "$fixture_path" \
       --dataset "$dataset_name" \
       --selector-name "$selector_name" \
@@ -1097,35 +1135,23 @@ mode_applies_to_case() {
   return 0
 }
 
-run_matrix_for_impl() {
-  impl=$1
+run_matrix() {
   while read dataset_name fixture_path candidates selector_name expr; do
-    case "$impl" in
-      go)
-        for mode in $(selected_modes); do
-          mode_applies_to_case "$mode" "$selector_name" || continue
-          run_go_mode "$mode" "$dataset_name" "$fixture_path" "$candidates" \
-            "$selector_name" "$expr" || return 1
-        done
-        ;;
-      c)
-        for mode in $(selected_modes); do
-          mode_applies_to_case "$mode" "$selector_name" || continue
-          run_c_native_mode "$mode" "$dataset_name" "$fixture_path" \
-            "$candidates" "$selector_name" "$expr" || return 1
-        done
-        ;;
-      lua)
-        for mode in $(selected_modes); do
-          mode_applies_to_case "$mode" "$selector_name" || continue
-          run_lua_mode "$mode" "$dataset_name" "$fixture_path" "$candidates" \
-            "$selector_name" "$expr" || return 1
-        done
-        ;;
-      *)
-        return 2
-        ;;
-    esac
+    for mode in $(selected_modes); do
+      mode_applies_to_case "$mode" "$selector_name" || continue
+      if is_selected go; then
+        run_go_mode "$mode" "$dataset_name" "$fixture_path" "$candidates" \
+          "$selector_name" "$expr" || return 1
+      fi
+      if is_selected c; then
+        run_c_native_mode "$mode" "$dataset_name" "$fixture_path" \
+          "$candidates" "$selector_name" "$expr" || return 1
+      fi
+      if is_selected lua; then
+        run_lua_mode "$mode" "$dataset_name" "$fixture_path" "$candidates" \
+          "$selector_name" "$expr" || return 1
+      fi
+    done
   done < "$case_matrix"
 }
 
@@ -1175,25 +1201,16 @@ exit_status=0
 if ! validate_required_impls; then
   exit_status=1
 fi
+if [ "$exit_status" -eq 0 ] && ! resolve_bench_cpu; then
+  exit_status=1
+fi
 generate_fixture
 if ! assert_no_ndjson_root_arrays; then
   exit_status=1
 fi
 
-if [ "$exit_status" -eq 0 ] && is_selected go; then
-  if ! run_matrix_for_impl go; then
-    exit_status=1
-  fi
-fi
-
-if [ "$exit_status" -eq 0 ] && is_selected c; then
-  if ! run_matrix_for_impl c; then
-    exit_status=1
-  fi
-fi
-
-if [ "$exit_status" -eq 0 ] && is_selected lua; then
-  if ! run_matrix_for_impl lua; then
+if [ "$exit_status" -eq 0 ]; then
+  if ! run_matrix; then
     exit_status=1
   fi
 fi

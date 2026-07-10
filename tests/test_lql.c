@@ -2948,7 +2948,9 @@ static void expect_stream_error_corpus_api(void) {
   } cases[] = {
       {"truncated object candidate", "{\"status\":\"open\"}\n{\"status\":"},
       {"truncated array stream", "[{\"status\":\"open\"},{\"status\":"},
-      {"invalid literal", "{\"status\": tru}"}};
+      {"invalid literal", "{\"status\": tru}"},
+      {"invalid skipped number", "{\"status\":\"open\",\"count\":1e}"},
+      {"leading zero in skipped number", "{\"status\":\"open\",\"count\":01}"}};
   lql_selector *selector;
   lql_error error;
   lql_status st;
