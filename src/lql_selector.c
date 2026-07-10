@@ -1592,6 +1592,88 @@ static void selector_clear_path_metadata(lql_selector_parser *ctx,
   selector->field_path_literal = 0;
 }
 
+static void selector_clear_contains_lps(lql_selector_parser *ctx,
+                                        lql_selector *selector) {
+  ctx->allocator->destroy(ctx->allocator, selector->contains_lps);
+  selector->contains_lps = NULL;
+  selector->contains_lps_len = 0u;
+}
+
+static int selector_prepare_contains_lps(lql_selector_parser *ctx,
+                                         lql_selector *selector) {
+  size_t i;
+  size_t len;
+  size_t matched;
+  size_t *lps;
+  unsigned char a;
+  unsigned char b;
+
+  if (selector == NULL) {
+    return 1;
+  }
+  selector_clear_contains_lps(ctx, selector);
+  if ((selector->kind != LQL_SELECTOR_KIND_CONTAINS &&
+       selector->kind != LQL_SELECTOR_KIND_ICONTAINS) ||
+      selector->any_count != 0u || selector->value_data == NULL) {
+    return 1;
+  }
+  len = selector->value_len;
+  if (len <= 1u) {
+    return 1;
+  }
+  lps = (size_t *)ctx->allocator->calloc(ctx->allocator, len, sizeof(*lps));
+  if (lps == NULL) {
+    return 0;
+  }
+  matched = 0u;
+  for (i = 1u; i < len; ++i) {
+    a = (unsigned char)selector->value_data[i];
+    if (selector->observer_ignore_case) {
+      a = ascii_lower_byte(a);
+    }
+    while (matched != 0u) {
+      b = (unsigned char)selector->value_data[matched];
+      if (selector->observer_ignore_case) {
+        b = ascii_lower_byte(b);
+      }
+      if (a == b) {
+        break;
+      }
+      matched = lps[matched - 1u];
+    }
+    b = (unsigned char)selector->value_data[matched];
+    if (selector->observer_ignore_case) {
+      b = ascii_lower_byte(b);
+    }
+    if (a == b) {
+      ++matched;
+    }
+    lps[i] = matched;
+  }
+  selector->contains_lps = lps;
+  selector->contains_lps_len = len;
+  selector->observer_contains_tail_need = 0u;
+  return 1;
+}
+
+static int prepare_selector_contains_lps(lql_selector_parser *ctx,
+                                         lql_selector *selector) {
+  size_t i;
+
+  if (selector == NULL) {
+    return 1;
+  }
+  if (!selector_prepare_contains_lps(ctx, selector)) {
+    return 0;
+  }
+  for (i = 0u; i < selector->child_count; ++i) {
+    if (!prepare_selector_contains_lps(ctx, &selector->children[i])) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int selector_prepare_one_path(lql_selector_parser *ctx,
                                      lql_selector *selector) {
   const char *seg;
@@ -1743,6 +1825,9 @@ static int finalize_selector(lql_selector_parser *ctx, lql_selector *selector) {
   assign_hit_indexes(selector, &selector->hit_count);
   selector_refresh_derived_lengths(selector);
   selector_refresh_predicate_features(selector);
+  if (!prepare_selector_contains_lps(ctx, selector)) {
+    return 0;
+  }
   selector_refresh_match_sticky(selector);
   if (!prepare_selector_paths(ctx, selector)) {
     return 0;
@@ -2734,6 +2819,8 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   memset(dst->any_first_bitmap, 0, sizeof(dst->any_first_bitmap));
   memset(dst->any_ifirst_bitmap, 0, sizeof(dst->any_ifirst_bitmap));
   dst->any_count = 0u;
+  dst->contains_lps = NULL;
+  dst->contains_lps_len = 0u;
   dst->range_gt_text = NULL;
   dst->range_gte_text = NULL;
   dst->range_lt_text = NULL;

@@ -268,6 +268,7 @@ static void receiver_destroy(lql *self) {
     allocator->destroy(allocator, impl->eval_stream_misses);
     allocator->destroy(allocator, impl->eval_scalar_family_predicates);
     allocator->destroy(allocator, impl->eval_in_matches);
+    allocator->destroy(allocator, impl->eval_contains_positions);
     allocator->destroy(allocator, impl->eval_contains_tail_buf);
     allocator->destroy(allocator, impl->eval_container_types);
     block = impl->eval_pool_all;
@@ -301,6 +302,7 @@ LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
   allocator->destroy(allocator, selector->any_lens);
   allocator->destroy(allocator, selector->any_firsts);
   allocator->destroy(allocator, selector->any_ifirsts);
+  allocator->destroy(allocator, selector->contains_lps);
   allocator->destroy(allocator, selector->range_gt_text);
   allocator->destroy(allocator, selector->range_gte_text);
   allocator->destroy(allocator, selector->range_lt_text);

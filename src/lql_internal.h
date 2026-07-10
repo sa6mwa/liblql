@@ -60,6 +60,8 @@ struct lql_impl {
   size_t eval_scalar_family_predicates_cap;
   unsigned int *eval_in_matches;
   size_t eval_in_matches_cap;
+  size_t *eval_contains_positions;
+  size_t eval_contains_positions_cap;
   char *eval_contains_tail_buf;
   size_t eval_contains_tail_cap;
   int *eval_container_types;
@@ -248,6 +250,8 @@ struct lql_selector {
   unsigned char any_ifirst_bitmap[32];
   size_t any_count;
   size_t any_max_len;
+  size_t *contains_lps;
+  size_t contains_lps_len;
   char *range_gt_text;
   char *range_gte_text;
   char *range_lt_text;

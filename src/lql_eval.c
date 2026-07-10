@@ -44,6 +44,8 @@ typedef struct eval_doc {
   unsigned int *in_matches;
   size_t in_matches_cap;
   size_t in_match_stride;
+  size_t *contains_positions;
+  size_t contains_positions_cap;
   unsigned int candidate_epoch;
   const lql_selector *const *predicates;
   size_t predicate_count;
@@ -250,6 +252,10 @@ static void destroy_doc(eval_doc *doc) {
         memset(doc->in_matches, 0,
                sizeof(*doc->in_matches) * doc->in_matches_cap);
       }
+      if (doc->contains_positions != NULL) {
+        memset(doc->contains_positions, 0,
+               sizeof(*doc->contains_positions) * doc->contains_positions_cap);
+      }
       doc->impl->eval_candidate_epoch = 1u;
     }
     doc->impl->eval_hits = doc->hits;
@@ -261,6 +267,8 @@ static void destroy_doc(eval_doc *doc) {
         doc->scalar_family_predicates_cap;
     doc->impl->eval_in_matches = doc->in_matches;
     doc->impl->eval_in_matches_cap = doc->in_matches_cap;
+    doc->impl->eval_contains_positions = doc->contains_positions;
+    doc->impl->eval_contains_positions_cap = doc->contains_positions_cap;
     doc->impl->eval_contains_tail_buf = doc->contains_tail_buf;
     doc->impl->eval_contains_tail_cap = doc->contains_tail_cap;
     doc->impl->eval_container_types = doc->container_types;
@@ -271,6 +279,7 @@ static void destroy_doc(eval_doc *doc) {
     doc->allocator->destroy(doc->allocator, doc->stream_misses);
     doc->allocator->destroy(doc->allocator, doc->scalar_family_predicates);
     doc->allocator->destroy(doc->allocator, doc->in_matches);
+    doc->allocator->destroy(doc->allocator, doc->contains_positions);
     doc->allocator->destroy(doc->allocator, doc->contains_tail_buf);
     doc->allocator->destroy(doc->allocator, doc->container_types);
   }
@@ -372,6 +381,7 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   unsigned int *next_stream_misses;
   const lql_selector **next_scalar_family_predicates;
   unsigned int *next_in_matches;
+  size_t *next_contains_positions;
   size_t in_match_need;
   size_t family_need;
   size_t i;
@@ -401,6 +411,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     doc->scalar_family_predicates_cap = impl->eval_scalar_family_predicates_cap;
     doc->in_matches = impl->eval_in_matches;
     doc->in_matches_cap = impl->eval_in_matches_cap;
+    doc->contains_positions = impl->eval_contains_positions;
+    doc->contains_positions_cap = impl->eval_contains_positions_cap;
     doc->contains_tail_buf = impl->eval_contains_tail_buf;
     doc->contains_tail_cap = impl->eval_contains_tail_cap;
     doc->container_types = impl->eval_container_types;
@@ -413,6 +425,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     impl->eval_scalar_family_predicates_cap = 0u;
     impl->eval_in_matches = NULL;
     impl->eval_in_matches_cap = 0u;
+    impl->eval_contains_positions = NULL;
+    impl->eval_contains_positions_cap = 0u;
     impl->eval_contains_tail_buf = NULL;
     impl->eval_contains_tail_cap = 0u;
     impl->eval_container_types = NULL;
@@ -494,6 +508,20 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
         memset(doc->in_matches, 0,
                sizeof(*doc->in_matches) * doc->in_matches_cap);
       }
+    }
+    if ((selector->predicate_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u &&
+        doc->contains_positions_cap < selector->hit_count) {
+      next_contains_positions = (size_t *)doc->allocator->realloc(
+          doc->allocator, doc->contains_positions,
+          sizeof(*doc->contains_positions) * selector->hit_count);
+      if (next_contains_positions == NULL) {
+        destroy_doc(doc);
+        return 0;
+      }
+      doc->contains_positions = next_contains_positions;
+      doc->contains_positions_cap = selector->hit_count;
+      memset(doc->contains_positions, 0,
+             sizeof(*doc->contains_positions) * doc->contains_positions_cap);
     }
     doc->predicates = selector->predicates;
     doc->predicate_count = selector->predicate_count;
@@ -675,6 +703,8 @@ static int ascii_is_digit(unsigned char c) {
 
 static int contains_case_len(const char *haystack, size_t h, const char *needle,
                              size_t n, int ignore_case);
+static size_t *contains_position_ptr(eval_doc *doc,
+                                     const lql_selector *selector);
 
 static int contains_case_len(const char *haystack, size_t h, const char *needle,
                              size_t n, int ignore_case) {
@@ -1583,6 +1613,7 @@ static void observe_contains_stream_begin(eval_doc *doc,
                                           const lql_selector *selector,
                                           const lonejson_value_path *path) {
   const lql_selector **items;
+  size_t *position;
   size_t i;
   size_t j;
   size_t count;
@@ -1596,6 +1627,10 @@ static void observe_contains_stream_begin(eval_doc *doc,
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_CONTAINS];
   for (i = 0u; i < count; ++i) {
     selector = items[i];
+    position = contains_position_ptr(doc, selector);
+    if (position != NULL) {
+      *position = 0u;
+    }
     if (selector->any_count == 0u) {
       if (!selector->value_set && selector->value == NULL) {
         hit_mark_fast(doc, selector);
@@ -2213,6 +2248,67 @@ static int contains_stream_scan(const char *tail, size_t tail_len,
                                        needle_len, ignore_case);
 }
 
+static size_t *contains_position_ptr(eval_doc *doc,
+                                     const lql_selector *selector) {
+  if (doc == NULL || selector == NULL || doc->contains_positions == NULL ||
+      selector->hit_index >= doc->contains_positions_cap) {
+    return NULL;
+  }
+  return &doc->contains_positions[selector->hit_index];
+}
+
+static int contains_stream_kmp_scan(eval_doc *doc, const lql_selector *selector,
+                                    const char *data, size_t len) {
+  size_t *pos;
+  size_t matched;
+  size_t i;
+  size_t needle_len;
+  unsigned char a;
+  unsigned char b;
+  int ignore_case;
+
+  if (selector == NULL || selector->contains_lps == NULL ||
+      selector->contains_lps_len == 0u || selector->value_data == NULL) {
+    return 0;
+  }
+  pos = contains_position_ptr(doc, selector);
+  if (pos == NULL) {
+    return 0;
+  }
+  matched = *pos;
+  needle_len = selector->contains_lps_len;
+  ignore_case = selector->observer_ignore_case;
+  for (i = 0u; i < len; ++i) {
+    a = (unsigned char)data[i];
+    if (ignore_case) {
+      a = ascii_lower_byte(a);
+    }
+    while (matched != 0u) {
+      b = (unsigned char)selector->value_data[matched];
+      if (ignore_case) {
+        b = ascii_lower_byte(b);
+      }
+      if (a == b) {
+        break;
+      }
+      matched = selector->contains_lps[matched - 1u];
+    }
+    b = (unsigned char)selector->value_data[matched];
+    if (ignore_case) {
+      b = ascii_lower_byte(b);
+    }
+    if (a == b) {
+      ++matched;
+      if (matched == needle_len) {
+        *pos = selector->contains_lps[matched - 1u];
+        return 1;
+      }
+    }
+  }
+  *pos = matched;
+  return 0;
+}
+
 static int contains_any_stream_scan(const char *tail, size_t tail_len,
                                     const char *data, size_t len,
                                     char **needles, const size_t *needle_lens,
@@ -2283,8 +2379,11 @@ static void observe_contains_stream_chunk(eval_doc *doc,
     ignore_case = selector->observer_ignore_case;
     if (selector->any_count == 0u) {
       value_len = selector->value_len;
-      if (contains_stream_scan(tail, doc->contains_tail_len, data, len,
-                               selector->value_data, value_len, ignore_case)) {
+      if (contains_stream_kmp_scan(doc, selector, data, len) ||
+          (selector->contains_lps == NULL &&
+           contains_stream_scan(tail, doc->contains_tail_len, data, len,
+                                selector->value_data, value_len,
+                                ignore_case))) {
         hit_mark_fast(doc, selector);
       }
     } else if (selector->any_count == 1u) {
