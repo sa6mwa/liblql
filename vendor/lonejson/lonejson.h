@@ -18310,6 +18310,70 @@ lonejson__json_read_key_match(lonejson__json_io *io, const char *key,
   if (out_match != NULL) {
     *out_match = 0;
   }
+  {
+    const unsigned char *fast_span;
+    const unsigned char *fast_quote;
+    const unsigned char *fast_escape;
+    size_t fast_available;
+    size_t fast_len;
+    size_t fast_control;
+    int fast_uses_read_buffer;
+
+    fast_uses_read_buffer = 0;
+    fast_span = lonejson__json_cursor_plain_span(io, &fast_available,
+                                                 &fast_uses_read_buffer);
+    if (fast_span != NULL && fast_available != 0u) {
+      fast_quote = (const unsigned char *)memchr(fast_span, '"', fast_available);
+      if (fast_quote != NULL) {
+        fast_len = (size_t)(fast_quote - fast_span);
+        fast_escape = (const unsigned char *)memchr(fast_span, '\\', fast_len);
+        fast_control = lonejson__json_control_offset(fast_span, fast_len);
+        if (fast_escape == NULL && fast_control == fast_len) {
+          if (io->limits.max_total_bytes != 0u &&
+              io->total_bytes + fast_len > io->limits.max_total_bytes) {
+            return lonejson__set_error(
+                io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                "JSON value exceeds maximum total byte limit");
+          }
+          io->total_bytes += fast_len;
+          decoded_bytes = fast_len;
+          if (io->limits.max_key_bytes != 0u &&
+              decoded_bytes > io->limits.max_key_bytes) {
+            return lonejson__set_error(
+                io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                "JSON object key exceeds maximum decoded byte limit");
+          }
+          if (out_match != NULL) {
+            *out_match = key_len == fast_len &&
+                         memcmp(key, fast_span, fast_len) == 0;
+          }
+          if (fast_uses_read_buffer) {
+            io->cursor->read_buffer_off += fast_len;
+          } else {
+            io->cursor->buffer_off += fast_len;
+          }
+          if (io->raw_capture_spool != NULL) {
+            lonejson_status capture_status =
+                lonejson__json_cursor_advance_span(io, fast_len);
+            if (capture_status != LONEJSON_STATUS_OK &&
+                capture_status != LONEJSON_STATUS_TRUNCATED) {
+              return capture_status;
+            }
+          }
+          ch = lonejson__json_cursor_getc(io);
+          if (ch == -2) {
+            return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+          }
+          if (ch != '"') {
+            return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                       0u, 0u, 0u,
+                                       "unterminated JSON string");
+          }
+          return LONEJSON_STATUS_OK;
+        }
+      }
+    }
+  }
   for (;;) {
     const unsigned char *span;
     size_t available;
@@ -18562,6 +18626,75 @@ static lonejson_status lonejson__json_read_key_match_any(
                                0u, 0u,
                                "top-level field key count exceeds fast scan "
                                "limit");
+  }
+  {
+    const unsigned char *fast_span;
+    const unsigned char *fast_quote;
+    const unsigned char *fast_escape;
+    size_t fast_available;
+    size_t fast_len;
+    size_t fast_control;
+    int fast_uses_read_buffer;
+
+    fast_uses_read_buffer = 0;
+    fast_span = lonejson__json_cursor_plain_span(io, &fast_available,
+                                                 &fast_uses_read_buffer);
+    if (fast_span != NULL && fast_available != 0u) {
+      fast_quote = (const unsigned char *)memchr(fast_span, '"', fast_available);
+      if (fast_quote != NULL) {
+        fast_len = (size_t)(fast_quote - fast_span);
+        fast_escape = (const unsigned char *)memchr(fast_span, '\\', fast_len);
+        fast_control = lonejson__json_control_offset(fast_span, fast_len);
+        if (fast_escape == NULL && fast_control == fast_len) {
+          if (io->limits.max_total_bytes != 0u &&
+              io->total_bytes + fast_len > io->limits.max_total_bytes) {
+            return lonejson__set_error(
+                io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                "JSON value exceeds maximum total byte limit");
+          }
+          io->total_bytes += fast_len;
+          decoded_bytes = fast_len;
+          if (io->limits.max_key_bytes != 0u &&
+              decoded_bytes > io->limits.max_key_bytes) {
+            return lonejson__set_error(
+                io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                "JSON object key exceeds maximum decoded byte limit");
+          }
+          if (out_index != NULL) {
+            for (i = 0u; i < key_count; ++i) {
+              if (key_lens[i] == fast_len &&
+                  memcmp(keys[i], fast_span, fast_len) == 0) {
+                *out_index = i;
+                break;
+              }
+            }
+          }
+          if (fast_uses_read_buffer) {
+            io->cursor->read_buffer_off += fast_len;
+          } else {
+            io->cursor->buffer_off += fast_len;
+          }
+          if (io->raw_capture_spool != NULL) {
+            lonejson_status capture_status =
+                lonejson__json_cursor_advance_span(io, fast_len);
+            if (capture_status != LONEJSON_STATUS_OK &&
+                capture_status != LONEJSON_STATUS_TRUNCATED) {
+              return capture_status;
+            }
+          }
+          ch = lonejson__json_cursor_getc(io);
+          if (ch == -2) {
+            return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+          }
+          if (ch != '"') {
+            return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                       0u, 0u, 0u,
+                                       "unterminated JSON string");
+          }
+          return LONEJSON_STATUS_OK;
+        }
+      }
+    }
   }
   for (i = 0u; i < key_count; ++i) {
     matched[i] = 0u;
