@@ -3939,62 +3939,6 @@ static void query_stream_state_cleanup_capture(query_stream_state *state) {
   }
 }
 
-static lonejson_status
-query_source_decision_payload_sink(void *user, const void *data, size_t len,
-                                   lonejson_error *error) {
-  query_stream_state *state;
-  size_t copy_len;
-  lonejson_status st;
-
-  state = (query_stream_state *)user;
-  if (state == NULL || len == 0u) {
-    return LONEJSON_STATUS_OK;
-  }
-  if (state->doc.root_kind == '[') {
-    if (!state->array_spool_initialized) {
-      if (state->capture_runtime == NULL) {
-        if (error != NULL) {
-          error->code = LONEJSON_STATUS_INTERNAL_ERROR;
-          strcpy(error->message, "source decision spool runtime missing");
-        }
-        return LONEJSON_STATUS_INTERNAL_ERROR;
-      }
-      lonejson_spooled_init(state->capture_runtime, &state->array_spool);
-      state->array_spool_initialized = 1;
-      if (state->pending_payload_prefix_len != 0u) {
-        st = state->array_spool.append(
-            &state->array_spool, state->pending_payload_prefix,
-            state->pending_payload_prefix_len, error);
-        if (st != LONEJSON_STATUS_OK) {
-          state->callback_status = LQL_STATUS_JSON_ERROR;
-          return st;
-        }
-        state->pending_payload_prefix_len = 0u;
-      }
-    }
-    st = state->array_spool.append(&state->array_spool, data, len, error);
-    if (st != LONEJSON_STATUS_OK) {
-      state->callback_status = LQL_STATUS_JSON_ERROR;
-    }
-    return st;
-  }
-  if (state->doc.root_kind != '\0') {
-    state->pending_payload_prefix_len = 0u;
-    return LONEJSON_STATUS_OK;
-  }
-  copy_len =
-      sizeof(state->pending_payload_prefix) - state->pending_payload_prefix_len;
-  if (copy_len > len) {
-    copy_len = len;
-  }
-  if (copy_len != 0u) {
-    memcpy(state->pending_payload_prefix + state->pending_payload_prefix_len,
-           data, copy_len);
-    state->pending_payload_prefix_len += copy_len;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
 static lonejson_candidate_callback_result
 on_candidate_begin(void *user, const lonejson_candidate_info *candidate,
                    lonejson_error *error) {
@@ -5550,7 +5494,7 @@ static lql_status execute_query_source_decisions_with_base(
   int runtime_pooled;
   query_stream_state state;
   source_reader_adapter adapter;
-  int capture_needed;
+  int recursive_array_framing;
 
   memset(&state, 0, sizeof(state));
   state.receiver = self;
@@ -5578,8 +5522,8 @@ static lql_status execute_query_source_decisions_with_base(
   memset(&adapter, 0, sizeof(adapter));
   adapter.read = read;
   adapter.user = read_user;
-  capture_needed = 1;
-  if (!source_reader_prefix_capture(&adapter, &capture_needed)) {
+  recursive_array_framing = 0;
+  if (!source_reader_prefix_capture(&adapter, &recursive_array_framing)) {
     destroy_doc(&state.doc);
     lql_lonejson_release(self, runtime, runtime_pooled);
     if (out_result != NULL) {
@@ -5591,13 +5535,10 @@ static lql_status execute_query_source_decisions_with_base(
   init_eval_visitor(&visitor);
   configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
-  if (capture_needed) {
-    options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SINK;
-    options.payload_sink = query_source_decision_payload_sink;
-    options.payload_sink_user = &state;
-  } else {
-    options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  }
+  options.framing = recursive_array_framing
+                        ? LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS
+                        : LONEJSON_CANDIDATE_FRAMING_AUTO;
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   options.path_visitor = &visitor;
   options.visitor_user = &state.doc;
   options.candidate_begin = on_candidate_begin;
@@ -5660,6 +5601,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
   lonejson_status st;
   source_spooled_match_state state;
   source_reader_adapter adapter;
+  int recursive_array_framing;
 
   memset(&state, 0, sizeof(state));
   state.receiver = self;
@@ -5685,9 +5627,22 @@ static lql_status execute_query_source_spooled_matches_with_base(
   memset(&adapter, 0, sizeof(adapter));
   adapter.read = read;
   adapter.user = read_user;
+  recursive_array_framing = 0;
+  if (!source_reader_prefix_capture(&adapter, &recursive_array_framing)) {
+    destroy_doc(&state.doc);
+    lonejson_free(runtime);
+    if (out_result != NULL) {
+      *out_result = state.result;
+    }
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, "query source reader failed");
+    return LQL_STATUS_JSON_ERROR;
+  }
   init_eval_visitor(&visitor);
   configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
+  options.framing = recursive_array_framing
+                        ? LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS
+                        : LONEJSON_CANDIDATE_FRAMING_AUTO;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED;
   options.path_visitor = &visitor;
   options.visitor_user = &state.doc;
@@ -5696,8 +5651,8 @@ static lql_status execute_query_source_spooled_matches_with_base(
   options.candidate_user = &state;
   options.capture_decision = on_source_spooled_capture_decision;
   options.capture_decision_user = &state;
-  st = lonejson_visit_candidates_reader(runtime, source_reader_read_plain,
-                                        &adapter, &options, &lj_error);
+  st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
+                                        &options, &lj_error);
   if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||
       state.callback_status != LQL_STATUS_OK) {
     query_finish_source_bytes_with_base(&state.result, &adapter, offset_base);
@@ -6022,6 +5977,7 @@ static lql_status execute_query_source_v2_transform(
   source_reader_adapter adapter;
   lql_allocator *allocator;
   int recursive_array_framing;
+  int runtime_pooled;
   (void)compact;
 
   if (read == NULL || out == NULL) {
@@ -6078,7 +6034,8 @@ static lql_status execute_query_source_v2_transform(
     lql_set_error(error, LQL_STATUS_JSON_ERROR, "source read failed");
     return LQL_STATUS_JSON_ERROR;
   }
-  runtime = lql_lonejson_new(self, &lj_error);
+  runtime_pooled = 0;
+  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     source_transform_free_projection_paths(allocator, projection_paths,
@@ -6138,7 +6095,7 @@ static lql_status execute_query_source_v2_transform(
   if (out_result != NULL) {
     *out_result = state.result;
   }
-  lonejson_free(runtime);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   source_transform_free_projection_paths(allocator, projection_paths,
                                          projection_segments);
   source_transform_cleanup(&state);
