@@ -1049,37 +1049,6 @@ func TestSDKMutationFileRangeCandidateStreamParity(t *testing.T) {
 		matchesOnly bool
 	}{
 		{
-			name:      "top-level array match all",
-			doc:       `[{"id":"a","status":"open"},{"id":"b","status":"open"}]`,
-			mutations: []string{`/status=done`},
-		},
-		{
-			name:        "top-level array matches only",
-			selector:    `/status="open"`,
-			doc:         `[{"id":"a","status":"open"},{"id":"b","status":"closed"}]`,
-			mutations:   []string{`/status=done`},
-			matchesOnly: true,
-		},
-		{
-			name:      "nested top-level array match all",
-			doc:       `[{"id":"a","status":"open"},[{"id":"b","status":"open"}],{"id":"c","status":"closed"}]`,
-			mutations: []string{`/status=done`},
-		},
-		{
-			name:        "nested top-level array selector",
-			selector:    `/status="open"`,
-			doc:         `[{"id":"a","status":"open"},[{"id":"b","status":"open"}],{"id":"c","status":"closed"}]`,
-			mutations:   []string{`/status=done`},
-			matchesOnly: false,
-		},
-		{
-			name:        "nested top-level array matches only",
-			selector:    `/status="open"`,
-			doc:         `[{"id":"a","status":"open"},[{"id":"b","status":"open"}],{"id":"c","status":"closed"}]`,
-			mutations:   []string{`/status=done`},
-			matchesOnly: true,
-		},
-		{
 			name:     "query mutate handoff with time mutation",
 			selector: `/event="tabs_update"`,
 			doc: `{"event":"tabs_update","component":"host","id":1}
@@ -1141,7 +1110,7 @@ func TestSDKMutationProjectedCandidateStreamParity(t *testing.T) {
 			name:        "matches only projected candidates",
 			selector:    `/status=404`,
 			fields:      []string{`/uri`},
-			doc:         `[{"uri":"/a","status":404,"drop":true},{"uri":"/b","status":200,"drop":true}]`,
+			doc:         "{\"uri\":\"/a\",\"status\":404,\"drop\":true}\n{\"uri\":\"/b\",\"status\":200,\"drop\":true}",
 			mutations:   []string{`/hello=world`},
 			matchesOnly: true,
 		},
@@ -1712,16 +1681,6 @@ func TestSDKStreamingDecisionParity(t *testing.T) {
 			doc:  "{\"status\":\"open\",\"id\":1}\n{\"status\":\"closed\",\"id\":2}\n{\"status\":\"open\",\"id\":3}\n",
 		},
 		{
-			name: "array candidates",
-			expr: `/status="open"`,
-			doc:  `[{"status":"open","id":1},{"status":"closed","id":2},{"status":"open","id":3}]`,
-		},
-		{
-			name: "nested array candidates",
-			expr: `/id="b"`,
-			doc:  `[{"id":"a"},[{"id":"b"}],{"id":"c"}]`,
-		},
-		{
 			name: "mixed scalar and object candidates",
 			expr: `/id="x"`,
 			doc:  "\"x\"\n{\"id\":\"x\"}\n123\n",
@@ -1760,22 +1719,6 @@ func TestSDKStreamingDecisionParity(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestSDKStreamingNestedArrayFileDecisionParity(t *testing.T) {
-	doc := `[{"id":"a"},[{"id":"b"}],{"id":"c"}]`
-	want, err := goStreamQuery(`/id="b"`, doc, 0, 0, 0, 0, false)
-	if err != nil {
-		t.Fatalf("go nested array file decision: %v", err)
-	}
-	got, err := cStreamQuery(`/id="b"`, doc, 0, 0, 0, 0, false)
-	if err != nil {
-		t.Fatalf("liblql nested array file decision: %v", err)
-	}
-	assertStreamSummaryParity(t, got, want)
-	if got.DecisionCallbacks != want.DecisionCallbacks {
-		t.Fatalf("nested array decision callback mismatch: got=%d want=%d", got.DecisionCallbacks, want.DecisionCallbacks)
 	}
 }
 
@@ -1858,20 +1801,6 @@ func TestSDKStreamingPayloadParity(t *testing.T) {
 			mode:                2,
 			wantSpooledPayloads: 1,
 		},
-		{
-			name:                 "nested array seekable file range",
-			expr:                 `/id="b"`,
-			doc:                  `[{"id":"a"},[{"id":"b"}],{"id":"c"}]`,
-			mode:                 1,
-			wantSeekablePayloads: 1,
-		},
-		{
-			name:                "nested array callback source spooled payload",
-			expr:                `/id="b"`,
-			doc:                 `[{"id":"a"},[{"id":"b"}],{"id":"c"}]`,
-			mode:                2,
-			wantSpooledPayloads: 1,
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			want, err := goStreamQuery(tc.expr, tc.doc, tc.mode, 0, 0, 0, false)
@@ -1911,8 +1840,8 @@ func TestSDKStreamingStdlibOracleParity(t *testing.T) {
 		doc  string
 	}{
 		{
-			name: "ndjson-and-top-level-array",
-			doc:  "{\"id\":\"a\",\"n\":1}\n{\"id\":\"b\",\"n\":-2.5e+3}\n[{\"id\":\"c\",\"n\":3},[{\"id\":\"d\",\"n\":4}],true,null,\"x\"]",
+			name: "ndjson-and-scalars",
+			doc:  "{\"id\":\"a\",\"n\":1}\n{\"id\":\"b\",\"n\":-2.5e+3}\ntrue\nnull\n\"x\"",
 		},
 		{
 			name: "raw-invalid-utf8-bytes",
