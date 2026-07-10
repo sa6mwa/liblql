@@ -17755,7 +17755,7 @@ static lonejson_status lonejson__json_visit_one_cursor(
     int *raw_capture_disabled, lonejson_error *error) {
   lonejson__json_io io;
   lonejson__value_limits defaults;
-  unsigned char *raw_capture_buffer;
+  unsigned char raw_capture_buffer[LONEJSON_RAW_CAPTURE_BUFFER_SIZE];
   lonejson_status status;
   size_t i;
 
@@ -17764,7 +17764,6 @@ static lonejson_status lonejson__json_visit_one_cursor(
                                0u,
                                "JSON value source and visitor are required");
   }
-  raw_capture_buffer = NULL;
   memset(&io, 0, sizeof(io));
   io.cursor = cursor;
   io.visitor = visitor;
@@ -17773,13 +17772,6 @@ static lonejson_status lonejson__json_visit_one_cursor(
   io.raw_capture_spool = raw_capture_spool;
   io.raw_capture_disabled = raw_capture_disabled;
   if (raw_capture_spool != NULL) {
-    raw_capture_buffer = (unsigned char *)lonejson__owned_malloc(
-        allocator, LONEJSON_RAW_CAPTURE_BUFFER_SIZE);
-    if (raw_capture_buffer == NULL) {
-      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
-                                 0u, 0u,
-                                 "failed to allocate raw capture buffer");
-    }
     io.raw_capture_buffer = raw_capture_buffer;
     io.raw_capture_buffer_cap = LONEJSON_RAW_CAPTURE_BUFFER_SIZE;
   }
@@ -17821,7 +17813,6 @@ static lonejson_status lonejson__json_visit_one_cursor(
     if (io.path_segments == NULL || io.path_frames == NULL) {
       lonejson__owned_free(io.path_segments);
       lonejson__owned_free(io.path_frames);
-      lonejson__owned_free(raw_capture_buffer);
       return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
                                  0u, 0u,
                                  "failed to allocate JSON path visitor state");
@@ -17853,7 +17844,6 @@ static lonejson_status lonejson__json_visit_one_cursor(
   }
   lonejson__owned_free(io.path_segments);
   lonejson__owned_free(io.path_frames);
-  lonejson__owned_free(raw_capture_buffer);
   return status;
 }
 
@@ -19529,7 +19519,7 @@ static lonejson_status lonejson__json_visit_one_top_level_field_cursor(
     int *raw_capture_disabled, lonejson_error *error) {
   lonejson__json_io io;
   lonejson__value_limits defaults;
-  unsigned char *raw_capture_buffer;
+  unsigned char raw_capture_buffer[LONEJSON_RAW_CAPTURE_BUFFER_SIZE];
   lonejson_status status;
   int ch;
 
@@ -19539,7 +19529,6 @@ static lonejson_status lonejson__json_visit_one_top_level_field_cursor(
                                "JSON value source, visitor, and field key are "
                                "required");
   }
-  raw_capture_buffer = NULL;
   memset(&io, 0, sizeof(io));
   io.cursor = cursor;
   io.visitor = visitor;
@@ -19547,13 +19536,6 @@ static lonejson_status lonejson__json_visit_one_top_level_field_cursor(
   io.raw_capture_spool = raw_capture_spool;
   io.raw_capture_disabled = raw_capture_disabled;
   if (raw_capture_spool != NULL) {
-    raw_capture_buffer = (unsigned char *)lonejson__owned_malloc(
-        allocator, LONEJSON_RAW_CAPTURE_BUFFER_SIZE);
-    if (raw_capture_buffer == NULL) {
-      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
-                                 0u, 0u,
-                                 "failed to allocate raw capture buffer");
-    }
     io.raw_capture_buffer = raw_capture_buffer;
     io.raw_capture_buffer_cap = LONEJSON_RAW_CAPTURE_BUFFER_SIZE;
   }
@@ -19627,7 +19609,6 @@ static lonejson_status lonejson__json_visit_one_top_level_field_cursor(
       status = flush_status;
     }
   }
-  lonejson__owned_free(raw_capture_buffer);
   return status;
 }
 
@@ -19640,7 +19621,7 @@ static lonejson_status lonejson__json_visit_one_top_level_fields_cursor(
     lonejson_error *error) {
   lonejson__json_io io;
   lonejson__value_limits defaults;
-  unsigned char *raw_capture_buffer;
+  unsigned char raw_capture_buffer[LONEJSON_RAW_CAPTURE_BUFFER_SIZE];
   lonejson_status status;
   int ch;
 
@@ -19651,7 +19632,6 @@ static lonejson_status lonejson__json_visit_one_top_level_fields_cursor(
                                "JSON value source, visitor, and field keys are "
                                "required");
   }
-  raw_capture_buffer = NULL;
   memset(&io, 0, sizeof(io));
   io.cursor = cursor;
   io.visitor = visitor;
@@ -19659,13 +19639,6 @@ static lonejson_status lonejson__json_visit_one_top_level_fields_cursor(
   io.raw_capture_spool = raw_capture_spool;
   io.raw_capture_disabled = raw_capture_disabled;
   if (raw_capture_spool != NULL) {
-    raw_capture_buffer = (unsigned char *)lonejson__owned_malloc(
-        allocator, LONEJSON_RAW_CAPTURE_BUFFER_SIZE);
-    if (raw_capture_buffer == NULL) {
-      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
-                                 0u, 0u,
-                                 "failed to allocate raw capture buffer");
-    }
     io.raw_capture_buffer = raw_capture_buffer;
     io.raw_capture_buffer_cap = LONEJSON_RAW_CAPTURE_BUFFER_SIZE;
   }
@@ -19739,7 +19712,6 @@ static lonejson_status lonejson__json_visit_one_top_level_fields_cursor(
       status = flush_status;
     }
   }
-  lonejson__owned_free(raw_capture_buffer);
   return status;
 }
 
