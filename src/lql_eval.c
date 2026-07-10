@@ -21,7 +21,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define LQL_SOURCE_PREFIX_CAP 4096u
+#define LQL_SOURCE_PREFIX_CAP 1024u
 #define LQL_EVAL_FEATURE_PREFIX_CAPTURE 0x80000000u
 #define LQL_EVAL_FAST_DIRECT_DEPTH_CAP 16u
 #define LQL_EVAL_FAST_MULTI_PRED_CAP 16u
