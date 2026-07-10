@@ -248,12 +248,31 @@ static lql_status seek_end_size(FILE *file, lql_uint64 *out_size) {
   return LQL_STATUS_OK;
 }
 
-static lql_status count_payload(void *user, const lql_query_match *match) {
+static lql_status count_seekable_payload(void *user,
+                                         const lql_query_match *match) {
+  payload_counts *counts;
+
+  counts = (payload_counts *)user;
+  if (match->payload.kind != LQL_PAYLOAD_SEEKABLE_RANGE ||
+      match->payload.size != match->decision.size ||
+      match->payload.offset != match->decision.offset) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  counts->payloads++;
+  counts->payload_bytes += match->payload.size;
+  return LQL_STATUS_OK;
+}
+
+static lql_status replay_seekable_payload(void *user,
+                                          const lql_query_match *match) {
   payload_counts *counts;
   lql_status st;
   lql_error error;
 
   counts = (payload_counts *)user;
+  if (counts == NULL || counts->sink == NULL) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
   if (match->payload.kind != LQL_PAYLOAD_SEEKABLE_RANGE ||
       match->payload.size != match->decision.size ||
       match->payload.offset != match->decision.offset) {
@@ -369,8 +388,10 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
                                      &source, observe_decision, NULL, result,
                                      error);
   } else if (strcmp(mode, "plus_value_selector") == 0 ||
-             strcmp(mode, "plus_value_plan") == 0 ||
-             strcmp(mode, "plus_value_openjson_selector") == 0 ||
+             strcmp(mode, "plus_value_plan") == 0) {
+    st = ctx->query_file_matches(ctx, run_selector, fixture,
+                                 count_seekable_payload, counts, result, error);
+  } else if (strcmp(mode, "plus_value_openjson_selector") == 0 ||
              strcmp(mode, "plus_value_openjson_plan") == 0) {
     sink = open_discard_sink();
     if (sink == NULL) {
@@ -378,8 +399,9 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
       goto done;
     }
     counts->sink = sink;
-    st = ctx->query_file_matches(ctx, run_selector, fixture, count_payload,
-                                 counts, result, error);
+    st =
+        ctx->query_file_matches(ctx, run_selector, fixture,
+                                replay_seekable_payload, counts, result, error);
   } else if (strcmp(mode, "plus_value_source_selector") == 0) {
     st = ctx->query_source_spooled_matches(ctx, run_selector, read_bench_source,
                                            &source, count_spooled_payload,
