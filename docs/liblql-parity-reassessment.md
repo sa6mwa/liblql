@@ -81,14 +81,14 @@ be called complete for the v0 public contract:
 - Mutation:
   parser forms, quoted paths, root and nested sets, increments, removals,
   wildcard and recursive paths, numeric object-key versus array-index behavior,
-  file-backed values, text validation, error precedence, top-level array
+  file-backed values, text validation, error precedence, repeated top-level
   candidate streams, projection-before-mutation, and matches-only behavior.
 
 - Streaming:
-  NDJSON and top-level array flattening, nested arrays, mixed scalar/object
-  streams, callback-source framing, seekable offset/size contracts, result
-  counters, stop precedence, callback failure behavior, malformed JSON
-  accounting, and payload replay.
+  repeated top-level NDJSON values, nested arrays inside candidates, mixed
+  scalar/object streams, callback-source framing, seekable offset/size
+  contracts, result counters, stop precedence, callback failure behavior,
+  malformed JSON accounting, and payload replay.
 
 - CLI:
   argument splitting, interspersed flags, stdin/file behavior, inline/write

@@ -226,9 +226,9 @@ than full selected-value buffers, including numeric `range`; the current
 lonejson visitor still imposes a small raw number-token limit documented in
 `docs/liblql-dependency-gaps.md`.
 The fast C test gate also proves the warmed decision hot path does not attempt
-receiver allocation for file, callback-source, root-array source, compound, and
-mixed scalar-observer selectors. Warmed projection and seekable candidate
-mutation paths are covered by the same no-receiver-allocation contract.
+receiver allocation for file, callback-source, compound, and mixed
+scalar-observer selectors. Warmed projection and seekable candidate mutation
+paths are covered by the same no-receiver-allocation contract.
 
 Common verification targets:
 

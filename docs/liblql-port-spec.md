@@ -275,9 +275,8 @@ not receiver-owned, or an epoch wraps.
 Steady-state decision scanning must not attempt receiver allocation after the
 selector and evaluator scratch have been warmed for the same query shape. The
 C allocator contract tests should freeze a receiver allocator after warmup and
-rerun file, callback-source, root-array source, compound, and mixed scalar
-observer-family scans; any liblql-owned allocation attempt in that warmed hot
-path is a test failure.
+rerun file, callback-source, compound, and mixed scalar observer-family scans;
+any liblql-owned allocation attempt in that warmed hot path is a test failure.
 Projection and seekable candidate mutation are held to the same warmed-receiver
 standard for supported streaming paths: after parse/plan construction and
 runtime warmup, repeated projection or seekable candidate mutation must not
@@ -1494,18 +1493,13 @@ Current implementation status:
   `SpillBytes` counters belong to Go's callback request shape and are not
   mirrored unless liblql grows an equivalent mutation callback/factory or
   aggregate accounting API;
-- callback-source mutation stream coverage now includes mixed scalar/object
-  candidates inside a root array: root-array items are emitted incrementally,
-  object candidates are mutated, scalar candidates pass through unchanged, and
-  partial read failures retain already-emitted candidate counters. The
-  remaining Go `MutateStream` mixed-framing case is narrower: a root array
-  followed by additional top-level values in the same callback source. lonejson
-  `v0.41.0` exposes `AUTO`, `NDJSON`, `SINGLE_VALUE`, `ARRAY_ITEMS`, and
-  `RECURSIVE_ARRAY_ITEMS`
-  framing, but not a no-materialization mode that both emits root-array items
-  incrementally and then continues with subsequent top-level values. liblql
-  must not fake this by materializing the whole array or source; support for
-  that exact shape needs dependency API support plus an explicit future public
+- callback-source mutation stream coverage includes mixed scalar/object
+  repeated top-level candidates: object candidates are mutated, scalar
+  candidates pass through unchanged, and partial read failures retain
+  already-emitted candidate counters. Root arrays entering NDJSON candidate
+  streams are rejected instead of flattened. liblql must not fake root-array
+  candidate flattening by materializing the whole array or source; support for
+  that shape would need dependency API support plus an explicit future public
   liblql framing contract that preserves streaming semantics. This is tracked
   as an accepted v0 non-parity case in `docs/liblql-dependency-gaps.md` and is
   not part of the current public liblql v0 callback-source contract;
@@ -1599,13 +1593,11 @@ Current implementation status:
   success/error, mutation success/error, compact success/error, and stream
   corpora; this is behavioral oracle coverage, not C SDK unit coverage and not
   a requirement that the C API mirror Go API shape;
-- Nested top-level array flattening is proven for `clql` stdin and seekable
-  file selection, `ctx->query_file_decisions()`,
+- Root-array rejection is proven for `clql` stdin and candidate-stream SDK
+  entry points. Repeated top-level object/scalar streams remain the public
+  NDJSON parity shape for `ctx->query_file_decisions()`,
   `ctx->query_source_decisions()`, `ctx->query_file_matches()`, and
-  `ctx->query_source_spooled_matches()`. Seekable recursion rereads nested
-  candidate ranges with absolute-offset `pread()` range readers so the active
-  parser cursor is not disturbed and no hidden candidate materialization is
-  introduced; callback-source recursion uses callback-scoped spooled payloads;
+  `ctx->query_source_spooled_matches()`;
 - C SDK projection tests assert duplicate projection paths are
   idempotent and parent/child projection path conflicts are rejected through
   the public projection API;
@@ -1747,9 +1739,9 @@ Current implementation status:
   gate because bounded-memory streaming is a product contract rather than an
   optional hardening check; the C allocator contract test also freezes the
   receiver allocator after warmup and rejects liblql-owned allocation attempts
-  in warmed decision-query and seekable-match hot paths, including root-array
-  file range flattening and a mixed selector that exercises exact,
-  contains-any, prefix, numeric range, and temporal observers together, plus a
+  in warmed decision-query and seekable-match hot paths, including a mixed
+  selector that exercises exact, contains-any, prefix, numeric range, and
+  temporal observers together, plus a
   nested container-observer selector that exercises `exists`, container
   `contains`, and container `prefix` without falling back to scalar-only
   observer branches; the same allocator gate freezes the receiver after

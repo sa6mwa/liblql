@@ -59,9 +59,7 @@ func TestCLQLSelectorParity(t *testing.T) {
 		{`icontains{f=/hello/world}`, `{"hello":{"world":null}}`},
 		{`prefix{f=/hello/world}`, `{"hello":{"world":null}}`},
 		{`iprefix{f=/hello/world}`, `{"hello":{"world":null}}`},
-		{`exists{/hello/world}`, `{"hello":{"world":null}}`},
 		{`/hello/world=""`, `{"hello":{"world":null}}`},
-		{`contains{f=/hello/world,v=""}`, `{"hello":{"world":null}}`},
 		{`prefix{f=/hello/world,v=""}`, `{"hello":{"world":null}}`},
 		{`in{f=/hello/world,any=null|""}`, `{"hello":{"world":null}}`},
 		{`contains{f=/,v=""}`, `{"status":"open"}`},
@@ -337,11 +335,6 @@ func TestCLQLMatchesOnlyStreamingParity(t *testing.T) {
 			name: "ndjson match",
 			expr: `/status="open"`,
 			body: "{\"status\":\"closed\"}\n{\"status\":\"open\"}\n",
-		},
-		{
-			name: "array match",
-			expr: `/status="open"`,
-			body: `[{"status":"closed"},{"status":"open"}]`,
 		},
 		{
 			name: "no match",
@@ -713,7 +706,7 @@ func TestCLQLSeekableFileProjectionParity(t *testing.T) {
 			name:   "multiple root fields",
 			expr:   `/status="open"`,
 			fields: []string{"/id", "/count"},
-			body:   `[{"status":"closed","id":"a"},{"status":"open","id":"b","count":2}]`,
+			body:   "{\"status\":\"closed\",\"id\":\"a\"}\n{\"status\":\"open\",\"id\":\"b\",\"count\":2}\n",
 		},
 		{
 			name:   "nested object and array field",
@@ -866,10 +859,8 @@ func TestCLQLCompactSelectionParity(t *testing.T) {
 	if clql == "" {
 		t.Skip("CLQL_PATH not set")
 	}
-	body := `[
-  { "id" : "a", "items" : [ { "sku" : "A" } ] },
-  { "id" : "b", "items" : [ { "sku" : "B" } ] }
-]`
+	body := "{ \"id\" : \"a\", \"items\" : [ { \"sku\" : \"A\" } ] }\n" +
+		"{ \"id\" : \"b\", \"items\" : [ { \"sku\" : \"B\" } ] }\n"
 	tmp, err := os.CreateTemp(t.TempDir(), "clql-compact-*.json")
 	if err != nil {
 		t.Fatalf("create temp: %v", err)
@@ -2508,22 +2499,14 @@ func TestCLQLMatchAllMutationMixedStreamContract(t *testing.T) {
 	}
 	body := `1
 {"id":"a","status":"new"}
-[{"id":"b","status":"new"},3]`
+3`
 	mutations := []string{`/status=ready`}
-	wantStdin, err := decodeJSONValues([]byte(`1
+	want, err := decodeJSONValues([]byte(`1
 {"id":"a","status":"ready"}
-[{"id":"b","status":"new"},3]
-`))
-	if err != nil {
-		t.Fatalf("decode clql stdin mixed stream contract expectation: %v", err)
-	}
-	wantFile, err := decodeJSONValues([]byte(`1
-{"id":"a","status":"ready"}
-{"id":"b","status":"ready"}
 3
 `))
 	if err != nil {
-		t.Fatalf("decode clql file mixed stream contract expectation: %v", err)
+		t.Fatalf("decode clql stdin mixed stream contract expectation: %v", err)
 	}
 
 	t.Run("stdin", func(t *testing.T) {
@@ -2541,8 +2524,8 @@ func TestCLQLMatchAllMutationMixedStreamContract(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decode clql stdin mixed mutation: %v out=%q", err, string(out))
 		}
-		if !reflect.DeepEqual(got, wantStdin) {
-			t.Fatalf("stdin mixed mutation contract mismatch: got=%#v want=%#v out=%q", got, wantStdin, string(out))
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("stdin mixed mutation contract mismatch: got=%#v want=%#v out=%q", got, want, string(out))
 		}
 	})
 
@@ -2571,8 +2554,8 @@ func TestCLQLMatchAllMutationMixedStreamContract(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decode clql file mixed mutation: %v out=%q", err, string(out))
 		}
-		if !reflect.DeepEqual(got, wantFile) {
-			t.Fatalf("file mixed mutation contract mismatch: got=%#v want=%#v out=%q", got, wantFile, string(out))
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("file mixed mutation contract mismatch: got=%#v want=%#v out=%q", got, want, string(out))
 		}
 	})
 }

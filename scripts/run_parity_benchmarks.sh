@@ -90,6 +90,21 @@ json_string() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
+assert_no_ndjson_root_arrays() {
+  for path in "$fixture_dir"/*.jsonl; do
+    [ -f "$path" ] || continue
+    if ! awk '
+      /^[[:space:]]*\[/ {
+        printf "%s:%d: generated NDJSON fixture has root array candidate\n", FILENAME, FNR > "/dev/stderr"
+        found = 1
+      }
+      END { exit found ? 1 : 0 }
+    ' "$path"; then
+      return 1
+    fi
+  done
+}
+
 detect_time_mode() {
   time_probe="$fixture_dir/time-probe.$$"
   if "$time_bin" -f 'peak_rss_kb=%M' -o "$time_probe" true >/dev/null 2>&1; then
@@ -1197,6 +1212,9 @@ if ! validate_required_impls; then
   exit_status=1
 fi
 generate_fixture
+if ! assert_no_ndjson_root_arrays; then
+  exit_status=1
+fi
 
 if [ "$exit_status" -eq 0 ] && is_selected go; then
   if ! run_matrix_for_impl go; then
