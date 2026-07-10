@@ -1772,20 +1772,16 @@ Current implementation status:
   copies and separators. Public `FILE *` payload-writing APIs keep their normal
   ownership and error contract but also use the same scoped output lock for
   spooled and seekable payload byte copies;
-- callback-source matched payload queries use lonejson `v0.41.0`
-  predicate-gated spooled capture, so sparse unmatched candidates are discarded
-  before callback-scoped payload handles are exposed. Callback-source source
-  mutation and projected mutation use lonejson's candidate transform surface:
-  selector observation happens on the original source pass, late selector
-  decisions return finalized candidate policy before replay/output, unmatched
-  `matches_only` candidates are dropped before replay, unmatched preserved
-  candidates disable mutation/insertion, and projected mutation uses
-  project-then-transform composition over the projected candidate shape.
-  Projection and mutation pass-through numbers use lonejson chunked number
-  writer callbacks rather than liblql-owned complete-token buffers. liblql must
-  not reintroduce full-candidate buffering outside lonejson, temp-file staging,
-  selector/result caches, or a second JSON parser. The consumed and remaining
-  surfaces are summarized in `docs/liblql-dependency-gaps.md`;
+- the next callback-source and transform performance work is governed by
+  `docs/liblql-lonejson-hybrid-spec.md`. The vendored lonejson
+  candidate/transform surface may be rewritten because it is currently
+  liblql-local. The target is one strict NDJSON candidate pipeline where
+  lonejson owns JSON parsing/framing/writing and liblql owns selector,
+  projection, and mutation semantics. Candidate spooling remains a public
+  payload-handle mechanism or explicit fallback, not the default internal
+  projection/mutation path. liblql must not reintroduce root-array flattening,
+  full-candidate buffering outside lonejson, hidden temp-file staging,
+  selector/result caches, or a second JSON parser;
 - seekable matched-object mutation uses candidate offsets, no-capture parsing,
   and `pread()` range rereads, so liblql does not need candidate capture or
   runtime caches for that path. Current release profiles show that matched
