@@ -48,6 +48,16 @@ LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void) {
   return &default_allocator;
 }
 
+LQL_INTERNAL_SYMBOL int
+lql_lonejson_default_runtime_pool_allowed(const lql *self) {
+  const lql_impl *impl;
+  if (self == NULL || self->impl == NULL) {
+    return 0;
+  }
+  impl = (const lql_impl *)self->impl;
+  return impl->allocator == &default_allocator;
+}
+
 LQL_INTERNAL_SYMBOL lql_allocator *
 lql_allocator_from_receiver(const lql *self) {
   const lql_impl *impl;

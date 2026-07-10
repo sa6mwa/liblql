@@ -7532,6 +7532,8 @@ static lql_status execute_query_source_spooled_matches_with_base(
   lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
+  int runtime_pooled;
+  int runtime_can_pool;
   source_spooled_match_state state;
   source_reader_adapter adapter;
 
@@ -7550,7 +7552,11 @@ static lql_status execute_query_source_spooled_matches_with_base(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lql_lonejson_new(self, &lj_error);
+  runtime_pooled = 0;
+  runtime_can_pool = lql_lonejson_default_runtime_pool_allowed(self);
+  runtime = runtime_can_pool ? lql_lonejson_acquire(self, &runtime_pooled,
+                                                    &lj_error)
+                             : lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
@@ -7561,7 +7567,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
   adapter.user = read_user;
   if (!source_reader_prefix_capture(&adapter)) {
     destroy_doc(&state.doc);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     if (out_result != NULL) {
       *out_result = state.result;
     }
@@ -7570,7 +7576,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
   }
   if (adapter.prefix_root_array) {
     destroy_doc(&state.doc);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     if (out_result != NULL) {
       *out_result = state.result;
     }
@@ -7605,7 +7611,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
   }
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
-    lonejson_free(runtime);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     if (out_result != NULL) {
       *out_result = state.result;
     }
@@ -7622,7 +7628,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
     return LQL_STATUS_JSON_ERROR;
   }
   destroy_doc(&state.doc);
-  lonejson_free(runtime);
+  lql_lonejson_release(self, runtime, runtime_pooled);
   if (out_result != NULL) {
     *out_result = state.result;
   }

@@ -56,6 +56,8 @@ struct lql_impl {
 };
 
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
+LQL_INTERNAL_SYMBOL int lql_lonejson_default_runtime_pool_allowed(
+    const lql *self);
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_from_receiver(const lql *self);
 LQL_INTERNAL_SYMBOL void *lql_receiver_alloc(lql *self, size_t size);
 LQL_INTERNAL_SYMBOL void *lql_receiver_calloc(lql *self, size_t count,
