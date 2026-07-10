@@ -6529,7 +6529,6 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
       match.payload.size = match.decision.size;
       match.payload.source = state->file;
       st = state->on_match(state->user, &match);
-      reset_doc(&state->doc);
       if (st == LQL_STATUS_STOP) {
         query_stop(state, LQL_QUERY_STOP_CALLBACK);
         return LONEJSON_CANDIDATE_STOP;
@@ -6538,8 +6537,6 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
         state->callback_status = st;
         return LONEJSON_CANDIDATE_ERROR;
       }
-    } else {
-      reset_doc(&state->doc);
     }
     if (query_result_stop_if_limited(&state->result, &state->options,
                                      state->limit_flags)) {
@@ -6552,7 +6549,6 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
   decision.offset = state->offset_base + (lql_uint64)candidate->stream_offset;
   decision.size = (lql_uint64)candidate->byte_size;
   st = state->on_decision(state->user, &decision);
-  reset_doc(&state->doc);
   if (st == LQL_STATUS_STOP) {
     query_stop(state, LQL_QUERY_STOP_CALLBACK);
     return LONEJSON_CANDIDATE_STOP;
@@ -6566,6 +6562,23 @@ on_candidate_end(void *user, const lonejson_candidate_info *candidate,
     return LONEJSON_CANDIDATE_STOP;
   }
   return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static void
+configure_query_candidate_callbacks(lonejson_candidate_stream_options *options,
+                                    query_stream_state *state) {
+  if (options == NULL || state == NULL) {
+    return;
+  }
+#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_VISITOR)
+  /* The dedicated parser clears its per-candidate match and root outputs. */
+  options->candidate_begin =
+      options->top_level_string_eq_key != NULL ? NULL : on_candidate_begin;
+#else
+  options->candidate_begin = on_candidate_begin;
+#endif
+  options->candidate_end = on_candidate_end;
+  options->candidate_user = state;
 }
 
 static lonejson_status file_sink_unlocked(void *user, const void *data,
@@ -7908,9 +7921,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   enable_fast_top_level_field_candidate(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
   enable_fast_top_level_string_eq_candidate(&options, &state.doc);
-  options.candidate_begin = on_candidate_begin;
-  options.candidate_end = on_candidate_end;
-  options.candidate_user = &state;
+  configure_query_candidate_callbacks(&options, &state);
   st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
@@ -7995,9 +8006,7 @@ execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
   enable_fast_top_level_field_candidate(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
   enable_fast_top_level_string_eq_candidate(&options, &state.doc);
-  options.candidate_begin = on_candidate_begin;
-  options.candidate_end = on_candidate_end;
-  options.candidate_user = &state;
+  configure_query_candidate_callbacks(&options, &state);
   st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
   if (st != LONEJSON_STATUS_OK) {
     destroy_doc(&state.doc);
@@ -8104,9 +8113,7 @@ static lql_status execute_query_source_decisions_with_base(
   enable_fast_top_level_field_candidate(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
   enable_fast_top_level_string_eq_candidate(&options, &state.doc);
-  options.candidate_begin = on_candidate_begin;
-  options.candidate_end = on_candidate_end;
-  options.candidate_user = &state;
+  configure_query_candidate_callbacks(&options, &state);
   st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
                                         &options, &lj_error);
   if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||
