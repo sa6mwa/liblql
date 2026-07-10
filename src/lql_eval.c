@@ -105,6 +105,7 @@ typedef struct eval_doc {
   size_t fast_direct_array_index_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
   char fast_direct_container_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
   const lql_selector *fast_multi_value_selector;
+  int fast_multi_skip_unmatched_strings;
   size_t fast_multi_depth;
   size_t fast_multi_key_len;
   unsigned int fast_multi_key_candidates;
@@ -4324,10 +4325,25 @@ static lonejson_status fast_multi_key_end(void *user, lonejson_error *error) {
 static lonejson_status fast_multi_string_begin(void *user,
                                                lonejson_error *error) {
   eval_doc *doc;
+  const lql_selector *selector;
   lonejson_status st;
   (void)error;
   doc = (eval_doc *)user;
-  st = fast_multi_prepare_value(doc, doc->fast_multi_value_selector, 1);
+#if defined(LONEJSON_HAS_VALUE_SKIP)
+  if (doc->fast_multi_skip_unmatched_strings && doc->fast_multi_depth == 0u) {
+    doc->root_kind = 's';
+    return LONEJSON_STATUS_SKIP_VALUE;
+  }
+  selector = doc->fast_multi_value_selector;
+  if (doc->fast_multi_skip_unmatched_strings &&
+      (selector == NULL || hit_marked_fast(doc, selector))) {
+    doc->fast_multi_value_selector = NULL;
+    return LONEJSON_STATUS_SKIP_VALUE;
+  }
+#else
+  selector = doc->fast_multi_value_selector;
+#endif
+  st = fast_multi_prepare_value(doc, selector, 1);
   doc->fast_multi_value_selector = NULL;
   return st;
 }
@@ -4346,12 +4362,28 @@ static lonejson_status fast_multi_string_end(void *user,
 static lonejson_status fast_multi_number_begin(void *user,
                                                lonejson_error *error) {
   eval_doc *doc;
+  const lql_selector *selector;
   lonejson_status st;
-  st = fast_multi_string_begin(user, error);
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_multi_depth == 0u) {
+    doc->root_kind = '0';
+    doc->scalar_path_features = 0u;
+    doc->scalar_stream_features = 0u;
+    return LONEJSON_STATUS_OK;
+  }
+  selector = doc->fast_multi_value_selector;
+  if (selector == NULL || hit_marked_fast(doc, selector)) {
+    doc->fast_multi_value_selector = NULL;
+    doc->scalar_path_features = 0u;
+    doc->scalar_stream_features = 0u;
+    return LONEJSON_STATUS_OK;
+  }
+  st = fast_multi_prepare_value(doc, selector, 1);
+  doc->fast_multi_value_selector = NULL;
   if (st != LONEJSON_STATUS_OK) {
     return st;
   }
-  doc = (eval_doc *)user;
   if (doc->scalar_path_features == 0u) {
     return LONEJSON_STATUS_OK;
   }
@@ -7270,6 +7302,11 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
+#if defined(LONEJSON_HAS_VALUE_SKIP)
+  if (selector_fast_top_level_multi_eligible(selector)) {
+    state.doc.fast_multi_skip_unmatched_strings = 1;
+  }
+#endif
   runtime_pooled = 0;
   runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
@@ -7342,6 +7379,11 @@ static lql_status execute_query_file_range_decisions(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
+#if defined(LONEJSON_HAS_VALUE_SKIP)
+  if (selector_fast_top_level_multi_eligible(selector)) {
+    state.doc.fast_multi_skip_unmatched_strings = 1;
+  }
+#endif
   runtime_pooled = 0;
   runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {

@@ -26,6 +26,8 @@
 #ifndef LONEJSON_H
 #define LONEJSON_H
 
+#define LONEJSON_HAS_VALUE_SKIP 1
+
 #include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -707,6 +709,8 @@ typedef enum lonejson_status {
   LONEJSON_STATUS_IO_ERROR,
   /** The operation is valid, but unsupported for the selected runtime shape. */
   LONEJSON_STATUS_UNSUPPORTED,
+  /** Internal visitor request to consume the current value without callbacks. */
+  LONEJSON_STATUS_SKIP_VALUE,
   /** lonejson encountered an unexpected internal state. */
   LONEJSON_STATUS_INTERNAL_ERROR
 } lonejson_status;
@@ -16459,6 +16463,8 @@ static lonejson_status lonejson__json_visit_plain_chunk_no_path(
 
 static LONEJSON__HOT lonejson_status
 lonejson__json_visit_value_no_path(lonejson__json_io *io);
+static lonejson_status lonejson__json_skip_string(lonejson__json_io *io,
+                                                  size_t limit);
 
 static lonejson_status
 lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
@@ -16478,6 +16484,9 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
 
   if (begin_fn != NULL) {
     status = begin_fn(io->visitor_user, io->error);
+    if (status == LONEJSON_STATUS_SKIP_VALUE && !is_key) {
+      return lonejson__json_skip_string(io, limit);
+    }
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
@@ -30826,6 +30835,8 @@ const char *lonejson_status_string(lonejson_status status) {
     return "io_error";
   case LONEJSON_STATUS_UNSUPPORTED:
     return "unsupported";
+  case LONEJSON_STATUS_SKIP_VALUE:
+    return "skip_value";
   case LONEJSON_STATUS_INTERNAL_ERROR:
     return "internal_error";
   default:
