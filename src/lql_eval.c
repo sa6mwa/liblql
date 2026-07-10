@@ -79,6 +79,11 @@ typedef struct eval_doc {
   int fast_exact_path_active;
   int fast_exact_hit;
   int fast_exact_miss;
+  size_t fast_flat_depth;
+  size_t fast_flat_key_len;
+  int fast_flat_key_active;
+  int fast_flat_key_match;
+  int fast_flat_next_value_target;
 } eval_doc;
 
 typedef struct lql_payload_sink_adapter {
@@ -264,6 +269,13 @@ static int selector_fast_exact_eligible(const lql_selector *selector) {
          selector->observer_family == LQL_EVAL_FAMILY_EXACT;
 }
 
+static int selector_fast_flat_exact_eligible(const lql_selector *selector) {
+  return selector_fast_exact_eligible(selector) &&
+         selector->field_segment_count == 1u &&
+         selector->field_segment_kinds != NULL &&
+         selector->field_segment_kinds[0] == LQL_FIELD_SEGMENT_LITERAL;
+}
+
 static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   lql_impl *impl;
   unsigned int *next_hits;
@@ -441,6 +453,11 @@ static void reset_doc(eval_doc *doc) {
   doc->fast_exact_path_active = 0;
   doc->fast_exact_hit = 0;
   doc->fast_exact_miss = 0;
+  doc->fast_flat_depth = 0u;
+  doc->fast_flat_key_len = 0u;
+  doc->fast_flat_key_active = 0;
+  doc->fast_flat_key_match = 0;
+  doc->fast_flat_next_value_target = 0;
 }
 
 static char *contains_tail_data(eval_doc *doc) {
@@ -2542,6 +2559,247 @@ static void configure_eval_visitor_for_doc(lonejson_path_value_visitor *visitor,
   }
 }
 
+static void fast_flat_begin_value(eval_doc *doc, int scalar) {
+  if (doc == NULL) {
+    return;
+  }
+  doc->fast_exact_path_active = doc->fast_flat_next_value_target && scalar;
+  doc->fast_flat_next_value_target = 0;
+  doc->fast_exact_miss = 0;
+  doc->scalar_len = 0u;
+  doc->prefix_len = 0u;
+}
+
+static lonejson_status fast_flat_object_begin(void *user,
+                                              lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_flat_depth == 0u) {
+    doc->root_kind = '{';
+  } else {
+    fast_flat_begin_value(doc, 0);
+  }
+  doc->fast_flat_depth++;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_object_end(void *user, lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_flat_depth != 0u) {
+    doc->fast_flat_depth--;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_array_begin(void *user,
+                                             lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_flat_depth == 0u) {
+    doc->root_kind = '[';
+  } else {
+    fast_flat_begin_value(doc, 0);
+  }
+  doc->fast_flat_depth++;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_array_end(void *user, lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_flat_depth != 0u) {
+    doc->fast_flat_depth--;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_key_begin(void *user, lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  doc->fast_flat_key_active =
+      doc->fast_flat_depth == 1u && !doc->fast_exact_hit;
+  doc->fast_flat_key_match = doc->fast_flat_key_active;
+  doc->fast_flat_key_len = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_key_chunk(void *user, const char *data,
+                                           size_t len, lonejson_error *error) {
+  eval_doc *doc;
+  const lql_selector *selector;
+  size_t key_offset;
+  size_t key_len;
+  size_t cmp_len;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (!doc->fast_flat_key_active || !doc->fast_flat_key_match) {
+    return LONEJSON_STATUS_OK;
+  }
+  selector = doc->fast_exact_selector;
+  key_offset = selector->field_segment_offsets[0];
+  key_len = selector->field_segment_lens[0];
+  if (doc->fast_flat_key_len >= key_len) {
+    doc->fast_flat_key_match = 0;
+  } else {
+    cmp_len = key_len - doc->fast_flat_key_len;
+    if (cmp_len > len) {
+      cmp_len = len;
+    }
+    if (memcmp(selector->field + key_offset + doc->fast_flat_key_len, data,
+               cmp_len) != 0 ||
+        len > key_len - doc->fast_flat_key_len) {
+      doc->fast_flat_key_match = 0;
+    }
+  }
+  doc->fast_flat_key_len += len;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_key_end(void *user, lonejson_error *error) {
+  eval_doc *doc;
+  const lql_selector *selector;
+  (void)error;
+  doc = (eval_doc *)user;
+  selector = doc->fast_exact_selector;
+  doc->fast_flat_next_value_target =
+      doc->fast_flat_key_active && doc->fast_flat_key_match &&
+      doc->fast_flat_key_len == selector->field_segment_lens[0];
+  doc->fast_flat_key_active = 0;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_string_begin(void *user,
+                                              lonejson_error *error) {
+  (void)error;
+  fast_flat_begin_value((eval_doc *)user, 1);
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_string_chunk(void *user, const char *data,
+                                              size_t len,
+                                              lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (!doc->fast_exact_path_active || doc->fast_exact_hit ||
+      doc->fast_exact_miss) {
+    return LONEJSON_STATUS_OK;
+  }
+  doc->scalar_len += len;
+  observe_exact_stream_chunk(doc, doc->selector, NULL, data, len);
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_string_end(void *user, lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_flat_depth == 0u) {
+    doc->root_kind = 's';
+  }
+  observe_exact_stream_end(doc, doc->selector, NULL);
+  doc->fast_exact_path_active = 0;
+  doc->scalar_len = 0u;
+  doc->prefix_len = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_number_begin(void *user,
+                                              lonejson_error *error) {
+  return fast_flat_string_begin(user, error);
+}
+
+static lonejson_status fast_flat_number_chunk(void *user, const char *data,
+                                              size_t len,
+                                              lonejson_error *error) {
+  return fast_flat_string_chunk(user, data, len, error);
+}
+
+static lonejson_status fast_flat_number_end(void *user, lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_flat_depth == 0u) {
+    doc->root_kind = 'n';
+  }
+  observe_exact_stream_end(doc, doc->selector, NULL);
+  doc->fast_exact_path_active = 0;
+  doc->scalar_len = 0u;
+  doc->prefix_len = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_boolean(void *user, int value,
+                                         lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_flat_depth == 0u) {
+    doc->root_kind = 'b';
+  }
+  fast_flat_begin_value(doc, 1);
+  if (doc->fast_exact_path_active) {
+    observe_prepared_exact_value(doc, value ? "true" : "false", value ? 4u : 5u,
+                                 0, 0);
+  }
+  doc->fast_exact_path_active = 0;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_flat_null(void *user, lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_flat_depth == 0u) {
+    doc->root_kind = '0';
+  }
+  fast_flat_begin_value(doc, 1);
+  doc->fast_exact_path_active = 0;
+  return LONEJSON_STATUS_OK;
+}
+
+static void init_fast_flat_exact_visitor(lonejson_value_visitor *visitor) {
+  *visitor = lonejson_default_value_visitor();
+  visitor->object_begin = fast_flat_object_begin;
+  visitor->object_end = fast_flat_object_end;
+  visitor->object_key_begin = fast_flat_key_begin;
+  visitor->object_key_chunk = fast_flat_key_chunk;
+  visitor->object_key_end = fast_flat_key_end;
+  visitor->array_begin = fast_flat_array_begin;
+  visitor->array_end = fast_flat_array_end;
+  visitor->string_begin = fast_flat_string_begin;
+  visitor->string_chunk = fast_flat_string_chunk;
+  visitor->string_end = fast_flat_string_end;
+  visitor->number_begin = fast_flat_number_begin;
+  visitor->number_chunk = fast_flat_number_chunk;
+  visitor->number_end = fast_flat_number_end;
+  visitor->boolean_value = fast_flat_boolean;
+  visitor->null_value = fast_flat_null;
+}
+
+static void
+configure_candidate_eval_visitors(lonejson_candidate_stream_options *options,
+                                  lonejson_path_value_visitor *path_visitor,
+                                  lonejson_value_visitor *value_visitor,
+                                  eval_doc *doc) {
+  if (selector_fast_flat_exact_eligible(doc != NULL ? doc->selector : NULL)) {
+    init_fast_flat_exact_visitor(value_visitor);
+    options->visitor = value_visitor;
+    options->visitor_user = doc;
+    return;
+  }
+  init_eval_visitor(path_visitor);
+  configure_eval_visitor_for_doc(path_visitor, doc);
+  options->path_visitor = path_visitor;
+  options->visitor_user = doc;
+}
+
 typedef struct query_stream_state {
   lql *receiver;
   FILE *file;
@@ -4156,6 +4414,7 @@ static lonejson_status write_spooled_array_candidates(
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
+  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_spooled cursor;
   spooled_match_state state;
@@ -4189,12 +4448,10 @@ static lonejson_status write_spooled_array_candidates(
     return LONEJSON_STATUS_ALLOCATION_FAILED;
   }
   cursor = *spooled;
-  init_eval_visitor(&visitor);
-  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
+  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
+                                    &state.doc);
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
-  options.path_visitor = &visitor;
-  options.visitor_user = &state.doc;
   options.candidate_begin = on_spooled_candidate_begin;
   options.candidate_end = on_spooled_candidate_end;
   options.candidate_user = &state;
@@ -4671,6 +4928,7 @@ static lql_status execute_mutate_file_range_candidates_fast(
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
+  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   file_mutation_range_state state;
@@ -4710,12 +4968,10 @@ static lql_status execute_mutate_file_range_candidates_fast(
   reader.fd = state.fd;
   reader.offset = offset;
   reader.remaining = size;
-  init_eval_visitor(&visitor);
-  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
+  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
+                                    &state.doc);
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  options.path_visitor = &visitor;
-  options.visitor_user = &state.doc;
   options.candidate_begin = on_file_mutation_candidate_begin;
   options.candidate_end = on_file_mutation_candidate_end;
   options.candidate_user = &state;
@@ -5184,6 +5440,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
+  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   int runtime_pooled;
@@ -5212,12 +5469,10 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
     destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
-  init_eval_visitor(&visitor);
-  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
+  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
+                                    &state.doc);
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  options.path_visitor = &visitor;
-  options.visitor_user = &state.doc;
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -5253,6 +5508,7 @@ static lql_status execute_query_file_range_decisions(
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
+  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   int runtime_pooled;
@@ -5292,13 +5548,11 @@ static lql_status execute_query_file_range_decisions(
   }
   reader.offset = offset;
   reader.remaining = size;
-  init_eval_visitor(&visitor);
-  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
+  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
+                                    &state.doc);
   options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  options.path_visitor = &visitor;
-  options.visitor_user = &state.doc;
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -5332,6 +5586,7 @@ execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
+  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   int runtime_pooled;
@@ -5360,12 +5615,10 @@ execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
     destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
-  init_eval_visitor(&visitor);
-  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
+  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
+                                    &state.doc);
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  options.path_visitor = &visitor;
-  options.visitor_user = &state.doc;
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -5401,6 +5654,7 @@ static lql_status execute_query_file_range_matches(
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
+  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   int runtime_pooled;
@@ -5440,13 +5694,11 @@ static lql_status execute_query_file_range_matches(
   }
   reader.offset = offset;
   reader.remaining = size;
-  init_eval_visitor(&visitor);
-  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
+  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
+                                    &state.doc);
   options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  options.path_visitor = &visitor;
-  options.visitor_user = &state.doc;
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -5489,6 +5741,7 @@ static lql_status execute_query_source_decisions_with_base(
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
+  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   int runtime_pooled;
@@ -5532,15 +5785,13 @@ static lql_status execute_query_source_decisions_with_base(
     lql_set_error(error, LQL_STATUS_JSON_ERROR, "query source reader failed");
     return LQL_STATUS_JSON_ERROR;
   }
-  init_eval_visitor(&visitor);
-  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
+  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
+                                    &state.doc);
   options.framing = recursive_array_framing
                         ? LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS
                         : LONEJSON_CANDIDATE_FRAMING_AUTO;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  options.path_visitor = &visitor;
-  options.visitor_user = &state.doc;
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -5597,6 +5848,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
+  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   source_spooled_match_state state;
@@ -5637,15 +5889,13 @@ static lql_status execute_query_source_spooled_matches_with_base(
     lql_set_error(error, LQL_STATUS_JSON_ERROR, "query source reader failed");
     return LQL_STATUS_JSON_ERROR;
   }
-  init_eval_visitor(&visitor);
-  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
+  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
+                                    &state.doc);
   options.framing = recursive_array_framing
                         ? LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS
                         : LONEJSON_CANDIDATE_FRAMING_AUTO;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED;
-  options.path_visitor = &visitor;
-  options.visitor_user = &state.doc;
   options.candidate_begin = on_source_spooled_candidate_begin;
   options.candidate_end = on_source_spooled_candidate_end;
   options.candidate_user = &state;
@@ -5692,6 +5942,7 @@ static lql_status execute_query_file_range_spooled_matches(
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
+  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   spooled_match_state state;
@@ -5741,12 +5992,10 @@ static lql_status execute_query_file_range_spooled_matches(
   }
   reader.file = file;
   reader.remaining = size;
-  init_eval_visitor(&visitor);
-  configure_eval_visitor_for_doc(&visitor, &state.doc);
   options = lonejson_default_candidate_stream_options();
+  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
+                                    &state.doc);
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
-  options.path_visitor = &visitor;
-  options.visitor_user = &state.doc;
   options.candidate_begin = on_spooled_candidate_begin;
   options.candidate_end = on_spooled_candidate_end;
   options.candidate_user = &state;
