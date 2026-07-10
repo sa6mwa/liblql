@@ -639,7 +639,7 @@ extern "C" {
 #endif
 /** Transient per-parser raw candidate capture staging buffer bytes. */
 #ifndef LONEJSON_RAW_CAPTURE_BUFFER_SIZE
-#define LONEJSON_RAW_CAPTURE_BUFFER_SIZE (8u * 1024u)
+#define LONEJSON_RAW_CAPTURE_BUFFER_SIZE (32u * 1024u)
 #endif
 /** Default in-memory threshold before streamed fields spill into a temporary
  * file. */
