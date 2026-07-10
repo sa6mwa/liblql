@@ -2717,6 +2717,13 @@ typedef struct lonejson_candidate_stream_options {
   const char *top_level_field_key;
   size_t top_level_field_key_len;
   int top_level_field_stop_after_truncated;
+  const char *top_level_string_eq_key;
+  size_t top_level_string_eq_key_len;
+  const char *top_level_string_eq_value;
+  size_t top_level_string_eq_value_len;
+  int *top_level_string_eq_matched;
+  char *top_level_string_eq_root_kind;
+  int top_level_string_eq_stop_after_match;
   lonejson_candidate_event_fn candidate_begin;
   lonejson_candidate_event_fn candidate_end;
   void *candidate_user;
@@ -18589,6 +18596,382 @@ static lonejson_status lonejson__json_skip_object_tail_after_value(
   }
 }
 
+static lonejson_status lonejson__json_skip_object_tail_plain_after_value(
+    lonejson__json_io *io) {
+  int ch;
+  for (;;) {
+    ch = lonejson__json_peek_nonspace(io);
+    if (ch == -2) {
+      return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (ch == EOF) {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "unterminated JSON object");
+    }
+    if (ch == '}') {
+      (void)lonejson__json_cursor_getc(io);
+      return LONEJSON_STATUS_OK;
+    }
+    ch = lonejson__json_cursor_getc(io);
+    if (ch != ',') {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "expected ',' in object");
+    }
+    ch = lonejson__json_peek_nonspace(io);
+    if (ch != '"') {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "expected object key");
+    }
+    (void)lonejson__json_cursor_getc(io);
+    {
+      lonejson_status status =
+          lonejson__json_skip_string(io, io->limits.max_key_bytes);
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+    }
+    ch = lonejson__json_peek_nonspace(io);
+    if (ch != ':') {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "expected ':' after object key");
+    }
+    (void)lonejson__json_cursor_getc(io);
+    ++io->depth;
+    {
+      lonejson_status status = lonejson__json_skip_value(io);
+      --io->depth;
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+    }
+  }
+}
+
+static lonejson_status lonejson__json_read_string_eq(
+    lonejson__json_io *io, const char *value, size_t value_len, int *matched) {
+  size_t pos = 0u;
+  size_t decoded_bytes = 0u;
+  int equal = 1;
+  int ch;
+
+  for (;;) {
+    ch = lonejson__json_cursor_getc(io);
+    if (ch == -2) {
+      return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (ch == EOF) {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "unterminated JSON string");
+    }
+    if (ch == '"') {
+      if (matched != NULL) {
+        *matched = equal && pos == value_len;
+      }
+      return LONEJSON_STATUS_OK;
+    }
+    if (ch < 0x20) {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "control character in string");
+    }
+    if (ch == '\\') {
+      unsigned char bytes[4];
+      size_t len = 0u;
+      int esc = lonejson__json_cursor_getc(io);
+      if (esc == -2) {
+        return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+      }
+      if (esc == EOF) {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                   0u, 0u, "unterminated escape sequence");
+      }
+      switch (esc) {
+      case '"':
+      case '\\':
+      case '/':
+        bytes[len++] = (unsigned char)esc;
+        break;
+      case 'b':
+        bytes[len++] = '\b';
+        break;
+      case 'f':
+        bytes[len++] = '\f';
+        break;
+      case 'n':
+        bytes[len++] = '\n';
+        break;
+      case 'r':
+        bytes[len++] = '\r';
+        break;
+      case 't':
+        bytes[len++] = '\t';
+        break;
+      case 'u': {
+        int i;
+        int hx;
+        int hv;
+        lonejson_uint32 cp = 0u;
+        lonejson_scratch scratch;
+        for (i = 0; i < 4; ++i) {
+          hx = lonejson__json_cursor_getc(io);
+          if (hx == -2) {
+            return io->error ? io->error->code
+                             : LONEJSON_STATUS_CALLBACK_FAILED;
+          }
+          if (hx == EOF) {
+            return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                       0u, 0u, 0u, "invalid unicode escape");
+          }
+          hv = lonejson__hex_value(hx);
+          if (hv < 0) {
+            return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                       0u, 0u, 0u, "invalid unicode escape");
+          }
+          cp = (cp << 4u) | (lonejson_uint32)hv;
+        }
+        if (cp >= 0xD800u && cp <= 0xDBFFu) {
+          lonejson_uint32 low = 0u;
+          if (lonejson__json_cursor_getc(io) != '\\' ||
+              lonejson__json_cursor_getc(io) != 'u') {
+            return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                       0u, 0u, 0u,
+                                       "invalid unicode surrogate pair");
+          }
+          for (i = 0; i < 4; ++i) {
+            hx = lonejson__json_cursor_getc(io);
+            if (hx == -2) {
+              return io->error ? io->error->code
+                               : LONEJSON_STATUS_CALLBACK_FAILED;
+            }
+            if (hx == EOF) {
+              return lonejson__set_error(io->error,
+                                         LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                                         0u, "invalid unicode surrogate pair");
+            }
+            hv = lonejson__hex_value(hx);
+            if (hv < 0) {
+              return lonejson__set_error(io->error,
+                                         LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                                         0u, "invalid unicode surrogate pair");
+            }
+            low = (low << 4u) | (lonejson_uint32)hv;
+          }
+          if (low < 0xDC00u || low > 0xDFFFu) {
+            return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                       0u, 0u, 0u,
+                                       "invalid unicode surrogate pair");
+          }
+          cp = 0x10000u + (((cp - 0xD800u) << 10u) | (low - 0xDC00u));
+        } else if (cp >= 0xDC00u && cp <= 0xDFFFu) {
+          return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                     0u, 0u, 0u, "unexpected low surrogate");
+        }
+        memset(&scratch, 0, sizeof(scratch));
+        scratch.data = (char *)bytes;
+        scratch.cap = sizeof(bytes);
+        if (!lonejson__utf8_append(&scratch, cp)) {
+          return lonejson__set_error(io->error, LONEJSON_STATUS_INTERNAL_ERROR,
+                                     0u, 0u, 0u,
+                                     "failed to encode unicode escape");
+        }
+        len = scratch.len;
+        break;
+      }
+      default:
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                   0u, 0u, "invalid string escape");
+      }
+      decoded_bytes += len;
+      if (io->limits.max_string_bytes != 0u &&
+          decoded_bytes > io->limits.max_string_bytes) {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                                   0u,
+                                   "decoded JSON text exceeds limit");
+      }
+      if (equal) {
+        if (pos > value_len || len > value_len - pos ||
+            (len != 0u && memcmp(value + pos, bytes, len) != 0)) {
+          equal = 0;
+        }
+        pos += len;
+      }
+      continue;
+    }
+    ++decoded_bytes;
+    if (io->limits.max_string_bytes != 0u &&
+        decoded_bytes > io->limits.max_string_bytes) {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                                 0u, "decoded JSON text exceeds limit");
+    }
+    if (equal) {
+      if (pos >= value_len || value[pos] != (char)ch) {
+        equal = 0;
+      }
+      ++pos;
+    }
+  }
+}
+
+static lonejson_status lonejson__json_match_top_level_string_eq_object(
+    lonejson__json_io *io, const char *key, size_t key_len, const char *value,
+    size_t value_len, int stop_after_match, int *matched) {
+  int ch;
+  int first = 1;
+  lonejson_status status;
+
+  for (;;) {
+    int key_match = 0;
+    int value_match = 0;
+    ch = lonejson__json_peek_nonspace(io);
+    if (ch == -2) {
+      return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (ch == EOF) {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "unterminated JSON object");
+    }
+    if (ch == '}') {
+      (void)lonejson__json_cursor_getc(io);
+      return LONEJSON_STATUS_OK;
+    }
+    if (!first) {
+      ch = lonejson__json_cursor_getc(io);
+      if (ch != ',') {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                   0u, 0u, "expected ',' in object");
+      }
+    }
+    ch = lonejson__json_peek_nonspace(io);
+    if (ch != '"') {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "expected object key");
+    }
+    (void)lonejson__json_cursor_getc(io);
+    status = lonejson__json_read_key_match(io, key, key_len, &key_match);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    ch = lonejson__json_peek_nonspace(io);
+    if (ch != ':') {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "expected ':' after object key");
+    }
+    (void)lonejson__json_cursor_getc(io);
+    ++io->depth;
+    ch = lonejson__json_peek_nonspace(io);
+    if (ch == -2) {
+      --io->depth;
+      return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (key_match && ch == '"') {
+      (void)lonejson__json_cursor_getc(io);
+      status = lonejson__json_read_string_eq(io, value, value_len, &value_match);
+      if (status == LONEJSON_STATUS_OK && value_match) {
+        if (matched != NULL) {
+          *matched = 1;
+        }
+        if (stop_after_match) {
+          --io->depth;
+          return lonejson__json_skip_object_tail_plain_after_value(io);
+        }
+      }
+    } else {
+      ch = lonejson__json_cursor_getc(io);
+      if (ch == -2) {
+        --io->depth;
+        return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+      }
+      lonejson__json_cursor_ungetc(io, ch);
+      status = lonejson__json_skip_value(io);
+    }
+    --io->depth;
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    first = 0;
+  }
+}
+
+static lonejson_status lonejson__json_match_top_level_string_eq_cursor(
+    lonejson__json_cursor *cursor, const char *key, size_t key_len,
+    const char *value, size_t value_len, const lonejson__value_limits *limits,
+    int stop_after_match, int *matched, char *root_kind,
+    lonejson_error *error) {
+  lonejson__json_io io;
+  lonejson__value_limits defaults;
+  lonejson_status status;
+  int ch;
+
+  if (cursor == NULL || key == NULL || value == NULL || matched == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u,
+                               "JSON value source, field key, value, and "
+                               "match output are required");
+  }
+  *matched = 0;
+  if (root_kind != NULL) {
+    *root_kind = '\0';
+  }
+  memset(&io, 0, sizeof(io));
+  io.cursor = cursor;
+  io.error = error;
+  if (limits != NULL && limits->max_depth != 0u &&
+      limits->max_string_bytes != 0u && limits->max_number_bytes != 0u &&
+      limits->max_key_bytes != 0u) {
+    io.limits = *limits;
+  } else {
+    defaults = lonejson__default_value_limits();
+    io.limits = limits ? *limits : defaults;
+    if (io.limits.max_depth == 0u) {
+      io.limits.max_depth = defaults.max_depth;
+    }
+    if (io.limits.max_string_bytes == 0u) {
+      io.limits.max_string_bytes = defaults.max_string_bytes;
+    }
+    if (io.limits.max_number_bytes == 0u) {
+      io.limits.max_number_bytes = defaults.max_number_bytes;
+    }
+    if (io.limits.max_key_bytes == 0u) {
+      io.limits.max_key_bytes = defaults.max_key_bytes;
+    }
+  }
+  if (cursor->has_pushback) {
+    io.has_pushback = 1;
+    io.pushback_counted = cursor->count_pushback;
+    io.pushback = cursor->pushback;
+    cursor->has_pushback = 0;
+    cursor->count_pushback = 0;
+  }
+  ch = lonejson__json_peek_nonspace(&io);
+  if (ch == -2) {
+    status = io.error ? io.error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+  } else if (ch == EOF) {
+    status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                                 0u, "expected JSON value");
+  } else {
+    ch = lonejson__json_cursor_getc(&io);
+    if (ch == '{') {
+      if (root_kind != NULL) {
+        *root_kind = '{';
+      }
+      status = lonejson__json_match_top_level_string_eq_object(
+          &io, key, key_len, value, value_len, stop_after_match, matched);
+    } else {
+      if (root_kind != NULL && ch == '[') {
+        *root_kind = '[';
+      }
+      lonejson__json_cursor_ungetc(&io, ch);
+      status = lonejson__json_skip_value(&io);
+    }
+  }
+  if (io.has_pushback) {
+    cursor->has_pushback = 1;
+    cursor->count_pushback = io.pushback_counted;
+    cursor->pushback = io.pushback;
+    cursor->pushback_offset = lonejson__json_cursor_last_offset(cursor);
+  }
+  return status;
+}
+
 static lonejson_status lonejson__json_visit_top_level_field_object(
     lonejson__json_io *io, const char *key, size_t key_len,
     int stop_after_truncated) {
@@ -33399,6 +33782,16 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
     visitor = &scan->empty_visitor;
   }
   if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
+      scan->options->top_level_string_eq_key != NULL) {
+    status = lonejson__json_match_top_level_string_eq_cursor(
+        scan->cursor, scan->options->top_level_string_eq_key,
+        scan->options->top_level_string_eq_key_len,
+        scan->options->top_level_string_eq_value,
+        scan->options->top_level_string_eq_value_len, scan->limits,
+        scan->options->top_level_string_eq_stop_after_match,
+        scan->options->top_level_string_eq_matched,
+        scan->options->top_level_string_eq_root_kind, scan->error);
+  } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
       scan->options->top_level_field_key != NULL) {
     status = lonejson__json_visit_one_top_level_field_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user,
@@ -33757,6 +34150,29 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
         error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
         "top-level field candidate visitor requires no path visitor, a value "
         "visitor, and no capture or gated spooled capture");
+  }
+  if (local.top_level_string_eq_key != NULL &&
+      (local.top_level_string_eq_value == NULL ||
+       local.top_level_string_eq_matched == NULL ||
+       local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE ||
+       local.path_visitor != NULL || local.visitor != NULL ||
+       local.top_level_field_key != NULL)) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "top-level string equality candidate scan requires key, value, match "
+        "output, no visitor, no path visitor, no top-level field visitor, and "
+        "no capture");
+  }
+  if (local.top_level_string_eq_key == NULL &&
+      (local.top_level_string_eq_key_len != 0u ||
+       local.top_level_string_eq_value != NULL ||
+       local.top_level_string_eq_value_len != 0u ||
+       local.top_level_string_eq_matched != NULL ||
+       local.top_level_string_eq_root_kind != NULL ||
+       local.top_level_string_eq_stop_after_match)) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "top-level string equality candidate scan options require a key");
   }
   if (local.top_level_field_key == NULL && local.top_level_field_key_len != 0u) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,

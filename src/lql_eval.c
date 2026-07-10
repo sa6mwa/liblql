@@ -312,6 +312,69 @@ static int selector_fast_flat_scalar_eligible(const lql_selector *selector) {
          selector->observer_family < LQL_EVAL_FAMILY_COUNT;
 }
 
+#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
+static int text_is_json_number_literal(const char *value, size_t len) {
+  size_t i = 0u;
+
+  if (value == NULL || len == 0u) {
+    return 0;
+  }
+  if (value[i] == '-') {
+    ++i;
+    if (i == len) {
+      return 0;
+    }
+  }
+  if (value[i] == '0') {
+    ++i;
+    if (i < len && value[i] >= '0' && value[i] <= '9') {
+      return 0;
+    }
+  } else {
+    if (value[i] < '1' || value[i] > '9') {
+      return 0;
+    }
+    while (i < len && value[i] >= '0' && value[i] <= '9') {
+      ++i;
+    }
+  }
+  if (i < len && value[i] == '.') {
+    ++i;
+    if (i == len || value[i] < '0' || value[i] > '9') {
+      return 0;
+    }
+    while (i < len && value[i] >= '0' && value[i] <= '9') {
+      ++i;
+    }
+  }
+  if (i < len && (value[i] == 'e' || value[i] == 'E')) {
+    ++i;
+    if (i < len && (value[i] == '+' || value[i] == '-')) {
+      ++i;
+    }
+    if (i == len || value[i] < '0' || value[i] > '9') {
+      return 0;
+    }
+    while (i < len && value[i] >= '0' && value[i] <= '9') {
+      ++i;
+    }
+  }
+  return i == len;
+}
+
+static int text_is_json_nonstring_literal(const char *value, size_t len) {
+  if (value == NULL) {
+    return 0;
+  }
+  if ((len == 4u && memcmp(value, "true", 4u) == 0) ||
+      (len == 4u && memcmp(value, "null", 4u) == 0) ||
+      (len == 5u && memcmp(value, "false", 5u) == 0)) {
+    return 1;
+  }
+  return text_is_json_number_literal(value, len);
+}
+#endif
+
 static int selector_fast_direct_scalar_eligible(const lql_selector *selector) {
   size_t i;
   if (selector == NULL || selector->hit_count != 1u ||
@@ -4447,6 +4510,39 @@ enable_fast_flat_candidate_stop(lonejson_candidate_stream_options *options,
 #endif
 }
 
+static void enable_fast_top_level_string_eq_candidate(
+    lonejson_candidate_stream_options *options, eval_doc *doc) {
+#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
+  const lql_selector *selector;
+  if (options == NULL || doc == NULL || doc->fast_exact_selector == NULL ||
+      !selector_fast_flat_scalar_eligible(doc->fast_exact_selector)) {
+    return;
+  }
+  selector = doc->fast_exact_selector;
+  if (text_is_json_nonstring_literal(selector->value_data,
+                                     selector->value_len)) {
+    return;
+  }
+  options->visitor = NULL;
+  options->path_visitor = NULL;
+  options->visitor_user = NULL;
+  options->top_level_field_key = NULL;
+  options->top_level_field_key_len = 0u;
+  options->top_level_field_stop_after_truncated = 0;
+  options->top_level_string_eq_key =
+      selector->field + selector->field_segment_offsets[0];
+  options->top_level_string_eq_key_len = selector->field_segment_lens[0];
+  options->top_level_string_eq_value = selector->value_data;
+  options->top_level_string_eq_value_len = selector->value_len;
+  options->top_level_string_eq_matched = &doc->fast_exact_hit;
+  options->top_level_string_eq_root_kind = &doc->root_kind;
+  options->top_level_string_eq_stop_after_match = 1;
+#else
+  (void)options;
+  (void)doc;
+#endif
+}
+
 typedef struct query_stream_state {
   lql *receiver;
   FILE *file;
@@ -7187,6 +7283,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   enable_fast_top_level_field_candidate(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
+  enable_fast_top_level_string_eq_candidate(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -7269,6 +7366,7 @@ static lql_status execute_query_file_range_decisions(
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   enable_fast_top_level_field_candidate(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
+  enable_fast_top_level_string_eq_candidate(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
