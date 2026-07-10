@@ -49,7 +49,7 @@ shape is intentionally outside the public candidate-stream contract. liblql must
 not emulate it by materializing the root array, spooling the whole input, or
 retaining all candidates.
 
-lonejson `v0.40.0` exposes useful pieces:
+lonejson `v0.41.0` exposes useful pieces:
 
 - `AUTO` framing for repeated top-level values;
 - `ARRAY_ITEMS` framing for one top-level array treated as item candidates;
@@ -121,7 +121,7 @@ streams to claim this additional Go-compatible input shape.
 
 The Go `pkt.systems/lql v0.17.1` stream parity corpus compares `QueryStream`
 against `encoding/json.Decoder`. Two observable edge cases from that corpus are
-not currently matched by lonejson `v0.40.0`:
+not currently matched by lonejson `v0.41.0`:
 
 - The string payload
   `{"id":"a","s":"line\n\t\u0001\u2028\u2029\ud800\udc00\ud800x"}`
@@ -171,7 +171,7 @@ Seekable liblql candidate streams can avoid candidate capture: lonejson reports
 with `pread()` without disturbing the active parser cursor. Callback-source
 candidate streams do not have that option.
 
-lonejson `v0.40.0` provides `LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED` plus a
+lonejson `v0.41.0` provides `LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED` plus a
 capture decision callback. liblql now uses that surface for callback-source
 matched payload queries and selector-gated source mutation/projection replay:
 selector state is evaluated while the candidate is parsed, unmatched candidates
@@ -194,7 +194,7 @@ intent is to let a streaming visitor evaluate selector state while lonejson
 keeps only the minimal dependency-owned replay state needed to make an
 end-of-candidate retain/discard decision.
 
-Required semantics, now represented by the lonejson `v0.40.0` surface:
+Required semantics, now represented by the lonejson `v0.41.0` surface:
 
 - The parser still streams path/value visitor callbacks as candidate bytes are
   consumed. liblql evaluates selectors from those callbacks.
@@ -274,7 +274,7 @@ selector-result, candidate, or transform-output cache to avoid replay: those
 would add memory growth, invalidation, and branch cost while failing to remove
 the fundamental extra parse/write pass.
 
-lonejson `v0.40.0` exposes the candidate transform surface liblql needs:
+lonejson `v0.41.0` exposes the candidate transform surface liblql needs:
 explicit streaming and gated-spooled execution modes, finalized gated
 candidate decisions with caller policy, recursive logical candidate metadata,
 project-then-transform composition, source/replay/projected event metadata,
@@ -338,6 +338,12 @@ for late selectors and project-then-transform composition for projected
 mutation. Further work in this area should be treated as optimization or
 expanded public behavior, not as a blocker to removing liblql-owned
 callback-source replay/staging.
+
+lonejson `v0.41.0` also exposes the candidate stream read buffer as runtime
+configuration. liblql sets that buffer to 64 KiB for receiver-owned runtimes,
+which keeps transport buffering bounded and dependency-owned while reducing
+large-stream read-call overhead. This is not a selector/result cache and does
+not retain candidates, complete outputs, or full input documents.
 
 ## Chunked Number Writer
 

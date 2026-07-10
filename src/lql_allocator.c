@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define LQL_LONEJSON_CANDIDATE_READ_BUFFER_SIZE (64u * 1024u)
+
 static void lonejson_eval_pool_release(void *ctx, void *ptr);
 
 static void *system_alloc(lql_allocator *self, size_t size) {
@@ -230,6 +232,7 @@ LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
 
   config = lonejson_default_config();
   config.json_value_max_number_bytes = 4096u;
+  config.candidate_read_buffer_size = LQL_LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
   allocator = lonejson_default_allocator();
   allocator.malloc_fn = lonejson_lql_malloc;
   allocator.realloc_fn = lonejson_lql_realloc;
@@ -257,6 +260,7 @@ static lonejson *lql_lonejson_new_pooled(lql *self, lonejson_error *error) {
 
   config = lonejson_default_config();
   config.json_value_max_number_bytes = 4096u;
+  config.candidate_read_buffer_size = LQL_LONEJSON_CANDIDATE_READ_BUFFER_SIZE;
   allocator = lonejson_default_allocator();
   allocator.malloc_fn = lonejson_eval_pool_malloc;
   allocator.realloc_fn = lonejson_eval_pool_realloc;

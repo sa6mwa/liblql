@@ -2934,6 +2934,7 @@ static lonejson_status mutation_key_end(void *user,
   const mutation_path_frame *frame;
   size_t index;
   state = (mutation_stream_state *)user;
+  index = 0u;
   if (state->skipping) {
     frame = current_path_frame(state, path);
     if (skipped_earlier_increment_key_index(state, path, frame, state->key_buf,

@@ -207,7 +207,7 @@ when it removes allocation or repeated derivation without changing the
 observable selector result and without adding invalidation logic to the hot
 path.
 Dependency-owned streaming work is tracked as explicit lonejson CRs rather than
-hidden liblql workarounds. With lonejson `v0.40.0`, callback-source matched
+hidden liblql workarounds. With lonejson `v0.41.0`, callback-source matched
 payload queries use predicate-gated spooled capture, so sparse unmatched
 candidates are discarded before payload handles are exposed or replayed.
 Callback-source source mutation and projected mutation use lonejson's candidate
@@ -215,7 +215,9 @@ transform path with finalized gated candidate policy, projected-candidate
 composition, recursive candidate framing, and lonejson-owned replay where late
 selector decisions require it. Projection and mutation pass-through numbers use
 lonejson's chunked number writer instead of liblql-owned complete-token
-buffers.
+buffers. liblql configures lonejson's public 64 KiB candidate reader buffer so
+large candidate streams avoid tiny transport reads without adding caches or
+full-value materialization.
 In all cases liblql must keep streaming behavior real and bounded, not add
 caches or materialized output buffers.
 Selected-scalar query predicates use bounded streaming state in liblql rather

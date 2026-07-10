@@ -695,7 +695,7 @@ end
 
 local function expect_oversized_source_error(label, fn)
   local value, source_error = fn(function(_)
-    return string.rep("x", 9000)
+    return string.rep("x", 70000)
   end)
   if value ~= nil or not source_error or
       not string.find(source_error.stderr or "", "larger than capacity", 1,

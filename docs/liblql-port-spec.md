@@ -88,7 +88,7 @@ Target matrix follows the pkt.systems lifecycle:
 
 ## Dependency Boundary
 
-`lonejson v0.40.0` or newer is the JSON substrate. liblql obtains lonejson
+`lonejson v0.41.0` or newer is the JSON substrate. liblql obtains lonejson
 from the official GitHub release SDK archives for each target and verifies the
 archive SHA-256 before installing it into the local dependency cache.
 
@@ -290,12 +290,12 @@ on push rather than cleared wholesale per candidate; this is reduced zeroing,
 not allocator reuse or candidate caching.
 
 liblql configures lonejson receiver runtimes with a 4096-byte raw JSON
-number-token visitor limit. Numeric range matching remains a bounded streaming
-consumer of lonejson number chunks, and allocator tests prove a 2048-digit
-numeric token does not make peak memory grow with the token. Full arbitrarily
-large numeric-token support remains outside the v0 contract unless lonejson
-adds a public visitor mode that streams raw number tokens without
-token-size-proportional allocation.
+number-token visitor limit and a 64 KiB candidate reader buffer. Numeric range
+matching remains a bounded streaming consumer of lonejson number chunks, and
+allocator tests prove a 2048-digit numeric token does not make peak memory grow
+with the token. Full arbitrarily large numeric-token support remains outside
+the v0 contract unless lonejson adds a public visitor mode that streams raw
+number tokens without token-size-proportional allocation.
 
 ## Selector AST Public API
 
@@ -388,7 +388,7 @@ constructor parity are incomplete regardless of evaluator parity.
 ## Selector AST JSON And Lonejson Mapping
 
 Selector AST JSON is part of the public selector contract. It must be parsed,
-validated, and serialized through lonejson `v0.40.0` mapping, `JSON_VALUE`,
+validated, and serialized through lonejson `v0.41.0` mapping, `JSON_VALUE`,
 visitor, and writer surfaces. liblql must not hand-roll JSON object parsing,
 escaping, raw-token decoding, or serializer formatting for selector AST JSON.
 
@@ -626,7 +626,7 @@ source is seekable or rewindable, liblql must prefer offset/size based reread
 over candidate capture. Capture is only justified when the source cannot be
 revisited or when the caller explicitly selects a capture mode.
 
-As of lonejson `v0.40.0`, the installed public header confirms that
+As of lonejson `v0.41.0`, the installed public header confirms that
 `lonejson_candidate_info` exposes candidate index, stream offset, byte size, and
 payload size as `lonejson_uint64` range values, and exposes public candidate
 streaming without payload capture. liblql should therefore treat lonejson's
@@ -653,7 +653,7 @@ a JSON parser workaround:
 
 The public liblql v0 callback-source framing contract covers one stream of
 top-level JSON values and root-array item streams as exposed by lonejson
-`v0.40.0`. It does not claim the Go implementation's narrower mixed framing
+`v0.41.0`. It does not claim the Go implementation's narrower mixed framing
 case where a non-seekable source starts with a top-level array and then
 continues with more top-level values. That shape is an accepted v0 non-parity
 case documented in `docs/liblql-dependency-gaps.md`, not current liblql
@@ -999,7 +999,7 @@ complete merely because Go parity passes.
 Current implementation status:
 
 - lifecycle scaffold exists;
-- lonejson `v0.40.0` binary archive acquisition from GitHub release assets
+- lonejson `v0.41.0` binary archive acquisition from GitHub release assets
   exists;
 - the installed public C API now exposes selector AST traversal, construction,
   and Go-compatible selector JSON parse/serialize through receiver methods.
@@ -1513,7 +1513,7 @@ Current implementation status:
   partial read failures retain already-emitted candidate counters. The
   remaining Go `MutateStream` mixed-framing case is narrower: a root array
   followed by additional top-level values in the same callback source. lonejson
-  `v0.40.0` exposes `AUTO`, `NDJSON`, `SINGLE_VALUE`, `ARRAY_ITEMS`, and
+  `v0.41.0` exposes `AUTO`, `NDJSON`, `SINGLE_VALUE`, `ARRAY_ITEMS`, and
   `RECURSIVE_ARRAY_ITEMS`
   framing, but not a no-materialization mode that both emits root-array items
   incrementally and then continues with subsequent top-level values. liblql
@@ -1522,7 +1522,7 @@ Current implementation status:
   liblql framing contract that preserves streaming semantics. This is tracked
   as an accepted v0 non-parity case in `docs/liblql-dependency-gaps.md` and is
   not part of the current public liblql v0 callback-source contract;
-- lonejson `v0.40.0` exposes candidate `stream_offset`, `byte_size`, and
+- lonejson `v0.41.0` exposes candidate `stream_offset`, `byte_size`, and
   `payload_size` plus callback-scoped `lonejson_spooled` handles with
   per-handle size/spilled inspection. It does not expose aggregate query-level
   capture-byte, spill-count, or spill-byte counters. liblql must therefore not
@@ -1793,7 +1793,7 @@ Current implementation status:
   copies and separators. Public `FILE *` payload-writing APIs keep their normal
   ownership and error contract but also use the same scoped output lock for
   spooled and seekable payload byte copies;
-- callback-source matched payload queries use lonejson `v0.40.0`
+- callback-source matched payload queries use lonejson `v0.41.0`
   predicate-gated spooled capture, so sparse unmatched candidates are discarded
   before callback-scoped payload handles are exposed. Callback-source source
   mutation and projected mutation use lonejson's candidate transform surface:
@@ -1822,7 +1822,7 @@ Current implementation status:
   Linux GNU/musl targets in the configured matrix.
   `LQL_PACKAGE_TARGETS=arm64-apple-darwin make release-matrix` also builds and
   verifies the Darwin arm64 `liblql` and `clql` artifacts when the osxcross
-  compiler, linker, strip, and otool are available. lonejson `v0.40.0` does
+  compiler, linker, strip, and otool are available. lonejson `v0.41.0` does
   not publish an x86_64 Darwin SDK archive, so x86_64 Darwin is not a current
   liblql package target under the GitHub-release dependency boundary.
   These gates are strong evidence for the current implementation state, but
