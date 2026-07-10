@@ -2986,7 +2986,8 @@ static lonejson_status fast_flat_string_chunk(void *user, const char *data,
 }
 
 static lonejson_status fast_flat_done_status(const eval_doc *doc) {
-  return doc != NULL && doc->fast_flat_stop_after_match && doc->fast_exact_hit
+  return doc != NULL && doc->fast_flat_stop_after_match &&
+                 doc->candidate_matched
              ? LONEJSON_STATUS_TRUNCATED
              : LONEJSON_STATUS_OK;
 }
@@ -3132,7 +3133,7 @@ static lonejson_status fast_flat_null(void *user, lonejson_error *error) {
     observe_prepared_value(doc, "", 0, 0, 1);
   }
   doc->fast_exact_path_active = 0;
-  return LONEJSON_STATUS_OK;
+  return fast_flat_done_status(doc);
 }
 
 static void init_fast_flat_scalar_visitor(lonejson_value_visitor *visitor) {
@@ -3967,10 +3968,12 @@ static void enable_fast_top_level_field_candidate(
 #endif
 }
 
-static void enable_fast_flat_exact_candidate_stop(
-    lonejson_candidate_stream_options *options, eval_doc *doc) {
+static void
+enable_fast_flat_candidate_stop(lonejson_candidate_stream_options *options,
+                                eval_doc *doc) {
 #if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
-  if (options == NULL || doc == NULL || doc->fast_exact_selector == NULL ||
+  if (options == NULL || doc == NULL ||
+      !selector_fast_flat_scalar_eligible(doc->selector) ||
       options->top_level_field_key == NULL ||
       options->capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE) {
     return;
@@ -6658,7 +6661,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
                                     &state.doc);
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   enable_fast_top_level_field_candidate(&options, &state.doc);
-  enable_fast_flat_exact_candidate_stop(&options, &state.doc);
+  enable_fast_flat_candidate_stop(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -6740,7 +6743,7 @@ static lql_status execute_query_file_range_decisions(
   options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   enable_fast_top_level_field_candidate(&options, &state.doc);
-  enable_fast_flat_exact_candidate_stop(&options, &state.doc);
+  enable_fast_flat_candidate_stop(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -6981,7 +6984,7 @@ static lql_status execute_query_source_decisions_with_base(
                         : LONEJSON_CANDIDATE_FRAMING_AUTO;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   enable_fast_top_level_field_candidate(&options, &state.doc);
-  enable_fast_flat_exact_candidate_stop(&options, &state.doc);
+  enable_fast_flat_candidate_stop(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
