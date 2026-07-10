@@ -1090,6 +1090,8 @@ typedef struct lonejson_spooled {
   unsigned char *memory;
   /** Number of bytes currently stored in `memory`. */
   size_t memory_len;
+  /** Allocated byte capacity of `memory`. */
+  size_t memory_capacity;
   /** Total logical bytes held by the handle across memory and any spill file.
    */
   size_t size;
@@ -14121,6 +14123,7 @@ static void lonejson__spooled_assign_methods(lonejson_spooled *value) {
       0u,
       0u,
       0u,
+      0u,
       NULL,
       NULL,
       0,
@@ -14189,6 +14192,7 @@ void lonejson_spooled_cleanup(lonejson_spooled *value) {
   lonejson__owned_free(value->memory);
   value->memory = NULL;
   value->memory_len = 0u;
+  value->memory_capacity = 0u;
   value->size = 0u;
   value->read_offset = 0u;
   value->spilled = 0;
@@ -14219,6 +14223,18 @@ void lonejson_spooled_reset(lonejson_spooled *value) {
   value->allocator = allocator;
   value->owned_temp_dir = saved_temp_dir;
   value->temp_dir = saved_temp_dir;
+}
+
+static void
+lonejson__spooled_reset_preserve_memory(lonejson_spooled *value) {
+  if (value == NULL) {
+    return;
+  }
+  value->memory_len = 0u;
+  value->size = 0u;
+  value->read_offset = 0u;
+  value->spilled = 0;
+  lonejson__spooled_close_temp(value);
 }
 
 size_t lonejson_spooled_size(const lonejson_spooled *value) {
@@ -14282,7 +14298,7 @@ static lonejson_status lonejson__spooled_reserve_memory(lonejson_spooled *value,
                                                         lonejson_error *error) {
   unsigned char *next;
 
-  if (need <= value->memory_len) {
+  if (need <= value->memory_capacity) {
     return LONEJSON_STATUS_OK;
   }
   next = (unsigned char *)lonejson__owned_realloc(&value->allocator,
@@ -14292,6 +14308,7 @@ static lonejson_status lonejson__spooled_reserve_memory(lonejson_spooled *value,
                                0u, "failed to expand spooled in-memory prefix");
   }
   value->memory = next;
+  value->memory_capacity = need;
   return LONEJSON_STATUS_OK;
 }
 
@@ -14301,7 +14318,7 @@ lonejson__spooled_reserve_memory_parse(lonejson_parser *parser,
                                        lonejson_error *error) {
   unsigned char *next;
 
-  if (need <= value->memory_len) {
+  if (need <= value->memory_capacity) {
     return LONEJSON_STATUS_OK;
   }
   if (!lonejson__parser_alloc_can_grow(
@@ -14317,6 +14334,7 @@ lonejson__spooled_reserve_memory_parse(lonejson_parser *parser,
                                0u, "failed to expand spooled in-memory prefix");
   }
   value->memory = next;
+  value->memory_capacity = need;
   return LONEJSON_STATUS_OK;
 }
 
@@ -33333,7 +33351,9 @@ typedef struct lonejson__candidate_scan {
   const lonejson__value_limits *limits;
   lonejson_error *error;
   lonejson_value_visitor empty_visitor;
+  lonejson_spooled reusable_raw_spool;
   lonejson_uint64 next_index;
+  int reusable_raw_spool_init;
   int stopped;
 } lonejson__candidate_scan;
 
@@ -33359,6 +33379,7 @@ typedef struct lonejson__candidate_capture {
   size_t max_number_bytes;
   lonejson__candidate_memory_capture memory;
   lonejson_spooled spool;
+  lonejson_spooled *borrowed_spool;
   lonejson__spool_options spool_options;
   lonejson_candidate_capture_prune_fn prune;
   void *prune_user;
@@ -33906,7 +33927,11 @@ lonejson__candidate_capture_cleanup(lonejson__candidate_capture *capture) {
     lonejson_writer_cleanup(&capture->writer);
   }
   if (capture->spool_init) {
-    lonejson_spooled_cleanup(&capture->spool);
+    if (capture->borrowed_spool != NULL) {
+      *capture->borrowed_spool = capture->spool;
+    } else {
+      lonejson_spooled_cleanup(&capture->spool);
+    }
   }
   lonejson__byte_free(&capture->memory.bytes, capture->memory.allocator);
   lonejson__byte_free(&capture->key, capture->allocator);
@@ -33998,9 +34023,22 @@ lonejson__candidate_capture_open(lonejson__candidate_scan *scan,
       capture->spool_options.max_bytes =
           scan->options->max_spooled_payload_bytes;
     }
-    lonejson_spooled_init_with_allocator(&capture->spool,
-                                         &capture->spool_options,
-                                         scan->runtime->config.allocator);
+    if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
+      if (scan->reusable_raw_spool_init) {
+        lonejson__spooled_reset_preserve_memory(&scan->reusable_raw_spool);
+      } else {
+        lonejson_spooled_init_with_allocator(&scan->reusable_raw_spool,
+                                             &capture->spool_options,
+                                             scan->runtime->config.allocator);
+        scan->reusable_raw_spool_init = 1;
+      }
+      capture->spool = scan->reusable_raw_spool;
+      capture->borrowed_spool = &scan->reusable_raw_spool;
+    } else {
+      lonejson_spooled_init_with_allocator(&capture->spool,
+                                           &capture->spool_options,
+                                           scan->runtime->config.allocator);
+    }
     capture->spool_init = 1;
     if (capture->mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
       capture->raw_spooled = 1;
@@ -34851,6 +34889,9 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
   }
   if (status == LONEJSON_STATUS_OK) {
     lonejson__clear_error(error);
+  }
+  if (scan.reusable_raw_spool_init) {
+    lonejson_spooled_cleanup(&scan.reusable_raw_spool);
   }
   return status;
 }
