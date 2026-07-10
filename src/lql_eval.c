@@ -98,6 +98,7 @@ typedef struct eval_doc {
   int fast_direct_key_match;
   int fast_direct_pending_active;
   int fast_direct_value_target;
+  int fast_direct_skip_unmatched_values;
   size_t fast_recursive_depth;
   size_t fast_recursive_key_len;
   int fast_recursive_key_active;
@@ -3793,9 +3794,15 @@ static lonejson_status fast_direct_key_end(void *user, lonejson_error *error) {
   eval_doc *doc;
   const lql_selector *selector;
   size_t prefix;
+#if defined(LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP)
+  int skip_value;
+#endif
   (void)error;
   doc = (eval_doc *)user;
   selector = fast_direct_selector(doc);
+#if defined(LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP)
+  skip_value = 0;
+#endif
   if (doc->fast_mutation_key_active && doc->fast_mutation_key_match &&
       doc->fast_mutation_key_len == doc->fast_mutation_top_key_len) {
     doc->fast_mutation_key_seen = 1;
@@ -3809,9 +3816,20 @@ static lonejson_status fast_direct_key_end(void *user, lonejson_error *error) {
       doc->fast_direct_pending_match = prefix + 1u;
     }
   }
+#if defined(LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP)
+  if (doc->fast_direct_skip_unmatched_values &&
+      (selector == NULL || hit_marked_fast(doc, selector) ||
+       !doc->fast_direct_pending_active)) {
+    skip_value = 1;
+  }
+#endif
   doc->fast_direct_key_active = 0;
   doc->fast_mutation_key_active = 0;
+#if defined(LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP)
+  return skip_value ? LONEJSON_STATUS_SKIP_VALUE : LONEJSON_STATUS_OK;
+#else
   return LONEJSON_STATUS_OK;
+#endif
 }
 
 static lonejson_status fast_direct_string_begin(void *user,
@@ -4965,6 +4983,21 @@ static void enable_fast_top_level_multi_field_candidate(
     options->top_level_field_prune_user = doc;
   }
 #endif
+#else
+  (void)options;
+  (void)doc;
+#endif
+}
+
+static void
+enable_fast_direct_value_skip(const lonejson_candidate_stream_options *options,
+                              eval_doc *doc) {
+#if defined(LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP)
+  if (options != NULL && doc != NULL &&
+      options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
+      selector_fast_direct_scalar_eligible(doc->selector)) {
+    doc->fast_direct_skip_unmatched_values = 1;
+  }
 #else
   (void)options;
   (void)doc;
@@ -7919,6 +7952,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   enable_fast_top_level_multi_field_candidate(&options, &state.doc);
   enable_fast_top_level_field_candidate(&options, &state.doc);
+  enable_fast_direct_value_skip(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
   enable_fast_top_level_string_eq_candidate(&options, &state.doc);
   configure_query_candidate_callbacks(&options, &state);
@@ -8004,6 +8038,7 @@ execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   enable_fast_top_level_multi_field_candidate(&options, &state.doc);
   enable_fast_top_level_field_candidate(&options, &state.doc);
+  enable_fast_direct_value_skip(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
   enable_fast_top_level_string_eq_candidate(&options, &state.doc);
   configure_query_candidate_callbacks(&options, &state);
@@ -8111,6 +8146,7 @@ static lql_status execute_query_source_decisions_with_base(
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   enable_fast_top_level_multi_field_candidate(&options, &state.doc);
   enable_fast_top_level_field_candidate(&options, &state.doc);
+  enable_fast_direct_value_skip(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
   enable_fast_top_level_string_eq_candidate(&options, &state.doc);
   configure_query_candidate_callbacks(&options, &state);

@@ -172,6 +172,7 @@ typedef unsigned long long lonejson_uint64;
 #define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE 1
 #define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_FIRST_KEY 1
 #define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_VISITOR 1
+#define LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP 1
 
 #if defined(_MSC_VER)
 #define LONEJSON_SHORT_ALIAS_INLINE static __inline
@@ -16937,6 +16938,8 @@ lonejson__json_visit_literal_no_path(lonejson__json_io *io, int first,
   return lonejson__json_visit_event(io, io->visitor->null_value);
 }
 
+static lonejson_status lonejson__json_skip_value(lonejson__json_io *io);
+
 static lonejson_status
 lonejson__json_visit_array_no_path(lonejson__json_io *io) {
   int ch;
@@ -17022,7 +17025,8 @@ lonejson__json_visit_object_no_path(lonejson__json_io *io) {
     }
     (void)lonejson__json_cursor_getc(io);
     status = lonejson__json_visit_string_value_no_path(io, 1);
-    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED &&
+        status != LONEJSON_STATUS_SKIP_VALUE) {
       return status;
     }
     ch = lonejson__json_peek_nonspace(io);
@@ -17032,7 +17036,9 @@ lonejson__json_visit_object_no_path(lonejson__json_io *io) {
     }
     (void)lonejson__json_cursor_getc(io);
     ++io->depth;
-    status = lonejson__json_visit_value_no_path(io);
+    status = status == LONEJSON_STATUS_SKIP_VALUE
+                 ? lonejson__json_skip_value(io)
+                 : lonejson__json_visit_value_no_path(io);
     --io->depth;
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
