@@ -50,8 +50,28 @@ normalize_cases() {
   }' "$dir/cases.tsv"
 }
 
+assert_no_ndjson_root_arrays() {
+  dir=$1
+  for path in "$dir"/*.jsonl; do
+    [ -f "$path" ] || continue
+    if awk '
+      /^[[:space:]]*\[/ {
+        printf "%s:%d: generated NDJSON fixture has root array candidate\n", FILENAME, FNR > "/dev/stderr"
+        found = 1
+      }
+      END { exit found ? 1 : 0 }
+    ' "$path"; then
+      :
+    else
+      return 1
+    fi
+  done
+}
+
 generate "$tmp/one" "$tmp/one.jsonl"
 generate "$tmp/two" "$tmp/two.jsonl"
+assert_no_ndjson_root_arrays "$tmp/one"
+assert_no_ndjson_root_arrays "$tmp/two"
 
 manifest "$tmp/one" > "$tmp/one.manifest"
 manifest "$tmp/two" > "$tmp/two.manifest"
