@@ -1042,6 +1042,31 @@ static int selector_path_matches(const eval_doc *doc,
   return 1;
 }
 
+static int
+selector_top_level_literal_path_match(const lql_selector *selector,
+                                      const lonejson_value_path *path,
+                                      int *out_match) {
+  size_t offset;
+  size_t len;
+
+  if (out_match != NULL) {
+    *out_match = 0;
+  }
+  if (selector == NULL || path == NULL || path->segment_count != 1u ||
+      !selector->field_path_direct || !selector->field_path_literal ||
+      selector->field_segment_count != 1u) {
+    return 0;
+  }
+  offset = selector->field_segment_offsets[0];
+  len = selector->field_segment_lens[0];
+  if (out_match != NULL) {
+    *out_match =
+        path->segments[0].len == len &&
+        memcmp(selector->field + offset, path->segments[0].data, len) == 0;
+  }
+  return 1;
+}
+
 static int selector_path_depth_possible(const lql_selector *selector,
                                         const lonejson_value_path *path) {
   if (selector == NULL || path == NULL || selector->hit_count == 0u ||
@@ -1081,6 +1106,7 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
   size_t i;
   size_t predicate_index;
   size_t start;
+  int path_match;
 
   root = doc->selector;
   if (doc->fast_exact_selector != NULL) {
@@ -1134,7 +1160,9 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
       if (feature_mask != 0u && (feature & feature_mask) == 0u) {
         continue;
       }
-      if (selector_path_matches(doc, selector, path)) {
+      if (selector_top_level_literal_path_match(selector, path, &path_match)
+              ? path_match
+              : selector_path_matches(doc, selector, path)) {
         if (doc->stream_misses != NULL) {
           stream_miss_clear_fast(doc, selector);
         }
@@ -1159,7 +1187,9 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
     if (feature_mask != 0u && (feature & feature_mask) == 0u) {
       continue;
     }
-    if (selector_path_matches(doc, selector, path)) {
+    if (selector_top_level_literal_path_match(selector, path, &path_match)
+            ? path_match
+            : selector_path_matches(doc, selector, path)) {
       if (doc->stream_misses != NULL) {
         stream_miss_clear_fast(doc, selector);
       }
