@@ -637,6 +637,10 @@ extern "C" {
 #ifndef LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE
 #define LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE (1024u * 1024u)
 #endif
+/** Transient per-parser raw candidate capture staging buffer bytes. */
+#ifndef LONEJSON_RAW_CAPTURE_BUFFER_SIZE
+#define LONEJSON_RAW_CAPTURE_BUFFER_SIZE (8u * 1024u)
+#endif
 /** Default in-memory threshold before streamed fields spill into a temporary
  * file. */
 #ifndef LONEJSON_SPOOL_MEMORY_LIMIT
@@ -17750,15 +17754,15 @@ static lonejson_status lonejson__json_visit_one_cursor(
   io.raw_capture_spool = raw_capture_spool;
   io.raw_capture_disabled = raw_capture_disabled;
   if (raw_capture_spool != NULL) {
-    raw_capture_buffer =
-        (unsigned char *)lonejson__owned_malloc(allocator, 256u);
+    raw_capture_buffer = (unsigned char *)lonejson__owned_malloc(
+        allocator, LONEJSON_RAW_CAPTURE_BUFFER_SIZE);
     if (raw_capture_buffer == NULL) {
       return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
                                  0u, 0u,
                                  "failed to allocate raw capture buffer");
     }
     io.raw_capture_buffer = raw_capture_buffer;
-    io.raw_capture_buffer_cap = 256u;
+    io.raw_capture_buffer_cap = LONEJSON_RAW_CAPTURE_BUFFER_SIZE;
   }
   io.error = error;
   io.allocator = allocator;
@@ -18739,15 +18743,15 @@ static lonejson_status lonejson__json_visit_one_top_level_field_cursor(
   io.raw_capture_spool = raw_capture_spool;
   io.raw_capture_disabled = raw_capture_disabled;
   if (raw_capture_spool != NULL) {
-    raw_capture_buffer =
-        (unsigned char *)lonejson__owned_malloc(allocator, 256u);
+    raw_capture_buffer = (unsigned char *)lonejson__owned_malloc(
+        allocator, LONEJSON_RAW_CAPTURE_BUFFER_SIZE);
     if (raw_capture_buffer == NULL) {
       return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
                                  0u, 0u,
                                  "failed to allocate raw capture buffer");
     }
     io.raw_capture_buffer = raw_capture_buffer;
-    io.raw_capture_buffer_cap = 256u;
+    io.raw_capture_buffer_cap = LONEJSON_RAW_CAPTURE_BUFFER_SIZE;
   }
   io.error = error;
   io.allocator = allocator;
