@@ -81,6 +81,7 @@ typedef struct eval_doc {
   int fast_exact_path_active;
   int fast_exact_hit;
   int fast_exact_miss;
+  int fast_flat_stop_after_match;
   size_t fast_flat_depth;
   size_t fast_flat_key_len;
   int fast_flat_key_active;
@@ -2984,8 +2985,15 @@ static lonejson_status fast_flat_string_chunk(void *user, const char *data,
   return LONEJSON_STATUS_OK;
 }
 
+static lonejson_status fast_flat_done_status(const eval_doc *doc) {
+  return doc != NULL && doc->fast_flat_stop_after_match && doc->fast_exact_hit
+             ? LONEJSON_STATUS_TRUNCATED
+             : LONEJSON_STATUS_OK;
+}
+
 static lonejson_status fast_flat_string_end(void *user, lonejson_error *error) {
   eval_doc *doc;
+  lonejson_status status;
   (void)error;
   doc = (eval_doc *)user;
   if (doc->fast_flat_depth == 0u) {
@@ -3000,6 +3008,7 @@ static lonejson_status fast_flat_string_end(void *user, lonejson_error *error) {
   if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
     observe_temporal_stream_end(doc, doc->selector, NULL);
   }
+  status = fast_flat_done_status(doc);
   doc->fast_exact_path_active = 0;
   doc->scalar_len = 0u;
   doc->scalar_stream_features = 0u;
@@ -3007,7 +3016,7 @@ static lonejson_status fast_flat_string_end(void *user, lonejson_error *error) {
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;
   doc->prefix_need = 0u;
-  return LONEJSON_STATUS_OK;
+  return status;
 }
 
 static lonejson_status fast_flat_number_begin(void *user,
@@ -3061,6 +3070,7 @@ static lonejson_status fast_flat_number_chunk(void *user, const char *data,
 
 static lonejson_status fast_flat_number_end(void *user, lonejson_error *error) {
   eval_doc *doc;
+  lonejson_status status;
   (void)error;
   doc = (eval_doc *)user;
   if (doc->fast_flat_depth == 0u) {
@@ -3079,6 +3089,7 @@ static lonejson_status fast_flat_number_end(void *user, lonejson_error *error) {
       0u) {
     observe_numeric_range_stream_end(doc, doc->selector, NULL);
   }
+  status = fast_flat_done_status(doc);
   doc->fast_exact_path_active = 0;
   doc->scalar_len = 0u;
   doc->scalar_stream_features = 0u;
@@ -3086,7 +3097,7 @@ static lonejson_status fast_flat_number_end(void *user, lonejson_error *error) {
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;
   doc->prefix_need = 0u;
-  return LONEJSON_STATUS_OK;
+  return status;
 }
 
 static lonejson_status fast_flat_boolean(void *user, int value,
@@ -3104,7 +3115,7 @@ static lonejson_status fast_flat_boolean(void *user, int value,
     observe_prepared_value(doc, value ? "true" : "false", 0, 0, 0);
   }
   doc->fast_exact_path_active = 0;
-  return LONEJSON_STATUS_OK;
+  return fast_flat_done_status(doc);
 }
 
 static lonejson_status fast_flat_null(void *user, lonejson_error *error) {
@@ -3939,7 +3950,7 @@ configure_candidate_eval_visitors(lonejson_candidate_stream_options *options,
 }
 
 static void enable_fast_top_level_field_candidate(
-    lonejson_candidate_stream_options *options, const eval_doc *doc) {
+    lonejson_candidate_stream_options *options, eval_doc *doc) {
 #if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
   const lql_selector *selector;
   if (options == NULL || doc == NULL ||
@@ -3950,6 +3961,22 @@ static void enable_fast_top_level_field_candidate(
   options->top_level_field_key =
       selector->field + selector->field_segment_offsets[0];
   options->top_level_field_key_len = selector->field_segment_lens[0];
+#else
+  (void)options;
+  (void)doc;
+#endif
+}
+
+static void enable_fast_flat_exact_candidate_stop(
+    lonejson_candidate_stream_options *options, eval_doc *doc) {
+#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
+  if (options == NULL || doc == NULL || doc->fast_exact_selector == NULL ||
+      options->top_level_field_key == NULL ||
+      options->capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE) {
+    return;
+  }
+  doc->fast_flat_stop_after_match = 1;
+  options->top_level_field_stop_after_truncated = 1;
 #else
   (void)options;
   (void)doc;
@@ -6631,6 +6658,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
                                     &state.doc);
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   enable_fast_top_level_field_candidate(&options, &state.doc);
+  enable_fast_flat_exact_candidate_stop(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -6712,6 +6740,7 @@ static lql_status execute_query_file_range_decisions(
   options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   enable_fast_top_level_field_candidate(&options, &state.doc);
+  enable_fast_flat_exact_candidate_stop(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -6952,6 +6981,7 @@ static lql_status execute_query_source_decisions_with_base(
                         : LONEJSON_CANDIDATE_FRAMING_AUTO;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   enable_fast_top_level_field_candidate(&options, &state.doc);
+  enable_fast_flat_exact_candidate_stop(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
