@@ -105,6 +105,8 @@ typedef struct eval_doc {
   size_t fast_direct_array_index_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
   char fast_direct_container_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
   const lql_selector *fast_multi_value_selector;
+  const char *fast_multi_keys[LQL_EVAL_FAST_MULTI_PRED_CAP];
+  size_t fast_multi_key_lens[LQL_EVAL_FAST_MULTI_PRED_CAP];
   int fast_multi_skip_unmatched_strings;
   size_t fast_multi_depth;
   size_t fast_multi_key_len;
@@ -4524,6 +4526,33 @@ static void enable_fast_top_level_field_candidate(
 #endif
 }
 
+static void enable_fast_top_level_multi_field_candidate(
+    lonejson_candidate_stream_options *options, eval_doc *doc) {
+#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
+  const lql_selector *selector;
+  const lql_selector *predicate;
+  size_t i;
+  if (options == NULL || doc == NULL ||
+      !selector_fast_top_level_multi_eligible(doc->selector) ||
+      doc->selector->predicate_count > LQL_EVAL_FAST_MULTI_PRED_CAP) {
+    return;
+  }
+  selector = doc->selector;
+  for (i = 0u; i < selector->predicate_count; ++i) {
+    predicate = selector->predicates[i];
+    doc->fast_multi_keys[i] =
+        predicate->field + predicate->field_segment_offsets[0];
+    doc->fast_multi_key_lens[i] = predicate->field_segment_lens[0];
+  }
+  options->top_level_field_keys = doc->fast_multi_keys;
+  options->top_level_field_key_lens = doc->fast_multi_key_lens;
+  options->top_level_field_key_count = selector->predicate_count;
+#else
+  (void)options;
+  (void)doc;
+#endif
+}
+
 static void
 enable_fast_flat_candidate_stop(lonejson_candidate_stream_options *options,
                                 eval_doc *doc) {
@@ -7318,6 +7347,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
                                     &state.doc);
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  enable_fast_top_level_multi_field_candidate(&options, &state.doc);
   enable_fast_top_level_field_candidate(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
   enable_fast_top_level_string_eq_candidate(&options, &state.doc);
@@ -7406,6 +7436,7 @@ static lql_status execute_query_file_range_decisions(
                                     &state.doc);
   options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  enable_fast_top_level_multi_field_candidate(&options, &state.doc);
   enable_fast_top_level_field_candidate(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
   enable_fast_top_level_string_eq_candidate(&options, &state.doc);
@@ -7648,6 +7679,7 @@ static lql_status execute_query_source_decisions_with_base(
                         ? LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS
                         : LONEJSON_CANDIDATE_FRAMING_AUTO;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  enable_fast_top_level_multi_field_candidate(&options, &state.doc);
   enable_fast_top_level_field_candidate(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
