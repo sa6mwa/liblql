@@ -240,20 +240,14 @@ static lql_status count_payload(void *user, const lql_query_match *match) {
 static lql_status count_spooled_payload(void *user,
                                         const lql_query_match *match) {
   payload_counts *counts;
-  lql_status st;
-  lql_error error;
 
   counts = (payload_counts *)user;
   if (match->payload.kind != LQL_PAYLOAD_SPOOLED ||
       match->payload.size != match->decision.size) {
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  lql_error_init(&error);
-  st = counts->ctx->payload_write_json(counts->ctx, &match->payload,
-                                       counts->sink, &error);
-  if (st != LQL_STATUS_OK) {
-    return st;
-  }
+  /* Match Go's in-memory payload accounting: count delivery without forcing a
+     replay copy through the benchmark sink. */
   counts->payloads++;
   counts->payload_bytes += match->payload.size;
   return LQL_STATUS_OK;
