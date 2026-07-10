@@ -7087,7 +7087,6 @@ on_source_spooled_candidate_end(void *user,
                              (lql_uint64)candidate->byte_size;
   if (matched) {
     if (candidate->payload_spool == NULL) {
-      reset_doc(&state->doc);
       return LONEJSON_CANDIDATE_ERROR;
     }
     if (state->doc.fast_mutation_top_key != NULL &&
@@ -7102,7 +7101,6 @@ on_source_spooled_candidate_end(void *user,
              state->mutation_out, candidate->payload_spool, fast_item,
              state->mutation_error))) {
       state->result.candidates_matched++;
-      reset_doc(&state->doc);
       if (query_result_stop_if_limited(&state->result, &state->options,
                                        state->limit_flags)) {
         return LONEJSON_CANDIDATE_STOP;
@@ -7125,16 +7123,13 @@ on_source_spooled_candidate_end(void *user,
     if (st == LQL_STATUS_STOP) {
       state->result.stopped_early = 1;
       state->result.stop_reason = LQL_QUERY_STOP_CALLBACK;
-      reset_doc(&state->doc);
       return LONEJSON_CANDIDATE_STOP;
     }
     if (st != LQL_STATUS_OK) {
       state->callback_status = st;
-      reset_doc(&state->doc);
       return LONEJSON_CANDIDATE_ERROR;
     }
   }
-  reset_doc(&state->doc);
   if (query_result_stop_if_limited(&state->result, &state->options,
                                    state->limit_flags)) {
     return LONEJSON_CANDIDATE_STOP;
