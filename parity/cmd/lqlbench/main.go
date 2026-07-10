@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -167,13 +168,25 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	start := time.Now()
-	result, payloads, payloadBytes, err := runBenchmark(file, sel, selectorName, expr, mode)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "lqlbench: stream: %v\n", err)
-		os.Exit(1)
+	var result lql.QueryStreamResult
+	var payloads int64
+	var payloadBytes int64
+	var nsPerOp int64
+	for sample := 0; sample < benchSampleCount(submode); sample++ {
+		start := time.Now()
+		sampleResult, samplePayloads, samplePayloadBytes, err := runBenchmark(file, sel, selectorName, expr, mode)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "lqlbench: stream: %v\n", err)
+			os.Exit(1)
+		}
+		elapsed := time.Since(start).Nanoseconds()
+		if sample == 0 || elapsed < nsPerOp {
+			result = sampleResult
+			payloads = samplePayloads
+			payloadBytes = samplePayloadBytes
+			nsPerOp = elapsed
+		}
 	}
-	nsPerOp := time.Since(start).Nanoseconds()
 
 	rec := record{
 		Schema:            "liblql.parity_benchmark.v1",
@@ -200,6 +213,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "lqlbench: encode record: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func benchSampleCount(submode string) int {
+	if submode != "steady_state" {
+		return 1
+	}
+	raw := os.Getenv("LQL_BENCH_SAMPLES")
+	if raw == "" {
+		return 3
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 || value > 100 {
+		return 3
+	}
+	return value
 }
 
 func runBenchmark(file *os.File, sel lql.Selector, selectorName string, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {

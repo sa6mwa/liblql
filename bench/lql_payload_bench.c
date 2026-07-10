@@ -175,6 +175,25 @@ static lql_uint64 elapsed_ns(const struct timespec *start,
   return (lql_uint64)sec * 1000000000u + (lql_uint64)nsec;
 }
 
+static int bench_sample_count(const char *submode) {
+  const char *env;
+  char *end;
+  long value;
+
+  if (submode == NULL || strcmp(submode, "steady_state") != 0) {
+    return 1;
+  }
+  env = getenv("LQL_BENCH_SAMPLES");
+  if (env == NULL || *env == '\0') {
+    return 3;
+  }
+  value = strtol(env, &end, 10);
+  if (end == env || *end != '\0' || value < 1L || value > 100L) {
+    return 3;
+  }
+  return (int)value;
+}
+
 static lql_uint64 peak_rss_bytes(void) {
   struct rusage usage;
 
@@ -507,6 +526,13 @@ int main(int argc, char **argv) {
   char file_backed_mutation_expr[4096];
   struct timespec start;
   struct timespec end;
+  lql_query_result sample_result;
+  payload_counts sample_counts;
+  lql_uint64 sample_elapsed_ns;
+  lql_uint64 best_elapsed_ns;
+  int sample_count;
+  int sample;
+  int have_best;
 
   if (argc != 4 && argc != 5 && argc != 6) {
     fprintf(stderr, "usage: lql_payload_bench MODE SELECTOR FIXTURE "
@@ -601,24 +627,40 @@ int main(int argc, char **argv) {
     }
   }
 
-  if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
-    fprintf(stderr, "lql_payload_bench: failed to read start clock\n");
-    fclose(fixture);
-    ctx->projection_destroy(ctx, projection);
-    ctx->selector_destroy(ctx, selector);
-    ctx->destroy(ctx);
-    return 1;
-  }
-  st = run_payload_pass(ctx, mode, expr, selector_name, fixture, fixture_size,
-                        selector, projection, mutation_exprs,
-                        mutation_expr_count, &result, &counts, &error);
-  if (clock_gettime(CLOCK_MONOTONIC, &end) != 0) {
-    fprintf(stderr, "lql_payload_bench: failed to read end clock\n");
-    fclose(fixture);
-    ctx->projection_destroy(ctx, projection);
-    ctx->selector_destroy(ctx, selector);
-    ctx->destroy(ctx);
-    return 1;
+  sample_count = bench_sample_count(submode);
+  best_elapsed_ns = 0u;
+  have_best = 0;
+  for (sample = 0; sample < sample_count; ++sample) {
+    if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
+      fprintf(stderr, "lql_payload_bench: failed to read start clock\n");
+      fclose(fixture);
+      ctx->projection_destroy(ctx, projection);
+      ctx->selector_destroy(ctx, selector);
+      ctx->destroy(ctx);
+      return 1;
+    }
+    st = run_payload_pass(ctx, mode, expr, selector_name, fixture, fixture_size,
+                          selector, projection, mutation_exprs,
+                          mutation_expr_count, &sample_result, &sample_counts,
+                          &error);
+    if (clock_gettime(CLOCK_MONOTONIC, &end) != 0) {
+      fprintf(stderr, "lql_payload_bench: failed to read end clock\n");
+      fclose(fixture);
+      ctx->projection_destroy(ctx, projection);
+      ctx->selector_destroy(ctx, selector);
+      ctx->destroy(ctx);
+      return 1;
+    }
+    if (st != LQL_STATUS_OK) {
+      break;
+    }
+    sample_elapsed_ns = elapsed_ns(&start, &end);
+    if (!have_best || sample_elapsed_ns < best_elapsed_ns) {
+      result = sample_result;
+      counts = sample_counts;
+      best_elapsed_ns = sample_elapsed_ns;
+      have_best = 1;
+    }
   }
   fclose(fixture);
   ctx->projection_destroy(ctx, projection);
@@ -645,7 +687,7 @@ int main(int argc, char **argv) {
   fputs(" payload_bytes=", stdout);
   print_u64(counts.payload_bytes);
   fputs(" elapsed_ns=", stdout);
-  print_u64(elapsed_ns(&start, &end));
+  print_u64(best_elapsed_ns);
   fputs(" peak_rss_bytes=", stdout);
   print_u64(peak_rss_bytes());
   fputc('\n', stdout);
