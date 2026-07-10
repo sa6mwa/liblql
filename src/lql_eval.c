@@ -852,14 +852,77 @@ static int path_matches_from(const eval_doc *doc, const char *seg,
   return path_matches_from(doc, slash + 1, path, path_idx + 1u);
 }
 
+static int path_recursive_literal_suffix_matches(
+    const char *pattern, const lonejson_value_path *path, int *out_match) {
+  const char *seg;
+  const char *slash;
+  size_t count;
+  size_t len;
+  size_t path_idx;
+  size_t suffix_idx;
+
+  if (out_match != NULL) {
+    *out_match = 0;
+  }
+  if (pattern == NULL || path == NULL || memcmp(pattern, "/.../", 5u) != 0) {
+    return 0;
+  }
+  seg = pattern + 5u;
+  if (*seg == '\0') {
+    if (out_match != NULL) {
+      *out_match = 1;
+    }
+    return 1;
+  }
+  count = 1u;
+  for (slash = seg; *slash != '\0'; ++slash) {
+    if (*slash == '/') {
+      ++count;
+    }
+  }
+  if (count > path->segment_count) {
+    return 0;
+  }
+  path_idx = path->segment_count - count;
+  suffix_idx = 0u;
+  while (*seg != '\0') {
+    slash = strchr(seg, '/');
+    len = slash == NULL ? strlen(seg) : (size_t)(slash - seg);
+    if (pattern_segment_is(seg, len, "...") ||
+        pattern_segment_is(seg, len, "*") ||
+        pattern_segment_is(seg, len, "[]") ||
+        pattern_segment_is(seg, len, "**")) {
+      return 0;
+    }
+    if (!path_segment_matches(seg, len,
+                              &path->segments[path_idx + suffix_idx])) {
+      return 1;
+    }
+    ++suffix_idx;
+    if (slash == NULL) {
+      break;
+    }
+    seg = slash + 1;
+  }
+  if (out_match != NULL) {
+    *out_match = 1;
+  }
+  return 1;
+}
+
 static int path_matches(const eval_doc *doc, const char *pattern,
                         const lonejson_value_path *path) {
   const char *seg;
+  int suffix_match;
   if (pattern == NULL || path == NULL || pattern[0] != '/') {
     return 0;
   }
   if (pattern[1] == '\0') {
     return path->segment_count == 0u;
+  }
+  if (pattern[1] == '.' &&
+      path_recursive_literal_suffix_matches(pattern, path, &suffix_match)) {
+    return suffix_match;
   }
   seg = pattern + 1;
   return path_matches_from(doc, seg, path, 0u);
