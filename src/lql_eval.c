@@ -8006,7 +8006,8 @@ static lql_status execute_query_source_v2_transform(
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   if ((selector_fast_flat_scalar_eligible(selector) ||
-       selector_fast_direct_scalar_eligible(selector)) &&
+       selector_fast_direct_scalar_eligible(selector) ||
+       selector_fast_top_level_multi_eligible(selector)) &&
       projection == NULL && mutation_plan != NULL && matches_only) {
     return execute_mutate_source_matches_only_spooled(
         self, selector, read, read_user, out, mutation_plan, query_options,
