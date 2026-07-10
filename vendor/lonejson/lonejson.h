@@ -33763,6 +33763,41 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
     return status;
   }
 
+  if (scan->options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
+      scan->options->top_level_string_eq_key != NULL) {
+    status = lonejson__json_match_top_level_string_eq_cursor(
+        scan->cursor, scan->options->top_level_string_eq_key,
+        scan->options->top_level_string_eq_key_len,
+        scan->options->top_level_string_eq_value,
+        scan->options->top_level_string_eq_value_len, scan->limits,
+        scan->options->top_level_string_eq_stop_after_match,
+        scan->options->top_level_string_eq_matched,
+        scan->options->top_level_string_eq_root_kind, scan->error);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      lonejson__candidate_set_parse_offset(scan, start);
+      return status;
+    }
+    end = scan->cursor->has_pushback
+              ? scan->cursor->pushback_offset
+              : lonejson__json_cursor_next_offset(scan->cursor);
+    if (end < start) {
+      return lonejson__set_error(scan->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                                 0u, "candidate byte range overflow");
+    }
+    info.byte_size = end - start;
+    status = lonejson__candidate_callback_status(
+        scan, scan->options->candidate_end, &info);
+    if (status == LONEJSON_STATUS_OK) {
+      if (scan->next_index == LONEJSON_UINT64_MAX) {
+        return lonejson__set_error(scan->error, LONEJSON_STATUS_OVERFLOW, 0u,
+                                   0u, 0u,
+                                   "candidate index exceeds uint64 range");
+      }
+      ++scan->next_index;
+    }
+    return status;
+  }
+
   status = lonejson__candidate_capture_open(scan, &capture);
   if (status != LONEJSON_STATUS_OK) {
     return status;
