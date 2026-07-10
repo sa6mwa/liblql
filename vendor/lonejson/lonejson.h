@@ -43624,6 +43624,8 @@ typedef struct lonejson__writer_state {
   lonejson_allocator allocator;
   lonejson_sink_fn sink;
   void *sink_user;
+  unsigned char sink_buffer[8192];
+  size_t sink_buffer_len;
   lonejson_error *external_error;
   lonejson__writer_frame *frames;
   size_t frame_count;
@@ -43829,6 +43831,47 @@ static lonejson_status lonejson__writer_emit(lonejson_writer *writer,
                                       "writer and data are required");
   }
   state = (lonejson__writer_state *)writer->state;
+  if (state->mode == LONEJSON__WRITER_MODE_SINK &&
+      len < sizeof(state->sink_buffer)) {
+    size_t room;
+    room = sizeof(state->sink_buffer) - state->sink_buffer_len;
+    if (len > room) {
+      status = state->sink(state->sink_user, state->sink_buffer,
+                           state->sink_buffer_len,
+                           error != NULL ? error : &writer->error);
+      if (status != LONEJSON_STATUS_OK &&
+          status != LONEJSON_STATUS_TRUNCATED) {
+        state->failed = 1;
+        if (error == NULL && writer->error.code == LONEJSON_STATUS_OK) {
+          lonejson__set_error(&writer->error, status, 0u, 0u, 0u,
+                              "writer sink failed");
+        }
+      }
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+      state->sink_buffer_len = 0u;
+    }
+    memcpy(state->sink_buffer + state->sink_buffer_len, data, len);
+    state->sink_buffer_len += len;
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->sink_buffer_len != 0u) {
+    status = state->sink(state->sink_user, state->sink_buffer,
+                         state->sink_buffer_len,
+                         error != NULL ? error : &writer->error);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      state->failed = 1;
+      if (error == NULL && writer->error.code == LONEJSON_STATUS_OK) {
+        lonejson__set_error(&writer->error, status, 0u, 0u, 0u,
+                            "writer sink failed");
+      }
+    }
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    state->sink_buffer_len = 0u;
+  }
   status = state->sink(state->sink_user, data, len,
                        error != NULL ? error : &writer->error);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
@@ -46524,6 +46567,7 @@ lonejson_status lonejson_writer_mapped(lonejson_writer *writer,
 lonejson_status lonejson_writer_finish(lonejson_writer *writer,
                                        lonejson_error *error) {
   lonejson__writer_state *state;
+  lonejson_status status;
 
   if (writer == NULL || writer->state == NULL) {
     return lonejson__writer_set_error(
@@ -46559,6 +46603,22 @@ lonejson_status lonejson_writer_finish(lonejson_writer *writer,
     return lonejson__writer_set_error(writer, error,
                                       LONEJSON_STATUS_INVALID_JSON,
                                       "writer has unclosed containers");
+  }
+  if (state->sink_buffer_len != 0u) {
+    status = state->sink(state->sink_user, state->sink_buffer,
+                         state->sink_buffer_len,
+                         error != NULL ? error : &writer->error);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      state->failed = 1;
+      if (error == NULL && writer->error.code == LONEJSON_STATUS_OK) {
+        lonejson__set_error(&writer->error, status, 0u, 0u, 0u,
+                            "writer sink failed");
+      }
+    }
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    state->sink_buffer_len = 0u;
   }
   state->finished = 1;
   return LONEJSON_STATUS_OK;
