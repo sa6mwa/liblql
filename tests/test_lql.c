@@ -2041,12 +2041,18 @@ static void stream_root_arrays_rejected_helper(void) {
   payload_seen payload;
   memory_sink sink;
   chunk_reader reader;
+  lql_mutation_plan *plan;
+  lql_projection *projection;
   FILE *fp;
   FILE *out;
   lql_error error;
   lql_status st;
+  const char *mutation;
+  const char *field;
 
   selector = NULL;
+  plan = NULL;
+  projection = NULL;
   lql_error_init(&error);
   st =
       test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
@@ -2071,6 +2077,27 @@ static void stream_root_arrays_rejected_helper(void) {
     ++failures;
     return;
   }
+  mutation = "/seen=true";
+  lql_error_init(&error);
+  st = test_ctx->mutation_plan_parse(test_ctx, &mutation, 1u, &plan, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("root array rejection mutation parse failed: %s\n", error.message);
+    fclose(fp);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  field = "/status";
+  lql_error_init(&error);
+  st = test_ctx->projection_parse(test_ctx, &field, 1u, &projection, &error);
+  if (st != LQL_STATUS_OK) {
+    printf("root array rejection projection parse failed: %s\n", error.message);
+    fclose(fp);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
 
   memset(&seen, 0, sizeof(seen));
   memset(&result, 0, sizeof(result));
@@ -2086,6 +2113,8 @@ static void stream_root_arrays_rejected_helper(void) {
            lql_status_string(st), error.message, seen.calls,
            (unsigned long)result.candidates_seen);
     fclose(fp);
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
     test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
@@ -2094,6 +2123,8 @@ static void stream_root_arrays_rejected_helper(void) {
   if (fseek(fp, 0L, SEEK_SET) != 0) {
     printf("root array rejection payload seek failed\n");
     fclose(fp);
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
     test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
@@ -2112,6 +2143,106 @@ static void stream_root_arrays_rejected_helper(void) {
            "seen=%lu\n",
            lql_status_string(st), error.message,
            (unsigned long)result.candidates_seen);
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+
+  fp = tmpfile();
+  out = tmpfile();
+  if (fp == NULL || out == NULL) {
+    printf("root array rejection mutation tmpfile failed\n");
+    if (fp != NULL) {
+      fclose(fp);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||
+      fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("root array rejection mutation source setup failed\n");
+    fclose(fp);
+    fclose(out);
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = test_ctx->mutate_file_range_candidates(test_ctx, selector, plan, fp, 0u,
+                                              (lql_uint64)strlen(input), out, 1,
+                                              0, &result, &error);
+  fclose(fp);
+  fclose(out);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message,
+             "root arrays are not valid NDJSON candidate streams") != 0 ||
+      result.candidates_seen != (lql_uint64)0) {
+    printf("root array file mutation rejection mismatch: status=%s error=%s "
+           "seen=%lu\n",
+           lql_status_string(st), error.message,
+           (unsigned long)result.candidates_seen);
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+
+  fp = tmpfile();
+  out = tmpfile();
+  if (fp == NULL || out == NULL) {
+    printf("root array rejection projected mutation tmpfile failed\n");
+    if (fp != NULL) {
+      fclose(fp);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||
+      fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("root array rejection projected mutation source setup failed\n");
+    fclose(fp);
+    fclose(out);
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  memset(&result, 0, sizeof(result));
+  lql_error_init(&error);
+  st = test_ctx->mutate_file_range_projected_candidates(
+      test_ctx, selector, projection, plan, fp, 0u, (lql_uint64)strlen(input),
+      out, 1, 0, &result, &error);
+  fclose(fp);
+  fclose(out);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message,
+             "root arrays are not valid NDJSON candidate streams") != 0 ||
+      result.candidates_seen != (lql_uint64)0) {
+    printf("root array projected mutation rejection mismatch: status=%s "
+           "error=%s seen=%lu\n",
+           lql_status_string(st), error.message,
+           (unsigned long)result.candidates_seen);
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
     test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
@@ -2135,6 +2266,8 @@ static void stream_root_arrays_rejected_helper(void) {
            "calls=%d seen=%lu\n",
            lql_status_string(st), error.message, seen.calls,
            (unsigned long)result.candidates_seen);
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
     test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
@@ -2143,6 +2276,8 @@ static void stream_root_arrays_rejected_helper(void) {
   out = tmpfile();
   if (out == NULL) {
     printf("root array rejection output tmpfile failed\n");
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
     test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
@@ -2159,7 +2294,6 @@ static void stream_root_arrays_rejected_helper(void) {
                                               &reader, record_spooled_payload,
                                               &payload, &result, &error);
   fclose(out);
-  test_ctx->selector_destroy(test_ctx, selector);
   if (st != LQL_STATUS_JSON_ERROR ||
       strcmp(error.message,
              "root arrays are not valid NDJSON candidate streams") != 0 ||
@@ -2167,6 +2301,42 @@ static void stream_root_arrays_rejected_helper(void) {
     printf("root array source payload rejection mismatch: status=%s error=%s "
            "calls=%d seen=%lu\n",
            lql_status_string(st), error.message, payload.calls,
+           (unsigned long)result.candidates_seen);
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+
+  out = tmpfile();
+  if (out == NULL) {
+    printf("root array rejection source mutation tmpfile failed\n");
+    test_ctx->projection_destroy(test_ctx, projection);
+    test_ctx->mutation_plan_destroy(test_ctx, plan);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+  memset(&reader, 0, sizeof(reader));
+  memset(&result, 0, sizeof(result));
+  reader.data = input;
+  reader.len = strlen(input);
+  reader.chunk_size = 5u;
+  lql_error_init(&error);
+  st = test_ctx->mutate_source_candidates(test_ctx, selector, plan, read_chunk,
+                                          &reader, out, 1, 0, &result, &error);
+  fclose(out);
+  test_ctx->projection_destroy(test_ctx, projection);
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  test_ctx->selector_destroy(test_ctx, selector);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message,
+             "root arrays are not valid NDJSON candidate streams") != 0 ||
+      result.candidates_seen != (lql_uint64)0) {
+    printf("root array source mutation rejection mismatch: status=%s error=%s "
+           "seen=%lu\n",
+           lql_status_string(st), error.message,
            (unsigned long)result.candidates_seen);
     ++failures;
   }

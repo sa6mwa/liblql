@@ -4836,7 +4836,6 @@ typedef struct spooled_match_state {
   lql_query_options options;
   unsigned int limit_flags;
   int matches_only;
-  int expand_arrays;
   lonejson *compact_runtime;
   lql_query_result result;
   lql_error projection_error;
@@ -6689,87 +6688,12 @@ static int write_file_range_object_with_fast_root_create(
   return 1;
 }
 
-static lonejson_read_result eval_spooled_read(void *user, unsigned char *buffer,
-                                              size_t capacity) {
-  return lonejson_spooled_read((lonejson_spooled *)user, buffer, capacity);
-}
-
 static lonejson_candidate_callback_result
 on_spooled_candidate_begin(void *user, const lonejson_candidate_info *candidate,
                            lonejson_error *error);
 static lonejson_candidate_callback_result
 on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
                          lonejson_error *error);
-
-static lonejson_status write_spooled_array_candidates(
-    lql *self, const lql_selector *selector, const lql_projection *projection,
-    const lql_mutation_plan *mutation_plan, int matches_only,
-    const lonejson_spooled *spooled, FILE *out, int compact,
-    lonejson *compact_runtime, const lql_query_options *query_options,
-    lql_query_result *out_result, lonejson_error *error) {
-  lonejson *runtime;
-  lonejson_error lj_error;
-  lonejson_path_value_visitor visitor;
-  lonejson_value_visitor value_visitor;
-  lonejson_candidate_stream_options options;
-  lonejson_spooled cursor;
-  spooled_match_state state;
-  lonejson_status st;
-
-  runtime = lql_lonejson_new(self, &lj_error);
-  if (runtime == NULL) {
-    *error = lj_error;
-    return LONEJSON_STATUS_INTERNAL_ERROR;
-  }
-  memset(&state, 0, sizeof(state));
-  state.receiver = self;
-  state.selector = selector;
-  state.out = out;
-  state.compact = compact;
-  state.projection = projection;
-  state.mutation_plan = mutation_plan;
-  state.compact_runtime = compact_runtime;
-  state.matches_only = matches_only;
-  state.expand_arrays = 1;
-  if (query_options != NULL) {
-    state.options = *query_options;
-  }
-  state.limit_flags = query_limit_flags(&state.options);
-  lql_error_init(&state.projection_error);
-  lql_error_init(&state.mutation_error);
-  if (!init_doc(&state.doc, self, selector)) {
-    lonejson_free(runtime);
-    error->code = LONEJSON_STATUS_ALLOCATION_FAILED;
-    strcpy(error->message, "failed to initialize nested array mutation");
-    return LONEJSON_STATUS_ALLOCATION_FAILED;
-  }
-  cursor = *spooled;
-  options = lonejson_default_candidate_stream_options();
-  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
-                                    &state.doc);
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
-  options.candidate_begin = on_spooled_candidate_begin;
-  options.candidate_end = on_spooled_candidate_end;
-  options.candidate_user = &state;
-  st = lonejson_visit_candidates_reader(runtime, eval_spooled_read, &cursor,
-                                        &options, &lj_error);
-  destroy_doc(&state.doc);
-  lonejson_free(runtime);
-  if (out_result != NULL) {
-    *out_result = state.result;
-  }
-  if (st != LONEJSON_STATUS_OK) {
-    if (state.mutation_error.code != LQL_STATUS_OK) {
-      error->code = LONEJSON_STATUS_CALLBACK_FAILED;
-      strncpy(error->message, state.mutation_error.message,
-              sizeof(error->message) - 1u);
-      error->message[sizeof(error->message) - 1u] = '\0';
-      return LONEJSON_STATUS_CALLBACK_FAILED;
-    }
-    *error = lj_error;
-  }
-  return st;
-}
 
 static lonejson_candidate_callback_result
 on_spooled_candidate_begin(void *user, const lonejson_candidate_info *candidate,
@@ -6902,8 +6826,6 @@ static lonejson_candidate_callback_result
 on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
                          lonejson_error *error) {
   spooled_match_state *state = (spooled_match_state *)user;
-  lql_query_options nested_options;
-  lql_query_result nested_result;
   lonejson_status write_status;
   int matched;
   int projected;
@@ -6911,33 +6833,9 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
   write_status = LONEJSON_STATUS_OK;
   projected = 0;
   wrote_output = 0;
-  if (state->doc.root_kind == '[' && state->expand_arrays &&
-      candidate->payload_spool != NULL) {
-    nested_options = query_remaining_options(&state->options, &state->result);
-    memset(&nested_result, 0, sizeof(nested_result));
-    write_status = write_spooled_array_candidates(
-        state->receiver, state->selector, state->projection,
-        state->mutation_plan, state->matches_only, candidate->payload_spool,
-        state->out, state->compact, state->compact_runtime, &nested_options,
-        &nested_result, error);
+  if (state->doc.root_kind == '[') {
     reset_doc(&state->doc);
-    state->result.candidates_seen += nested_result.candidates_seen;
-    state->result.candidates_matched += nested_result.candidates_matched;
-    state->result.bytes_read =
-        (lql_uint64)(candidate->stream_offset + candidate->byte_size);
-    if (write_status != LONEJSON_STATUS_OK) {
-      return LONEJSON_CANDIDATE_ERROR;
-    }
-    if (nested_result.stopped_early) {
-      state->result.stopped_early = 1;
-      state->result.stop_reason = nested_result.stop_reason;
-      return LONEJSON_CANDIDATE_STOP;
-    }
-    if (query_result_stop_if_limited(&state->result, &state->options,
-                                     state->limit_flags)) {
-      return LONEJSON_CANDIDATE_STOP;
-    }
-    return LONEJSON_CANDIDATE_CONTINUE;
+    return reject_root_array_candidate(error);
   }
   matched = eval_doc_matches(state->selector, &state->doc);
   if (!matched && state->mutation_plan != NULL && state->matches_only) {
@@ -6978,33 +6876,7 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
         }
         wrote_output = 1;
       } else if (matched) {
-        if (state->doc.root_kind == '[' && state->expand_arrays) {
-          nested_options =
-              query_remaining_options(&state->options, &state->result);
-          memset(&nested_result, 0, sizeof(nested_result));
-          write_status = write_spooled_array_candidates(
-              state->receiver, state->selector, state->projection,
-              state->mutation_plan, state->matches_only,
-              candidate->payload_spool, state->out, state->compact,
-              state->compact_runtime, &nested_options, &nested_result, error);
-          state->result.candidates_seen += nested_result.candidates_seen;
-          state->result.candidates_matched += nested_result.candidates_matched;
-          if (write_status != LONEJSON_STATUS_OK) {
-            reset_doc(&state->doc);
-            return LONEJSON_CANDIDATE_ERROR;
-          }
-          if (nested_result.stopped_early) {
-            state->result.stopped_early = 1;
-            state->result.stop_reason = nested_result.stop_reason;
-            reset_doc(&state->doc);
-            return LONEJSON_CANDIDATE_STOP;
-          }
-          if (query_result_stop_if_limited(&state->result, &state->options,
-                                           state->limit_flags)) {
-            reset_doc(&state->doc);
-            return LONEJSON_CANDIDATE_STOP;
-          }
-        } else if (state->doc.root_kind != '{') {
+        if (state->doc.root_kind != '{') {
           write_status = write_spooled_payload(
               state->out, candidate->payload_spool, state->compact,
               file_sink_unlocked, state->compact_runtime, error);
@@ -8252,7 +8124,6 @@ static lql_status execute_query_file_range_spooled_matches(
   state.projection = projection;
   state.mutation_plan = mutation_plan;
   state.matches_only = matches_only;
-  state.expand_arrays = 1;
   if (query_options != NULL) {
     state.options = *query_options;
   }
@@ -8282,6 +8153,7 @@ static lql_status execute_query_file_range_spooled_matches(
   options = lonejson_default_candidate_stream_options();
   configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
                                     &state.doc);
+  options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
   options.candidate_begin = on_spooled_candidate_begin;
   options.candidate_end = on_spooled_candidate_end;
