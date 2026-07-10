@@ -8581,8 +8581,6 @@ source_transform_candidate_end(void *user,
   if (matched) {
     ++state->result.candidates_matched;
   }
-  reset_doc(&state->doc);
-  source_transform_cleanup_frames(state);
   if (query_result_stop_if_limited(&state->result, &state->options,
                                    state->limit_flags)) {
     return LONEJSON_CANDIDATE_STOP;
