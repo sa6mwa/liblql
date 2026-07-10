@@ -1108,6 +1108,10 @@ typedef struct lonejson_spooled {
   FILE *spill_fp;
   /** Non-zero once data has been written beyond the in-memory prefix. */
   int spilled;
+  /** Current stdio append position in the spill file when known. */
+  size_t spill_write_offset;
+  /** Non-zero when buffered spill bytes may need flushing before reads. */
+  int spill_write_dirty;
   /** Named temporary path when the configured temp directory path is used.
    * Empty for anonymous temporary files. */
   char temp_path[LONEJSON_SPOOL_TEMP_PATH_CAPACITY];
@@ -14127,6 +14131,8 @@ static void lonejson__spooled_assign_methods(lonejson_spooled *value) {
       NULL,
       NULL,
       0,
+      0u,
+      0,
       "",
 #if defined(LONEJSON_INTERNAL_BUILD) || defined(LONEJSON_IMPLEMENTATION)
       NULL,
@@ -14196,6 +14202,8 @@ void lonejson_spooled_cleanup(lonejson_spooled *value) {
   value->size = 0u;
   value->read_offset = 0u;
   value->spilled = 0;
+  value->spill_write_offset = 0u;
+  value->spill_write_dirty = 0;
   lonejson__spooled_close_temp(value);
   lonejson__owned_free(value->owned_temp_dir);
   value->owned_temp_dir = NULL;
@@ -14234,6 +14242,8 @@ lonejson__spooled_reset_preserve_memory(lonejson_spooled *value) {
   value->size = 0u;
   value->read_offset = 0u;
   value->spilled = 0;
+  value->spill_write_offset = 0u;
+  value->spill_write_dirty = 0;
   lonejson__spooled_close_temp(value);
 }
 
@@ -14290,6 +14300,8 @@ static lonejson_status lonejson__spooled_open_temp(lonejson_spooled *value,
     }
   }
   value->spilled = 1;
+  value->spill_write_offset = 0u;
+  value->spill_write_dirty = 0;
   return LONEJSON_STATUS_OK;
 }
 
@@ -14374,6 +14386,54 @@ lonejson__spooled_reserve_memory_parse(lonejson_parser *parser,
   return LONEJSON_STATUS_OK;
 }
 
+static lonejson_status lonejson__spooled_flush_writes(lonejson_spooled *value,
+                                                      lonejson_error *error) {
+  if (value == NULL || value->spill_fp == NULL || !value->spill_write_dirty) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (fflush(value->spill_fp) != 0) {
+    if (error != NULL) {
+      error->system_errno = errno;
+    }
+    return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
+                               "failed to flush spool file");
+  }
+  value->spill_write_dirty = 0;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__spooled_write_append(
+    lonejson_spooled *value, const unsigned char *data, size_t len,
+    size_t offset, lonejson_error *error) {
+  if ((size_t)(long)offset != offset) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "spooled file offset exceeds platform range");
+  }
+  if (value->spill_write_offset != offset) {
+    if (lonejson__spooled_flush_writes(value, error) != LONEJSON_STATUS_OK) {
+      return LONEJSON_STATUS_IO_ERROR;
+    }
+    if (fseek(value->spill_fp, (long)offset, SEEK_SET) != 0) {
+      if (error != NULL) {
+        error->system_errno = errno;
+      }
+      return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
+                                 "failed to seek spool file for append");
+    }
+    value->spill_write_offset = offset;
+  }
+  if (fwrite(data, 1u, len, value->spill_fp) != len) {
+    if (error != NULL) {
+      error->system_errno = errno;
+    }
+    return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
+                               "failed to write spool file");
+  }
+  value->spill_write_offset += len;
+  value->spill_write_dirty = 1;
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status lonejson__spooled_append(lonejson_spooled *value,
                                                 const unsigned char *data,
                                                 size_t len,
@@ -14409,36 +14469,17 @@ static lonejson_status lonejson__spooled_append(lonejson_spooled *value,
   }
   if (memory_copy < len) {
     size_t spill_len = len - memory_copy;
-    long spill_read_pos;
+    size_t spill_offset;
 
     status = lonejson__spooled_open_temp(value, error);
     if (status != LONEJSON_STATUS_OK) {
       return status;
     }
-    spill_read_pos = (value->read_offset > value->memory_len)
-                         ? (long)(value->read_offset - value->memory_len)
-                         : 0L;
-    if (fseek(value->spill_fp, 0L, SEEK_END) != 0) {
-      if (error != NULL) {
-        error->system_errno = errno;
-      }
-      return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
-                                 "failed to seek spool file for append");
-    }
-    if (fwrite(data + memory_copy, 1u, spill_len, value->spill_fp) !=
-        spill_len) {
-      if (error != NULL) {
-        error->system_errno = errno;
-      }
-      return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
-                                 "failed to write spool file");
-    }
-    if (fseek(value->spill_fp, spill_read_pos, SEEK_SET) != 0) {
-      if (error != NULL) {
-        error->system_errno = errno;
-      }
-      return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
-                                 "failed to restore spool file read cursor");
+    spill_offset = value->size + memory_copy - value->memory_len;
+    status = lonejson__spooled_write_append(
+        value, data + memory_copy, spill_len, spill_offset, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
     }
   }
   value->size += len;
@@ -14481,36 +14522,17 @@ static lonejson_status lonejson__spooled_append_parse(lonejson_parser *parser,
   }
   if (memory_copy < len) {
     size_t spill_len = len - memory_copy;
-    long spill_read_pos;
+    size_t spill_offset;
 
     status = lonejson__spooled_open_temp(value, error);
     if (status != LONEJSON_STATUS_OK) {
       return status;
     }
-    spill_read_pos = (value->read_offset > value->memory_len)
-                         ? (long)(value->read_offset - value->memory_len)
-                         : 0L;
-    if (fseek(value->spill_fp, 0L, SEEK_END) != 0) {
-      if (error != NULL) {
-        error->system_errno = errno;
-      }
-      return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
-                                 "failed to seek spool file for append");
-    }
-    if (fwrite(data + memory_copy, 1u, spill_len, value->spill_fp) !=
-        spill_len) {
-      if (error != NULL) {
-        error->system_errno = errno;
-      }
-      return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
-                                 "failed to write spool file");
-    }
-    if (fseek(value->spill_fp, spill_read_pos, SEEK_SET) != 0) {
-      if (error != NULL) {
-        error->system_errno = errno;
-      }
-      return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
-                                 "failed to restore spool file read cursor");
+    spill_offset = value->size + memory_copy - value->memory_len;
+    status = lonejson__spooled_write_append(
+        value, data + memory_copy, spill_len, spill_offset, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
     }
   }
   value->size += len;
@@ -14530,6 +14552,9 @@ lonejson_status lonejson_spooled_rewind(lonejson_spooled *value,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "spooled value is required");
   }
+  if (lonejson__spooled_flush_writes(value, error) != LONEJSON_STATUS_OK) {
+    return LONEJSON_STATUS_IO_ERROR;
+  }
   value->read_offset = 0u;
   if (value->spill_fp != NULL) {
     if (fseek(value->spill_fp, 0L, SEEK_SET) != 0) {
@@ -14539,6 +14564,7 @@ lonejson_status lonejson_spooled_rewind(lonejson_spooled *value,
       return lonejson__set_error(error, LONEJSON_STATUS_IO_ERROR, 0u, 0u, 0u,
                                  "failed to rewind spool file");
     }
+    value->spill_write_offset = 0u;
   }
   lonejson__clear_error(error);
   return LONEJSON_STATUS_OK;
@@ -14581,6 +14607,10 @@ lonejson_read_result lonejson_spooled_read(lonejson_spooled *value,
     off_t spill_pos;
     ssize_t got;
 
+    if (lonejson__spooled_flush_writes(value, NULL) != LONEJSON_STATUS_OK) {
+      result.error_code = errno != 0 ? errno : EIO;
+      return result;
+    }
     spill_pos = (off_t)spill_offset;
     if (spill_pos >= (off_t)0 && (size_t)spill_pos == spill_offset) {
       got = pread(fileno(value->spill_fp), buffer, capacity, spill_pos);
@@ -14595,6 +14625,8 @@ lonejson_read_result lonejson_spooled_read(lonejson_spooled *value,
     }
 
     got = (ssize_t)fread(buffer, 1u, capacity, value->spill_fp);
+    value->spill_write_offset = value->read_offset - value->memory_len +
+                                (got > 0 ? (size_t)got : 0u);
     value->read_offset += (size_t)got;
     result.bytes_read = (size_t)got;
     result.eof = (value->read_offset >= value->size) ? 1 : 0;

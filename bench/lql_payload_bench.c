@@ -195,14 +195,13 @@ static int bench_sample_count(const char *submode) {
 }
 
 static int mode_uses_discard_sink(const char *mode) {
-  return mode != NULL &&
-         (strcmp(mode, "plus_value_openjson_selector") == 0 ||
-          strcmp(mode, "plus_value_openjson_plan") == 0 ||
-          strcmp(mode, "mutate_file_selector") == 0 ||
-          strcmp(mode, "mutate_file_plan") == 0 ||
-          strcmp(mode, "mutate_source_selector") == 0 ||
-          strcmp(mode, "mutate_file_backed_text") == 0 ||
-          strcmp(mode, "mutate_file_backed_base64") == 0);
+  return mode != NULL && (strcmp(mode, "plus_value_openjson_selector") == 0 ||
+                          strcmp(mode, "plus_value_openjson_plan") == 0 ||
+                          strcmp(mode, "mutate_file_selector") == 0 ||
+                          strcmp(mode, "mutate_file_plan") == 0 ||
+                          strcmp(mode, "mutate_source_selector") == 0 ||
+                          strcmp(mode, "mutate_file_backed_text") == 0 ||
+                          strcmp(mode, "mutate_file_backed_base64") == 0);
 }
 
 static lql_uint64 peak_rss_bytes(void) {
@@ -376,8 +375,7 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
                  lql_uint64 fixture_size, lql_selector *selector,
                  lql_projection *projection, const char *const *mutation_exprs,
                  lql_uint64 mutation_expr_count, lql_query_result *result,
-                 payload_counts *counts, FILE *discard_sink,
-                 lql_error *error) {
+                 payload_counts *counts, FILE *discard_sink, lql_error *error) {
   FILE *sink;
   lql_mutation_plan *mutation_plan;
   lql_mutation_parse_options mutation_options;

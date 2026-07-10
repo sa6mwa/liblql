@@ -5391,8 +5391,7 @@ static void expect_file_range_candidate_mutation_api(void) {
                             "{\"records\":[{\"service\":\"auth\"}],"
                             "\"bench\":{\"old\":true,\"touched\":true}}\n") !=
                          0) {
-            printf("candidate mutation fast-create output mismatch: %s\n",
-                   buf);
+            printf("candidate mutation fast-create output mismatch: %s\n", buf);
             ++failures;
           }
         }

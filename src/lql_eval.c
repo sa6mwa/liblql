@@ -160,8 +160,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
     lql_uint64 offset_base, lql_uint64 index_base,
     const lql_query_options *query_options, lql_query_match_fn on_match,
     void *user, const lql_mutation_plan *mutation_plan, FILE *mutation_out,
-    lql_error *mutation_error, lql_query_result *out_result,
-    lql_error *error);
+    lql_error *mutation_error, lql_query_result *out_result, lql_error *error);
 static lql_status execute_query_file_range_spooled_matches(
     lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, int compact, const lql_projection *projection,
@@ -4637,8 +4636,7 @@ static void enable_fast_top_level_field_candidate(
             : 2u;
     return;
   }
-  options->top_level_field_key =
-      selector_key;
+  options->top_level_field_key = selector_key;
   options->top_level_field_key_len = selector_key_len;
 #else
   (void)options;
@@ -6326,8 +6324,9 @@ static int raw_json_safe_key(const char *data, size_t len) {
   return 1;
 }
 
-static int mutation_plan_fast_root_create_eligible(
-    const lql_mutation_plan *plan, const lql_mutation_item **out) {
+static int
+mutation_plan_fast_root_create_eligible(const lql_mutation_plan *plan,
+                                        const lql_mutation_item **out) {
   const lql_mutation_item *item;
   size_t i;
   if (plan == NULL || plan->count != 1u || plan->create_count != 1u ||
@@ -6345,7 +6344,8 @@ static int mutation_plan_fast_root_create_eligible(
   }
   for (i = 0u; i < item->path.segment_count; ++i) {
     if (item->path.segment_kinds[i] != LQL_MUTATION_PATH_LITERAL ||
-        !raw_json_safe_key(item->path.segments[i], item->path.segment_lens[i])) {
+        !raw_json_safe_key(item->path.segments[i],
+                           item->path.segment_lens[i])) {
       return 0;
     }
   }
@@ -6477,8 +6477,8 @@ static int file_range_object_has_member(int fd, lql_uint64 offset,
   remaining = end;
   cursor = offset;
   while (remaining != 0u) {
-    want = remaining > (lql_uint64)sizeof(head) ? sizeof(head)
-                                                : (size_t)remaining;
+    want =
+        remaining > (lql_uint64)sizeof(head) ? sizeof(head) : (size_t)remaining;
     got = pread(fd, head, want, (off_t)cursor);
     if (got < 0 || (size_t)got != want) {
       return 0;
@@ -7864,8 +7864,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
     lql_uint64 offset_base, lql_uint64 index_base,
     const lql_query_options *query_options, lql_query_match_fn on_match,
     void *user, const lql_mutation_plan *mutation_plan, FILE *mutation_out,
-    lql_error *mutation_error, lql_query_result *out_result,
-    lql_error *error) {
+    lql_error *mutation_error, lql_query_result *out_result, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
@@ -7905,9 +7904,9 @@ static lql_status execute_query_source_spooled_matches_with_base(
   }
   runtime_pooled = 0;
   runtime_can_pool = lql_lonejson_default_runtime_pool_allowed(self);
-  runtime = runtime_can_pool ? lql_lonejson_acquire(self, &runtime_pooled,
-                                                    &lj_error)
-                             : lql_lonejson_new(self, &lj_error);
+  runtime = runtime_can_pool
+                ? lql_lonejson_acquire(self, &runtime_pooled, &lj_error)
+                : lql_lonejson_new(self, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     destroy_doc(&state.doc);
