@@ -1492,6 +1492,24 @@ static int top_level_multi_candidate_impossible(const eval_doc *doc,
   }
   return 0;
 }
+
+static int
+top_level_multi_candidate_payload_discardable(const eval_doc *doc,
+                                              const lql_selector *selector) {
+  size_t i;
+  if (doc == NULL || selector == NULL || doc->root_kind != '{' ||
+      !selector_fast_top_level_multi_eligible(selector) ||
+      doc->stream_misses == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < selector->predicate_count; ++i) {
+    if (!hit_marked_fast(doc, selector->predicates[i]) &&
+        stream_miss_marked_fast(doc, selector->predicates[i])) {
+      return 1;
+    }
+  }
+  return 0;
+}
 #endif
 
 #if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE)
@@ -4935,7 +4953,8 @@ static void enable_fast_top_level_multi_field_candidate(
   options->top_level_field_keys = doc->fast_multi_keys;
   options->top_level_field_key_lens = doc->fast_multi_key_lens;
   options->top_level_field_key_count = selector->predicate_count;
-  if (options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE) {
+  if (options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE ||
+      options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
     doc->fast_multi_direct_enabled = 1;
     options->top_level_field_match = fast_top_level_multi_field_match;
     options->top_level_field_match_user = doc;
@@ -5943,7 +5962,8 @@ static int source_transform_capture_prune(void *user, lonejson_error *error) {
   if (state->doc.fast_exact_selector != NULL) {
     return !state->doc.fast_exact_hit && state->doc.fast_exact_miss;
   }
-  return top_level_multi_candidate_impossible(&state->doc, state->selector);
+  return top_level_multi_candidate_payload_discardable(&state->doc,
+                                                       state->selector);
 }
 #endif
 
@@ -6966,7 +6986,8 @@ static int on_source_spooled_capture_prune(void *user, lonejson_error *error) {
   if (state->doc.fast_exact_selector != NULL) {
     return !state->doc.fast_exact_hit && state->doc.fast_exact_miss;
   }
-  return top_level_multi_candidate_impossible(&state->doc, state->selector);
+  return top_level_multi_candidate_payload_discardable(&state->doc,
+                                                       state->selector);
 }
 #endif
 
