@@ -5328,6 +5328,85 @@ static void expect_file_range_candidate_mutation_api(void) {
       }
     }
 
+    {
+      FILE *create_source;
+      FILE *create_out;
+      lql_selector *create_selector;
+      lql_mutation_plan *create_plan;
+      const char *create_expr;
+      const char *create_mutation;
+      static const char create_doc[] =
+          "{\"records\":[{\"service\":\"auth\"}]}\n"
+          "{\"records\":[{\"service\":\"auth\"}],\"bench\":{\"old\":true}}\n";
+      create_source = tmpfile();
+      create_out = tmpfile();
+      create_selector = NULL;
+      create_plan = NULL;
+      create_expr = "contains{field=/records[]/service,value=auth}";
+      create_mutation = "/bench/touched=true";
+      if (create_source == NULL || create_out == NULL) {
+        printf("candidate mutation fast-create tmpfile failed\n");
+        ++failures;
+      } else if (fwrite(create_doc, 1u, strlen(create_doc), create_source) !=
+                     strlen(create_doc) ||
+                 fseek(create_source, 0L, SEEK_SET) != 0) {
+        printf("candidate mutation fast-create source setup failed\n");
+        ++failures;
+      } else {
+        lql_error_init(&error);
+        st = test_ctx->selector_parse(test_ctx, create_expr, &create_selector,
+                                      &error);
+        if (st != LQL_STATUS_OK) {
+          printf("candidate mutation fast-create selector failed: %s\n",
+                 error.message);
+          ++failures;
+        }
+        lql_error_init(&error);
+        st = test_ctx->mutation_plan_parse(test_ctx, &create_mutation, 1u,
+                                           &create_plan, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("candidate mutation fast-create plan failed: %s\n",
+                 error.message);
+          ++failures;
+        }
+        if (create_selector != NULL && create_plan != NULL) {
+          memset(&result, 0, sizeof(result));
+          lql_error_init(&error);
+          st = test_ctx->mutate_file_range_candidates(
+              test_ctx, create_selector, create_plan, create_source, 0u,
+              (lql_uint64)strlen(create_doc), create_out, 1, 1, &result,
+              &error);
+          if (st != LQL_STATUS_OK) {
+            printf("candidate mutation fast-create failed: %s\n",
+                   error.message);
+            ++failures;
+          } else if (result.candidates_seen != 2u ||
+                     result.candidates_matched != 2u || result.stopped_early) {
+            printf("candidate mutation fast-create result mismatch\n");
+            ++failures;
+          } else if (!read_tmpfile(create_out, buf, sizeof(buf), &len) ||
+                     strcmp(buf,
+                            "{\"records\":[{\"service\":\"auth\"}],"
+                            "\"bench\":{\"touched\":true}}\n"
+                            "{\"records\":[{\"service\":\"auth\"}],"
+                            "\"bench\":{\"old\":true,\"touched\":true}}\n") !=
+                         0) {
+            printf("candidate mutation fast-create output mismatch: %s\n",
+                   buf);
+            ++failures;
+          }
+        }
+      }
+      test_ctx->mutation_plan_destroy(test_ctx, create_plan);
+      test_ctx->selector_destroy(test_ctx, create_selector);
+      if (create_source != NULL) {
+        fclose(create_source);
+      }
+      if (create_out != NULL) {
+        fclose(create_out);
+      }
+    }
+
     if (fseek(source, 0L, SEEK_SET) != 0) {
       printf("candidate mutation match-all rewind failed\n");
       ++failures;
@@ -5476,13 +5555,17 @@ static void expect_source_candidate_mutation_api(void) {
   lql_error error;
   lql_status st;
   lql_selector *selector;
+  lql_selector *create_selector;
   lql_mutation_plan *plan;
+  lql_mutation_plan *create_plan;
   lql_query_result result;
   lql_query_options options;
   chunk_reader reader;
   fail_after_reader fail_reader;
   const char *expr;
   const char *mutation;
+  const char *create_expr;
+  const char *create_mutation;
   char buf[512];
   size_t len;
   static const char doc[] = "{\"id\":\"a\",\"status\":\"open\"}\n"
@@ -5495,9 +5578,13 @@ static void expect_source_candidate_mutation_api(void) {
     return;
   }
   selector = NULL;
+  create_selector = NULL;
   plan = NULL;
+  create_plan = NULL;
   expr = "/status=\"open\"";
   mutation = "/status=done";
+  create_expr = "contains{field=/records[]/service,value=auth}";
+  create_mutation = "/bench/touched=true";
   lql_error_init(&error);
   st = test_ctx->selector_parse(test_ctx, expr, &selector, &error);
   if (st != LQL_STATUS_OK) {
@@ -5626,6 +5713,63 @@ static void expect_source_candidate_mutation_api(void) {
         printf("source candidate mutation matches-only output mismatch: %s\n",
                buf);
         ++failures;
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source candidate mutation fast-create tmpfile failed\n");
+      ++failures;
+    } else {
+      static const char create_doc[] =
+          "{\"records\":[{\"service\":\"auth\"}]}\n"
+          "{\"records\":[{\"service\":\"auth\"}],\"bench\":{\"old\":true}}\n";
+      lql_error_init(&error);
+      st = test_ctx->selector_parse(test_ctx, create_expr, &create_selector,
+                                    &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation fast-create selector failed: %s\n",
+               error.message);
+        ++failures;
+      }
+      lql_error_init(&error);
+      st = test_ctx->mutation_plan_parse(test_ctx, &create_mutation, 1u,
+                                         &create_plan, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation fast-create plan failed: %s\n",
+               error.message);
+        ++failures;
+      }
+      if (create_selector != NULL && create_plan != NULL) {
+        memset(&reader, 0, sizeof(reader));
+        reader.data = create_doc;
+        reader.len = strlen(create_doc);
+        reader.chunk_size = 7u;
+        memset(&result, 0, sizeof(result));
+        lql_error_init(&error);
+        st = test_ctx->mutate_source_candidates(
+            test_ctx, create_selector, create_plan, read_chunk, &reader, out, 1,
+            1, &result, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("source candidate mutation fast-create failed: %s\n",
+                 error.message);
+          ++failures;
+        } else if (result.candidates_seen != 2u ||
+                   result.candidates_matched != 2u || result.stopped_early) {
+          printf("source candidate mutation fast-create result mismatch\n");
+          ++failures;
+        } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                   strcmp(buf,
+                          "{\"records\":[{\"service\":\"auth\"}],"
+                          "\"bench\":{\"touched\":true}}\n"
+                          "{\"records\":[{\"service\":\"auth\"}],"
+                          "\"bench\":{\"old\":true,\"touched\":true}}\n") !=
+                       0) {
+          printf("source candidate mutation fast-create output mismatch: %s\n",
+                 buf);
+          ++failures;
+        }
       }
     }
 
@@ -6085,7 +6229,9 @@ static void expect_source_candidate_mutation_api(void) {
       }
     }
   }
+  test_ctx->mutation_plan_destroy(test_ctx, create_plan);
   test_ctx->mutation_plan_destroy(test_ctx, plan);
+  test_ctx->selector_destroy(test_ctx, create_selector);
   test_ctx->selector_destroy(test_ctx, selector);
   if (out != NULL) {
     fclose(out);

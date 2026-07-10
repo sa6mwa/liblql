@@ -114,6 +114,12 @@ typedef struct eval_doc {
   size_t fast_multi_key_len;
   unsigned int fast_multi_key_candidates;
   int fast_multi_key_active;
+  const char *fast_mutation_top_key;
+  size_t fast_mutation_top_key_len;
+  size_t fast_mutation_key_len;
+  int fast_mutation_key_active;
+  int fast_mutation_key_match;
+  int fast_mutation_key_seen;
 } eval_doc;
 
 typedef struct lql_payload_sink_adapter {
@@ -153,7 +159,9 @@ static lql_status execute_query_source_spooled_matches_with_base(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     lql_uint64 offset_base, lql_uint64 index_base,
     const lql_query_options *query_options, lql_query_match_fn on_match,
-    void *user, lql_query_result *out_result, lql_error *error);
+    void *user, const lql_mutation_plan *mutation_plan, FILE *mutation_out,
+    lql_error *mutation_error, lql_query_result *out_result,
+    lql_error *error);
 static lql_status execute_query_file_range_spooled_matches(
     lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
     lql_uint64 size, FILE *out, int compact, const lql_projection *projection,
@@ -688,6 +696,10 @@ static void reset_doc(eval_doc *doc) {
   doc->fast_multi_key_len = 0u;
   doc->fast_multi_key_candidates = 0u;
   doc->fast_multi_key_active = 0;
+  doc->fast_mutation_key_len = 0u;
+  doc->fast_mutation_key_active = 0;
+  doc->fast_mutation_key_match = 0;
+  doc->fast_mutation_key_seen = 0;
 }
 
 static char *contains_tail_data(eval_doc *doc) {
@@ -3626,6 +3638,12 @@ static lonejson_status fast_direct_key_begin(void *user,
   doc->fast_direct_key_len = 0u;
   doc->fast_direct_pending_active = 0;
   doc->fast_direct_pending_match = 0u;
+  doc->fast_mutation_key_len = 0u;
+  doc->fast_mutation_key_active =
+      doc->fast_mutation_top_key != NULL && doc->fast_direct_depth == 1u &&
+      doc->fast_direct_container_stack[doc->fast_direct_depth] == '{' &&
+      !doc->fast_mutation_key_seen;
+  doc->fast_mutation_key_match = doc->fast_mutation_key_active;
   if (selector == NULL ||
       doc->fast_direct_depth >= LQL_EVAL_FAST_DIRECT_DEPTH_CAP ||
       doc->fast_direct_container_stack[doc->fast_direct_depth] != '{' ||
@@ -3650,6 +3668,15 @@ static lonejson_status fast_direct_key_chunk(void *user, const char *data,
   size_t prefix;
   (void)error;
   doc = (eval_doc *)user;
+  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match) {
+    if (doc->fast_mutation_key_len >= doc->fast_mutation_top_key_len ||
+        len > doc->fast_mutation_top_key_len - doc->fast_mutation_key_len ||
+        memcmp(doc->fast_mutation_top_key + doc->fast_mutation_key_len, data,
+               len) != 0) {
+      doc->fast_mutation_key_match = 0;
+    }
+    doc->fast_mutation_key_len += len;
+  }
   if (!doc->fast_direct_key_active || !doc->fast_direct_key_match ||
       doc->fast_direct_depth >= LQL_EVAL_FAST_DIRECT_DEPTH_CAP) {
     return LONEJSON_STATUS_OK;
@@ -3671,6 +3698,10 @@ static lonejson_status fast_direct_key_end(void *user, lonejson_error *error) {
   (void)error;
   doc = (eval_doc *)user;
   selector = fast_direct_selector(doc);
+  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match &&
+      doc->fast_mutation_key_len == doc->fast_mutation_top_key_len) {
+    doc->fast_mutation_key_seen = 1;
+  }
   if (doc->fast_direct_key_active && doc->fast_direct_key_match &&
       doc->fast_direct_depth < LQL_EVAL_FAST_DIRECT_DEPTH_CAP &&
       selector != NULL) {
@@ -3681,6 +3712,7 @@ static lonejson_status fast_direct_key_end(void *user, lonejson_error *error) {
     }
   }
   doc->fast_direct_key_active = 0;
+  doc->fast_mutation_key_active = 0;
   return LONEJSON_STATUS_OK;
 }
 
@@ -4548,6 +4580,8 @@ static void enable_fast_top_level_field_candidate(
     lonejson_candidate_stream_options *options, eval_doc *doc) {
 #if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
   const lql_selector *selector;
+  const char *selector_key;
+  size_t selector_key_len;
   if (options == NULL || doc == NULL) {
     return;
   }
@@ -4556,9 +4590,26 @@ static void enable_fast_top_level_field_candidate(
     return;
   }
   selector = doc->selector;
+  selector_key = selector->field + selector->field_segment_offsets[0];
+  selector_key_len = selector->field_segment_lens[0];
+  if (doc->fast_mutation_top_key != NULL) {
+    doc->fast_multi_keys[0] = selector_key;
+    doc->fast_multi_key_lens[0] = selector_key_len;
+    doc->fast_multi_keys[1] = doc->fast_mutation_top_key;
+    doc->fast_multi_key_lens[1] = doc->fast_mutation_top_key_len;
+    options->top_level_field_keys = doc->fast_multi_keys;
+    options->top_level_field_key_lens = doc->fast_multi_key_lens;
+    options->top_level_field_key_count =
+        selector_key_len == doc->fast_mutation_top_key_len &&
+                memcmp(selector_key, doc->fast_mutation_top_key,
+                       selector_key_len) == 0
+            ? 1u
+            : 2u;
+    return;
+  }
   options->top_level_field_key =
-      selector->field + selector->field_segment_offsets[0];
-  options->top_level_field_key_len = selector->field_segment_lens[0];
+      selector_key;
+  options->top_level_field_key_len = selector_key_len;
 #else
   (void)options;
   (void)doc;
@@ -4740,6 +4791,9 @@ typedef struct source_spooled_match_state {
   unsigned int limit_flags;
   lql_query_match_fn on_match;
   void *user;
+  const lql_mutation_plan *mutation_plan;
+  FILE *mutation_out;
+  lql_error *mutation_error;
   lql_query_result result;
   lql_status callback_status;
   eval_doc doc;
@@ -6229,6 +6283,209 @@ static lonejson_status write_spooled_payload(
   return st;
 }
 
+static int raw_json_safe_key(const char *data, size_t len) {
+  size_t i;
+  if (data == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < len; ++i) {
+    if ((unsigned char)data[i] < 0x20u || data[i] == '"' || data[i] == '\\') {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int mutation_plan_fast_root_create_eligible(
+    const lql_mutation_plan *plan, const lql_mutation_item **out) {
+  const lql_mutation_item *item;
+  size_t i;
+  if (plan == NULL || plan->count != 1u || plan->create_count != 1u ||
+      plan->create_indexes == NULL || plan->create_indexes[0] != 0u ||
+      !plan->literal_only_paths || plan->variable_depth_paths) {
+    return 0;
+  }
+  item = &plan->items[0];
+  if (item->kind != LQL_MUTATION_SET || !item->can_create_missing_object ||
+      item->file_mode != LQL_MUTATION_FILE_NONE ||
+      item->path.segment_count < 2u || item->path.segment_kinds == NULL ||
+      item->path.segments == NULL || item->path.segment_lens == NULL ||
+      item->value_kind == LQL_MUTATION_VALUE_STRING) {
+    return 0;
+  }
+  for (i = 0u; i < item->path.segment_count; ++i) {
+    if (item->path.segment_kinds[i] != LQL_MUTATION_PATH_LITERAL ||
+        !raw_json_safe_key(item->path.segments[i], item->path.segment_lens[i])) {
+      return 0;
+    }
+  }
+  if (out != NULL) {
+    *out = item;
+  }
+  return 1;
+}
+
+static int json_space_byte(unsigned char ch) {
+  return ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t';
+}
+
+static int write_raw_json_key(FILE *out, const char *key, size_t key_len) {
+  return eval_file_putc_unlocked(out, '"') &&
+         eval_file_write_unlocked(out, key, key_len) &&
+         eval_file_putc_unlocked(out, '"');
+}
+
+static int write_fast_mutation_value(FILE *out, const lql_mutation_item *item) {
+  const char *text;
+  size_t len;
+  switch (item->value_kind) {
+  case LQL_MUTATION_VALUE_BOOL_TRUE:
+    return eval_file_write_unlocked(out, "true", 4u);
+  case LQL_MUTATION_VALUE_BOOL_FALSE:
+    return eval_file_write_unlocked(out, "false", 5u);
+  case LQL_MUTATION_VALUE_NULL:
+    return eval_file_write_unlocked(out, "null", 4u);
+  case LQL_MUTATION_VALUE_NUMBER:
+    text = item->value == NULL ? "" : item->value + item->value_offset;
+    len = item->value_len;
+    return len != 0u && eval_file_write_unlocked(out, text, len);
+  default:
+    return 0;
+  }
+}
+
+static int write_fast_mutation_subtree(FILE *out, const lql_mutation_item *item,
+                                       size_t depth) {
+  if (!write_raw_json_key(out, item->path.segments[depth],
+                          item->path.segment_lens[depth]) ||
+      !eval_file_putc_unlocked(out, ':')) {
+    return 0;
+  }
+  if (depth + 1u == item->path.segment_count) {
+    return write_fast_mutation_value(out, item);
+  }
+  return eval_file_putc_unlocked(out, '{') &&
+         write_fast_mutation_subtree(out, item, depth + 1u) &&
+         eval_file_putc_unlocked(out, '}');
+}
+
+static int write_spooled_object_with_fast_root_create(
+    FILE *out, const lonejson_spooled *spooled, const lql_mutation_item *item,
+    lql_error *error) {
+  const unsigned char *data;
+  size_t end;
+  size_t first_member;
+  int has_member;
+  if (out == NULL || spooled == NULL || item == NULL || spooled->spilled ||
+      spooled->memory == NULL || spooled->memory_len != spooled->size ||
+      spooled->size < 2u) {
+    return 0;
+  }
+  data = spooled->memory;
+  end = spooled->size;
+  while (end != 0u && json_space_byte(data[end - 1u])) {
+    --end;
+  }
+  if (end < 2u || data[0] != '{' || data[end - 1u] != '}') {
+    return 0;
+  }
+  first_member = 1u;
+  while (first_member + 1u < end && json_space_byte(data[first_member])) {
+    ++first_member;
+  }
+  has_member = first_member + 1u < end;
+  if (!eval_file_write_unlocked(out, data, end - 1u) ||
+      (has_member && !eval_file_putc_unlocked(out, ',')) ||
+      !write_fast_mutation_subtree(out, item, 0u) ||
+      !eval_file_putc_unlocked(out, '}') ||
+      !eval_file_putc_unlocked(out, '\n')) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to write fast mutated source candidate");
+    return 0;
+  }
+  return 1;
+}
+
+static int find_file_range_object_end(int fd, lql_uint64 offset,
+                                      lql_uint64 size, lql_uint64 *out_end) {
+  unsigned char tail[4096];
+  lql_uint64 tail_offset;
+  size_t want;
+  ssize_t got;
+  size_t i;
+  if (size < 2u || out_end == NULL) {
+    return 0;
+  }
+  want = size > (lql_uint64)sizeof(tail) ? sizeof(tail) : (size_t)size;
+  tail_offset = offset + size - (lql_uint64)want;
+  got = pread(fd, tail, want, (off_t)tail_offset);
+  if (got < 0 || (size_t)got != want) {
+    return 0;
+  }
+  i = want;
+  while (i != 0u && json_space_byte(tail[i - 1u])) {
+    --i;
+  }
+  if (i == 0u || tail[i - 1u] != '}') {
+    return 0;
+  }
+  *out_end = (tail_offset - offset) + (lql_uint64)i;
+  return 1;
+}
+
+static int file_range_object_has_member(int fd, lql_uint64 offset,
+                                        lql_uint64 end, int *out) {
+  unsigned char head[4096];
+  lql_uint64 remaining;
+  lql_uint64 cursor;
+  size_t want;
+  ssize_t got;
+  size_t i;
+  if (out == NULL || end < 2u) {
+    return 0;
+  }
+  remaining = end;
+  cursor = offset;
+  while (remaining != 0u) {
+    want = remaining > (lql_uint64)sizeof(head) ? sizeof(head)
+                                                : (size_t)remaining;
+    got = pread(fd, head, want, (off_t)cursor);
+    if (got < 0 || (size_t)got != want) {
+      return 0;
+    }
+    for (i = cursor == offset ? 1u : 0u; i < want; ++i) {
+      if (!json_space_byte(head[i])) {
+        *out = head[i] != '}';
+        return 1;
+      }
+    }
+    cursor += (lql_uint64)want;
+    remaining -= (lql_uint64)want;
+  }
+  return 0;
+}
+
+static int write_file_range_object_with_fast_root_create(
+    FILE *out, int fd, lql_uint64 offset, lql_uint64 size,
+    const lql_mutation_item *item, lql_error *error) {
+  lql_uint64 end;
+  int has_member;
+  if (out == NULL || fd < 0 || item == NULL ||
+      !find_file_range_object_end(fd, offset, size, &end) ||
+      !file_range_object_has_member(fd, offset, end, &has_member)) {
+    return 0;
+  }
+  if (!eval_copy_fd_range_unlocked(fd, offset, out, end - 1u) ||
+      (has_member && !eval_file_putc_unlocked(out, ',')) ||
+      !write_fast_mutation_subtree(out, item, 0u) ||
+      !eval_file_putc_unlocked(out, '}')) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to write fast mutated file candidate");
+    return 0;
+  }
+  return 1;
+}
+
 static lonejson_read_result eval_spooled_read(void *user, unsigned char *buffer,
                                               size_t capacity) {
   return lonejson_spooled_read((lonejson_spooled *)user, buffer, capacity);
@@ -6368,6 +6625,7 @@ on_source_spooled_candidate_end(void *user,
                                 lonejson_error *error) {
   source_spooled_match_state *state;
   lql_query_match match;
+  const lql_mutation_item *fast_item;
   lql_status st;
   int matched;
 
@@ -6384,6 +6642,22 @@ on_source_spooled_candidate_end(void *user,
     if (candidate->payload_spool == NULL) {
       reset_doc(&state->doc);
       return LONEJSON_CANDIDATE_ERROR;
+    }
+    if (state->doc.fast_mutation_top_key != NULL &&
+        state->mutation_plan != NULL && state->mutation_out != NULL &&
+        !state->doc.fast_mutation_key_seen &&
+        mutation_plan_fast_root_create_eligible(state->mutation_plan,
+                                                &fast_item) &&
+        write_spooled_object_with_fast_root_create(
+            state->mutation_out, candidate->payload_spool, fast_item,
+            state->mutation_error)) {
+      state->result.candidates_matched++;
+      reset_doc(&state->doc);
+      if (query_result_stop_if_limited(&state->result, &state->options,
+                                       state->limit_flags)) {
+        return LONEJSON_CANDIDATE_STOP;
+      }
+      return LONEJSON_CANDIDATE_CONTINUE;
     }
     memset(&match, 0, sizeof(match));
     match.decision.matched = 1;
@@ -6636,6 +6910,7 @@ on_file_mutation_candidate_end(void *user,
   lql_status st;
   lql_uint64 offset;
   lql_uint64 size;
+  const lql_mutation_item *fast_item;
   int matched;
   int wrote_output;
 
@@ -6683,17 +6958,27 @@ on_file_mutation_candidate_end(void *user,
   if (matched) {
     state->result.candidates_matched++;
     if (state->doc.root_kind == '{') {
-      reader.fd = state->fd;
-      reader.offset = offset;
-      reader.remaining = size;
-      st = state->receiver->mutate_source_paths(
-          state->receiver, state->mutation_plan, eval_lql_pread_range, &reader,
-          state->out, &state->mutation_error);
-      if (st != LQL_STATUS_OK) {
-        reset_doc(&state->doc);
-        return LONEJSON_CANDIDATE_ERROR;
+      if (state->doc.fast_mutation_top_key != NULL &&
+          !state->doc.fast_mutation_key_seen &&
+          mutation_plan_fast_root_create_eligible(state->mutation_plan,
+                                                  &fast_item) &&
+          write_file_range_object_with_fast_root_create(
+              state->out, state->fd, offset, size, fast_item,
+              &state->mutation_error)) {
+        wrote_output = 1;
+      } else {
+        reader.fd = state->fd;
+        reader.offset = offset;
+        reader.remaining = size;
+        st = state->receiver->mutate_source_paths(
+            state->receiver, state->mutation_plan, eval_lql_pread_range,
+            &reader, state->out, &state->mutation_error);
+        if (st != LQL_STATUS_OK) {
+          reset_doc(&state->doc);
+          return LONEJSON_CANDIDATE_ERROR;
+        }
+        wrote_output = 1;
       }
-      wrote_output = 1;
     } else if (!eval_copy_fd_range_unlocked(state->fd, offset, state->out,
                                             size)) {
       reset_doc(&state->doc);
@@ -6759,6 +7044,11 @@ static lql_status execute_mutate_file_range_candidates_fast(
   lql_error_init(&state.mutation_error);
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
+  }
+  if (selector_fast_direct_scalar_eligible(selector) &&
+      mutation_plan_fast_root_create_eligible(plan, NULL)) {
+    state.doc.fast_mutation_top_key = plan->items[0].path.segments[0];
+    state.doc.fast_mutation_top_key_len = plan->items[0].path.segment_lens[0];
   }
   runtime_pooled = 0;
   runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
@@ -7524,14 +7814,16 @@ static lql_status execute_query_source_spooled_matches(
     void *user, lql_query_result *out_result, lql_error *error) {
   return execute_query_source_spooled_matches_with_base(
       self, selector, read, read_user, 0u, 0u, query_options, on_match, user,
-      out_result, error);
+      NULL, NULL, NULL, out_result, error);
 }
 
 static lql_status execute_query_source_spooled_matches_with_base(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     lql_uint64 offset_base, lql_uint64 index_base,
     const lql_query_options *query_options, lql_query_match_fn on_match,
-    void *user, lql_query_result *out_result, lql_error *error) {
+    void *user, const lql_mutation_plan *mutation_plan, FILE *mutation_out,
+    lql_error *mutation_error, lql_query_result *out_result,
+    lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
@@ -7550,6 +7842,9 @@ static lql_status execute_query_source_spooled_matches_with_base(
   state.index_base = index_base;
   state.on_match = on_match;
   state.user = user;
+  state.mutation_plan = mutation_plan;
+  state.mutation_out = mutation_out;
+  state.mutation_error = mutation_error;
   state.callback_status = LQL_STATUS_OK;
   if (query_options != NULL) {
     state.options = *query_options;
@@ -7557,6 +7852,14 @@ static lql_status execute_query_source_spooled_matches_with_base(
   state.limit_flags = query_limit_flags(&state.options);
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
+  }
+  if (selector_fast_direct_scalar_eligible(selector) &&
+      state.mutation_plan != NULL &&
+      mutation_plan_fast_root_create_eligible(state.mutation_plan, NULL)) {
+    state.doc.fast_mutation_top_key =
+        state.mutation_plan->items[0].path.segments[0];
+    state.doc.fast_mutation_top_key_len =
+        state.mutation_plan->items[0].path.segment_lens[0];
   }
   runtime_pooled = 0;
   runtime_can_pool = lql_lonejson_default_runtime_pool_allowed(self);
@@ -7688,9 +7991,10 @@ static lql_status execute_mutate_source_matches_only_spooled(
   state.out = out;
   lql_error_init(&state.mutation_error);
   flockfile(out);
-  st = execute_query_source_spooled_matches(
-      self, selector, read, read_user, query_options,
-      mutate_spooled_match_payload, &state, out_result, error);
+  st = execute_query_source_spooled_matches_with_base(
+      self, selector, read, read_user, 0u, 0u, query_options,
+      mutate_spooled_match_payload, &state, mutation_plan, out,
+      &state.mutation_error, out_result, error);
   funlockfile(out);
   if (st != LQL_STATUS_OK && state.mutation_error.code != LQL_STATUS_OK) {
     lql_set_error(error, state.mutation_error.code,
