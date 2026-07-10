@@ -13,7 +13,6 @@
 
 typedef struct lql_allocator lql_allocator;
 typedef struct lql_impl lql_impl;
-typedef struct lql_pool_block lql_pool_block;
 
 #define LQL_EVAL_CONTAINS_TAIL_CAP 8192u
 #define LQL_EVAL_PREFIX_CAP 8192u
@@ -22,18 +21,6 @@ typedef struct lql_pool_block lql_pool_block;
 #define LQL_EVAL_NUMERIC_PREFIX_CAP 64u
 #define LQL_EVAL_NUMERIC_SIG_CAP 32u
 #define LQL_EVAL_NUMERIC_EXP_CAP 1000000L
-
-struct lql_pool_block {
-  union {
-    void *ptr;
-    long l;
-    double d;
-    long double ld;
-  } align;
-  lql_pool_block *all_next;
-  lql_pool_block *free_next;
-  size_t size;
-};
 
 struct lql_allocator {
   void *impl;
@@ -46,8 +33,6 @@ struct lql_allocator {
 
 struct lql_impl {
   lql_allocator *allocator;
-  lql_pool_block *eval_pool_all;
-  lql_pool_block *eval_pool_free;
   lonejson *eval_runtime;
   lonejson *eval_runtime_nested;
   int eval_runtime_in_use;

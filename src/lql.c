@@ -248,8 +248,6 @@ static void receiver_capabilities_get(const lql *self, lql_capabilities *out) {
 static void receiver_destroy(lql *self) {
   lql_allocator *allocator;
   lql_impl *impl;
-  lql_pool_block *block;
-  lql_pool_block *next_block;
   if (self == NULL) {
     return;
   }
@@ -271,12 +269,6 @@ static void receiver_destroy(lql *self) {
     allocator->destroy(allocator, impl->eval_contains_positions);
     allocator->destroy(allocator, impl->eval_contains_tail_buf);
     allocator->destroy(allocator, impl->eval_container_types);
-    block = impl->eval_pool_all;
-    while (block != NULL) {
-      next_block = block->all_next;
-      allocator->destroy(allocator, block);
-      block = next_block;
-    }
     allocator->destroy(allocator, impl);
   }
   allocator->destroy(allocator, self);
