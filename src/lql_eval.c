@@ -1452,6 +1452,36 @@ static int stream_miss_marked_fast(const eval_doc *doc,
   return doc->stream_misses[selector->hit_index] == doc->candidate_epoch;
 }
 
+#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE) ||                   \
+    defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
+static int top_level_multi_candidate_impossible(const eval_doc *doc,
+                                                const lql_selector *selector) {
+  size_t i;
+  if (doc == NULL || selector == NULL || doc->root_kind != '{' ||
+      !selector_fast_top_level_multi_eligible(selector) ||
+      doc->stream_misses == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < selector->predicate_count; ++i) {
+    if (!hit_marked_fast(doc, selector->predicates[i]) &&
+        stream_miss_marked_fast(doc, selector->predicates[i])) {
+      return 1;
+    }
+  }
+  return 0;
+}
+#endif
+
+#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE)
+static int fast_top_level_multi_field_prune(void *user, lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  return top_level_multi_candidate_impossible(doc, doc != NULL ? doc->selector
+                                                               : NULL);
+}
+#endif
+
 static unsigned int *in_match_row_fast(eval_doc *doc,
                                        const lql_selector *selector) {
   return doc->in_matches + selector->hit_index * doc->in_match_stride;
@@ -4550,6 +4580,12 @@ static void enable_fast_top_level_multi_field_candidate(
   options->top_level_field_keys = doc->fast_multi_keys;
   options->top_level_field_key_lens = doc->fast_multi_key_lens;
   options->top_level_field_key_count = selector->predicate_count;
+#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE)
+  if (options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE) {
+    options->top_level_field_prune = fast_top_level_multi_field_prune;
+    options->top_level_field_prune_user = doc;
+  }
+#endif
 #else
   (void)options;
   (void)doc;
@@ -5533,8 +5569,6 @@ source_transform_candidate_decision(
 #if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
 static int source_transform_capture_prune(void *user, lonejson_error *error) {
   source_transform_state *state;
-  const lql_selector *selector;
-  size_t i;
   (void)error;
   state = (source_transform_state *)user;
   if (state == NULL || !state->matches_only || state->selector == NULL ||
@@ -5544,18 +5578,7 @@ static int source_transform_capture_prune(void *user, lonejson_error *error) {
   if (state->doc.fast_exact_selector != NULL) {
     return !state->doc.fast_exact_hit && state->doc.fast_exact_miss;
   }
-  selector = state->selector;
-  if (!selector_fast_top_level_multi_eligible(selector) ||
-      state->doc.stream_misses == NULL) {
-    return 0;
-  }
-  for (i = 0u; i < selector->predicate_count; ++i) {
-    if (!hit_marked_fast(&state->doc, selector->predicates[i]) &&
-        stream_miss_marked_fast(&state->doc, selector->predicates[i])) {
-      return 1;
-    }
-  }
-  return 0;
+  return top_level_multi_candidate_impossible(&state->doc, state->selector);
 }
 #endif
 
@@ -6307,8 +6330,6 @@ on_source_spooled_capture_decision(void *user,
 #if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
 static int on_source_spooled_capture_prune(void *user, lonejson_error *error) {
   source_spooled_match_state *state;
-  const lql_selector *selector;
-  size_t i;
   (void)error;
   state = (source_spooled_match_state *)user;
   if (state == NULL || state->doc.root_kind != '{') {
@@ -6317,18 +6338,7 @@ static int on_source_spooled_capture_prune(void *user, lonejson_error *error) {
   if (state->doc.fast_exact_selector != NULL) {
     return !state->doc.fast_exact_hit && state->doc.fast_exact_miss;
   }
-  selector = state->selector;
-  if (!selector_fast_top_level_multi_eligible(selector) ||
-      state->doc.stream_misses == NULL) {
-    return 0;
-  }
-  for (i = 0u; i < selector->predicate_count; ++i) {
-    if (!hit_marked_fast(&state->doc, selector->predicates[i]) &&
-        stream_miss_marked_fast(&state->doc, selector->predicates[i])) {
-      return 1;
-    }
-  }
-  return 0;
+  return top_level_multi_candidate_impossible(&state->doc, state->selector);
 }
 #endif
 

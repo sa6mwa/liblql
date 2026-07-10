@@ -169,6 +169,7 @@ typedef unsigned long long lonejson_uint64;
 #define LONEJSON_HAS_CANDIDATE_TRANSFORM_VALUE_OBSERVER 1
 #define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR 1
 #define LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE 1
+#define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE 1
 
 #if defined(_MSC_VER)
 #define LONEJSON_SHORT_ALIAS_INLINE static __inline
@@ -2724,6 +2725,8 @@ typedef struct lonejson_candidate_stream_options {
   const char *const *top_level_field_keys;
   const size_t *top_level_field_key_lens;
   size_t top_level_field_key_count;
+  lonejson_candidate_capture_prune_fn top_level_field_prune;
+  void *top_level_field_prune_user;
   const char *top_level_string_eq_key;
   size_t top_level_string_eq_key_len;
   const char *top_level_string_eq_value;
@@ -19383,7 +19386,8 @@ static lonejson_status lonejson__json_visit_top_level_field_array(
 
 static lonejson_status lonejson__json_visit_top_level_fields_object(
     lonejson__json_io *io, const char *const *keys, const size_t *key_lens,
-    size_t key_count, int stop_after_truncated) {
+    size_t key_count, int stop_after_truncated,
+    lonejson_candidate_capture_prune_fn prune, void *prune_user) {
   int ch;
   int first = 1;
   lonejson_status status;
@@ -19448,13 +19452,18 @@ static lonejson_status lonejson__json_visit_top_level_fields_object(
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
+    if (match_index != (size_t)-1 && prune != NULL &&
+        prune(prune_user, io->error)) {
+      return lonejson__json_skip_object_tail_after_value(io);
+    }
     first = 0;
   }
 }
 
 static lonejson_status lonejson__json_visit_top_level_fields_array(
     lonejson__json_io *io, const char *const *keys, const size_t *key_lens,
-    size_t key_count, int stop_after_truncated) {
+    size_t key_count, int stop_after_truncated,
+    lonejson_candidate_capture_prune_fn prune, void *prune_user) {
   int ch;
   int first = 1;
   lonejson_status status;
@@ -19495,10 +19504,12 @@ static lonejson_status lonejson__json_visit_top_level_fields_array(
     ++io->depth;
     if (ch == '{') {
       status = lonejson__json_visit_top_level_fields_object(
-          io, keys, key_lens, key_count, stop_after_truncated);
+          io, keys, key_lens, key_count, stop_after_truncated, prune,
+          prune_user);
     } else if (ch == '[') {
       status = lonejson__json_visit_top_level_fields_array(
-          io, keys, key_lens, key_count, stop_after_truncated);
+          io, keys, key_lens, key_count, stop_after_truncated, prune,
+          prune_user);
     } else {
       lonejson__json_cursor_ungetc(io, ch);
       status = lonejson__json_skip_value(io);
@@ -19618,6 +19629,7 @@ static lonejson_status lonejson__json_visit_one_top_level_fields_cursor(
     const size_t *key_lens, size_t key_count,
     const lonejson__value_limits *limits, lonejson_spooled *raw_capture_spool,
     int stop_after_truncated, int *raw_capture_disabled,
+    lonejson_candidate_capture_prune_fn prune, void *prune_user,
     lonejson_error *error) {
   lonejson__json_io io;
   lonejson__value_limits defaults;
@@ -19681,10 +19693,12 @@ static lonejson_status lonejson__json_visit_one_top_level_fields_cursor(
     ch = lonejson__json_cursor_getc(&io);
     if (ch == '{') {
       status = lonejson__json_visit_top_level_fields_object(
-          &io, keys, key_lens, key_count, stop_after_truncated);
+          &io, keys, key_lens, key_count, stop_after_truncated, prune,
+          prune_user);
     } else if (ch == '[') {
       status = lonejson__json_visit_top_level_fields_array(
-          &io, keys, key_lens, key_count, stop_after_truncated);
+          &io, keys, key_lens, key_count, stop_after_truncated, prune,
+          prune_user);
     } else {
       lonejson_spooled *saved_raw_capture_spool = io.raw_capture_spool;
       unsigned char *saved_raw_capture_buffer = io.raw_capture_buffer;
@@ -34341,6 +34355,8 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
         scan->options->top_level_field_key_lens,
         scan->options->top_level_field_key_count, scan->limits, NULL,
         scan->options->top_level_field_stop_after_truncated, NULL,
+        scan->options->top_level_field_prune,
+        scan->options->top_level_field_prune_user,
         scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
       scan->options->top_level_field_key != NULL) {
@@ -34358,7 +34374,7 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
         scan->options->top_level_field_keys,
         scan->options->top_level_field_key_lens,
         scan->options->top_level_field_key_count, scan->limits, &capture.spool,
-        0, &raw_capture_disabled, scan->error);
+        0, &raw_capture_disabled, NULL, NULL, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED &&
              capture.raw_spooled &&
              scan->options->top_level_field_key != NULL) {
@@ -34731,6 +34747,19 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
     return lonejson__set_error(
         error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
         "multi top-level field candidate key lengths require field keys");
+  }
+  if (local.top_level_field_prune != NULL &&
+      (local.top_level_field_keys == NULL ||
+       local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE)) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "top-level field prune requires multi field visitor and no capture");
+  }
+  if (local.top_level_field_prune == NULL &&
+      local.top_level_field_prune_user != NULL) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "top-level field prune user requires prune callback");
   }
   if (local.top_level_string_eq_key != NULL &&
       (local.top_level_string_eq_value == NULL ||
