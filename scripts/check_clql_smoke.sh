@@ -231,6 +231,21 @@ do
   esac
 done
 
+if root_array_out=$(printf '%s\n' '[{"status":"open"}]' |
+  "$clql" '/status="open"' 2>&1); then
+  printf 'clql smoke: root array stdin unexpectedly succeeded: %s\n' \
+    "$root_array_out" >&2
+  exit 1
+fi
+case "$root_array_out" in
+  *"root arrays are not valid NDJSON candidate streams"*) ;;
+  *)
+    printf 'clql smoke: root array stdin diagnostic mismatch: %s\n' \
+      "$root_array_out" >&2
+    exit 1
+    ;;
+esac
+
 if "$clql" --help | grep -E -- '(^|[[:space:]])(-t|--theme)([[:space:],=]|$)' >/dev/null; then
   printf 'clql smoke: help still advertises unsupported theme flag\n' >&2
   exit 1

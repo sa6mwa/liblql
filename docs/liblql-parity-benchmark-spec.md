@@ -165,8 +165,8 @@ Current implementation status:
   Go helper records report `ns_per_op`; `steady_state` performs one untimed
   warmup fixture pass before the measured pass. The schema validator requires
   supported Go records to report timing.
-- the current executable dataset matrix covers NDJSON, top-level array, and
-  single-root JSON object fixture shapes for both library-style and CLI-style
+- the current executable dataset matrix covers NDJSON and single-root JSON
+  object fixture shapes for both library-style and CLI-style
   record forms, plus a lockd-shaped NDJSON fixture with session, tab, event,
   operation, timestamp, and payload fields, a mixed-root NDJSON fixture that
   interleaves scalar and object candidates, and the Go realworld benchmark
@@ -277,14 +277,7 @@ Generate the same deterministic datasets for all implementations:
    - CLI-style benchmark may also support `LQL_BENCH_NDJSON_COUNT`, fallback
      `30000`.
 
-2. `large_array`
-   - one top-level JSON array of candidate objects;
-   - default count should mirror Go library benchmark scale:
-     `LQL_BENCH_QUERY_ARRAY_COUNT`, fallback `20000`;
-   - CLI-style benchmark may also support `LQL_BENCH_ARRAY_COUNT`, fallback
-     `30000`.
-
-3. `large_single_json`
+2. `large_single_json`
    - one top-level object containing a `records` array;
    - default count should mirror Go library benchmark scale:
      `LQL_BENCH_QUERY_SINGLE_COUNT`, fallback `12000`;

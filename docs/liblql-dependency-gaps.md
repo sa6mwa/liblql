@@ -9,10 +9,10 @@ mix framing modes.
 The v0 public contract is:
 
 - liblql uses lonejson strict JSON parsing and framing;
-- liblql supports repeated top-level JSON values and root-array item streams
-  as separate candidate-stream shapes;
-- liblql does not support a single candidate stream that starts with root-array
-  items and then continues with additional top-level JSON values;
+- liblql supports repeated top-level JSON values as the public candidate-stream
+  shape;
+- liblql rejects root arrays in NDJSON candidate-stream entry points rather
+  than flattening them into candidate items;
 - liblql must not emulate these excluded cases by materializing the whole
   source, adding a second JSON parser, or pre-normalizing input.
 

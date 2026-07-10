@@ -66,10 +66,8 @@ time_bin="${LQL_BENCH_TIME:-/usr/bin/time}"
 require_lua_rss="${LQL_BENCH_REQUIRE_LUA_RSS:-0}"
 mkdir -p "$fixture_dir"
 ndjson_fixture="$fixture_dir/large_ndjson.jsonl"
-array_fixture="$fixture_dir/large_array.json"
 single_fixture="$fixture_dir/large_single_json.json"
 cli_ndjson_fixture="$fixture_dir/selection_ndjson.jsonl"
-cli_array_fixture="$fixture_dir/selection_array.json"
 cli_single_fixture="$fixture_dir/selection_single_json.json"
 lockd_ndjson_fixture="$fixture_dir/lockd_ndjson.jsonl"
 mixed_root_ndjson_fixture="$fixture_dir/mixed_root_ndjson.jsonl"
@@ -577,10 +575,8 @@ generate_lockd_perf_fixtures() {
 generate_fixtures() {
   i=0
   : > "$ndjson_fixture"
-  : > "$array_fixture"
   : > "$single_fixture"
   : > "$cli_ndjson_fixture"
-  : > "$cli_array_fixture"
   : > "$cli_single_fixture"
   : > "$lockd_ndjson_fixture"
   : > "$mixed_root_ndjson_fixture"
@@ -601,20 +597,6 @@ generate_fixtures() {
     printf '\n' >> "$realworld_pretty_nested_fixture"
     i=$((i + 1))
   done
-  printf '[' > "$array_fixture"
-  printf '[' > "$cli_array_fixture"
-  i=0
-  while [ "$i" -lt "$count" ]; do
-    if [ "$i" -ne 0 ]; then
-      printf ',' >> "$array_fixture"
-      printf ',' >> "$cli_array_fixture"
-    fi
-    record_json "$i" >> "$array_fixture"
-    selection_record_json "$i" >> "$cli_array_fixture"
-    i=$((i + 1))
-  done
-  printf ']\n' >> "$array_fixture"
-  printf ']\n' >> "$cli_array_fixture"
   printf '{"records":[' > "$single_fixture"
   printf '{"records":[' > "$cli_single_fixture"
   i=0
@@ -682,9 +664,7 @@ generate_fixture() {
   generate_fixtures
   : > "$case_matrix"
   add_dataset_selector_cases "large_ndjson" "$ndjson_fixture" "$count"
-  add_dataset_selector_cases "large_array" "$array_fixture" "$count"
   add_selection_selector_cases "selection_ndjson" "$cli_ndjson_fixture" "$count" ""
-  add_selection_selector_cases "selection_array" "$cli_array_fixture" "$count" ""
   add_lockd_selector_cases "lockd_ndjson" "$lockd_ndjson_fixture" "$count"
   add_capture_selector_cases "mixed_root_ndjson" "$mixed_root_ndjson_fixture" "$count"
   add_realworld_selector_cases "realworld_compact_ndjson" \
@@ -701,7 +681,6 @@ generate_fixture() {
       awk '
         ($1 == "large_ndjson" && $4 == "eq_status_open") ||
         ($1 == "large_ndjson" && $4 == "numeric_path_amount") ||
-        ($1 == "large_array" && $4 == "date_window") ||
         ($1 == "lockd_ndjson" && $4 == "lockd_session_sync") ||
         ($1 == "mixed_root_ndjson" && $4 == "mixed_low_match_id") ||
         ($1 == "realworld_compact_ndjson" && $4 == "realworld_multi_clause_and") ||
@@ -1251,10 +1230,8 @@ if [ "$check" -eq 1 ] && [ "$exit_status" -eq 0 ]; then
   else
     fixtures_ready=1
     [ -s "$ndjson_fixture" ] || fixtures_ready=0
-    [ -s "$array_fixture" ] || fixtures_ready=0
     [ -s "$single_fixture" ] || fixtures_ready=0
     [ -s "$cli_ndjson_fixture" ] || fixtures_ready=0
-    [ -s "$cli_array_fixture" ] || fixtures_ready=0
     [ -s "$cli_single_fixture" ] || fixtures_ready=0
     [ -s "$lockd_ndjson_fixture" ] || fixtures_ready=0
     [ -s "$mixed_root_ndjson_fixture" ] || fixtures_ready=0

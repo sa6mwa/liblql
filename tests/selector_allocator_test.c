@@ -371,8 +371,8 @@ static int expect_file_decisions_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  json = "[{\"status\":\"open\",\"message\":\"hello\"},"
-         "{\"status\":\"closed\",\"message\":\"bye\"}]";
+  json = "{\"status\":\"open\",\"message\":\"hello\"}\n"
+         "{\"status\":\"closed\",\"message\":\"bye\"}\n";
   if (fwrite(json, 1u, strlen(json), file) != strlen(json)) {
     printf("file decision fixture write failed\n");
     fclose(file);
@@ -495,8 +495,8 @@ static int expect_file_matches_steady_state_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  json = "[{\"status\":\"open\",\"message\":\"hello\"},"
-         "{\"status\":\"closed\",\"message\":\"bye\"}]";
+  json = "{\"status\":\"open\",\"message\":\"hello\"}\n"
+         "{\"status\":\"closed\",\"message\":\"bye\"}\n";
   if (fwrite(json, 1u, strlen(json), file) != strlen(json)) {
     printf("file match fixture write failed\n");
     fclose(file);
@@ -860,7 +860,7 @@ expect_compound_source_decisions_steady_state_has_no_receiver_alloc(void) {
 }
 
 static int
-expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
+expect_source_ndjson_decisions_steady_state_has_no_receiver_alloc(void) {
   counting_allocator counter;
   lql *ctx;
   lql_selector *selector;
@@ -877,19 +877,19 @@ expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
   lql_error_init(&error);
   st = lql_new_with_allocator(&ctx, &counter.api, &error);
   if (st != LQL_STATUS_OK || ctx == NULL) {
-    printf("source array decision receiver failed: %s\n", error.message);
+    printf("source NDJSON decision receiver failed: %s\n", error.message);
     return 1;
   }
   selector = NULL;
   lql_error_init(&error);
   st = ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK || selector == NULL) {
-    printf("source array decision selector parse failed: %s\n", error.message);
+    printf("source NDJSON decision selector parse failed: %s\n", error.message);
     ctx->destroy(ctx);
     return 1;
   }
-  json = "[{\"status\":\"open\",\"message\":\"hello\"},"
-         "{\"status\":\"closed\",\"message\":\"bye\"}]";
+  json = "{\"status\":\"open\",\"message\":\"hello\"}\n"
+         "{\"status\":\"closed\",\"message\":\"bye\"}\n";
 
   reader.data = json;
   reader.len = strlen(json);
@@ -902,7 +902,7 @@ expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
                                    count_matched_decision, &matched, &result,
                                    &error);
   if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
-    printf("source array decision first warmup failed: %s\n", error.message);
+    printf("source NDJSON decision first warmup failed: %s\n", error.message);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
@@ -916,7 +916,7 @@ expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
                                    count_matched_decision, &matched, &result,
                                    &error);
   if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
-    printf("source array decision second warmup failed: %s\n", error.message);
+    printf("source NDJSON decision second warmup failed: %s\n", error.message);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
@@ -932,16 +932,17 @@ expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
                                    count_matched_decision, &matched, &result,
                                    &error);
   if (st != LQL_STATUS_OK || matched != 1u || result.candidates_seen != 2u) {
-    printf("source array decision steady eval failed: %s\n", error.message);
+    printf("source NDJSON decision steady eval failed: %s\n", error.message);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
   }
   if (counter.alloc_attempt_count != alloc_attempts_after_second_warmup) {
-    printf("source array decision steady eval attempted allocation: before=%lu "
-           "after=%lu\n",
-           (unsigned long)alloc_attempts_after_second_warmup,
-           (unsigned long)counter.alloc_attempt_count);
+    printf(
+        "source NDJSON decision steady eval attempted allocation: before=%lu "
+        "after=%lu\n",
+        (unsigned long)alloc_attempts_after_second_warmup,
+        (unsigned long)counter.alloc_attempt_count);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
@@ -949,10 +950,11 @@ expect_source_array_decisions_steady_state_has_no_receiver_alloc(void) {
   ctx->selector_destroy(ctx, selector);
   ctx->destroy(ctx);
   if (counter.outstanding != 0u || counter.destroy_count == 0u) {
-    printf("source array decision allocator cleanup imbalance: outstanding=%lu "
-           "destroys=%lu\n",
-           (unsigned long)counter.outstanding,
-           (unsigned long)counter.destroy_count);
+    printf(
+        "source NDJSON decision allocator cleanup imbalance: outstanding=%lu "
+        "destroys=%lu\n",
+        (unsigned long)counter.outstanding,
+        (unsigned long)counter.destroy_count);
     return 1;
   }
   return 0;
@@ -2968,7 +2970,7 @@ int main(void) {
   failures +=
       expect_compound_source_decisions_steady_state_has_no_receiver_alloc();
   failures +=
-      expect_source_array_decisions_steady_state_has_no_receiver_alloc();
+      expect_source_ndjson_decisions_steady_state_has_no_receiver_alloc();
   failures +=
       expect_mixed_observer_source_decisions_have_no_hot_path_receiver_alloc();
   failures +=

@@ -11,9 +11,10 @@ iprefix, range, date, in, exists, AND/OR/NOT composition, JSON Pointer paths,
 array indexes, wildcards, recursive descent, shorthand operators, and date
 macros. Query streams support seekable `FILE *` inputs, callback-source
 decision streams, callback-scoped seekable range payloads, callback-scoped
-spooled payloads, caller-managed payload sinks, stop controls, root-array
-candidate streams, nested top-level array flattening, and large-input memory
-gates without hidden full-document materialization.
+spooled payloads, caller-managed payload sinks, stop controls, NDJSON/repeated
+top-level JSON candidate streams, and large-input memory gates without hidden
+full-document materialization. Root arrays are rejected as candidate-stream
+input because they are not NDJSON.
 
 ## Selector AST Architecture
 
@@ -131,9 +132,9 @@ while removing repeated stdio lock traffic from source/file rewrite paths.
 Public `FILE *` payload copies also hold the caller-provided output lock once
 while copying spooled or seekable payload bytes, preserving the public payload
 API while avoiding repeated output-side lock branches.
-Callback-source decision streams inspect one bounded prefix chunk and use
-no-capture parsing for ordinary non-array streams, while preserving sink capture
-for root-array recursion on non-seekable inputs.
+Callback-source decision streams inspect one bounded prefix chunk, reject root
+arrays as invalid NDJSON candidate streams, and use no-capture parsing for
+ordinary streams.
 The C allocator contract tests warm representative query paths, freeze the
 receiver allocator, and then rerun candidate scans; any attempted liblql-owned
 allocation in the warmed decision hot path fails `make test`.

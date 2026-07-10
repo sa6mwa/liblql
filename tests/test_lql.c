@@ -2033,126 +2033,90 @@ static void expect_source_spooled_payload_api(void) {
   }
 }
 
-static void expect_stream_array_items(void) {
-  static const char input[] =
-      "[{\"status\":\"open\"}, {\"status\":\"closed\"}]";
-  FILE *fp;
-  lql_selector *selector;
-  lql_query_result result;
-  stream_seen seen;
-  lql_error error;
-  lql_status st;
-
-  memset(&seen, 0, sizeof(seen));
-  lql_error_init(&error);
-  st =
-      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
-  if (st != LQL_STATUS_OK) {
-    printf("array stream parse failed: %s\n", error.message);
-    ++failures;
-    return;
-  }
-  fp = tmpfile();
-  if (fp == NULL) {
-    printf("array tmpfile failed\n");
-    test_ctx->selector_destroy(test_ctx, selector);
-    ++failures;
-    return;
-  }
-  if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||
-      fseek(fp, 0L, SEEK_SET) != 0) {
-    printf("array tmpfile write/seek failed\n");
-    fclose(fp);
-    test_ctx->selector_destroy(test_ctx, selector);
-    ++failures;
-    return;
-  }
-  memset(&result, 0, sizeof(result));
-  st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
-                                      &seen, &result, &error);
-  fclose(fp);
-  test_ctx->selector_destroy(test_ctx, selector);
-  if (st != LQL_STATUS_OK) {
-    printf("array stream query failed: %s\n", error.message);
-    ++failures;
-    return;
-  }
-  if (seen.calls != 2 || seen.matched != 1 ||
-      result.candidates_seen != (lql_uint64)2 ||
-      result.candidates_matched != (lql_uint64)1 ||
-      result.bytes_read != (lql_uint64)40) {
-    printf("array stream counts mismatch calls=%d matched=%d\n", seen.calls,
-           seen.matched);
-    ++failures;
-  }
-  if (seen.offsets[0] != (lql_uint64)1 || seen.sizes[0] != (lql_uint64)17 ||
-      seen.offsets[1] != (lql_uint64)20 || seen.sizes[1] != (lql_uint64)19) {
-    printf("array stream ranges mismatch\n");
-    ++failures;
-  }
-}
-
-static void expect_stream_nested_array_items(void) {
-  static const char input[] =
-      "[{\"id\":\"a\"},[{\"id\":\"b\"}],{\"id\":\"c\"}]";
-  FILE *fp;
-  FILE *out;
+static void stream_root_arrays_rejected_helper(void) {
+  static const char input[] = "[{\"status\":\"open\"}]\n";
   lql_selector *selector;
   lql_query_result result;
   stream_seen seen;
   payload_seen payload;
   memory_sink sink;
   chunk_reader reader;
-  char buf[64];
-  const char *expected_payload;
-  long end;
-  size_t got;
+  FILE *fp;
+  FILE *out;
   lql_error error;
   lql_status st;
 
+  selector = NULL;
   lql_error_init(&error);
-  st = test_ctx->selector_parse(test_ctx, "/id=\"b\"", &selector, &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
-    printf("nested array stream parse failed: %s\n", error.message);
+    printf("root array rejection parse failed: %s\n", error.message);
     ++failures;
     return;
   }
+
   fp = tmpfile();
   if (fp == NULL) {
-    printf("nested array decision tmpfile failed\n");
+    printf("root array rejection tmpfile failed\n");
     test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
   if (fwrite(input, 1u, strlen(input), fp) != strlen(input) ||
       fseek(fp, 0L, SEEK_SET) != 0) {
-    printf("nested array decision tmpfile write/seek failed\n");
+    printf("root array rejection tmpfile write/seek failed\n");
     fclose(fp);
     test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
+
   memset(&seen, 0, sizeof(seen));
   memset(&result, 0, sizeof(result));
   lql_error_init(&error);
   st = test_ctx->query_file_decisions(test_ctx, selector, fp, record_decision,
                                       &seen, &result, &error);
-  if (st != LQL_STATUS_OK) {
-    printf("nested array file decision query failed: %s\n", error.message);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message,
+             "root arrays are not valid NDJSON candidate streams") != 0 ||
+      seen.calls != 0 || result.candidates_seen != (lql_uint64)0) {
+    printf("root array file decision rejection mismatch: status=%s error=%s "
+           "calls=%d seen=%lu\n",
+           lql_status_string(st), error.message, seen.calls,
+           (unsigned long)result.candidates_seen);
     fclose(fp);
     test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
-  if (seen.calls != 3 || seen.matched != 1 ||
-      result.candidates_seen != (lql_uint64)3 ||
-      result.candidates_matched != (lql_uint64)1) {
-    printf("nested array file decision mismatch calls=%d matched=%d seen=%lu "
-           "matched_result=%lu\n",
-           seen.calls, seen.matched, (unsigned long)result.candidates_seen,
-           (unsigned long)result.candidates_matched);
+
+  if (fseek(fp, 0L, SEEK_SET) != 0) {
+    printf("root array rejection payload seek failed\n");
+    fclose(fp);
+    test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
+    return;
   }
+  memset(&result, 0, sizeof(result));
+  memset(&sink, 0, sizeof(sink));
+  lql_error_init(&error);
+  st = test_ctx->query_file_matches(test_ctx, selector, fp, record_payload_sink,
+                                    &sink, &result, &error);
+  fclose(fp);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message,
+             "root arrays are not valid NDJSON candidate streams") != 0 ||
+      result.candidates_seen != (lql_uint64)0) {
+    printf("root array file payload rejection mismatch: status=%s error=%s "
+           "seen=%lu\n",
+           lql_status_string(st), error.message,
+           (unsigned long)result.candidates_seen);
+    test_ctx->selector_destroy(test_ctx, selector);
+    ++failures;
+    return;
+  }
+
   memset(&seen, 0, sizeof(seen));
   memset(&reader, 0, sizeof(reader));
   memset(&result, 0, sizeof(result));
@@ -2163,53 +2127,22 @@ static void expect_stream_nested_array_items(void) {
   st =
       test_ctx->query_source_decisions(test_ctx, selector, read_chunk, &reader,
                                        record_decision, &seen, &result, &error);
-  if (st != LQL_STATUS_OK) {
-    printf("nested array source decision query failed: %s\n", error.message);
-    fclose(fp);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message,
+             "root arrays are not valid NDJSON candidate streams") != 0 ||
+      seen.calls != 0 || result.candidates_seen != (lql_uint64)0) {
+    printf("root array source decision rejection mismatch: status=%s error=%s "
+           "calls=%d seen=%lu\n",
+           lql_status_string(st), error.message, seen.calls,
+           (unsigned long)result.candidates_seen);
     test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
   }
-  if (reader.calls <= 1 || seen.calls != 3 || seen.matched != 1 ||
-      result.candidates_seen != (lql_uint64)3 ||
-      result.candidates_matched != (lql_uint64)1) {
-    printf("nested array source decision mismatch calls=%d matched=%d "
-           "seen=%lu matched_result=%lu reader_calls=%d\n",
-           seen.calls, seen.matched, (unsigned long)result.candidates_seen,
-           (unsigned long)result.candidates_matched, reader.calls);
-    ++failures;
-  }
-  if (fseek(fp, 0L, SEEK_SET) != 0) {
-    printf("nested array range payload seek failed\n");
-    fclose(fp);
-    test_ctx->selector_destroy(test_ctx, selector);
-    ++failures;
-    return;
-  }
-  memset(&sink, 0, sizeof(sink));
-  memset(&result, 0, sizeof(result));
-  lql_error_init(&error);
-  st = test_ctx->query_file_matches(test_ctx, selector, fp, record_payload_sink,
-                                    &sink, &result, &error);
-  fclose(fp);
-  if (st != LQL_STATUS_OK) {
-    printf("nested array file payload query failed: %s\n", error.message);
-    test_ctx->selector_destroy(test_ctx, selector);
-    ++failures;
-    return;
-  }
-  if (result.candidates_seen != (lql_uint64)3 ||
-      result.candidates_matched != (lql_uint64)1 ||
-      strcmp(sink.data, "{\"id\":\"b\"}") != 0) {
-    printf("nested array file payload mismatch seen=%lu matched=%lu "
-           "payload=%s\n",
-           (unsigned long)result.candidates_seen,
-           (unsigned long)result.candidates_matched, sink.data);
-    ++failures;
-  }
+
   out = tmpfile();
   if (out == NULL) {
-    printf("nested array payload tmpfile failed\n");
+    printf("root array rejection output tmpfile failed\n");
     test_ctx->selector_destroy(test_ctx, selector);
     ++failures;
     return;
@@ -2225,46 +2158,26 @@ static void expect_stream_nested_array_items(void) {
   st = test_ctx->query_source_spooled_matches(test_ctx, selector, read_chunk,
                                               &reader, record_spooled_payload,
                                               &payload, &result, &error);
-  test_ctx->selector_destroy(test_ctx, selector);
-  if (st != LQL_STATUS_OK) {
-    printf("nested array source payload query failed: %s\n", error.message);
-    fclose(out);
-    ++failures;
-    return;
-  }
-  end = ftell(out);
-  if (end < 0 || end >= (long)sizeof(buf) || fseek(out, 0L, SEEK_SET) != 0) {
-    printf("nested array payload output sizing failed\n");
-    fclose(out);
-    ++failures;
-    return;
-  }
-  got = fread(buf, 1u, (size_t)end, out);
   fclose(out);
-  buf[got] = '\0';
-  if (payload.calls != 1 || result.candidates_seen != (lql_uint64)3 ||
-      result.candidates_matched != (lql_uint64)1 ||
-      strcmp(buf, "{\"id\":\"b\"}") != 0) {
-    printf("nested array payload mismatch calls=%d seen=%lu matched=%lu "
-           "payload=%s\n",
-           payload.calls, (unsigned long)result.candidates_seen,
-           (unsigned long)result.candidates_matched, buf);
+  test_ctx->selector_destroy(test_ctx, selector);
+  if (st != LQL_STATUS_JSON_ERROR ||
+      strcmp(error.message,
+             "root arrays are not valid NDJSON candidate streams") != 0 ||
+      payload.calls != 0 || result.candidates_seen != (lql_uint64)0) {
+    printf("root array source payload rejection mismatch: status=%s error=%s "
+           "calls=%d seen=%lu\n",
+           lql_status_string(st), error.message, payload.calls,
+           (unsigned long)result.candidates_seen);
     ++failures;
   }
-  expected_payload = strstr(input, "{\"id\":\"b\"}");
-  if (expected_payload == NULL) {
-    printf("nested array expected payload fixture mismatch\n");
-    ++failures;
-  } else if (payload.indexes[0] != (lql_uint64)1 ||
-             payload.offsets[0] != (lql_uint64)(expected_payload - input) ||
-             payload.sizes[0] != (lql_uint64)strlen("{\"id\":\"b\"}")) {
-    printf("nested array source payload coordinates mismatch index=%lu "
-           "offset=%lu size=%lu expected_offset=%lu\n",
-           (unsigned long)payload.indexes[0], (unsigned long)payload.offsets[0],
-           (unsigned long)payload.sizes[0],
-           (unsigned long)(expected_payload - input));
-    ++failures;
-  }
+}
+
+static void expect_stream_array_items(void) {
+  stream_root_arrays_rejected_helper();
+}
+
+static void expect_stream_nested_array_items(void) {
+  stream_root_arrays_rejected_helper();
 }
 
 static void expect_stream_stop_controls(void) {
@@ -5319,8 +5232,8 @@ static void expect_file_range_candidate_mutation_api(void) {
   const char *mutation;
   char buf[512];
   size_t len;
-  static const char doc[] = "[{\"id\":\"a\",\"status\":\"open\"},{\"id\":\"b\","
-                            "\"status\":\"closed\"}]";
+  static const char doc[] = "{\"id\":\"a\",\"status\":\"open\"}\n"
+                            "{\"id\":\"b\",\"status\":\"closed\"}\n";
 
   source = tmpfile();
   out = tmpfile();
@@ -5504,9 +5417,9 @@ static void expect_file_range_candidate_mutation_api(void) {
     {
       FILE *nested_source;
       FILE *nested_out;
-      static const char nested_doc[] =
-          "[{\"id\":\"a\",\"status\":\"open\"},[{\"id\":\"b\",\"status\":"
-          "\"open\"}],{\"id\":\"c\",\"status\":\"closed\"}]";
+      static const char nested_doc[] = "{\"id\":\"a\",\"status\":\"open\"}\n"
+                                       "{\"id\":\"b\",\"status\":\"open\"}\n"
+                                       "{\"id\":\"c\",\"status\":\"closed\"}\n";
       nested_source = tmpfile();
       nested_out = tmpfile();
       if (nested_source == NULL || nested_out == NULL) {
@@ -5572,8 +5485,8 @@ static void expect_source_candidate_mutation_api(void) {
   const char *mutation;
   char buf[512];
   size_t len;
-  static const char doc[] = "[{\"id\":\"a\",\"status\":\"open\"},{\"id\":\"b\","
-                            "\"status\":\"closed\"}]";
+  static const char doc[] = "{\"id\":\"a\",\"status\":\"open\"}\n"
+                            "{\"id\":\"b\",\"status\":\"closed\"}\n";
 
   out = tmpfile();
   if (out == NULL) {
@@ -5942,9 +5855,9 @@ static void expect_source_candidate_mutation_api(void) {
       printf("source candidate mutation nested tmpfile failed\n");
       ++failures;
     } else {
-      static const char nested_doc[] =
-          "[{\"id\":\"a\",\"status\":\"open\"},[{\"id\":\"b\",\"status\":"
-          "\"open\"}],{\"id\":\"c\",\"status\":\"closed\"}]";
+      static const char nested_doc[] = "{\"id\":\"a\",\"status\":\"open\"}\n"
+                                       "{\"id\":\"b\",\"status\":\"open\"}\n"
+                                       "{\"id\":\"c\",\"status\":\"closed\"}\n";
       memset(&reader, 0, sizeof(reader));
       reader.data = nested_doc;
       reader.len = strlen(nested_doc);
@@ -5982,9 +5895,10 @@ static void expect_source_candidate_mutation_api(void) {
       printf("source candidate mutation mixed tmpfile failed\n");
       ++failures;
     } else {
-      static const char mixed_doc[] =
-          "[{\"id\":\"a\",\"status\":\"open\"},7,[{\"id\":\"b\",\"status\":"
-          "\"open\"}],true]";
+      static const char mixed_doc[] = "{\"id\":\"a\",\"status\":\"open\"}\n"
+                                      "7\n"
+                                      "{\"id\":\"b\",\"status\":\"open\"}\n"
+                                      "true\n";
       memset(&reader, 0, sizeof(reader));
       reader.data = mixed_doc;
       reader.len = strlen(mixed_doc);
@@ -6145,7 +6059,7 @@ static void expect_source_candidate_mutation_api(void) {
       fail_reader.data = doc;
       fail_reader.len = strlen(doc);
       fail_reader.chunk_size = 6u;
-      fail_reader.fail_offset = strlen("{\"id\":\"a\",\"status\":\"open\"},");
+      fail_reader.fail_offset = strlen("{\"id\":\"a\",\"status\":\"open\"}\n");
       lql_error_init(&error);
       st = test_ctx->mutate_source_candidates(
           test_ctx, selector, plan, read_until_offset_then_fail, &fail_reader,
@@ -6154,7 +6068,7 @@ static void expect_source_candidate_mutation_api(void) {
           strcmp(error.message, "source read failed") != 0 ||
           result.candidates_seen != 1u || result.candidates_matched != 1u ||
           result.bytes_read !=
-              (lql_uint64)strlen("{\"id\":\"a\",\"status\":\"open\"},") ||
+              (lql_uint64)strlen("{\"id\":\"a\",\"status\":\"open\"}\n") ||
           fail_reader.calls <= 1) {
         printf("source candidate mutation partial read error mismatch: "
                "status=%s seen=%lu matched=%lu bytes=%lu reads=%d error=%s\n",
@@ -6196,13 +6110,14 @@ static void expect_projected_candidate_mutation_api(void) {
   char buf[512];
   size_t len;
   static const char doc[] =
-      "[{\"id\":\"a\",\"status\":\"open\",\"state\":{\"count\":1},"
-      "\"drop\":true},{\"id\":\"b\",\"status\":\"closed\",\"state\":{\"count\":"
-      "2},\"drop\":true}]";
+      "{\"id\":\"a\",\"status\":\"open\",\"state\":{\"count\":1},"
+      "\"drop\":true}\n"
+      "{\"id\":\"b\",\"status\":\"closed\",\"state\":{\"count\":2},"
+      "\"drop\":true}\n";
   static const char nested_doc[] =
-      "[[{\"id\":\"a\",\"status\":\"open\",\"state\":{\"count\":1}},"
-      "{\"id\":\"b\",\"status\":\"open\",\"state\":{\"count\":1}}],"
-      "{\"id\":\"c\",\"status\":\"open\",\"state\":{\"count\":1}}]";
+      "{\"id\":\"a\",\"status\":\"open\",\"state\":{\"count\":1}}\n"
+      "{\"id\":\"b\",\"status\":\"open\",\"state\":{\"count\":1}}\n"
+      "{\"id\":\"c\",\"status\":\"open\",\"state\":{\"count\":1}}\n";
 
   source = tmpfile();
   out = tmpfile();
@@ -7334,9 +7249,9 @@ static void expect_sdk_contract_manifest(void) {
        expect_stream_large_irrelevant_scalar_api},
       {"streaming", "callback-source spooled matched payloads",
        expect_source_spooled_payload_api},
-      {"streaming", "top-level array candidate streams",
+      {"streaming", "root arrays are rejected as NDJSON candidate streams",
        expect_stream_array_items},
-      {"streaming", "nested array candidate streams",
+      {"streaming", "nested root arrays are rejected as NDJSON streams",
        expect_stream_nested_array_items},
       {"streaming", "stream stop controls", expect_stream_stop_controls},
       {"streaming", "query and payload public API error contracts",

@@ -587,9 +587,7 @@ The stream API must handle:
 
 - one top-level JSON value;
 - NDJSON / repeated top-level JSON values;
-- top-level arrays as streams of candidate values, including recursively
-  flattened nested top-level array candidates where the public API can do so
-  without hidden full-value materialization;
+- root arrays as hard errors for NDJSON candidate-stream entry points;
 - large candidates with bounded memory;
 - decision-only mode;
 - plus-value mode with callback-scoped payload access;
@@ -640,25 +638,17 @@ a JSON parser workaround:
 - matched seekable candidates expose callback-scoped seekable range payloads;
 - seekable decision-only and seekable plus-value paths use lonejson
   `CAPTURE_NONE`;
-- callback-source decision streams discard ordinary candidate payload bytes as
-  they are parsed and use callback-scoped spooled replay only for nested
-  top-level array candidates because non-seekable sources cannot be rewound by
-  offset;
-- callback-source decision streams may inspect one bounded prefix chunk to route
-  ordinary non-array streams through lonejson `CAPTURE_NONE`; if the prefix is
-  empty, all whitespace, or starts with `[`, they must retain sink capture so
-  root-array recursion remains correct;
+- callback-source decision streams inspect one bounded prefix chunk and reject
+  root arrays before candidate evaluation;
+- callback-source decision streams route ordinary streams through lonejson
+  `CAPTURE_NONE`;
 - non-seekable plus-value paths use callback-scoped spooled handles and caller
   sinks rather than contiguous candidate materialization.
 
 The public liblql v0 callback-source framing contract covers one stream of
-top-level JSON values and root-array item streams as exposed by lonejson
-`v0.41.0`. It does not claim the Go implementation's narrower mixed framing
-case where a non-seekable source starts with a top-level array and then
-continues with more top-level values. That shape is an accepted v0 non-parity
-case documented in `docs/liblql-dependency-gaps.md`, not current liblql
-implementation work. liblql must not materialize the root array or the whole
-source to emulate it.
+top-level JSON values. A root array entering this NDJSON/candidate-stream flow
+is rejected rather than flattened. liblql must not materialize the root array
+or the whole source to emulate array-item candidate streams.
 
 Seekable range APIs use 64-bit liblql offsets and sizes. When a platform
 `FILE *` seek cannot represent a 64-bit range offset, liblql must fail the
@@ -1271,12 +1261,11 @@ Current implementation status:
   applies supported concrete-path, existing-position wildcard, and
   existing-position recursive mutations to matched candidates;
 - public SDK seekable and callback-source candidate-stream mutation exposes
-  the selector-plus-plan path used by `clql`: top-level arrays are expanded as
-  candidate streams, nested top-level array candidates are recursively
-  flattened where the stream surface supports candidate payload access, matched
+  the selector-plus-plan path used by `clql`: NDJSON/repeated top-level values
+  are processed as candidate streams, root arrays are rejected, matched
   candidates are mutated, unmatched candidates are preserved unless
   `matches_only` is set, match-all candidate-stream mutation mutates every
-  top-level array candidate, option-aware variants enforce match, candidate, and
+  repeated-value candidate, option-aware variants enforce match, candidate, and
   byte stop limits, and result counters report candidates and matches;
 - brace shorthand mutation execution is covered by C SDK contract tests and
   Go-backed CLI parity tests for nested set, increment, delete, and path
@@ -1405,10 +1394,8 @@ Current implementation status:
   selectors without being dropped from decision accounting.
   Projection-before-mutation candidate-stream tests cover both seekable and
   callback-source inputs in preserve-unmatched and matches-only modes.
-  C-native streaming tests also cover recursive flattening of nested
-  top-level array candidates for seekable decision streams, callback-source
-  decision streams, seekable range payload streams, and callback-source spooled
-  match payloads.
+  C-native streaming tests also cover root-array rejection for seekable and
+  callback-source NDJSON candidate streams.
   Handle-producing selector, projection, and mutation APIs also have
   C-only ownership contract tests for optional diagnostics, output-handle
   clearing on parse failure, empty-selector ownership, and `NULL` cleanup/count
