@@ -17815,6 +17815,39 @@ static lonejson_status lonejson__json_visit_one_cursor(
   return status;
 }
 
+static size_t lonejson__json_control_offset(const unsigned char *data,
+                                            size_t len) {
+  size_t i;
+  size_t ones;
+  size_t highs;
+  size_t limit;
+  size_t word;
+
+  if (data == NULL) {
+    return len;
+  }
+  ones = ~(size_t)0 / (size_t)0xffu;
+  highs = ones * (size_t)0x80u;
+  limit = len - (len % sizeof(word));
+  for (i = 0u; i < limit; i += sizeof(word)) {
+    memcpy(&word, data + i, sizeof(word));
+    if (((word - (ones * (size_t)0x20u)) & ~word & highs) != 0u) {
+      size_t j;
+      for (j = 0u; j < sizeof(word); ++j) {
+        if (data[i + j] < 0x20u) {
+          return i + j;
+        }
+      }
+    }
+  }
+  for (i = limit; i < len; ++i) {
+    if (data[i] < 0x20u) {
+      return i;
+    }
+  }
+  return len;
+}
+
 static lonejson_status lonejson__json_skip_string(lonejson__json_io *io,
                                                   size_t limit) {
   size_t decoded_bytes = 0u;
@@ -17828,12 +17861,21 @@ static lonejson_status lonejson__json_skip_string(lonejson__json_io *io,
 
     span = lonejson__json_cursor_plain_span(io, &available, &uses_read_buffer);
     while (span != NULL && available != 0u) {
-      while (plain_span < available) {
-        unsigned char b = span[plain_span];
-        if (b == '"' || b == '\\' || b < 0x20u) {
-          break;
+      {
+        const unsigned char *quote;
+        const unsigned char *escape;
+        size_t control;
+
+        quote = (const unsigned char *)memchr(span, '"', available);
+        plain_span = quote == NULL ? available : (size_t)(quote - span);
+        escape = (const unsigned char *)memchr(span, '\\', plain_span);
+        if (escape != NULL) {
+          plain_span = (size_t)(escape - span);
         }
-        ++plain_span;
+        control = lonejson__json_control_offset(span, plain_span);
+        if (control < plain_span) {
+          plain_span = control;
+        }
       }
       if (plain_span != 0u) {
         if (io->limits.max_total_bytes != 0u &&
@@ -18213,12 +18255,21 @@ lonejson__json_read_key_match(lonejson__json_io *io, const char *key,
 
     span = lonejson__json_cursor_plain_span(io, &available, &uses_read_buffer);
     while (span != NULL && available != 0u) {
-      while (plain_span < available) {
-        unsigned char b = span[plain_span];
-        if (b == '"' || b == '\\' || b < 0x20u) {
-          break;
+      {
+        const unsigned char *quote;
+        const unsigned char *escape;
+        size_t control;
+
+        quote = (const unsigned char *)memchr(span, '"', available);
+        plain_span = quote == NULL ? available : (size_t)(quote - span);
+        escape = (const unsigned char *)memchr(span, '\\', plain_span);
+        if (escape != NULL) {
+          plain_span = (size_t)(escape - span);
         }
-        ++plain_span;
+        control = lonejson__json_control_offset(span, plain_span);
+        if (control < plain_span) {
+          plain_span = control;
+        }
       }
       if (plain_span != 0u) {
         if (io->limits.max_total_bytes != 0u &&
