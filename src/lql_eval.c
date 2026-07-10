@@ -96,6 +96,11 @@ typedef struct eval_doc {
   int fast_direct_key_match;
   int fast_direct_pending_active;
   int fast_direct_value_target;
+  size_t fast_recursive_depth;
+  size_t fast_recursive_key_len;
+  int fast_recursive_key_active;
+  int fast_recursive_key_match;
+  int fast_recursive_next_value_target;
   size_t fast_direct_match_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
   size_t fast_direct_array_index_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
   char fast_direct_container_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
@@ -327,6 +332,19 @@ static int selector_fast_direct_scalar_eligible(const lql_selector *selector) {
   }
   return selector->field_segment_kinds[selector->field_segment_count - 1u] ==
          LQL_FIELD_SEGMENT_LITERAL;
+}
+
+static int
+selector_fast_recursive_suffix_scalar_eligible(const lql_selector *selector) {
+  return selector != NULL && selector->hit_count == 1u &&
+         selector->predicate_count == 1u && selector->predicates != NULL &&
+         selector->predicates[0] == selector &&
+         selector->field_path_recursive_literal_suffix &&
+         selector->field_segment_count == 1u &&
+         selector->field_segment_kinds != NULL &&
+         selector->field_segment_kinds[0] == LQL_FIELD_SEGMENT_LITERAL &&
+         selector->observer_feature != 0u &&
+         selector->observer_family < LQL_EVAL_FAMILY_COUNT;
 }
 
 static int
@@ -583,6 +601,11 @@ static void reset_doc(eval_doc *doc) {
   doc->fast_direct_key_match = 0;
   doc->fast_direct_pending_active = 0;
   doc->fast_direct_value_target = 0;
+  doc->fast_recursive_depth = 0u;
+  doc->fast_recursive_key_len = 0u;
+  doc->fast_recursive_key_active = 0;
+  doc->fast_recursive_key_match = 0;
+  doc->fast_recursive_next_value_target = 0;
   memset(doc->fast_direct_match_stack, 0, sizeof(doc->fast_direct_match_stack));
   memset(doc->fast_direct_array_index_stack, 0,
          sizeof(doc->fast_direct_array_index_stack));
@@ -1936,10 +1959,7 @@ static void observe_exact_stream_end(eval_doc *doc,
   if (doc->fast_exact_selector != NULL) {
     selector = doc->fast_exact_selector;
     if (doc->fast_exact_path_active && !doc->fast_exact_hit &&
-        !doc->fast_exact_miss && doc->scalar_len == selector->value_len &&
-        (selector->value_len > doc->prefix_len ||
-         memcmp(doc->prefix_buf, selector->value_data, selector->value_len) ==
-             0)) {
+        !doc->fast_exact_miss && doc->scalar_len == selector->value_len) {
       hit_mark_fast(doc, selector);
     }
     return;
@@ -2909,8 +2929,7 @@ static lonejson_status fast_flat_begin_value(eval_doc *doc, int scalar) {
     if (scalar) {
       doc->scalar_path_features = LQL_SELECTOR_FEATURE_EXACT;
       doc->prefix_need = doc->fast_exact_selector->observer_prefix_need;
-      doc->scalar_stream_features =
-          LQL_SELECTOR_FEATURE_EXACT | LQL_EVAL_FEATURE_PREFIX_CAPTURE;
+      doc->scalar_stream_features = LQL_SELECTOR_FEATURE_EXACT;
     }
     return LONEJSON_STATUS_OK;
   }
@@ -3357,8 +3376,7 @@ static lonejson_status fast_direct_prepare_scalar(eval_doc *doc) {
     doc->fast_exact_miss = 0;
     doc->scalar_path_features = LQL_SELECTOR_FEATURE_EXACT;
     doc->prefix_need = doc->fast_exact_selector->observer_prefix_need;
-    doc->scalar_stream_features =
-        LQL_SELECTOR_FEATURE_EXACT | LQL_EVAL_FEATURE_PREFIX_CAPTURE;
+    doc->scalar_stream_features = LQL_SELECTOR_FEATURE_EXACT;
     return LONEJSON_STATUS_OK;
   }
   memset(doc->scalar_family_counts, 0, sizeof(doc->scalar_family_counts));
@@ -3742,6 +3760,326 @@ static void init_fast_direct_scalar_visitor(lonejson_value_visitor *visitor) {
   visitor->null_value = fast_direct_null;
 }
 
+static lonejson_status fast_recursive_prepare_value(eval_doc *doc, int scalar) {
+  const lql_selector *selector;
+
+  selector = doc == NULL ? NULL : doc->selector;
+  if (doc == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  doc->scalar_path_features = 0u;
+  doc->scalar_stream_features = 0u;
+  doc->scalar_len = 0u;
+  doc->contains_tail_len = 0u;
+  doc->contains_tail_need = 0u;
+  doc->prefix_len = 0u;
+  doc->prefix_need = 0u;
+  if (selector == NULL || !doc->fast_recursive_next_value_target ||
+      hit_marked_fast(doc, selector)) {
+    doc->fast_recursive_next_value_target = 0;
+    return LONEJSON_STATUS_OK;
+  }
+  doc->fast_recursive_next_value_target = 0;
+  memset(doc->scalar_family_counts, 0, sizeof(doc->scalar_family_counts));
+  if (doc->stream_misses != NULL) {
+    stream_miss_clear_fast(doc, selector);
+  }
+  doc->scalar_path_features = selector->observer_feature;
+  scalar_family_append_fast(doc, selector);
+  doc->contains_tail_need = selector->observer_contains_tail_need;
+  doc->prefix_need = selector->observer_prefix_need;
+  if (!scalar) {
+    observe_prepared_value(doc, "", 0, 1, 0);
+    return LONEJSON_STATUS_OK;
+  }
+  doc->scalar_stream_features =
+      doc->scalar_path_features &
+      (LQL_SELECTOR_FEATURE_CONTAINS | LQL_SELECTOR_FEATURE_PREFIX |
+       LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL);
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) == 0u &&
+      (doc->scalar_stream_features &
+       (LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL)) != 0u) {
+    doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
+  }
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
+    if (!ensure_contains_tail(doc)) {
+      return LONEJSON_STATUS_ALLOCATION_FAILED;
+    }
+    observe_contains_stream_begin(doc, doc->selector, NULL);
+  }
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
+    observe_prefix_stream_begin(doc, doc->selector, NULL);
+  }
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
+    observe_in_stream_begin(doc, doc->selector, NULL);
+  }
+  observe_scalar_exists_begin(doc, doc->selector, NULL);
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_recursive_object_begin(void *user,
+                                                   lonejson_error *error) {
+  eval_doc *doc;
+  lonejson_status st;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_recursive_depth == 0u) {
+    doc->root_kind = '{';
+  } else if (doc->fast_recursive_next_value_target) {
+    st = fast_recursive_prepare_value(doc, 0);
+    if (st != LONEJSON_STATUS_OK) {
+      return st;
+    }
+  }
+  ++doc->fast_recursive_depth;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_recursive_object_end(void *user,
+                                                 lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_recursive_depth != 0u) {
+    --doc->fast_recursive_depth;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_recursive_array_begin(void *user,
+                                                  lonejson_error *error) {
+  eval_doc *doc;
+  lonejson_status st;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_recursive_depth == 0u) {
+    doc->root_kind = '[';
+  } else if (doc->fast_recursive_next_value_target) {
+    st = fast_recursive_prepare_value(doc, 0);
+    if (st != LONEJSON_STATUS_OK) {
+      return st;
+    }
+  }
+  ++doc->fast_recursive_depth;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_recursive_array_end(void *user,
+                                                lonejson_error *error) {
+  return fast_recursive_object_end(user, error);
+}
+
+static lonejson_status fast_recursive_key_begin(void *user,
+                                                lonejson_error *error) {
+  eval_doc *doc;
+  const lql_selector *selector;
+  (void)error;
+  doc = (eval_doc *)user;
+  selector = doc->selector;
+  doc->fast_recursive_key_active = selector != NULL &&
+                                   doc->fast_recursive_depth != 0u &&
+                                   !hit_marked_fast(doc, selector);
+  doc->fast_recursive_key_match = doc->fast_recursive_key_active;
+  doc->fast_recursive_key_len = 0u;
+  doc->fast_recursive_next_value_target = 0;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_recursive_key_chunk(void *user, const char *data,
+                                                size_t len,
+                                                lonejson_error *error) {
+  eval_doc *doc;
+  const lql_selector *selector;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (!doc->fast_recursive_key_active || !doc->fast_recursive_key_match) {
+    return LONEJSON_STATUS_OK;
+  }
+  selector = doc->selector;
+  if (!fast_direct_segment_matches(selector, 0u, data, len,
+                                   doc->fast_recursive_key_len)) {
+    doc->fast_recursive_key_match = 0;
+  }
+  doc->fast_recursive_key_len += len;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_recursive_key_end(void *user,
+                                              lonejson_error *error) {
+  eval_doc *doc;
+  const lql_selector *selector;
+  (void)error;
+  doc = (eval_doc *)user;
+  selector = doc->selector;
+  doc->fast_recursive_next_value_target =
+      doc->fast_recursive_key_active && doc->fast_recursive_key_match &&
+      selector != NULL &&
+      doc->fast_recursive_key_len == selector->field_segment_lens[0];
+  doc->fast_recursive_key_active = 0;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_recursive_string_begin(void *user,
+                                                   lonejson_error *error) {
+  (void)error;
+  return fast_recursive_prepare_value((eval_doc *)user, 1);
+}
+
+static lonejson_status fast_recursive_string_chunk(void *user, const char *data,
+                                                   size_t len,
+                                                   lonejson_error *error) {
+  return fast_flat_string_chunk(user, data, len, error);
+}
+
+static lonejson_status fast_recursive_string_end(void *user,
+                                                 lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_recursive_depth == 0u) {
+    doc->root_kind = 's';
+  }
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
+    observe_prefix_stream_end(doc, doc->selector, NULL);
+  }
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
+    observe_exact_stream_end(doc, doc->selector, NULL);
+  }
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
+    observe_temporal_stream_end(doc, doc->selector, NULL);
+  }
+  doc->scalar_len = 0u;
+  doc->scalar_stream_features = 0u;
+  doc->contains_tail_len = 0u;
+  doc->contains_tail_need = 0u;
+  doc->prefix_len = 0u;
+  doc->prefix_need = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_recursive_number_begin(void *user,
+                                                   lonejson_error *error) {
+  eval_doc *doc;
+  lonejson_status st;
+  st = fast_recursive_string_begin(user, error);
+  if (st != LONEJSON_STATUS_OK) {
+    return st;
+  }
+  doc = (eval_doc *)user;
+  if (doc->scalar_path_features == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  doc->scalar_stream_features |=
+      doc->scalar_path_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
+      0u) {
+    if ((doc->scalar_stream_features &
+         (LQL_SELECTOR_FEATURE_PREFIX | LQL_SELECTOR_FEATURE_EXACT |
+          LQL_SELECTOR_FEATURE_TEMPORAL)) == 0u) {
+      doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
+    }
+    numeric_stream_reset(doc);
+    if (doc->prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
+      doc->prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
+      doc->prefix_buf[0] = '\0';
+    }
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_recursive_number_chunk(void *user, const char *data,
+                                                   size_t len,
+                                                   lonejson_error *error) {
+  return fast_flat_number_chunk(user, data, len, error);
+}
+
+static lonejson_status fast_recursive_number_end(void *user,
+                                                 lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_recursive_depth == 0u) {
+    doc->root_kind = 'n';
+  }
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
+    observe_prefix_stream_end(doc, doc->selector, NULL);
+  }
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
+    observe_exact_stream_end(doc, doc->selector, NULL);
+  }
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
+    observe_temporal_stream_end(doc, doc->selector, NULL);
+  }
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
+      0u) {
+    observe_numeric_range_stream_end(doc, doc->selector, NULL);
+  }
+  doc->scalar_len = 0u;
+  doc->scalar_stream_features = 0u;
+  doc->contains_tail_len = 0u;
+  doc->contains_tail_need = 0u;
+  doc->prefix_len = 0u;
+  doc->prefix_need = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_recursive_boolean(void *user, int value,
+                                              lonejson_error *error) {
+  eval_doc *doc;
+  lonejson_status st;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_recursive_depth == 0u) {
+    doc->root_kind = 'b';
+  }
+  st = fast_recursive_prepare_value(doc, 1);
+  if (st != LONEJSON_STATUS_OK) {
+    return st;
+  }
+  if (doc->scalar_path_features != 0u) {
+    observe_prepared_value(doc, value ? "true" : "false", 0, 0, 0);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status fast_recursive_null(void *user, lonejson_error *error) {
+  eval_doc *doc;
+  lonejson_status st;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_recursive_depth == 0u) {
+    doc->root_kind = '0';
+  }
+  st = fast_recursive_prepare_value(doc, 1);
+  if (st != LONEJSON_STATUS_OK) {
+    return st;
+  }
+  if (doc->scalar_path_features != 0u) {
+    observe_prepared_value(doc, "", 0, 0, 1);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static void
+init_fast_recursive_suffix_scalar_visitor(lonejson_value_visitor *visitor) {
+  *visitor = lonejson_default_value_visitor();
+  visitor->object_begin = fast_recursive_object_begin;
+  visitor->object_end = fast_recursive_object_end;
+  visitor->object_key_begin = fast_recursive_key_begin;
+  visitor->object_key_chunk = fast_recursive_key_chunk;
+  visitor->object_key_end = fast_recursive_key_end;
+  visitor->array_begin = fast_recursive_array_begin;
+  visitor->array_end = fast_recursive_array_end;
+  visitor->string_begin = fast_recursive_string_begin;
+  visitor->string_chunk = fast_recursive_string_chunk;
+  visitor->string_end = fast_recursive_string_end;
+  visitor->number_begin = fast_recursive_number_begin;
+  visitor->number_chunk = fast_recursive_number_chunk;
+  visitor->number_end = fast_recursive_number_end;
+  visitor->boolean_value = fast_recursive_boolean;
+  visitor->null_value = fast_recursive_null;
+}
+
 static lonejson_status fast_multi_prepare_value(eval_doc *doc,
                                                 const lql_selector *selector,
                                                 int scalar) {
@@ -4049,6 +4387,13 @@ configure_candidate_eval_visitors(lonejson_candidate_stream_options *options,
   if (selector_fast_direct_scalar_eligible(doc != NULL ? doc->selector
                                                        : NULL)) {
     init_fast_direct_scalar_visitor(value_visitor);
+    options->visitor = value_visitor;
+    options->visitor_user = doc;
+    return;
+  }
+  if (selector_fast_recursive_suffix_scalar_eligible(doc != NULL ? doc->selector
+                                                                 : NULL)) {
+    init_fast_recursive_suffix_scalar_visitor(value_visitor);
     options->visitor = value_visitor;
     options->visitor_user = doc;
     return;
@@ -7766,6 +8111,10 @@ static lql_status execute_query_source_v2_transform(
 #if defined(LONEJSON_HAS_CANDIDATE_TRANSFORM_VALUE_OBSERVER)
   if (selector_fast_flat_scalar_eligible(selector)) {
     init_fast_flat_scalar_visitor(&value_observer);
+    options.observer_value = &value_observer;
+    options.observer_user = &state.doc;
+  } else if (selector_fast_recursive_suffix_scalar_eligible(selector)) {
+    init_fast_recursive_suffix_scalar_visitor(&value_observer);
     options.observer_value = &value_observer;
     options.observer_user = &state.doc;
   } else if (selector_fast_top_level_multi_eligible(selector)) {
