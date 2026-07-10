@@ -194,6 +194,17 @@ static int bench_sample_count(const char *submode) {
   return (int)value;
 }
 
+static int mode_uses_discard_sink(const char *mode) {
+  return mode != NULL &&
+         (strcmp(mode, "plus_value_openjson_selector") == 0 ||
+          strcmp(mode, "plus_value_openjson_plan") == 0 ||
+          strcmp(mode, "mutate_file_selector") == 0 ||
+          strcmp(mode, "mutate_file_plan") == 0 ||
+          strcmp(mode, "mutate_source_selector") == 0 ||
+          strcmp(mode, "mutate_file_backed_text") == 0 ||
+          strcmp(mode, "mutate_file_backed_base64") == 0);
+}
+
 static lql_uint64 peak_rss_bytes(void) {
   struct rusage usage;
 
@@ -365,7 +376,8 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
                  lql_uint64 fixture_size, lql_selector *selector,
                  lql_projection *projection, const char *const *mutation_exprs,
                  lql_uint64 mutation_expr_count, lql_query_result *result,
-                 payload_counts *counts, lql_error *error) {
+                 payload_counts *counts, FILE *discard_sink,
+                 lql_error *error) {
   FILE *sink;
   lql_mutation_plan *mutation_plan;
   lql_mutation_parse_options mutation_options;
@@ -373,8 +385,10 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
   lql_selector *run_selector;
   bench_source source;
   lql_status st;
+  int close_sink;
 
   sink = NULL;
+  close_sink = 0;
   mutation_plan = NULL;
   parsed_selector = NULL;
   run_selector = selector;
@@ -412,7 +426,7 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
                                  count_seekable_payload, counts, result, error);
   } else if (strcmp(mode, "plus_value_openjson_selector") == 0 ||
              strcmp(mode, "plus_value_openjson_plan") == 0) {
-    sink = open_discard_sink();
+    sink = discard_sink;
     if (sink == NULL) {
       st = LQL_STATUS_JSON_ERROR;
       goto done;
@@ -431,6 +445,7 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
       st = LQL_STATUS_JSON_ERROR;
       goto done;
     }
+    close_sink = 1;
     counts->sink = sink;
     st =
         ctx->query_file_matches(ctx, run_selector, fixture,
@@ -441,13 +456,14 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
       st = LQL_STATUS_JSON_ERROR;
       goto done;
     }
+    close_sink = 1;
     counts->sink = sink;
     st = ctx->query_source_spooled_matches(ctx, run_selector, read_bench_source,
                                            &source, count_projected_payload,
                                            counts, result, error);
   } else if (strcmp(mode, "mutate_file_selector") == 0 ||
              strcmp(mode, "mutate_file_plan") == 0) {
-    sink = open_discard_sink();
+    sink = discard_sink;
     if (sink == NULL) {
       st = LQL_STATUS_JSON_ERROR;
       goto done;
@@ -460,7 +476,7 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
                                              1, result, error);
     }
   } else if (strcmp(mode, "mutate_source_selector") == 0) {
-    sink = open_discard_sink();
+    sink = discard_sink;
     if (sink == NULL) {
       st = LQL_STATUS_JSON_ERROR;
       goto done;
@@ -474,7 +490,7 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
     }
   } else if (strcmp(mode, "mutate_file_backed_text") == 0 ||
              strcmp(mode, "mutate_file_backed_base64") == 0) {
-    sink = open_discard_sink();
+    sink = discard_sink;
     if (sink == NULL) {
       st = LQL_STATUS_JSON_ERROR;
       goto done;
@@ -494,7 +510,7 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
   }
 
 done:
-  if (sink != NULL) {
+  if (close_sink && sink != NULL) {
     fclose(sink);
   }
   ctx->mutation_plan_destroy(ctx, mutation_plan);
@@ -519,6 +535,7 @@ int main(int argc, char **argv) {
   lql_error error;
   lql_status st;
   payload_counts counts;
+  FILE *discard_sink;
   lql_uint64 fixture_size;
   const char *const *mutation_exprs;
   const char *file_backed_mutation_exprs[1];
@@ -570,6 +587,7 @@ int main(int argc, char **argv) {
   ctx = NULL;
   selector = NULL;
   projection = NULL;
+  discard_sink = NULL;
   st = lql_new(&ctx, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "lql_payload_bench: create lql: %s\n", error.message);
@@ -612,13 +630,29 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  if (mode_uses_discard_sink(mode)) {
+    discard_sink = open_discard_sink();
+    if (discard_sink == NULL) {
+      fprintf(stderr, "lql_payload_bench: failed to open discard sink\n");
+      fclose(fixture);
+      ctx->projection_destroy(ctx, projection);
+      ctx->selector_destroy(ctx, selector);
+      ctx->destroy(ctx);
+      return 1;
+    }
+  }
+
   if (strcmp(submode, "steady_state") == 0) {
     st = run_payload_pass(ctx, mode, expr, selector_name, fixture, fixture_size,
                           selector, projection, mutation_exprs,
-                          mutation_expr_count, &result, &counts, &error);
+                          mutation_expr_count, &result, &counts, discard_sink,
+                          &error);
     if (st != LQL_STATUS_OK) {
       fprintf(stderr, "lql_payload_bench: warmup mode %s: %s\n", mode,
               error.message);
+      if (discard_sink != NULL) {
+        fclose(discard_sink);
+      }
       fclose(fixture);
       ctx->projection_destroy(ctx, projection);
       ctx->selector_destroy(ctx, selector);
@@ -633,6 +667,9 @@ int main(int argc, char **argv) {
   for (sample = 0; sample < sample_count; ++sample) {
     if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
       fprintf(stderr, "lql_payload_bench: failed to read start clock\n");
+      if (discard_sink != NULL) {
+        fclose(discard_sink);
+      }
       fclose(fixture);
       ctx->projection_destroy(ctx, projection);
       ctx->selector_destroy(ctx, selector);
@@ -642,9 +679,12 @@ int main(int argc, char **argv) {
     st = run_payload_pass(ctx, mode, expr, selector_name, fixture, fixture_size,
                           selector, projection, mutation_exprs,
                           mutation_expr_count, &sample_result, &sample_counts,
-                          &error);
+                          discard_sink, &error);
     if (clock_gettime(CLOCK_MONOTONIC, &end) != 0) {
       fprintf(stderr, "lql_payload_bench: failed to read end clock\n");
+      if (discard_sink != NULL) {
+        fclose(discard_sink);
+      }
       fclose(fixture);
       ctx->projection_destroy(ctx, projection);
       ctx->selector_destroy(ctx, selector);
@@ -661,6 +701,9 @@ int main(int argc, char **argv) {
       best_elapsed_ns = sample_elapsed_ns;
       have_best = 1;
     }
+  }
+  if (discard_sink != NULL) {
+    fclose(discard_sink);
   }
   fclose(fixture);
   ctx->projection_destroy(ctx, projection);
