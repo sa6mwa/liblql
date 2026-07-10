@@ -1,6 +1,9 @@
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200112L
 #endif
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE 1
+#endif
 #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
 #define _DARWIN_C_SOURCE 1
 #endif
@@ -28,6 +31,26 @@ typedef struct payload_counts {
 typedef struct bench_source {
   FILE *file;
 } bench_source;
+
+#if defined(__linux__)
+static ssize_t discard_cookie_write(void *cookie, const char *data,
+                                    size_t size) {
+  (void)cookie;
+  (void)data;
+  return (ssize_t)size;
+}
+#endif
+
+static FILE *open_discard_sink(void) {
+#if defined(__linux__)
+  cookie_io_functions_t io;
+  memset(&io, 0, sizeof(io));
+  io.write = discard_cookie_write;
+  return fopencookie(NULL, "wb", io);
+#else
+  return fopen("/dev/null", "wb");
+#endif
+}
 
 static const char *default_mutation_exprs[] = {"/bench/touched=true"};
 static const char *numeric_mutation_exprs[] = {"/voucher/lines/10/bench=true"};
@@ -339,7 +362,7 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
              strcmp(mode, "plus_value_plan") == 0 ||
              strcmp(mode, "plus_value_openjson_selector") == 0 ||
              strcmp(mode, "plus_value_openjson_plan") == 0) {
-    sink = fopen("/dev/null", "wb");
+    sink = open_discard_sink();
     if (sink == NULL) {
       st = LQL_STATUS_JSON_ERROR;
       goto done;
@@ -348,7 +371,7 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
     st = ctx->query_file_matches(ctx, run_selector, fixture, count_payload,
                                  counts, result, error);
   } else if (strcmp(mode, "plus_value_source_selector") == 0) {
-    sink = fopen("/dev/null", "wb");
+    sink = open_discard_sink();
     if (sink == NULL) {
       st = LQL_STATUS_JSON_ERROR;
       goto done;
@@ -379,7 +402,7 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
                                            counts, result, error);
   } else if (strcmp(mode, "mutate_file_selector") == 0 ||
              strcmp(mode, "mutate_file_plan") == 0) {
-    sink = fopen("/dev/null", "wb");
+    sink = open_discard_sink();
     if (sink == NULL) {
       st = LQL_STATUS_JSON_ERROR;
       goto done;
@@ -392,7 +415,7 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
                                              1, result, error);
     }
   } else if (strcmp(mode, "mutate_source_selector") == 0) {
-    sink = fopen("/dev/null", "wb");
+    sink = open_discard_sink();
     if (sink == NULL) {
       st = LQL_STATUS_JSON_ERROR;
       goto done;
@@ -406,7 +429,7 @@ run_payload_pass(lql *ctx, const char *mode, const char *expr,
     }
   } else if (strcmp(mode, "mutate_file_backed_text") == 0 ||
              strcmp(mode, "mutate_file_backed_base64") == 0) {
-    sink = fopen("/dev/null", "wb");
+    sink = open_discard_sink();
     if (sink == NULL) {
       st = LQL_STATUS_JSON_ERROR;
       goto done;
