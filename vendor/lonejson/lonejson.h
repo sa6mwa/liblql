@@ -45496,6 +45496,9 @@ typedef struct lonejson__candidate_transform_gated_state {
   lonejson_candidate_transform_candidate_info transform_candidate;
   void *candidate_policy;
   lonejson_status deferred_status;
+  int candidate_decision_made;
+  int candidate_dropped;
+  int candidate_stopped;
 } lonejson__candidate_transform_gated_state;
 
 static lonejson_status lonejson__transform_candidates_reader_core(
@@ -47677,6 +47680,9 @@ lonejson__candidate_transform_gated_begin(
   state->candidate = *candidate;
   memset(&state->transform_candidate, 0, sizeof(state->transform_candidate));
   state->candidate_policy = NULL;
+  state->candidate_decision_made = 0;
+  state->candidate_dropped = 0;
+  state->candidate_stopped = 0;
   state->transform_candidate.mode =
       LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED;
   state->transform_candidate.physical_index = candidate->index;
@@ -47689,6 +47695,57 @@ lonejson__candidate_transform_gated_begin(
                                            candidate, error);
   }
   return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static lonejson_candidate_capture_decision
+lonejson__candidate_transform_gated_capture_decision(
+    void *user, const lonejson_candidate_info *candidate,
+    lonejson_error *error) {
+  lonejson__candidate_transform_gated_state *state =
+      (lonejson__candidate_transform_gated_state *)user;
+  lonejson_candidate_transform_candidate_policy policy;
+
+  state->candidate = *candidate;
+  state->transform_candidate.byte_size = candidate->byte_size;
+  state->candidate_decision_made = 1;
+  state->candidate_dropped = 0;
+  state->candidate_stopped = 0;
+  if (state->options->candidate_decision == NULL) {
+    state->candidate_policy = NULL;
+    return LONEJSON_CANDIDATE_RETAIN;
+  }
+
+  lonejson__clear_error(error);
+  policy = state->options->candidate_decision(
+      state->options->candidate_decision_user, candidate,
+      &state->transform_candidate, error);
+  state->candidate_policy = policy.candidate_policy;
+  if (policy.decision == LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_DROP) {
+    state->candidate_dropped = 1;
+    return LONEJSON_CANDIDATE_DISCARD;
+  }
+  if (policy.decision == LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_STOP) {
+    state->candidate_stopped = 1;
+    return LONEJSON_CANDIDATE_DECISION_STOP;
+  }
+  if (policy.decision == LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_EMIT) {
+    return LONEJSON_CANDIDATE_RETAIN;
+  }
+  if (policy.decision == LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_ERROR) {
+    if (error != NULL &&
+        (error->code == LONEJSON_STATUS_OK || error->code == 0)) {
+      state->deferred_status = lonejson__set_error(
+          error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u, 0u,
+          "candidate transform decision callback failed");
+    } else {
+      state->deferred_status = LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    return LONEJSON_CANDIDATE_DECISION_ERROR;
+  }
+  state->deferred_status = lonejson__set_error(
+      error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u, 0u,
+      "candidate transform decision callback returned invalid action");
+  return LONEJSON_CANDIDATE_DECISION_ERROR;
 }
 
 static lonejson_status
@@ -47867,6 +47924,25 @@ lonejson__candidate_transform_gated_end(
   state->transform_candidate.replay_count = 0u;
   spool = candidate->payload_spool;
   if (spool == NULL) {
+    if (state->options->result != NULL) {
+      if (state->candidate_dropped) {
+        state->options->result->candidates_dropped++;
+      }
+      if (state->candidate_stopped) {
+        state->options->result->candidates_stopped++;
+      }
+      state->options->result->last_candidate = state->transform_candidate;
+    }
+    if (state->candidate_dropped) {
+      if (state->options->candidate_end != NULL) {
+        return state->options->candidate_end(state->options->candidate_user,
+                                             candidate, error);
+      }
+      return LONEJSON_CANDIDATE_CONTINUE;
+    }
+    if (state->candidate_stopped) {
+      return LONEJSON_CANDIDATE_STOP;
+    }
     state->deferred_status =
         lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u, 0u,
                             "candidate transform gated spool is missing");
@@ -47880,7 +47956,8 @@ lonejson__candidate_transform_gated_end(
   state->transform_candidate.spill_bytes =
       spool_size > memory_bytes ? (lonejson_uint64)(spool_size - memory_bytes)
                                 : 0u;
-  if (state->options->candidate_decision != NULL) {
+  if (!state->candidate_decision_made &&
+      state->options->candidate_decision != NULL) {
     lonejson_candidate_transform_candidate_policy policy;
 
     lonejson__clear_error(error);
@@ -47910,7 +47987,9 @@ lonejson__candidate_transform_gated_end(
       return LONEJSON_CANDIDATE_ERROR;
     }
   } else {
-    state->candidate_policy = NULL;
+    if (!state->candidate_decision_made) {
+      state->candidate_policy = NULL;
+    }
   }
   if (state->options->result != NULL) {
     state->options->result->candidates_spooled++;
@@ -47921,22 +48000,22 @@ lonejson__candidate_transform_gated_end(
     }
     state->options->result->total_spill_bytes +=
         state->transform_candidate.spill_bytes;
-    if (dropped) {
+    if (dropped || state->candidate_dropped) {
       state->options->result->candidates_dropped++;
     }
-    if (stopped) {
+    if (stopped || state->candidate_stopped) {
       state->options->result->candidates_stopped++;
     }
     state->options->result->last_candidate = state->transform_candidate;
   }
-  if (dropped) {
+  if (dropped || state->candidate_dropped) {
     if (state->options->candidate_end != NULL) {
       return state->options->candidate_end(state->options->candidate_user,
                                            candidate, error);
     }
     return LONEJSON_CANDIDATE_CONTINUE;
   }
-  if (stopped) {
+  if (stopped || state->candidate_stopped) {
     return LONEJSON_CANDIDATE_STOP;
   }
   if (state->options->composition ==
@@ -48053,7 +48132,7 @@ static lonejson_status lonejson__transform_candidates_cursor_gated(
   state.deferred_status = LONEJSON_STATUS_OK;
   candidate_options = lonejson_default_candidate_stream_options();
   candidate_options.framing = options->framing;
-  candidate_options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
+  candidate_options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED;
   candidate_options.spool_class = options->spool_class;
   candidate_options.max_spooled_payload_bytes =
       options->max_spooled_candidate_bytes;
@@ -48062,6 +48141,9 @@ static lonejson_status lonejson__transform_candidates_cursor_gated(
   candidate_options.candidate_begin = lonejson__candidate_transform_gated_begin;
   candidate_options.candidate_end = lonejson__candidate_transform_gated_end;
   candidate_options.candidate_user = &state;
+  candidate_options.capture_decision =
+      lonejson__candidate_transform_gated_capture_decision;
+  candidate_options.capture_decision_user = &state;
   status = lonejson__visit_candidates_cursor_with_limits(
       cursor, &candidate_options, runtime_state, &runtime_state->value_limits,
       runtime_state->config.allocator, error);
