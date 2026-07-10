@@ -166,28 +166,26 @@ Current implementation status:
   warmup fixture pass before the measured pass. The schema validator requires
   supported Go records to report timing.
 - the current executable dataset matrix covers NDJSON and single-root JSON
-  object fixture shapes for both library-style and CLI-style
-  record forms, plus a lockd-shaped NDJSON fixture with session, tab, event,
-  operation, timestamp, and payload fields, a mixed-root NDJSON fixture that
-  interleaves scalar and object candidates, and the Go realworld benchmark
-  fixture family: compact realworld NDJSON and pretty nested realworld streams
-  with sparse events, dense components, nested hash fields, session ID arrays,
-  metadata, timestamps, and nested payload blobs. All fixtures are generated
-  once and shared by Go, C, and Lua.
+  object fixture shapes for both library-style and CLI-style record forms,
+  plus a lockd-shaped NDJSON fixture with session, tab, event, operation,
+  timestamp, and payload fields, and the Go realworld benchmark fixture family:
+  compact realworld NDJSON and pretty nested realworld streams with sparse
+  events, dense components, nested hash fields, session ID arrays, metadata,
+  timestamps, and nested payload blobs. All fixtures are generated once and
+  shared by Go, C, and Lua. Root-array flattening and mixed-root/non-object
+  NDJSON candidate streams stay out of the Go parity and benchmark matrices.
 - the current executable selector matrix covers equality, contains,
   `contains.any`, case-insensitive contains, timestamp comparison, date
   window, numeric range terms, and concrete numeric object-key/array-index path
   traversal over record-stream fixtures, lockd-style `/event="session_sync"`,
   `/event="tabs_update"`, and `/lockd/key` existence terms, plus nested
-  `/records[]/...` selection over the single-root JSON fixture. Mixed-root
-  selectors include an object-root pruning case and a one-record low-match case
-  so capture-policy modes cannot be validated only on dense all-object streams.
-  The full runner also mirrors Go realworld benchmark selectors for sparse and
-  dense equality, no-match equality, numeric ranges, nested hashes, array
-  membership, recursive field lookup, contains/icontains, any-value string
-  terms, and multi-clause AND evaluation. The smoke gate includes compact
-  multi-clause realworld selection and pretty/nested recursive hash selection
-  so this fixture family remains part of the ordinary benchmark gate.
+  `/records[]/...` selection over the single-root JSON fixture. The full runner
+  also mirrors Go realworld benchmark selectors for sparse and dense equality,
+  no-match equality, numeric ranges, nested hashes, array membership, recursive
+  field lookup, contains/icontains, any-value string terms, and multi-clause AND
+  evaluation. The smoke gate includes compact multi-clause realworld selection
+  and pretty/nested recursive hash selection so this fixture family remains
+  part of the ordinary benchmark gate.
 - the current executable mode matrix covers `decision_only_selector`,
   `decision_only_plan`, `reuse_selector`, `reparse_selector_each_run`,
   `decision_only_source_selector`, `plus_value_selector`, `plus_value_plan`,

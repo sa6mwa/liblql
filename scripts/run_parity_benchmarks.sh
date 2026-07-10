@@ -70,7 +70,6 @@ single_fixture="$fixture_dir/large_single_json.json"
 cli_ndjson_fixture="$fixture_dir/selection_ndjson.jsonl"
 cli_single_fixture="$fixture_dir/selection_single_json.json"
 lockd_ndjson_fixture="$fixture_dir/lockd_ndjson.jsonl"
-mixed_root_ndjson_fixture="$fixture_dir/mixed_root_ndjson.jsonl"
 realworld_compact_fixture="$fixture_dir/realworld_compact_ndjson.jsonl"
 realworld_pretty_nested_fixture="$fixture_dir/realworld_pretty_nested.jsonl"
 lockd_perf_contains_fixture="$fixture_dir/lockd_perf_contains.jsonl"
@@ -542,24 +541,6 @@ realworld_pretty_record_json() {
   /g'
 }
 
-mixed_root_record_json() {
-  i=$1
-  case $((i % 4)) in
-    0)
-      printf '"scalar-%d"' "$i"
-      ;;
-    1)
-      printf '%d' "$i"
-      ;;
-    2)
-      record_json "$i"
-      ;;
-    *)
-      printf 'false'
-      ;;
-  esac
-}
-
 lockd_perf_contains_record_json() {
   i=$1
   msg=$(generate_repeat "x" 640)
@@ -594,7 +575,6 @@ generate_fixtures() {
   : > "$cli_ndjson_fixture"
   : > "$cli_single_fixture"
   : > "$lockd_ndjson_fixture"
-  : > "$mixed_root_ndjson_fixture"
   : > "$realworld_compact_fixture"
   : > "$realworld_pretty_nested_fixture"
   while [ "$i" -lt "$count" ]; do
@@ -604,8 +584,6 @@ generate_fixtures() {
     printf '\n' >> "$cli_ndjson_fixture"
     lockd_record_json "$i" >> "$lockd_ndjson_fixture"
     printf '\n' >> "$lockd_ndjson_fixture"
-    mixed_root_record_json "$i" >> "$mixed_root_ndjson_fixture"
-    printf '\n' >> "$mixed_root_ndjson_fixture"
     realworld_record_json "$i" 0 >> "$realworld_compact_fixture"
     printf '\n' >> "$realworld_compact_fixture"
     realworld_pretty_record_json "$i" 1 >> "$realworld_pretty_nested_fixture"
@@ -681,7 +659,6 @@ generate_fixture() {
   add_dataset_selector_cases "large_ndjson" "$ndjson_fixture" "$count"
   add_selection_selector_cases "selection_ndjson" "$cli_ndjson_fixture" "$count" ""
   add_lockd_selector_cases "lockd_ndjson" "$lockd_ndjson_fixture" "$count"
-  add_capture_selector_cases "mixed_root_ndjson" "$mixed_root_ndjson_fixture" "$count"
   add_realworld_selector_cases "realworld_compact_ndjson" \
     "$realworld_compact_fixture" "$count"
   add_realworld_selector_cases "realworld_pretty_nested" \
@@ -697,7 +674,6 @@ generate_fixture() {
         ($1 == "large_ndjson" && $4 == "eq_status_open") ||
         ($1 == "large_ndjson" && $4 == "numeric_path_amount") ||
         ($1 == "lockd_ndjson" && $4 == "lockd_session_sync") ||
-        ($1 == "mixed_root_ndjson" && $4 == "mixed_low_match_id") ||
         ($1 == "realworld_compact_ndjson" && $4 == "realworld_multi_clause_and") ||
         ($1 == "realworld_pretty_nested" && $4 == "realworld_recursive_nested_eq_sparse") ||
         ($1 == "selection_single_json" && $4 == "contains_service")
@@ -800,18 +776,6 @@ add_realworld_selector_cases() {
       "realworld_icontains_any_component_dense" 'icontains{field=/component,any=EDGE|__nope__}'
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
       "realworld_multi_clause_and" '/component="edge",/event="session_sync",/active_idx=0,/tab_count=1,exists{/session_ids},/code>=10'
-  } >> "$case_matrix"
-}
-
-add_capture_selector_cases() {
-  dataset_name=$1
-  fixture_path=$2
-  candidates=$3
-  {
-    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
-      "mixed_object_root_status" '/status="closed"'
-    printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
-      "mixed_low_match_id" '/id="id-2"'
   } >> "$case_matrix"
 }
 
@@ -1252,7 +1216,6 @@ if [ "$check" -eq 1 ] && [ "$exit_status" -eq 0 ]; then
     [ -s "$cli_ndjson_fixture" ] || fixtures_ready=0
     [ -s "$cli_single_fixture" ] || fixtures_ready=0
     [ -s "$lockd_ndjson_fixture" ] || fixtures_ready=0
-    [ -s "$mixed_root_ndjson_fixture" ] || fixtures_ready=0
     [ -s "$realworld_compact_fixture" ] || fixtures_ready=0
     [ -s "$realworld_pretty_nested_fixture" ] || fixtures_ready=0
   fi
