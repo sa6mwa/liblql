@@ -5718,6 +5718,106 @@ static void expect_source_candidate_mutation_api(void) {
     fclose(out);
     out = tmpfile();
     if (out == NULL) {
+      printf("source candidate mutation escaped fast-create tmpfile failed\n");
+      ++failures;
+    } else if (create_selector != NULL && create_plan != NULL) {
+      static const char escaped_create_doc[] =
+          "{\"records\":[{\"service\":\"auth\"}],"
+          "\"b\\u0065nch\":{\"old\":true}}\n";
+      memset(&reader, 0, sizeof(reader));
+      reader.data = escaped_create_doc;
+      reader.len = strlen(escaped_create_doc);
+      reader.chunk_size = 5u;
+      memset(&result, 0, sizeof(result));
+      lql_error_init(&error);
+      st = test_ctx->mutate_source_candidates(test_ctx, create_selector,
+                                              create_plan, read_chunk, &reader,
+                                              out, 1, 1, &result, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation escaped fast-create failed: %s\n",
+               error.message);
+        ++failures;
+      } else if (result.candidates_seen != 1u ||
+                 result.candidates_matched != 1u || result.stopped_early) {
+        printf(
+            "source candidate mutation escaped fast-create result mismatch\n");
+        ++failures;
+      } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                 strcmp(buf,
+                        "{\"records\":[{\"service\":\"auth\"}],"
+                        "\"bench\":{\"old\":true,\"touched\":true}}\n") != 0) {
+        printf("source candidate mutation escaped fast-create output mismatch: "
+               "%s\n",
+               buf);
+        ++failures;
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
+      printf("source candidate mutation spilled fast-create tmpfile failed\n");
+      ++failures;
+    } else if (create_selector != NULL && create_plan != NULL) {
+      static char spilled_create_doc[70000];
+      char tail[128];
+      long end;
+      size_t pos;
+      size_t tail_len;
+      if (spilled_create_doc[0] == '\0') {
+        static const char prefix[] =
+            "{\"records\":[{\"service\":\"auth\",\"blob\":\"";
+        static const char suffix[] = "\"}]}\n";
+        pos = 0u;
+        memcpy(spilled_create_doc + pos, prefix, sizeof(prefix) - 1u);
+        pos += sizeof(prefix) - 1u;
+        memset(spilled_create_doc + pos, 'x', 66000u);
+        pos += 66000u;
+        memcpy(spilled_create_doc + pos, suffix, sizeof(suffix));
+      }
+      memset(&reader, 0, sizeof(reader));
+      reader.data = spilled_create_doc;
+      reader.len = strlen(spilled_create_doc);
+      reader.chunk_size = 17u;
+      memset(&result, 0, sizeof(result));
+      lql_error_init(&error);
+      st = test_ctx->mutate_source_candidates(test_ctx, create_selector,
+                                              create_plan, read_chunk, &reader,
+                                              out, 1, 1, &result, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation spilled fast-create failed: %s\n",
+               error.message);
+        ++failures;
+      } else if (result.candidates_seen != 1u ||
+                 result.candidates_matched != 1u || result.stopped_early) {
+        printf(
+            "source candidate mutation spilled fast-create result mismatch\n");
+        ++failures;
+      } else if (fseek(out, 0L, SEEK_END) != 0 || (end = ftell(out)) < 0) {
+        printf("source candidate mutation spilled fast-create size failed\n");
+        ++failures;
+      } else {
+        tail_len =
+            (size_t)end < sizeof(tail) - 1u ? (size_t)end : sizeof(tail) - 1u;
+        if (fseek(out, end - (long)tail_len, SEEK_SET) != 0 ||
+            fread(tail, 1u, tail_len, out) != tail_len) {
+          printf("source candidate mutation spilled fast-create tail failed\n");
+          ++failures;
+        } else {
+          tail[tail_len] = '\0';
+          if (strstr(tail, ",\"bench\":{\"touched\":true}}\n") == NULL) {
+            printf("source candidate mutation spilled fast-create tail "
+                   "mismatch: %s\n",
+                   tail);
+            ++failures;
+          }
+        }
+      }
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
       printf("source candidate mutation fast-create tmpfile failed\n");
       ++failures;
     } else {

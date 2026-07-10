@@ -2771,6 +2771,52 @@ static lonejson_status on_array_end(void *user, const lonejson_value_path *path,
   return LONEJSON_STATUS_OK;
 }
 
+static lonejson_status on_key_begin(void *user, const lonejson_value_path *path,
+                                    lonejson_error *error) {
+  eval_doc *doc;
+  (void)error;
+  doc = (eval_doc *)user;
+  doc->fast_mutation_key_len = 0u;
+  doc->fast_mutation_key_active = doc->fast_mutation_top_key != NULL &&
+                                  path != NULL && path->segment_count == 0u &&
+                                  !doc->fast_mutation_key_seen;
+  doc->fast_mutation_key_match = doc->fast_mutation_key_active;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status on_key_chunk(void *user, const lonejson_value_path *path,
+                                    const char *data, size_t len,
+                                    lonejson_error *error) {
+  eval_doc *doc;
+  (void)path;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match) {
+    if (doc->fast_mutation_key_len >= doc->fast_mutation_top_key_len ||
+        len > doc->fast_mutation_top_key_len - doc->fast_mutation_key_len ||
+        memcmp(doc->fast_mutation_top_key + doc->fast_mutation_key_len, data,
+               len) != 0) {
+      doc->fast_mutation_key_match = 0;
+    }
+    doc->fast_mutation_key_len += len;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status on_key_end(void *user, const lonejson_value_path *path,
+                                  lonejson_error *error) {
+  eval_doc *doc;
+  (void)path;
+  (void)error;
+  doc = (eval_doc *)user;
+  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match &&
+      doc->fast_mutation_key_len == doc->fast_mutation_top_key_len) {
+    doc->fast_mutation_key_seen = 1;
+  }
+  doc->fast_mutation_key_active = 0;
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status on_string_begin(void *user,
                                        const lonejson_value_path *path,
                                        lonejson_error *error) {
@@ -2996,6 +3042,11 @@ static void init_eval_visitor(lonejson_path_value_visitor *visitor) {
 
 static void configure_eval_visitor_for_doc(lonejson_path_value_visitor *visitor,
                                            const eval_doc *doc) {
+  if (visitor != NULL && doc != NULL && doc->fast_mutation_top_key != NULL) {
+    visitor->object_key_begin = on_key_begin;
+    visitor->object_key_chunk = on_key_chunk;
+    visitor->object_key_end = on_key_end;
+  }
   if (visitor != NULL && doc != NULL && !doc->track_container_types &&
       (doc->selector == NULL ||
        doc->selector->container_observer_features == 0u)) {
@@ -6436,6 +6487,128 @@ static int write_spooled_object_with_fast_root_create(
   return 1;
 }
 
+static int read_spooled_exact(const lonejson_spooled *spooled, size_t offset,
+                              unsigned char *buffer, size_t len) {
+  lonejson_spooled cursor;
+  size_t total;
+  if (spooled == NULL || (buffer == NULL && len != 0u) ||
+      offset > spooled->size || len > spooled->size - offset) {
+    return 0;
+  }
+  cursor = *spooled;
+  cursor.read_offset = offset;
+  total = 0u;
+  while (total < len) {
+    lonejson_read_result chunk =
+        lonejson_spooled_read(&cursor, buffer + total, len - total);
+    if (chunk.error_code != 0 || chunk.bytes_read == 0u) {
+      return 0;
+    }
+    total += chunk.bytes_read;
+  }
+  return 1;
+}
+
+static int find_spooled_object_end(const lonejson_spooled *spooled,
+                                   size_t *out_end) {
+  unsigned char tail[4096];
+  size_t want;
+  size_t offset;
+  size_t i;
+  if (spooled == NULL || out_end == NULL || spooled->size < 2u) {
+    return 0;
+  }
+  want = spooled->size > sizeof(tail) ? sizeof(tail) : spooled->size;
+  offset = spooled->size - want;
+  if (!read_spooled_exact(spooled, offset, tail, want)) {
+    return 0;
+  }
+  i = want;
+  while (i != 0u && json_space_byte(tail[i - 1u])) {
+    --i;
+  }
+  if (i == 0u || tail[i - 1u] != '}') {
+    return 0;
+  }
+  *out_end = offset + i;
+  return 1;
+}
+
+static int spooled_object_has_member(const lonejson_spooled *spooled,
+                                     size_t end, int *out) {
+  unsigned char head[4096];
+  size_t remaining;
+  size_t cursor;
+  size_t want;
+  size_t i;
+  if (spooled == NULL || out == NULL || end < 2u) {
+    return 0;
+  }
+  remaining = end;
+  cursor = 0u;
+  while (remaining != 0u) {
+    want = remaining > sizeof(head) ? sizeof(head) : remaining;
+    if (!read_spooled_exact(spooled, cursor, head, want)) {
+      return 0;
+    }
+    for (i = cursor == 0u ? 1u : 0u; i < want; ++i) {
+      if (!json_space_byte(head[i])) {
+        *out = head[i] != '}';
+        return 1;
+      }
+    }
+    cursor += want;
+    remaining -= want;
+  }
+  return 0;
+}
+
+static int eval_copy_spooled_range_unlocked(const lonejson_spooled *spooled,
+                                            FILE *out, size_t len) {
+  unsigned char buffer[4096];
+  lonejson_spooled cursor;
+  size_t remaining;
+  if (spooled == NULL || out == NULL || len > spooled->size) {
+    return 0;
+  }
+  cursor = *spooled;
+  cursor.read_offset = 0u;
+  remaining = len;
+  while (remaining != 0u) {
+    size_t want = remaining > sizeof(buffer) ? sizeof(buffer) : remaining;
+    lonejson_read_result chunk = lonejson_spooled_read(&cursor, buffer, want);
+    if (chunk.error_code != 0 || chunk.bytes_read == 0u ||
+        chunk.bytes_read > remaining ||
+        !eval_file_write_unlocked(out, buffer, chunk.bytes_read)) {
+      return 0;
+    }
+    remaining -= chunk.bytes_read;
+  }
+  return 1;
+}
+
+static int write_spilled_spooled_object_with_fast_root_create(
+    FILE *out, const lonejson_spooled *spooled, const lql_mutation_item *item,
+    lql_error *error) {
+  size_t end;
+  int has_member;
+  if (out == NULL || spooled == NULL || item == NULL ||
+      !find_spooled_object_end(spooled, &end) ||
+      !spooled_object_has_member(spooled, end, &has_member)) {
+    return 0;
+  }
+  if (!eval_copy_spooled_range_unlocked(spooled, out, end - 1u) ||
+      (has_member && !eval_file_putc_unlocked(out, ',')) ||
+      !write_fast_mutation_subtree(out, item, 0u) ||
+      !eval_file_putc_unlocked(out, '}') ||
+      !eval_file_putc_unlocked(out, '\n')) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to write fast mutated source candidate");
+    return 0;
+  }
+  return 1;
+}
+
 static int find_file_range_object_end(int fd, lql_uint64 offset,
                                       lql_uint64 size, lql_uint64 *out_end) {
   unsigned char tail[4096];
@@ -6678,9 +6851,12 @@ on_source_spooled_candidate_end(void *user,
         !state->doc.fast_mutation_key_seen &&
         mutation_plan_fast_root_create_eligible(state->mutation_plan,
                                                 &fast_item) &&
-        write_spooled_object_with_fast_root_create(
-            state->mutation_out, candidate->payload_spool, fast_item,
-            state->mutation_error)) {
+        (write_spooled_object_with_fast_root_create(
+             state->mutation_out, candidate->payload_spool, fast_item,
+             state->mutation_error) ||
+         write_spilled_spooled_object_with_fast_root_create(
+             state->mutation_out, candidate->payload_spool, fast_item,
+             state->mutation_error))) {
       state->result.candidates_matched++;
       reset_doc(&state->doc);
       if (query_result_stop_if_limited(&state->result, &state->options,
@@ -7894,8 +8070,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  if (selector_fast_direct_scalar_eligible(selector) &&
-      state.mutation_plan != NULL &&
+  if (state.mutation_plan != NULL &&
       mutation_plan_fast_root_create_eligible(state.mutation_plan, NULL)) {
     state.doc.fast_mutation_top_key =
         state.mutation_plan->items[0].path.segments[0];
