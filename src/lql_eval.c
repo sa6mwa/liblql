@@ -7786,6 +7786,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
                         ? LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS
                         : LONEJSON_CANDIDATE_FRAMING_AUTO;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED;
+  enable_fast_top_level_multi_field_candidate(&options, &state.doc);
   enable_fast_top_level_field_candidate(&options, &state.doc);
   options.candidate_begin = on_source_spooled_candidate_begin;
   options.candidate_end = on_source_spooled_candidate_end;
