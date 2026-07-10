@@ -5007,6 +5007,35 @@ source_transform_candidate_decision(
   return policy;
 }
 
+#if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
+static int source_transform_capture_prune(void *user, lonejson_error *error) {
+  source_transform_state *state;
+  const lql_selector *selector;
+  size_t i;
+  (void)error;
+  state = (source_transform_state *)user;
+  if (state == NULL || !state->matches_only || state->selector == NULL ||
+      state->doc.root_kind != '{') {
+    return 0;
+  }
+  if (state->doc.fast_exact_selector != NULL) {
+    return !state->doc.fast_exact_hit && state->doc.fast_exact_miss;
+  }
+  selector = state->selector;
+  if (!selector_fast_top_level_multi_eligible(selector) ||
+      state->doc.stream_misses == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < selector->predicate_count; ++i) {
+    if (!hit_marked_fast(&state->doc, selector->predicates[i]) &&
+        stream_miss_marked_fast(&state->doc, selector->predicates[i])) {
+      return 1;
+    }
+  }
+  return 0;
+}
+#endif
+
 static lonejson_candidate_transform_old_scalar_mode
 source_transform_old_scalar(void *user,
                             const lonejson_candidate_transform_event *event,
@@ -7751,6 +7780,14 @@ static lql_status execute_query_source_v2_transform(
   options.old_scalar_user = &state;
   options.candidate_decision = source_transform_candidate_decision;
   options.candidate_decision_user = &state;
+#if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
+  if ((selector_fast_exact_eligible(selector) &&
+       selector_fast_flat_scalar_eligible(selector)) ||
+      selector_fast_top_level_multi_eligible(selector)) {
+    options.capture_prune = source_transform_capture_prune;
+    options.capture_prune_user = &state;
+  }
+#endif
   flockfile(out);
   st = lonejson_transform_candidates_reader(runtime, source_reader_read,
                                             &adapter, &options, &lj_error);

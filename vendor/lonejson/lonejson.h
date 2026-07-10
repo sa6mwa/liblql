@@ -3106,6 +3106,10 @@ typedef struct lonejson_candidate_transform_options {
   lonejson_candidate_transform_candidate_decision_fn candidate_decision;
   /** Caller state passed to `candidate_decision`. */
   void *candidate_decision_user;
+  /** Optional gated-spooled raw capture prune callback. */
+  lonejson_candidate_capture_prune_fn capture_prune;
+  /** Caller state passed to `capture_prune`. */
+  void *capture_prune_user;
 } lonejson_candidate_transform_options;
 
 struct lonejson_json_value;
@@ -49393,6 +49397,8 @@ static lonejson_status lonejson__transform_candidates_cursor_gated(
   candidate_options.capture_decision =
       lonejson__candidate_transform_gated_capture_decision;
   candidate_options.capture_decision_user = &state;
+  candidate_options.capture_prune = options->capture_prune;
+  candidate_options.capture_prune_user = options->capture_prune_user;
   status = lonejson__visit_candidates_cursor_with_limits(
       cursor, &candidate_options, runtime_state, &runtime_state->value_limits,
       runtime_state->config.allocator, error);
