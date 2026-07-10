@@ -7651,6 +7651,11 @@ execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
+#if defined(LONEJSON_HAS_VALUE_SKIP)
+  if (selector_fast_top_level_multi_eligible(selector)) {
+    state.doc.fast_multi_skip_unmatched_strings = 1;
+  }
+#endif
   runtime_pooled = 0;
   runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
@@ -7666,6 +7671,7 @@ execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
   enable_fast_top_level_multi_field_candidate(&options, &state.doc);
   enable_fast_top_level_field_candidate(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
+  enable_fast_top_level_string_eq_candidate(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -7732,6 +7738,11 @@ static lql_status execute_query_source_decisions_with_base(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
+#if defined(LONEJSON_HAS_VALUE_SKIP)
+  if (selector_fast_top_level_multi_eligible(selector)) {
+    state.doc.fast_multi_skip_unmatched_strings = 1;
+  }
+#endif
   runtime_pooled = 0;
   runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
@@ -7769,6 +7780,7 @@ static lql_status execute_query_source_decisions_with_base(
   enable_fast_top_level_multi_field_candidate(&options, &state.doc);
   enable_fast_top_level_field_candidate(&options, &state.doc);
   enable_fast_flat_candidate_stop(&options, &state.doc);
+  enable_fast_top_level_string_eq_candidate(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -8312,7 +8324,8 @@ static lql_status execute_query_source_v2_transform(
   if ((selector_fast_flat_scalar_eligible(selector) ||
        selector_fast_direct_scalar_eligible(selector) ||
        selector_fast_top_level_multi_eligible(selector)) &&
-      projection == NULL && mutation_plan != NULL && matches_only) {
+      projection == NULL && mutation_plan != NULL && matches_only &&
+      mutation_plan_fast_root_create_eligible(mutation_plan, NULL)) {
     return execute_mutate_source_matches_only_spooled(
         self, selector, read, read_user, out, mutation_plan, query_options,
         out_result, error);
