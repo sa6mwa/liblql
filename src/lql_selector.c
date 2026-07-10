@@ -1590,6 +1590,7 @@ static void selector_clear_path_metadata(lql_selector_parser *ctx,
   selector->field_segment_count = 0u;
   selector->field_path_direct = 0;
   selector->field_path_literal = 0;
+  selector->field_path_recursive_literal_suffix = 0;
 }
 
 static void selector_clear_contains_lps(lql_selector_parser *ctx,
@@ -1746,15 +1747,83 @@ static int selector_prepare_one_path(lql_selector_parser *ctx,
   return 1;
 }
 
+static int selector_prepare_recursive_literal_suffix(lql_selector_parser *ctx,
+                                                     lql_selector *selector) {
+  const char *seg;
+  const char *slash;
+  size_t count;
+  size_t len;
+  size_t offset;
+
+  if (selector == NULL || selector->field == NULL ||
+      memcmp(selector->field, "/.../", 5u) != 0) {
+    return 0;
+  }
+  seg = selector->field + 5;
+  if (*seg == '\0') {
+    return 0;
+  }
+  count = 1u;
+  for (slash = seg; *slash != '\0'; ++slash) {
+    if (*slash == '/') {
+      ++count;
+    }
+  }
+  selector->field_segment_offsets =
+      (size_t *)ctx->allocator->calloc(ctx->allocator, count, sizeof(size_t));
+  selector->field_segment_lens =
+      (size_t *)ctx->allocator->calloc(ctx->allocator, count, sizeof(size_t));
+  selector->field_segment_kinds = (unsigned char *)ctx->allocator->calloc(
+      ctx->allocator, count, sizeof(unsigned char));
+  if (selector->field_segment_offsets == NULL ||
+      selector->field_segment_lens == NULL ||
+      selector->field_segment_kinds == NULL) {
+    selector_clear_path_metadata(ctx, selector);
+    return -1;
+  }
+  count = 0u;
+  while (*seg != '\0') {
+    slash = strchr(seg, '/');
+    len = slash == NULL ? strlen(seg) : (size_t)(slash - seg);
+    if (selector_segment_is(seg, len, "...") ||
+        selector_segment_is(seg, len, "*") ||
+        selector_segment_is(seg, len, "[]") ||
+        selector_segment_is(seg, len, "**") || memchr(seg, '~', len) != NULL) {
+      selector_clear_path_metadata(ctx, selector);
+      return 0;
+    }
+    offset = (size_t)(seg - selector->field);
+    selector->field_segment_offsets[count] = offset;
+    selector->field_segment_lens[count] = len;
+    selector->field_segment_kinds[count] = LQL_FIELD_SEGMENT_LITERAL;
+    ++count;
+    if (slash == NULL) {
+      break;
+    }
+    seg = slash + 1;
+  }
+  selector->field_segment_count = count;
+  selector->field_path_literal = 1;
+  selector->field_path_recursive_literal_suffix = 1;
+  return 1;
+}
+
 static int prepare_selector_paths(lql_selector_parser *ctx,
                                   lql_selector *selector) {
   size_t i;
   if (selector == NULL) {
     return 1;
   }
-  if (selector_is_predicate(selector) &&
-      !selector_prepare_one_path(ctx, selector)) {
-    return 0;
+  if (selector_is_predicate(selector)) {
+    int recursive_suffix;
+    selector_clear_path_metadata(ctx, selector);
+    recursive_suffix = selector_prepare_recursive_literal_suffix(ctx, selector);
+    if (recursive_suffix < 0) {
+      return 0;
+    }
+    if (recursive_suffix == 0 && !selector_prepare_one_path(ctx, selector)) {
+      return 0;
+    }
   }
   for (i = 0u; i < selector->child_count; ++i) {
     if (!prepare_selector_paths(ctx, &selector->children[i])) {

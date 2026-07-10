@@ -290,6 +290,7 @@ struct lql_selector {
   size_t field_segment_count;
   int field_path_direct;
   int field_path_literal;
+  int field_path_recursive_literal_suffix;
   struct lql_selector *children;
   size_t child_count;
   const struct lql_selector **predicates;
