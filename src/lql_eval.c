@@ -5706,6 +5706,34 @@ on_source_spooled_capture_decision(void *user,
   return LONEJSON_CANDIDATE_DISCARD;
 }
 
+#if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
+static int on_source_spooled_capture_prune(void *user, lonejson_error *error) {
+  source_spooled_match_state *state;
+  const lql_selector *selector;
+  size_t i;
+  (void)error;
+  state = (source_spooled_match_state *)user;
+  if (state == NULL || state->doc.root_kind != '{') {
+    return 0;
+  }
+  if (state->doc.fast_exact_selector != NULL) {
+    return !state->doc.fast_exact_hit && state->doc.fast_exact_miss;
+  }
+  selector = state->selector;
+  if (!selector_fast_top_level_multi_eligible(selector) ||
+      state->doc.stream_misses == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < selector->predicate_count; ++i) {
+    if (!hit_marked_fast(&state->doc, selector->predicates[i]) &&
+        stream_miss_marked_fast(&state->doc, selector->predicates[i])) {
+      return 1;
+    }
+  }
+  return 0;
+}
+#endif
+
 static lonejson_candidate_callback_result
 on_source_spooled_candidate_end(void *user,
                                 const lonejson_candidate_info *candidate,
@@ -7102,6 +7130,14 @@ static lql_status execute_query_source_spooled_matches_with_base(
   options.candidate_user = &state;
   options.capture_decision = on_source_spooled_capture_decision;
   options.capture_decision_user = &state;
+#if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
+  if ((selector_fast_exact_eligible(selector) &&
+       selector_fast_flat_scalar_eligible(selector)) ||
+      selector_fast_top_level_multi_eligible(selector)) {
+    options.capture_prune = on_source_spooled_capture_prune;
+    options.capture_prune_user = &state;
+  }
+#endif
   st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
                                         &options, &lj_error);
   if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||

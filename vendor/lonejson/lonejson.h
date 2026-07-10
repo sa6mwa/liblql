@@ -166,6 +166,7 @@ typedef unsigned long long lonejson_uint64;
 
 #define LONEJSON_HAS_CANDIDATE_TRANSFORM_VALUE_OBSERVER 1
 #define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR 1
+#define LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE 1
 
 #if defined(_MSC_VER)
 #define LONEJSON_SHORT_ALIAS_INLINE static __inline
@@ -2680,6 +2681,8 @@ typedef lonejson_candidate_capture_decision (
     *lonejson_candidate_capture_decision_fn)(
     void *user, const lonejson_candidate_info *candidate,
     lonejson_error *error);
+typedef int (*lonejson_candidate_capture_prune_fn)(void *user,
+                                                   lonejson_error *error);
 
 /** Options for arbitrary JSON candidate streams.
  *
@@ -2715,6 +2718,8 @@ typedef struct lonejson_candidate_stream_options {
   void *candidate_user;
   lonejson_candidate_capture_decision_fn capture_decision;
   void *capture_decision_user;
+  lonejson_candidate_capture_prune_fn capture_prune;
+  void *capture_prune_user;
 } lonejson_candidate_stream_options;
 
 /** Output framing policy for transformed candidate streams. */
@@ -15038,6 +15043,7 @@ typedef struct lonejson__json_io {
   lonejson_sink_fn sink;
   void *sink_user;
   lonejson_spooled *raw_capture_spool;
+  int *raw_capture_disabled;
   unsigned char *raw_capture_buffer;
   size_t raw_capture_buffer_len;
   size_t raw_capture_buffer_cap;
@@ -15646,7 +15652,8 @@ lonejson__json_cursor_advance_span(lonejson__json_io *io, size_t len) {
   if (len == 0u) {
     return LONEJSON_STATUS_OK;
   }
-  if (io->raw_capture_spool == NULL) {
+  if (io->raw_capture_spool == NULL ||
+      (io->raw_capture_disabled != NULL && *io->raw_capture_disabled)) {
     return LONEJSON_STATUS_OK;
   }
   status = lonejson__json_cursor_flush_raw_capture(io);
@@ -15676,8 +15683,13 @@ static LONEJSON__INLINE lonejson_status
 lonejson__json_cursor_flush_raw_capture(lonejson__json_io *io) {
   lonejson_status status;
 
-  if (io->raw_capture_spool == NULL || io->raw_capture_buffer == NULL ||
+  if (io->raw_capture_spool == NULL ||
+      (io->raw_capture_disabled != NULL && *io->raw_capture_disabled) ||
+      io->raw_capture_buffer == NULL ||
       io->raw_capture_buffer_len == 0u) {
+    if (io->raw_capture_disabled != NULL && *io->raw_capture_disabled) {
+      io->raw_capture_buffer_len = 0u;
+    }
     return LONEJSON_STATUS_OK;
   }
   status =
@@ -15694,7 +15706,8 @@ lonejson__json_cursor_capture_byte(lonejson__json_io *io, unsigned char byte) {
   lonejson_status status;
 
   io->last_raw_capture_counted = 0;
-  if (io->raw_capture_spool == NULL) {
+  if (io->raw_capture_spool == NULL ||
+      (io->raw_capture_disabled != NULL && *io->raw_capture_disabled)) {
     return 1;
   }
   if (io->raw_capture_buffer == NULL || io->raw_capture_buffer_cap == 0u) {
@@ -17712,7 +17725,7 @@ static lonejson_status lonejson__json_visit_one_cursor(
     const lonejson_value_visitor *visitor, void *user,
     const lonejson_path_value_visitor *path_visitor,
     const lonejson__value_limits *limits, lonejson_spooled *raw_capture_spool,
-    lonejson_error *error) {
+    int *raw_capture_disabled, lonejson_error *error) {
   lonejson__json_io io;
   lonejson__value_limits defaults;
   unsigned char *raw_capture_buffer;
@@ -17731,6 +17744,7 @@ static lonejson_status lonejson__json_visit_one_cursor(
   io.path_visitor = path_visitor;
   io.visitor_user = user;
   io.raw_capture_spool = raw_capture_spool;
+  io.raw_capture_disabled = raw_capture_disabled;
   if (raw_capture_spool != NULL) {
     raw_capture_buffer =
         (unsigned char *)lonejson__owned_malloc(allocator, 256u);
@@ -18700,7 +18714,7 @@ static lonejson_status lonejson__json_visit_one_top_level_field_cursor(
     const lonejson_value_visitor *visitor, void *user, const char *key,
     size_t key_len, const lonejson__value_limits *limits,
     lonejson_spooled *raw_capture_spool, int stop_after_truncated,
-    lonejson_error *error) {
+    int *raw_capture_disabled, lonejson_error *error) {
   lonejson__json_io io;
   lonejson__value_limits defaults;
   unsigned char *raw_capture_buffer;
@@ -18719,6 +18733,7 @@ static lonejson_status lonejson__json_visit_one_top_level_field_cursor(
   io.visitor = visitor;
   io.visitor_user = user;
   io.raw_capture_spool = raw_capture_spool;
+  io.raw_capture_disabled = raw_capture_disabled;
   if (raw_capture_spool != NULL) {
     raw_capture_buffer =
         (unsigned char *)lonejson__owned_malloc(allocator, 256u);
@@ -32421,9 +32436,13 @@ typedef struct lonejson__candidate_capture {
   lonejson__candidate_memory_capture memory;
   lonejson_spooled spool;
   lonejson__spool_options spool_options;
+  lonejson_candidate_capture_prune_fn prune;
+  void *prune_user;
+  int *raw_capture_disabled;
   int writer_open;
   int spool_init;
   int raw_spooled;
+  int raw_capture_pruned;
 } lonejson__candidate_capture;
 
 static size_t lonejson__candidate_error_offset(lonejson_uint64 offset) {
@@ -32443,31 +32462,60 @@ static lonejson_status lonejson__writer_init_sink_with_options(
     const lonejson__write_options *options, const lonejson_runtime *runtime,
     lonejson_error *error);
 
+static void lonejson__candidate_capture_maybe_prune(
+    lonejson__candidate_capture *capture) {
+  if (capture == NULL || capture->prune == NULL ||
+      capture->raw_capture_pruned) {
+    return;
+  }
+  if (capture->prune(capture->prune_user, capture->error)) {
+    capture->raw_capture_pruned = 1;
+    if (capture->raw_capture_disabled != NULL) {
+      *capture->raw_capture_disabled = 1;
+    }
+  }
+}
+
 static lonejson_status
 lonejson__candidate_capture_forward_event(lonejson__candidate_capture *capture,
                                           lonejson_value_event_fn fn) {
+  lonejson_status status;
   if (fn == NULL) {
     return LONEJSON_STATUS_OK;
   }
-  return fn(capture->user, capture->error);
+  status = fn(capture->user, capture->error);
+  if (status == LONEJSON_STATUS_OK) {
+    lonejson__candidate_capture_maybe_prune(capture);
+  }
+  return status;
 }
 
 static lonejson_status lonejson__candidate_capture_forward_path_event(
     lonejson__candidate_capture *capture, const lonejson_value_path *path,
     lonejson_path_value_event_fn fn) {
+  lonejson_status status;
   if (fn == NULL) {
     return LONEJSON_STATUS_OK;
   }
-  return fn(capture->user, path, capture->error);
+  status = fn(capture->user, path, capture->error);
+  if (status == LONEJSON_STATUS_OK) {
+    lonejson__candidate_capture_maybe_prune(capture);
+  }
+  return status;
 }
 
 static lonejson_status lonejson__candidate_capture_forward_path_chunk(
     lonejson__candidate_capture *capture, const lonejson_value_path *path,
     lonejson_path_value_chunk_fn fn, const char *data, size_t len) {
+  lonejson_status status;
   if (fn == NULL) {
     return LONEJSON_STATUS_OK;
   }
-  return fn(capture->user, path, data, len, capture->error);
+  status = fn(capture->user, path, data, len, capture->error);
+  if (status == LONEJSON_STATUS_OK) {
+    lonejson__candidate_capture_maybe_prune(capture);
+  }
+  return status;
 }
 
 static lonejson_status lonejson__candidate_capture_path_object_begin(
@@ -32691,18 +32739,23 @@ static lonejson_status
 lonejson__candidate_capture_key_chunk(void *user, const char *data, size_t len,
                                       lonejson_error *error) {
   lonejson__candidate_capture *capture = (lonejson__candidate_capture *)user;
+  lonejson_status status;
   if (!capture->raw_spooled) {
-    lonejson_status status =
-        lonejson__byte_append(&capture->key, data, len, capture->max_key_bytes,
-                              capture->allocator, error);
+    status = lonejson__byte_append(&capture->key, data, len,
+                                   capture->max_key_bytes, capture->allocator,
+                                   error);
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
   }
   if (capture->user_visitor != NULL &&
       capture->user_visitor->object_key_chunk != NULL) {
-    return capture->user_visitor->object_key_chunk(capture->user, data, len,
-                                                   capture->error);
+    status = capture->user_visitor->object_key_chunk(capture->user, data, len,
+                                                     capture->error);
+    if (status == LONEJSON_STATUS_OK) {
+      lonejson__candidate_capture_maybe_prune(capture);
+    }
+    return status;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -32774,17 +32827,21 @@ static lonejson_status
 lonejson__candidate_capture_string_chunk(void *user, const char *data,
                                          size_t len, lonejson_error *error) {
   lonejson__candidate_capture *capture = (lonejson__candidate_capture *)user;
+  lonejson_status status;
   if (!capture->raw_spooled) {
-    lonejson_status status =
-        lonejson_writer_string_chunk(&capture->writer, data, len, error);
+    status = lonejson_writer_string_chunk(&capture->writer, data, len, error);
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
   }
   if (capture->user_visitor != NULL &&
       capture->user_visitor->string_chunk != NULL) {
-    return capture->user_visitor->string_chunk(capture->user, data, len,
-                                               capture->error);
+    status = capture->user_visitor->string_chunk(capture->user, data, len,
+                                                 capture->error);
+    if (status == LONEJSON_STATUS_OK) {
+      lonejson__candidate_capture_maybe_prune(capture);
+    }
+    return status;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -32824,17 +32881,21 @@ static lonejson_status
 lonejson__candidate_capture_number_chunk(void *user, const char *data,
                                          size_t len, lonejson_error *error) {
   lonejson__candidate_capture *capture = (lonejson__candidate_capture *)user;
+  lonejson_status status;
   if (!capture->raw_spooled) {
-    lonejson_status status =
-        lonejson_writer_number_chunk(&capture->writer, data, len, error);
+    status = lonejson_writer_number_chunk(&capture->writer, data, len, error);
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
   }
   if (capture->user_visitor != NULL &&
       capture->user_visitor->number_chunk != NULL) {
-    return capture->user_visitor->number_chunk(capture->user, data, len,
-                                               capture->error);
+    status = capture->user_visitor->number_chunk(capture->user, data, len,
+                                                 capture->error);
+    if (status == LONEJSON_STATUS_OK) {
+      lonejson__candidate_capture_maybe_prune(capture);
+    }
+    return status;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -32857,17 +32918,22 @@ lonejson__candidate_capture_number_end(void *user, lonejson_error *error) {
 static lonejson_status lonejson__candidate_capture_bool(void *user, int value,
                                                         lonejson_error *error) {
   lonejson__candidate_capture *capture = (lonejson__candidate_capture *)user;
+  lonejson_status status;
   if (!capture->raw_spooled) {
-    lonejson_status status =
-        lonejson_writer_bool(&capture->writer, value, error);
+    status = lonejson_writer_bool(&capture->writer, value, error);
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       return status;
     }
   }
   if (capture->user_visitor != NULL &&
       capture->user_visitor->boolean_value != NULL) {
-    return capture->user_visitor->boolean_value(capture->user, value,
-                                                capture->error);
+    status =
+        capture->user_visitor->boolean_value(capture->user, value,
+                                             capture->error);
+    if (status == LONEJSON_STATUS_OK) {
+      lonejson__candidate_capture_maybe_prune(capture);
+    }
+    return status;
   }
   return LONEJSON_STATUS_OK;
 }
@@ -32944,6 +33010,8 @@ lonejson__candidate_capture_open(lonejson__candidate_scan *scan,
   capture->user_path_visitor = scan->options->path_visitor;
   capture->user = scan->options->visitor_user;
   capture->error = scan->error;
+  capture->prune = scan->options->capture_prune;
+  capture->prune_user = scan->options->capture_prune_user;
   capture->visitor = lonejson_default_value_visitor();
   capture->path_visitor = lonejson_default_path_value_visitor();
   capture->visitor.object_begin = lonejson__candidate_capture_object_begin;
@@ -33284,11 +33352,13 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
   lonejson_status status;
   lonejson_uint64 start;
   lonejson_uint64 end;
+  int raw_capture_disabled;
   const lonejson_value_visitor *visitor;
   const lonejson_path_value_visitor *path_visitor;
   void *visitor_user;
 
   memset(&info, 0, sizeof(info));
+  raw_capture_disabled = 0;
   start = scan->cursor->has_pushback
               ? scan->cursor->pushback_offset
               : lonejson__json_cursor_next_offset(scan->cursor);
@@ -33306,6 +33376,7 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
+  capture.raw_capture_disabled = &raw_capture_disabled;
   if (capture.mode != LONEJSON_CANDIDATE_CAPTURE_NONE) {
     visitor = &capture.visitor;
     path_visitor =
@@ -33325,7 +33396,7 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
         scan->cursor, scan->allocator, visitor, visitor_user,
         scan->options->top_level_field_key,
         scan->options->top_level_field_key_len, scan->limits, NULL,
-        scan->options->top_level_field_stop_after_truncated,
+        scan->options->top_level_field_stop_after_truncated, NULL,
         scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED &&
              capture.raw_spooled &&
@@ -33334,7 +33405,7 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
         scan->cursor, scan->allocator, visitor, visitor_user,
         scan->options->top_level_field_key,
         scan->options->top_level_field_key_len, scan->limits, &capture.spool,
-        0, scan->error);
+        0, &raw_capture_disabled, scan->error);
   } else {
     status = lonejson__json_visit_one_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user, path_visitor,
@@ -33342,6 +33413,10 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
         capture.mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED &&
                 capture.raw_spooled
             ? &capture.spool
+            : NULL,
+        capture.mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED &&
+                capture.raw_spooled
+            ? &raw_capture_disabled
             : NULL,
         scan->error);
   }
@@ -33368,6 +33443,9 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
     if (status != LONEJSON_STATUS_OK || scan->stopped) {
       lonejson__candidate_capture_cleanup(&capture);
       return status;
+    }
+    if (capture.raw_capture_pruned) {
+      retain_payload = 0;
     }
     if (retain_payload) {
       status = lonejson__candidate_capture_close(scan, &capture, &info);
