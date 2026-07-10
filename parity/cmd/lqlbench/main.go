@@ -221,11 +221,11 @@ func benchSampleCount(submode string) int {
 	}
 	raw := os.Getenv("LQL_BENCH_SAMPLES")
 	if raw == "" {
-		return 3
+		return 15
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil || value < 1 || value > 100 {
-		return 3
+		return 15
 	}
 	return value
 }

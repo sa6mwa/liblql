@@ -185,11 +185,11 @@ static int bench_sample_count(const char *submode) {
   }
   env = getenv("LQL_BENCH_SAMPLES");
   if (env == NULL || *env == '\0') {
-    return 3;
+    return 15;
   }
   value = strtol(env, &end, 10);
   if (end == env || *end != '\0' || value < 1L || value > 100L) {
-    return 3;
+    return 15;
   }
   return (int)value;
 }
