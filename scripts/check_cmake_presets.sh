@@ -22,7 +22,7 @@ check_presets() {
       .cacheVariables.LQL_DEPENDENCY_MODE == "bundled")
   ' || return 1
 
-  for preset in debug debug-lua asan bench-release; do
+  for preset in debug debug-vendored-lonejson debug-lua asan bench-release bench-vendored-lonejson; do
     jq_expect_arg "$presets" name "$preset" \
       '.configurePresets[] | select(.name == $name)' || return 1
     jq_expect_arg "$presets" name "$preset" \
@@ -43,6 +43,12 @@ check_presets() {
   ' || return 1
   jq_expect "$presets" '
     .configurePresets[] |
+    select(.name == "debug-vendored-lonejson" and .inherits == "debug" and
+      .cacheVariables.LQL_LONEJSON_PROVIDER == "vendored" and
+      .cacheVariables.LQL_INSTALL == "OFF")
+  ' || return 1
+  jq_expect "$presets" '
+    .configurePresets[] |
     select(.name == "asan" and .inherits == "debug" and
       (.cacheVariables.CMAKE_C_FLAGS | contains("-fsanitize=address,undefined")) and
       (.cacheVariables.CMAKE_C_FLAGS | contains("-fno-omit-frame-pointer")))
@@ -60,8 +66,14 @@ check_presets() {
       .cacheVariables.LQL_TARGET_OS == "linux" and
       .cacheVariables.LQL_TARGET_LIBC == "gnu")
   ' || return 1
+  jq_expect "$presets" '
+    .configurePresets[] |
+    select(.name == "bench-vendored-lonejson" and .inherits == "bench-release" and
+      .cacheVariables.LQL_LONEJSON_PROVIDER == "vendored" and
+      .cacheVariables.LQL_INSTALL == "OFF")
+  ' || return 1
 
-  for preset in debug asan; do
+  for preset in debug debug-vendored-lonejson asan; do
     jq_expect_arg "$presets" name "$preset" \
       '.testPresets[] | select(.name == $name and .configurePreset == $name)' ||
       return 1
@@ -153,9 +165,11 @@ if [ "${1:-}" = "--fixtures" ]; then
   "configurePresets": [
     {"name":"base","hidden":true,"generator":"Ninja","binaryDir":"${sourceDir}/build/${presetName}","cacheVariables":{"CMAKE_EXPORT_COMPILE_COMMANDS":"ON","LQL_DEPENDENCY_MODE":"bundled"}},
     {"name":"debug","inherits":"base","cacheVariables":{"CMAKE_BUILD_TYPE":"Debug","LQL_TARGET_ID":"x86_64-linux-gnu"}},
+    {"name":"debug-vendored-lonejson","inherits":"debug","cacheVariables":{"LQL_LONEJSON_PROVIDER":"vendored","LQL_INSTALL":"OFF"}},
     {"name":"debug-lua","inherits":"debug","cacheVariables":{"LQL_BUILD_LUA_MODULE":"ON"}},
     {"name":"asan","inherits":"debug","cacheVariables":{"CMAKE_C_FLAGS":"-fsanitize=address,undefined -fno-omit-frame-pointer"}},
     {"name":"bench-release","inherits":"base","cacheVariables":{"CMAKE_BUILD_TYPE":"Release","LQL_BUILD_TESTS":"OFF","LQL_BUILD_EXAMPLES":"OFF","LQL_BUILD_BENCHMARKS":"ON","LQL_BUILD_LUA_MODULE":"OFF","LQL_TARGET_ID":"x86_64-linux-gnu","LQL_TARGET_ARCH":"x86_64","LQL_TARGET_OS":"linux","LQL_TARGET_LIBC":"gnu"}},
+    {"name":"bench-vendored-lonejson","inherits":"bench-release","cacheVariables":{"LQL_LONEJSON_PROVIDER":"vendored","LQL_INSTALL":"OFF"}},
     {"name":"release-base","hidden":true,"inherits":"base","cacheVariables":{"CMAKE_BUILD_TYPE":"Release","LQL_BUILD_TESTS":"OFF","LQL_BUILD_EXAMPLES":"OFF","LQL_BUILD_BENCHMARKS":"OFF","LQL_BUILD_LUA_MODULE":"OFF"}},
     {"name":"x86_64-linux-gnu-release","inherits":"release-base","cacheVariables":{"LQL_TARGET_ID":"x86_64-linux-gnu","LQL_TARGET_ARCH":"x86_64","LQL_TARGET_OS":"linux","LQL_TARGET_LIBC":"gnu"}},
     {"name":"x86_64-linux-musl-release","inherits":"release-base","cacheVariables":{"LQL_TARGET_ID":"x86_64-linux-musl","LQL_TARGET_ARCH":"x86_64","LQL_TARGET_OS":"linux","LQL_TARGET_LIBC":"musl"}},
@@ -167,9 +181,11 @@ if [ "${1:-}" = "--fixtures" ]; then
   ],
   "buildPresets": [
     {"name":"debug","configurePreset":"debug"},
+    {"name":"debug-vendored-lonejson","configurePreset":"debug-vendored-lonejson"},
     {"name":"debug-lua","configurePreset":"debug-lua"},
     {"name":"asan","configurePreset":"asan"},
     {"name":"bench-release","configurePreset":"bench-release"},
+    {"name":"bench-vendored-lonejson","configurePreset":"bench-vendored-lonejson"},
     {"name":"x86_64-linux-gnu-release","configurePreset":"x86_64-linux-gnu-release"},
     {"name":"x86_64-linux-musl-release","configurePreset":"x86_64-linux-musl-release"},
     {"name":"aarch64-linux-gnu-release","configurePreset":"aarch64-linux-gnu-release"},
@@ -180,6 +196,7 @@ if [ "${1:-}" = "--fixtures" ]; then
   ],
   "testPresets": [
     {"name":"debug","configurePreset":"debug"},
+    {"name":"debug-vendored-lonejson","configurePreset":"debug-vendored-lonejson"},
     {"name":"asan","configurePreset":"asan"}
   ]
 }

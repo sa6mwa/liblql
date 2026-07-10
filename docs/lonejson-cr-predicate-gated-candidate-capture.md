@@ -103,7 +103,7 @@ The liblql acceptance gate should prove:
 - no liblql-owned full candidate materialization, hidden output buffering,
   temp-file staging, or selector-result cache is introduced;
 - warmed receiver allocation tests still pass;
-- `make bench-check`, `make bench-memory-check`, and the 1 GiB memory gate
+- `make bench-check`, `make bench-memory-check`, and the 100 MiB memory gate
   remain green;
 - release profiles for sparse callback-source plus-value and matches-only
   mutation rows no longer show all-candidate `lonejson_spooled_append` as the

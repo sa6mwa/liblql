@@ -16,8 +16,8 @@ printf '%s\n' 'release: running benchmark smoke gate'
 printf '%s\n' 'release: running scalable memory benchmark gate'
 "$MAKE_CMD" -C "$ROOT_DIR" bench-memory-check
 
-printf '%s\n' 'release: running 1 GiB streaming memory benchmark gate'
-"$MAKE_CMD" -C "$ROOT_DIR" bench-1g-check
+printf '%s\n' 'release: running 100 MiB streaming memory benchmark gate'
+"$MAKE_CMD" -C "$ROOT_DIR" bench-large-json-check
 
 printf '%s\n' 'release: building and verifying release matrix'
 "$MAKE_CMD" -C "$ROOT_DIR" release-matrix

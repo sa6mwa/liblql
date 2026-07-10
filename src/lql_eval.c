@@ -75,6 +75,10 @@ typedef struct eval_doc {
   char root_kind;
   int candidate_matched;
   int borrowed_scratch;
+  const lql_selector *fast_exact_selector;
+  int fast_exact_path_active;
+  int fast_exact_hit;
+  int fast_exact_miss;
 } eval_doc;
 
 typedef struct lql_payload_sink_adapter {
@@ -250,6 +254,16 @@ static void destroy_doc(eval_doc *doc) {
   memset(doc, 0, sizeof(*doc));
 }
 
+static int selector_fast_exact_eligible(const lql_selector *selector) {
+  return selector != NULL && selector->kind == LQL_SELECTOR_KIND_EQ &&
+         selector->hit_count == 1u && selector->predicate_count == 1u &&
+         selector->predicates != NULL && selector->predicates[0] == selector &&
+         selector->field_path_direct && selector->field_path_literal &&
+         !selector->value_is_temporal && selector->any_count == 0u &&
+         (selector->value_set || selector->value != NULL) &&
+         selector->observer_family == LQL_EVAL_FAMILY_EXACT;
+}
+
 static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   lql_impl *impl;
   unsigned int *next_hits;
@@ -270,6 +284,9 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   doc->selector = selector;
   if (doc->allocator == NULL) {
     return 0;
+  }
+  if (selector_fast_exact_eligible(selector)) {
+    doc->fast_exact_selector = selector;
   }
   if (impl != NULL && !impl->eval_scratch_in_use) {
     impl->eval_scratch_in_use = 1;
@@ -299,7 +316,8 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
     impl->eval_container_types = NULL;
     impl->eval_container_cap = 0u;
   }
-  if (selector != NULL && selector->hit_count != 0u) {
+  if (selector != NULL && selector->hit_count != 0u &&
+      doc->fast_exact_selector == NULL) {
     clear_hits = !doc->borrowed_scratch;
     clear_stream_misses = !doc->borrowed_scratch;
     clear_in_matches = !doc->borrowed_scratch;
@@ -420,6 +438,9 @@ static void reset_doc(eval_doc *doc) {
   doc->prefix_need = 0u;
   doc->root_kind = '\0';
   doc->candidate_matched = 0;
+  doc->fast_exact_path_active = 0;
+  doc->fast_exact_hit = 0;
+  doc->fast_exact_miss = 0;
 }
 
 static char *contains_tail_data(eval_doc *doc) {
@@ -933,6 +954,24 @@ static void path_match_prepare(eval_doc *doc, const lonejson_value_path *path,
   size_t start;
 
   root = doc->selector;
+  if (doc->fast_exact_selector != NULL) {
+    doc->scalar_path_features = 0u;
+    doc->fast_exact_path_active = 0;
+    doc->fast_exact_miss = 0;
+    if (doc->fast_exact_hit) {
+      return;
+    }
+    if (feature_mask != 0u &&
+        (LQL_SELECTOR_FEATURE_EXACT & feature_mask) == 0u) {
+      return;
+    }
+    if (selector_path_matches(doc, doc->fast_exact_selector, path)) {
+      doc->scalar_path_features = LQL_SELECTOR_FEATURE_EXACT;
+      doc->prefix_need = doc->fast_exact_selector->observer_prefix_need;
+      doc->fast_exact_path_active = 1;
+    }
+    return;
+  }
   if (root == NULL || root->hit_count == 0u ||
       doc->scalar_family_predicates == NULL) {
     return;
@@ -1013,6 +1052,11 @@ static void scalar_path_match_prepare(eval_doc *doc,
 }
 
 static void hit_mark_fast(eval_doc *doc, const lql_selector *selector) {
+  if (doc->fast_exact_selector == selector) {
+    doc->fast_exact_hit = 1;
+    doc->candidate_matched = 1;
+    return;
+  }
   doc->hits[selector->hit_index] = doc->candidate_epoch;
   if (!doc->candidate_matched && doc->selector->match_sticky_once_true &&
       eval_selector_tree(doc->selector, doc)) {
@@ -1021,20 +1065,34 @@ static void hit_mark_fast(eval_doc *doc, const lql_selector *selector) {
 }
 
 static int hit_marked_fast(const eval_doc *doc, const lql_selector *selector) {
+  if (doc->fast_exact_selector == selector) {
+    return doc->fast_exact_hit;
+  }
   return doc->hits[selector->hit_index] == doc->candidate_epoch;
 }
 
 static void stream_miss_mark_fast(eval_doc *doc, const lql_selector *selector) {
+  if (doc->fast_exact_selector == selector) {
+    doc->fast_exact_miss = 1;
+    return;
+  }
   doc->stream_misses[selector->hit_index] = doc->candidate_epoch;
 }
 
 static void stream_miss_clear_fast(eval_doc *doc,
                                    const lql_selector *selector) {
+  if (doc->fast_exact_selector == selector) {
+    doc->fast_exact_miss = 0;
+    return;
+  }
   doc->stream_misses[selector->hit_index] = 0u;
 }
 
 static int stream_miss_marked_fast(const eval_doc *doc,
                                    const lql_selector *selector) {
+  if (doc->fast_exact_selector == selector) {
+    return doc->fast_exact_miss;
+  }
   return doc->stream_misses[selector->hit_index] == doc->candidate_epoch;
 }
 
@@ -1136,6 +1194,19 @@ static void observe_prepared_exact_value(eval_doc *doc, const char *value,
   size_t count;
   size_t needle_len;
 
+  if (doc->fast_exact_selector != NULL) {
+    selector = doc->fast_exact_selector;
+    if (!doc->fast_exact_path_active || is_container || is_null ||
+        doc->fast_exact_hit) {
+      return;
+    }
+    needle = selector->value_data;
+    if (value_len == selector->value_len &&
+        (value_len == 0u || memcmp(value, needle, value_len) == 0)) {
+      hit_mark_fast(doc, selector);
+    }
+    return;
+  }
   items = scalar_family_begin(doc, LQL_EVAL_FAMILY_EXACT);
   count = doc->scalar_family_counts[LQL_EVAL_FAMILY_EXACT];
   for (i = 0u; i < count; ++i) {
@@ -1455,6 +1526,21 @@ static void observe_exact_stream_chunk(eval_doc *doc,
 
   (void)selector;
   (void)path;
+  if (doc->fast_exact_selector != NULL) {
+    selector = doc->fast_exact_selector;
+    if (!doc->fast_exact_path_active || doc->fast_exact_hit ||
+        doc->fast_exact_miss || doc->scalar_len < len) {
+      return;
+    }
+    offset = doc->scalar_len - len;
+    value_len = selector->value_len;
+    if (offset >= value_len ||
+        !literal_chunk_matches(selector->value_data, value_len, offset, data,
+                               len, 0, value_len)) {
+      doc->fast_exact_miss = 1;
+    }
+    return;
+  }
   if (doc->hits == NULL || doc->stream_misses == NULL ||
       doc->scalar_len < len) {
     return;
@@ -1578,6 +1664,17 @@ static void observe_exact_stream_end(eval_doc *doc,
 
   (void)selector;
   (void)path;
+  if (doc->fast_exact_selector != NULL) {
+    selector = doc->fast_exact_selector;
+    if (doc->fast_exact_path_active && !doc->fast_exact_hit &&
+        !doc->fast_exact_miss && doc->scalar_len == selector->value_len &&
+        (selector->value_len > doc->prefix_len ||
+         memcmp(doc->prefix_buf, selector->value_data, selector->value_len) ==
+             0)) {
+      hit_mark_fast(doc, selector);
+    }
+    return;
+  }
   if (doc->hits == NULL) {
     return;
   }
@@ -2127,7 +2224,9 @@ static int eval_selector_tree(const lql_selector *selector,
                ? 1
                : !eval_selector_tree(&selector->children[0], doc);
   default:
-    return doc->hits != NULL && hit_marked_fast(doc, selector);
+    return doc != NULL &&
+           (doc->fast_exact_selector == selector || doc->hits != NULL) &&
+           hit_marked_fast(doc, selector);
   }
 }
 

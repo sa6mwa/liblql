@@ -33,16 +33,16 @@ check_release_surface() {
     printf 'release surface: print-release-assets must use checksum manifest helper\n' >&2
     exit 1
   fi
-  if ! grep -F 'make bench-1g-check' "$makefile" >/dev/null; then
-    printf 'release surface: make help must advertise make bench-1g-check\n' >&2
+  if ! grep -F 'make bench-large-json-check' "$makefile" >/dev/null; then
+    printf 'release surface: make help must advertise make bench-large-json-check\n' >&2
     exit 1
   fi
-  if ! grep -Eq '^prerelease-hardening:.*bench-1g-check' "$makefile"; then
-    printf 'release surface: prerelease-hardening must include bench-1g-check\n' >&2
+  if ! grep -Eq '^prerelease-hardening:.*bench-large-json-check' "$makefile"; then
+    printf 'release surface: prerelease-hardening must include bench-large-json-check\n' >&2
     exit 1
   fi
   if ! grep -Eq '^bench-memory-check:.*build-bench-release' "$makefile" ||
-     ! grep -Eq '^bench-1g-check:.*build-bench-release' "$makefile"; then
+     ! grep -Eq '^bench-large-json-check:.*build-bench-release' "$makefile"; then
     printf 'release surface: memory benchmark gates must build optimized C helpers\n' >&2
     exit 1
   fi
@@ -59,7 +59,7 @@ check_release_surface() {
   fi
 
   for required in 'scripts/clean.sh' 'test-all' 'bench-check' \
-    'bench-memory-check' 'bench-1g-check' 'release-matrix'; do
+    'bench-memory-check' 'bench-large-json-check' 'release-matrix'; do
     if ! grep -F "$required" "$release_script" >/dev/null; then
       printf 'release surface: release gate is missing %s\n' "$required" >&2
       exit 1
@@ -119,8 +119,8 @@ if [ "${1:-}" = "--fixtures" ]; then
 
   cat >"$makefile" <<'EOF'
 help:
-	@printf '%s\n' 'make release' 'make bench-1g-check' 'make print-release-assets'
-prerelease-hardening: prerelease bench-1g-check release-matrix
+	@printf '%s\n' 'make release' 'make bench-large-json-check' 'make print-release-assets'
+prerelease-hardening: prerelease bench-large-json-check release-matrix
 release:
 	@./scripts/release_gate.sh
 print-release-assets:
@@ -133,10 +133,10 @@ bench-memory-check: build-debug build-bench-release
 	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
 	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
 	  ./scripts/check_parity_benchmark_large_memory.sh
-bench-1g-check: build-debug build-bench-release
+bench-large-json-check: build-debug build-bench-release
 	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
 	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
-	  ./scripts/check_parity_benchmark_1g_memory.sh
+	  ./scripts/check_parity_benchmark_large_json_memory.sh
 EOF
   cat >"$release_script" <<'EOF'
 #!/bin/sh
@@ -144,7 +144,7 @@ scripts/clean.sh
 make test-all
 make bench-check
 make bench-memory-check
-make bench-1g-check
+make bench-large-json-check
 make release-matrix
 EOF
   cat >"$cmakelists" <<'EOF'

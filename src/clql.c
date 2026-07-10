@@ -619,8 +619,7 @@ static int create_inline_temp(const char *path, char **out_path,
   struct stat st;
   len = strlen(path);
   template_path =
-      (char *)lql_receiver_alloc(clql_ctx,
-                                 len + strlen(".lql-XXXXXX") + 1u);
+      (char *)lql_receiver_alloc(clql_ctx, len + strlen(".lql-XXXXXX") + 1u);
   if (template_path == NULL) {
     return 0;
   }
@@ -656,7 +655,9 @@ static void usage(FILE *out) {
   fprintf(out, "  clql --version\n");
   fprintf(out, "\n");
   fprintf(out, "Input:\n");
-  fprintf(out, "  file                       read JSON from file; use - for stdin\n");
+  fprintf(
+      out,
+      "  file                       read JSON from file; use - for stdin\n");
   fprintf(out, "  stdin                      used when no file is provided\n");
   fprintf(out, "\n");
   fprintf(out, "Selection:\n");
@@ -665,16 +666,21 @@ static void usage(FILE *out) {
   fprintf(out, "  -c, --compact[=bool]       emit compact JSON\n");
   fprintf(out, "\n");
   fprintf(out, "Projection:\n");
-  fprintf(out, "  -f, --field <path>         project a field from each match; repeatable\n");
+  fprintf(out, "  -f, --field <path>         project a field from each match; "
+               "repeatable\n");
   fprintf(out, "      --field=<path>         same as --field <path>\n");
   fprintf(out, "\n");
   fprintf(out, "Mutation:\n");
-  fprintf(out, "  -m, --mutate <expr>        apply a mutation expression; repeatable\n");
+  fprintf(
+      out,
+      "  -m, --mutate <expr>        apply a mutation expression; repeatable\n");
   fprintf(out, "      --mutate=<expr>        same as --mutate <expr>\n");
-  fprintf(out, "  -i, --inline[=bool]        rewrite the input file in place\n");
+  fprintf(out,
+          "  -i, --inline[=bool]        rewrite the input file in place\n");
   fprintf(out, "  -w, --write[=bool]         alias for --inline\n");
   fprintf(out, "  -F, --enable-file-mutations[=bool]\n");
-  fprintf(out, "                             allow file-backed mutation values\n");
+  fprintf(out,
+          "                             allow file-backed mutation values\n");
   fprintf(out, "\n");
   fprintf(out, "Commands:\n");
   fprintf(out, "  -h, --help                 show this help\n");
@@ -694,7 +700,8 @@ static void usage(FILE *out) {
   fprintf(out, "Selector examples (full LQL):\n");
   fprintf(out, "  clql 'eq{field=/status,value=open}' data.json\n");
   fprintf(out, "  clql 'contains{field=/msg,value=timeout,ic=t}' data.json\n");
-  fprintf(out, "  clql 'contains{field=/msg,any=timeout|degraded}' data.json\n");
+  fprintf(out,
+          "  clql 'contains{field=/msg,any=timeout|degraded}' data.json\n");
   fprintf(out, "  clql 'icontains{field=/msg,value=timeout}' data.json\n");
   fprintf(out, "  clql 'icontains{field=/service,a=AUTH|EDGE}' data.json\n");
   fprintf(out, "  clql 'iprefix{field=/service,value=auth}' data.json\n");
@@ -702,14 +709,14 @@ static void usage(FILE *out) {
           "  clql 'date{field=/timestamp,after=2025-01-01,before=2025-02-01}' "
           "data.json\n");
   fprintf(out, "  clql 'date{f=/timestamp,since=yesterday}' data.json\n");
-  fprintf(out,
-          "  clql "
-          "'and.eq{field=/status,value=open},and.range{field=/progress,gte=50}' "
-          "data.json\n");
-  fprintf(out,
-          "  clql "
-          "'or.eq{field=/region,value=us},or.eq{field=/region,value=eu}' "
-          "data.json\n");
+  fprintf(
+      out,
+      "  clql "
+      "'and.eq{field=/status,value=open},and.range{field=/progress,gte=50}' "
+      "data.json\n");
+  fprintf(out, "  clql "
+               "'or.eq{field=/region,value=us},or.eq{field=/region,value=eu}' "
+               "data.json\n");
   fprintf(out, "  clql 'not.eq{field=/state,value=disabled}' data.json\n");
   fprintf(out, "  clql 'exists{/metadata/etag}' data.json\n");
   fprintf(out, "\n");
@@ -719,11 +726,17 @@ static void usage(FILE *out) {
   fprintf(out, "  clql -O '/status=\"open\"' '/status=\"queued\"' data.json\n");
   fprintf(out, "\n");
   fprintf(out, "Notes:\n");
-  fprintf(out, "  With -m, selectors choose which objects are mutated. Add -M to output\n");
-  fprintf(out, "  only selector matches. contains/icontains accept value=... or\n");
-  fprintf(out, "  any=/a=... pipe-delimited lists. range accepts numeric or datetime\n");
-  fprintf(out, "  literals. date supports value, after, before, gt, gte, lt, and lte;\n");
-  fprintf(out, "  only date{...,since=...} supports relative macros such as now, today,\n");
+  fprintf(out, "  With -m, selectors choose which objects are mutated. Add -M "
+               "to output\n");
+  fprintf(out,
+          "  only selector matches. contains/icontains accept value=... or\n");
+  fprintf(
+      out,
+      "  any=/a=... pipe-delimited lists. range accepts numeric or datetime\n");
+  fprintf(out, "  literals. date supports value, after, before, gt, gte, lt, "
+               "and lte;\n");
+  fprintf(out, "  only date{...,since=...} supports relative macros such as "
+               "now, today,\n");
   fprintf(out, "  and yesterday.\n");
 }
 

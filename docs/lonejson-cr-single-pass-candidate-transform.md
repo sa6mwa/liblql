@@ -155,7 +155,7 @@ The liblql acceptance gate should prove:
   spooled capture for every candidate;
 - no liblql-owned full candidate or output materialization is introduced;
 - warmed receiver allocation tests still pass;
-- `make bench-check`, `make bench-memory-check`, and the 1 GiB memory gate
+- `make bench-check`, `make bench-memory-check`, and the 100 MiB memory gate
   remain green;
 - release profiles no longer show dense source projection/mutation dominated by
   `lonejson_spooled_append` and candidate replay work.

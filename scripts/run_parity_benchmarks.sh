@@ -1076,7 +1076,7 @@ selected_modes() {
         plus_value_source_selector \
         plus_value_openjson_selector
       ;;
-    one-gig)
+    large-json)
       printf '%s\n' \
         decision_only_selector \
         plus_value_selector \
@@ -1110,7 +1110,7 @@ mode_applies_to_case() {
   mode=$1
   selector_name=$2
   case "$mode_profile" in
-    one-gig)
+    large-json)
       case "$selector_name:$mode" in
         eq_status_open:decision_only_selector|eq_status_open:plus_value_selector|eq_status_open:plus_value_source_selector)
           return 0

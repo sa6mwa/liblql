@@ -2,7 +2,7 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INSTALL ?= install
 
-.PHONY: help deps-debug deps-release deps-cross build build-clql-static build-debug build-debug-lua build-release build-bench-release install test test-debug parity-test test-all asan fuzz fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-gate perf-gate bench-lockd-perf-check bench-memory-check bench-1g-check bench-freeze-baseline benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version print-release-assets format clean clean-dist
+.PHONY: help deps-debug deps-release deps-cross build build-clql-static build-debug build-debug-vendored-lonejson build-debug-lua build-release build-bench-release build-bench-vendored-lonejson install test test-debug test-vendored-lonejson parity-test test-all asan fuzz fuzz-smoke lua-rock lua-env lua-test bench benchmarks bench-check bench-check-vendored-lonejson bench-gate perf-gate bench-lockd-perf-check bench-memory-check bench-large-json-check bench-freeze-baseline benchmarks-go benchmarks-c benchmarks-lua benchmarks-parity package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-lua-artifacts release-matrix finalize-slice prerelease prerelease-hardening release print-release-version print-release-assets format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -11,12 +11,15 @@ help:
 	  'make deps-cross              fetch all release lonejson SDKs' \
 	  'make build                   build static clql, preferring musl then GNU' \
 	  'make build-debug             configure and build debug preset' \
+	  'make build-debug-vendored-lonejson configure and build debug preset with vendored lonejson' \
 	  'make build-debug-lua         configure and build debug Lua preset' \
 	  'make build-release           configure and build host GNU release preset' \
 	  'make build-bench-release     configure and build optimized benchmark helpers' \
+	  'make build-bench-vendored-lonejson configure and build optimized helpers with vendored lonejson' \
 	  'make install                 install built clql to $${PREFIX:-/usr/local}/bin' \
 	  'make test                    run fast C/API tests' \
 	  'make test-debug              alias for fast C/API tests' \
+	  'make test-vendored-lonejson run fast C/API tests with vendored lonejson' \
 	  'make parity-test             run Go-backed parity tests' \
 	  'make test-all                run tests, fuzz smoke, sanitizers, and Lua smoke tests' \
 	  'make asan                    run ASan/UBSan tests' \
@@ -27,11 +30,12 @@ help:
 	  'make lua-test                run Lua facade smoke tests' \
 	  'make benchmarks             run local parity benchmark smoke' \
 	  'make bench-check            run deterministic benchmark smoke gate' \
+	  'make bench-check-vendored-lonejson run deterministic benchmark smoke gate with vendored lonejson' \
 	  'make bench-gate             alias for deterministic benchmark smoke gate' \
 	  'make perf-gate              alias for deterministic benchmark smoke gate' \
 	  'make bench-lockd-perf-check run lockd-specific C performance gates' \
 	  'make bench-memory-check     run scalable streaming and C mutation memory gates' \
-	  'make bench-1g-check         run 1 GiB/128 MiB streaming memory gate' \
+	  'make bench-large-json-check run 100 MiB large-JSON memory gate' \
 	  'make bench-freeze-baseline  wait for quiet host and update committed benchmark baselines' \
 	  'make benchmarks-go          run Go benchmark implementation' \
 	  'make benchmarks-c           run C benchmark implementation' \
@@ -83,6 +87,10 @@ build-debug: deps-debug
 	@cmake --preset debug
 	@cmake --build --preset debug
 
+build-debug-vendored-lonejson:
+	@cmake --preset debug-vendored-lonejson
+	@cmake --build --preset debug-vendored-lonejson
+
 build-debug-lua: deps-debug
 	@cmake --preset debug-lua
 	@cmake --build --preset debug-lua
@@ -95,8 +103,15 @@ build-bench-release: deps-release
 	@cmake --preset bench-release
 	@cmake --build --preset bench-release
 
+build-bench-vendored-lonejson:
+	@cmake --preset bench-vendored-lonejson
+	@cmake --build --preset bench-vendored-lonejson
+
 test test-debug: build-debug
 	@ctest --preset debug -LE 'parity|fuzz'
+
+test-vendored-lonejson: build-debug-vendored-lonejson
+	@ctest --preset debug-vendored-lonejson -LE 'parity|fuzz'
 
 parity-test: build-debug
 	@ctest --preset debug -L parity
@@ -142,6 +157,20 @@ bench-check: build-debug build-debug-lua build-bench-release
 	@./scripts/check_parity_benchmark_memory.sh build/bench-check.jsonl
 	@./scripts/check_parity_benchmark_schema.sh
 
+bench-check-vendored-lonejson: build-debug-vendored-lonejson build-debug-lua build-bench-vendored-lonejson
+	@mkdir -p build
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-vendored-lonejson/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-vendored-lonejson \
+	  LQL_BENCH_SUITE=smoke \
+	  ./scripts/run_parity_benchmarks.sh --impl go,c,lua --format json --check --require go,c,lua > build/bench-check-vendored-lonejson.jsonl
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-vendored-lonejson/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-vendored-lonejson \
+	  ./scripts/check_lockd_perf_benchmark.sh
+	@./scripts/check_parity_benchmark_failures.sh
+	@./scripts/check_parity_benchmark_fixtures.sh
+	@./scripts/check_parity_benchmark_memory.sh build/bench-check-vendored-lonejson.jsonl
+	@./scripts/check_parity_benchmark_schema.sh
+
 bench-gate perf-gate: bench-check
 
 bench-lockd-perf-check: build-bench-release
@@ -154,10 +183,10 @@ bench-memory-check: build-debug build-bench-release
 	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
 	  ./scripts/check_parity_benchmark_large_memory.sh
 
-bench-1g-check: build-debug build-bench-release
+bench-large-json-check: build-debug build-bench-release
 	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
 	  LQL_BENCH_LIBRARY_DIR=build/bench-release \
-	  ./scripts/check_parity_benchmark_1g_memory.sh
+	  ./scripts/check_parity_benchmark_large_json_memory.sh
 
 bench-freeze-baseline: build-debug build-bench-release
 	@LQL_PAYLOAD_BENCH_PATH=build/bench-release/lql_payload_bench \
@@ -185,7 +214,7 @@ finalize-slice: format test
 
 prerelease: format test-all bench-check package-verify
 
-prerelease-hardening: prerelease bench-1g-check release-matrix
+prerelease-hardening: prerelease bench-large-json-check release-matrix
 
 release:
 	@./scripts/release_gate.sh

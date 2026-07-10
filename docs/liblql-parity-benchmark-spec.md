@@ -130,8 +130,8 @@ Current implementation status:
   Lua through GNU
   `/usr/bin/time -f/-o` or Darwin `/usr/bin/time -l`. It is configurable with
   `LQL_BENCH_MEMORY_COUNT`, `LQL_BENCH_MEMORY_BLOB_BYTES`, and
-  `LQL_BENCH_MEMORY_MIN_BYTES`, so the same gate shape can be scaled toward the
-  1 GiB/128 MiB requirement without changing the runner or weakening the normal
+  `LQL_BENCH_MEMORY_MIN_BYTES`, so the same gate shape can be scaled without
+  changing the runner or weakening the normal
   smoke gate. The target builds and runs the optimized C benchmark helper for
   C performance rows while preserving debug/test builds for normal unit
   coverage. The same target also runs a separate Go/C-only mutation memory
@@ -145,17 +145,17 @@ Current implementation status:
   `/id` from matched candidates while large `/blob` fields remain unselected.
   That profile gates seekable and callback-source payload projection RSS/time
   without materializing whole candidates.
-- `make bench-1g-check` is the explicit 1 GiB/128 MiB profile. It uses the
+- `make bench-large-json-check` is the explicit 100 MiB streaming profile. It uses the
   generated large NDJSON fixture and a focused C/Lua streaming profile covering
   decision-only file-backed selection, seekable file-backed plus-value
   selection, and callback-source plus-value selection. The gate validates exact
   generated candidate/match/payload counts without
-  asking Go to rescan the 1 GiB corpus, then applies the common RSS/time
+  asking Go to rescan the 100 MiB corpus, then applies the common RSS/time
   validator. Go remains the oracle for the broader medium-size parity benchmark
-  gates where exhaustive mode coverage is practical. The 1 GiB gate writes
-  `build/bench-1g-check.jsonl` and is configurable with `LQL_BENCH_1G_COUNT`,
-  `LQL_BENCH_1G_BLOB_BYTES`, `LQL_BENCH_1G_MIN_BYTES`, and
-  `LQL_BENCH_1G_LOG` for local reproduction or reduced-size wiring checks.
+  gates where exhaustive mode coverage is practical. The 100 MiB gate writes
+  `build/bench-large-json-check.jsonl` and is configurable with `LQL_BENCH_LARGE_JSON_COUNT`,
+  `LQL_BENCH_LARGE_JSON_BLOB_BYTES`, `LQL_BENCH_LARGE_JSON_MIN_BYTES`, and
+  `LQL_BENCH_LARGE_JSON_LOG` for local reproduction or reduced-size wiring checks.
   It is part of `make prerelease-hardening` and the normal `make release` gate.
 - `make benchmarks-c` exercises the public liblql API for decision-only output
   and matched-only seekable plus-value payload access over a shared generated
@@ -617,7 +617,7 @@ Performance thresholds should be added after:
 
 Committed baseline logs live under `bench/baselines/` and are refreshed with
 `make bench-freeze-baseline`. The freeze target waits for a quiet host load,
-runs the smoke, lockd, scalable memory, and 1 GiB benchmark profiles, validates
+runs the smoke, lockd, scalable memory, and 100 MiB benchmark profiles, validates
 the emitted JSON Lines records, and updates the baseline checksum manifest.
 
 Suggested staged gates:
@@ -661,10 +661,10 @@ mode, observed value, baseline/threshold, and reproduction command.
 - Do not call a benchmark streaming if it materializes the full dataset first.
 - Do not satisfy payload modes by retaining complete candidate copies outside
   the callback lifetime.
-- Do not pass the 1 GB / 128 MB profile by increasing memory limits, using
+- Do not pass the 100 MiB streaming profile by increasing memory limits, using
   temporary files as an undisclosed full-input staging substitute, or disabling
   payload modes that the profile requires.
-- Do not treat the 1 GB / 128 MB profile as permission for memory growth
+- Do not treat the 100 MiB streaming profile as permission for memory growth
   proportional to input size; it is only the practical CI-sized proxy for the
   1 TB / 8 MB stress model.
 
@@ -685,7 +685,7 @@ Add tests or smoke gates proving:
 - `make benchmarks-parity` fails if any required implementation is missing;
 - `make bench-check` runs a small deterministic matrix suitable for local
   confidence.
-- `make bench-1g-check` runs the explicit 1 GiB/128 MiB memory profile with
+- `make bench-large-json-check` runs the explicit 100 MiB memory profile with
   seekable file-backed and callback-source plus-value coverage; reduced-size
   overrides are available only for checking target wiring.
 - `make bench-freeze-baseline` refreshes the committed baseline logs only after

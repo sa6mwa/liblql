@@ -429,7 +429,7 @@ if(LQL_BUILD_TESTS)
   if(GO_EXECUTABLE AND LUA_EXECUTABLE AND LQL_LUA_EXECUTABLE_IS_55 AND
       TARGET clql AND TARGET lql_payload_bench AND TARGET lql_lua_core AND
       TARGET lql_shared AND NOT LQL_SANITIZER_BUILD)
-    add_test(NAME lql.benchmark-1g-fixtures
+    add_test(NAME lql.benchmark-large-json-fixtures
       COMMAND ${CMAKE_COMMAND} -E env
         GO=${GO_EXECUTABLE}
         LUA=${LUA_EXECUTABLE}
@@ -438,8 +438,8 @@ if(LQL_BUILD_TESTS)
         LQL_LUA_MODULE_DIR=${CMAKE_CURRENT_BINARY_DIR}
         LQL_BENCH_LIBRARY_DIR=$<TARGET_FILE_DIR:lql_shared>
         LQL_BENCH_DEP_LIBRARY_DIR=${LQL_EXTERNAL_ROOT}/lib
-        sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_parity_benchmark_1g_fixtures.sh)
-    set_tests_properties(lql.benchmark-1g-fixtures PROPERTIES
+        sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_parity_benchmark_large_json_fixtures.sh)
+    set_tests_properties(lql.benchmark-large-json-fixtures PROPERTIES
       LABELS "unit;local;lua" TIMEOUT 20)
   endif()
   if(TARGET lql_match_example)

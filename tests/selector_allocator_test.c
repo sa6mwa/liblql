@@ -571,9 +571,10 @@ static int expect_file_matches_steady_state_has_no_receiver_alloc(void) {
     return 1;
   }
   if (counter.alloc_attempt_count != alloc_attempts_after_second_warmup) {
-    printf("file match steady eval attempted allocation: before=%lu after=%lu\n",
-           (unsigned long)alloc_attempts_after_second_warmup,
-           (unsigned long)counter.alloc_attempt_count);
+    printf(
+        "file match steady eval attempted allocation: before=%lu after=%lu\n",
+        (unsigned long)alloc_attempts_after_second_warmup,
+        (unsigned long)counter.alloc_attempt_count);
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     return 1;
@@ -1513,8 +1514,8 @@ static int expect_mutation_unselected_large_blob_allocation_stable(void) {
   return 0;
 }
 
-static int expect_file_candidate_mutation_steady_state_has_no_receiver_alloc(
-    void) {
+static int
+expect_file_candidate_mutation_steady_state_has_no_receiver_alloc(void) {
   counting_allocator counter;
   lql *ctx;
   lql_selector *selector;
@@ -1576,11 +1577,11 @@ static int expect_file_candidate_mutation_steady_state_has_no_receiver_alloc(
     return 1;
   }
 
-#define RUN_FILE_CANDIDATE_MUTATION(label)                                    \
+#define RUN_FILE_CANDIDATE_MUTATION(label)                                     \
   do {                                                                         \
     out = tmpfile();                                                           \
     if (out == NULL) {                                                         \
-      printf("file candidate mutation output tmpfile failed: %s\n", (label)); \
+      printf("file candidate mutation output tmpfile failed: %s\n", (label));  \
       fclose(file);                                                            \
       ctx->mutation_plan_destroy(ctx, plan);                                   \
       ctx->selector_destroy(ctx, selector);                                    \
@@ -1588,7 +1589,7 @@ static int expect_file_candidate_mutation_steady_state_has_no_receiver_alloc(
       return 1;                                                                \
     }                                                                          \
     if (fseek(file, 0L, SEEK_SET) != 0) {                                      \
-      printf("file candidate mutation seek failed: %s\n", (label));           \
+      printf("file candidate mutation seek failed: %s\n", (label));            \
       fclose(out);                                                             \
       fclose(file);                                                            \
       ctx->mutation_plan_destroy(ctx, plan);                                   \
@@ -1598,12 +1599,12 @@ static int expect_file_candidate_mutation_steady_state_has_no_receiver_alloc(
     }                                                                          \
     memset(&result, 0, sizeof(result));                                        \
     lql_error_init(&error);                                                    \
-    st = ctx->mutate_file_range_candidates(                                   \
-        ctx, selector, plan, file, 0u, (lql_uint64)strlen(json), out, 0, 0,    \
-        &result, &error);                                                      \
-    if (st != LQL_STATUS_OK || result.candidates_seen != 2u ||                \
+    st = ctx->mutate_file_range_candidates(ctx, selector, plan, file, 0u,      \
+                                           (lql_uint64)strlen(json), out, 0,   \
+                                           0, &result, &error);                \
+    if (st != LQL_STATUS_OK || result.candidates_seen != 2u ||                 \
         result.candidates_matched != 1u) {                                     \
-      printf("file candidate mutation failed: %s: %s\n", (label),             \
+      printf("file candidate mutation failed: %s: %s\n", (label),              \
              error.message);                                                   \
       fclose(out);                                                             \
       fclose(file);                                                            \
@@ -1613,7 +1614,7 @@ static int expect_file_candidate_mutation_steady_state_has_no_receiver_alloc(
       return 1;                                                                \
     }                                                                          \
     if (fseek(out, 0L, SEEK_SET) != 0) {                                       \
-      printf("file candidate mutation output seek failed: %s\n", (label));    \
+      printf("file candidate mutation output seek failed: %s\n", (label));     \
       fclose(out);                                                             \
       fclose(file);                                                            \
       ctx->mutation_plan_destroy(ctx, plan);                                   \
@@ -1624,13 +1625,14 @@ static int expect_file_candidate_mutation_steady_state_has_no_receiver_alloc(
     memset(output, 0, sizeof(output));                                         \
     nread = fread(output, 1u, sizeof(output) - 1u, out);                       \
     fclose(out);                                                               \
-    if (nread != strlen("{\"status\":\"open\",\"count\":2}\n"                 \
-                        "{\"status\":\"closed\",\"count\":4}\n") ||           \
-        memcmp(output, "{\"status\":\"open\",\"count\":2}\n"                  \
-                       "{\"status\":\"closed\",\"count\":4}\n",               \
-               strlen("{\"status\":\"open\",\"count\":2}\n"                  \
-                      "{\"status\":\"closed\",\"count\":4}\n")) != 0) {       \
-      printf("file candidate mutation output mismatch: %s: %s\n", (label),    \
+    if (nread != strlen("{\"status\":\"open\",\"count\":2}\n"                  \
+                        "{\"status\":\"closed\",\"count\":4}\n") ||            \
+        memcmp(output,                                                         \
+               "{\"status\":\"open\",\"count\":2}\n"                           \
+               "{\"status\":\"closed\",\"count\":4}\n",                        \
+               strlen("{\"status\":\"open\",\"count\":2}\n"                    \
+                      "{\"status\":\"closed\",\"count\":4}\n")) != 0) {        \
+      printf("file candidate mutation output mismatch: %s: %s\n", (label),     \
              output);                                                          \
       fclose(file);                                                            \
       ctx->mutation_plan_destroy(ctx, plan);                                   \
@@ -1694,8 +1696,7 @@ expect_file_candidate_mutation_matches_only_miss_has_no_receiver_alloc(void) {
   lql_error_init(&error);
   st = lql_new_with_allocator(&ctx, &counter.api, &error);
   if (st != LQL_STATUS_OK || ctx == NULL) {
-    printf("file candidate mutation miss receiver failed: %s\n",
-           error.message);
+    printf("file candidate mutation miss receiver failed: %s\n", error.message);
     return 1;
   }
   selector = NULL;
@@ -1726,7 +1727,8 @@ expect_file_candidate_mutation_matches_only_miss_has_no_receiver_alloc(void) {
     ctx->destroy(ctx);
     return 1;
   }
-  json = "{\"status\":\"closed\",\"count\":4,\"blob\":\"large pass-through\"}\n";
+  json =
+      "{\"status\":\"closed\",\"count\":4,\"blob\":\"large pass-through\"}\n";
   if (fwrite(json, 1u, strlen(json), file) != strlen(json)) {
     printf("file candidate mutation miss source write failed\n");
     fclose(file);
@@ -1736,65 +1738,65 @@ expect_file_candidate_mutation_matches_only_miss_has_no_receiver_alloc(void) {
     return 1;
   }
 
-#define RUN_FILE_CANDIDATE_MUTATION_MISS(label)                              \
-  do {                                                                       \
-    out = tmpfile();                                                         \
-    if (out == NULL) {                                                       \
-      printf("file candidate mutation miss output tmpfile failed: %s\n",     \
-             (label));                                                       \
-      fclose(file);                                                          \
-      ctx->mutation_plan_destroy(ctx, plan);                                 \
-      ctx->selector_destroy(ctx, selector);                                  \
-      ctx->destroy(ctx);                                                     \
-      return 1;                                                              \
-    }                                                                        \
-    if (fseek(file, 0L, SEEK_SET) != 0) {                                    \
-      printf("file candidate mutation miss seek failed: %s\n", (label));     \
-      fclose(out);                                                           \
-      fclose(file);                                                          \
-      ctx->mutation_plan_destroy(ctx, plan);                                 \
-      ctx->selector_destroy(ctx, selector);                                  \
-      ctx->destroy(ctx);                                                     \
-      return 1;                                                              \
-    }                                                                        \
-    memset(&result, 0, sizeof(result));                                      \
-    lql_error_init(&error);                                                  \
-    st = ctx->mutate_file_range_candidates(                                 \
-        ctx, selector, plan, file, 0u, (lql_uint64)strlen(json), out, 1, 1,  \
-        &result, &error);                                                    \
-    if (st != LQL_STATUS_OK || result.candidates_seen != 1u ||              \
-        result.candidates_matched != 0u) {                                   \
-      printf("file candidate mutation miss failed: %s: %s\n", (label),       \
-             error.message);                                                 \
-      fclose(out);                                                           \
-      fclose(file);                                                          \
-      ctx->mutation_plan_destroy(ctx, plan);                                 \
-      ctx->selector_destroy(ctx, selector);                                  \
-      ctx->destroy(ctx);                                                     \
-      return 1;                                                              \
-    }                                                                        \
-    if (fseek(out, 0L, SEEK_SET) != 0) {                                     \
-      printf("file candidate mutation miss output seek failed: %s\n",        \
-             (label));                                                       \
-      fclose(out);                                                           \
-      fclose(file);                                                          \
-      ctx->mutation_plan_destroy(ctx, plan);                                 \
-      ctx->selector_destroy(ctx, selector);                                  \
-      ctx->destroy(ctx);                                                     \
-      return 1;                                                              \
-    }                                                                        \
-    memset(output, 0, sizeof(output));                                       \
-    nread = fread(output, 1u, sizeof(output), out);                          \
-    fclose(out);                                                             \
-    if (nread != 0u) {                                                       \
-      printf("file candidate mutation miss output was not empty: %s: %s\n",  \
-             (label), output);                                               \
-      fclose(file);                                                          \
-      ctx->mutation_plan_destroy(ctx, plan);                                 \
-      ctx->selector_destroy(ctx, selector);                                  \
-      ctx->destroy(ctx);                                                     \
-      return 1;                                                              \
-    }                                                                        \
+#define RUN_FILE_CANDIDATE_MUTATION_MISS(label)                                \
+  do {                                                                         \
+    out = tmpfile();                                                           \
+    if (out == NULL) {                                                         \
+      printf("file candidate mutation miss output tmpfile failed: %s\n",       \
+             (label));                                                         \
+      fclose(file);                                                            \
+      ctx->mutation_plan_destroy(ctx, plan);                                   \
+      ctx->selector_destroy(ctx, selector);                                    \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+    if (fseek(file, 0L, SEEK_SET) != 0) {                                      \
+      printf("file candidate mutation miss seek failed: %s\n", (label));       \
+      fclose(out);                                                             \
+      fclose(file);                                                            \
+      ctx->mutation_plan_destroy(ctx, plan);                                   \
+      ctx->selector_destroy(ctx, selector);                                    \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+    memset(&result, 0, sizeof(result));                                        \
+    lql_error_init(&error);                                                    \
+    st = ctx->mutate_file_range_candidates(ctx, selector, plan, file, 0u,      \
+                                           (lql_uint64)strlen(json), out, 1,   \
+                                           1, &result, &error);                \
+    if (st != LQL_STATUS_OK || result.candidates_seen != 1u ||                 \
+        result.candidates_matched != 0u) {                                     \
+      printf("file candidate mutation miss failed: %s: %s\n", (label),         \
+             error.message);                                                   \
+      fclose(out);                                                             \
+      fclose(file);                                                            \
+      ctx->mutation_plan_destroy(ctx, plan);                                   \
+      ctx->selector_destroy(ctx, selector);                                    \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+    if (fseek(out, 0L, SEEK_SET) != 0) {                                       \
+      printf("file candidate mutation miss output seek failed: %s\n",          \
+             (label));                                                         \
+      fclose(out);                                                             \
+      fclose(file);                                                            \
+      ctx->mutation_plan_destroy(ctx, plan);                                   \
+      ctx->selector_destroy(ctx, selector);                                    \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+    memset(output, 0, sizeof(output));                                         \
+    nread = fread(output, 1u, sizeof(output), out);                            \
+    fclose(out);                                                               \
+    if (nread != 0u) {                                                         \
+      printf("file candidate mutation miss output was not empty: %s: %s\n",    \
+             (label), output);                                                 \
+      fclose(file);                                                            \
+      ctx->mutation_plan_destroy(ctx, plan);                                   \
+      ctx->selector_destroy(ctx, selector);                                    \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
   } while (0)
 
   RUN_FILE_CANDIDATE_MUTATION_MISS("first warmup");
@@ -2143,7 +2145,7 @@ static int expect_projection_steady_state_has_no_receiver_alloc(void) {
   do {                                                                         \
     out = tmpfile();                                                           \
     if (out == NULL) {                                                         \
-      printf("projection steady output tmpfile failed: %s\n", (label));       \
+      printf("projection steady output tmpfile failed: %s\n", (label));        \
       ctx->projection_destroy(ctx, projection);                                \
       ctx->destroy(ctx);                                                       \
       return 1;                                                                \
@@ -2154,7 +2156,7 @@ static int expect_projection_steady_state_has_no_receiver_alloc(void) {
                            &error);                                            \
     fclose(out);                                                               \
     if (st != LQL_STATUS_OK || !found) {                                       \
-      printf("projection steady run failed (%s): %s\n", (label),              \
+      printf("projection steady run failed (%s): %s\n", (label),               \
              error.message);                                                   \
       ctx->projection_destroy(ctx, projection);                                \
       ctx->destroy(ctx);                                                       \

@@ -81,17 +81,24 @@ fi
 
 receiver_doc_hits=$(
   awk '
-    /^struct lql[[:space:]]*\{/ { in_receiver = 1; prev = ""; next }
+    /^struct lql[[:space:]]*\{/ { in_receiver = 1; documented = 0; next }
     in_receiver && /^};/ { in_receiver = 0; next }
     in_receiver {
       if ($0 ~ /^[[:space:]]*$/) {
         next
       }
+      if ($0 ~ /^[[:space:]]*\/\*/) {
+        documented = 1
+        next
+      }
+      if (documented && $0 ~ /^[[:space:]]*\*/) {
+        next
+      }
       if ($0 ~ /^[[:space:]]*(void[[:space:]]+\*impl;|[A-Za-z_][A-Za-z0-9_[:space:]*]*\(\*[A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*\()/ &&
-          prev !~ /^[[:space:]]*\/\*/) {
+          !documented) {
         print FILENAME ":" FNR ":" $0
       }
-      prev = $0
+      documented = 0
     }
   ' "$header"
 )

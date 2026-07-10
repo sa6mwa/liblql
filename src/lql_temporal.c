@@ -203,8 +203,8 @@ static int parse_temporal_fast(const char *raw, lql_temporal *out) {
   } else if (*p == '+' || *p == '-') {
     off_sign = *p == '-' ? -1 : 1;
     ++p;
-    if (!parse_2_at(p, &off_h) || p[2] != ':' ||
-        !parse_2_at(p + 3, &off_m) || off_h > 23 || off_m > 59) {
+    if (!parse_2_at(p, &off_h) || p[2] != ':' || !parse_2_at(p + 3, &off_m) ||
+        off_h > 23 || off_m > 59) {
       return 0;
     }
     p += 5;
@@ -272,8 +272,7 @@ LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
   }
   ++p;
   if (!parse_ndigits(&p, 2, &h) || *p++ != ':' || !parse_ndigits(&p, 2, &mi) ||
-      *p++ != ':' || !parse_ndigits(&p, 2, &s) || h > 23 || mi > 59 ||
-      s > 59) {
+      *p++ != ':' || !parse_ndigits(&p, 2, &s) || h > 23 || mi > 59 || s > 59) {
     return 0;
   }
   if (*p == '.') {

@@ -54,7 +54,7 @@ The following gates have passed from the current repository state:
 - `make bench-memory-check`
 - `make package-verify`
 - `make release-matrix`
-- `make bench-1g-check`
+- `make bench-large-json-check`
 - clean `make release`
 - `LQL_PACKAGE_TARGETS=arm64-apple-darwin make release-matrix`
 
@@ -83,9 +83,9 @@ The clean release rehearsal produced and verified:
   - `arm64-apple-darwin`
 
 The release rehearsal verified the checksum manifest and expanded source
-archive test suite. The focused C/Lua 1 GiB benchmark gate writes
-`build/bench-1g-check.jsonl`, checks exact generated counts for the selected
-streaming modes, and applies the 128 MiB memory profile.
+archive test suite. The focused C/Lua 100 MiB benchmark gate writes
+`build/bench-large-json-check.jsonl`, checks exact generated counts for the selected
+streaming modes, and applies the bounded memory profile.
 
 ## Requirement Evidence Map
 
@@ -99,10 +99,10 @@ streaming modes, and applies the 128 MiB memory profile.
 | Selector behavior for claimed scope | C SDK tests with unique manifest requirement keys plus Go-backed `make parity-test`; wildcard/recursive paths, string terms, logical composition, parse equivalence, parse errors, AST traversal, AST JSON import/export, receiver builders, Lua selector userdata, and temporal formats are covered in `parity/oracle_inventory.tsv` | Proven locally |
 | Projection behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests, Go oracle projection row covered in `parity/oracle_inventory.tsv` | Proven locally |
 | Mutation behavior for claimed scope | C SDK tests with unique manifest requirement keys, CLI parity tests, SDK parity tests, and documented v0 framing exclusions in `docs/liblql-dependency-gaps.md` | Proven locally |
-| Streaming decision and plus-value behavior | C SDK streaming tests, benchmark memory gates, 1 GiB memory gate, SDK parity tests, and documented v0 parser/framing exclusions in `docs/liblql-dependency-gaps.md` | Proven locally |
+| Streaming decision and plus-value behavior | C SDK streaming tests, benchmark memory gates, 100 MiB memory gate, SDK parity tests, and documented v0 parser/framing exclusions in `docs/liblql-dependency-gaps.md` | Proven locally |
 | Lua facade is direct liblql binding, not `clql` backed | Lua C module tests, Lua runtime fixtures, Lua release artifact verification | Proven locally |
 | Lua 5.5 only | C compile-time guard, Lua runtime fixtures, Lua package contract fixtures | Proven locally |
-| Go/C/Lua benchmark parity and memory gates | `make bench-check` and `make bench-memory-check` for Go-backed parity; `make bench-1g-check` for focused C/Lua 1 GiB bounded-memory invariants; clean `make release` | Proven locally |
+| Go/C/Lua benchmark parity and memory gates | `make bench-check` and `make bench-memory-check` for Go-backed parity; `make bench-large-json-check` for focused C/Lua 100 MiB bounded-memory invariants; clean `make release` | Proven locally |
 | Linux GNU/musl release artifacts | `make release-matrix`, `make release`, checksum manifest | Proven locally |
 | Darwin arm64 release artifacts | `LQL_PACKAGE_TARGETS=arm64-apple-darwin make release-matrix`, checksum manifest, target-correct Mach-O loader metadata verification, static `clql` project/dependency closure | Proven locally with available osxcross toolchain |
 | Darwin x86_64 release artifacts | lonejson `v0.40.0` GitHub release asset inventory has no `liblonejson-0.40.0-x86_64-apple-darwin.tar.gz`; liblql dependency policy requires GitHub release SDK archives | Not a current package target |

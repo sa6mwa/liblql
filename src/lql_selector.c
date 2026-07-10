@@ -1449,8 +1449,8 @@ selector_refresh_predicate_features(lql_selector *selector) {
     selector->observer_ignore_case =
         (unsigned char)(selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
                         selector->ignore_case);
-    need = selector->any_count == 0u ? selector->value_len
-                                     : selector->any_max_len;
+    need =
+        selector->any_count == 0u ? selector->value_len : selector->any_max_len;
     selector->observer_contains_tail_need = need > 1u ? need - 1u : 0u;
     if (selector->any_count == 0u && !selector->value_set &&
         selector->value == NULL) {
@@ -1464,9 +1464,9 @@ selector_refresh_predicate_features(lql_selector *selector) {
     selector->observer_ignore_case =
         (unsigned char)(selector->kind == LQL_SELECTOR_KIND_IPREFIX ||
                         selector->ignore_case);
-    selector->observer_prefix_need =
-        selector->value_len > LQL_EVAL_PREFIX_CAP ? LQL_EVAL_PREFIX_CAP
-                                                  : selector->value_len;
+    selector->observer_prefix_need = selector->value_len > LQL_EVAL_PREFIX_CAP
+                                         ? LQL_EVAL_PREFIX_CAP
+                                         : selector->value_len;
     if (!selector->value_set && selector->value == NULL) {
       container_features |= LQL_SELECTOR_FEATURE_PREFIX;
     }
@@ -1480,17 +1480,17 @@ selector_refresh_predicate_features(lql_selector *selector) {
     } else {
       selector->observer_feature = LQL_SELECTOR_FEATURE_EXACT;
       selector->observer_family = LQL_EVAL_FAMILY_EXACT;
-      selector->observer_prefix_need =
-          selector->value_len > LQL_EVAL_EXACT_CAP ? LQL_EVAL_EXACT_CAP
-                                                   : selector->value_len;
+      selector->observer_prefix_need = selector->value_len > LQL_EVAL_EXACT_CAP
+                                           ? LQL_EVAL_EXACT_CAP
+                                           : selector->value_len;
     }
     break;
   case LQL_SELECTOR_KIND_IN:
     selector->observer_feature = LQL_SELECTOR_FEATURE_EXACT;
     selector->observer_family = LQL_EVAL_FAMILY_EXACT;
-    selector->observer_prefix_need =
-        selector->any_max_len > LQL_EVAL_EXACT_CAP ? LQL_EVAL_EXACT_CAP
-                                                   : selector->any_max_len;
+    selector->observer_prefix_need = selector->any_max_len > LQL_EVAL_EXACT_CAP
+                                         ? LQL_EVAL_EXACT_CAP
+                                         : selector->any_max_len;
     break;
   case LQL_SELECTOR_KIND_RANGE:
     selector->observer_feature = selector->range_is_temporal
@@ -1765,8 +1765,8 @@ static int finalize_selector(lql_selector_parser *ctx, lql_selector *selector) {
       selector->predicate_has_variable_path = 1;
       continue;
     }
-    if (direct_count == 0u ||
-        predicate->field_segment_count < selector->predicate_min_segment_count) {
+    if (direct_count == 0u || predicate->field_segment_count <
+                                  selector->predicate_min_segment_count) {
       selector->predicate_min_segment_count = predicate->field_segment_count;
     }
     if (predicate->field_segment_count >

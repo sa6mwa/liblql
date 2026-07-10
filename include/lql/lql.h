@@ -312,30 +312,31 @@ struct lql {
   void (*selector_destroy)(lql *self, lql_selector *selector);
   /* Reports whether selector is NULL or matches all candidates. */
   int (*selector_is_empty)(const lql *self, const lql_selector *selector);
-  /* Writes selector feature-family capabilities to out; NULL out is accepted. */
-  void (*selector_capabilities_get)(
-      const lql *self, const lql_selector *selector,
-      lql_selector_capabilities *out);
+  /* Writes selector feature-family capabilities to out; NULL out is accepted.
+   */
+  void (*selector_capabilities_get)(const lql *self,
+                                    const lql_selector *selector,
+                                    lql_selector_capabilities *out);
   /* Writes selector execution traits to out; NULL out is accepted. */
-  void (*selector_execution_traits_get)(
-      const lql *self, const lql_selector *selector,
-      lql_selector_execution_traits *out);
+  void (*selector_execution_traits_get)(const lql *self,
+                                        const lql_selector *selector,
+                                        lql_selector_execution_traits *out);
   /* Borrows the selector root AST node; out is valid while selector lives. */
   lql_status (*selector_root)(const lql *self, const lql_selector *selector,
                               lql_selector_node *out, lql_error *error);
   /* Returns the child count for an AND, OR, or NOT AST node. */
   lql_status (*selector_node_child_count)(const lql *self,
                                           lql_selector_node node,
-                                          size_t *out_count,
-                                          lql_error *error);
+                                          size_t *out_count, lql_error *error);
   /* Borrows one child AST node by index from an AND, OR, or NOT node. */
   lql_status (*selector_node_child)(const lql *self, lql_selector_node node,
                                     size_t index, lql_selector_node *out,
                                     lql_error *error);
   /* Borrows string-term data for eq/contains/icontains/prefix/iprefix nodes. */
-  lql_status (*selector_node_string_term)(
-      const lql *self, lql_selector_node node,
-      lql_selector_string_term *out, lql_error *error);
+  lql_status (*selector_node_string_term)(const lql *self,
+                                          lql_selector_node node,
+                                          lql_selector_string_term *out,
+                                          lql_error *error);
   /* Borrows one any-list value from a string-term node. */
   lql_status (*selector_node_string_term_any)(const lql *self,
                                               lql_selector_node node,
@@ -348,8 +349,7 @@ struct lql {
                                          lql_selector_range_term *out,
                                          lql_error *error);
   /* Borrows date-term data for a date node. */
-  lql_status (*selector_node_date_term)(const lql *self,
-                                        lql_selector_node node,
+  lql_status (*selector_node_date_term)(const lql *self, lql_selector_node node,
                                         lql_selector_date_term *out,
                                         lql_error *error);
   /* Borrows in-term data for an in node. */
@@ -373,18 +373,15 @@ struct lql {
   lql_status (*selector_build_all)(lql *self, lql_selector **out,
                                    lql_error *error);
   /* Builds an AND/OR selector from child selectors. Empty lists build all. */
-  lql_status (*selector_build_compound)(lql *self,
-                                        lql_selector_node_kind kind,
+  lql_status (*selector_build_compound)(lql *self, lql_selector_node_kind kind,
                                         const lql_selector *const *children,
-                                        size_t child_count,
-                                        lql_selector **out,
+                                        size_t child_count, lql_selector **out,
                                         lql_error *error);
   /* Builds a NOT selector from one child selector. */
   lql_status (*selector_build_not)(lql *self, const lql_selector *child,
                                    lql_selector **out, lql_error *error);
   /* Builds an eq/contains/icontains/prefix/iprefix selector term. */
-  lql_status (*selector_build_string)(lql *self,
-                                      lql_selector_node_kind kind,
+  lql_status (*selector_build_string)(lql *self, lql_selector_node_kind kind,
                                       const lql_selector_string_term *term,
                                       const lql_string_view *any_values,
                                       lql_selector **out, lql_error *error);
@@ -397,8 +394,7 @@ struct lql {
                                     const lql_selector_date_term *term,
                                     lql_selector **out, lql_error *error);
   /* Builds an in selector term. */
-  lql_status (*selector_build_in)(lql *self,
-                                  const lql_selector_in_term *term,
+  lql_status (*selector_build_in)(lql *self, const lql_selector_in_term *term,
                                   const lql_string_view *any_values,
                                   lql_selector **out, lql_error *error);
   /* Builds an exists selector term. */

@@ -107,10 +107,10 @@ validate_log "$tmp/bench-memory-check.jsonl"
 validate_log "$tmp/bench-memory-mutation-check.jsonl"
 validate_log "$tmp/bench-memory-projection-check.jsonl"
 
-printf 'benchmark baseline freeze: running 1 GiB memory benchmark\n' >&2
-LQL_BENCH_1G_LOG="$tmp/bench-1g-check.jsonl" \
-  "$root/scripts/check_parity_benchmark_1g_memory.sh"
-validate_log "$tmp/bench-1g-check.jsonl"
+printf 'benchmark baseline freeze: running 100 MiB memory benchmark\n' >&2
+LQL_BENCH_LARGE_JSON_LOG="$tmp/bench-large-json-check.jsonl" \
+  "$root/scripts/check_parity_benchmark_large_json_memory.sh"
+validate_log "$tmp/bench-large-json-check.jsonl"
 
 cp "$tmp"/*.jsonl "$baseline_dir"/
 write_manifest

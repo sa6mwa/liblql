@@ -136,8 +136,8 @@ static lua_lql_projection_handle *lua_lql_test_projection(lua_State *L,
 
 static lua_lql_mutation_plan_handle *lua_lql_test_mutation_plan(lua_State *L,
                                                                 int index) {
-  return (lua_lql_mutation_plan_handle *)luaL_testudata(
-      L, index, LUA_LQL_MUTATION_PLAN);
+  return (lua_lql_mutation_plan_handle *)luaL_testudata(L, index,
+                                                        LUA_LQL_MUTATION_PLAN);
 }
 
 static int lua_lql_selector_gc(lua_State *L) {
@@ -158,9 +158,9 @@ static lua_lql_selector_handle *lua_lql_check_selector(lua_State *L,
 
   handle =
       (lua_lql_selector_handle *)luaL_checkudata(L, index, LUA_LQL_SELECTOR);
-  luaL_argcheck(L, handle != NULL && handle->ctx != NULL &&
-                       handle->selector != NULL,
-                index, "closed lql selector");
+  luaL_argcheck(
+      L, handle != NULL && handle->ctx != NULL && handle->selector != NULL,
+      index, "closed lql selector");
   return handle;
 }
 
@@ -267,8 +267,8 @@ static int lua_lql_selector_parse(lua_State *L) {
   selector_expr = luaL_checkstring(L, 2);
   selector = NULL;
   lql_error_init(&error);
-  st = client->ctx->selector_parse(client->ctx, selector_expr,
-                                   &selector, &error);
+  st = client->ctx->selector_parse(client->ctx, selector_expr, &selector,
+                                   &error);
   if (st != LQL_STATUS_OK) {
     return lua_lql_fail(L, &error);
   }
@@ -286,8 +286,8 @@ static int lua_lql_selector_parse_or(lua_State *L) {
   selector_expr = luaL_checkstring(L, 2);
   selector = NULL;
   lql_error_init(&error);
-  st = client->ctx->selector_parse_or(client->ctx, selector_expr,
-                                      &selector, &error);
+  st = client->ctx->selector_parse_or(client->ctx, selector_expr, &selector,
+                                      &error);
   if (st != LQL_STATUS_OK) {
     return lua_lql_fail(L, &error);
   }
@@ -483,8 +483,9 @@ lua_lql_selector_since_kind_name(lql_selector_since_kind kind) {
   return "unknown";
 }
 
-static int lua_lql_selector_since_kind_from_string(
-    const char *name, lql_selector_since_kind *out) {
+static int
+lua_lql_selector_since_kind_from_string(const char *name,
+                                        lql_selector_since_kind *out) {
   if (strcmp(name, "none") == 0) {
     *out = LQL_SELECTOR_SINCE_NONE;
   } else if (strcmp(name, "now") == 0) {
@@ -564,9 +565,9 @@ static lql_status lua_lql_push_selector_any(lua_State *L, const lql *ctx,
 
   lua_newtable(L);
   for (i = 0u; i < count; ++i) {
-    st = in_term ? ctx->selector_node_in_term_any(ctx, node, i, &value, error)
-                 : ctx->selector_node_string_term_any(ctx, node, i, &value,
-                                                      error);
+    st = in_term
+             ? ctx->selector_node_in_term_any(ctx, node, i, &value, error)
+             : ctx->selector_node_string_term_any(ctx, node, i, &value, error);
     if (st != LQL_STATUS_OK) {
       lua_pop(L, 1);
       return st;
@@ -578,8 +579,8 @@ static lql_status lua_lql_push_selector_any(lua_State *L, const lql *ctx,
   return LQL_STATUS_OK;
 }
 
-static void lua_lql_push_selector_range_bound(
-    lua_State *L, const char *name, lql_selector_range_bound bound) {
+static void lua_lql_push_selector_range_bound(lua_State *L, const char *name,
+                                              lql_selector_range_bound bound) {
   if (bound.kind == LQL_SELECTOR_BOUND_ABSENT) {
     return;
   }
@@ -601,7 +602,7 @@ static void lua_lql_set_range_kind_field(lua_State *L, const char *name,
   strcpy(key, name);
   strcat(key, "_kind");
   lua_pushstring(L, bound.kind == LQL_SELECTOR_BOUND_NUMBER ? "number"
-                                                           : "datetime");
+                                                            : "datetime");
   lua_setfield(L, -2, key);
 }
 
@@ -672,9 +673,9 @@ static lql_status lua_lql_push_selector_node(lua_State *L, const lql *ctx,
     lua_lql_push_view_field(L, "field", date_term.field);
     lua_lql_push_view_field(L, "value", date_term.value);
     lua_lql_push_view_field(L, "since", date_term.since);
-    lua_lql_set_string_field(L, "since_kind",
-                             lua_lql_selector_since_kind_name(
-                                 date_term.since_kind));
+    lua_lql_set_string_field(
+        L, "since_kind",
+        lua_lql_selector_since_kind_name(date_term.since_kind));
     lua_lql_push_view_field(L, "after", date_term.after);
     lua_lql_push_view_field(L, "before", date_term.before);
     lua_lql_push_view_field(L, "gt", date_term.gt);
@@ -691,8 +692,7 @@ static lql_status lua_lql_push_selector_node(lua_State *L, const lql *ctx,
       return st;
     }
     lua_lql_push_view_field(L, "field", in_term.field);
-    return lua_lql_push_selector_any(L, ctx, node, in_term.any_count, 1,
-                                     error);
+    return lua_lql_push_selector_any(L, ctx, node, in_term.any_count, 1, error);
   }
   if (node.kind == LQL_SELECTOR_NODE_EXISTS) {
     path.data = NULL;
@@ -772,8 +772,8 @@ static int lua_lql_selector_parse_json(lua_State *L) {
   json = luaL_checklstring(L, 2, &json_len);
   selector = NULL;
   lql_error_init(&error);
-  st = client->ctx->selector_parse_json(client->ctx, json, json_len,
-                                        &selector, &error);
+  st = client->ctx->selector_parse_json(client->ctx, json, json_len, &selector,
+                                        &error);
   if (st != LQL_STATUS_OK) {
     return lua_lql_fail(L, &error);
   }
@@ -890,8 +890,8 @@ static int lua_lql_selector_method_is_empty(lua_State *L) {
   lua_lql_selector_handle *handle;
 
   handle = lua_lql_check_selector(L, 1);
-  lua_pushboolean(L, handle->ctx->selector_is_empty(handle->ctx,
-                                                    handle->selector));
+  lua_pushboolean(
+      L, handle->ctx->selector_is_empty(handle->ctx, handle->selector));
   return 1;
 }
 
@@ -979,8 +979,7 @@ static void lua_lql_range_bound_from_table(lua_State *L, int index,
 }
 
 static int lua_lql_view_array(lua_State *L, int index,
-                              lql_string_view **out_values,
-                              size_t *out_count) {
+                              lql_string_view **out_values, size_t *out_count) {
   lql_string_view *values;
   size_t count;
   size_t i;
@@ -989,8 +988,8 @@ static int lua_lql_view_array(lua_State *L, int index,
   luaL_checktype(L, index, LUA_TTABLE);
   count = (size_t)lua_rawlen(L, index);
   if (count > 0u) {
-    values = (lql_string_view *)lua_lql_alloc(
-        L, NULL, 0u, sizeof(values[0]) * count);
+    values = (lql_string_view *)lua_lql_alloc(L, NULL, 0u,
+                                              sizeof(values[0]) * count);
     if (values == NULL) {
       return 0;
     }
@@ -1072,7 +1071,7 @@ static int lua_lql_selector_build_compound(lua_State *L) {
   selector = NULL;
   lql_error_init(&error);
   st = client->ctx->selector_build_compound(client->ctx, kind, children, count,
-                                           &selector, &error);
+                                            &selector, &error);
   if (children != NULL) {
     (void)lua_lql_alloc(L, (void *)children, sizeof(children[0]) * count, 0u);
   }
@@ -1095,8 +1094,8 @@ static int lua_lql_selector_build_not(lua_State *L) {
                 "selector belongs to another lql client");
   selector = NULL;
   lql_error_init(&error);
-  st = client->ctx->selector_build_not(client->ctx, child->selector,
-                                      &selector, &error);
+  st = client->ctx->selector_build_not(client->ctx, child->selector, &selector,
+                                       &error);
   if (st != LQL_STATUS_OK) {
     return lua_lql_fail(L, &error);
   }
@@ -1167,8 +1166,7 @@ static int lua_lql_selector_build_range(lua_State *L) {
   lua_lql_range_bound_from_table(L, 2, "lte", &term.lte);
   selector = NULL;
   lql_error_init(&error);
-  st = client->ctx->selector_build_range(client->ctx, &term, &selector,
-                                         &error);
+  st = client->ctx->selector_build_range(client->ctx, &term, &selector, &error);
   if (st != LQL_STATUS_OK) {
     return lua_lql_fail(L, &error);
   }
@@ -1241,8 +1239,8 @@ static int lua_lql_selector_build_in(lua_State *L) {
   term.any_count = any_count;
   selector = NULL;
   lql_error_init(&error);
-  st = client->ctx->selector_build_in(client->ctx, &term, any_values,
-                                      &selector, &error);
+  st = client->ctx->selector_build_in(client->ctx, &term, any_values, &selector,
+                                      &error);
   lua_lql_view_array_release(L, any_values, any_count);
   if (st != LQL_STATUS_OK) {
     return lua_lql_fail(L, &error);
@@ -1261,8 +1259,7 @@ static int lua_lql_selector_build_exists(lua_State *L) {
   path = lua_lql_check_view(L, 2);
   selector = NULL;
   lql_error_init(&error);
-  st = client->ctx->selector_build_exists(client->ctx, path, &selector,
-                                          &error);
+  st = client->ctx->selector_build_exists(client->ctx, path, &selector, &error);
   if (st != LQL_STATUS_OK) {
     return lua_lql_fail(L, &error);
   }
@@ -1889,12 +1886,10 @@ static lql_status lua_lql_projection_arg(lua_State *L, lua_lql_client *client,
     return LQL_STATUS_NO_MEMORY;
   }
   *out_owned = 1;
-  st = client->ctx->projection_parse(client->ctx,
-                                     (const char *const *)fields, field_count,
-                                     out, error);
+  st = client->ctx->projection_parse(client->ctx, (const char *const *)fields,
+                                     field_count, out, error);
   if (fields != NULL) {
-    (void)lua_lql_alloc(L, (void *)fields, sizeof(fields[0]) * field_count,
-                        0u);
+    (void)lua_lql_alloc(L, (void *)fields, sizeof(fields[0]) * field_count, 0u);
   }
   return st;
 }
@@ -1904,8 +1899,7 @@ static lql_status lua_lql_mutation_plan_arg(lua_State *L,
                                             int expr_index, int options_index,
                                             const char *base_dir,
                                             lql_mutation_plan **out,
-                                            int *out_owned,
-                                            lql_error *error) {
+                                            int *out_owned, lql_error *error) {
   lua_lql_mutation_plan_handle *handle;
 
   *out = NULL;
@@ -1940,7 +1934,8 @@ static int lua_lql_projection_parse(lua_State *L) {
   if (!lua_lql_fields(L, 2, &fields, &field_count)) {
     return luaL_error(L, "out of memory");
   }
-  handle = (lua_lql_projection_handle *)lua_newuserdatauv(L, sizeof(*handle), 1);
+  handle =
+      (lua_lql_projection_handle *)lua_newuserdatauv(L, sizeof(*handle), 1);
   handle->ctx = client->ctx;
   handle->projection = NULL;
   luaL_getmetatable(L, LUA_LQL_PROJECTION);
@@ -1948,12 +1943,10 @@ static int lua_lql_projection_parse(lua_State *L) {
   lua_pushvalue(L, 1);
   lua_setiuservalue(L, -2, 1);
   lql_error_init(&error);
-  st = client->ctx->projection_parse(client->ctx,
-                                     (const char *const *)fields, field_count,
-                                     &handle->projection, &error);
+  st = client->ctx->projection_parse(client->ctx, (const char *const *)fields,
+                                     field_count, &handle->projection, &error);
   if (fields != NULL) {
-    (void)lua_lql_alloc(L, (void *)fields, sizeof(fields[0]) * field_count,
-                        0u);
+    (void)lua_lql_alloc(L, (void *)fields, sizeof(fields[0]) * field_count, 0u);
   }
   if (st != LQL_STATUS_OK) {
     lua_pop(L, 1);

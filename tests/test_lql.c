@@ -8,8 +8,7 @@ static int failures = 0;
 static lql *test_ctx = NULL;
 
 static int read_tmpfile(FILE *fp, char *buf, size_t cap, size_t *out_len);
-static int append_literal(char *buf, size_t cap, size_t *pos,
-                          const char *text);
+static int append_literal(char *buf, size_t cap, size_t *pos, const char *text);
 static int append_repeated(char *buf, size_t cap, size_t *pos, char ch,
                            size_t count);
 static lql_string_view view_from_cstr(const char *text);
@@ -87,12 +86,11 @@ static void expect_receiver_api(void) {
   }
   if (ctx->version == NULL || ctx->capabilities_get == NULL ||
       ctx->selector_parse == NULL || ctx->selector_parse_or == NULL ||
-      ctx->selector_parse_json == NULL ||
-      ctx->selector_destroy == NULL || ctx->selector_is_empty == NULL ||
+      ctx->selector_parse_json == NULL || ctx->selector_destroy == NULL ||
+      ctx->selector_is_empty == NULL ||
       ctx->selector_capabilities_get == NULL ||
       ctx->selector_execution_traits_get == NULL ||
-      ctx->selector_root == NULL ||
-      ctx->selector_node_child_count == NULL ||
+      ctx->selector_root == NULL || ctx->selector_node_child_count == NULL ||
       ctx->selector_node_child == NULL ||
       ctx->selector_node_string_term == NULL ||
       ctx->selector_node_string_term_any == NULL ||
@@ -101,16 +99,12 @@ static void expect_receiver_api(void) {
       ctx->selector_node_in_term == NULL ||
       ctx->selector_node_in_term_any == NULL ||
       ctx->selector_node_exists_path == NULL ||
-      ctx->selector_write_json == NULL ||
-      ctx->selector_build_all == NULL ||
-      ctx->selector_build_compound == NULL ||
-      ctx->selector_build_not == NULL ||
-      ctx->selector_build_string == NULL ||
-      ctx->selector_build_range == NULL ||
-      ctx->selector_build_date == NULL ||
-      ctx->selector_build_in == NULL ||
-      ctx->selector_build_exists == NULL ||
-      ctx->matches_json == NULL || ctx->query_file_decisions == NULL ||
+      ctx->selector_write_json == NULL || ctx->selector_build_all == NULL ||
+      ctx->selector_build_compound == NULL || ctx->selector_build_not == NULL ||
+      ctx->selector_build_string == NULL || ctx->selector_build_range == NULL ||
+      ctx->selector_build_date == NULL || ctx->selector_build_in == NULL ||
+      ctx->selector_build_exists == NULL || ctx->matches_json == NULL ||
+      ctx->query_file_decisions == NULL ||
       ctx->query_file_decisions_with_options == NULL ||
       ctx->query_source_decisions == NULL ||
       ctx->query_source_decisions_with_options == NULL ||
@@ -256,8 +250,8 @@ static void expect_version_api(void) {
   lql_capabilities caps;
 
   if (strcmp(test_ctx->version(test_ctx), LQL_VERSION) != 0) {
-    printf("receiver version mismatch: %s != %s\n",
-           test_ctx->version(test_ctx), LQL_VERSION);
+    printf("receiver version mismatch: %s != %s\n", test_ctx->version(test_ctx),
+           LQL_VERSION);
     ++failures;
   }
   if (strchr(LQL_VERSION, '.') == NULL) {
@@ -1327,9 +1321,9 @@ static void expect_stream_mixed_scalar_candidates(void) {
   reader.len = strlen(input);
   reader.chunk_size = 2u;
   lql_error_init(&error);
-  st = test_ctx->query_source_decisions(test_ctx, selector, read_chunk,
-                                        &reader, record_decision, &seen,
-                                        &result, &error);
+  st =
+      test_ctx->query_source_decisions(test_ctx, selector, read_chunk, &reader,
+                                       record_decision, &seen, &result, &error);
   if (st != LQL_STATUS_OK) {
     printf("mixed scalar source stream query failed: %s\n", error.message);
     test_ctx->selector_destroy(test_ctx, selector);
@@ -1359,8 +1353,7 @@ static void expect_stream_mixed_scalar_candidates(void) {
     ++failures;
     return;
   }
-  if (fwrite(sized_input, 1u, strlen(sized_input), fp) !=
-          strlen(sized_input) ||
+  if (fwrite(sized_input, 1u, strlen(sized_input), fp) != strlen(sized_input) ||
       fseek(fp, 0L, SEEK_SET) != 0) {
     printf("candidate size write/seek failed\n");
     fclose(fp);
@@ -1395,16 +1388,15 @@ static void expect_stream_mixed_scalar_candidates(void) {
   reader.len = strlen(sized_input);
   reader.chunk_size = 3u;
   lql_error_init(&error);
-  st = test_ctx->query_source_decisions(test_ctx, NULL, read_chunk, &reader,
-                                        record_decision, &seen, &result,
-                                        &error);
+  st =
+      test_ctx->query_source_decisions(test_ctx, NULL, read_chunk, &reader,
+                                       record_decision, &seen, &result, &error);
   if (st != LQL_STATUS_OK || seen.calls != 2 ||
       result.candidates_seen != (lql_uint64)2 ||
       seen.offsets[0] != (lql_uint64)2 ||
       seen.sizes[0] != (lql_uint64)strlen(sized_first) ||
       seen.offsets[1] != (lql_uint64)(2u + strlen(sized_first) + 4u) ||
-      seen.sizes[1] != (lql_uint64)strlen(sized_second) ||
-      reader.calls <= 1) {
+      seen.sizes[1] != (lql_uint64)strlen(sized_second) || reader.calls <= 1) {
     printf("candidate size source contract mismatch: status=%s calls=%d "
            "reads=%d off0=%lu size0=%lu off1=%lu size1=%lu error=%s\n",
            lql_status_string(st), seen.calls, reader.calls,
@@ -1476,10 +1468,9 @@ static void expect_stream_mixed_scalar_candidates(void) {
 }
 
 static void expect_stream_escaped_json_pointer_segments(void) {
-  static const char input[] =
-      "{\"a/b\":{\"~key\":\"ready\"}}\n"
-      "{\"a/b\":{\"~key\":\"old\"}}\n"
-      "{\"a\":{\"b\":{\"~key\":\"ready\"}}}\n";
+  static const char input[] = "{\"a/b\":{\"~key\":\"ready\"}}\n"
+                              "{\"a/b\":{\"~key\":\"old\"}}\n"
+                              "{\"a\":{\"b\":{\"~key\":\"ready\"}}}\n";
   FILE *fp;
   lql_selector *selector;
   lql_query_result result;
@@ -1633,9 +1624,9 @@ static void expect_source_icontains_any_boundary_stream(void) {
     ++failures;
     return;
   }
-  st = test_ctx->query_source_decisions(test_ctx, selector, read_chunk,
-                                        &reader, record_decision, &seen,
-                                        &result, &error);
+  st =
+      test_ctx->query_source_decisions(test_ctx, selector, read_chunk, &reader,
+                                       record_decision, &seen, &result, &error);
   test_ctx->selector_destroy(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("source icontains.any boundary query failed: %s\n", error.message);
@@ -2102,7 +2093,8 @@ static void expect_stream_array_items(void) {
 }
 
 static void expect_stream_nested_array_items(void) {
-  static const char input[] = "[{\"id\":\"a\"},[{\"id\":\"b\"}],{\"id\":\"c\"}]";
+  static const char input[] =
+      "[{\"id\":\"a\"},[{\"id\":\"b\"}],{\"id\":\"c\"}]";
   FILE *fp;
   FILE *out;
   lql_selector *selector;
@@ -2168,9 +2160,9 @@ static void expect_stream_nested_array_items(void) {
   reader.len = strlen(input);
   reader.chunk_size = 5u;
   lql_error_init(&error);
-  st = test_ctx->query_source_decisions(test_ctx, selector, read_chunk,
-                                        &reader, record_decision, &seen,
-                                        &result, &error);
+  st =
+      test_ctx->query_source_decisions(test_ctx, selector, read_chunk, &reader,
+                                       record_decision, &seen, &result, &error);
   if (st != LQL_STATUS_OK) {
     printf("nested array source decision query failed: %s\n", error.message);
     fclose(fp);
@@ -2230,9 +2222,9 @@ static void expect_stream_nested_array_items(void) {
   reader.chunk_size = 5u;
   payload.out = out;
   lql_error_init(&error);
-  st = test_ctx->query_source_spooled_matches(
-      test_ctx, selector, read_chunk, &reader, record_spooled_payload,
-      &payload, &result, &error);
+  st = test_ctx->query_source_spooled_matches(test_ctx, selector, read_chunk,
+                                              &reader, record_spooled_payload,
+                                              &payload, &result, &error);
   test_ctx->selector_destroy(test_ctx, selector);
   if (st != LQL_STATUS_OK) {
     printf("nested array source payload query failed: %s\n", error.message);
@@ -2268,8 +2260,7 @@ static void expect_stream_nested_array_items(void) {
              payload.sizes[0] != (lql_uint64)strlen("{\"id\":\"b\"}")) {
     printf("nested array source payload coordinates mismatch index=%lu "
            "offset=%lu size=%lu expected_offset=%lu\n",
-           (unsigned long)payload.indexes[0],
-           (unsigned long)payload.offsets[0],
+           (unsigned long)payload.indexes[0], (unsigned long)payload.offsets[0],
            (unsigned long)payload.sizes[0],
            (unsigned long)(expected_payload - input));
     ++failures;
@@ -2387,8 +2378,8 @@ static void expect_stream_stop_controls(void) {
         result.candidates_matched != (lql_uint64)(want_matched) ||             \
         !result.stopped_early || result.stop_reason != (want_reason)) {        \
       printf(label " source stop mismatch calls=%d matched=%d "                \
-                   "result_seen=%lu result_matched=%lu stopped=%d "           \
-                   "reason=%d\n",                                             \
+                   "result_seen=%lu result_matched=%lu stopped=%d "            \
+                   "reason=%d\n",                                              \
              seen.calls, seen.matched, (unsigned long)result.candidates_seen,  \
              (unsigned long)result.candidates_matched, result.stopped_early,   \
              (int)result.stop_reason);                                         \
@@ -2396,8 +2387,8 @@ static void expect_stream_stop_controls(void) {
     }                                                                          \
   } while (0)
 
-  RUN_SOURCE_STOP_CASE("source max matches", options.max_matches = 1u,
-                       (void)0, 1, 1, LQL_QUERY_STOP_MATCH_LIMIT);
+  RUN_SOURCE_STOP_CASE("source max matches", options.max_matches = 1u, (void)0,
+                       1, 1, LQL_QUERY_STOP_MATCH_LIMIT);
   RUN_SOURCE_STOP_CASE("source max candidates", options.max_candidates = 2u,
                        (void)0, 2, 2, LQL_QUERY_STOP_CANDIDATE_LIMIT);
   RUN_SOURCE_STOP_CASE("source max bytes", options.max_bytes_read = 17u,
@@ -2408,18 +2399,16 @@ static void expect_stream_stop_controls(void) {
   RUN_SOURCE_STOP_CASE("source callback stop precedence",
                        options.max_matches = 1u;
                        options.max_candidates = 1u;
-                       options.max_bytes_read = 1u,
-                       seen.stop_after_first = 1, 1, 1,
-                       LQL_QUERY_STOP_CALLBACK);
-  RUN_SOURCE_STOP_CASE("source max matches precedence",
-                       options.max_matches = 1u;
-                       options.max_candidates = 1u;
-                       options.max_bytes_read = 1u,
-                       (void)0, 1, 1, LQL_QUERY_STOP_MATCH_LIMIT);
+                       options.max_bytes_read = 1u, seen.stop_after_first = 1,
+                       1, 1, LQL_QUERY_STOP_CALLBACK);
+  RUN_SOURCE_STOP_CASE(
+      "source max matches precedence", options.max_matches = 1u;
+      options.max_candidates = 1u;
+      options.max_bytes_read = 1u, (void)0, 1, 1, LQL_QUERY_STOP_MATCH_LIMIT);
   RUN_SOURCE_STOP_CASE("source max candidates precedence",
                        options.max_candidates = 1u;
-                       options.max_bytes_read = 1u,
-                       (void)0, 1, 1, LQL_QUERY_STOP_CANDIDATE_LIMIT);
+                       options.max_bytes_read = 1u, (void)0, 1, 1,
+                       LQL_QUERY_STOP_CANDIDATE_LIMIT);
 
 #undef RUN_SOURCE_STOP_CASE
 
@@ -2538,9 +2527,9 @@ static void expect_stream_error_api(void) {
   reader.chunk_size = 5u;
   memset(&result, 0x5a, sizeof(result));
   lql_error_init(&error);
-  st = test_ctx->query_source_decisions(test_ctx, selector, read_chunk, &reader,
-                                        record_decision, &seen, &result,
-                                        &error);
+  st =
+      test_ctx->query_source_decisions(test_ctx, selector, read_chunk, &reader,
+                                       record_decision, &seen, &result, &error);
   if (st != LQL_STATUS_JSON_ERROR || seen.calls != 1 || seen.matched != 1 ||
       result.candidates_seen != 1u || result.candidates_matched != 1u ||
       result.bytes_read != complete_candidate_bytes || result.stopped_early) {
@@ -3056,9 +3045,9 @@ static void expect_seekable_payload_api(void) {
     projected.out = project_out;
     projected.projection = projection;
     lql_error_init(&error);
-    st = test_ctx->query_file_matches(
-        test_ctx, selector, fp, record_seekable_payload_projection, &projected,
-        &result, &error);
+    st = test_ctx->query_file_matches(test_ctx, selector, fp,
+                                      record_seekable_payload_projection,
+                                      &projected, &result, &error);
     if (st != LQL_STATUS_OK || projected.calls != 2 ||
         result.candidates_seen != (lql_uint64)3 ||
         result.candidates_matched != (lql_uint64)2) {
@@ -3085,13 +3074,12 @@ static void expect_seekable_payload_api(void) {
     seen.out = out;
     options.max_matches = 1u;
     lql_error_init(&error);
-    st = test_ctx->query_file_matches_with_options(
-        test_ctx, selector, fp, &options, record_payload, &seen, &result,
-        &error);
+    st = test_ctx->query_file_matches_with_options(test_ctx, selector, fp,
+                                                   &options, record_payload,
+                                                   &seen, &result, &error);
     if (st != LQL_STATUS_OK || seen.calls != 1 ||
         result.candidates_seen != (lql_uint64)1 ||
-        result.candidates_matched != (lql_uint64)1 ||
-        !result.stopped_early ||
+        result.candidates_matched != (lql_uint64)1 || !result.stopped_early ||
         result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT) {
       printf("payload max-match stop mismatch: status=%s calls=%d seen=%lu "
              "matched=%lu stopped=%d reason=%d error=%s\n",
@@ -3113,13 +3101,12 @@ static void expect_seekable_payload_api(void) {
     seen.out = out;
     options.max_candidates = 2u;
     lql_error_init(&error);
-    st = test_ctx->query_file_matches_with_options(
-        test_ctx, selector, fp, &options, record_payload, &seen, &result,
-        &error);
+    st = test_ctx->query_file_matches_with_options(test_ctx, selector, fp,
+                                                   &options, record_payload,
+                                                   &seen, &result, &error);
     if (st != LQL_STATUS_OK || seen.calls != 1 ||
         result.candidates_seen != (lql_uint64)2 ||
-        result.candidates_matched != (lql_uint64)1 ||
-        !result.stopped_early ||
+        result.candidates_matched != (lql_uint64)1 || !result.stopped_early ||
         result.stop_reason != LQL_QUERY_STOP_CANDIDATE_LIMIT) {
       printf("payload max-candidate stop mismatch: status=%s calls=%d "
              "seen=%lu matched=%lu stopped=%d reason=%d error=%s\n",
@@ -3141,13 +3128,12 @@ static void expect_seekable_payload_api(void) {
     seen.out = out;
     options.max_bytes_read = 1u;
     lql_error_init(&error);
-    st = test_ctx->query_file_matches_with_options(
-        test_ctx, selector, fp, &options, record_payload, &seen, &result,
-        &error);
+    st = test_ctx->query_file_matches_with_options(test_ctx, selector, fp,
+                                                   &options, record_payload,
+                                                   &seen, &result, &error);
     if (st != LQL_STATUS_OK || seen.calls != 1 ||
         result.candidates_seen != (lql_uint64)1 ||
-        result.candidates_matched != (lql_uint64)1 ||
-        !result.stopped_early ||
+        result.candidates_matched != (lql_uint64)1 || !result.stopped_early ||
         result.stop_reason != LQL_QUERY_STOP_BYTE_LIMIT ||
         result.bytes_read < (lql_uint64)24) {
       printf("payload max-byte stop mismatch: status=%s calls=%d seen=%lu "
@@ -4369,8 +4355,7 @@ static void expect_mutation_plan_api(void) {
   st = test_ctx->mutation_plan_parse(test_ctx, &newline_separated, 1u, &plan,
                                      &error);
   if (st != LQL_STATUS_OK) {
-    printf("newline-separated mutation plan parse failed: %s\n",
-           error.message);
+    printf("newline-separated mutation plan parse failed: %s\n", error.message);
     ++failures;
   } else if (test_ctx->mutation_plan_count(test_ctx, plan) != 3u) {
     printf("newline-separated mutation plan count mismatch: %lu\n",
@@ -4379,14 +4364,13 @@ static void expect_mutation_plan_api(void) {
   }
   test_ctx->mutation_plan_destroy(test_ctx, plan);
 
-  multiline_brace =
-      "/state/details{\n"
-      "  /owner = \"alice\"\n"
-      "  /note = \"hi, world\"\n"
-      "}\n"
-      "delete:/state/details/temporary\n"
-      "/state/count=+4\n"
-      "/state/count--";
+  multiline_brace = "/state/details{\n"
+                    "  /owner = \"alice\"\n"
+                    "  /note = \"hi, world\"\n"
+                    "}\n"
+                    "delete:/state/details/temporary\n"
+                    "/state/count=+4\n"
+                    "/state/count--";
   plan = NULL;
   lql_error_init(&error);
   st = test_ctx->mutation_plan_parse(test_ctx, &multiline_brace, 1u, &plan,
@@ -4608,12 +4592,11 @@ static void expect_mutation_error_api(void) {
       ++failures;
     } else {
       lql_error_init(&error);
-      st = test_ctx->mutate_file_range_root_fields(
-          test_ctx, nested_plan, source, 0u, 2u, out, &error);
+      st = test_ctx->mutate_file_range_root_fields(test_ctx, nested_plan,
+                                                   source, 0u, 2u, out, &error);
       if (st != LQL_STATUS_UNSUPPORTED ||
           strcmp(error.message,
-                 "mutation plan requires unsupported non-root behavior") !=
-              0) {
+                 "mutation plan requires unsupported non-root behavior") != 0) {
         printf("root mutation nested-plan unsupported mismatch: status=%s "
                "error=%s\n",
                lql_status_string(st), error.message);
@@ -4744,9 +4727,9 @@ static void expect_mutation_error_api(void) {
         ++failures;
       } else {
         lql_error_init(&error);
-        st = test_ctx->mutate_file_range_paths(
-            test_ctx, plan, source, 0u, (lql_uint64)strlen(array_root), out,
-            &error);
+        st = test_ctx->mutate_file_range_paths(test_ctx, plan, source, 0u,
+                                               (lql_uint64)strlen(array_root),
+                                               out, &error);
         if (st != LQL_STATUS_JSON_ERROR) {
           printf("path mutation accepted non-object root with status %s\n",
                  lql_status_string(st));
@@ -4974,7 +4957,8 @@ static void expect_path_mutation_api(void) {
                strcmp(buf, "{\"state\":{\"status\":\"done\",\"count\":2,"
                            "\"missing\":\"value\",\"updated\":\"2025-01-"
                            "02T00:34:05.123456789Z\"},\"big\":"
-                           "123456789012345678901234567890123456789012345678901234567890"
+                           "123456789012345678901234567890123456789012345678901"
+                           "234567890"
                            "12345678901234567890,\"id\":\"a\","
                            "\"added\":{\"nested\":\"ok\",\"other\":2}}") != 0) {
       printf("path mutation output mismatch: %s\n", buf);
@@ -5144,8 +5128,7 @@ static void expect_buffered_wildcard_mutation_api(void) {
                       "{\"items\":[{\"status\":\"ready\"}],\"boxes\":{\"a\":{"
                       "\"status\":\"ready\"}},\"groups\":[{\"items\":[{"
                       "\"sku\":\"Z\",\"count\":3,\"drop\":true}]}]}") != 0) {
-      printf("buffered recursive wildcard mutation output mismatch: %s\n",
-             buf);
+      printf("buffered recursive wildcard mutation output mismatch: %s\n", buf);
       ++failures;
     }
   }
@@ -5232,11 +5215,11 @@ static void expect_source_mutation_api(void) {
       printf("source mutation did not consume fragmented reads\n");
       ++failures;
     } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
-               strcmp(buf,
-                      "{\"state\":{\"status\":\"done\",\"count\":2,"
-                      "\"missing\":\"value\"},\"big\":"
-                      "123456789012345678901234567890123456789012345678901234567890"
-                      "12345678901234567890,\"id\":\"a\"}") != 0) {
+               strcmp(buf, "{\"state\":{\"status\":\"done\",\"count\":2,"
+                           "\"missing\":\"value\"},\"big\":"
+                           "123456789012345678901234567890123456789012345678901"
+                           "234567890"
+                           "12345678901234567890,\"id\":\"a\"}") != 0) {
       printf("source mutation output mismatch: %s\n", buf);
       ++failures;
     }
@@ -5470,10 +5453,9 @@ static void expect_file_range_candidate_mutation_api(void) {
     {
       FILE *limit_source;
       FILE *limit_out;
-      static const char limit_doc[] =
-          "{\"id\":\"a\",\"status\":\"open\"}\n"
-          "{\"id\":\"b\",\"status\":\"open\"}\n"
-          "{\"id\":\"c\",\"status\":\"closed\"}\n";
+      static const char limit_doc[] = "{\"id\":\"a\",\"status\":\"open\"}\n"
+                                      "{\"id\":\"b\",\"status\":\"open\"}\n"
+                                      "{\"id\":\"c\",\"status\":\"closed\"}\n";
       limit_source = tmpfile();
       limit_out = tmpfile();
       if (limit_source == NULL || limit_out == NULL) {
@@ -5497,14 +5479,13 @@ static void expect_file_range_candidate_mutation_api(void) {
           printf("candidate mutation options failed: %s\n", error.message);
           ++failures;
         } else if (result.candidates_seen != 1u ||
-                   result.candidates_matched != 1u ||
-                   !result.stopped_early ||
+                   result.candidates_matched != 1u || !result.stopped_early ||
                    result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT) {
           printf("candidate mutation options result mismatch: seen=%lu "
                  "matched=%lu stopped=%d reason=%d\n",
                  (unsigned long)result.candidates_seen,
-                 (unsigned long)result.candidates_matched,
-                 result.stopped_early, (int)result.stop_reason);
+                 (unsigned long)result.candidates_matched, result.stopped_early,
+                 (int)result.stop_reason);
           ++failures;
         } else if (!read_tmpfile(limit_out, buf, sizeof(buf), &len) ||
                    strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n") != 0) {
@@ -5556,8 +5537,7 @@ static void expect_file_range_candidate_mutation_api(void) {
         } else if (!read_tmpfile(nested_out, buf, sizeof(buf), &len) ||
                    strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n"
                                "{\"id\":\"b\",\"status\":\"done\"}\n"
-                               "{\"id\":\"c\",\"status\":\"closed\"}\n") !=
-                       0) {
+                               "{\"id\":\"c\",\"status\":\"closed\"}\n") != 0) {
           printf("candidate mutation nested output mismatch: %s\n", buf);
           ++failures;
         }
@@ -5656,10 +5636,9 @@ static void expect_source_candidate_mutation_api(void) {
       printf("source candidate mutation options tmpfile failed\n");
       ++failures;
     } else {
-      static const char limit_doc[] =
-          "{\"event\":\"tabs_update\",\"id\":1}\n"
-          "{\"event\":\"tabs_update\",\"id\":2}\n"
-          "{\"event\":\"noop\",\"id\":3}\n";
+      static const char limit_doc[] = "{\"event\":\"tabs_update\",\"id\":1}\n"
+                                      "{\"event\":\"tabs_update\",\"id\":2}\n"
+                                      "{\"event\":\"noop\",\"id\":3}\n";
       lql_selector *limit_selector;
       limit_selector = NULL;
       lql_error_init(&error);
@@ -5686,20 +5665,20 @@ static void expect_source_candidate_mutation_api(void) {
                  error.message);
           ++failures;
         } else if (result.candidates_seen != 1u ||
-                   result.candidates_matched != 1u ||
-                   !result.stopped_early ||
+                   result.candidates_matched != 1u || !result.stopped_early ||
                    result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT ||
                    reader.calls <= 1) {
           printf("source candidate mutation options result mismatch: seen=%lu "
                  "matched=%lu stopped=%d reason=%d reads=%d\n",
                  (unsigned long)result.candidates_seen,
-                 (unsigned long)result.candidates_matched,
-                 result.stopped_early, (int)result.stop_reason, reader.calls);
+                 (unsigned long)result.candidates_matched, result.stopped_early,
+                 (int)result.stop_reason, reader.calls);
           ++failures;
         } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                    strcmp(buf, "{\"event\":\"tabs_update\",\"id\":1,"
                                "\"status\":\"done\"}\n") != 0) {
-          printf("source candidate mutation options output mismatch: %s\n", buf);
+          printf("source candidate mutation options output mismatch: %s\n",
+                 buf);
           ++failures;
         }
       }
@@ -5778,22 +5757,21 @@ static void expect_source_candidate_mutation_api(void) {
         reader.chunk_size = 7u;
         memset(&result, 0, sizeof(result));
         lql_error_init(&error);
-        st = test_ctx->mutate_source_candidates(
-            test_ctx, event_selector, event_plan, read_chunk, &reader, out, 1,
-            1, &result, &error);
+        st = test_ctx->mutate_source_candidates(test_ctx, event_selector,
+                                                event_plan, read_chunk, &reader,
+                                                out, 1, 1, &result, &error);
         if (st != LQL_STATUS_OK) {
           printf("source candidate mutation query-mutate failed: %s\n",
                  error.message);
           ++failures;
         } else if (reader.calls <= 1 || result.candidates_seen != 4u ||
-                   result.candidates_matched != 3u ||
-                   result.stopped_early || result.bytes_read == 0u) {
+                   result.candidates_matched != 3u || result.stopped_early ||
+                   result.bytes_read == 0u) {
           printf("source candidate mutation query-mutate result mismatch: "
                  "seen=%lu matched=%lu stopped=%d bytes=%lu reads=%d\n",
                  (unsigned long)result.candidates_seen,
-                 (unsigned long)result.candidates_matched,
-                 result.stopped_early, (unsigned long)result.bytes_read,
-                 reader.calls);
+                 (unsigned long)result.candidates_matched, result.stopped_early,
+                 (unsigned long)result.bytes_read, reader.calls);
           ++failures;
         } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                    strcmp(buf,
@@ -5834,23 +5812,19 @@ static void expect_source_candidate_mutation_api(void) {
       lockd_mutations[1] = "time:/processed_at=2023-11-14T22:13:20Z";
       pos = 0u;
       lockd_doc[0] = '\0';
-      if (!append_literal(lockd_doc, sizeof(lockd_doc),
-                          &pos,
+      if (!append_literal(lockd_doc, sizeof(lockd_doc), &pos,
                           "{\"event\":\"tabs_update\",\"component\":\"host\","
                           "\"blob\":\"") ||
           !append_repeated(lockd_doc, sizeof(lockd_doc), &pos, 'x', 2048u) ||
-          !append_literal(lockd_doc, sizeof(lockd_doc),
-                          &pos,
+          !append_literal(lockd_doc, sizeof(lockd_doc), &pos,
                           "\"}\n{\"event\":\"noop\",\"component\":\"host\","
                           "\"blob\":\"") ||
           !append_repeated(lockd_doc, sizeof(lockd_doc), &pos, 'y', 1024u) ||
-          !append_literal(lockd_doc, sizeof(lockd_doc),
-                          &pos,
+          !append_literal(lockd_doc, sizeof(lockd_doc), &pos,
                           "\"}\n{\"event\":\"tabs_update\",\"component\":"
                           "\"host\",\"blob\":\"") ||
           !append_repeated(lockd_doc, sizeof(lockd_doc), &pos, 'z', 1536u) ||
-          !append_literal(lockd_doc, sizeof(lockd_doc),
-                          &pos,
+          !append_literal(lockd_doc, sizeof(lockd_doc), &pos,
                           "\"}\n{\"event\":\"tabs_update\",\"component\":"
                           "\"host\",\"blob\":\"") ||
           !append_repeated(lockd_doc, sizeof(lockd_doc), &pos, 'w', 1536u) ||
@@ -5891,16 +5865,15 @@ static void expect_source_candidate_mutation_api(void) {
                  error.message);
           ++failures;
         } else if (reader.calls <= 1 || result.candidates_seen != 3u ||
-                   result.candidates_matched != 2u ||
-                   !result.stopped_early ||
+                   result.candidates_matched != 2u || !result.stopped_early ||
                    result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT ||
                    result.bytes_read == 0u) {
           printf("source candidate mutation lockd result mismatch: seen=%lu "
                  "matched=%lu stopped=%d reason=%d bytes=%lu reads=%d\n",
                  (unsigned long)result.candidates_seen,
-                 (unsigned long)result.candidates_matched,
-                 result.stopped_early, (int)result.stop_reason,
-                 (unsigned long)result.bytes_read, reader.calls);
+                 (unsigned long)result.candidates_matched, result.stopped_early,
+                 (int)result.stop_reason, (unsigned long)result.bytes_read,
+                 reader.calls);
           ++failures;
         } else if (!read_tmpfile(out, lockd_doc, sizeof(lockd_doc), &len)) {
           printf("source candidate mutation lockd output read failed\n");
@@ -5915,7 +5888,7 @@ static void expect_source_candidate_mutation_api(void) {
           if (processed_count != 2u ||
               strstr(lockd_doc, "\"event\":\"noop\"") != NULL ||
               strstr(lockd_doc, "\"processed_at\":"
-                               "\"2023-11-14T22:13:20Z\"") == NULL ||
+                                "\"2023-11-14T22:13:20Z\"") == NULL ||
               strstr(lockd_doc, "\"blob\":\"xxxxxxxx") == NULL ||
               strstr(lockd_doc, "\"blob\":\"zzzzzzzz") == NULL ||
               strstr(lockd_doc, "\"blob\":\"wwwwwwww") != NULL) {
@@ -5952,8 +5925,7 @@ static void expect_source_candidate_mutation_api(void) {
         printf("source candidate mutation match-all result mismatch: seen=%lu "
                "matched=%lu stopped=%d\n",
                (unsigned long)result.candidates_seen,
-               (unsigned long)result.candidates_matched,
-               result.stopped_early);
+               (unsigned long)result.candidates_matched, result.stopped_early);
         ++failures;
       } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                  strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n"
@@ -5983,8 +5955,7 @@ static void expect_source_candidate_mutation_api(void) {
                                               read_chunk, &reader, out, 1, 0,
                                               &result, &error);
       if (st != LQL_STATUS_OK) {
-        printf("source candidate mutation nested failed: %s\n",
-               error.message);
+        printf("source candidate mutation nested failed: %s\n", error.message);
         ++failures;
       } else if (reader.calls <= 1) {
         printf("source candidate mutation nested did not fragment reads\n");
@@ -5994,8 +5965,7 @@ static void expect_source_candidate_mutation_api(void) {
         printf("source candidate mutation nested result mismatch: seen=%lu "
                "matched=%lu stopped=%d\n",
                (unsigned long)result.candidates_seen,
-               (unsigned long)result.candidates_matched,
-               result.stopped_early);
+               (unsigned long)result.candidates_matched, result.stopped_early);
         ++failures;
       } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                  strcmp(buf, "{\"id\":\"a\",\"status\":\"done\"}\n"
@@ -6094,21 +6064,19 @@ static void expect_source_candidate_mutation_api(void) {
                  error.message);
           ++failures;
         } else if (reader.calls <= 1 || result.candidates_seen != 1u ||
-                   result.candidates_matched != 1u ||
-                   result.stopped_early || result.bytes_read == 0u) {
+                   result.candidates_matched != 1u || result.stopped_early ||
+                   result.bytes_read == 0u) {
           printf("source candidate mutation wrapped result mismatch: seen=%lu "
                  "matched=%lu stopped=%d bytes=%lu reads=%d\n",
                  (unsigned long)result.candidates_seen,
-                 (unsigned long)result.candidates_matched,
-                 result.stopped_early, (unsigned long)result.bytes_read,
-                 reader.calls);
+                 (unsigned long)result.candidates_matched, result.stopped_early,
+                 (unsigned long)result.bytes_read, reader.calls);
           ++failures;
         } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
-                   strcmp(buf,
-                          "{\"records\":[{\"id\":\"a\",\"service\":"
-                          "\"auth-api\"},{\"id\":\"b\",\"service\":"
-                          "\"search-api\"}],\"source\":\"fixture\","
-                          "\"bench\":{\"touched\":true}}\n") != 0) {
+                   strcmp(buf, "{\"records\":[{\"id\":\"a\",\"service\":"
+                               "\"auth-api\"},{\"id\":\"b\",\"service\":"
+                               "\"search-api\"}],\"source\":\"fixture\","
+                               "\"bench\":{\"touched\":true}}\n") != 0) {
           printf("source candidate mutation wrapped output mismatch: %s\n",
                  buf);
           ++failures;
@@ -6332,15 +6300,14 @@ static void expect_projected_candidate_mutation_api(void) {
                  error.message);
           ++failures;
         } else if (result.candidates_seen != 1u ||
-                   result.candidates_matched != 1u ||
-                   !result.stopped_early ||
+                   result.candidates_matched != 1u || !result.stopped_early ||
                    result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT ||
                    result.bytes_read == 0u) {
           printf("file projected candidate matches-only result mismatch: "
                  "seen=%lu matched=%lu stopped=%d bytes=%lu\n",
                  (unsigned long)result.candidates_seen,
-                 (unsigned long)result.candidates_matched,
-                 result.stopped_early, (unsigned long)result.bytes_read);
+                 (unsigned long)result.candidates_matched, result.stopped_early,
+                 (unsigned long)result.bytes_read);
           ++failures;
         } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                    strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") !=
@@ -6365,8 +6332,8 @@ static void expect_projected_candidate_mutation_api(void) {
     } else {
       if (fwrite(nested_doc, 1u, strlen(nested_doc), nested_source) !=
               strlen(nested_doc) ||
-          fflush(nested_source) != 0 || fseek(nested_source, 0L, SEEK_SET) !=
-                                             0) {
+          fflush(nested_source) != 0 ||
+          fseek(nested_source, 0L, SEEK_SET) != 0) {
         printf("file projected nested candidate limit source setup failed\n");
         ++failures;
       } else {
@@ -6383,15 +6350,14 @@ static void expect_projected_candidate_mutation_api(void) {
                  error.message);
           ++failures;
         } else if (result.candidates_seen != 1u ||
-                   result.candidates_matched != 1u ||
-                   !result.stopped_early ||
+                   result.candidates_matched != 1u || !result.stopped_early ||
                    result.stop_reason != LQL_QUERY_STOP_MATCH_LIMIT ||
                    result.bytes_read == 0u) {
           printf("file projected nested candidate limit result mismatch: "
                  "seen=%lu matched=%lu stopped=%d reason=%d\n",
                  (unsigned long)result.candidates_seen,
-                 (unsigned long)result.candidates_matched,
-                 result.stopped_early, (int)result.stop_reason);
+                 (unsigned long)result.candidates_matched, result.stopped_early,
+                 (int)result.stop_reason);
           ++failures;
         } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
                    strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") !=
@@ -6504,7 +6470,8 @@ static void expect_projected_candidate_mutation_api(void) {
                error.message);
         ++failures;
       } else if (reader.calls <= 1) {
-        printf("source projected nested candidate limit did not fragment reads\n");
+        printf(
+            "source projected nested candidate limit did not fragment reads\n");
         ++failures;
       } else if (result.candidates_seen != 1u ||
                  result.candidates_matched != 1u || !result.stopped_early ||
@@ -6516,8 +6483,7 @@ static void expect_projected_candidate_mutation_api(void) {
                (int)result.stop_reason);
         ++failures;
       } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
-                 strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") !=
-                     0) {
+                 strcmp(buf, "{\"id\":\"a\",\"state\":{\"count\":2}}\n") != 0) {
         printf("source projected nested candidate limit output mismatch: %s\n",
                buf);
         ++failures;
@@ -6799,11 +6765,10 @@ static void expect_mutation_file_backed_text_validation_api(void) {
   expr = "textfile:/payload=lql-test-invalid-utf8.txt";
   plan = NULL;
   lql_error_init(&error);
-  st = test_ctx->mutation_plan_parse_with_options(test_ctx, &expr, 1u,
-                                                  &options, &plan, &error);
+  st = test_ctx->mutation_plan_parse_with_options(test_ctx, &expr, 1u, &options,
+                                                  &plan, &error);
   if (st != LQL_STATUS_OK) {
-    printf("invalid UTF-8 textfile mutation parse failed: %s\n",
-           error.message);
+    printf("invalid UTF-8 textfile mutation parse failed: %s\n", error.message);
     ++failures;
   } else {
     out = tmpfile();
@@ -6827,8 +6792,8 @@ static void expect_mutation_file_backed_text_validation_api(void) {
   expr = "textfile:/payload=lql-test-nul-text.txt";
   plan = NULL;
   lql_error_init(&error);
-  st = test_ctx->mutation_plan_parse_with_options(test_ctx, &expr, 1u,
-                                                  &options, &plan, &error);
+  st = test_ctx->mutation_plan_parse_with_options(test_ctx, &expr, 1u, &options,
+                                                  &plan, &error);
   if (st != LQL_STATUS_OK) {
     printf("NUL textfile mutation parse failed: %s\n", error.message);
     ++failures;
@@ -7101,9 +7066,8 @@ static void expect_wildcard_remove_mutation_api(void) {
       printf("wildcard remove mutation failed: %s\n", error.message);
       ++failures;
     } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
-               strcmp(buf,
-                      "{\"labels\":{},\"items\":[{},{}],\"nested\":{"
-                      "\"items\":[{\"sku\":\"C\"}]}}") != 0) {
+               strcmp(buf, "{\"labels\":{},\"items\":[{},{}],\"nested\":{"
+                           "\"items\":[{\"sku\":\"C\"}]}}") != 0) {
       printf("wildcard remove mutation output mismatch: %s\n", buf);
       ++failures;
     }
@@ -7335,7 +7299,8 @@ static void expect_sdk_contract_manifest(void) {
        "logical composition across AND, OR, indexed groups, NOT, and aliases",
        expect_selector_logical_composition_api},
       {"selector",
-       "omitted-value string selectors assert path existence across value kinds",
+       "omitted-value string selectors assert path existence across value "
+       "kinds",
        expect_selector_omitted_string_path_api},
       {"selector", "parse-equivalence invariants",
        expect_selector_parse_equivalence_api},
@@ -7437,9 +7402,9 @@ static void expect_sdk_contract_manifest(void) {
        expect_array_wildcard_value_mutation_api},
   };
   static const sdk_contract_surface_count surface_counts[] = {
-      {"receiver", 1},     {"utility", 1},  {"api-contract", 2},
-      {"version", 1},      {"selector", 14}, {"streaming", 14},
-      {"projection", 7},   {"compact", 2},  {"mutation", 20},
+      {"receiver", 1},   {"utility", 1},   {"api-contract", 2},
+      {"version", 1},    {"selector", 14}, {"streaming", 14},
+      {"projection", 7}, {"compact", 2},   {"mutation", 20},
   };
   size_t i;
   size_t j;
@@ -7802,14 +7767,13 @@ static void expect_selector_string_term_semantics_api(void) {
   expect_match("not.icontains{f=/,v=\"\"}", "{\"status\":\"open\"}", 0);
   expect_match("contains{f=/hello/world}",
                "{\"hello\":{\"world\":{\"nested\":true}}}", 1);
-  expect_match("contains{f=/hello/world}",
-               "{\"hello\":{\"world\":[1,2,3]}}", 1);
+  expect_match("contains{f=/hello/world}", "{\"hello\":{\"world\":[1,2,3]}}",
+               1);
   expect_match("contains{f=/hello/world}", "{\"hello\":{\"world\":null}}", 1);
   expect_match("contains{f=/hello/world}", "{\"hello\":{\"other\":\"x\"}}", 0);
   expect_match("icontains{f=/hello/world}",
                "{\"hello\":{\"world\":{\"nested\":true}}}", 1);
-  expect_match("prefix{f=/hello/world}",
-               "{\"hello\":{\"world\":[1,2,3]}}", 1);
+  expect_match("prefix{f=/hello/world}", "{\"hello\":{\"world\":[1,2,3]}}", 1);
   expect_match("iprefix{f=/hello/world}", "{\"hello\":{\"world\":null}}", 1);
   expect_match("contains{f=/hello/*}", path_doc, 1);
   expect_match("contains{f=/hello/...}", path_doc, 1);
@@ -7903,29 +7867,28 @@ static void expect_selector_omitted_string_path_api(void) {
 static void expect_selector_parse_equivalence_api(void) {
   {
     static const char *const exprs[] = {
-        "eq{field=/status,value=open}", "eq{value=open,field=/status}",
+        "eq{field=/status,value=open}",
+        "eq{value=open,field=/status}",
         "eq{f=/status,v=open}",
         "eq{field=/status,field=/status,value=open,value=open}",
-        "eq{field=/status value=open}", " /status = \"open\" "};
-    expect_selector_equivalent_forms("eq aliases", exprs,
-                                     sizeof(exprs) / sizeof(exprs[0]),
-                                     "{\"status\":\"open\"}",
-                                     "{\"status\":\"closed\"}");
+        "eq{field=/status value=open}",
+        " /status = \"open\" "};
+    expect_selector_equivalent_forms(
+        "eq aliases", exprs, sizeof(exprs) / sizeof(exprs[0]),
+        "{\"status\":\"open\"}", "{\"status\":\"closed\"}");
   }
   expect_match("and.eq{field=/status,value=open}", "{\"status\":\"open\"}", 1);
   expect_match("and.eq{field=/status,value=open}", "{\"status\":\"closed\"}",
                0);
-  expect_match("and.0.eq{field=/status,value=open}",
-               "{\"status\":\"open\"}", 1);
-  expect_match("and.0.eq{field=/status,value=open}",
-               "{\"status\":\"closed\"}", 0);
-  expect_match("or.eq{field=/status,value=open}", "{\"status\":\"open\"}", 1);
-  expect_match("or.eq{field=/status,value=open}", "{\"status\":\"closed\"}",
+  expect_match("and.0.eq{field=/status,value=open}", "{\"status\":\"open\"}",
+               1);
+  expect_match("and.0.eq{field=/status,value=open}", "{\"status\":\"closed\"}",
                0);
-  expect_match("or.0.eq{field=/status,value=open}",
-               "{\"status\":\"open\"}", 1);
-  expect_match("or.0.eq{field=/status,value=open}",
-               "{\"status\":\"closed\"}", 0);
+  expect_match("or.eq{field=/status,value=open}", "{\"status\":\"open\"}", 1);
+  expect_match("or.eq{field=/status,value=open}", "{\"status\":\"closed\"}", 0);
+  expect_match("or.0.eq{field=/status,value=open}", "{\"status\":\"open\"}", 1);
+  expect_match("or.0.eq{field=/status,value=open}", "{\"status\":\"closed\"}",
+               0);
   expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"open\"}",
                1);
   expect_match("not.eq{field=/status,value=closed}", "{\"status\":\"closed\"}",
@@ -7934,16 +7897,16 @@ static void expect_selector_parse_equivalence_api(void) {
                "{\"status\":\"open\"}", 1);
   expect_match("and.not.eq{field=/status,value=closed}",
                "{\"status\":\"closed\"}", 0);
-  expect_match("or.not.eq{field=/status,value=closed}",
-               "{\"status\":\"open\"}", 1);
+  expect_match("or.not.eq{field=/status,value=closed}", "{\"status\":\"open\"}",
+               1);
   expect_match("or.not.eq{field=/status,value=closed}",
                "{\"status\":\"closed\"}", 0);
-  expect_match("and.or.0.eq{field=/status,value=open}",
-               "{\"status\":\"open\"}", 1);
+  expect_match("and.or.0.eq{field=/status,value=open}", "{\"status\":\"open\"}",
+               1);
   expect_match("and.or.0.eq{field=/status,value=open}",
                "{\"status\":\"closed\"}", 0);
-  expect_match("or.and.0.eq{field=/status,value=open}",
-               "{\"status\":\"open\"}", 1);
+  expect_match("or.and.0.eq{field=/status,value=open}", "{\"status\":\"open\"}",
+               1);
   expect_match("or.and.0.eq{field=/status,value=open}",
                "{\"status\":\"closed\"}", 0);
   {
@@ -7952,19 +7915,17 @@ static void expect_selector_parse_equivalence_api(void) {
         "contains{any=timeout|error,field=/msg}",
         "contains{f=/msg,a=timeout|error}",
         "contains{ field=/msg,\nany=timeout|error }"};
-    expect_selector_equivalent_forms("contains any aliases", exprs,
-                                     sizeof(exprs) / sizeof(exprs[0]),
-                                     "{\"msg\":\"upstream timeout\"}",
-                                     "{\"msg\":\"healthy\"}");
+    expect_selector_equivalent_forms(
+        "contains any aliases", exprs, sizeof(exprs) / sizeof(exprs[0]),
+        "{\"msg\":\"upstream timeout\"}", "{\"msg\":\"healthy\"}");
   }
   {
     static const char *const exprs[] = {
         "in{field=/env,any=prod|stage}", "in{any=prod|stage,field=/env}",
         "in{f=/env,a=prod|stage}", "in{field=/env,any=\"prod|stage\"}"};
-    expect_selector_equivalent_forms("in any aliases", exprs,
-                                     sizeof(exprs) / sizeof(exprs[0]),
-                                     "{\"env\":\"stage\"}",
-                                     "{\"env\":\"dev\"}");
+    expect_selector_equivalent_forms(
+        "in any aliases", exprs, sizeof(exprs) / sizeof(exprs[0]),
+        "{\"env\":\"stage\"}", "{\"env\":\"dev\"}");
   }
   {
     static const char *const exprs[] = {
@@ -8004,10 +7965,10 @@ static void expect_selector_parse_equivalence_api(void) {
         "eq{field=/status,value=open},in{field=/env,any=prod|stage}",
         "eq{field=/status,value=open}\nin{field=/env,any=prod|stage}",
         " eq{field=/status,value=open},\n in{field=/env,any=prod|stage} "};
-    expect_selector_equivalent_forms(
-        "multiline implicit and", exprs, sizeof(exprs) / sizeof(exprs[0]),
-        "{\"status\":\"open\",\"env\":\"prod\"}",
-        "{\"status\":\"open\",\"env\":\"dev\"}");
+    expect_selector_equivalent_forms("multiline implicit and", exprs,
+                                     sizeof(exprs) / sizeof(exprs[0]),
+                                     "{\"status\":\"open\",\"env\":\"prod\"}",
+                                     "{\"status\":\"open\",\"env\":\"dev\"}");
   }
   {
     static const char *const exprs[] = {
@@ -8038,8 +7999,8 @@ static void expect_selector_parse_equivalence_api(void) {
 static void expect_selector_quoted_parse_api(void) {
   expect_match("eq{field=/status,value='open,closed'}",
                "{\"status\":\"open,closed\"}", 1);
-  expect_match("eq{field=/status,value='open,closed'}",
-               "{\"status\":\"open\"}", 0);
+  expect_match("eq{field=/status,value='open,closed'}", "{\"status\":\"open\"}",
+               0);
   expect_match("and.eq{field=/message,value=\"hi, world\"},and.eq{field=/"
                "status,value=\"okili dokili\"}",
                "{\"message\":\"hi, world\",\"status\":\"okili dokili\"}", 1);
@@ -8069,18 +8030,18 @@ static void expect_selector_any_or_equivalence_api(void) {
   static const char icontains_or[] =
       "or.icontains{f=/msg,v=warn},or.icontains{f=/msg,v=timeout}";
 
-  expect_selector_equivalent_match_result(
-      "contains any first value", contains_any, contains_or,
-      "{\"msg\":\"warn: cache miss\"}");
+  expect_selector_equivalent_match_result("contains any first value",
+                                          contains_any, contains_or,
+                                          "{\"msg\":\"warn: cache miss\"}");
   expect_selector_equivalent_match_result(
       "contains any second value", contains_any, contains_or,
       "{\"msg\":\"timeout waiting for reply\"}");
   expect_selector_equivalent_match_result("contains any no match", contains_any,
                                           contains_or,
                                           "{\"msg\":\"all good\"}");
-  expect_selector_equivalent_match_result(
-      "icontains any first value", icontains_any, icontains_or,
-      "{\"msg\":\"WARN: cache miss\"}");
+  expect_selector_equivalent_match_result("icontains any first value",
+                                          icontains_any, icontains_or,
+                                          "{\"msg\":\"WARN: cache miss\"}");
   expect_selector_equivalent_match_result(
       "icontains any second value", icontains_any, icontains_or,
       "{\"msg\":\"TIMEOUT waiting for reply\"}");
@@ -8092,8 +8053,7 @@ static void expect_selector_any_or_equivalence_api(void) {
 static void expect_selector_match_all_alias_api(void) {
   static const char *const aliases[] = {"", "{}", ".", "/"};
   static const char *const regressions[] = {
-      "And.-1", "ANd.\xe0\xa5\xb0\x8b.30zz v1\nst",
-      "ANd.066666666000"};
+      "And.-1", "ANd.\xe0\xa5\xb0\x8b.30zz v1\nst", "ANd.066666666000"};
   size_t i;
   lql_selector *selector;
   lql_error error;
@@ -8103,7 +8063,8 @@ static void expect_selector_match_all_alias_api(void) {
     selector = NULL;
     lql_error_init(&error);
     st = test_ctx->selector_parse(test_ctx, aliases[i], &selector, &error);
-    if (st != LQL_STATUS_OK || !test_ctx->selector_is_empty(test_ctx, selector)) {
+    if (st != LQL_STATUS_OK ||
+        !test_ctx->selector_is_empty(test_ctx, selector)) {
       printf("match-all alias %s mismatch: status=%s empty=%d error=%s\n",
              aliases[i], lql_status_string(st),
              test_ctx->selector_is_empty(test_ctx, selector), error.message);
@@ -8305,14 +8266,13 @@ static void expect_selector_inspection_api(void) {
   test_ctx->selector_capabilities_get(test_ctx, NULL, NULL);
   test_ctx->selector_execution_traits_get(test_ctx, NULL, NULL);
 
-  families =
-      "and.eq{field=/status,value=open},"
-      "and.range{field=/progress,gte=5},"
-      "or.in{field=/env,any=prod|stage},"
-      "not.eq{field=/state,value=disabled},"
-      "exists{/meta/etag},"
-      "icontains{field=/msg,value=timeout},"
-      "iprefix{field=/service,value=auth}";
+  families = "and.eq{field=/status,value=open},"
+             "and.range{field=/progress,gte=5},"
+             "or.in{field=/env,any=prod|stage},"
+             "not.eq{field=/state,value=disabled},"
+             "exists{/meta/etag},"
+             "icontains{field=/msg,value=timeout},"
+             "iprefix{field=/service,value=auth}";
   selector = NULL;
   lql_error_init(&error);
   st = test_ctx->selector_parse(test_ctx, families, &selector, &error);
@@ -8324,8 +8284,8 @@ static void expect_selector_inspection_api(void) {
   memset(&caps, 0, sizeof(caps));
   test_ctx->selector_capabilities_get(test_ctx, selector, &caps);
   if (!caps.and_ || !caps.or_ || !caps.not_ || !caps.eq || !caps.range ||
-      caps.date || !caps.in || !caps.prefix || !caps.contains ||
-      !caps.exists || caps.wildcard_path || caps.recursive_path) {
+      caps.date || !caps.in || !caps.prefix || !caps.contains || !caps.exists ||
+      caps.wildcard_path || caps.recursive_path) {
     printf("selector inspection family flags mismatch\n");
     ++failures;
   }
@@ -8342,8 +8302,7 @@ static void expect_selector_inspection_api(void) {
   }
   memset(&caps, 0, sizeof(caps));
   test_ctx->selector_capabilities_get(test_ctx, selector, &caps);
-  if (!caps.eq || !caps.exists || !caps.wildcard_path ||
-      !caps.recursive_path) {
+  if (!caps.eq || !caps.exists || !caps.wildcard_path || !caps.recursive_path) {
     printf("selector inspection path flags mismatch\n");
     ++failures;
   }
@@ -8392,8 +8351,8 @@ static void expect_selector_inspection_api(void) {
 
   selector = NULL;
   lql_error_init(&error);
-  st = test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector,
-                                &error);
+  st =
+      test_ctx->selector_parse(test_ctx, "/status=\"open\"", &selector, &error);
   if (st != LQL_STATUS_OK) {
     printf("selector inspection simple parse failed: %s\n", error.message);
     ++failures;
@@ -8422,8 +8381,7 @@ static void expect_selector_json_output(const char *expr, const char *want) {
   lql_error_init(&error);
   st = test_ctx->selector_parse(test_ctx, expr, &selector, &error);
   if (st != LQL_STATUS_OK) {
-    printf("selector AST JSON parse failed for %s: %s\n", expr,
-           error.message);
+    printf("selector AST JSON parse failed for %s: %s\n", expr, error.message);
     ++failures;
     return;
   }
@@ -8441,8 +8399,8 @@ static void expect_selector_json_output(const char *expr, const char *want) {
     ++failures;
   } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
              strcmp(buf, want) != 0) {
-    printf("selector AST JSON mismatch for %s\n got: %s\nwant: %s\n", expr,
-           buf, want);
+    printf("selector AST JSON mismatch for %s\n got: %s\nwant: %s\n", expr, buf,
+           want);
     ++failures;
   }
   fclose(out);
@@ -8505,8 +8463,8 @@ static void expect_selector_ast_api(void) {
 
   json_selector = NULL;
   lql_error_init(&error);
-  st = test_ctx->selector_parse_json(test_ctx, NULL, 1u, &json_selector,
-                                     &error);
+  st =
+      test_ctx->selector_parse_json(test_ctx, NULL, 1u, &json_selector, &error);
   if (st != LQL_STATUS_INVALID_ARGUMENT ||
       strcmp(error.message, "selector JSON required") != 0 ||
       json_selector != NULL) {
@@ -8541,8 +8499,7 @@ static void expect_selector_ast_api(void) {
   st = test_ctx->selector_parse_json(test_ctx, json, strlen(json),
                                      &json_selector, &error);
   if (st != LQL_STATUS_OK || json_selector == NULL) {
-    printf("selector AST JSON parse omitted value failed: %s\n",
-           error.message);
+    printf("selector AST JSON parse omitted value failed: %s\n", error.message);
     ++failures;
   } else {
     memset(&root, 0, sizeof(root));
@@ -8558,10 +8515,9 @@ static void expect_selector_ast_api(void) {
       ++failures;
     }
     matched = 0;
-    st = test_ctx->matches_json(test_ctx, json_selector,
-                                "{\"hello\":{\"world\":\"anything\"}}",
-                                strlen("{\"hello\":{\"world\":\"anything\"}}"),
-                                &matched, &error);
+    st = test_ctx->matches_json(
+        test_ctx, json_selector, "{\"hello\":{\"world\":\"anything\"}}",
+        strlen("{\"hello\":{\"world\":\"anything\"}}"), &matched, &error);
     if (st != LQL_STATUS_OK || !matched) {
       printf("selector AST JSON omitted value match mismatch: %s\n",
              error.message);
@@ -8592,10 +8548,9 @@ static void expect_selector_ast_api(void) {
       ++failures;
     }
     matched = 0;
-    st = test_ctx->matches_json(test_ctx, json_selector,
-                                "{\"hello\":{\"world\":\"\"}}",
-                                strlen("{\"hello\":{\"world\":\"\"}}"),
-                                &matched, &error);
+    st = test_ctx->matches_json(
+        test_ctx, json_selector, "{\"hello\":{\"world\":\"\"}}",
+        strlen("{\"hello\":{\"world\":\"\"}}"), &matched, &error);
     if (st != LQL_STATUS_OK || !matched) {
       printf("selector AST JSON explicit empty match mismatch: %s\n",
              error.message);
@@ -8625,9 +8580,9 @@ static void expect_selector_ast_api(void) {
       ++failures;
     }
     matched = 0;
-    st = test_ctx->matches_json(test_ctx, json_selector, "{\"region\":\"eu\"}",
-                                strlen("{\"region\":\"eu\"}"), &matched,
-                                &error);
+    st =
+        test_ctx->matches_json(test_ctx, json_selector, "{\"region\":\"eu\"}",
+                               strlen("{\"region\":\"eu\"}"), &matched, &error);
     if (st != LQL_STATUS_OK || !matched) {
       printf("selector AST JSON or match mismatch: %s\n", error.message);
       ++failures;
@@ -8658,8 +8613,8 @@ static void expect_selector_ast_api(void) {
   count = 0u;
   st = test_ctx->selector_node_child_count(test_ctx, root, &count, &error);
   if (st != LQL_STATUS_OK || count != 6u) {
-    printf("selector AST child count mismatch: %lu %s\n",
-           (unsigned long)count, error.message);
+    printf("selector AST child count mismatch: %lu %s\n", (unsigned long)count,
+           error.message);
     ++failures;
   }
   st = test_ctx->selector_node_child(test_ctx, root, 0u, &child, &error);
@@ -8707,8 +8662,7 @@ static void expect_selector_ast_api(void) {
                                             &error);
     if (st != LQL_STATUS_OK ||
         range_term.lt.kind != LQL_SELECTOR_BOUND_DATETIME ||
-        !view_equals(range_term.lt.datetime,
-                     "2026-03-05T11:29:41.265+01:00")) {
+        !view_equals(range_term.lt.datetime, "2026-03-05T11:29:41.265+01:00")) {
       printf("selector AST datetime range mismatch: %s\n", error.message);
       ++failures;
     }
@@ -8719,8 +8673,7 @@ static void expect_selector_ast_api(void) {
     ++failures;
   } else {
     memset(&date_term, 0, sizeof(date_term));
-    st = test_ctx->selector_node_date_term(test_ctx, child, &date_term,
-                                           &error);
+    st = test_ctx->selector_node_date_term(test_ctx, child, &date_term, &error);
     if (st != LQL_STATUS_OK || !view_equals(date_term.field, "/timestamp") ||
         !view_equals(date_term.after, "2025-01-01") ||
         !view_equals(date_term.before, "2025-01-03")) {
@@ -8740,8 +8693,8 @@ static void expect_selector_ast_api(void) {
       printf("selector AST in term mismatch: %s\n", error.message);
       ++failures;
     }
-    st = test_ctx->selector_node_in_term_any(test_ctx, child, 0u, &view,
-                                             &error);
+    st =
+        test_ctx->selector_node_in_term_any(test_ctx, child, 0u, &view, &error);
     if (st != LQL_STATUS_OK || !view_equals(view, "prod")) {
       printf("selector AST in any mismatch: %s\n", error.message);
       ++failures;
@@ -8820,8 +8773,7 @@ static void expect_selector_builder_api(void) {
   string_term.value = view_from_cstr("open");
   lql_error_init(&error);
   st = test_ctx->selector_build_string(
-      test_ctx, LQL_SELECTOR_NODE_EQ, &string_term, NULL, &eq_selector,
-      &error);
+      test_ctx, LQL_SELECTOR_NODE_EQ, &string_term, NULL, &eq_selector, &error);
   if (st != LQL_STATUS_OK || eq_selector == NULL) {
     printf("selector_build_string eq failed: %s\n", error.message);
     ++failures;
@@ -8854,8 +8806,8 @@ static void expect_selector_builder_api(void) {
   children[0] = eq_selector;
   children[1] = range_selector;
   lql_error_init(&error);
-  st = test_ctx->selector_build_compound(
-      test_ctx, LQL_SELECTOR_NODE_AND, children, 2u, &and_selector, &error);
+  st = test_ctx->selector_build_compound(test_ctx, LQL_SELECTOR_NODE_AND,
+                                         children, 2u, &and_selector, &error);
   if (st != LQL_STATUS_OK || and_selector == NULL) {
     printf("selector_build_compound failed: %s\n", error.message);
     ++failures;
@@ -8883,9 +8835,9 @@ static void expect_selector_builder_api(void) {
   string_term.value_present = 1;
   string_term.value = view_from_cstr("closed");
   lql_error_init(&error);
-  st = test_ctx->selector_build_string(
-      test_ctx, LQL_SELECTOR_NODE_EQ, &string_term, NULL, &closed_selector,
-      &error);
+  st = test_ctx->selector_build_string(test_ctx, LQL_SELECTOR_NODE_EQ,
+                                       &string_term, NULL, &closed_selector,
+                                       &error);
   if (st != LQL_STATUS_OK || closed_selector == NULL) {
     printf("selector_build_string closed failed: %s\n", error.message);
     ++failures;
@@ -8914,18 +8866,17 @@ static void expect_selector_builder_api(void) {
   any_values[0] = view_from_cstr("WARN");
   any_values[1] = view_from_cstr("timeout");
   lql_error_init(&error);
-  st = test_ctx->selector_build_string(
-      test_ctx, LQL_SELECTOR_NODE_CONTAINS, &string_term, any_values,
-      &contains_selector, &error);
+  st = test_ctx->selector_build_string(test_ctx, LQL_SELECTOR_NODE_CONTAINS,
+                                       &string_term, any_values,
+                                       &contains_selector, &error);
   if (st != LQL_STATUS_OK || contains_selector == NULL) {
     printf("selector_build_string contains any failed: %s\n", error.message);
     ++failures;
   } else {
     matched = 0;
-    st = test_ctx->matches_json(test_ctx, contains_selector,
-                                "{\"msg\":\"warn before timeout\"}",
-                                strlen("{\"msg\":\"warn before timeout\"}"),
-                                &matched, &error);
+    st = test_ctx->matches_json(
+        test_ctx, contains_selector, "{\"msg\":\"warn before timeout\"}",
+        strlen("{\"msg\":\"warn before timeout\"}"), &matched, &error);
     if (st != LQL_STATUS_OK || !matched) {
       printf("selector_build_string contains any mismatch: %s\n",
              error.message);
@@ -8937,12 +8888,11 @@ static void expect_selector_builder_api(void) {
   string_term.field = view_from_cstr("/msg");
   string_term.value = view_from_cstr("needle");
   lql_error_init(&error);
-  st = test_ctx->selector_build_string(
-      test_ctx, LQL_SELECTOR_NODE_CONTAINS, &string_term, NULL,
-      &contains_value_selector, &error);
+  st = test_ctx->selector_build_string(test_ctx, LQL_SELECTOR_NODE_CONTAINS,
+                                       &string_term, NULL,
+                                       &contains_value_selector, &error);
   if (st != LQL_STATUS_OK || contains_value_selector == NULL) {
-    printf("selector_build_string contains value failed: %s\n",
-           error.message);
+    printf("selector_build_string contains value failed: %s\n", error.message);
     ++failures;
   } else {
     expect_selector_handle_json(
@@ -8968,15 +8918,15 @@ static void expect_selector_builder_api(void) {
     st = test_ctx->matches_json(
         test_ctx, datetime_range_selector,
         "{\"timestamp\":\"2026-03-05T10:29:00Z\"}",
-        strlen("{\"timestamp\":\"2026-03-05T10:29:00Z\"}"), &matched,
-        &error);
+        strlen("{\"timestamp\":\"2026-03-05T10:29:00Z\"}"), &matched, &error);
     if (st != LQL_STATUS_OK || !matched) {
       printf("selector_build_range datetime mismatch: %s\n", error.message);
       ++failures;
     }
-    expect_selector_handle_json(
-        "build datetime range", datetime_range_selector,
-        "{\"range\":{\"field\":\"/timestamp\",\"gte\":\"2026-03-05T10:28:21Z\",\"lt\":\"2026-03-05T10:30:00Z\"}}");
+    expect_selector_handle_json("build datetime range", datetime_range_selector,
+                                "{\"range\":{\"field\":\"/"
+                                "timestamp\",\"gte\":\"2026-03-05T10:28:21Z\","
+                                "\"lt\":\"2026-03-05T10:30:00Z\"}}");
   }
 
   memset(&date_term, 0, sizeof(date_term));
@@ -9006,16 +8956,16 @@ static void expect_selector_builder_api(void) {
   any_values[0] = view_from_cstr("prod");
   any_values[1] = view_from_cstr("stage");
   lql_error_init(&error);
-  st = test_ctx->selector_build_in(test_ctx, &in_term, any_values,
-                                   &in_selector, &error);
+  st = test_ctx->selector_build_in(test_ctx, &in_term, any_values, &in_selector,
+                                   &error);
   if (st != LQL_STATUS_OK || in_selector == NULL) {
     printf("selector_build_in failed: %s\n", error.message);
     ++failures;
   } else {
     matched = 0;
-    st = test_ctx->matches_json(test_ctx, in_selector, "{\"env\":\"stage\"}",
-                                strlen("{\"env\":\"stage\"}"), &matched,
-                                &error);
+    st =
+        test_ctx->matches_json(test_ctx, in_selector, "{\"env\":\"stage\"}",
+                               strlen("{\"env\":\"stage\"}"), &matched, &error);
     if (st != LQL_STATUS_OK || !matched) {
       printf("selector_build_in match mismatch: %s\n", error.message);
       ++failures;
@@ -9036,10 +8986,9 @@ static void expect_selector_builder_api(void) {
       ++failures;
     }
     matched = 0;
-    st = test_ctx->matches_json(test_ctx, exists_selector,
-                                "{\"meta\":{\"etag\":\"abc\"}}",
-                                strlen("{\"meta\":{\"etag\":\"abc\"}}"),
-                                &matched, &error);
+    st = test_ctx->matches_json(
+        test_ctx, exists_selector, "{\"meta\":{\"etag\":\"abc\"}}",
+        strlen("{\"meta\":{\"etag\":\"abc\"}}"), &matched, &error);
     if (st != LQL_STATUS_OK || !matched) {
       printf("selector_build_exists match mismatch: %s\n", error.message);
       ++failures;
@@ -9055,8 +9004,7 @@ static void expect_selector_builder_api(void) {
   memset(&range_term, 0, sizeof(range_term));
   range_term.field = view_from_cstr("/progress");
   lql_error_init(&error);
-  st = test_ctx->selector_build_range(test_ctx, &range_term, &selector,
-                                      &error);
+  st = test_ctx->selector_build_range(test_ctx, &range_term, &selector, &error);
   if (st != LQL_STATUS_PARSE_ERROR ||
       strcmp(error.message, "range selector requires at least one bound") !=
           0) {
@@ -9068,9 +9016,9 @@ static void expect_selector_builder_api(void) {
   string_term.any_count = 1u;
   any_values[0] = view_from_cstr("open");
   lql_error_init(&error);
-  st = test_ctx->selector_build_string(
-      test_ctx, LQL_SELECTOR_NODE_EQ, &string_term, any_values, &selector,
-      &error);
+  st = test_ctx->selector_build_string(test_ctx, LQL_SELECTOR_NODE_EQ,
+                                       &string_term, any_values, &selector,
+                                       &error);
   if (st != LQL_STATUS_PARSE_ERROR ||
       strcmp(error.message, "selector operator does not support any") != 0) {
     printf("selector_build_string invalid mismatch: %s\n", error.message);
