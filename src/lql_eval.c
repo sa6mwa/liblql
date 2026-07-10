@@ -7370,6 +7370,9 @@ execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
                                     &state.doc);
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  enable_fast_top_level_multi_field_candidate(&options, &state.doc);
+  enable_fast_top_level_field_candidate(&options, &state.doc);
+  enable_fast_flat_candidate_stop(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
