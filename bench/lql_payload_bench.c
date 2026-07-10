@@ -294,40 +294,192 @@ static lql_status count_projected_payload(void *user,
   return LQL_STATUS_OK;
 }
 
+static lql_status
+run_payload_pass(lql *ctx, const char *mode, const char *expr,
+                 const char *selector_name, FILE *fixture,
+                 lql_uint64 fixture_size, lql_selector *selector,
+                 lql_projection *projection, const char *const *mutation_exprs,
+                 lql_uint64 mutation_expr_count, lql_query_result *result,
+                 payload_counts *counts, lql_error *error) {
+  FILE *sink;
+  lql_mutation_plan *mutation_plan;
+  lql_mutation_parse_options mutation_options;
+  lql_selector *parsed_selector;
+  lql_selector *run_selector;
+  bench_source source;
+  lql_status st;
+
+  sink = NULL;
+  mutation_plan = NULL;
+  parsed_selector = NULL;
+  run_selector = selector;
+  memset(result, 0, sizeof(*result));
+  memset(counts, 0, sizeof(*counts));
+  counts->ctx = ctx;
+  counts->projection = projection;
+  memset(&source, 0, sizeof(source));
+  source.file = fixture;
+  if (fseeko(fixture, (off_t)0, SEEK_SET) != 0) {
+    return LQL_STATUS_JSON_ERROR;
+  }
+
+  if (strcmp(mode, "reparse_selector_each_run") == 0) {
+    st = ctx->selector_parse(ctx, expr, &parsed_selector, error);
+    if (st != LQL_STATUS_OK) {
+      return st;
+    }
+    run_selector = parsed_selector;
+  }
+
+  if (strcmp(mode, "decision_only_selector") == 0 ||
+      strcmp(mode, "decision_only_plan") == 0 ||
+      strcmp(mode, "reuse_selector") == 0 ||
+      strcmp(mode, "reparse_selector_each_run") == 0) {
+    st = ctx->query_file_decisions(ctx, run_selector, fixture, observe_decision,
+                                   NULL, result, error);
+  } else if (strcmp(mode, "decision_only_source_selector") == 0) {
+    st = ctx->query_source_decisions(ctx, run_selector, read_bench_source,
+                                     &source, observe_decision, NULL, result,
+                                     error);
+  } else if (strcmp(mode, "plus_value_selector") == 0 ||
+             strcmp(mode, "plus_value_plan") == 0 ||
+             strcmp(mode, "plus_value_openjson_selector") == 0 ||
+             strcmp(mode, "plus_value_openjson_plan") == 0) {
+    sink = fopen("/dev/null", "wb");
+    if (sink == NULL) {
+      st = LQL_STATUS_JSON_ERROR;
+      goto done;
+    }
+    counts->sink = sink;
+    st = ctx->query_file_matches(ctx, run_selector, fixture, count_payload,
+                                 counts, result, error);
+  } else if (strcmp(mode, "plus_value_source_selector") == 0) {
+    sink = fopen("/dev/null", "wb");
+    if (sink == NULL) {
+      st = LQL_STATUS_JSON_ERROR;
+      goto done;
+    }
+    counts->sink = sink;
+    st = ctx->query_source_spooled_matches(ctx, run_selector, read_bench_source,
+                                           &source, count_spooled_payload,
+                                           counts, result, error);
+  } else if (strcmp(mode, "project_file_selector") == 0) {
+    sink = tmpfile();
+    if (sink == NULL) {
+      st = LQL_STATUS_JSON_ERROR;
+      goto done;
+    }
+    counts->sink = sink;
+    st =
+        ctx->query_file_matches(ctx, run_selector, fixture,
+                                count_projected_payload, counts, result, error);
+  } else if (strcmp(mode, "project_source_selector") == 0) {
+    sink = tmpfile();
+    if (sink == NULL) {
+      st = LQL_STATUS_JSON_ERROR;
+      goto done;
+    }
+    counts->sink = sink;
+    st = ctx->query_source_spooled_matches(ctx, run_selector, read_bench_source,
+                                           &source, count_projected_payload,
+                                           counts, result, error);
+  } else if (strcmp(mode, "mutate_file_selector") == 0 ||
+             strcmp(mode, "mutate_file_plan") == 0) {
+    sink = fopen("/dev/null", "wb");
+    if (sink == NULL) {
+      st = LQL_STATUS_JSON_ERROR;
+      goto done;
+    }
+    st = ctx->mutation_plan_parse(ctx, mutation_exprs, mutation_expr_count,
+                                  &mutation_plan, error);
+    if (st == LQL_STATUS_OK) {
+      st = ctx->mutate_file_range_candidates(ctx, run_selector, mutation_plan,
+                                             fixture, 0u, fixture_size, sink, 1,
+                                             1, result, error);
+    }
+  } else if (strcmp(mode, "mutate_source_selector") == 0) {
+    sink = fopen("/dev/null", "wb");
+    if (sink == NULL) {
+      st = LQL_STATUS_JSON_ERROR;
+      goto done;
+    }
+    st = ctx->mutation_plan_parse(ctx, mutation_exprs, mutation_expr_count,
+                                  &mutation_plan, error);
+    if (st == LQL_STATUS_OK) {
+      st = ctx->mutate_source_candidates(ctx, run_selector, mutation_plan,
+                                         read_bench_source, &source, sink, 1, 1,
+                                         result, error);
+    }
+  } else if (strcmp(mode, "mutate_file_backed_text") == 0 ||
+             strcmp(mode, "mutate_file_backed_base64") == 0) {
+    sink = fopen("/dev/null", "wb");
+    if (sink == NULL) {
+      st = LQL_STATUS_JSON_ERROR;
+      goto done;
+    }
+    memset(&mutation_options, 0, sizeof(mutation_options));
+    mutation_options.enable_file_values = 1;
+    st = ctx->mutation_plan_parse_with_options(
+        ctx, mutation_exprs, mutation_expr_count, &mutation_options,
+        &mutation_plan, error);
+    if (st == LQL_STATUS_OK) {
+      st = ctx->mutate_file_range_candidates(ctx, run_selector, mutation_plan,
+                                             fixture, 0u, fixture_size, sink, 1,
+                                             0, result, error);
+    }
+  } else {
+    st = LQL_STATUS_INVALID_ARGUMENT;
+  }
+
+done:
+  if (sink != NULL) {
+    fclose(sink);
+  }
+  ctx->mutation_plan_destroy(ctx, mutation_plan);
+  if (parsed_selector != NULL) {
+    ctx->selector_destroy(ctx, parsed_selector);
+  }
+  (void)selector_name;
+  return st;
+}
+
 int main(int argc, char **argv) {
   const char *mode;
   const char *expr;
   const char *fixture_path;
   const char *selector_name;
+  const char *submode;
   FILE *fixture;
-  FILE *sink;
   lql *ctx;
   lql_selector *selector;
   lql_projection *projection;
   lql_query_result result;
-  lql_mutation_plan *mutation_plan;
   lql_error error;
   lql_status st;
   payload_counts counts;
-  bench_source source;
   lql_uint64 fixture_size;
   const char *const *mutation_exprs;
   const char *file_backed_mutation_exprs[1];
-  lql_mutation_parse_options mutation_options;
   lql_uint64 mutation_expr_count;
   char file_backed_mutation_expr[4096];
   clock_t start;
   clock_t end;
 
-  if (argc != 4 && argc != 5) {
-    fprintf(stderr,
-            "usage: lql_payload_bench MODE SELECTOR FIXTURE [SELECTOR_NAME]\n");
+  if (argc != 4 && argc != 5 && argc != 6) {
+    fprintf(stderr, "usage: lql_payload_bench MODE SELECTOR FIXTURE "
+                    "[SELECTOR_NAME] [SUBMODE]\n");
     return 2;
   }
   mode = argv[1];
   expr = argv[2];
   fixture_path = argv[3];
-  selector_name = argc == 5 ? argv[4] : NULL;
+  selector_name = argc >= 5 ? argv[4] : NULL;
+  submode = argc == 6 ? argv[5] : "warmup_included";
+  if (strcmp(submode, "warmup_included") != 0 &&
+      strcmp(submode, "steady_state") != 0) {
+    fprintf(stderr, "lql_payload_bench: unsupported submode: %s\n", submode);
+    return 2;
+  }
   mutation_expr_count = 1u;
   mutation_exprs =
       mutation_exprs_for_selector(selector_name, expr, &mutation_expr_count);
@@ -349,7 +501,6 @@ int main(int argc, char **argv) {
   ctx = NULL;
   selector = NULL;
   projection = NULL;
-  mutation_plan = NULL;
   st = lql_new(&ctx, &error);
   if (st != LQL_STATUS_OK) {
     fprintf(stderr, "lql_payload_bench: create lql: %s\n", error.message);
@@ -392,169 +543,36 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  memset(&counts, 0, sizeof(counts));
-  counts.ctx = ctx;
-  counts.projection = projection;
-  memset(&source, 0, sizeof(source));
-  source.file = fixture;
-  memset(&result, 0, sizeof(result));
-  start = clock();
-  if (strcmp(mode, "reparse_selector_each_run") == 0) {
-    st = ctx->selector_parse(ctx, expr, &selector, &error);
-    if (st == LQL_STATUS_OK) {
-      st = ctx->query_file_decisions(ctx, selector, fixture, observe_decision,
-                                     NULL, &result, &error);
-    }
-  } else if (strcmp(mode, "decision_only_selector") == 0 ||
-             strcmp(mode, "decision_only_plan") == 0 ||
-             strcmp(mode, "reuse_selector") == 0) {
-    st = ctx->query_file_decisions(ctx, selector, fixture, observe_decision,
-                                   NULL, &result, &error);
-  } else if (strcmp(mode, "decision_only_source_selector") == 0) {
-    st = ctx->query_source_decisions(ctx, selector, read_bench_source, &source,
-                                     observe_decision, NULL, &result, &error);
-  } else if (strcmp(mode, "plus_value_selector") == 0 ||
-             strcmp(mode, "plus_value_plan") == 0) {
-    sink = fopen("/dev/null", "wb");
-    if (sink == NULL) {
-      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
-      fclose(fixture);
-      ctx->selector_destroy(ctx, selector);
-      ctx->destroy(ctx);
-      return 1;
-    }
-    counts.sink = sink;
-    st = ctx->query_file_matches(ctx, selector, fixture, count_payload, &counts,
-                                 &result, &error);
-    fclose(sink);
-  } else if (strcmp(mode, "plus_value_source_selector") == 0) {
-    sink = fopen("/dev/null", "wb");
-    if (sink == NULL) {
-      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
-      fclose(fixture);
-      ctx->selector_destroy(ctx, selector);
-      ctx->destroy(ctx);
-      return 1;
-    }
-    counts.sink = sink;
-    st = ctx->query_source_spooled_matches(ctx, selector, read_bench_source,
-                                           &source, count_spooled_payload,
-                                           &counts, &result, &error);
-    fclose(sink);
-  } else if (strcmp(mode, "plus_value_openjson_selector") == 0 ||
-             strcmp(mode, "plus_value_openjson_plan") == 0) {
-    sink = fopen("/dev/null", "wb");
-    if (sink == NULL) {
-      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
-      fclose(fixture);
-      ctx->selector_destroy(ctx, selector);
-      ctx->destroy(ctx);
-      return 1;
-    }
-    counts.sink = sink;
-    st = ctx->query_file_matches(ctx, selector, fixture, count_payload, &counts,
-                                 &result, &error);
-    fclose(sink);
-  } else if (strcmp(mode, "project_file_selector") == 0) {
-    sink = tmpfile();
-    if (sink == NULL) {
-      fprintf(stderr, "lql_payload_bench: failed to create projection sink\n");
+  if (strcmp(submode, "steady_state") == 0) {
+    st = run_payload_pass(ctx, mode, expr, selector_name, fixture, fixture_size,
+                          selector, projection, mutation_exprs,
+                          mutation_expr_count, &result, &counts, &error);
+    if (st != LQL_STATUS_OK) {
+      fprintf(stderr, "lql_payload_bench: warmup mode %s: %s\n", mode,
+              error.message);
       fclose(fixture);
       ctx->projection_destroy(ctx, projection);
       ctx->selector_destroy(ctx, selector);
       ctx->destroy(ctx);
       return 1;
     }
-    counts.sink = sink;
-    st =
-        ctx->query_file_matches(ctx, selector, fixture, count_projected_payload,
-                                &counts, &result, &error);
-    fclose(sink);
-  } else if (strcmp(mode, "project_source_selector") == 0) {
-    sink = tmpfile();
-    if (sink == NULL) {
-      fprintf(stderr, "lql_payload_bench: failed to create projection sink\n");
-      fclose(fixture);
-      ctx->projection_destroy(ctx, projection);
-      ctx->selector_destroy(ctx, selector);
-      ctx->destroy(ctx);
-      return 1;
-    }
-    counts.sink = sink;
-    st = ctx->query_source_spooled_matches(ctx, selector, read_bench_source,
-                                           &source, count_projected_payload,
-                                           &counts, &result, &error);
-    fclose(sink);
-  } else if (strcmp(mode, "mutate_file_selector") == 0 ||
-             strcmp(mode, "mutate_file_plan") == 0) {
-    sink = fopen("/dev/null", "wb");
-    if (sink == NULL) {
-      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
-      fclose(fixture);
-      ctx->selector_destroy(ctx, selector);
-      ctx->destroy(ctx);
-      return 1;
-    }
-    st = ctx->mutation_plan_parse(ctx, mutation_exprs, mutation_expr_count,
-                                  &mutation_plan, &error);
-    if (st == LQL_STATUS_OK) {
-      st = ctx->mutate_file_range_candidates(ctx, selector, mutation_plan,
-                                             fixture, 0u, fixture_size, sink, 1,
-                                             1, &result, &error);
-    }
-    fclose(sink);
-  } else if (strcmp(mode, "mutate_source_selector") == 0) {
-    sink = fopen("/dev/null", "wb");
-    if (sink == NULL) {
-      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
-      fclose(fixture);
-      ctx->selector_destroy(ctx, selector);
-      ctx->destroy(ctx);
-      return 1;
-    }
-    st = ctx->mutation_plan_parse(ctx, mutation_exprs, mutation_expr_count,
-                                  &mutation_plan, &error);
-    if (st == LQL_STATUS_OK) {
-      st = ctx->mutate_source_candidates(ctx, selector, mutation_plan,
-                                         read_bench_source, &source, sink, 1, 1,
-                                         &result, &error);
-    }
-    fclose(sink);
-  } else if (strcmp(mode, "mutate_file_backed_text") == 0 ||
-             strcmp(mode, "mutate_file_backed_base64") == 0) {
-    sink = fopen("/dev/null", "wb");
-    if (sink == NULL) {
-      fprintf(stderr, "lql_payload_bench: failed to open /dev/null\n");
-      fclose(fixture);
-      ctx->selector_destroy(ctx, selector);
-      ctx->destroy(ctx);
-      return 1;
-    }
-    memset(&mutation_options, 0, sizeof(mutation_options));
-    mutation_options.enable_file_values = 1;
-    st = ctx->mutation_plan_parse_with_options(
-        ctx, mutation_exprs, mutation_expr_count, &mutation_options,
-        &mutation_plan, &error);
-    if (st == LQL_STATUS_OK) {
-      st = ctx->mutate_file_range_candidates(ctx, selector, mutation_plan,
-                                             fixture, 0u, fixture_size, sink, 1,
-                                             0, &result, &error);
-    }
-    fclose(sink);
-  } else {
-    fprintf(stderr, "lql_payload_bench: unsupported mode: %s\n", mode);
-    fclose(fixture);
-    ctx->selector_destroy(ctx, selector);
-    ctx->destroy(ctx);
-    return 2;
   }
+
+  start = clock();
+  st = run_payload_pass(ctx, mode, expr, selector_name, fixture, fixture_size,
+                        selector, projection, mutation_exprs,
+                        mutation_expr_count, &result, &counts, &error);
   end = clock();
   fclose(fixture);
-  ctx->mutation_plan_destroy(ctx, mutation_plan);
   ctx->projection_destroy(ctx, projection);
   ctx->selector_destroy(ctx, selector);
 
   if (st != LQL_STATUS_OK) {
+    if (st == LQL_STATUS_INVALID_ARGUMENT) {
+      fprintf(stderr, "lql_payload_bench: unsupported mode: %s\n", mode);
+      ctx->destroy(ctx);
+      return 2;
+    }
     fprintf(stderr, "lql_payload_bench: query mode %s: %s\n", mode,
             error.message);
     ctx->destroy(ctx);

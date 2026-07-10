@@ -873,43 +873,42 @@ run_c_native_mode() {
     return 1
   fi
   fixture_sha=$(file_sha256 "$fixture_path")
-  record=$("$payload_bench" "$mode" "$expr" "$fixture_path" "$selector_name")
-  c_candidates=$(kv_field candidates "$record")
-  c_matches=$(kv_field matches "$record")
-  c_payloads=$(kv_field payloads "$record")
-  c_payload_bytes=$(kv_field payload_bytes "$record")
-  c_elapsed_ns=$(kv_field elapsed_ns "$record")
-  c_peak_rss_bytes=$(kv_field peak_rss_bytes "$record")
-  if [ -z "$c_candidates" ] || [ -z "$c_matches" ] ||
-    [ -z "$c_payloads" ] || [ -z "$c_payload_bytes" ] ||
-    [ -z "$c_elapsed_ns" ] || [ -z "$c_peak_rss_bytes" ]; then
-    printf 'C payload benchmark emitted an invalid record: %s\n' "$record" >&2
-    return 1
-  fi
-  if [ "$dataset_name" = "large_ndjson" ] &&
-    [ "$selector_name" = "eq_status_open" ]; then
-    c_candidates=$(fault_count "$c_candidates" "$inject_candidate_mismatch")
-    c_matches=$(fault_count "$c_matches" "$inject_match_mismatch")
-    c_payloads=$(fault_count "$c_payloads" "$inject_payload_mismatch")
-    c_payload_bytes=$(fault_count "$c_payload_bytes" "$inject_payload_byte_mismatch")
-  fi
   : "$candidates"
-  printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
-    "$mode" "warmup_included" "$c_candidates" "$c_matches" "$c_payloads" \
-    "$c_payload_bytes" >> "$c_counts_file"
-  printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
-    "$mode" "steady_state" "$c_candidates" "$c_matches" "$c_payloads" \
-    "$c_payload_bytes" >> "$c_counts_file"
   payload_source_type=none
   case "$mode" in
     plus_value_source_selector) payload_source_type=spooled ;;
     plus_value_*) payload_source_type=seekable_range ;;
     project_*) payload_source_type=projection ;;
   esac
-  emit_submode_records "c" "$dataset_name" "$selector_name" "$expr" \
-    "$mode" "$bytes" "$c_candidates" \
-    "$c_matches" "$c_payloads" "$c_payload_bytes" "$payload_source_type" \
-    "$c_elapsed_ns" "$c_peak_rss_bytes" false "" "$fixture_sha"
+  for submode in warmup_included steady_state; do
+    record=$("$payload_bench" "$mode" "$expr" "$fixture_path" "$selector_name" "$submode")
+    c_candidates=$(kv_field candidates "$record")
+    c_matches=$(kv_field matches "$record")
+    c_payloads=$(kv_field payloads "$record")
+    c_payload_bytes=$(kv_field payload_bytes "$record")
+    c_elapsed_ns=$(kv_field elapsed_ns "$record")
+    c_peak_rss_bytes=$(kv_field peak_rss_bytes "$record")
+    if [ -z "$c_candidates" ] || [ -z "$c_matches" ] ||
+      [ -z "$c_payloads" ] || [ -z "$c_payload_bytes" ] ||
+      [ -z "$c_elapsed_ns" ] || [ -z "$c_peak_rss_bytes" ]; then
+      printf 'C payload benchmark emitted an invalid record: %s\n' "$record" >&2
+      return 1
+    fi
+    if [ "$dataset_name" = "large_ndjson" ] &&
+      [ "$selector_name" = "eq_status_open" ]; then
+      c_candidates=$(fault_count "$c_candidates" "$inject_candidate_mismatch")
+      c_matches=$(fault_count "$c_matches" "$inject_match_mismatch")
+      c_payloads=$(fault_count "$c_payloads" "$inject_payload_mismatch")
+      c_payload_bytes=$(fault_count "$c_payload_bytes" "$inject_payload_byte_mismatch")
+    fi
+    printf '%s %s %s %s %s %s %s %s\n' "$dataset_name" "$selector_name" \
+      "$mode" "$submode" "$c_candidates" "$c_matches" "$c_payloads" \
+      "$c_payload_bytes" >> "$c_counts_file"
+    emit_record "c" "$dataset_name" "$selector_name" "$expr" \
+      "$mode" "$submode" "$bytes" "$c_candidates" \
+      "$c_matches" "$c_payloads" "$c_payload_bytes" "$payload_source_type" \
+      "$c_elapsed_ns" "$c_peak_rss_bytes" false "" "$fixture_sha"
+  done
 }
 
 run_go_mode() {

@@ -166,10 +166,14 @@ bench-check-vendored-lonejson: build-debug-vendored-lonejson build-debug-lua bui
 	@LQL_PAYLOAD_BENCH_PATH=build/bench-vendored-lonejson/lql_payload_bench \
 	  LQL_BENCH_LIBRARY_DIR=build/bench-vendored-lonejson \
 	  ./scripts/check_lockd_perf_benchmark.sh
-	@./scripts/check_parity_benchmark_failures.sh
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-vendored-lonejson/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-vendored-lonejson \
+	  ./scripts/check_parity_benchmark_failures.sh
 	@./scripts/check_parity_benchmark_fixtures.sh
 	@./scripts/check_parity_benchmark_memory.sh build/bench-check-vendored-lonejson.jsonl
-	@./scripts/check_parity_benchmark_schema.sh
+	@LQL_PAYLOAD_BENCH_PATH=build/bench-vendored-lonejson/lql_payload_bench \
+	  LQL_BENCH_LIBRARY_DIR=build/bench-vendored-lonejson \
+	  ./scripts/check_parity_benchmark_schema.sh
 
 bench-gate perf-gate: bench-check
 
