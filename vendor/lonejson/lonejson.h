@@ -15025,6 +15025,9 @@ typedef struct lonejson__json_io {
   lonejson_sink_fn sink;
   void *sink_user;
   lonejson_spooled *raw_capture_spool;
+  unsigned char *raw_capture_buffer;
+  size_t raw_capture_buffer_len;
+  size_t raw_capture_buffer_cap;
   const lonejson_value_visitor *visitor;
   const lonejson_path_value_visitor *path_visitor;
   void *visitor_user;
@@ -15391,6 +15394,8 @@ lonejson__json_cursor_add_stream_bytes(lonejson__json_io *io, size_t len) {
 
 static LONEJSON__INLINE int
 lonejson__json_cursor_capture_byte(lonejson__json_io *io, unsigned char byte);
+static LONEJSON__INLINE lonejson_status
+lonejson__json_cursor_flush_raw_capture(lonejson__json_io *io);
 
 static LONEJSON__NOINLINE LONEJSON__COLD int
 lonejson__json_cursor_refill_source_getc(lonejson__json_io *io) {
@@ -15603,7 +15608,10 @@ static LONEJSON__INLINE void lonejson__json_cursor_ungetc(lonejson__json_io *io,
     --io->total_bytes;
   }
   if (io->last_raw_capture_counted && io->raw_capture_spool != NULL &&
-      io->raw_capture_spool->size != 0u) {
+      io->raw_capture_buffer_len != 0u) {
+    --io->raw_capture_buffer_len;
+  } else if (io->last_raw_capture_counted && io->raw_capture_spool != NULL &&
+             io->raw_capture_spool->size != 0u) {
     --io->raw_capture_spool->size;
     if (io->raw_capture_spool->memory_len > io->raw_capture_spool->size) {
       io->raw_capture_spool->memory_len = io->raw_capture_spool->size;
@@ -15620,12 +15628,17 @@ static LONEJSON__INLINE void lonejson__json_cursor_ungetc(lonejson__json_io *io,
 static LONEJSON__INLINE lonejson_status
 lonejson__json_cursor_advance_span(lonejson__json_io *io, size_t len) {
   const unsigned char *data;
+  lonejson_status status;
 
   if (len == 0u) {
     return LONEJSON_STATUS_OK;
   }
   if (io->raw_capture_spool == NULL) {
     return LONEJSON_STATUS_OK;
+  }
+  status = lonejson__json_cursor_flush_raw_capture(io);
+  if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+    return status;
   }
   if (io->cursor->buffer != NULL) {
     if (io->cursor->buffer_off < len) {
@@ -15646,6 +15659,23 @@ lonejson__json_cursor_advance_span(lonejson__json_io *io, size_t len) {
   return lonejson_spooled_append(io->raw_capture_spool, data, len, io->error);
 }
 
+static LONEJSON__INLINE lonejson_status
+lonejson__json_cursor_flush_raw_capture(lonejson__json_io *io) {
+  lonejson_status status;
+
+  if (io->raw_capture_spool == NULL || io->raw_capture_buffer == NULL ||
+      io->raw_capture_buffer_len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  status =
+      lonejson_spooled_append(io->raw_capture_spool, io->raw_capture_buffer,
+                              io->raw_capture_buffer_len, io->error);
+  if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
+    io->raw_capture_buffer_len = 0u;
+  }
+  return status;
+}
+
 static LONEJSON__INLINE int
 lonejson__json_cursor_capture_byte(lonejson__json_io *io, unsigned char byte) {
   lonejson_status status;
@@ -15654,7 +15684,23 @@ lonejson__json_cursor_capture_byte(lonejson__json_io *io, unsigned char byte) {
   if (io->raw_capture_spool == NULL) {
     return 1;
   }
-  status = lonejson_spooled_append(io->raw_capture_spool, &byte, 1u, io->error);
+  if (io->raw_capture_buffer == NULL || io->raw_capture_buffer_cap == 0u) {
+    status =
+        lonejson_spooled_append(io->raw_capture_spool, &byte, 1u, io->error);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      return 0;
+    }
+    io->last_raw_capture_counted = 1;
+    return 1;
+  }
+  if (io->raw_capture_buffer_len == io->raw_capture_buffer_cap) {
+    status = lonejson__json_cursor_flush_raw_capture(io);
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      return 0;
+    }
+  }
+  io->raw_capture_buffer[io->raw_capture_buffer_len++] = byte;
+  status = LONEJSON_STATUS_OK;
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     return 0;
   }
@@ -17656,6 +17702,7 @@ static lonejson_status lonejson__json_visit_one_cursor(
     lonejson_error *error) {
   lonejson__json_io io;
   lonejson__value_limits defaults;
+  unsigned char *raw_capture_buffer;
   lonejson_status status;
   size_t i;
 
@@ -17664,12 +17711,24 @@ static lonejson_status lonejson__json_visit_one_cursor(
                                0u,
                                "JSON value source and visitor are required");
   }
+  raw_capture_buffer = NULL;
   memset(&io, 0, sizeof(io));
   io.cursor = cursor;
   io.visitor = visitor;
   io.path_visitor = path_visitor;
   io.visitor_user = user;
   io.raw_capture_spool = raw_capture_spool;
+  if (raw_capture_spool != NULL) {
+    raw_capture_buffer =
+        (unsigned char *)lonejson__owned_malloc(allocator, 256u);
+    if (raw_capture_buffer == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to allocate raw capture buffer");
+    }
+    io.raw_capture_buffer = raw_capture_buffer;
+    io.raw_capture_buffer_cap = 256u;
+  }
   io.error = error;
   io.allocator = allocator;
   if (limits != NULL && limits->max_depth != 0u &&
@@ -17708,6 +17767,7 @@ static lonejson_status lonejson__json_visit_one_cursor(
     if (io.path_segments == NULL || io.path_frames == NULL) {
       lonejson__owned_free(io.path_segments);
       lonejson__owned_free(io.path_frames);
+      lonejson__owned_free(raw_capture_buffer);
       return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
                                  0u, 0u,
                                  "failed to allocate JSON path visitor state");
@@ -17717,6 +17777,13 @@ static lonejson_status lonejson__json_visit_one_cursor(
   }
   status = io.path_visitor == NULL ? lonejson__json_visit_value_no_path(&io)
                                    : lonejson__json_visit_value(&io);
+  if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
+    lonejson_status flush_status = lonejson__json_cursor_flush_raw_capture(&io);
+    if (flush_status != LONEJSON_STATUS_OK &&
+        flush_status != LONEJSON_STATUS_TRUNCATED) {
+      status = flush_status;
+    }
+  }
   if (io.has_pushback) {
     cursor->has_pushback = 1;
     cursor->count_pushback = io.pushback_counted;
@@ -17732,6 +17799,7 @@ static lonejson_status lonejson__json_visit_one_cursor(
   }
   lonejson__owned_free(io.path_segments);
   lonejson__owned_free(io.path_frames);
+  lonejson__owned_free(raw_capture_buffer);
   return status;
 }
 
