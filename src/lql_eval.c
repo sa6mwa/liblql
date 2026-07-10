@@ -1477,6 +1477,9 @@ static int top_level_multi_candidate_impossible(const eval_doc *doc,
       doc->stream_misses == NULL) {
     return 0;
   }
+  if (doc->candidate_matched && selector->match_sticky_once_true) {
+    return 1;
+  }
   for (i = 0u; i < selector->predicate_count; ++i) {
     if (!hit_marked_fast(doc, selector->predicates[i]) &&
         stream_miss_marked_fast(doc, selector->predicates[i])) {
@@ -3080,10 +3083,13 @@ static lonejson_status fast_flat_begin_value(eval_doc *doc, int scalar) {
   if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
     observe_prefix_stream_begin(doc, doc->selector, NULL);
   }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u &&
+      selector->kind == LQL_SELECTOR_KIND_IN) {
     observe_in_stream_begin(doc, doc->selector, NULL);
   }
-  observe_scalar_exists_begin(doc, doc->selector, NULL);
+  if ((doc->scalar_path_features & LQL_SELECTOR_FEATURE_EXISTS) != 0u) {
+    observe_scalar_exists_begin(doc, doc->selector, NULL);
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -3519,10 +3525,13 @@ static lonejson_status fast_direct_prepare_scalar(eval_doc *doc) {
   if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
     observe_prefix_stream_begin(doc, doc->selector, NULL);
   }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u &&
+      selector->kind == LQL_SELECTOR_KIND_IN) {
     observe_in_stream_begin(doc, doc->selector, NULL);
   }
-  observe_scalar_exists_begin(doc, doc->selector, NULL);
+  if ((doc->scalar_path_features & LQL_SELECTOR_FEATURE_EXISTS) != 0u) {
+    observe_scalar_exists_begin(doc, doc->selector, NULL);
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -3944,10 +3953,13 @@ static lonejson_status fast_recursive_prepare_value(eval_doc *doc, int scalar) {
   if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
     observe_prefix_stream_begin(doc, doc->selector, NULL);
   }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u &&
+      selector->kind == LQL_SELECTOR_KIND_IN) {
     observe_in_stream_begin(doc, doc->selector, NULL);
   }
-  observe_scalar_exists_begin(doc, doc->selector, NULL);
+  if ((doc->scalar_path_features & LQL_SELECTOR_FEATURE_EXISTS) != 0u) {
+    observe_scalar_exists_begin(doc, doc->selector, NULL);
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -4257,10 +4269,13 @@ static lonejson_status fast_multi_prepare_value(eval_doc *doc,
   if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
     observe_prefix_stream_begin(doc, doc->selector, NULL);
   }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
+  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u &&
+      selector->kind == LQL_SELECTOR_KIND_IN) {
     observe_in_stream_begin(doc, doc->selector, NULL);
   }
-  observe_scalar_exists_begin(doc, doc->selector, NULL);
+  if ((doc->scalar_path_features & LQL_SELECTOR_FEATURE_EXISTS) != 0u) {
+    observe_scalar_exists_begin(doc, doc->selector, NULL);
+  }
   return LONEJSON_STATUS_OK;
 }
 
