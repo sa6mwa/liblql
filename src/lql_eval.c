@@ -112,6 +112,7 @@ typedef struct eval_doc {
   const char *fast_multi_keys[LQL_EVAL_FAST_MULTI_PRED_CAP];
   size_t fast_multi_key_lens[LQL_EVAL_FAST_MULTI_PRED_CAP];
   int fast_multi_skip_unmatched_strings;
+  int fast_multi_eligible;
   int fast_multi_direct_enabled;
   int fast_multi_direct_miss;
   size_t fast_multi_depth;
@@ -521,6 +522,7 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   impl = self == NULL ? NULL : (lql_impl *)self->impl;
   doc->impl = impl;
   doc->selector = selector;
+  doc->fast_multi_eligible = selector_fast_top_level_multi_eligible(selector);
   if (doc->allocator == NULL) {
     return 0;
   }
@@ -1507,8 +1509,7 @@ static int top_level_multi_candidate_impossible(const eval_doc *doc,
                                                 const lql_selector *selector) {
   size_t i;
   if (doc == NULL || selector == NULL || doc->root_kind != '{' ||
-      !selector_fast_top_level_multi_eligible(selector) ||
-      doc->stream_misses == NULL) {
+      !doc->fast_multi_eligible || doc->stream_misses == NULL) {
     return 0;
   }
   if (doc->candidate_matched && selector->match_sticky_once_true) {
@@ -1528,8 +1529,7 @@ top_level_multi_candidate_payload_discardable(const eval_doc *doc,
                                               const lql_selector *selector) {
   size_t i;
   if (doc == NULL || selector == NULL || doc->root_kind != '{' ||
-      !selector_fast_top_level_multi_eligible(selector) ||
-      doc->stream_misses == NULL) {
+      !doc->fast_multi_eligible || doc->stream_misses == NULL) {
     return 0;
   }
   for (i = 0u; i < selector->predicate_count; ++i) {
@@ -5769,6 +5769,9 @@ static lonejson_status source_transform_observer_object_begin(
     state->current_root_seen = 1;
     state->current_root_object = 1;
   }
+  if (state->gated_transform) {
+    return LONEJSON_STATUS_OK;
+  }
   return source_transform_push_frame(state, path, 'o');
 }
 
@@ -5780,7 +5783,9 @@ static lonejson_status source_transform_observer_object_end(
   st = state->eval_visitor.object_end == NULL
            ? LONEJSON_STATUS_OK
            : state->eval_visitor.object_end(&state->doc, path, error);
-  source_transform_pop_frame(state);
+  if (!state->gated_transform) {
+    source_transform_pop_frame(state);
+  }
   return st;
 }
 
@@ -5799,6 +5804,9 @@ static lonejson_status source_transform_observer_array_begin(
     state->current_root_seen = 1;
     state->current_root_object = 0;
   }
+  if (state->gated_transform) {
+    return LONEJSON_STATUS_OK;
+  }
   return source_transform_push_frame(state, path, 'a');
 }
 
@@ -5811,7 +5819,9 @@ source_transform_observer_array_end(void *user, const lonejson_value_path *path,
   st = state->eval_visitor.array_end == NULL
            ? LONEJSON_STATUS_OK
            : state->eval_visitor.array_end(&state->doc, path, error);
-  source_transform_pop_frame(state);
+  if (!state->gated_transform) {
+    source_transform_pop_frame(state);
+  }
   return st;
 }
 
@@ -8834,6 +8844,10 @@ static lql_status execute_query_source_v2_transform(
     init_fast_flat_scalar_visitor(&value_observer);
     options.observer_value = &value_observer;
     options.observer_user = &state.doc;
+  } else if (selector_fast_direct_scalar_eligible(selector)) {
+    init_fast_direct_scalar_visitor(&value_observer);
+    options.observer_value = &value_observer;
+    options.observer_user = &state.doc;
   } else if (selector_fast_recursive_suffix_scalar_eligible(selector)) {
     init_fast_recursive_suffix_scalar_visitor(&value_observer);
     options.observer_value = &value_observer;
@@ -8841,6 +8855,9 @@ static lql_status execute_query_source_v2_transform(
   } else if (selector_fast_top_level_multi_eligible(selector)) {
     init_fast_top_level_multi_visitor(&value_observer);
     options.observer_value = &value_observer;
+    options.observer_user = &state.doc;
+  } else if (state.gated_transform) {
+    options.observer = &state.eval_visitor;
     options.observer_user = &state.doc;
   } else
 #endif

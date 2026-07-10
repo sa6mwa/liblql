@@ -16566,6 +16566,43 @@ lonejson__json_visit_value_no_path(lonejson__json_io *io);
 static lonejson_status lonejson__json_skip_string(lonejson__json_io *io,
                                                   size_t limit);
 
+static lonejson_status lonejson__json_number_append(
+    lonejson__json_io *io, char **buffer, size_t *capacity,
+    int *heap_buffer, size_t len, char value) {
+  size_t next_capacity;
+  char *next;
+
+  if (len >= io->limits.max_number_bytes) {
+    return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                               0u,
+                               "JSON number exceeds maximum byte limit");
+  }
+  if (len == *capacity) {
+    next_capacity = *capacity > io->limits.max_number_bytes / 2u
+                        ? io->limits.max_number_bytes
+                        : *capacity * 2u;
+    if (!*heap_buffer) {
+      next = (char *)lonejson__owned_malloc(io->allocator, next_capacity);
+      if (next != NULL && len != 0u) {
+        memcpy(next, *buffer, len);
+      }
+    } else {
+      next = (char *)lonejson__owned_realloc(io->allocator, *buffer,
+                                             next_capacity);
+    }
+    if (next == NULL) {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_ALLOCATION_FAILED,
+                                 0u, 0u, 0u,
+                                 "failed to allocate JSON number buffer");
+    }
+    *buffer = next;
+    *capacity = next_capacity;
+    *heap_buffer = 1;
+  }
+  (*buffer)[len] = value;
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status
 lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
   unsigned char plain[256];
@@ -16843,19 +16880,12 @@ static lonejson_status
 lonejson__json_visit_number_no_path(lonejson__json_io *io, int first) {
   char stack_buf[256];
   char *buffer = stack_buf;
-  size_t capacity = io->limits.max_number_bytes + 1u;
+  size_t capacity = sizeof(stack_buf);
   size_t len = 0u;
   int ch = first;
+  int heap_buffer = 0;
   lonejson_status status;
 
-  if (capacity > sizeof(stack_buf)) {
-    buffer = (char *)lonejson__owned_malloc(io->allocator, capacity);
-    if (buffer == NULL) {
-      return lonejson__set_error(io->error, LONEJSON_STATUS_ALLOCATION_FAILED,
-                                 0u, 0u, 0u,
-                                 "failed to allocate JSON number buffer");
-    }
-  }
   status = lonejson__json_visit_event(io, io->visitor->number_begin);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     if (buffer != stack_buf) {
@@ -16863,14 +16893,15 @@ lonejson__json_visit_number_no_path(lonejson__json_io *io, int first) {
     }
     return status;
   }
-  if (len >= io->limits.max_number_bytes) {
+  status = lonejson__json_number_append(io, &buffer, &capacity, &heap_buffer,
+                                         len, (char)first);
+  if (status != LONEJSON_STATUS_OK) {
     if (buffer != stack_buf) {
       lonejson__owned_free(buffer);
     }
-    return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
-                               "JSON number exceeds maximum byte limit");
+    return status;
   }
-  buffer[len++] = (char)first;
+  ++len;
   ch = lonejson__json_cursor_getc_lookahead(io);
   while (ch >= 0 && (lonejson__is_digit(ch) || ch == '+' || ch == '-' ||
                      ch == '.' || ch == 'e' || ch == 'E')) {
@@ -16881,14 +16912,15 @@ lonejson__json_visit_number_no_path(lonejson__json_io *io, int first) {
       }
       return status;
     }
-    if (len >= io->limits.max_number_bytes) {
+    status = lonejson__json_number_append(io, &buffer, &capacity,
+                                           &heap_buffer, len, (char)ch);
+    if (status != LONEJSON_STATUS_OK) {
       if (buffer != stack_buf) {
         lonejson__owned_free(buffer);
       }
-      return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
-                                 0u, "JSON number exceeds maximum byte limit");
+      return status;
     }
-    buffer[len++] = (char)ch;
+    ++len;
     ch = lonejson__json_cursor_getc_lookahead(io);
   }
   if (ch >= 0) {
@@ -17434,9 +17466,10 @@ static lonejson_status lonejson__json_visit_number(lonejson__json_io *io,
                                                    int first) {
   char stack_buf[256];
   char *buffer = stack_buf;
-  size_t capacity = io->limits.max_number_bytes + 1u;
+  size_t capacity = sizeof(stack_buf);
   size_t len = 0u;
   int ch = first;
+  int heap_buffer = 0;
   lonejson_status status;
   lonejson_value_event_fn begin_fn =
       io->visitor == NULL ? NULL : io->visitor->number_begin;
@@ -17451,14 +17484,6 @@ static lonejson_status lonejson__json_visit_number(lonejson__json_io *io,
   lonejson_path_value_event_fn path_end_fn =
       io->path_visitor == NULL ? NULL : io->path_visitor->number_end;
 
-  if (capacity > sizeof(stack_buf)) {
-    buffer = (char *)lonejson__owned_malloc(io->allocator, capacity);
-    if (buffer == NULL) {
-      return lonejson__set_error(io->error, LONEJSON_STATUS_ALLOCATION_FAILED,
-                                 0u, 0u, 0u,
-                                 "failed to allocate JSON number buffer");
-    }
-  }
   status = lonejson__json_visit_any_event(io, begin_fn, path_begin_fn);
   if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
     if (buffer != stack_buf) {
@@ -17466,14 +17491,15 @@ static lonejson_status lonejson__json_visit_number(lonejson__json_io *io,
     }
     return status;
   }
-  if (len >= io->limits.max_number_bytes) {
+  status = lonejson__json_number_append(io, &buffer, &capacity, &heap_buffer,
+                                         len, (char)first);
+  if (status != LONEJSON_STATUS_OK) {
     if (buffer != stack_buf) {
       lonejson__owned_free(buffer);
     }
-    return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
-                               "JSON number exceeds maximum byte limit");
+    return status;
   }
-  buffer[len++] = (char)first;
+  ++len;
   ch = lonejson__json_cursor_getc_lookahead(io);
   while (ch >= 0 && (lonejson__is_digit(ch) || ch == '+' || ch == '-' ||
                      ch == '.' || ch == 'e' || ch == 'E')) {
@@ -17484,14 +17510,15 @@ static lonejson_status lonejson__json_visit_number(lonejson__json_io *io,
       }
       return status;
     }
-    if (len >= io->limits.max_number_bytes) {
+    status = lonejson__json_number_append(io, &buffer, &capacity,
+                                           &heap_buffer, len, (char)ch);
+    if (status != LONEJSON_STATUS_OK) {
       if (buffer != stack_buf) {
         lonejson__owned_free(buffer);
       }
-      return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
-                                 0u, "JSON number exceeds maximum byte limit");
+      return status;
     }
-    buffer[len++] = (char)ch;
+    ++len;
     ch = lonejson__json_cursor_getc_lookahead(io);
   }
   if (ch >= 0) {
@@ -18171,44 +18198,40 @@ static lonejson_status lonejson__json_skip_number(lonejson__json_io *io,
                                                   int first) {
   char stack_buf[256];
   char *buffer = stack_buf;
-  size_t capacity = io->limits.max_number_bytes + 1u;
+  size_t capacity = sizeof(stack_buf);
   size_t len = 0u;
   int ch = first;
+  int heap_buffer = 0;
+  lonejson_status status;
 
-  if (capacity > sizeof(stack_buf)) {
-    buffer = (char *)lonejson__owned_malloc(io->allocator, capacity);
-    if (buffer == NULL) {
-      return lonejson__set_error(io->error, LONEJSON_STATUS_ALLOCATION_FAILED,
-                                 0u, 0u, 0u,
-                                 "failed to allocate JSON number buffer");
-    }
-  }
-  if (len >= io->limits.max_number_bytes) {
+  status = lonejson__json_number_append(io, &buffer, &capacity, &heap_buffer,
+                                         len, (char)first);
+  if (status != LONEJSON_STATUS_OK) {
     if (buffer != stack_buf) {
       lonejson__owned_free(buffer);
     }
-    return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
-                               "JSON number exceeds maximum byte limit");
+    return status;
   }
-  buffer[len++] = (char)first;
+  ++len;
   ch = lonejson__json_cursor_getc_lookahead(io);
   while (ch >= 0 && (lonejson__is_digit(ch) || ch == '+' || ch == '-' ||
                      ch == '.' || ch == 'e' || ch == 'E')) {
-    lonejson_status status = lonejson__json_enforce_total_limit(io);
+    status = lonejson__json_enforce_total_limit(io);
     if (status != LONEJSON_STATUS_OK) {
       if (buffer != stack_buf) {
         lonejson__owned_free(buffer);
       }
       return status;
     }
-    if (len >= io->limits.max_number_bytes) {
+    status = lonejson__json_number_append(io, &buffer, &capacity,
+                                           &heap_buffer, len, (char)ch);
+    if (status != LONEJSON_STATUS_OK) {
       if (buffer != stack_buf) {
         lonejson__owned_free(buffer);
       }
-      return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
-                                 0u, "JSON number exceeds maximum byte limit");
+      return status;
     }
-    buffer[len++] = (char)ch;
+    ++len;
     ch = lonejson__json_cursor_getc_lookahead(io);
   }
   if (ch >= 0) {
