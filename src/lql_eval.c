@@ -2800,6 +2800,24 @@ configure_candidate_eval_visitors(lonejson_candidate_stream_options *options,
   options->visitor_user = doc;
 }
 
+static void enable_fast_top_level_field_candidate(
+    lonejson_candidate_stream_options *options, const eval_doc *doc) {
+#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
+  const lql_selector *selector;
+  if (options == NULL || doc == NULL ||
+      !selector_fast_flat_exact_eligible(doc->selector)) {
+    return;
+  }
+  selector = doc->selector;
+  options->top_level_field_key =
+      selector->field + selector->field_segment_offsets[0];
+  options->top_level_field_key_len = selector->field_segment_lens[0];
+#else
+  (void)options;
+  (void)doc;
+#endif
+}
+
 typedef struct query_stream_state {
   lql *receiver;
   FILE *file;
@@ -3704,7 +3722,8 @@ source_transform_candidate_decision(
   state->current_policy.emit_candidate = matched || !state->matches_only;
   state->current_policy.mutate_candidate =
       matched && state->mutation_plan != NULL;
-  state->current_policy.root_object = state->current_root_object;
+  state->current_policy.root_object =
+      state->current_root_object || state->doc.root_kind == '{';
   if (!state->current_policy.emit_candidate) {
     policy.decision = LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_DROP;
     return policy;
@@ -5473,6 +5492,7 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
                                     &state.doc);
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  enable_fast_top_level_field_candidate(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -5553,6 +5573,7 @@ static lql_status execute_query_file_range_decisions(
                                     &state.doc);
   options.framing = LONEJSON_CANDIDATE_FRAMING_ARRAY_ITEMS;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  enable_fast_top_level_field_candidate(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -5792,6 +5813,7 @@ static lql_status execute_query_source_decisions_with_base(
                         ? LONEJSON_CANDIDATE_FRAMING_RECURSIVE_ARRAY_ITEMS
                         : LONEJSON_CANDIDATE_FRAMING_AUTO;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  enable_fast_top_level_field_candidate(&options, &state.doc);
   options.candidate_begin = on_candidate_begin;
   options.candidate_end = on_candidate_end;
   options.candidate_user = &state;
@@ -6217,6 +6239,9 @@ static lql_status execute_query_source_v2_transform(
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor observer;
+#if defined(LONEJSON_HAS_CANDIDATE_TRANSFORM_VALUE_OBSERVER)
+  lonejson_value_visitor value_observer;
+#endif
   lonejson_candidate_transform_options options;
   lonejson_candidate_transform_result transform_result;
   lonejson_candidate_transform_projection_path *projection_paths;
@@ -6312,8 +6337,17 @@ static lql_status execute_query_source_v2_transform(
           : LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE;
   options.sink = file_sink_unlocked;
   options.sink_user = out;
-  options.observer = &observer;
-  options.observer_user = &state;
+#if defined(LONEJSON_HAS_CANDIDATE_TRANSFORM_VALUE_OBSERVER)
+  if (selector_fast_flat_exact_eligible(selector)) {
+    init_fast_flat_exact_visitor(&value_observer);
+    options.observer_value = &value_observer;
+    options.observer_user = &state.doc;
+  } else
+#endif
+  {
+    options.observer = &observer;
+    options.observer_user = &state;
+  }
   options.transform = source_transform_decide;
   options.replace = source_transform_replace;
   options.insert = source_transform_insert_missing;
