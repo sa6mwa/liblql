@@ -4545,8 +4545,11 @@ static void enable_fast_top_level_field_candidate(
     lonejson_candidate_stream_options *options, eval_doc *doc) {
 #if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
   const lql_selector *selector;
-  if (options == NULL || doc == NULL ||
-      !selector_fast_flat_scalar_eligible(doc->selector)) {
+  if (options == NULL || doc == NULL) {
+    return;
+  }
+  if (!selector_fast_flat_scalar_eligible(doc->selector) &&
+      !selector_fast_direct_scalar_eligible(doc->selector)) {
     return;
   }
   selector = doc->selector;
@@ -5814,7 +5817,18 @@ source_reader_read(void *user, unsigned char *buffer, size_t capacity) {
       adapter->prefix_offset += copy_len;
       result.bytes_read = copy_len;
       if (adapter->prefix_offset == adapter->prefix_len &&
-          adapter->prefix_eof) {
+          !adapter->prefix_eof && copy_len < capacity) {
+        lonejson_read_result extra = source_reader_read_plain(
+            user, buffer + copy_len, capacity - copy_len);
+        if (extra.error_code != 0 && extra.bytes_read == 0u) {
+          result.error_code = extra.error_code;
+        } else {
+          result.bytes_read += extra.bytes_read;
+          result.eof = extra.eof;
+          result.error_code = extra.error_code;
+        }
+      } else if (adapter->prefix_offset == adapter->prefix_len &&
+                 adapter->prefix_eof) {
         result.eof = 1;
       }
       return result;
