@@ -191,6 +191,8 @@ lql_projection_capture_destroy(lql_projection_capture *capture);
 LQL_INTERNAL_SYMBOL void
 lql_projection_capture_reset(lql_projection_capture *capture);
 LQL_INTERNAL_SYMBOL void
+lql_projection_capture_set_root_object(lql_projection_capture *capture);
+LQL_INTERNAL_SYMBOL void
 lql_projection_capture_visitor(lonejson_path_value_visitor *out);
 LQL_INTERNAL_SYMBOL void *
 lql_projection_capture_visitor_user(lql_projection_capture *capture);

@@ -21,6 +21,7 @@ typedef struct lql_stream_field {
 } lql_stream_field;
 
 typedef struct lql_stream_member_context lql_stream_member_context;
+typedef struct lql_mapped_projection_field lql_mapped_projection_field;
 
 struct lql_stream_program {
   lql_stream_term terms[sizeof(unsigned long) * CHAR_BIT];
@@ -83,6 +84,11 @@ struct lql_stream_member_context {
   unsigned long mismatches;
   int full_path;
   int root_object;
+};
+
+struct lql_mapped_projection_field {
+  lql_stream_state *state;
+  const lql_stream_field *field;
 };
 
 #define LQL_STREAM_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
@@ -1681,6 +1687,132 @@ stream_composed_path_object_key_end(void *user, const lonejson_value_path *path,
 #undef STREAM_COMPOSE_PATH_CHUNK
 #undef STREAM_COMPOSE_PATH_EVENT
 
+#define STREAM_MAPPED_PROJECTION_EVENT(name)                                  \
+  static lonejson_status stream_mapped_projection_##name(                     \
+      void *user, const lonejson_value_path *path, lonejson_error *error) {   \
+    lql_mapped_projection_field *field;                                       \
+    lonejson_path_segment segments[LQL_STREAM_PATH_CAPACITY];                 \
+    lonejson_value_path prefixed;                                             \
+    size_t i;                                                                 \
+    field = (lql_mapped_projection_field *)user;                              \
+    if (field->state->projection_capture == NULL ||                           \
+        field->state->projection_visitor == NULL ||                           \
+        field->state->projection_visitor->name == NULL) {                     \
+      return LONEJSON_STATUS_OK;                                              \
+    }                                                                         \
+    if (path->segment_count >= LQL_STREAM_PATH_CAPACITY) {                    \
+      stream_lonejson_error(error, "projection path depth exceeded");        \
+      return LONEJSON_STATUS_CALLBACK_FAILED;                                 \
+    }                                                                         \
+    segments[0].data = field->field->key;                                     \
+    segments[0].len = field->field->key_len;                                  \
+    for (i = 0u; i < path->segment_count; ++i) {                              \
+      segments[i + 1u] = path->segments[i];                                   \
+    }                                                                         \
+    prefixed.segments = segments;                                             \
+    prefixed.segment_count = path->segment_count + 1u;                        \
+    return field->state->projection_visitor->name(                            \
+        lql_projection_capture_visitor_user(field->state->projection_capture), \
+        &prefixed, error);                                                    \
+  }
+
+#define STREAM_MAPPED_PROJECTION_CHUNK(name)                                  \
+  static lonejson_status stream_mapped_projection_##name(                     \
+      void *user, const lonejson_value_path *path, const char *data,          \
+      size_t len, lonejson_error *error) {                                    \
+    lql_mapped_projection_field *field;                                       \
+    lonejson_path_segment segments[LQL_STREAM_PATH_CAPACITY];                 \
+    lonejson_value_path prefixed;                                             \
+    size_t i;                                                                 \
+    field = (lql_mapped_projection_field *)user;                              \
+    if (field->state->projection_capture == NULL ||                           \
+        field->state->projection_visitor == NULL ||                           \
+        field->state->projection_visitor->name == NULL) {                     \
+      return LONEJSON_STATUS_OK;                                              \
+    }                                                                         \
+    if (path->segment_count >= LQL_STREAM_PATH_CAPACITY) {                    \
+      stream_lonejson_error(error, "projection path depth exceeded");        \
+      return LONEJSON_STATUS_CALLBACK_FAILED;                                 \
+    }                                                                         \
+    segments[0].data = field->field->key;                                     \
+    segments[0].len = field->field->key_len;                                  \
+    for (i = 0u; i < path->segment_count; ++i) {                              \
+      segments[i + 1u] = path->segments[i];                                   \
+    }                                                                         \
+    prefixed.segments = segments;                                             \
+    prefixed.segment_count = path->segment_count + 1u;                        \
+    return field->state->projection_visitor->name(                            \
+        lql_projection_capture_visitor_user(field->state->projection_capture), \
+        &prefixed, data, len, error);                                         \
+  }
+
+STREAM_MAPPED_PROJECTION_EVENT(object_begin)
+STREAM_MAPPED_PROJECTION_EVENT(object_end)
+STREAM_MAPPED_PROJECTION_EVENT(object_key_begin)
+STREAM_MAPPED_PROJECTION_EVENT(object_key_end)
+STREAM_MAPPED_PROJECTION_EVENT(array_begin)
+STREAM_MAPPED_PROJECTION_EVENT(array_end)
+STREAM_MAPPED_PROJECTION_EVENT(string_begin)
+STREAM_MAPPED_PROJECTION_EVENT(string_end)
+STREAM_MAPPED_PROJECTION_EVENT(number_begin)
+STREAM_MAPPED_PROJECTION_EVENT(number_end)
+STREAM_MAPPED_PROJECTION_EVENT(null_value)
+STREAM_MAPPED_PROJECTION_CHUNK(object_key_chunk)
+STREAM_MAPPED_PROJECTION_CHUNK(string_chunk)
+STREAM_MAPPED_PROJECTION_CHUNK(number_chunk)
+
+static lonejson_status stream_mapped_projection_boolean_value(
+    void *user, const lonejson_value_path *path, int value,
+    lonejson_error *error) {
+  lql_mapped_projection_field *field;
+  lonejson_path_segment segments[LQL_STREAM_PATH_CAPACITY];
+  lonejson_value_path prefixed;
+  size_t i;
+  field = (lql_mapped_projection_field *)user;
+  if (field->state->projection_capture == NULL ||
+      field->state->projection_visitor == NULL ||
+      field->state->projection_visitor->boolean_value == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (path->segment_count >= LQL_STREAM_PATH_CAPACITY) {
+    stream_lonejson_error(error, "projection path depth exceeded");
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  segments[0].data = field->field->key;
+  segments[0].len = field->field->key_len;
+  for (i = 0u; i < path->segment_count; ++i) {
+    segments[i + 1u] = path->segments[i];
+  }
+  prefixed.segments = segments;
+  prefixed.segment_count = path->segment_count + 1u;
+  return field->state->projection_visitor->boolean_value(
+      lql_projection_capture_visitor_user(field->state->projection_capture),
+      &prefixed, value, error);
+}
+
+#undef STREAM_MAPPED_PROJECTION_CHUNK
+#undef STREAM_MAPPED_PROJECTION_EVENT
+
+static void stream_mapped_projection_visitor(
+    lonejson_path_value_visitor *visitor) {
+  *visitor = lonejson_default_path_value_visitor();
+  visitor->object_begin = stream_mapped_projection_object_begin;
+  visitor->object_end = stream_mapped_projection_object_end;
+  visitor->object_key_begin = stream_mapped_projection_object_key_begin;
+  visitor->object_key_chunk = stream_mapped_projection_object_key_chunk;
+  visitor->object_key_end = stream_mapped_projection_object_key_end;
+  visitor->array_begin = stream_mapped_projection_array_begin;
+  visitor->array_end = stream_mapped_projection_array_end;
+  visitor->string_begin = stream_mapped_projection_string_begin;
+  visitor->string_chunk = stream_mapped_projection_string_chunk;
+  visitor->string_end = stream_mapped_projection_string_end;
+  visitor->number_begin = stream_mapped_projection_number_begin;
+  visitor->number_chunk = stream_mapped_projection_number_chunk;
+  visitor->number_end = stream_mapped_projection_number_end;
+  visitor->boolean_value = stream_mapped_projection_boolean_value;
+  visitor->null_value = stream_mapped_projection_null_value;
+}
+
 static const lonejson_value_path stream_mapped_root_path = {NULL, 0u};
 
 static lonejson_status stream_mapped_top_object_begin(void *user,
@@ -1783,20 +1915,115 @@ static lql_status stream_status(lql_stream_state *state, lonejson_status status,
   return LQL_STATUS_JSON_ERROR;
 }
 
+static void stream_program_configure_mapped_fields(lql_stream_program *program) {
+  size_t i;
+  for (i = 0u; i < program->field_count; ++i) {
+    lonejson_field *field;
+    const lql_stream_field *stream_field;
+    field = &program->mapped_fields[i];
+    stream_field = &program->fields[i];
+    memset(field, 0, sizeof(*field));
+    field->json_key = stream_field->key;
+    field->json_key_len = stream_field->key_len;
+    field->json_key_first = stream_field->key_len == 0u
+                                ? 0u
+                                : (unsigned char)stream_field->key[0];
+    field->json_key_last =
+        stream_field->key_len == 0u
+            ? 0u
+            : (unsigned char)stream_field->key[stream_field->key_len - 1u];
+    field->struct_offset = i * sizeof(lonejson_json_value);
+    field->kind = LONEJSON_FIELD_KIND_JSON_VALUE;
+    field->storage = LONEJSON_STORAGE_FIXED;
+    field->overflow_policy = LONEJSON_OVERFLOW_FAIL;
+    field->spool_class = LONEJSON_SPOOL_CLASS_DEFAULT;
+  }
+  memset(&program->mapped_map, 0, sizeof(program->mapped_map));
+  program->mapped_map.name = "lql_stream_program";
+  program->mapped_map.struct_size =
+      program->field_count * sizeof(lonejson_json_value);
+  program->mapped_map.fields = program->mapped_fields;
+  program->mapped_map.field_count = program->field_count;
+}
+
+static int stream_projection_mapped_eligible(const lql_stream_state *state) {
+  const lql_projection *projection;
+  size_t i;
+  size_t j;
+  if (state->request->output_mode != LQL_STREAM_OUTPUT_PROJECTION ||
+      state->program == NULL || state->program->match_all ||
+      state->program->requires_generic_path || state->program->has_nested_paths) {
+    return 0;
+  }
+  projection = state->request->projection;
+  if (projection == NULL ||
+      projection->path_count > LQL_STREAM_TERM_CAPACITY - state->program->field_count) {
+    return 0;
+  }
+  for (i = 0u; i < projection->path_count; ++i) {
+    const lql_projection_path *path;
+    path = &projection->compiled_paths[i];
+    if (path->segment_count != 1u) {
+      return 0;
+    }
+    for (j = 0u; j < state->program->field_count; ++j) {
+      if (strlen(path->segments[0]) == state->program->fields[j].key_len &&
+          memcmp(path->segments[0], state->program->fields[j].key,
+                 state->program->fields[j].key_len) == 0) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
 static lql_status stream_execute_mapped(lql_stream_state *state,
                                         lonejson *runtime, lql_error *error) {
   lonejson_json_value values[sizeof(unsigned long) * CHAR_BIT];
   lql_stream_member_context members[sizeof(unsigned long) * CHAR_BIT];
+  lql_mapped_projection_field projection_fields[
+      sizeof(unsigned long) * CHAR_BIT];
+  lql_stream_program projection_program;
+  const lql_stream_program *saved_program;
   lonejson_value_visitor top_visitor;
   lonejson_path_value_visitor path_visitor;
+  lonejson_path_value_visitor capture_visitor;
+  lonejson_path_value_visitor projection_visitor;
   lonejson_stream *stream;
   lonejson_stream_result stream_result;
   lonejson_error lonejson_error;
   lonejson_status lonejson_status;
   lonejson_candidate_callback_result callback_result;
   lql_status status;
+  size_t selector_field_count;
+  int mapped_projection;
   size_t i;
 
+  mapped_projection = stream_projection_mapped_eligible(state);
+  saved_program = state->program;
+  selector_field_count = state->program->field_count;
+  if (mapped_projection) {
+    const lql_projection *projection;
+    projection = state->request->projection;
+    projection_program = *state->program;
+    for (i = 0u; i < projection->path_count; ++i) {
+      lql_stream_field *field;
+      field = &projection_program.fields[projection_program.field_count++];
+      field->key = projection->compiled_paths[i].segments[0];
+      field->key_len = strlen(field->key);
+    }
+    stream_program_configure_mapped_fields(&projection_program);
+    state->program = &projection_program;
+    status = lql_projection_capture_create(
+        state->receiver, state->request->projection, runtime,
+        &state->projection_capture, error);
+    if (status != LQL_STATUS_OK) {
+      state->program = saved_program;
+      return status;
+    }
+    lql_projection_capture_visitor(&capture_visitor);
+    state->projection_visitor = &capture_visitor;
+  }
   top_visitor = lonejson_default_value_visitor();
   top_visitor.object_begin = stream_mapped_top_object_begin;
   top_visitor.object_end = stream_mapped_top_object_end;
@@ -1821,12 +2048,36 @@ static lql_status stream_execute_mapped(lql_stream_state *state,
   path_visitor.number_chunk = stream_mapped_path_number_chunk;
   path_visitor.number_end = stream_mapped_path_number_end;
   path_visitor.boolean_value = stream_mapped_path_boolean_value;
+  if (mapped_projection) {
+    stream_mapped_projection_visitor(&projection_visitor);
+  }
   lonejson_error_init(&lonejson_error);
   for (i = 0u; i < state->program->field_count; ++i) {
+    lonejson_json_value_init(runtime, &values[i]);
+    if (mapped_projection && i >= selector_field_count) {
+      size_t projection_index;
+      projection_index = i - selector_field_count;
+      projection_fields[projection_index].state = state;
+      projection_fields[projection_index].field = &state->program->fields[i];
+      lonejson_status = lonejson_json_value_set_parse_path_visitor(
+          &values[i], &projection_visitor, &projection_fields[projection_index],
+          &lonejson_error);
+      if (lonejson_status != LONEJSON_STATUS_OK) {
+        while (i != 0u) {
+          --i;
+          lonejson_json_value_cleanup(&values[i]);
+        }
+        lql_projection_capture_destroy(state->projection_capture);
+        state->projection_capture = NULL;
+        state->projection_visitor = NULL;
+        state->program = saved_program;
+        return stream_status(state, lonejson_status, &lonejson_error, error);
+      }
+      continue;
+    }
     memset(&members[i], 0, sizeof(members[i]));
     members[i].state = state;
     members[i].field_index = i;
-    lonejson_json_value_init(runtime, &values[i]);
     if (state->program->has_nested_paths) {
       lonejson_status = lonejson_json_value_set_parse_path_visitor(
           &values[i], &path_visitor, &members[i], &lonejson_error);
@@ -1856,7 +2107,12 @@ static lql_status stream_execute_mapped(lql_stream_state *state,
     for (i = 0u; i < state->program->field_count; ++i) {
       lonejson_json_value_cleanup(&values[i]);
     }
-    return stream_status(state, lonejson_error.code, &lonejson_error, error);
+    status = stream_status(state, lonejson_error.code, &lonejson_error, error);
+    lql_projection_capture_destroy(state->projection_capture);
+    state->projection_capture = NULL;
+    state->projection_visitor = NULL;
+    state->program = saved_program;
+    return status;
   }
   status = LQL_STATUS_OK;
   for (;;) {
@@ -1888,6 +2144,12 @@ static lql_status stream_execute_mapped(lql_stream_state *state,
       status = state->failure.code;
       break;
     }
+    if (mapped_projection &&
+        (stream_result == LONEJSON_STREAM_OBJECT ||
+         (stream_result == LONEJSON_STREAM_VALUE &&
+          stream->root_type == LONEJSON_VALUE_OBJECT))) {
+      lql_projection_capture_set_root_object(state->projection_capture);
+    }
     callback_result = stream_candidate_end(state, NULL, &lonejson_error);
     if (callback_result == LONEJSON_CANDIDATE_STOP) {
       break;
@@ -1902,6 +2164,10 @@ static lql_status stream_execute_mapped(lql_stream_state *state,
   for (i = 0u; i < state->program->field_count; ++i) {
     lonejson_json_value_cleanup(&values[i]);
   }
+  lql_projection_capture_destroy(state->projection_capture);
+  state->projection_capture = NULL;
+  state->projection_visitor = NULL;
+  state->program = saved_program;
   if (status == LQL_STATUS_OK && state->failure.code != LQL_STATUS_OK) {
     if (error != NULL) {
       *error = state->failure;
@@ -2014,6 +2280,7 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
   lonejson_candidate_stream_options options;
   lonejson_value_visitor visitor;
   lql_status status;
+  int mapped_projection;
   if (result != NULL) {
     memset(result, 0, sizeof(*result));
   }
@@ -2087,10 +2354,12 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
     state.execution_yesterday_ready =
         lql_temporal_yesterday(&state.execution_yesterday);
   }
+  mapped_projection = stream_projection_mapped_eligible(&state);
   lonejson_error_init(&lonejson_error);
   runtime = state.program != NULL && !state.program->match_all &&
-                    !state.program->requires_generic_path &&
-                    request->output_mode == LQL_STREAM_OUTPUT_DECISION_ONLY
+                !state.program->requires_generic_path &&
+                (request->output_mode == LQL_STREAM_OUTPUT_DECISION_ONLY ||
+                 mapped_projection)
                 ? lql_lonejson_new_mapped_stream(self, &lonejson_error)
                 : lql_lonejson_new(self, &lonejson_error);
   if (runtime == NULL) {
@@ -2102,7 +2371,8 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
   }
   if ((state.program != NULL && state.program->requires_generic_path) ||
       request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
-      request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
+      (request->output_mode == LQL_STREAM_OUTPUT_PROJECTION &&
+       !mapped_projection) ||
       request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
       request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION) {
     status = stream_execute_generic_path(&state, runtime, error);

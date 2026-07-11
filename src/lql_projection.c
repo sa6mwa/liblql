@@ -1038,6 +1038,17 @@ lql_projection_capture_reset(lql_projection_capture *capture) {
 }
 
 LQL_INTERNAL_SYMBOL void
+lql_projection_capture_set_root_object(lql_projection_capture *capture) {
+  size_t i;
+  if (capture == NULL) {
+    return;
+  }
+  for (i = 0u; i < capture->set.count; ++i) {
+    capture->captures[i].root_object = 1;
+  }
+}
+
+LQL_INTERNAL_SYMBOL void
 lql_projection_capture_visitor(lonejson_path_value_visitor *out) {
   if (out == NULL) {
     return;
