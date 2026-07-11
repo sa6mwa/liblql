@@ -5768,7 +5768,7 @@ static void expect_candidate_mutation_large_action_stage_api(void) {
     ++failures;
     return;
   }
-  for (i = 0u; i < 16384u; ++i) {
+  for (i = 0u; i < 131072u; ++i) {
     if (fputc('x', source) == EOF) {
       printf("large candidate mutation source body failed\n");
       fclose(source);
