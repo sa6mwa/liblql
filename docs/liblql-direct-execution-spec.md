@@ -1,120 +1,285 @@
-# Direct liblql Execution Reset
+# liblql Direct Execution Rewrite Specification
 
-## Status
+## Authority And Status
 
-This document is the sole execution specification for the reset. The current
-tree is intentionally incomplete. No implementation work may begin until the
-deletion gate in this document is satisfied and committed. Historical parity,
-completion, port, dependency-gap, and benchmark claims were removed because
-they described the discarded architecture.
+This is the governing implementation specification. It supersedes every
+previous Candidate Run, candidate-transform, hybrid, port, parity, and
+benchmark document.
 
-## Product Contract
+The repository is deliberately at a deletion checkpoint. Only the allocator,
+selector AST/parser, temporal support, vendored LoneJSON basics, public header
+smokes, and the Go benchmark oracle remain. There is no query, projection,
+mutation, CLI, Lua binding, C parity adapter, C benchmark runner, or release
+surface. This is intentional. Do not restore deleted code as a shortcut.
 
-liblql implements the LQL behavior accepted by the Go reference. It accepts
-strict NDJSON only at streaming entry points. A root JSON array is an error;
-there is no array flattening in liblql or clql.
+The next implementation session starts from this state. It must implement the
+architecture described here in coherent slabs, not retain compatibility code
+while iterating.
 
-The completed implementation must preserve these invariants:
+## Deletion Proof
 
-- Go behavioral parity for the accepted selector, projection, mutation, and
-  temporal cases;
-- bounded RSS independent of total input size, record count, match count, and
-  result count;
-- no default candidate/result cache, full-input materialization, or hidden
-  spool/replay transform path;
-- the 100 MiB large-JSON gate remains below 128 MiB RSS, including repeated
-  large records so reset behavior is proven;
-- every accepted Go/C benchmark row is at least 1.0x in C; 1.2x is the stretch
-  target only where the resulting code remains simpler.
+`scripts/check_direct_execution_reset.sh` is the repository-wide deletion
+gate. Outside this specification, the handover, that check, and the preserved
+`reference/` oracle assets, it rejects Candidate Run/candidate-transform names,
+old execution methods, old public stream methods, and evaluator-only AST state.
+It also asserts that the old executor, CLI, benchmark, Lua, and parity
+directories are not tracked.
 
-## Boundary
+The reference assets preserve the Go oracle, fixtures, and Go/C matrix, not
+executable C implementation. The legacy harness must never be compiled or
+called as the new C runner. Every new implementation commit keeps the deletion
+gate passing.
 
-Vendored LoneJSON is used through its public `lonejson.h` interface only. It
-provides JSON reading, strict NDJSON framing, token/value events, diagnostics,
-JSON writing, and its ordinary bounded spooling facilities. liblql owns all
-LQL compilation and execution: selector state, temporal behavior, projection,
-mutation ordering, output policy, and record lifecycle.
+## Reference Behavior
 
-LoneJSON must not contain LQL-aware state, selector-shaped options, mutation
-actions, output decisions, or a record transform engine. liblql must not use
-LoneJSON implementation headers or private symbols.
+The behavior authority is `pkt.systems/lql v0.17.1`:
 
-## Required Design
+- module: `pkt.systems/lql`;
+- tag commit: `273f918463c5f9e85dbbed7f0d0c1d4a79e32a11`;
+- module checksum: `h1:eXQ4Hv7FScVh9wQHIyJYzplJjEZ0SnZaI7kgwlLXJOU=`.
 
-The replacement is a direct, compiled LQL program in liblql. A single stream
-executor consumes LoneJSON public events and owns the path stack, selector
-truth, projection state, mutation state, and output for the current NDJSON
-record. File, callback-source, CLI, and Lua entry points call that same
-executor.
+Go controls observable LQL semantics. C is free to use a different internal
+design only when every accepted observable result is identical and the C
+resource/performance rules below are met.
 
-The executor may use a bounded current-record spool only when an observable
-public payload contract or delayed-output semantic requires it. It must not
-use capture as the normal decision or mutation mechanism. The design must be
-understandable as direct LQL execution, not an adapter around a renamed
-transform engine.
+The only intentional parser/framing exclusions are:
 
-This is a fresh execution implementation. The retained selector AST and
-allocator are language and ownership foundations only; no previous evaluator,
-projection executor, mutation executor, receiver execution method, or callback
-adapter may be reused as the replacement program.
+1. A root JSON array is a hard error at every liblql and clql NDJSON stream
+   entry point. It is never flattened, recursively or otherwise. Root arrays
+   must not appear in Go/C parity or performance fixtures.
+2. LoneJSON remains the strict JSON parser. Go decoder acceptance of malformed
+   surrogate sequences or adjacent leading-zero numbers is not required.
 
-## Consumer Boundary
+No other selector, temporal, projection, mutation, ordering, result, or error
+gap is permitted without adding a named exception here and obtaining an
+explicit decision.
 
-The liblql receiver is the public library API. The direct executor is an
-internal liblql implementation detail behind that receiver. `clql` is a
-separate CLI consumer, not a receiver shell and not an architectural layer.
+## Non-Negotiable Architecture
 
-`clql` is absent during the deletion phase because every previous command path
-depended on the removed execution API. It returns only after the replacement
-receiver stream contract exists, as a thin CLI over that contract. CLI needs
-must not shape, preserve, or reintroduce the discarded executor.
+liblql owns all LQL execution. Vendored LoneJSON is used only through public
+`lonejson.h`; liblql must not use LoneJSON private headers or symbols.
 
-## Deletion Gate
+LoneJSON provides JSON input, strict framing, token/value events, diagnostics,
+escaping, JSON writing, and ordinary bounded spooling primitives. It must not
+contain selector-aware options, LQL mutation actions, output decisions, a
+transform program, Candidate Run, or candidate-transform compatibility code.
 
-Before writing the replacement executor, remove every dependency on the
-discarded Candidate Run architecture. The removal includes:
+liblql compiles selector, projection, and mutation input into immutable flat
+programs. A single direct stream executor consumes LoneJSON public events and
+owns, for one current record only:
 
-- the Candidate Run public and private surface from vendored LoneJSON;
-- liblql Candidate Run adapters and all candidate-mutation receiver methods;
-- corresponding capability fields, headers, source wiring, the dependent CLI,
-  and Lua bindings;
-- benchmarks, parity adapters, inventories, tests, scripts, fixtures, and
-  documentation that exercise or claim the removed path;
-- stale release, completion, parity, and performance assertions about that
-  path.
+- path and container state;
+- selector truth and temporal comparison state;
+- projection inclusion state;
+- mutation ordering and writer state;
+- output framing, counters, limits, and error precedence.
 
-After this deletion, the project is expected to have a deliberate functional
-hole: no streaming projection/mutation implementation and no public API that
-pretends it exists. Selector parsing and other independent public contracts may
-remain. The project is not releasable at this point.
+The executor must not be a callback adapter around a generic transform engine.
+In particular, do not move Candidate Run, action staging, old-value replay,
+deferred transform decisions, or a generic candidate event protocol into
+liblql under a different name.
 
-The only permitted retained LoneJSON candidate facility is its generic JSON
-stream framing/capture API where it is unrelated to LQL transformation. It is
-not a liblql execution API and must not be wrapped as one during the reset.
+The existing selector AST is language data only. Its removed evaluator caches,
+observer families, predicate flattening, hit indexes, and path execution
+caches must not be reintroduced as the old evaluator. The new compiled program
+is derived afresh from the AST and is owned by the new executor.
 
-## Static Proof Of Deletion
+## Public Receiver Contract
 
-The deletion commit must include a repository-wide, tracked-file proof that,
-outside this specification, the absence-check script, and git history, there
-are no Candidate Run tokens, candidate-transform tokens, old adapter symbols,
-removed receiver methods, or references to their old tests and benchmarks. The
-proof must cover source, public headers, bindings, CLI, tests, benchmarks,
-parity tooling, scripts, README, and documentation.
+The replacement public C surface is receiver-based and has one stream engine.
+The exact declarations belong in `include/lql/lql.h`, but this contract is
+mandatory:
 
-Build or test failures caused by the removed API are expected during this
-phase. Do not preserve a compatibility shim to make them pass. Delete the
-dependent tests instead; replacement tests are written only for the new public
-behavior after the direct executor exists.
+- `lql_stream_execute(lql *, const lql_stream_request *,
+  lql_stream_result *, lql_error *)` is the only execution entry point;
+- a request accepts one reader callback, optional writer callback, compiled
+  selector/projection/mutation handles, explicit output mode, matched-only
+  policy, limits, and optional decision/value callbacks;
+- file and buffer helpers, when added, adapt into that request and invoke the
+  same executor. They must not become separate file/source execution paths;
+- output modes cover decision-only, selected record output, projection,
+  mutation, and projection-before-mutation;
+- value callbacks expose only a completed callback-scoped public payload when
+  that contract is requested. They do not expose parser events or transform
+  instructions;
+- results report records seen, records matched, bytes consumed, early-stop
+  state, and stop reason. Invalid arguments zero the result;
+- selector, projection, and mutation parse/build/destroy methods remain
+  receiver-owned handles. There is no compatibility requirement for removed
+  old method names or structs.
 
-## Implementation And Proof Order
+`clql` is a consumer of this receiver contract. It is not a receiver shell and
+does not define the executor architecture. Reintroduce it only after the
+receiver stream contract is tested; it must be a thin argument/parser and I/O
+adapter over `lql_stream_execute`.
 
-1. Commit the documentation reset and the deletion gate.
-2. Commit the complete deletion and record its static absence proof. Stop.
-3. In a fresh implementation session, define the small replacement streaming
-   public contract and implement one direct executor in large coherent slices.
-4. Add observable behavior tests, then run the focused and complete C, Go
-   parity, sanitizer, fuzz, RSS, and benchmark gates.
-5. Commit only when the direct implementation meets the contract and evidence
-   above.
+Lua is also a later consumer. It must not carry a second executor or call a
+CLI subprocess.
 
-No completion claim is valid before step 5.
+## Required Semantics
+
+### Framing And Streaming
+
+- Inputs are strict NDJSON: repeated top-level JSON values, excluding root
+  arrays. Objects and scalar values are parsed as individual records; a
+  non-empty selector does not match a scalar that lacks the selected path.
+- A completed earlier record remains observable when later input is malformed;
+  counters and output reflect work completed before the failure.
+- Duplicate object keys are visited in source order.
+- Every emitted record is compact JSON followed by one newline. No input,
+  record list, match list, or result list may be materialized as a whole.
+- Match, record, and byte limits stop promptly with Go-equivalent precedence.
+  Callback-requested graceful stop is distinct from callback failure.
+
+### Selectors And Temporal Rules
+
+Implement the accepted Go selector grammar and AST behavior: AND/OR/NOT,
+equality and inequality, contains/icontains, prefix/iprefix, range, date, in,
+exists, JSON Pointer decoding, numeric object-key versus array-index handling,
+object wildcard, array wildcard, any-child wildcard, recursive descent,
+shorthand, brace forms, aliases, quoted values, and indexed composition.
+
+Date-only equality, naive UTC datetimes, timezone offsets, nanoseconds,
+relative `since` macros, and range endpoints must match the Go reference. The
+current-time macro is evaluated per execution, not cached with the selector.
+
+### Projection And Mutation
+
+Projection must match Go path normalization, duplicate removal, parent/child
+conflict errors, object/array construction, missing-field behavior, escaped
+pointers, and compact output.
+
+Mutation must match Go parsing and execution for set, remove, increment,
+creation of missing object paths where Go permits it, typed/quoted values,
+time normalization, brace shorthand, explicit file/text/base64 values,
+concrete numeric paths, object/array wildcards, recursive paths, and error
+precedence.
+
+For a combined operation, selection occurs on the original record, projection
+is applied before mutation, mutation is applied only when selection and output
+policy require it, and unmatched-record preservation follows the explicit
+matched-only setting. This ordering is a behavior gate, not an optimization.
+
+## Streaming And RSS Invariants
+
+Streaming means direct producer-to-consumer flow. The implementation must not
+hide full-record, full-input, or all-result materialization behind a streaming
+API.
+
+- Default selection, projection, and mutation paths use no candidate/result
+  cache and no internal capture/replay path.
+- A bounded current-record spool is allowed only for an observable public
+  payload callback or a semantic delayed-output requirement. It is reset and
+  released before processing the next record.
+- Compiled selector/projection/mutation programs and bounded parser/writer
+  stacks are allowed. They are not input/result caches.
+- RSS must be independent of total input bytes, record count, match count, and
+  result count. It may scale only with program size, nesting depth, bounded
+  transport buffers, and one explicitly allowed current-record payload.
+- The 100 MiB large-JSON scenario must remain below 128 MiB peak RSS. A second
+  gate processes multiple large records and proves the peak does not grow with
+  record count or retained spools.
+- The RSS gates run with selection, projection, mutation, and sparse-match
+  cases. A one-record-only measurement is insufficient.
+
+## Performance Contract
+
+C must beat Go on every accepted Go/C benchmark row. This is a hard release
+gate:
+
+```text
+Go steady-state ns/op / C steady-state ns/op >= 1.0
+```
+
+There are no tolerated rows below `1.0x`. `1.2x` is the stretch target after
+the hard floor passes; do not add obscurity, caching, or architecture debt to
+chase it.
+
+The accepted matrix includes decision-only, selected-output, callback-source,
+projection, mutation, projection-before-mutation, nested/recursive selectors,
+temporal and numeric selectors, sparse and dense matches, realworld-shaped
+records, lockd-shaped records, the 100 MiB large JSON case, and repeated large
+records. Each row uses the same fixture bytes, selector, operation, output
+policy, and counters in Go and C. Root arrays are excluded.
+
+Compile reusable programs outside the timed loop. Do not warm, cache, or reuse
+input records, result sets, selected payloads, or mutation outputs. Record both
+`warmup_included` and `steady_state` rows; the hard speed gate applies to every
+accepted steady-state row and any accepted warmup row explicitly marked as a
+gate.
+
+## Oracle And Benchmark Assets
+
+`reference/go-benchmark/` is committed source, not a historical baseline:
+
+- `cmd/lqlbench` executes the pinned Go reference and emits benchmark records;
+- `cmd/benchvalidate` validates row shape/counter pairing and supports
+  `--min-c-go-speedup=1.0`;
+- `go.mod` and `go.sum` pin the reference module.
+
+`reference/benchmark-harness/legacy-run-parity-benchmarks.sh` preserves the
+exact pre-reset fixture generator and matrix. It defines the `large_ndjson`,
+single-root, selection, lockd, realworld compact, realworld pretty/nested, and
+lockd file-value data sets; selector rows for equality, range, contains,
+icontains, any alternatives, numeric paths, recursive paths, and sparse/dense
+realworld cases; and the following operation modes:
+
+```text
+decision_only_selector       decision_only_plan
+reuse_selector               reparse_selector_each_run
+decision_only_source_selector
+plus_value_selector          plus_value_plan
+plus_value_source_selector   plus_value_openjson_selector
+plus_value_openjson_plan
+project_file_selector        project_source_selector
+mutate_file_selector         mutate_file_plan
+mutate_source_selector
+mutate_file_backed_text      mutate_file_backed_base64
+```
+
+The reference harness also specifies deterministic fixture generation, root
+array rejection, fixture SHA-256, count/payload-byte comparison, Go/C order
+alternation, CPU pinning where available, and both `warmup_included` and
+`steady_state` rows. It is not runnable as-is because its old C and Lua calls
+were deliberately removed. The new harness preserves these definitions and
+replaces only those calls with the new direct C runner. It must require `go`
+and `c` rows, reject missing pairs, and run the Go/C counter comparison before
+timing validation.
+
+The new C benchmark runner must emit the same JSONL schema and every Go/C row
+must have equal fixture SHA-256, record count, match count, payload count, and
+payload bytes before timing is compared. Behavioral output equality is proved
+by the C/Go parity corpus separately; a benchmark row is never accepted merely
+because its counters agree.
+
+Do not restore old C benchmark code, CGo bridge code, benchmark baselines, or
+old performance claims. Write a new C runner over the direct public receiver.
+
+## Verification Order
+
+Implement in large coherent slices and only run broad gates at meaningful
+boundaries:
+
+1. Add the direct stream request/result API and strict-NDJSON rejection tests.
+2. Implement direct selector execution and Go selector/temporal parity.
+3. Add direct output, projection, and mutation execution with behavior tests.
+4. Add the thin `clql` consumer and CLI parity tests.
+5. Add the new C benchmark runner and pair it with the preserved Go oracle.
+6. Run complete C tests, Go parity, sanitizers, fuzzing, multi-large-record
+   RSS gates, and the full Go/C performance matrix.
+
+Do not test each small internal edit. Do test each completed behavioral slab.
+No task is complete until all required gates pass and every accepted C row is
+at least `1.0x` Go.
+
+## Prohibited Shortcuts
+
+- restoring or adapting deleted Candidate Run/candidate-transform code;
+- using LoneJSON internal headers or normal upstream SDK mode during this
+  rewrite;
+- root-array flattening in liblql, clql, parity, or benchmarks;
+- result/candidate caches or hidden capture/replay for speed;
+- whole-input or whole-record materialization disguised as streaming;
+- a separate CLI/Lua execution path;
+- declaring completion after deletion, compilation, a partial matrix, or a
+  benchmark median. Every required row and RSS invariant is mandatory.
