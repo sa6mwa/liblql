@@ -309,6 +309,18 @@ typedef struct projection_capture_set {
   size_t count;
 } projection_capture_set;
 
+struct lql_projection_capture {
+  lql *receiver;
+  const lql_projection *projection;
+  lonejson *runtime;
+  lql_allocator *allocator;
+  lonejson_spooled *values;
+  projection_capture *captures;
+  unsigned char *found;
+  size_t *members;
+  projection_capture_set set;
+};
+
 #define LQL_PROJECTION_MAX_INDEX 1048576u
 
 static lonejson_read_result
@@ -922,6 +934,191 @@ static lonejson_status projection_render_value(projection_render_state *state,
   current = numeric ? lonejson_writer_end_array(state->writer, state->error)
                     : lonejson_writer_end_object(state->writer, state->error);
   return (lonejson_status)current;
+}
+
+LQL_INTERNAL_SYMBOL lql_status lql_projection_capture_create(
+    lql *self, const lql_projection *projection, lonejson *runtime,
+    lql_projection_capture **out, lql_error *error) {
+  lql_projection_capture *capture;
+  lql_allocator *allocator;
+  size_t i;
+
+  if (out == NULL || projection == NULL || runtime == NULL ||
+      projection->path_count == 0u) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection capture arguments are invalid");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  *out = NULL;
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection capture receiver is required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  capture = (lql_projection_capture *)allocator->calloc(allocator, 1u,
+                                                        sizeof(*capture));
+  if (capture == NULL) {
+    lql_set_error(error, LQL_STATUS_NO_MEMORY, "projection allocation failed");
+    return LQL_STATUS_NO_MEMORY;
+  }
+  capture->receiver = self;
+  capture->projection = projection;
+  capture->runtime = runtime;
+  capture->allocator = allocator;
+  capture->values = (lonejson_spooled *)allocator->calloc(
+      allocator, projection->path_count, sizeof(*capture->values));
+  capture->captures = (projection_capture *)allocator->calloc(
+      allocator, projection->path_count, sizeof(*capture->captures));
+  capture->found = (unsigned char *)allocator->calloc(
+      allocator, projection->path_count, sizeof(*capture->found));
+  capture->members = (size_t *)allocator->alloc(
+      allocator, projection->path_count * sizeof(*capture->members));
+  if (capture->values == NULL || capture->captures == NULL ||
+      capture->found == NULL || capture->members == NULL) {
+    lql_projection_capture_destroy(capture);
+    lql_set_error(error, LQL_STATUS_NO_MEMORY, "projection allocation failed");
+    return LQL_STATUS_NO_MEMORY;
+  }
+  for (i = 0u; i < projection->path_count; ++i) {
+    lonejson_spooled_init_class(runtime, &capture->values[i],
+                                LONEJSON_SPOOL_CLASS_LARGE_TEXT);
+    capture->captures[i].receiver = self;
+    capture->captures[i].runtime = runtime;
+    capture->captures[i].path = &projection->compiled_paths[i];
+    capture->captures[i].spool = &capture->values[i];
+  }
+  capture->set.captures = capture->captures;
+  capture->set.count = projection->path_count;
+  *out = capture;
+  return LQL_STATUS_OK;
+}
+
+LQL_INTERNAL_SYMBOL void
+lql_projection_capture_destroy(lql_projection_capture *capture) {
+  size_t i;
+  if (capture == NULL || capture->allocator == NULL) {
+    return;
+  }
+  for (i = 0u; i < capture->set.count; ++i) {
+    if (capture->captures[i].writer_ready) {
+      lonejson_writer_cleanup(&capture->captures[i].writer);
+    }
+    capture->allocator->destroy(capture->allocator, capture->captures[i].key);
+    lonejson_spooled_cleanup(&capture->values[i]);
+  }
+  capture->allocator->destroy(capture->allocator, capture->members);
+  capture->allocator->destroy(capture->allocator, capture->found);
+  capture->allocator->destroy(capture->allocator, capture->captures);
+  capture->allocator->destroy(capture->allocator, capture->values);
+  capture->allocator->destroy(capture->allocator, capture);
+}
+
+LQL_INTERNAL_SYMBOL void
+lql_projection_capture_reset(lql_projection_capture *capture) {
+  size_t i;
+  if (capture == NULL) {
+    return;
+  }
+  for (i = 0u; i < capture->set.count; ++i) {
+    projection_capture *field;
+    field = &capture->captures[i];
+    if (field->writer_ready) {
+      lonejson_writer_cleanup(&field->writer);
+    }
+    lonejson_spooled_reset(&capture->values[i]);
+    field->key_len = 0u;
+    field->root_object = 0;
+    field->active = 0;
+    field->writer_ready = 0;
+    field->key_active = 0;
+    field->found = 0;
+    capture->found[i] = 0u;
+  }
+}
+
+LQL_INTERNAL_SYMBOL void
+lql_projection_capture_visitor(lonejson_path_value_visitor *out) {
+  if (out == NULL) {
+    return;
+  }
+  *out = lonejson_default_path_value_visitor();
+  out->object_begin = projection_capture_set_object_begin;
+  out->object_end = projection_capture_set_object_end;
+  out->object_key_begin = projection_capture_set_key_begin;
+  out->object_key_chunk = projection_capture_set_key_chunk;
+  out->object_key_end = projection_capture_set_key_end;
+  out->array_begin = projection_capture_set_array_begin;
+  out->array_end = projection_capture_set_array_end;
+  out->string_begin = projection_capture_set_string_begin;
+  out->string_chunk = projection_capture_set_string_chunk;
+  out->string_end = projection_capture_set_string_end;
+  out->number_begin = projection_capture_set_number_begin;
+  out->number_chunk = projection_capture_set_number_chunk;
+  out->number_end = projection_capture_set_number_end;
+  out->boolean_value = projection_capture_set_boolean;
+  out->null_value = projection_capture_set_null;
+}
+
+LQL_INTERNAL_SYMBOL void *
+lql_projection_capture_visitor_user(lql_projection_capture *capture) {
+  return capture == NULL ? NULL : &capture->set;
+}
+
+LQL_INTERNAL_SYMBOL lql_status lql_projection_capture_render(
+    lql_projection_capture *capture, lonejson_sink_fn sink, void *sink_user,
+    int *out_emitted, lql_error *error) {
+  projection_render_state render;
+  lonejson_writer writer;
+  lonejson_error lonejson_error;
+  lonejson_status status;
+  lql_status out;
+  size_t count;
+  size_t i;
+
+  if (out_emitted != NULL) {
+    *out_emitted = 0;
+  }
+  if (capture == NULL || sink == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection capture render arguments are invalid");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (!capture->captures[0].root_object) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "projection requires an object record");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  count = 0u;
+  for (i = 0u; i < capture->set.count; ++i) {
+    if (capture->captures[i].found) {
+      capture->found[i] = 1u;
+      capture->members[count++] = i;
+    }
+  }
+  if (count == 0u) {
+    return LQL_STATUS_OK;
+  }
+  lonejson_error_init(&lonejson_error);
+  status = lonejson_writer_init_sink(capture->runtime, &writer, sink, sink_user,
+                                     &lonejson_error);
+  if (status != LONEJSON_STATUS_OK) {
+    return projection_lonejson_status(status, &lonejson_error, error);
+  }
+  render.projection = capture->projection;
+  render.values = capture->values;
+  render.writer = &writer;
+  render.error = &lonejson_error;
+  status = projection_render_value(&render, capture->members, count, 0u);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_writer_finish(&writer, &lonejson_error);
+  }
+  lonejson_writer_cleanup(&writer);
+  out = projection_lonejson_status(status, &lonejson_error, error);
+  if (out == LQL_STATUS_OK && out_emitted != NULL) {
+    *out_emitted = 1;
+  }
+  return out;
 }
 
 LQL_INTERNAL_SYMBOL lql_status lql_projection_render_top_level(

@@ -60,6 +60,8 @@ typedef struct lql_stream_state {
   int execution_today_ready;
   int execution_yesterday_ready;
   lql_stream_member_context *generic_member;
+  lql_projection_capture *projection_capture;
+  const lonejson_path_value_visitor *projection_visitor;
 } lql_stream_state;
 
 struct lql_stream_member_context {
@@ -220,7 +222,7 @@ static void stream_term_failure_table(lql_allocator *allocator,
     return;
   }
   term->failure = (size_t *)allocator->calloc(allocator, term->value_len,
-                                               sizeof(*term->failure));
+                                              sizeof(*term->failure));
   if (term->failure == NULL) {
     return;
   }
@@ -236,9 +238,9 @@ static void stream_term_failure_table(lql_allocator *allocator,
   }
 }
 
-static lql_status stream_field_get(lql_stream_program *program,
-                                   const char *key, size_t key_len,
-                                   size_t *out, lql_error *error) {
+static lql_status stream_field_get(lql_stream_program *program, const char *key,
+                                   size_t key_len, size_t *out,
+                                   lql_error *error) {
   size_t i;
   for (i = 0u; i < program->field_count; ++i) {
     if (program->fields[i].key_len == key_len &&
@@ -263,10 +265,9 @@ static lql_status stream_field_get(lql_stream_program *program,
 static lql_status stream_append_term(lql_stream_program *program,
                                      lql_allocator *allocator,
                                      const lql_selector *selector,
-                                     lql_selector_kind kind,
-                                     const char *key, size_t key_len,
-                                     const char *value, size_t value_len,
-                                     lql_error *error) {
+                                     lql_selector_kind kind, const char *key,
+                                     size_t key_len, const char *value,
+                                     size_t value_len, lql_error *error) {
   lql_stream_term *term;
   lql_status status;
   size_t field_index;
@@ -371,9 +372,9 @@ static lql_status stream_compile_term(lql_stream_program *program,
       return LQL_STATUS_UNSUPPORTED;
     }
     for (i = 0u; i < selector->any_count; ++i) {
-      status = stream_append_term(program, allocator, selector,
-                                  LQL_SELECTOR_KIND_EQ, key, strlen(key),
-                                  selector->any[i], selector->any_lens[i], error);
+      status = stream_append_term(
+          program, allocator, selector, LQL_SELECTOR_KIND_EQ, key, strlen(key),
+          selector->any[i], selector->any_lens[i], error);
       if (status != LQL_STATUS_OK) {
         return status;
       }
@@ -381,19 +382,19 @@ static lql_status stream_compile_term(lql_stream_program *program,
     return LQL_STATUS_OK;
   }
   if (kind == LQL_SELECTOR_KIND_EXISTS) {
-    return stream_append_term(program, allocator, selector, kind, key, i,
-                              NULL, 0u, error);
+    return stream_append_term(program, allocator, selector, kind, key, i, NULL,
+                              0u, error);
   }
   if (kind == LQL_SELECTOR_KIND_RANGE) {
-    return stream_append_term(program, allocator, selector, kind, key, i,
-                              NULL, 0u, error);
+    return stream_append_term(program, allocator, selector, kind, key, i, NULL,
+                              0u, error);
   }
   if (kind == LQL_SELECTOR_KIND_DATE) {
     if (selector->since_macro != LQL_SINCE_NONE) {
       program->needs_execution_clock = 1;
     }
-    return stream_append_term(program, allocator, selector, kind, key, i,
-                              NULL, 0u, error);
+    return stream_append_term(program, allocator, selector, kind, key, i, NULL,
+                              0u, error);
   }
   if (kind != LQL_SELECTOR_KIND_CONTAINS && kind != LQL_SELECTOR_KIND_PREFIX) {
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
@@ -401,20 +402,23 @@ static lql_status stream_compile_term(lql_stream_program *program,
     return LQL_STATUS_UNSUPPORTED;
   }
   if (selector->ignore_case) {
-    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                  "direct stream case-insensitive string predicates are not implemented");
+    lql_set_error(
+        error, LQL_STATUS_UNSUPPORTED,
+        "direct stream case-insensitive string predicates are not implemented");
     return LQL_STATUS_UNSUPPORTED;
   }
   if (!selector->value_set && selector->any_count == 0u &&
       (selector->value == NULL || selector->value[0] == '\0')) {
-    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                  "direct stream omitted string predicate values are not implemented");
+    lql_set_error(
+        error, LQL_STATUS_UNSUPPORTED,
+        "direct stream omitted string predicate values are not implemented");
     return LQL_STATUS_UNSUPPORTED;
   }
   if (selector->any_count != 0u) {
     if (kind != LQL_SELECTOR_KIND_CONTAINS) {
-      lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                    "direct stream string predicate does not accept any values");
+      lql_set_error(
+          error, LQL_STATUS_UNSUPPORTED,
+          "direct stream string predicate does not accept any values");
       return LQL_STATUS_UNSUPPORTED;
     }
     for (i = 0u; i < selector->any_count; ++i) {
@@ -499,8 +503,8 @@ static int stream_date_matches(const lql_stream_state *state,
   } else if (selector->since_macro == LQL_SINCE_TODAY) {
     since = state->execution_today_ready ? &state->execution_today : NULL;
   } else if (selector->since_macro == LQL_SINCE_YESTERDAY) {
-    since = state->execution_yesterday_ready ? &state->execution_yesterday
-                                              : NULL;
+    since =
+        state->execution_yesterday_ready ? &state->execution_yesterday : NULL;
   }
   if (selector->since_macro != LQL_SINCE_NONE &&
       (since == NULL || lql_temporal_compare(candidate, since) < 0)) {
@@ -518,7 +522,8 @@ static lql_status stream_program_get(lql *self, const lql_selector *selector,
   lql_status status;
   size_t i;
   if (out == NULL) {
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "stream program out required");
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "stream program out required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   *out = NULL;
@@ -531,8 +536,8 @@ static lql_status stream_program_get(lql *self, const lql_selector *selector,
     return LQL_STATUS_OK;
   }
   allocator = lql_allocator_from_receiver(self);
-  program = (lql_stream_program *)allocator->calloc(allocator, 1u,
-                                                     sizeof(*program));
+  program =
+      (lql_stream_program *)allocator->calloc(allocator, 1u, sizeof(*program));
   if (program == NULL) {
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
     return LQL_STATUS_NO_MEMORY;
@@ -557,10 +562,10 @@ static lql_status stream_program_get(lql *self, const lql_selector *selector,
       field->json_key_first = stream_field->key_len == 0u
                                   ? 0u
                                   : (unsigned char)stream_field->key[0];
-      field->json_key_last = stream_field->key_len == 0u
-                                 ? 0u
-                                 : (unsigned char)stream_field->key[
-                                       stream_field->key_len - 1u];
+      field->json_key_last =
+          stream_field->key_len == 0u
+              ? 0u
+              : (unsigned char)stream_field->key[stream_field->key_len - 1u];
       field->struct_offset = i * sizeof(lonejson_json_value);
       field->kind = LONEJSON_FIELD_KIND_JSON_VALUE;
       field->storage = LONEJSON_STORAGE_FIXED;
@@ -580,7 +585,7 @@ static lql_status stream_program_get(lql *self, const lql_selector *selector,
 }
 
 LQL_INTERNAL_SYMBOL void lql_stream_program_destroy(lql *self,
-                                                     lql_selector *selector) {
+                                                    lql_selector *selector) {
   lql_allocator *allocator;
   if (self == NULL || selector == NULL || selector->stream_program == NULL) {
     return;
@@ -648,9 +653,10 @@ static lonejson_status stream_payload_sink(void *user, const void *data,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_emit_selected(
-    lql_stream_state *state, const lonejson_candidate_info *candidate,
-    lonejson_error *error) {
+static lonejson_status
+stream_emit_selected(lql_stream_state *state,
+                     const lonejson_candidate_info *candidate,
+                     lonejson_error *error) {
   lonejson_status status;
   static const char newline[] = "\n";
   if (candidate == NULL || candidate->payload_spool == NULL) {
@@ -660,7 +666,7 @@ static lonejson_status stream_emit_selected(
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
   status = lonejson_spooled_write_to_sink(candidate->payload_spool,
-                                           stream_payload_sink, state, error);
+                                          stream_payload_sink, state, error);
   if (status != LONEJSON_STATUS_OK) {
     if (state->failure.code == LQL_STATUS_OK) {
       stream_fail(state, LQL_STATUS_CALLBACK_ERROR,
@@ -672,12 +678,28 @@ static lonejson_status stream_emit_selected(
   return stream_payload_sink(state, newline, 1u, error);
 }
 
-static lonejson_status stream_emit_projection(
-    lql_stream_state *state, const lonejson_candidate_info *candidate,
-    lonejson_error *error) {
+static lonejson_status
+stream_emit_projection(lql_stream_state *state,
+                       const lonejson_candidate_info *candidate,
+                       lonejson_error *error) {
   lql_status status;
   int emitted;
   static const char newline[] = "\n";
+  if (state->projection_capture != NULL) {
+    emitted = 0;
+    status = lql_projection_capture_render(state->projection_capture,
+                                           stream_payload_sink, state, &emitted,
+                                           &state->failure);
+    if (status != LQL_STATUS_OK) {
+      if (state->failure.code == LQL_STATUS_OK) {
+        stream_fail(state, status, "projection rendering failed");
+      }
+      stream_lonejson_error(error, state->failure.message);
+      return LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    return emitted ? stream_payload_sink(state, newline, 1u, error)
+                   : LONEJSON_STATUS_OK;
+  }
   if (candidate == NULL || candidate->payload_spool == NULL) {
     stream_fail(state, LQL_STATUS_CALLBACK_ERROR,
                 "projection record capture is unavailable");
@@ -701,9 +723,10 @@ static lonejson_status stream_emit_projection(
   return stream_payload_sink(state, newline, 1u, error);
 }
 
-static lonejson_status stream_emit_mutation(
-    lql_stream_state *state, const lonejson_candidate_info *candidate,
-    lonejson_error *error) {
+static lonejson_status
+stream_emit_mutation(lql_stream_state *state,
+                     const lonejson_candidate_info *candidate,
+                     lonejson_error *error) {
   lql_status status;
   static const char newline[] = "\n";
   if (candidate == NULL || candidate->payload_spool == NULL) {
@@ -732,9 +755,10 @@ static lonejson_status stream_projection_spool_sink(void *user,
   return lonejson_spooled_append((lonejson_spooled *)user, data, len, error);
 }
 
-static lonejson_status stream_emit_projection_then_mutation(
-    lql_stream_state *state, const lonejson_candidate_info *candidate,
-    lonejson_error *error) {
+static lonejson_status
+stream_emit_projection_then_mutation(lql_stream_state *state,
+                                     const lonejson_candidate_info *candidate,
+                                     lonejson_error *error) {
   lonejson *runtime;
   lonejson_error local_error;
   lonejson_spooled projection;
@@ -751,7 +775,8 @@ static lonejson_status stream_emit_projection_then_mutation(
   lonejson_error_init(&local_error);
   runtime = lql_lonejson_new(state->receiver, &local_error);
   if (runtime == NULL) {
-    stream_fail(state, LQL_STATUS_NO_MEMORY, "combined output allocation failed");
+    stream_fail(state, LQL_STATUS_NO_MEMORY,
+                "combined output allocation failed");
     stream_lonejson_error(error, state->failure.message);
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
@@ -804,6 +829,9 @@ stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
   state->active_mismatch = 0;
   state->active_pos = 0u;
   state->root_value_started = 0;
+  if (state->projection_capture != NULL) {
+    lql_projection_capture_reset(state->projection_capture);
+  }
   if (state->generic_member != NULL) {
     lql_stream_member_context *member;
     member = state->generic_member;
@@ -834,7 +862,7 @@ stream_candidate_end(void *user, const lonejson_candidate_info *candidate,
     decision.record_index = state->result->records_seen - 1u;
     decision.matched = matched;
     callback_result = state->request->on_decision(state->request->decision_user,
-                                                   &decision, &state->failure);
+                                                  &decision, &state->failure);
     if (callback_result == LQL_STREAM_CALLBACK_ERROR) {
       if (state->failure.code == LQL_STATUS_OK) {
         stream_fail(state, LQL_STATUS_CALLBACK_ERROR,
@@ -951,7 +979,7 @@ static lonejson_status stream_object_begin(void *user, lonejson_error *error) {
 }
 
 static lonejson_status stream_match_all_object_begin(void *user,
-                                                      lonejson_error *error) {
+                                                     lonejson_error *error) {
   lql_stream_state *state;
   (void)error;
   state = (lql_stream_state *)user;
@@ -960,7 +988,7 @@ static lonejson_status stream_match_all_object_begin(void *user,
 }
 
 static lonejson_status stream_match_all_array_begin(void *user,
-                                                     lonejson_error *error) {
+                                                    lonejson_error *error) {
   lql_stream_state *state;
   state = (lql_stream_state *)user;
   if (!state->root_value_started) {
@@ -1033,8 +1061,8 @@ static lonejson_status stream_key_begin(void *user, lonejson_error *error) {
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_key_chunk(void *user, const char *data, size_t len,
-                                        lonejson_error *error) {
+static lonejson_status stream_key_chunk(void *user, const char *data,
+                                        size_t len, lonejson_error *error) {
   lql_stream_state *state;
   size_t i;
   (void)error;
@@ -1107,8 +1135,9 @@ static lonejson_status stream_boolean_value(void *user, int value,
   return stream_scalar_value(user, error);
 }
 
-static lonejson_status stream_mapped_path_object_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_object_begin(void *user, const lonejson_value_path *path,
+                                lonejson_error *error) {
   lql_stream_member_context *member;
   size_t i;
   (void)error;
@@ -1131,8 +1160,9 @@ static lonejson_status stream_mapped_path_object_begin(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_mapped_path_object_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_object_end(void *user, const lonejson_value_path *path,
+                              lonejson_error *error) {
   lql_stream_member_context *member;
   (void)path;
   (void)error;
@@ -1146,8 +1176,9 @@ static lonejson_status stream_mapped_path_object_end(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_mapped_path_array_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_array_begin(void *user, const lonejson_value_path *path,
+                               lonejson_error *error) {
   lql_stream_member_context *member;
   size_t i;
   member = (lql_stream_member_context *)user;
@@ -1172,13 +1203,15 @@ static lonejson_status stream_mapped_path_array_begin(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_mapped_path_array_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_array_end(void *user, const lonejson_value_path *path,
+                             lonejson_error *error) {
   return stream_mapped_path_object_end(user, path, error);
 }
 
-static lonejson_status stream_mapped_path_string_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_string_begin(void *user, const lonejson_value_path *path,
+                                lonejson_error *error) {
   lql_stream_member_context *member;
   size_t i;
   (void)error;
@@ -1218,9 +1251,10 @@ static lonejson_status stream_mapped_path_string_begin(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_mapped_path_string_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_string_chunk(void *user, const lonejson_value_path *path,
+                                const char *data, size_t len,
+                                lonejson_error *error) {
   lql_stream_member_context *member;
   size_t i;
   size_t pos;
@@ -1290,8 +1324,9 @@ static lonejson_status stream_mapped_path_string_chunk(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_mapped_path_string_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_string_end(void *user, const lonejson_value_path *path,
+                              lonejson_error *error) {
   lql_stream_member_context *member;
   size_t i;
   (void)error;
@@ -1350,11 +1385,13 @@ static lonejson_status stream_mapped_path_string_end(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_mapped_path_present(
-    void *user, const lonejson_value_path *path, lonejson_error *error);
+static lonejson_status
+stream_mapped_path_present(void *user, const lonejson_value_path *path,
+                           lonejson_error *error);
 
-static lonejson_status stream_mapped_path_number_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_number_begin(void *user, const lonejson_value_path *path,
+                                lonejson_error *error) {
   lql_stream_member_context *member;
   size_t i;
   lonejson_status status;
@@ -1383,9 +1420,10 @@ static lonejson_status stream_mapped_path_number_begin(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_mapped_path_number_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_number_chunk(void *user, const lonejson_value_path *path,
+                                const char *data, size_t len,
+                                lonejson_error *error) {
   lql_stream_member_context *member;
   (void)path;
   (void)error;
@@ -1405,8 +1443,9 @@ static lonejson_status stream_mapped_path_number_chunk(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_mapped_path_number_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_number_end(void *user, const lonejson_value_path *path,
+                              lonejson_error *error) {
   lql_stream_member_context *member;
   size_t i;
   char *end;
@@ -1451,8 +1490,9 @@ static lonejson_status stream_mapped_path_number_end(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_mapped_path_present(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_present(void *user, const lonejson_value_path *path,
+                           lonejson_error *error) {
   lql_stream_member_context *member;
   size_t i;
   (void)error;
@@ -1468,9 +1508,9 @@ static lonejson_status stream_mapped_path_present(
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status stream_mapped_path_boolean_value(
-    void *user, const lonejson_value_path *path, int value,
-    lonejson_error *error) {
+static lonejson_status
+stream_mapped_path_boolean_value(void *user, const lonejson_value_path *path,
+                                 int value, lonejson_error *error) {
   lql_stream_member_context *member;
   size_t i;
   lonejson_status status;
@@ -1482,7 +1522,8 @@ static lonejson_status stream_mapped_path_boolean_value(
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
     if ((member->full_path || term->field_index == member->field_index) &&
-        term->kind == LQL_SELECTOR_KIND_EQ && !term->selector->value_is_temporal &&
+        term->kind == LQL_SELECTOR_KIND_EQ &&
+        !term->selector->value_is_temporal &&
         stream_term_path_matches(term, path, member) &&
         ((value && strcmp(term->value, "true") == 0) ||
          (!value && strcmp(term->value, "false") == 0))) {
@@ -1492,20 +1533,168 @@ static lonejson_status stream_mapped_path_boolean_value(
   return LONEJSON_STATUS_OK;
 }
 
+static lonejson_status stream_projection_event(
+    lql_stream_member_context *member, lonejson_path_value_event_fn event,
+    const lonejson_value_path *path, lonejson_error *error) {
+  if (member->state->projection_capture == NULL ||
+      member->state->projection_visitor == NULL || event == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return event(
+      lql_projection_capture_visitor_user(member->state->projection_capture),
+      path, error);
+}
+
+static lonejson_status
+stream_projection_chunk(lql_stream_member_context *member,
+                        lonejson_path_value_chunk_fn event,
+                        const lonejson_value_path *path, const char *data,
+                        size_t len, lonejson_error *error) {
+  if (member->state->projection_capture == NULL ||
+      member->state->projection_visitor == NULL || event == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return event(
+      lql_projection_capture_visitor_user(member->state->projection_capture),
+      path, data, len, error);
+}
+
+#define STREAM_COMPOSE_PATH_EVENT(name)                                        \
+  static lonejson_status stream_composed_path_##name(                          \
+      void *user, const lonejson_value_path *path, lonejson_error *error) {    \
+    lql_stream_member_context *member;                                         \
+    lonejson_status status;                                                    \
+    member = (lql_stream_member_context *)user;                                \
+    status = stream_mapped_path_##name(user, path, error);                     \
+    if (status != LONEJSON_STATUS_OK) {                                        \
+      return status;                                                           \
+    }                                                                          \
+    return stream_projection_event(                                            \
+        member,                                                                \
+        member->state->projection_visitor == NULL                              \
+            ? NULL                                                             \
+            : member->state->projection_visitor->name,                         \
+        path, error);                                                          \
+  }
+
+#define STREAM_COMPOSE_PATH_CHUNK(name)                                        \
+  static lonejson_status stream_composed_path_##name(                          \
+      void *user, const lonejson_value_path *path, const char *data,           \
+      size_t len, lonejson_error *error) {                                     \
+    lql_stream_member_context *member;                                         \
+    lonejson_status status;                                                    \
+    member = (lql_stream_member_context *)user;                                \
+    status = stream_mapped_path_##name(user, path, data, len, error);          \
+    if (status != LONEJSON_STATUS_OK) {                                        \
+      return status;                                                           \
+    }                                                                          \
+    return stream_projection_chunk(                                            \
+        member,                                                                \
+        member->state->projection_visitor == NULL                              \
+            ? NULL                                                             \
+            : member->state->projection_visitor->name,                         \
+        path, data, len, error);                                               \
+  }
+
+STREAM_COMPOSE_PATH_EVENT(object_begin)
+STREAM_COMPOSE_PATH_EVENT(object_end)
+STREAM_COMPOSE_PATH_EVENT(array_begin)
+STREAM_COMPOSE_PATH_EVENT(array_end)
+STREAM_COMPOSE_PATH_EVENT(string_begin)
+STREAM_COMPOSE_PATH_EVENT(string_end)
+STREAM_COMPOSE_PATH_EVENT(number_begin)
+STREAM_COMPOSE_PATH_EVENT(number_end)
+STREAM_COMPOSE_PATH_CHUNK(string_chunk)
+STREAM_COMPOSE_PATH_CHUNK(number_chunk)
+
+static lonejson_status
+stream_composed_path_boolean_value(void *user, const lonejson_value_path *path,
+                                   int value, lonejson_error *error) {
+  lql_stream_member_context *member;
+  lonejson_status status;
+  member = (lql_stream_member_context *)user;
+  status = stream_mapped_path_boolean_value(user, path, value, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (member->state->projection_capture == NULL ||
+      member->state->projection_visitor == NULL ||
+      member->state->projection_visitor->boolean_value == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return member->state->projection_visitor->boolean_value(
+      lql_projection_capture_visitor_user(member->state->projection_capture),
+      path, value, error);
+}
+
+static lonejson_status
+stream_composed_path_null_value(void *user, const lonejson_value_path *path,
+                                lonejson_error *error) {
+  lql_stream_member_context *member;
+  member = (lql_stream_member_context *)user;
+  return stream_projection_event(
+      member,
+      member->state->projection_visitor == NULL
+          ? NULL
+          : member->state->projection_visitor->null_value,
+      path, error);
+}
+
+static lonejson_status stream_composed_path_object_key_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  lql_stream_member_context *member;
+  member = (lql_stream_member_context *)user;
+  return stream_projection_event(
+      member,
+      member->state->projection_visitor == NULL
+          ? NULL
+          : member->state->projection_visitor->object_key_begin,
+      path, error);
+}
+
+static lonejson_status stream_composed_path_object_key_chunk(
+    void *user, const lonejson_value_path *path, const char *data, size_t len,
+    lonejson_error *error) {
+  lql_stream_member_context *member;
+  member = (lql_stream_member_context *)user;
+  return stream_projection_chunk(
+      member,
+      member->state->projection_visitor == NULL
+          ? NULL
+          : member->state->projection_visitor->object_key_chunk,
+      path, data, len, error);
+}
+
+static lonejson_status
+stream_composed_path_object_key_end(void *user, const lonejson_value_path *path,
+                                    lonejson_error *error) {
+  lql_stream_member_context *member;
+  member = (lql_stream_member_context *)user;
+  return stream_projection_event(
+      member,
+      member->state->projection_visitor == NULL
+          ? NULL
+          : member->state->projection_visitor->object_key_end,
+      path, error);
+}
+
+#undef STREAM_COMPOSE_PATH_CHUNK
+#undef STREAM_COMPOSE_PATH_EVENT
+
 static const lonejson_value_path stream_mapped_root_path = {NULL, 0u};
 
 static lonejson_status stream_mapped_top_object_begin(void *user,
-                                                       lonejson_error *error) {
+                                                      lonejson_error *error) {
   return stream_mapped_path_object_begin(user, &stream_mapped_root_path, error);
 }
 
 static lonejson_status stream_mapped_top_object_end(void *user,
-                                                     lonejson_error *error) {
+                                                    lonejson_error *error) {
   return stream_mapped_path_object_end(user, &stream_mapped_root_path, error);
 }
 
 static lonejson_status stream_mapped_top_string_begin(void *user,
-                                                       lonejson_error *error) {
+                                                      lonejson_error *error) {
   lql_stream_member_context *member;
   member = (lql_stream_member_context *)user;
   if (member->container_depth != 0u) {
@@ -1517,20 +1706,20 @@ static lonejson_status stream_mapped_top_string_begin(void *user,
 }
 
 static lonejson_status stream_mapped_top_string_chunk(void *user,
-                                                       const char *data,
-                                                       size_t len,
-                                                       lonejson_error *error) {
+                                                      const char *data,
+                                                      size_t len,
+                                                      lonejson_error *error) {
   return stream_mapped_path_string_chunk(user, &stream_mapped_root_path, data,
                                          len, error);
 }
 
 static lonejson_status stream_mapped_top_string_end(void *user,
-                                                     lonejson_error *error) {
+                                                    lonejson_error *error) {
   return stream_mapped_path_string_end(user, &stream_mapped_root_path, error);
 }
 
 static lonejson_status stream_mapped_top_number_begin(void *user,
-                                                       lonejson_error *error) {
+                                                      lonejson_error *error) {
   lql_stream_member_context *member;
   member = (lql_stream_member_context *)user;
   if (member->container_depth != 0u) {
@@ -1541,20 +1730,20 @@ static lonejson_status stream_mapped_top_number_begin(void *user,
 }
 
 static lonejson_status stream_mapped_top_number_chunk(void *user,
-                                                       const char *data,
-                                                       size_t len,
-                                                       lonejson_error *error) {
+                                                      const char *data,
+                                                      size_t len,
+                                                      lonejson_error *error) {
   return stream_mapped_path_number_chunk(user, &stream_mapped_root_path, data,
                                          len, error);
 }
 
 static lonejson_status stream_mapped_top_number_end(void *user,
-                                                     lonejson_error *error) {
+                                                    lonejson_error *error) {
   return stream_mapped_path_number_end(user, &stream_mapped_root_path, error);
 }
 
 static lonejson_status stream_mapped_top_boolean_value(void *user, int value,
-                                                        lonejson_error *error) {
+                                                       lonejson_error *error) {
   lql_stream_member_context *member;
   member = (lql_stream_member_context *)user;
   if (member->container_depth != 0u) {
@@ -1661,7 +1850,8 @@ static lql_status stream_execute_mapped(lql_stream_state *state,
     }
   }
   stream = lonejson_stream_open_candidates_reader(
-      runtime, &state->program->mapped_map, stream_read, state, &lonejson_error);
+      runtime, &state->program->mapped_map, stream_read, state,
+      &lonejson_error);
   if (stream == NULL) {
     for (i = 0u; i < state->program->field_count; ++i) {
       lonejson_json_value_cleanup(&values[i]);
@@ -1727,6 +1917,7 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   lql_stream_member_context member;
   lonejson_candidate_stream_options options;
   lonejson_path_value_visitor visitor;
+  lonejson_path_value_visitor projection_visitor;
   lonejson_error lonejson_error;
   lql_status status;
   const lql_stream_program *saved_program;
@@ -1742,11 +1933,24 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   member.state = state;
   member.full_path = 1;
   state->generic_member = &member;
+  state->projection_capture = NULL;
+  state->projection_visitor = NULL;
+  if (state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION) {
+    status = lql_projection_capture_create(state->receiver,
+                                           state->request->projection, runtime,
+                                           &state->projection_capture, error);
+    if (status != LQL_STATUS_OK) {
+      state->generic_member = NULL;
+      state->program = saved_program;
+      return status;
+    }
+    lql_projection_capture_visitor(&projection_visitor);
+    state->projection_visitor = &projection_visitor;
+  }
   options = lonejson_default_candidate_stream_options();
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode =
       (state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
-       state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
        state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
        state->request->output_mode ==
            LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION)
@@ -1754,28 +1958,49 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
           : LONEJSON_CANDIDATE_CAPTURE_NONE;
   options.spool_class = LONEJSON_SPOOL_CLASS_LARGE_TEXT;
   visitor = lonejson_default_path_value_visitor();
-  visitor.object_begin = stream_mapped_path_object_begin;
-  visitor.object_end = stream_mapped_path_object_end;
-  visitor.array_begin = stream_mapped_path_array_begin;
-  visitor.array_end = stream_mapped_path_array_end;
-  visitor.string_begin = stream_mapped_path_string_begin;
-  visitor.string_chunk = stream_mapped_path_string_chunk;
-  visitor.string_end = stream_mapped_path_string_end;
-  visitor.number_begin = stream_mapped_path_number_begin;
-  visitor.number_chunk = stream_mapped_path_number_chunk;
-  visitor.number_end = stream_mapped_path_number_end;
-  visitor.boolean_value = stream_mapped_path_boolean_value;
+  if (state->projection_capture != NULL) {
+    visitor.object_begin = stream_composed_path_object_begin;
+    visitor.object_end = stream_composed_path_object_end;
+    visitor.object_key_begin = stream_composed_path_object_key_begin;
+    visitor.object_key_chunk = stream_composed_path_object_key_chunk;
+    visitor.object_key_end = stream_composed_path_object_key_end;
+    visitor.array_begin = stream_composed_path_array_begin;
+    visitor.array_end = stream_composed_path_array_end;
+    visitor.string_begin = stream_composed_path_string_begin;
+    visitor.string_chunk = stream_composed_path_string_chunk;
+    visitor.string_end = stream_composed_path_string_end;
+    visitor.number_begin = stream_composed_path_number_begin;
+    visitor.number_chunk = stream_composed_path_number_chunk;
+    visitor.number_end = stream_composed_path_number_end;
+    visitor.boolean_value = stream_composed_path_boolean_value;
+    visitor.null_value = stream_composed_path_null_value;
+  } else {
+    visitor.object_begin = stream_mapped_path_object_begin;
+    visitor.object_end = stream_mapped_path_object_end;
+    visitor.array_begin = stream_mapped_path_array_begin;
+    visitor.array_end = stream_mapped_path_array_end;
+    visitor.string_begin = stream_mapped_path_string_begin;
+    visitor.string_chunk = stream_mapped_path_string_chunk;
+    visitor.string_end = stream_mapped_path_string_end;
+    visitor.number_begin = stream_mapped_path_number_begin;
+    visitor.number_chunk = stream_mapped_path_number_chunk;
+    visitor.number_end = stream_mapped_path_number_end;
+    visitor.boolean_value = stream_mapped_path_boolean_value;
+  }
   options.path_visitor = &visitor;
   options.visitor_user = &member;
   options.candidate_begin = stream_candidate_begin;
   options.candidate_end = stream_candidate_end;
   options.candidate_user = state;
   lonejson_error_init(&lonejson_error);
-  status = stream_status(state,
-                         lonejson_visit_candidates_reader(runtime, stream_read,
-                                                          state, &options,
-                                                          &lonejson_error),
-                         &lonejson_error, error);
+  status =
+      stream_status(state,
+                    lonejson_visit_candidates_reader(
+                        runtime, stream_read, state, &options, &lonejson_error),
+                    &lonejson_error, error);
+  lql_projection_capture_destroy(state->projection_capture);
+  state->projection_capture = NULL;
+  state->projection_visitor = NULL;
   state->generic_member = NULL;
   state->program = saved_program;
   return status;
@@ -1806,8 +2031,7 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
        request->output_mode != LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION) ||
       (request->mutation != NULL &&
        request->output_mode != LQL_STREAM_OUTPUT_MUTATION &&
-       request->output_mode !=
-           LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION)) {
+       request->output_mode != LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION)) {
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                   "direct stream output mode is not implemented");
     return LQL_STATUS_UNSUPPORTED;
@@ -1865,14 +2089,15 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
   }
   lonejson_error_init(&lonejson_error);
   runtime = state.program != NULL && !state.program->match_all &&
-                !state.program->requires_generic_path &&
-                request->output_mode == LQL_STREAM_OUTPUT_DECISION_ONLY
+                    !state.program->requires_generic_path &&
+                    request->output_mode == LQL_STREAM_OUTPUT_DECISION_ONLY
                 ? lql_lonejson_new_mapped_stream(self, &lonejson_error)
                 : lql_lonejson_new(self, &lonejson_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_NO_MEMORY,
-                  lonejson_error.message[0] == '\0' ? "lonejson initialization failed"
-                                                     : lonejson_error.message);
+                  lonejson_error.message[0] == '\0'
+                      ? "lonejson initialization failed"
+                      : lonejson_error.message);
     return LQL_STATUS_NO_MEMORY;
   }
   if ((state.program != NULL && state.program->requires_generic_path) ||

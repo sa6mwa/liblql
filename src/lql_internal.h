@@ -14,6 +14,7 @@
 typedef struct lql_allocator lql_allocator;
 typedef struct lql_impl lql_impl;
 typedef struct lql_stream_program lql_stream_program;
+typedef struct lql_projection_capture lql_projection_capture;
 
 struct lql_allocator {
   void *impl;
@@ -42,8 +43,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
                                                       lql_error *error);
 LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
                                                lonejson_error *error);
-LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new_mapped_stream(
-    lql *self, lonejson_error *error);
+LQL_INTERNAL_SYMBOL lonejson *
+lql_lonejson_new_mapped_stream(lql *self, lonejson_error *error);
 
 typedef enum lql_selector_kind {
   LQL_SELECTOR_KIND_ALL = 0,
@@ -177,17 +178,30 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
 LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_internal(
     lql *self, const char *const *paths, size_t path_count,
     lql_projection **out, lql_error *error);
-LQL_INTERNAL_SYMBOL void lql_projection_destroy_internal(
-    lql *self, lql_projection *projection);
+LQL_INTERNAL_SYMBOL void
+lql_projection_destroy_internal(lql *self, lql_projection *projection);
 LQL_INTERNAL_SYMBOL lql_status lql_projection_render_top_level(
-    lql *self, const lql_projection *projection,
-    const lonejson_spooled *input, lonejson_sink_fn sink, void *sink_user,
+    lql *self, const lql_projection *projection, const lonejson_spooled *input,
+    lonejson_sink_fn sink, void *sink_user, int *out_emitted, lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_projection_capture_create(
+    lql *self, const lql_projection *projection, lonejson *runtime,
+    lql_projection_capture **out, lql_error *error);
+LQL_INTERNAL_SYMBOL void
+lql_projection_capture_destroy(lql_projection_capture *capture);
+LQL_INTERNAL_SYMBOL void
+lql_projection_capture_reset(lql_projection_capture *capture);
+LQL_INTERNAL_SYMBOL void
+lql_projection_capture_visitor(lonejson_path_value_visitor *out);
+LQL_INTERNAL_SYMBOL void *
+lql_projection_capture_visitor_user(lql_projection_capture *capture);
+LQL_INTERNAL_SYMBOL lql_status lql_projection_capture_render(
+    lql_projection_capture *capture, lonejson_sink_fn sink, void *sink_user,
     int *out_emitted, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal(
     lql *self, const char *const *expressions, size_t expression_count,
     lql_mutation **out, lql_error *error);
-LQL_INTERNAL_SYMBOL void lql_mutation_destroy_internal(
-    lql *self, lql_mutation *mutation);
+LQL_INTERNAL_SYMBOL void lql_mutation_destroy_internal(lql *self,
+                                                       lql_mutation *mutation);
 LQL_INTERNAL_SYMBOL lql_status lql_mutation_render(
     lql *self, const lql_mutation *mutation, const lonejson_spooled *input,
     lonejson_sink_fn sink, void *sink_user, lql_error *error);
@@ -229,6 +243,6 @@ LQL_INTERNAL_SYMBOL int lql_temporal_now(lql_temporal *out);
 LQL_INTERNAL_SYMBOL int lql_temporal_today(lql_temporal *out);
 LQL_INTERNAL_SYMBOL int lql_temporal_yesterday(lql_temporal *out);
 LQL_INTERNAL_SYMBOL void lql_stream_program_destroy(lql *self,
-                                                     lql_selector *selector);
+                                                    lql_selector *selector);
 
 #endif
