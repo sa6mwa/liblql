@@ -5943,8 +5943,21 @@ source_output_decide(void *user, const lonejson_candidate_output_event *event,
 static void
 source_output_update_staged_exact_match(source_output_state *state) {
   if (state == NULL || !state->staged_output || state->current_matched_known ||
-      state->doc.fast_exact_selector == NULL || state->doc.root_kind != '{' ||
-      (!state->doc.fast_exact_hit && !state->doc.fast_exact_miss)) {
+      state->doc.root_kind != '{') {
+    return;
+  }
+  if (state->doc.fast_exact_selector == NULL) {
+#if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
+    if (top_level_multi_candidate_payload_discardable(&state->doc,
+                                                      state->selector)) {
+      state->current_matched = 0;
+      state->current_matched_known = 1;
+      state->current_output_enabled = 0;
+    }
+#endif
+    return;
+  }
+  if (!state->doc.fast_exact_hit && !state->doc.fast_exact_miss) {
     return;
   }
   state->current_matched = state->doc.fast_exact_hit;
@@ -6129,10 +6142,15 @@ static lonejson_status
 source_output_observer_number_end(void *user, const lonejson_value_path *path,
                                   lonejson_error *error) {
   source_output_state *state;
+  lonejson_status st;
   state = (source_output_state *)user;
-  return state->eval_visitor.number_end == NULL
-             ? LONEJSON_STATUS_OK
-             : state->eval_visitor.number_end(&state->doc, path, error);
+  st = state->eval_visitor.number_end == NULL
+           ? LONEJSON_STATUS_OK
+           : state->eval_visitor.number_end(&state->doc, path, error);
+  if (st == LONEJSON_STATUS_OK) {
+    source_output_update_staged_exact_match(state);
+  }
+  return st;
 }
 
 static lonejson_status
