@@ -164,7 +164,6 @@ tokenizer to emulate that behavior.
 ## Candidate Engine Rewrite Direction
 
 The old standalone lonejson CR notes for predicate-gated capture, single-pass
-candidate transforms, chunked number writing, and streaming-candidate
 processing have been retired. They were useful while liblql depended on
 upstream-only lonejson releases, but the current vendored preset lets liblql
 reshape the candidate/transform surface directly.
@@ -176,7 +175,6 @@ The new dependency boundary is:
 
 - lonejson owns JSON parsing, validation, NDJSON candidate framing, writing,
   escaping, byte accounting, bounded current-candidate capture, and generic
-  candidate transform mechanics;
 - liblql owns selectors, projection semantics, mutation semantics, public API
   policy, CLI behavior, and benchmark acceptance;
 - the vendored lonejson candidate/transform API has no compatibility promise

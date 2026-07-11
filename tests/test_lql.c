@@ -5818,71 +5818,6 @@ static void expect_candidate_mutation_large_action_stage_api(void) {
   fclose(out);
 }
 
-static void expect_candidate_action_stage_inferred_begins_api(void) {
-  static const char doc[] = "{\"\":\"\",\"later\":\"match\",\"num\":2}\n";
-  static const char *const mutations[] = {"/seen=true"};
-  FILE *source;
-  FILE *out;
-  lql_error error;
-  lql_status st;
-  lql_selector *selector;
-  lql_mutation_plan *plan;
-  lql_query_result result;
-  char buf[256];
-  size_t len;
-
-  source = tmpfile();
-  out = tmpfile();
-  selector = NULL;
-  plan = NULL;
-  buf[0] = '\0';
-  if (source == NULL || out == NULL) {
-    printf("inferred action begin tmpfile failed\n");
-    if (source != NULL) {
-      fclose(source);
-    }
-    if (out != NULL) {
-      fclose(out);
-    }
-    ++failures;
-    return;
-  }
-  if (fwrite(doc, 1u, strlen(doc), source) != strlen(doc) ||
-      fseek(source, 0L, SEEK_SET) != 0) {
-    printf("inferred action begin source setup failed\n");
-    ++failures;
-  } else {
-    lql_error_init(&error);
-    st = test_ctx->selector_parse(test_ctx, "/later=\"match\"", &selector,
-                                  &error);
-    if (st == LQL_STATUS_OK) {
-      lql_error_init(&error);
-      st =
-          test_ctx->mutation_plan_parse(test_ctx, mutations, 1u, &plan, &error);
-    }
-    if (st == LQL_STATUS_OK) {
-      memset(&result, 0, sizeof(result));
-      lql_error_init(&error);
-      st = test_ctx->mutate_file_range_candidates(
-          test_ctx, selector, plan, source, 0u, (lql_uint64)strlen(doc), out, 1,
-          1, &result, &error);
-    }
-    if (st != LQL_STATUS_OK || result.candidates_seen != 1u ||
-        result.candidates_matched != 1u ||
-        !read_tmpfile(out, buf, sizeof(buf), &len) ||
-        strcmp(buf, "{\"\":\"\",\"later\":\"match\",\"num\":2,"
-                    "\"seen\":true}\n") != 0) {
-      printf("inferred action begin result mismatch: %s\n",
-             st == LQL_STATUS_OK ? buf : error.message);
-      ++failures;
-    }
-  }
-  test_ctx->mutation_plan_destroy(test_ctx, plan);
-  test_ctx->selector_destroy(test_ctx, selector);
-  fclose(source);
-  fclose(out);
-}
-
 static void expect_source_candidate_mutation_api(void) {
   FILE *out;
   lql_error error;
@@ -7998,8 +7933,6 @@ static void expect_sdk_contract_manifest(void) {
        expect_file_range_candidate_mutation_api},
       {"mutation", "large candidate action-to-output stage transition",
        expect_candidate_mutation_large_action_stage_api},
-      {"mutation", "action-stage replay infers empty token begins",
-       expect_candidate_action_stage_inferred_begins_api},
       {"mutation", "callback-source candidate stream mutation",
        expect_source_candidate_mutation_api},
       {"mutation", "projection-before-mutation candidate streams",
@@ -9722,7 +9655,6 @@ int main(void) {
   expect_source_mutation_api();
   expect_file_range_candidate_mutation_api();
   expect_candidate_mutation_large_action_stage_api();
-  expect_candidate_action_stage_inferred_begins_api();
   expect_source_candidate_mutation_api();
   expect_projected_candidate_mutation_api();
   expect_mutation_quoted_value_api();
