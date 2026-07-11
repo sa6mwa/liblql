@@ -168,6 +168,37 @@ static int run_or_selection(lql *ctx) {
   return 0;
 }
 
+static int run_not_selection(lql *ctx) {
+  static const char input[] =
+      "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n42\n";
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "not./status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 3u || result.records_matched != 2u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 static int run_match_all(lql *ctx) {
   static const char input[] = "{\"ignored\":[1,2]}\n42\n";
   static const char root_array[] = "[1]\n";
@@ -264,6 +295,7 @@ int main(void) {
   }
   if (run_status_selection(ctx) || run_conjunction_selection(ctx) ||
       run_or_selection(ctx) ||
+      run_not_selection(ctx) ||
       run_match_all(ctx) ||
       run_stop_and_root_array(ctx)) {
     ctx->destroy(ctx);
