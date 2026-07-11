@@ -243,6 +243,10 @@ static int run_mapped_string_predicates(lql *ctx) {
       "\"meta\":{\"etag\":\"x\"}}\n"
       "{\"items\":[{\"sku\":\"B\",\"price\":30}],\"meta\":{\"etag\":null}}\n"
       "{\"items\":[{\"sku\":\"C\",\"price\":1}]}\n";
+  static const char temporal_input[] =
+      "{\"timestamp\":\"2026-03-05T10:29:00+01:00\"}\n"
+      "{\"timestamp\":\"2026-03-05T10:29:00Z\"}\n"
+      "{\"timestamp\":\"2026-03-05\"}\n";
   if (run_selection(ctx, "contains{f=/msg,a=Timeout|degraded}", input, 3u,
                     1u)) {
     return 1;
@@ -274,6 +278,21 @@ static int run_mapped_string_predicates(lql *ctx) {
   if (run_selection(ctx, "range{field=/items/1/price,gte=20}", nested_input,
                     3u, 1u)) {
     return 9;
+  }
+  if (run_selection(ctx, "/timestamp=\"2026-03-05T09:29:00Z\"",
+                    temporal_input, 3u, 2u)) {
+    return 10;
+  }
+  if (run_selection(ctx,
+                    "range{field=/timestamp,gte=2026-03-05T10:28:21Z}",
+                    temporal_input, 3u, 1u)) {
+    return 11;
+  }
+  if (run_selection(ctx,
+                    "date{field=/timestamp,after=2026-03-05T10:28:21Z,"
+                    "before=2026-03-05T10:30:00Z}", temporal_input, 3u,
+                    1u)) {
+    return 12;
   }
   return 0;
 }

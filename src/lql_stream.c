@@ -26,6 +26,7 @@ struct lql_stream_program {
   lql_stream_field fields[sizeof(unsigned long) * CHAR_BIT];
   size_t field_count;
   int has_nested_paths;
+  int needs_execution_clock;
   int match_all;
   lonejson_field mapped_fields[sizeof(unsigned long) * CHAR_BIT];
   lonejson_map mapped_map;
@@ -49,6 +50,12 @@ typedef struct lql_stream_state {
   int key_active;
   int active;
   int root_value_started;
+  lql_temporal execution_now;
+  lql_temporal execution_today;
+  lql_temporal execution_yesterday;
+  int execution_now_ready;
+  int execution_today_ready;
+  int execution_yesterday_ready;
 } lql_stream_state;
 
 typedef struct lql_stream_member_context {
@@ -58,10 +65,14 @@ typedef struct lql_stream_member_context {
   size_t container_depth;
   char number[128];
   size_t number_len;
+  char temporal[128];
+  size_t temporal_len;
   unsigned long active_terms;
   unsigned long active_number_terms;
+  unsigned long active_temporal_terms;
   int active_string;
   int number_overflow;
+  int temporal_overflow;
   unsigned long mismatches;
 } lql_stream_member_context;
 
@@ -269,8 +280,7 @@ static lql_status stream_compile_term(lql_stream_program *program,
     }
     return LQL_STATUS_OK;
   }
-  if (!stream_field_root(selector->field, &key, &i) ||
-      selector->value_is_temporal) {
+  if (!stream_field_root(selector->field, &key, &i)) {
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                   "direct stream supports only non-temporal literal JSON pointer fields");
     return LQL_STATUS_UNSUPPORTED;
@@ -309,10 +319,12 @@ static lql_status stream_compile_term(lql_stream_program *program,
                               NULL, 0u, error);
   }
   if (kind == LQL_SELECTOR_KIND_RANGE) {
-    if (selector->range_is_temporal) {
-      lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                    "direct stream temporal ranges are not implemented");
-      return LQL_STATUS_UNSUPPORTED;
+    return stream_append_term(program, allocator, selector, kind, key, i,
+                              NULL, 0u, error);
+  }
+  if (kind == LQL_SELECTOR_KIND_DATE) {
+    if (selector->since_macro != LQL_SINCE_NONE) {
+      program->needs_execution_clock = 1;
     }
     return stream_append_term(program, allocator, selector, kind, key, i,
                               NULL, 0u, error);
@@ -384,6 +396,51 @@ static int stream_selector_matches(const lql_stream_program *program,
   }
   matched = stream_term_matches_selector(program, selector, hits);
   return matched > 0;
+}
+
+static int stream_temporal_bounds_match(const lql_selector *selector,
+                                        const lql_temporal *candidate) {
+  if (selector->has_temporal_gt &&
+      lql_temporal_compare(candidate, &selector->temporal_gt) <= 0) {
+    return 0;
+  }
+  if (selector->has_temporal_gte &&
+      lql_temporal_compare(candidate, &selector->temporal_gte) < 0) {
+    return 0;
+  }
+  if (selector->has_temporal_lt &&
+      lql_temporal_compare(candidate, &selector->temporal_lt) >= 0) {
+    return 0;
+  }
+  if (selector->has_temporal_lte &&
+      lql_temporal_compare(candidate, &selector->temporal_lte) > 0) {
+    return 0;
+  }
+  return 1;
+}
+
+static int stream_date_matches(const lql_stream_state *state,
+                               const lql_selector *selector,
+                               const lql_temporal *candidate) {
+  const lql_temporal *since;
+  since = NULL;
+  if (selector->has_temporal_eq &&
+      !lql_temporal_equal(candidate, &selector->temporal_eq)) {
+    return 0;
+  }
+  if (selector->since_macro == LQL_SINCE_NOW) {
+    since = state->execution_now_ready ? &state->execution_now : NULL;
+  } else if (selector->since_macro == LQL_SINCE_TODAY) {
+    since = state->execution_today_ready ? &state->execution_today : NULL;
+  } else if (selector->since_macro == LQL_SINCE_YESTERDAY) {
+    since = state->execution_yesterday_ready ? &state->execution_yesterday
+                                              : NULL;
+  }
+  if (selector->since_macro != LQL_SINCE_NONE &&
+      (since == NULL || lql_temporal_compare(candidate, since) < 0)) {
+    return 0;
+  }
+  return stream_temporal_bounds_match(selector, candidate);
 }
 
 static lql_status stream_program_get(lql *self, const lql_selector *selector,
@@ -831,7 +888,10 @@ static lonejson_status stream_mapped_path_string_begin(
   member = (lql_stream_member_context *)user;
   member->active_string = 1;
   member->active_terms = 0ul;
+  member->active_temporal_terms = 0ul;
   member->mismatches = 0ul;
+  member->temporal_len = 0u;
+  member->temporal_overflow = 0;
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
     if (term->field_index != member->field_index ||
@@ -839,6 +899,12 @@ static lonejson_status stream_mapped_path_string_begin(
       continue;
     }
     member->active_terms |= term->bit;
+    if (term->kind == LQL_SELECTOR_KIND_DATE ||
+        term->kind == LQL_SELECTOR_KIND_RANGE ||
+        (term->kind == LQL_SELECTOR_KIND_EQ &&
+         term->selector->value_is_temporal)) {
+      member->active_temporal_terms |= term->bit;
+    }
     member->positions[i] = 0u;
     if (term->kind == LQL_SELECTOR_KIND_EXISTS) {
       member->state->hits |= term->bit;
@@ -862,6 +928,14 @@ static lonejson_status stream_mapped_path_string_chunk(
   (void)path;
   if (!member->active_string) {
     return LONEJSON_STATUS_OK;
+  }
+  if (member->active_temporal_terms != 0ul) {
+    if (len > sizeof(member->temporal) - 1u - member->temporal_len) {
+      member->temporal_overflow = 1;
+    } else {
+      memcpy(member->temporal + member->temporal_len, data, len);
+      member->temporal_len += len;
+    }
   }
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
@@ -924,6 +998,30 @@ static lonejson_status stream_mapped_path_string_end(
   if (!member->active_string) {
     return LONEJSON_STATUS_OK;
   }
+  if (member->active_temporal_terms != 0ul && !member->temporal_overflow) {
+    lql_temporal candidate;
+    member->temporal[member->temporal_len] = '\0';
+    if (lql_parse_temporal_literal(member->temporal, &candidate)) {
+      for (i = 0u; i < member->state->program->term_count; ++i) {
+        const lql_stream_term *term = &member->state->program->terms[i];
+        const lql_selector *selector;
+        if ((member->active_temporal_terms & term->bit) == 0ul) {
+          continue;
+        }
+        selector = term->selector;
+        if ((term->kind == LQL_SELECTOR_KIND_EQ &&
+             selector->value_is_temporal &&
+             lql_temporal_equal(&candidate, &selector->temporal_eq)) ||
+            (term->kind == LQL_SELECTOR_KIND_RANGE &&
+             selector->range_is_temporal &&
+             stream_temporal_bounds_match(selector, &candidate)) ||
+            (term->kind == LQL_SELECTOR_KIND_DATE &&
+             stream_date_matches(member->state, selector, &candidate))) {
+          member->state->hits |= term->bit;
+        }
+      }
+    }
+  }
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
     if ((member->active_terms & term->bit) == 0ul ||
@@ -943,6 +1041,7 @@ static lonejson_status stream_mapped_path_string_end(
   }
   member->active_string = 0;
   member->active_terms = 0ul;
+  member->active_temporal_terms = 0ul;
   return LONEJSON_STATUS_OK;
 }
 
@@ -1326,6 +1425,12 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
       *error = state.failure;
     }
     return status;
+  }
+  if (state.program != NULL && state.program->needs_execution_clock) {
+    state.execution_now_ready = lql_temporal_now(&state.execution_now);
+    state.execution_today_ready = lql_temporal_today(&state.execution_today);
+    state.execution_yesterday_ready =
+        lql_temporal_yesterday(&state.execution_yesterday);
   }
   lonejson_error_init(&lonejson_error);
   runtime = state.program != NULL && !state.program->match_all
