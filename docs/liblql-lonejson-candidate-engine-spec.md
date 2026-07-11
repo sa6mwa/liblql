@@ -197,17 +197,23 @@ hot path is active. Formatting is part of every slice commit.
 ## Performance Decision Record
 
 The completed one-parse action-stage implementation is semantically clean but
-does not yet meet the performance floor. The 4 KiB mutation matrix recorded
-288 Go/C pairs: 188 at or above 1.0x, 100 below, with a 1.13x median and a
-0.65x worst row. C peak RSS across those rows was 2.7-3.2 MiB after correcting
-the Linux measurement to read `/proc/self/status` `VmHWM`.
+does not yet meet the performance floor. Its first 4 KiB mutation matrix
+recorded 288 Go/C pairs: 188 at or above 1.0x, 100 below, with a 1.13x median
+and a 0.65x worst row. Omitting key, string, and number begin actions improved
+that to 208 pairs at or above 1.0x, 80 below, and a 1.15x median, but the worst
+sparse recursive row was still 0.37x. C peak RSS across those rows was 2.7-3.2
+MiB after correcting Linux measurement to read `/proc/self/status` `VmHWM`.
 
 Profiling removed direct spool writes as the dominant cost, but rejected
 candidates still require decoded action recording. This cannot be safely
 discarded after a direct-path miss: JSON permits duplicate object keys and a
 later occurrence of the same path can make the candidate match. The Go
 reference retains bounded raw candidate bytes and reparses only accepted
-candidates, which avoids that rejected-candidate decoded-action cost.
+candidates, which avoids that rejected-candidate decoded-action cost. A direct
+vendored raw-spool experiment was worse: 99/288 rows at or above 1.0x, a 0.91x
+median, and a 0.44x worst row. Copying every raw candidate cost more than the
+decoded action stage, so that route is rejected without a first-pass capture
+mechanism that avoids per-candidate copying.
 
 Do not reintroduce scan plans, selector-shaped LoneJSON fields, or an
 unbounded cache to close this gap. If the one-parse action stage cannot reach
