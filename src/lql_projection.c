@@ -978,6 +978,22 @@ static lonejson_status projection_render_value(projection_render_state *state,
     return lonejson_writer_json_value_spooled(
         state->writer, &state->values[members[0]], state->error);
   }
+  if (depth == 0u && count == 1u && path->segment_count == 1u) {
+    status = lonejson_writer_begin_object(state->writer, state->error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    status = lonejson_writer_key(state->writer, path->segments[0],
+                                 strlen(path->segments[0]), state->error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    status = projection_render_value(state, members, count, 1u);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    return lonejson_writer_end_object(state->writer, state->error);
+  }
   numeric = projection_parse_index(path->segments[depth], NULL);
   for (i = 1u; i < count; ++i) {
     const lql_projection_path *candidate;
