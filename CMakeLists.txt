@@ -2,8 +2,12 @@ cmake_minimum_required(VERSION 3.20)
 
 project(liblql VERSION 0.0.0 LANGUAGES C)
 
+include(CTest)
+include(CheckIPOSupported)
+
 option(LQL_BUILD_STATIC "Build static liblql" ON)
 option(LQL_BUILD_SHARED "Build shared liblql" ON)
+option(LQL_BUILD_DIRECT_PROBE "Build the direct-execution architecture probe" ON)
 set(LQL_VERSION_OVERRIDE "" CACHE STRING "Version override")
 
 if(NOT LQL_BUILD_STATIC AND NOT LQL_BUILD_SHARED)
@@ -25,6 +29,7 @@ add_library(lql_common OBJECT
   src/lql.c
   src/lql_allocator.c
   src/lql_selector.c
+  src/lql_stream.c
   src/lql_temporal.c)
 set_target_properties(lql_common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(lql_common PUBLIC
@@ -54,4 +59,35 @@ if(LQL_BUILD_SHARED)
   target_include_directories(lql_shared PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>")
+endif()
+
+if(BUILD_TESTING)
+  add_executable(lql_direct_stream_test tests/direct_stream_test.c)
+  target_link_libraries(lql_direct_stream_test PRIVATE lql_static)
+  add_test(NAME lql.direct_stream COMMAND lql_direct_stream_test)
+endif()
+
+if(LQL_BUILD_DIRECT_PROBE)
+  add_executable(lql_direct_probe tests/lql_direct_probe.c)
+  target_compile_definitions(lql_direct_probe PRIVATE _POSIX_C_SOURCE=200809L)
+  target_link_libraries(lql_direct_probe PRIVATE lql_static)
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  check_ipo_supported(RESULT lql_ipo_supported OUTPUT lql_ipo_error LANGUAGES C)
+  if(lql_ipo_supported)
+    set_property(TARGET lql_common lonejson_vendored
+      PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    if(TARGET lql_static)
+      set_property(TARGET lql_static PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
+    if(TARGET lql_shared)
+      set_property(TARGET lql_shared PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
+    if(TARGET lql_direct_probe)
+      set_property(TARGET lql_direct_probe PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
+  else()
+    message(STATUS "liblql IPO unavailable: ${lql_ipo_error}")
+  endif()
 endif()

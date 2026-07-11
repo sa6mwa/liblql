@@ -139,6 +139,7 @@ LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
   }
 
   config = lonejson_default_config();
+  config.candidate_read_buffer_size = 64u * 1024u;
   config.json_value_max_number_bytes = 4096u;
   allocator = lonejson_default_allocator();
   allocator.malloc_fn = lonejson_lql_malloc;

@@ -15,7 +15,9 @@ typedef enum lql_status {
   LQL_STATUS_PARSE_ERROR = 3,
   LQL_STATUS_JSON_ERROR = 4,
   LQL_STATUS_UNSUPPORTED = 5,
-  LQL_STATUS_STOP = 6
+  LQL_STATUS_STOP = 6,
+  LQL_STATUS_CALLBACK_ERROR = 7,
+  LQL_STATUS_IO_ERROR = 8
 } lql_status;
 
 typedef struct lql_error {
@@ -25,6 +27,8 @@ typedef struct lql_error {
 
 typedef struct lql_selector lql_selector;
 typedef struct lql lql;
+typedef struct lql_projection lql_projection;
+typedef struct lql_mutation lql_mutation;
 
 typedef struct lql_capabilities {
   int selector_parse;
@@ -50,6 +54,75 @@ typedef struct lql_string_view {
   const char *data;
   size_t len;
 } lql_string_view;
+
+/** Reads up to `capacity` bytes. A successful zero-byte read signals EOF. */
+typedef lql_status (*lql_stream_reader_fn)(void *user, unsigned char *buffer,
+                                           size_t capacity, size_t *out_len,
+                                           lql_error *error);
+
+/** Writes exactly the supplied output chunk or returns an error status. */
+typedef lql_status (*lql_stream_writer_fn)(void *user, const void *data,
+                                           size_t len, lql_error *error);
+
+typedef enum lql_stream_callback_result {
+  LQL_STREAM_CALLBACK_CONTINUE = 0,
+  LQL_STREAM_CALLBACK_STOP = 1,
+  LQL_STREAM_CALLBACK_ERROR = 2
+} lql_stream_callback_result;
+
+typedef enum lql_stream_output_mode {
+  LQL_STREAM_OUTPUT_DECISION_ONLY = 0,
+  LQL_STREAM_OUTPUT_SELECTED_RECORD = 1,
+  LQL_STREAM_OUTPUT_PROJECTION = 2,
+  LQL_STREAM_OUTPUT_MUTATION = 3,
+  LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION = 4
+} lql_stream_output_mode;
+
+typedef enum lql_stream_stop_reason {
+  LQL_STREAM_STOP_NONE = 0,
+  LQL_STREAM_STOP_RECORD_LIMIT = 1,
+  LQL_STREAM_STOP_MATCH_LIMIT = 2,
+  LQL_STREAM_STOP_BYTE_LIMIT = 3,
+  LQL_STREAM_STOP_CALLBACK = 4
+} lql_stream_stop_reason;
+
+typedef struct lql_stream_decision {
+  size_t record_index;
+  int matched;
+} lql_stream_decision;
+
+/** Invoked after a complete record has been validated and evaluated. */
+typedef lql_stream_callback_result (*lql_stream_decision_fn)(
+    void *user, const lql_stream_decision *decision, lql_error *error);
+
+typedef struct lql_stream_limits {
+  size_t max_records;
+  size_t max_matches;
+  size_t max_bytes;
+} lql_stream_limits;
+
+typedef struct lql_stream_request {
+  lql_stream_reader_fn reader;
+  void *reader_user;
+  lql_stream_writer_fn writer;
+  void *writer_user;
+  const lql_selector *selector;
+  const lql_projection *projection;
+  const lql_mutation *mutation;
+  lql_stream_output_mode output_mode;
+  int matched_only;
+  lql_stream_limits limits;
+  lql_stream_decision_fn on_decision;
+  void *decision_user;
+} lql_stream_request;
+
+typedef struct lql_stream_result {
+  size_t records_seen;
+  size_t records_matched;
+  size_t bytes_consumed;
+  int stopped_early;
+  lql_stream_stop_reason stop_reason;
+} lql_stream_result;
 
 typedef enum lql_selector_node_kind {
   LQL_SELECTOR_NODE_ALL = 0,
@@ -208,6 +281,13 @@ struct lql {
 lql_status lql_new(lql **out, lql_error *error);
 void lql_error_init(lql_error *error);
 const char *lql_status_string(lql_status status);
+
+/**
+ * Executes strict NDJSON through liblql's sole stream engine. Root arrays are
+ * rejected. Invalid arguments clear `result` before this function returns.
+ */
+lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
+                              lql_stream_result *result, lql_error *error);
 
 #ifdef __cplusplus
 }

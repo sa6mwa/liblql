@@ -190,6 +190,10 @@ const char *lql_status_string(lql_status status) {
     return "unsupported";
   case LQL_STATUS_STOP:
     return "stop";
+  case LQL_STATUS_CALLBACK_ERROR:
+    return "callback error";
+  case LQL_STATUS_IO_ERROR:
+    return "I/O error";
   }
   return "unknown";
 }
@@ -257,6 +261,7 @@ LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
   allocator->destroy(allocator, selector->date_gte_text);
   allocator->destroy(allocator, selector->date_lt_text);
   allocator->destroy(allocator, selector->date_lte_text);
+  lql_stream_program_destroy(self, selector);
   for (i = 0u; i < selector->child_count; ++i) {
     lql_selector_cleanup(self, &selector->children[i]);
   }

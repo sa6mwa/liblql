@@ -21,7 +21,8 @@
       "name": "release-vendored-lonejson",
       "inherits": "base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "clang"
       }
     }
   ],

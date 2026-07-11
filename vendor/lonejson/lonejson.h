@@ -1,4 +1,973 @@
+/*
+ * MIT License
+ *
+ * lonejson is Copyright (c) 2026 Michel Blomgren <mike@pkt.systems>
+ * https://pkt.systems
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 
+#ifndef LONEJSON_H
+#define LONEJSON_H
+
+#define LONEJSON_HAS_VALUE_SKIP 1
+
+#include <limits.h>
+#include <stddef.h>
+#include <stdio.h>
+
+#if defined(LJ_DISABLE_SHORT_NAMES) && !defined(LONEJSON_DISABLE_SHORT_NAMES)
+#define LONEJSON_DISABLE_SHORT_NAMES 1
+#endif
+
+#if defined(LJ_IMPLEMENTATION) && !defined(LONEJSON_IMPLEMENTATION)
+#define LONEJSON_IMPLEMENTATION
+#endif
+#if defined(LJ_WITH_CURL) && !defined(LONEJSON_WITH_CURL)
+#define LONEJSON_WITH_CURL
+#endif
+#if defined(LJ_WITH_OPENSSL) && !defined(LONEJSON_WITH_OPENSSL)
+#define LONEJSON_WITH_OPENSSL
+#endif
+#if defined(LJ_WITH_JWT) && !defined(LONEJSON_WITH_JWT)
+#define LONEJSON_WITH_JWT
+#endif
+#if defined(LJ_WITH_OIDC) && !defined(LONEJSON_WITH_OIDC)
+#define LONEJSON_WITH_OIDC
+#endif
+#if defined(LONEJSON_WITH_OIDC) && !defined(LONEJSON_WITH_JWT)
+#error "LONEJSON_WITH_OIDC requires LONEJSON_WITH_JWT"
+#endif
+#if defined(LONEJSON_WITH_OPENSSL)
+#include <openssl/bn.h>
+#include <openssl/core_names.h>
+#include <openssl/ec.h>
+#include <openssl/ecdsa.h>
+#include <openssl/evp.h>
+#include <openssl/param_build.h>
+#include <openssl/params.h>
+#include <openssl/rand.h>
+#include <openssl/rsa.h>
+#include <openssl/x509.h>
+#include <openssl/x509_vfy.h>
+#include <stdlib.h>
+#include <string.h>
+#endif
+#if defined(LJ_MALLOC) && !defined(LONEJSON_MALLOC)
+#define LONEJSON_MALLOC LJ_MALLOC
+#endif
+#if defined(LJ_CALLOC) && !defined(LONEJSON_CALLOC)
+#define LONEJSON_CALLOC LJ_CALLOC
+#endif
+#if defined(LJ_REALLOC) && !defined(LONEJSON_REALLOC)
+#define LONEJSON_REALLOC LJ_REALLOC
+#endif
+#if defined(LJ_FREE) && !defined(LONEJSON_FREE)
+#define LONEJSON_FREE LJ_FREE
+#endif
+#if defined(LJ_PARSER_BUFFER_SIZE) && !defined(LONEJSON_PARSER_BUFFER_SIZE)
+#define LONEJSON_PARSER_BUFFER_SIZE LJ_PARSER_BUFFER_SIZE
+#endif
+#if defined(LJ_READER_BUFFER_SIZE) && !defined(LONEJSON_READER_BUFFER_SIZE)
+#define LONEJSON_READER_BUFFER_SIZE LJ_READER_BUFFER_SIZE
+#endif
+#if defined(LJ_PUSH_PARSER_BUFFER_SIZE) &&                                     \
+    !defined(LONEJSON_PUSH_PARSER_BUFFER_SIZE)
+#define LONEJSON_PUSH_PARSER_BUFFER_SIZE LJ_PUSH_PARSER_BUFFER_SIZE
+#endif
+#if defined(LJ_STREAM_BUFFER_SIZE) && !defined(LONEJSON_STREAM_BUFFER_SIZE)
+#define LONEJSON_STREAM_BUFFER_SIZE LJ_STREAM_BUFFER_SIZE
+#endif
+#if defined(LJ_CANDIDATE_READ_BUFFER_SIZE) &&                                  \
+    !defined(LONEJSON_CANDIDATE_READ_BUFFER_SIZE)
+#define LONEJSON_CANDIDATE_READ_BUFFER_SIZE LJ_CANDIDATE_READ_BUFFER_SIZE
+#endif
+#if defined(LJ_CANDIDATE_READ_BUFFER_MIN_SIZE) &&                              \
+    !defined(LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE)
+#define LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE                                \
+  LJ_CANDIDATE_READ_BUFFER_MIN_SIZE
+#endif
+#if defined(LJ_CANDIDATE_READ_BUFFER_MAX_SIZE) &&                              \
+    !defined(LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE)
+#define LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE                                \
+  LJ_CANDIDATE_READ_BUFFER_MAX_SIZE
+#endif
+#if defined(LJ_SPOOL_MEMORY_LIMIT) && !defined(LONEJSON_SPOOL_MEMORY_LIMIT)
+#define LONEJSON_SPOOL_MEMORY_LIMIT LJ_SPOOL_MEMORY_LIMIT
+#endif
+#if defined(LJ_WRITE_MAX_OUTPUT_BYTES) &&                                      \
+    !defined(LONEJSON_WRITE_MAX_OUTPUT_BYTES)
+#define LONEJSON_WRITE_MAX_OUTPUT_BYTES LJ_WRITE_MAX_OUTPUT_BYTES
+#endif
+#if defined(LJ_SPOOL_TEMP_PATH_CAPACITY) &&                                    \
+    !defined(LONEJSON_SPOOL_TEMP_PATH_CAPACITY)
+#define LONEJSON_SPOOL_TEMP_PATH_CAPACITY LJ_SPOOL_TEMP_PATH_CAPACITY
+#endif
+#if defined(LJ_TRACK_WORKSPACE_USAGE) &&                                       \
+    !defined(LONEJSON_TRACK_WORKSPACE_USAGE)
+#define LONEJSON_TRACK_WORKSPACE_USAGE LJ_TRACK_WORKSPACE_USAGE
+#endif
+
+#if !defined(__cplusplus)
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+#include <stdbool.h>
+#elif !defined(bool)
+typedef int bool;
+#define bool bool
+#define true 1
+#define false 0
+#endif
+#endif
+
+#if defined(_MSC_VER)
+/** Unsigned 32-bit integer type used by lonejson public structs and APIs. */
+typedef unsigned __int32 lonejson_uint32;
+/** Signed 64-bit integer type used by lonejson public structs and APIs. */
+typedef __int64 lonejson_int64;
+/** Unsigned 64-bit integer type used by lonejson public structs and APIs. */
+typedef unsigned __int64 lonejson_uint64;
+#elif defined(__GNUC__) || defined(__clang__)
+/** Unsigned 32-bit integer type used by lonejson public structs and APIs. */
+__extension__ typedef unsigned long lonejson_uint32;
+/** Signed 64-bit integer type used by lonejson public structs and APIs. */
+__extension__ typedef signed long long lonejson_int64;
+/** Unsigned 64-bit integer type used by lonejson public structs and APIs. */
+__extension__ typedef unsigned long long lonejson_uint64;
+#else
+/** Unsigned 32-bit integer type used by lonejson public structs and APIs. */
+typedef unsigned long lonejson_uint32;
+/** Signed 64-bit integer type used by lonejson public structs and APIs. */
+typedef signed long long lonejson_int64;
+/** Unsigned 64-bit integer type used by lonejson public structs and APIs. */
+typedef unsigned long long lonejson_uint64;
+#endif
+
+#if !defined(SIZE_MAX)
+#define SIZE_MAX ((size_t)-1)
+#endif
+
+#if !defined(LONEJSON_UINT64_MAX)
+#define LONEJSON_UINT64_MAX ((lonejson_uint64) ~(lonejson_uint64)0)
+#endif
+
+#define LONEJSON_HAS_CANDIDATE_RUN_STAGED 1
+#define LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP 1
+
+#if defined(_MSC_VER)
+#define LONEJSON_SHORT_ALIAS_INLINE static __inline
+#elif defined(__GNUC__) || defined(__clang__)
+#define LONEJSON_SHORT_ALIAS_INLINE                                            \
+  static __inline__ __attribute__((unused, always_inline))
+#else
+#define LONEJSON_SHORT_ALIAS_INLINE static
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @file lonejson.h
+ *
+ * lonejson is a schema-guided JSON library for C. In the source tree and in
+ * the binary release archives, this header is the public declarations-only
+ * interface used with the compiled `liblonejson` library. The release process
+ * also produces a separate standalone single-header artifact for projects that
+ * prefer to vendor one file directly. lonejson is meant for programs that
+ * already know the shape of the data they care about and want to move between
+ * JSON objects and C structs without dragging a generic DOM through the middle
+ * of the program. The library can parse from memory, files, file descriptors,
+ * and object-framed streams; it can serialize to buffers, sinks, files, and
+ * JSON Lines; and it can keep very large field values out of memory by
+ * spilling inbound values to temporary files or by serializing outbound values
+ * directly from paths, `FILE *`, or file descriptors.
+ *
+ * The usual lonejson workflow is simple. You define a C struct, describe its
+ * JSON-visible fields with `LONEJSON_FIELD_*` macros, bind those fields into a
+ * `lonejson_map`, and then parse or serialize through that map. The design is
+ * deliberately schema-guided: lonejson is at its best when you want stable,
+ * typed decoding into known structures, predictable fixed-capacity behavior,
+ * and efficient object-framed streaming instead of a line-delimited protocol.
+ *
+ * The project home, release artifacts, and full example programs are at:
+ *
+ *   https://github.com/sa6mwa/lonejson
+ *   https://github.com/sa6mwa/lonejson/tree/main/examples
+ *
+ * In the normal linked-library build, include this header and link
+ * `liblonejson`:
+ *
+ * ```c
+ * #include "lonejson.h"
+ * ```
+ *
+ * If you are using the generated standalone single-header release artifact,
+ * define `LONEJSON_IMPLEMENTATION` in exactly one translation unit before
+ * including that generated header:
+ *
+ * ```c
+ * #define LONEJSON_IMPLEMENTATION
+ * #include "lonejson.h"
+ * ```
+ *
+ * Short aliases are enabled by default. The long names remain canonical, but
+ * the library also exposes `lj_*` and `LJ_*` aliases for projects that prefer
+ * a shorter prefix. If those names collide with another dependency, disable
+ * them before the include:
+ *
+ * ```c
+ * #define LONEJSON_DISABLE_SHORT_NAMES 1
+ * #include "lonejson.h"
+ * ```
+ *
+ * The public API falls into a few coherent groups. Mapping is done with
+ * `LONEJSON_FIELD_*` and `LONEJSON_MAP_DEFINE(...)`. One-shot parsing is
+ * handled by `lonejson_parse_cstr`, `lonejson_parse_buffer`,
+ * `lonejson_parse_reader`, `lonejson_parse_filep`, and `lonejson_parse_path`,
+ * with `lonejson_validate_*` variants available when you only need syntax
+ * validation. Object-framed streams use `lonejson_stream_open_*`,
+ * `lonejson_stream_next`, `lonejson_stream_error`, and
+ * `lonejson_stream_close`. Selected-array streams use
+ * `lonejson_array_stream_open_*`, `lonejson_array_stream_next`,
+ * `lonejson_array_stream_next_value`, `lonejson_array_stream_error`, and
+ * `lonejson_array_stream_close`. Serialization is exposed through
+ * `lonejson_serialize_*` and `lonejson_serialize_jsonl_*`. Ownership and reuse
+ * of mapped values is handled by `lonejson_cleanup` and `lonejson_reset`.
+ * Large inbound values are represented by `lonejson_spooled`, large outbound
+ * values by `lonejson_source`, and arbitrary embedded JSON values by
+ * `lonejson_json_value`. One arbitrary JSON value can also be consumed without
+ * a schema through `lonejson_value_visitor` and `lonejson_visit_value_*`.
+ * Behavior is configured through one instantiated `lonejson` runtime and its
+ * `lonejson_config`.
+ *
+ * The small examples below are meant as orientation, not as exhaustive
+ * coverage. The repository examples are fuller programs with proper error
+ * paths, build instructions, and end-to-end behavior.
+ *
+ * Parsing one JSON object into a struct looks like this:
+ *
+ * ```c
+ * #include "lonejson.h"
+ *
+ * typedef struct user_doc {
+ *   char *name;
+ *   lonejson_int64 age;
+ * } user_doc;
+ *
+ * static const lonejson_field user_doc_fields[] = {
+ *   LONEJSON_FIELD_STRING_ALLOC_REQ(user_doc, name, "name"),
+ *   LONEJSON_FIELD_I64(user_doc, age, "age")
+ * };
+ *
+ * LONEJSON_MAP_DEFINE(user_doc_map, user_doc, user_doc_fields);
+ *
+ * user_doc doc;
+ * lonejson_error error;
+ * lonejson_status status;
+ *
+ * lonejson *runtime = lonejson_new(NULL, &error);
+ * if (runtime == NULL) {
+ *   return;
+ * }
+ *
+ * status = lonejson_parse_cstr(
+ *   runtime, &user_doc_map, &doc, "{\"name\":\"Ada\",\"age\":37}", &error);
+ * if (status != LONEJSON_STATUS_OK) {
+ *   lonejson_free(runtime);
+ *   return;
+ * }
+ *
+ * lonejson_cleanup(&user_doc_map, &doc);
+ * lonejson_free(runtime);
+ * ```
+ *
+ * Object-framed streaming is the right fit when the input consists of
+ * consecutive JSON objects with optional whitespace between them. lonejson does
+ * not treat newlines as framing; it treats completed objects as framing.
+ *
+ * ```c
+ * lonejson_stream *stream;
+ * lonejson_stream_result result;
+ * user_doc doc;
+ * lonejson_error error;
+ *
+ * lonejson *runtime = lonejson_new(NULL, &error);
+ * if (runtime == NULL) {
+ *   return;
+ * }
+ *
+ * stream = lonejson_stream_open_fd(runtime, &user_doc_map, fd, &error);
+ * if (stream == NULL) {
+ *   lonejson_free(runtime);
+ *   return;
+ * }
+ *
+ * for (;;) {
+ *   result = lonejson_stream_next(stream, &doc, &error);
+ *   if (result == LONEJSON_STREAM_OBJECT) {
+ *     lonejson_cleanup(&user_doc_map, &doc);
+ *     continue;
+ *   }
+ *   if (result == LONEJSON_STREAM_EOF) {
+ *     break;
+ *   }
+ *   break;
+ * }
+ *
+ * lonejson_stream_close(stream);
+ * lonejson_free(runtime);
+ * ```
+ *
+ * Selected-array streaming is the right fit when one valid JSON document
+ * contains an array that should be consumed item by item. `""` selects a root
+ * array. A non-empty v1 path selects one direct root object key such as
+ * `"items"`; implicit fan-out paths such as `"boards.items"` are rejected.
+ *
+ * ```c
+ * lonejson_array_stream *items;
+ * lonejson_array_stream_result result;
+ * user_doc doc;
+ * lonejson_error error;
+ *
+ * lonejson *runtime = lonejson_new(NULL, &error);
+ * if (runtime == NULL) {
+ *   return;
+ * }
+ *
+ * items = lonejson_array_stream_open_path(runtime, "items", "/tmp/users.json",
+ *                                         &error);
+ * if (items == NULL) {
+ *   lonejson_free(runtime);
+ *   return;
+ * }
+ *
+ * for (;;) {
+ *   result = lonejson_array_stream_next(items, &user_doc_map, &doc, &error);
+ *   if (result == LONEJSON_ARRAY_STREAM_ITEM) {
+ *     lonejson_cleanup(&user_doc_map, &doc);
+ *     continue;
+ *   }
+ *   if (result == LONEJSON_ARRAY_STREAM_EOF) {
+ *     break;
+ *   }
+ *   break;
+ * }
+ *
+ * lonejson_array_stream_close(items);
+ * lonejson_free(runtime);
+ * ```
+ *
+ * Serializing one mapped object is symmetrical:
+ *
+ * ```c
+ * char buffer[256];
+ * size_t written = 0u;
+ * lonejson_config config = lonejson_default_config();
+ * lonejson *runtime;
+ * lonejson_error error;
+ *
+ * config.write_pretty = 1;
+ * runtime = lonejson_new(&config, &error);
+ * if (runtime == NULL) {
+ *   return;
+ * }
+ *
+ * if (lonejson_serialize_buffer(
+ *       runtime, &user_doc_map, &doc, buffer, sizeof(buffer), &written,
+ *       &error) != LONEJSON_STATUS_OK) {
+ *   lonejson_free(runtime);
+ *   return;
+ * }
+ * lonejson_free(runtime);
+ * ```
+ *
+ * JSON Lines output is available when you need one compact object per line:
+ *
+ * ```c
+ * user_doc docs[2];
+ * char out[256];
+ * size_t written = 0u;
+ * lonejson_error error;
+ * lonejson *runtime = lonejson_new(NULL, &error);
+ *
+ * lonejson_serialize_jsonl_buffer(
+ *   runtime, &user_doc_map, docs, 2u, 0u, out, sizeof(out), &written, &error);
+ * lonejson_free(runtime);
+ * ```
+ *
+ * Very large inbound values can spill to disk instead of growing without
+ * bound in memory:
+ *
+ * ```c
+ * typedef struct blob_doc {
+ *   lonejson_spooled body;
+ * } blob_doc;
+ *
+ * lonejson_config config = lonejson_default_config();
+ * lonejson *runtime;
+ *
+ * config.spool_blob.memory_limit = 64u * 1024u;
+ * config.spool_blob.max_bytes = 32u * 1024u * 1024u;
+ * config.spool_blob.temp_dir = "/tmp";
+ * runtime = lonejson_new(&config, &error);
+ * if (runtime == NULL) {
+ *   return;
+ * }
+ *
+ * static const lonejson_field blob_doc_fields[] = {
+ *   LONEJSON_FIELD_STRING_STREAM_CLASS(blob_doc, body, "body",
+ *                                     LONEJSON_SPOOL_CLASS_BLOB)
+ * };
+ *
+ * LONEJSON_MAP_DEFINE(blob_doc_map, blob_doc, blob_doc_fields);
+ *
+ * blob_doc doc;
+ *
+ * lonejson_parse_path(runtime, &blob_doc_map, &doc, "input.json", &error);
+ * lonejson_spooled_write_to_sink(&doc.body, sink_fn, sink_user);
+ * lonejson_cleanup(&blob_doc_map, &doc);
+ * lonejson_free(runtime);
+ * ```
+ *
+ * Outbound source-backed fields cover the opposite direction. They let you
+ * serialize a JSON string or base64 field directly from a path, `FILE *`, or
+ * file descriptor without first building a spool:
+ *
+ * ```c
+ * typedef struct outbound_doc {
+ *   lonejson_source payload;
+ * } outbound_doc;
+ *
+ * static const lonejson_field outbound_doc_fields[] = {
+ *   LONEJSON_FIELD_BASE64_SOURCE_REQ(outbound_doc, payload, "payload")
+ * };
+ *
+ * LONEJSON_MAP_DEFINE(outbound_doc_map, outbound_doc, outbound_doc_fields);
+ *
+ * outbound_doc doc;
+ * lonejson_error error;
+ * lonejson *runtime = lonejson_new(NULL, &error);
+ * lonejson_source_set_path(&doc.payload, "payload.bin");
+ * lonejson_serialize_path(runtime, &outbound_doc_map, &doc, "request.json",
+ *                         &error);
+ * lonejson_cleanup(&outbound_doc_map, &doc);
+ * lonejson_free(runtime);
+ * ```
+ *
+ * Embedded arbitrary JSON values are stream-first on parse. The caller
+ * configures whether the nested value should be streamed to a raw sink,
+ * streamed as structured visitor callbacks, or explicitly captured for later
+ * reuse:
+ *
+ * ```c
+ * typedef struct query_doc {
+ *   char namespace_[16];
+ *   lonejson_json_value selector;
+ * } query_doc;
+ *
+ * static const lonejson_field query_doc_fields[] = {
+ *   LONEJSON_FIELD_STRING_FIXED_REQ(query_doc, namespace_, "namespace",
+ *                                   LONEJSON_OVERFLOW_FAIL),
+ *   LONEJSON_FIELD_JSON_VALUE_REQ(query_doc, selector, "selector")
+ * };
+ *
+ * LONEJSON_MAP_DEFINE(query_doc_map, query_doc, query_doc_fields);
+ *
+ * query_doc doc;
+ * lonejson_config config = lonejson_default_config();
+ * lonejson *runtime;
+ *
+ * config.clear_destination_by_default = 0;
+ * lj = lonejson_new(&config, &error);
+ * lonejson_init(lj, &query_doc_map, &doc);
+ * lonejson_json_value_enable_parse_capture(&doc.selector, &error);
+ * lonejson_parse_cstr(lj, &query_doc_map, &doc,
+ *                     "{\"namespace\":\"ops\",\"selector\":{\"op\":\"and\"}}",
+ *                     &error);
+ * lonejson_json_value_write_to_sink(&doc.selector, sink_fn, sink_user, &error);
+ * lonejson_cleanup(&query_doc_map, &doc);
+ * lonejson_free(lj);
+ * ```
+ *
+ * The lower-level visitor API is useful when you need to parse exactly one
+ * JSON value without a schema and without retaining it:
+ *
+ * ```c
+ * lonejson_value_visitor visitor = lonejson_default_value_visitor();
+ * lonejson_config config = lonejson_default_config();
+ * lonejson *runtime;
+ *
+ * visitor.object_begin = on_object_begin;
+ * visitor.object_key_chunk = on_object_key_chunk;
+ * visitor.string_chunk = on_string_chunk;
+ * visitor.number_chunk = on_number_chunk;
+ * config.json_value_max_total_bytes = 512u * 1024u;
+ * lj = lonejson_new(&config, &error);
+ *
+ * lonejson_visit_value_cstr(lj, "{\"ok\":true,\"n\":42}", &visitor, user,
+ *                           &error);
+ * lonejson_free(lj);
+ * ```
+ *
+ * The repository examples expand these patterns into complete programs covering
+ * one-shot parsing, object-framed streams, fixed-capacity fields, spool-to-disk
+ * fields, source-backed outbound fields, JSONL output, optional curl
+ * integration, and the Lua binding. For public structs, prefer lonejson's
+ * explicit initializers over manual `memset` or `{0}`:
+ * `lonejson_new`, `lonejson_default_config`, `lonejson_init`,
+ * `lonejson_error_init`, `lonejson_default_value_visitor`, and the
+ * handle-specific `*_init` helpers.
+ */
+
+/** Major component of the lonejson header version. */
+#define LONEJSON_VERSION_MAJOR 0
+/** Minor component of the lonejson header version. */
+#define LONEJSON_VERSION_MINOR 41
+/** Patch component of the lonejson header version. */
+#define LONEJSON_VERSION_PATCH 0
+/** Shared-library ABI / SONAME version for binary compatibility tracking. */
+#define LONEJSON_ABI_VERSION 24
+
+/** Marks a mapping field as required during parse. */
+#define LONEJSON_FIELD_REQUIRED (1u << 0)
+/** Omits an optional field during serialization when its value is JSON `null`.
+ */
+#define LONEJSON_FIELD_OMIT_NULL (1u << 1)
+/** Omits an optional field during serialization when its value is empty. This
+ * also implies `LONEJSON_FIELD_OMIT_NULL` behavior. */
+#define LONEJSON_FIELD_OMIT_EMPTY (1u << 2)
+/** Internal flag used by presence-gated primitive field macros. */
+#define LONEJSON_FIELD_HAS_PRESENCE (1u << 3)
+/** Internal flag allowing JSON `null` to parse as an absent optional primitive
+ * presence field. */
+#define LONEJSON_FIELD_ACCEPT_NULL (1u << 4)
+/* Internal-only flag used by implementation-generated maps. */
+#define LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE (1u << 31)
+#define LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE                              \
+  LONEJSON__FIELD_JSON_VALUE_DEFAULT_CAPTURE
+
+/** Internal/runtime flag indicating that an array container owns its backing
+ * allocation. */
+#define LONEJSON_ARRAY_OWNS_ITEMS (1u << 0)
+/** Marks an array container as using caller-owned fixed-capacity storage. */
+#define LONEJSON_ARRAY_FIXED_CAPACITY (1u << 1)
+/** Overrides lonejson's internal `malloc` implementation when
+ * `LONEJSON_IMPLEMENTATION` is enabled. */
+#ifndef LONEJSON_MALLOC
+#define LONEJSON_MALLOC malloc
+#endif
+/** Overrides lonejson's internal `calloc` implementation when
+ * `LONEJSON_IMPLEMENTATION` is enabled. */
+#ifndef LONEJSON_CALLOC
+#define LONEJSON_CALLOC calloc
+#endif
+/** Overrides lonejson's internal `realloc` implementation when
+ * `LONEJSON_IMPLEMENTATION` is enabled. */
+#ifndef LONEJSON_REALLOC
+#define LONEJSON_REALLOC realloc
+#endif
+/** Overrides lonejson's internal `free` implementation when
+ * `LONEJSON_IMPLEMENTATION` is enabled. */
+#ifndef LONEJSON_FREE
+#define LONEJSON_FREE free
+#endif
+
+/** Total internal parser workspace budget used by one-shot parse/validate
+ * entry points. */
+#ifndef LONEJSON_PARSER_BUFFER_SIZE
+#define LONEJSON_PARSER_BUFFER_SIZE 4096u
+#endif
+/** Private read-buffer size used by one-shot reader-based parse/validate entry
+ * points. */
+#ifndef LONEJSON_READER_BUFFER_SIZE
+#define LONEJSON_READER_BUFFER_SIZE 1024u
+#endif
+/** Total internal parser workspace budget used by the push parser.
+ * Defaults to `LONEJSON_PARSER_BUFFER_SIZE`. */
+#ifndef LONEJSON_PUSH_PARSER_BUFFER_SIZE
+#define LONEJSON_PUSH_PARSER_BUFFER_SIZE LONEJSON_PARSER_BUFFER_SIZE
+#endif
+/** Private read-buffer size used by object-framed streaming APIs. Defaults to
+ * `LONEJSON_READER_BUFFER_SIZE`. */
+#ifndef LONEJSON_STREAM_BUFFER_SIZE
+#define LONEJSON_STREAM_BUFFER_SIZE LONEJSON_READER_BUFFER_SIZE
+#endif
+/** Default runtime candidate reader/file/path/fd transport buffer size.
+ *
+ * `lonejson_default_config()` copies this value into
+ * `lonejson_config.candidate_read_buffer_size`. Buffer-backed candidate APIs
+ * ignore it because the complete input is already caller-owned memory.
+ *
+ * The default intentionally follows `LONEJSON_PARSER_BUFFER_SIZE`. Builds that
+ * lower the parser buffer below `LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE` must
+ * also set `LONEJSON_CANDIDATE_READ_BUFFER_SIZE` to a supported value;
+ * otherwise `lonejson_new()` rejects the runtime config before candidate APIs
+ * are used.
+ */
+#ifndef LONEJSON_CANDIDATE_READ_BUFFER_SIZE
+#define LONEJSON_CANDIDATE_READ_BUFFER_SIZE LONEJSON_PARSER_BUFFER_SIZE
+#endif
+/** Minimum accepted `lonejson_config.candidate_read_buffer_size`.
+ *
+ * `lonejson_new()` rejects non-zero candidate read buffers smaller than this
+ * bound. Zero is accepted as "use `LONEJSON_CANDIDATE_READ_BUFFER_SIZE`".
+ */
+#ifndef LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE
+#define LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE 1024u
+#endif
+/** Maximum accepted `lonejson_config.candidate_read_buffer_size`.
+ *
+ * `lonejson_new()` rejects candidate read buffers larger than this bound.
+ */
+#ifndef LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE
+#define LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE (1024u * 1024u)
+#endif
+/** Transient per-parser raw candidate capture staging buffer bytes. */
+#ifndef LONEJSON_RAW_CAPTURE_BUFFER_SIZE
+#define LONEJSON_RAW_CAPTURE_BUFFER_SIZE (32u * 1024u)
+#endif
+/** Default in-memory threshold before streamed fields spill into a temporary
+ * file. */
+#ifndef LONEJSON_SPOOL_MEMORY_LIMIT
+#define LONEJSON_SPOOL_MEMORY_LIMIT 65536u
+#endif
+/** Default hard cap for spool-backed streamed text/base64 fields. */
+#ifndef LONEJSON_SPOOL_MAX_BYTES
+#define LONEJSON_SPOOL_MAX_BYTES (10u * 1024u * 1024u)
+#endif
+/** Default decoded-byte cap for one dynamically allocated mapped string
+ * field during parse. Zero disables the ceiling when set on
+ * `lonejson_config.max_dynamic_string_bytes`.
+ */
+#ifndef LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES
+#define LONEJSON_PARSE_MAX_DYNAMIC_STRING_BYTES (128u * 1024u)
+#endif
+/** Default hard cap for lonejson-owned heap bytes kept live by one parse call.
+ * Zero disables the ceiling when set on `lonejson_config.max_alloc_bytes`.
+ */
+#ifndef LONEJSON_PARSE_MAX_ALLOC_BYTES
+#define LONEJSON_PARSE_MAX_ALLOC_BYTES (1024u * 1024u)
+#endif
+/** Default hard cap for serializer-owned output buffers. Set explicit
+ * `lonejson_config.write_max_output_bytes` when a runtime needs a larger
+ * materialized result.
+ */
+#ifndef LONEJSON_WRITE_MAX_OUTPUT_BYTES
+#define LONEJSON_WRITE_MAX_OUTPUT_BYTES (8u * 1024u * 1024u)
+#endif
+/** Fixed path-buffer capacity used for named temporary spool files. */
+#ifndef LONEJSON_SPOOL_TEMP_PATH_CAPACITY
+#define LONEJSON_SPOOL_TEMP_PATH_CAPACITY 512u
+#endif
+
+#ifndef LONEJSON_TRACK_WORKSPACE_USAGE
+/** Enables parser workspace high-water tracking when non-zero. */
+#define LONEJSON_TRACK_WORKSPACE_USAGE 0
+#endif
+
+/** Outcome codes returned by lonejson parse, stream, and serialization APIs.
+ */
+typedef enum lonejson_status {
+  /** Operation completed successfully. */
+  LONEJSON_STATUS_OK = 0,
+  /** Caller supplied an invalid pointer, size, or incompatible argument. */
+  LONEJSON_STATUS_INVALID_ARGUMENT,
+  /** Input was not syntactically valid JSON. */
+  LONEJSON_STATUS_INVALID_JSON,
+  /** A JSON value did not match the mapped destination field type. */
+  LONEJSON_STATUS_TYPE_MISMATCH,
+  /** A field marked required by the map was not present in the object. */
+  LONEJSON_STATUS_MISSING_REQUIRED_FIELD,
+  /** Duplicate object keys were rejected by parse options. */
+  LONEJSON_STATUS_DUPLICATE_FIELD,
+  /** A fixed-capacity destination or configured spool limit was exceeded. */
+  LONEJSON_STATUS_OVERFLOW,
+  /** Output was truncated under a non-failing overflow policy. */
+  LONEJSON_STATUS_TRUNCATED,
+  /** lonejson could not allocate internal or mapped dynamic storage. */
+  LONEJSON_STATUS_ALLOCATION_FAILED,
+  /** A caller-provided sink or reader callback reported failure. */
+  LONEJSON_STATUS_CALLBACK_FAILED,
+  /** An underlying file descriptor or `FILE *` operation failed. */
+  LONEJSON_STATUS_IO_ERROR,
+  /** The operation is valid, but unsupported for the selected runtime shape. */
+  LONEJSON_STATUS_UNSUPPORTED,
+  /** Internal visitor request to consume the current value without callbacks.
+   */
+  LONEJSON_STATUS_SKIP_VALUE,
+  /** lonejson encountered an unexpected internal state. */
+  LONEJSON_STATUS_INTERNAL_ERROR
+} lonejson_status;
+
+/** Internal field categories understood by `lonejson_field` maps. Most users
+ * select these indirectly through the `LONEJSON_FIELD_*` macros. */
+typedef enum lonejson_field_kind {
+  /** JSON string stored in a fixed buffer or allocated `char *`. */
+  LONEJSON_FIELD_KIND_STRING = 0,
+  /** JSON string streamed into a `lonejson_spooled` handle. */
+  LONEJSON_FIELD_KIND_STRING_STREAM = 1,
+  /** Base64 JSON string decoded into a `lonejson_spooled` handle. */
+  LONEJSON_FIELD_KIND_BASE64_STREAM = 2,
+  /** Serialize-only JSON string streamed from a `lonejson_source` handle. */
+  LONEJSON_FIELD_KIND_STRING_SOURCE = 3,
+  /** Serialize-only Base64 JSON string streamed from a `lonejson_source`
+   * handle. */
+  LONEJSON_FIELD_KIND_BASE64_SOURCE = 4,
+  /** Arbitrary embedded JSON value stored or streamed through
+   * `lonejson_json_value`. */
+  LONEJSON_FIELD_KIND_JSON_VALUE = 5,
+  /** JSON integer stored in a `lonejson_int64`. */
+  LONEJSON_FIELD_KIND_I64 = 6,
+  /** JSON unsigned integer stored in a `lonejson_uint64`. */
+  LONEJSON_FIELD_KIND_U64 = 7,
+  /** JSON number stored in a `double`. */
+  LONEJSON_FIELD_KIND_F64 = 8,
+  /** JSON boolean stored in a `bool`. */
+  LONEJSON_FIELD_KIND_BOOL = 9,
+  /** Nested JSON object mapped by a nested `lonejson_map`. */
+  LONEJSON_FIELD_KIND_OBJECT = 10,
+  /** JSON array of strings stored in `lonejson_string_array`. */
+  LONEJSON_FIELD_KIND_STRING_ARRAY = 11,
+  /** JSON array of integers stored in `lonejson_i64_array`. */
+  LONEJSON_FIELD_KIND_I64_ARRAY = 12,
+  /** JSON array of unsigned integers stored in `lonejson_u64_array`. */
+  LONEJSON_FIELD_KIND_U64_ARRAY = 13,
+  /** JSON array of numbers stored in `lonejson_f64_array`. */
+  LONEJSON_FIELD_KIND_F64_ARRAY = 14,
+  /** JSON array of booleans stored in `lonejson_bool_array`. */
+  LONEJSON_FIELD_KIND_BOOL_ARRAY = 15,
+  /** JSON array of nested objects stored in `lonejson_object_array`. */
+  LONEJSON_FIELD_KIND_OBJECT_ARRAY = 16,
+  /** JSON array of strings streamed through `lonejson_string_array_stream`. */
+  LONEJSON_FIELD_KIND_STRING_ARRAY_STREAM = 17,
+  /** JSON array of mapped objects streamed item-by-item. */
+  LONEJSON_FIELD_KIND_MAPPED_ARRAY_STREAM = 18
+} lonejson_field_kind;
+
+/** Backing source kind used by `lonejson_source` outbound field handles. */
+typedef enum lonejson_source_kind {
+  /** No source configured. Serializes as JSON `null`. */
+  LONEJSON_SOURCE_NONE = 0,
+  /** Read raw bytes from a caller-provided `FILE *`. */
+  LONEJSON_SOURCE_FILE = 1,
+  /** Read raw bytes from a caller-provided file descriptor. */
+  LONEJSON_SOURCE_FD = 2,
+  /** Open and read a filesystem path on each serialization. */
+  LONEJSON_SOURCE_PATH = 3
+} lonejson_source_kind;
+
+/** Backing mode used by `lonejson_json_value` opaque embedded JSON handles. */
+typedef enum lonejson_json_value_kind {
+  /** No value configured. Serializes as JSON `null`. */
+  LONEJSON_JSON_VALUE_NULL = 0,
+  /** Owned compact JSON bytes retained in memory. */
+  LONEJSON_JSON_VALUE_BUFFER = 1,
+  /** Read JSON bytes from a caller-provided reader callback. */
+  LONEJSON_JSON_VALUE_READER = 2,
+  /** Read JSON bytes from a caller-provided `FILE *`. */
+  LONEJSON_JSON_VALUE_FILE = 3,
+  /** Read JSON bytes from a caller-provided file descriptor. */
+  LONEJSON_JSON_VALUE_FD = 4,
+  /** Open and read JSON bytes from a filesystem path on each serialization. */
+  LONEJSON_JSON_VALUE_PATH = 5
+} lonejson_json_value_kind;
+
+/** JSON value category reported to old-value-dependent rewrite callbacks. */
+typedef enum lonejson_value_type {
+  /** No existing selected value was present. */
+  LONEJSON_VALUE_ABSENT = 0,
+  /** Existing selected value is a JSON object. */
+  LONEJSON_VALUE_OBJECT = 1,
+  /** Existing selected value is a JSON array. */
+  LONEJSON_VALUE_ARRAY = 2,
+  /** Existing selected value is a JSON string. */
+  LONEJSON_VALUE_STRING = 3,
+  /** Existing selected value is a JSON number. */
+  LONEJSON_VALUE_NUMBER = 4,
+  /** Existing selected value is a JSON boolean. */
+  LONEJSON_VALUE_BOOL = 5,
+  /** Existing selected value is JSON `null`. */
+  LONEJSON_VALUE_NULL = 6
+} lonejson_value_type;
+
+/** Storage model used by a mapped field. */
+typedef enum lonejson_storage_kind {
+  /** lonejson owns and allocates storage as needed. */
+  LONEJSON_STORAGE_DYNAMIC = 0,
+  /** Caller provides fixed-capacity storage inside the mapped struct. */
+  LONEJSON_STORAGE_FIXED = 1
+} lonejson_storage_kind;
+
+/** Behavior used when a fixed-capacity output or mapped field is too small. */
+typedef enum lonejson_overflow_policy {
+  /** Treat overflow as an error and stop. */
+  LONEJSON_OVERFLOW_FAIL = 0,
+  /** Truncate but report `LONEJSON_STATUS_TRUNCATED`. */
+  LONEJSON_OVERFLOW_TRUNCATE = 1,
+  /** Truncate silently while still setting `error.truncated`. */
+  LONEJSON_OVERFLOW_TRUNCATE_SILENT = 2
+} lonejson_overflow_policy;
+
+/** Detailed error information populated by most public APIs. Caller-provided
+ * error outputs do not need prior initialization because lonejson overwrites
+ * them on entry, but `lonejson_error_init` is available when you want an
+ * explicit known-empty state.
+ */
+typedef struct lonejson_error {
+  /** Primary status code for the failure or warning. */
+  lonejson_status code;
+  /** 1-based input line number when relevant. */
+  size_t line;
+  /** 1-based input column number when relevant. */
+  size_t column;
+  /** 1-based byte offset into the current input stream or buffer. */
+  size_t offset;
+  /** `errno`-style code for I/O and callback-backed failures. */
+  int system_errno;
+  /** Non-zero when truncation occurred under a permissive overflow policy. */
+  int truncated;
+  /** Human-readable summary suitable for logs and diagnostics. */
+  char message[160];
+} lonejson_error;
+
+/** Optional allocation counters used by custom allocators. lonejson updates
+ * these counters only in debug builds. Release builds leave them untouched.
+ */
+typedef struct lonejson_allocator_stats {
+  /** Number of successful allocate calls performed by lonejson. */
+  size_t alloc_calls;
+  /** Number of successful realloc calls performed by lonejson. */
+  size_t realloc_calls;
+  /** Number of free calls performed by lonejson. */
+  size_t free_calls;
+  /** Current user-visible bytes owned by lonejson through this allocator. */
+  size_t bytes_live;
+  /** Peak user-visible bytes owned by lonejson through this allocator. */
+  size_t peak_bytes_live;
+} lonejson_allocator_stats;
+
+/** Callback signature used for lonejson-owned allocations. */
+typedef void *(*lonejson_malloc_fn)(void *ctx, size_t size);
+/** Callback signature used for lonejson-owned reallocations. */
+typedef void *(*lonejson_realloc_fn)(void *ctx, void *ptr, size_t size);
+/** Callback signature used for lonejson-owned frees. */
+typedef void (*lonejson_free_fn)(void *ctx, void *ptr);
+
+/** Allocator vtable used by parser, spool, stream, and lonejson-owned output
+ * buffers. When all three callbacks are `NULL`, lonejson falls back to
+ * `lonejson_default_allocator()`. Partial callback sets are invalid; callers
+ * must provide either all callbacks or none. `malloc_fn` and `realloc_fn` must
+ * return pointers aligned at least as strictly as standard `malloc`; returning
+ * weaker-aligned storage is undefined behavior because lonejson may place
+ * internal owned-allocation headers at those addresses. Custom allocators that
+ * prepend private headers must over-align the returned payload pointer, for
+ * example by using a header union containing `void *`, integer, `double`, and
+ * `long double` members.
+ */
+typedef struct lonejson_allocator {
+  /** Allocation callback. `NULL` means use the default allocator. */
+  lonejson_malloc_fn malloc_fn;
+  /** Reallocation callback. `NULL` means use the default allocator. */
+  lonejson_realloc_fn realloc_fn;
+  /** Free callback. `NULL` means use the default allocator. */
+  lonejson_free_fn free_fn;
+  /** Opaque allocator context passed to every callback. */
+  void *ctx;
+  /** Optional debug allocation counters updated by lonejson in debug builds. */
+  lonejson_allocator_stats *stats;
+} lonejson_allocator;
+
+/** Forward declaration for the optional auth provider vtable. */
+typedef struct lonejson_auth_provider lonejson_auth_provider;
+/** Forward declaration for the optional auth HTTP provider vtable. */
+typedef struct lonejson_http_provider lonejson_http_provider;
+
+/** Named spool policy selectors used by streamed text and base64 fields. */
+typedef enum lonejson_spool_class {
+  /** Use the runtime's default spool policy. */
+  LONEJSON_SPOOL_CLASS_DEFAULT = 0,
+  /** Use the runtime's blob-oriented spool policy. */
+  LONEJSON_SPOOL_CLASS_BLOB = 1,
+  /** Use the runtime's large-text spool policy. */
+  LONEJSON_SPOOL_CLASS_LARGE_TEXT = 2
+} lonejson_spool_class;
+
+/** Runtime spool policy configuration. */
+typedef struct lonejson_spool_policy {
+  /** Maximum bytes retained in memory before spilling additional data. */
+  size_t memory_limit;
+  /** Hard maximum logical size in bytes. Zero means unbounded. */
+  size_t max_bytes;
+  /** Optional temporary directory for named spool files. `lonejson_new()`
+   * copies this path into runtime-owned storage.
+   */
+  const char *temp_dir;
+} lonejson_spool_policy;
+
+/** Runtime-wide lonejson configuration.
+ *
+ * Pass this to `lonejson_new()` to establish one parser/serializer runtime and
+ * its default policy. Passing `NULL` to `lonejson_new()` resolves the library
+ * defaults.
+ */
+typedef struct lonejson_config {
+  /** Maximum lonejson-owned live parse heap bytes. Zero disables the ceiling.
+   */
+  size_t max_alloc_bytes;
+  /** Maximum decoded byte length for one dynamically allocated mapped string.
+   * Zero disables the ceiling.
+   */
+  size_t max_dynamic_string_bytes;
+  /** Maximum mapped parse depth. */
+  size_t max_depth;
+  /** Maximum bytes accepted while parsing one arbitrary `JSON_VALUE`. Zero
+   * disables the ceiling.
+   */
+  size_t json_value_max_total_bytes;
+  /** Maximum decoded string bytes accepted inside one `JSON_VALUE`. */
+  size_t json_value_max_string_bytes;
+  /** Maximum decoded object-key bytes accepted inside one `JSON_VALUE`. */
+  size_t json_value_max_key_bytes;
+  /** Maximum raw number-token bytes accepted inside one `JSON_VALUE`. */
+  size_t json_value_max_number_bytes;
+  /** Maximum nested depth accepted inside one `JSON_VALUE`. */
+  size_t json_value_max_depth;
+  /** Default for mapped parse destination clearing. */
+  int clear_destination_by_default;
+  /** Default for duplicate-key rejection in mapped parses. */
+  int reject_duplicate_keys_by_default;
+  /** Default serializer overflow policy for fixed-capacity outputs. */
+  lonejson_overflow_policy write_overflow_policy;
+  /** Default serializer pretty-print toggle. */
+  int write_pretty;
+  /** Maximum serializer-owned output bytes. Zero keeps the library default. */
+  size_t write_max_output_bytes;
+  /** Candidate reader/file/path/fd transport buffer bytes.
+   *
+   * Zero keeps `LONEJSON_CANDIDATE_READ_BUFFER_SIZE`. Non-zero values must be
+   * within `LONEJSON_CANDIDATE_READ_BUFFER_MIN_SIZE` and
+   * `LONEJSON_CANDIDATE_READ_BUFFER_MAX_SIZE`. The setting applies to
+   * `lonejson_visit_candidates_reader/filep/path/fd()`. It changes only
+   * the transient source-read chunk size; it does not materialize the complete
+   * input, does not change candidate framing, and does not affect
+   * buffer-backed candidate APIs.
+   */
   size_t candidate_read_buffer_size;
   /** Default spool policy for streamed mapped fields. */
   lonejson_spool_policy spool_default;
@@ -42370,33 +43339,6 @@ void lonejson_writer_cleanup(lonejson_writer *writer) {
   lonejson__runtime_free_owned_config(&state->runtime_storage);
   lonejson__buffer_free(&state->allocator, state, sizeof(*state));
   memset(writer, 0, sizeof(*writer));
-  lonejson__writer_assign_methods(writer);
-}
-
-static void lonejson__writer_reset_for_reuse(lonejson_writer *writer) {
-  lonejson__writer_state *state;
-
-  if (writer == NULL || writer->state == NULL) {
-    return;
-  }
-  state = (lonejson__writer_state *)writer->state;
-  lonejson__writer_clear_event(state);
-  state->frame_count = 0u;
-  state->root_written = 0;
-  state->finished = 0;
-  state->string_open = 0;
-  state->number_open = 0;
-  state->failed = 0;
-  state->value_stream_active = 0;
-  state->string_reader_active = 0;
-  state->string_reader = NULL;
-  state->string_reader_user = NULL;
-  state->string_reader_buffer_len = 0u;
-  state->string_reader_buffer_off = 0u;
-  state->string_reader_eof = 0;
-  state->number.len = 0u;
-  state->sink_buffer_len = 0u;
-  lonejson__clear_error(&writer->error);
   lonejson__writer_assign_methods(writer);
 }
 

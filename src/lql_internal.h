@@ -13,6 +13,7 @@
 
 typedef struct lql_allocator lql_allocator;
 typedef struct lql_impl lql_impl;
+typedef struct lql_stream_program lql_stream_program;
 
 struct lql_allocator {
   void *impl;
@@ -121,6 +122,7 @@ struct lql_selector {
   lql_since_macro since_macro;
   struct lql_selector *children;
   size_t child_count;
+  lql_stream_program *stream_program;
 };
 
 LQL_INTERNAL_SYMBOL void lql_set_error(lql_error *error, lql_status status,
@@ -169,5 +171,7 @@ lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
 LQL_INTERNAL_SYMBOL int lql_temporal_now(lql_temporal *out);
 LQL_INTERNAL_SYMBOL int lql_temporal_today(lql_temporal *out);
 LQL_INTERNAL_SYMBOL int lql_temporal_yesterday(lql_temporal *out);
+LQL_INTERNAL_SYMBOL void lql_stream_program_destroy(lql *self,
+                                                     lql_selector *selector);
 
 #endif
