@@ -42,6 +42,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
                                                       lql_error *error);
 LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
                                                lonejson_error *error);
+LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new_mapped_stream(
+    lql *self, lonejson_error *error);
 
 typedef enum lql_selector_kind {
   LQL_SELECTOR_KIND_ALL = 0,

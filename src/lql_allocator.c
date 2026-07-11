@@ -123,8 +123,9 @@ static void lonejson_lql_release(void *ctx, void *ptr) {
   allocator->destroy(allocator, ptr);
 }
 
-LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
-                                               lonejson_error *error) {
+static lonejson *lql_lonejson_new_with_stream_mode(lql *self,
+                                                    int mapped_stream,
+                                                    lonejson_error *error) {
   lonejson_config config;
   lonejson_allocator allocator;
   lql_allocator *lql_alloc;
@@ -141,6 +142,9 @@ LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
   config = lonejson_default_config();
   config.candidate_read_buffer_size = 64u * 1024u;
   config.json_value_max_number_bytes = 4096u;
+  if (mapped_stream) {
+    config.clear_destination_by_default = 0;
+  }
   allocator = lonejson_default_allocator();
   allocator.malloc_fn = lonejson_lql_malloc;
   allocator.realloc_fn = lonejson_lql_realloc;
@@ -149,4 +153,14 @@ LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
   allocator.stats = NULL;
   config.allocator = &allocator;
   return lonejson_new(&config, error);
+}
+
+LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
+                                               lonejson_error *error) {
+  return lql_lonejson_new_with_stream_mode(self, 0, error);
+}
+
+LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new_mapped_stream(
+    lql *self, lonejson_error *error) {
+  return lql_lonejson_new_with_stream_mode(self, 1, error);
 }

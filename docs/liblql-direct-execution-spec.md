@@ -94,6 +94,14 @@ escaping, JSON writing, and ordinary bounded spooling primitives. It must not
 contain selector-aware options, LQL mutation actions, output decisions, a
 transform program, Candidate Run, or candidate-transform compatibility code.
 
+For direct-object selector fields, liblql may use LoneJSON's public mapped
+candidate stream with fixed schema fields configured as `lonejson_json_value`
+parse visitors. This is still direct execution: LoneJSON schema-dispatches and
+validates only the named JSON members, while liblql owns every selector
+comparison, decision, limit, callback, and root-array policy. The mapped
+candidate stream must accept scalar roots as unmatched records without
+materializing them and expose array roots so liblql rejects them.
+
 liblql compiles selector, projection, and mutation input into immutable flat
 programs. A single direct stream executor consumes LoneJSON public events and
 owns, for one current record only:

@@ -64,8 +64,8 @@ static lql_stream_callback_result test_decide(void *user,
 static int run_status_selection(lql *ctx) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n"
-      "{\"ignored\":{\"status\":\"open\"},\"status\":\"closed\"}\n"
-      "{\"status\":\"open\"}\n42\n";
+      "{\"status\":42}\n{\"status\":{\"nested\":\"open\"}}\n"
+      "{\"status\":\"openx\"}\n{\"status\":\"open\"}\n42\n";
   lql_selector *selector;
   lql_stream_request request;
   lql_stream_result result;
@@ -91,9 +91,9 @@ static int run_status_selection(lql *ctx) {
   request.on_decision = test_decide;
   request.decision_user = &decisions;
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
-      result.records_seen != 5u || result.records_matched != 2u ||
+      result.records_seen != 7u || result.records_matched != 2u ||
       result.bytes_consumed != reader.len || result.stopped_early ||
-      decisions.count != 5u || decisions.matches != 2u) {
+      decisions.count != 7u || decisions.matches != 2u) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }

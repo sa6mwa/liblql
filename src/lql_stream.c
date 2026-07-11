@@ -16,6 +16,8 @@ struct lql_stream_program {
   size_t term_count;
   unsigned long required_hits;
   int match_all;
+  lonejson_field mapped_fields[sizeof(unsigned long) * CHAR_BIT];
+  lonejson_map mapped_map;
 };
 
 typedef struct lql_stream_state {
@@ -37,6 +39,15 @@ typedef struct lql_stream_state {
   int active;
   int root_value_started;
 } lql_stream_state;
+
+typedef struct lql_stream_member_context {
+  lql_stream_state *state;
+  size_t term_index;
+  size_t value_pos;
+  size_t container_depth;
+  int active_string;
+  int mismatch;
+} lql_stream_member_context;
 
 static void stream_lonejson_error(lonejson_error *out, const char *message) {
   if (out == NULL) {
@@ -115,6 +126,7 @@ static lql_status stream_program_get(lql *self, const lql_selector *selector,
   lql_stream_program *program;
   lql_allocator *allocator;
   lql_status status;
+  size_t i;
   if (out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "stream program out required");
     return LQL_STATUS_INVALID_ARGUMENT;
@@ -142,6 +154,31 @@ static lql_status stream_program_get(lql *self, const lql_selector *selector,
   }
   if (program->term_count == 0u) {
     program->match_all = 1;
+  } else {
+    for (i = 0u; i < program->term_count; ++i) {
+      lonejson_field *field = &program->mapped_fields[i];
+      const lql_stream_term *term = &program->terms[i];
+      memset(field, 0, sizeof(*field));
+      field->json_key = term->key;
+      field->json_key_len = term->key_len;
+      field->json_key_first = term->key_len == 0u
+                                  ? 0u
+                                  : (unsigned char)term->key[0];
+      field->json_key_last = term->key_len == 0u
+                                 ? 0u
+                                 : (unsigned char)term->key[term->key_len - 1u];
+      field->struct_offset = i * sizeof(lonejson_json_value);
+      field->kind = LONEJSON_FIELD_KIND_JSON_VALUE;
+      field->storage = LONEJSON_STORAGE_FIXED;
+      field->overflow_policy = LONEJSON_OVERFLOW_FAIL;
+      field->spool_class = LONEJSON_SPOOL_CLASS_DEFAULT;
+    }
+    memset(&program->mapped_map, 0, sizeof(program->mapped_map));
+    program->mapped_map.name = "lql_stream_program";
+    program->mapped_map.struct_size =
+        program->term_count * sizeof(lonejson_json_value);
+    program->mapped_map.fields = program->mapped_fields;
+    program->mapped_map.field_count = program->term_count;
   }
   mutable_selector->stream_program = program;
   *out = program;
@@ -474,6 +511,75 @@ static lonejson_status stream_boolean_value(void *user, int value,
   return stream_scalar_value(user, error);
 }
 
+static lonejson_status stream_mapped_object_begin(void *user,
+                                                   lonejson_error *error) {
+  lql_stream_member_context *member;
+  (void)error;
+  member = (lql_stream_member_context *)user;
+  ++member->container_depth;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status stream_mapped_object_end(void *user,
+                                                 lonejson_error *error) {
+  lql_stream_member_context *member;
+  (void)error;
+  member = (lql_stream_member_context *)user;
+  if (member->container_depth != 0u) {
+    --member->container_depth;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status stream_mapped_string_begin(void *user,
+                                                   lonejson_error *error) {
+  lql_stream_member_context *member;
+  (void)error;
+  member = (lql_stream_member_context *)user;
+  member->active_string = member->container_depth == 0u;
+  member->value_pos = 0u;
+  member->mismatch = 0;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status stream_mapped_string_chunk(void *user, const char *data,
+                                                   size_t len,
+                                                   lonejson_error *error) {
+  lql_stream_member_context *member;
+  const lql_stream_term *term;
+  (void)error;
+  member = (lql_stream_member_context *)user;
+  if (!member->active_string) {
+    return LONEJSON_STATUS_OK;
+  }
+  term = &member->state->program->terms[member->term_index];
+  if (!member->mismatch &&
+      (member->value_pos > term->value_len ||
+       len > term->value_len - member->value_pos ||
+       memcmp(data, term->value + member->value_pos, len) != 0)) {
+    member->mismatch = 1;
+  }
+  member->value_pos += len;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status stream_mapped_string_end(void *user,
+                                                 lonejson_error *error) {
+  lql_stream_member_context *member;
+  const lql_stream_term *term;
+  (void)error;
+  member = (lql_stream_member_context *)user;
+  if (!member->active_string) {
+    return LONEJSON_STATUS_OK;
+  }
+  term = &member->state->program->terms[member->term_index];
+  if (!member->mismatch && member->value_pos == term->value_len) {
+    member->state->hits |= term->bit;
+  }
+  member->active_string = 0;
+  return LONEJSON_STATUS_OK;
+}
+
 static lql_status stream_status(lql_stream_state *state, lonejson_status status,
                                 const lonejson_error *error, lql_error *out) {
   if (state->failure.code != LQL_STATUS_OK) {
@@ -499,6 +605,104 @@ static lql_status stream_status(lql_stream_state *state, lonejson_status status,
                     ? error->message
                     : "invalid JSON stream");
   return LQL_STATUS_JSON_ERROR;
+}
+
+static lql_status stream_execute_mapped(lql_stream_state *state,
+                                        lonejson *runtime, lql_error *error) {
+  lonejson_json_value values[sizeof(unsigned long) * CHAR_BIT];
+  lql_stream_member_context members[sizeof(unsigned long) * CHAR_BIT];
+  lonejson_value_visitor visitor;
+  lonejson_stream *stream;
+  lonejson_stream_result stream_result;
+  lonejson_error lonejson_error;
+  lonejson_status lonejson_status;
+  lonejson_candidate_callback_result callback_result;
+  lql_status status;
+  size_t i;
+
+  visitor = lonejson_default_value_visitor();
+  visitor.object_begin = stream_mapped_object_begin;
+  visitor.object_end = stream_mapped_object_end;
+  visitor.array_begin = stream_mapped_object_begin;
+  visitor.array_end = stream_mapped_object_end;
+  visitor.string_begin = stream_mapped_string_begin;
+  visitor.string_chunk = stream_mapped_string_chunk;
+  visitor.string_end = stream_mapped_string_end;
+  lonejson_error_init(&lonejson_error);
+  for (i = 0u; i < state->program->term_count; ++i) {
+    memset(&members[i], 0, sizeof(members[i]));
+    members[i].state = state;
+    members[i].term_index = i;
+    lonejson_json_value_init(runtime, &values[i]);
+    lonejson_status = lonejson_json_value_set_parse_visitor(
+        &values[i], &visitor, &members[i], &lonejson_error);
+    if (lonejson_status != LONEJSON_STATUS_OK) {
+      while (i != 0u) {
+        --i;
+        lonejson_json_value_cleanup(&values[i]);
+      }
+      return stream_status(state, lonejson_status, &lonejson_error, error);
+    }
+  }
+  stream = lonejson_stream_open_candidates_reader(
+      runtime, &state->program->mapped_map, stream_read, state, &lonejson_error);
+  if (stream == NULL) {
+    for (i = 0u; i < state->program->term_count; ++i) {
+      lonejson_json_value_cleanup(&values[i]);
+    }
+    return stream_status(state, lonejson_error.code, &lonejson_error, error);
+  }
+  status = LQL_STATUS_OK;
+  for (;;) {
+    callback_result = stream_candidate_begin(state, NULL, &lonejson_error);
+    if (callback_result == LONEJSON_CANDIDATE_STOP) {
+      break;
+    }
+    if (callback_result != LONEJSON_CANDIDATE_CONTINUE) {
+      status = stream_status(state, LONEJSON_STATUS_CALLBACK_FAILED,
+                             &lonejson_error, error);
+      break;
+    }
+    stream_result = stream->next(stream, values, &lonejson_error);
+    if (stream_result == LONEJSON_STREAM_EOF) {
+      --state->result->records_seen;
+      break;
+    }
+    if (stream_result == LONEJSON_STREAM_ERROR) {
+      status = stream_status(state, stream->error.code, &stream->error, error);
+      break;
+    }
+    if (stream_result == LONEJSON_STREAM_VALUE &&
+        stream->root_type == LONEJSON_VALUE_ARRAY) {
+      stream_fail(state, LQL_STATUS_JSON_ERROR,
+                  "root JSON arrays are not valid NDJSON records");
+      if (error != NULL) {
+        *error = state->failure;
+      }
+      status = state->failure.code;
+      break;
+    }
+    callback_result = stream_candidate_end(state, NULL, &lonejson_error);
+    if (callback_result == LONEJSON_CANDIDATE_STOP) {
+      break;
+    }
+    if (callback_result != LONEJSON_CANDIDATE_CONTINUE) {
+      status = stream_status(state, LONEJSON_STATUS_CALLBACK_FAILED,
+                             &lonejson_error, error);
+      break;
+    }
+  }
+  stream->close(stream);
+  for (i = 0u; i < state->program->term_count; ++i) {
+    lonejson_json_value_cleanup(&values[i]);
+  }
+  if (status == LQL_STATUS_OK && state->failure.code != LQL_STATUS_OK) {
+    if (error != NULL) {
+      *error = state->failure;
+    }
+    status = state->failure.code;
+  }
+  return status;
 }
 
 lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
@@ -545,12 +749,19 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
     return status;
   }
   lonejson_error_init(&lonejson_error);
-  runtime = lql_lonejson_new(self, &lonejson_error);
+  runtime = state.program != NULL && !state.program->match_all
+                ? lql_lonejson_new_mapped_stream(self, &lonejson_error)
+                : lql_lonejson_new(self, &lonejson_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_NO_MEMORY,
                   lonejson_error.message[0] == '\0' ? "lonejson initialization failed"
                                                      : lonejson_error.message);
     return LQL_STATUS_NO_MEMORY;
+  }
+  if (state.program != NULL && !state.program->match_all) {
+    status = stream_execute_mapped(&state, runtime, error);
+    lonejson_free(runtime);
+    return status;
   }
   options = lonejson_default_candidate_stream_options();
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;

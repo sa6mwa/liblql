@@ -5462,12 +5462,17 @@ typedef enum lonejson_stream_result {
   /** One complete top-level object was parsed into the destination. */
   LONEJSON_STREAM_OBJECT = 0,
   /** No more objects remain in the underlying stream. */
-  LONEJSON_STREAM_EOF,
+  LONEJSON_STREAM_EOF = 1,
   /** The underlying source would block before a full object was available. */
-  LONEJSON_STREAM_WOULD_BLOCK,
+  LONEJSON_STREAM_WOULD_BLOCK = 2,
   /** A parse, I/O, or argument error occurred. Inspect `lonejson_stream_error`.
    */
-  LONEJSON_STREAM_ERROR
+  LONEJSON_STREAM_ERROR = 3,
+  /** One complete non-object root value was validated. The destination was
+   * cleared but not populated; inspect `lonejson_stream.root_type`. This is
+   * returned only by a candidate stream opened with
+   * `lonejson_stream_open_candidates_*()`. */
+  LONEJSON_STREAM_VALUE = 4
 } lonejson_stream_result;
 
 /** Result produced by `lonejson_array_stream_next*`. */
@@ -5490,6 +5495,8 @@ typedef enum lonejson_array_stream_result {
 struct lonejson_stream {
   /** Last stream error. Cleared when a complete object is emitted. */
   lonejson_error error;
+  /** Root category for the most recently returned object or value. */
+  lonejson_value_type root_type;
   /** Parses the next top-level object into `dst`. */
   lonejson_stream_result (*next)(lonejson_stream *stream, void *dst,
                                  lonejson_error *error);
@@ -5763,20 +5770,37 @@ lonejson_stream *lonejson_stream_open_reader(lonejson *runtime,
                                              const lonejson_map *map,
                                              lonejson_reader_fn reader,
                                              void *user, lonejson_error *error);
+/** Opens a mapped stream that accepts any top-level JSON value. Object roots
+ * are parsed through `map` into `dst`; scalar and array roots are fully
+ * validated without materialization and return `LONEJSON_STREAM_VALUE`.
+ */
+lonejson_stream *lonejson_stream_open_candidates_reader(
+    lonejson *runtime, const lonejson_map *map, lonejson_reader_fn reader,
+    void *user, lonejson_error *error);
 /** Opens an object-framed JSON stream over an open `FILE *`. */
 lonejson_stream *lonejson_stream_open_filep(lonejson *runtime,
                                             const lonejson_map *map, FILE *fp,
                                             lonejson_error *error);
+/** Opens a mapped any-root stream over an open `FILE *`. */
+lonejson_stream *lonejson_stream_open_candidates_filep(
+    lonejson *runtime, const lonejson_map *map, FILE *fp, lonejson_error *error);
 /** Opens an object-framed JSON stream over a filesystem path. */
 lonejson_stream *lonejson_stream_open_path(lonejson *runtime,
                                            const lonejson_map *map,
                                            const char *path,
                                            lonejson_error *error);
+/** Opens a mapped any-root stream over a filesystem path. */
+lonejson_stream *lonejson_stream_open_candidates_path(
+    lonejson *runtime, const lonejson_map *map, const char *path,
+    lonejson_error *error);
 /** Opens an object-framed JSON stream over a file descriptor, including Unix
  * domain sockets. */
 lonejson_stream *lonejson_stream_open_fd(lonejson *runtime,
                                          const lonejson_map *map, int fd,
                                          lonejson_error *error);
+/** Opens a mapped any-root stream over a file descriptor. */
+lonejson_stream *lonejson_stream_open_candidates_fd(
+    lonejson *runtime, const lonejson_map *map, int fd, lonejson_error *error);
 /** Parses the next top-level JSON object from a stream into `dst`. Whitespace
  * between objects is ignored and EOF after the last object is reported
  * separately. */
@@ -9803,12 +9827,24 @@ lj_stream_open_reader(lonejson *runtime, const lj_map *map, lj_reader_fn reader,
                       void *user, lj_error *error) {
   return lonejson_stream_open_reader(runtime, map, reader, user, error);
 }
+/** Opens a mapped any-root stream over a caller-supplied reader callback. */
+LONEJSON_SHORT_ALIAS_INLINE lj_stream *lj_stream_open_candidates_reader(
+    lonejson *runtime, const lj_map *map, lj_reader_fn reader, void *user,
+    lj_error *error) {
+  return lonejson_stream_open_candidates_reader(runtime, map, reader, user,
+                                                error);
+}
 /** Opens an object-framed JSON stream over an open `FILE *`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_stream *lj_stream_open_filep(lonejson *runtime,
                                                             const lj_map *map,
                                                             FILE *fp,
                                                             lj_error *error) {
   return lonejson_stream_open_filep(runtime, map, fp, error);
+}
+/** Opens a mapped any-root stream over an open `FILE *`. */
+LONEJSON_SHORT_ALIAS_INLINE lj_stream *lj_stream_open_candidates_filep(
+    lonejson *runtime, const lj_map *map, FILE *fp, lj_error *error) {
+  return lonejson_stream_open_candidates_filep(runtime, map, fp, error);
 }
 /** Opens an object-framed JSON stream over a filesystem path. */
 LONEJSON_SHORT_ALIAS_INLINE lj_stream *lj_stream_open_path(lonejson *runtime,
@@ -9817,6 +9853,11 @@ LONEJSON_SHORT_ALIAS_INLINE lj_stream *lj_stream_open_path(lonejson *runtime,
                                                            lj_error *error) {
   return lonejson_stream_open_path(runtime, map, path, error);
 }
+/** Opens a mapped any-root stream over a filesystem path. */
+LONEJSON_SHORT_ALIAS_INLINE lj_stream *lj_stream_open_candidates_path(
+    lonejson *runtime, const lj_map *map, const char *path, lj_error *error) {
+  return lonejson_stream_open_candidates_path(runtime, map, path, error);
+}
 /** Opens an object-framed JSON stream over a file descriptor, including Unix
  * domain sockets. */
 LONEJSON_SHORT_ALIAS_INLINE lj_stream *lj_stream_open_fd(lonejson *runtime,
@@ -9824,6 +9865,11 @@ LONEJSON_SHORT_ALIAS_INLINE lj_stream *lj_stream_open_fd(lonejson *runtime,
                                                          int fd,
                                                          lj_error *error) {
   return lonejson_stream_open_fd(runtime, map, fd, error);
+}
+/** Opens a mapped any-root stream over a file descriptor. */
+LONEJSON_SHORT_ALIAS_INLINE lj_stream *lj_stream_open_candidates_fd(
+    lonejson *runtime, const lj_map *map, int fd, lj_error *error) {
+  return lonejson_stream_open_candidates_fd(runtime, map, fd, error);
 }
 /** Parses the next top-level JSON object from a stream into `dst`. Whitespace
  * between objects is ignored and EOF after the last object is reported
@@ -12199,6 +12245,8 @@ typedef struct lonejson__stream_state {
   int owns_fd;
   int saw_eof;
   int object_in_progress;
+  int accept_nonobject_roots;
+  int root_is_object;
   size_t buffered_start;
   size_t buffered_end;
   size_t self_alloc_size;
@@ -30048,6 +30096,7 @@ static void lonejson__stream_assign_methods(lonejson_stream *stream) {
 
 static void lonejson__stream_prepare_parser(lonejson__stream_state *stream,
                                             void *dst) {
+  stream->parser->validate_only = 0;
   lonejson__parser_restart_stream(stream->parser, dst);
   if (stream->parser->options.clear_destination) {
     if (stream->prepared_dst == dst) {
@@ -30059,6 +30108,57 @@ static void lonejson__stream_prepare_parser(lonejson__stream_state *stream,
   }
   stream->current_dst = dst;
   stream->object_in_progress = 1;
+  stream->root_is_object = 0;
+  stream->public.root_type = LONEJSON_VALUE_ABSENT;
+}
+
+static lonejson_status lonejson__stream_prepare_root(
+    lonejson__stream_state *stream, int ch) {
+  if (ch == '{') {
+    stream->root_is_object = 1;
+    stream->public.root_type = LONEJSON_VALUE_OBJECT;
+    return LONEJSON_STATUS_OK;
+  }
+  if (!stream->accept_nonobject_roots) {
+    return lonejson__set_error(&stream->parser->error,
+                               LONEJSON_STATUS_INVALID_JSON, 0u, 0u, 0u,
+                               "expected top-level object");
+  }
+  stream->parser->validate_only = 1;
+  if (ch == '[') {
+    stream->public.root_type = LONEJSON_VALUE_ARRAY;
+  } else if (ch == '"') {
+    stream->public.root_type = LONEJSON_VALUE_STRING;
+  } else if (ch == '-' || lonejson__is_digit(ch)) {
+    stream->public.root_type = LONEJSON_VALUE_NUMBER;
+  } else if (ch == 't' || ch == 'f') {
+    stream->public.root_type = LONEJSON_VALUE_BOOL;
+  } else if (ch == 'n') {
+    stream->public.root_type = LONEJSON_VALUE_NULL;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_stream_result lonejson__stream_complete_result(
+    lonejson__stream_state *stream, lonejson_error *error) {
+  if (stream->parser->error.code == LONEJSON_STATUS_OK &&
+      !stream->parser->error.truncated) {
+    stream->public.error.code = LONEJSON_STATUS_OK;
+    stream->public.error.line = 0u;
+    stream->public.error.column = 0u;
+    stream->public.error.offset = 0u;
+    stream->public.error.system_errno = 0;
+    stream->public.error.truncated = 0;
+    stream->public.error.message[0] = '\0';
+  } else {
+    stream->public.error = stream->parser->error;
+  }
+  stream->object_in_progress = 0;
+  stream->current_dst = NULL;
+  if (error != NULL) {
+    *error = stream->public.error;
+  }
+  return stream->root_is_object ? LONEJSON_STREAM_OBJECT : LONEJSON_STREAM_VALUE;
 }
 
 static lonejson_read_result
@@ -30137,6 +30237,8 @@ static lonejson__stream_state *lonejson__stream_open_common(
   stream->owns_fd = 0;
   stream->saw_eof = 0;
   stream->object_in_progress = 0;
+  stream->accept_nonobject_roots = 0;
+  stream->root_is_object = 0;
   stream->buffered_start = 0u;
   stream->buffered_end = 0u;
   stream->source_kind = 0;
@@ -30295,6 +30397,17 @@ lonejson_stream *lonejson_stream_open_reader(lonejson *runtime,
   return stream;
 }
 
+lonejson_stream *lonejson_stream_open_candidates_reader(
+    lonejson *runtime, const lonejson_map *map, lonejson_reader_fn reader,
+    void *user, lonejson_error *error) {
+  lonejson_stream *stream;
+  stream = lonejson_stream_open_reader(runtime, map, reader, user, error);
+  if (stream != NULL) {
+    lonejson__stream_state_mut(stream)->accept_nonobject_roots = 1;
+  }
+  return stream;
+}
+
 static lonejson_stream *
 lonejson__runtime_stream_open_reader(lonejson *runtime, const lonejson_map *map,
                                      lonejson_reader_fn reader, void *user,
@@ -30320,6 +30433,16 @@ lonejson_stream *lonejson_stream_open_filep(lonejson *runtime,
   stream = lonejson__stream_open_filep_with_options(
       map, fp, &runtime_state->parse_options, runtime_state, error);
   lonejson__runtime_borrow_release(&borrow);
+  return stream;
+}
+
+lonejson_stream *lonejson_stream_open_candidates_filep(
+    lonejson *runtime, const lonejson_map *map, FILE *fp, lonejson_error *error) {
+  lonejson_stream *stream;
+  stream = lonejson_stream_open_filep(runtime, map, fp, error);
+  if (stream != NULL) {
+    lonejson__stream_state_mut(stream)->accept_nonobject_roots = 1;
+  }
   return stream;
 }
 
@@ -30351,6 +30474,17 @@ lonejson_stream *lonejson_stream_open_path(lonejson *runtime,
   return stream;
 }
 
+lonejson_stream *lonejson_stream_open_candidates_path(
+    lonejson *runtime, const lonejson_map *map, const char *path,
+    lonejson_error *error) {
+  lonejson_stream *stream;
+  stream = lonejson_stream_open_path(runtime, map, path, error);
+  if (stream != NULL) {
+    lonejson__stream_state_mut(stream)->accept_nonobject_roots = 1;
+  }
+  return stream;
+}
+
 static lonejson_stream *
 lonejson__runtime_stream_open_path(lonejson *runtime, const lonejson_map *map,
                                    const char *path, lonejson_error *error) {
@@ -30375,6 +30509,16 @@ lonejson_stream *lonejson_stream_open_fd(lonejson *runtime,
   stream = lonejson__stream_open_fd_with_options(
       map, fd, &runtime_state->parse_options, runtime_state, error);
   lonejson__runtime_borrow_release(&borrow);
+  return stream;
+}
+
+lonejson_stream *lonejson_stream_open_candidates_fd(
+    lonejson *runtime, const lonejson_map *map, int fd, lonejson_error *error) {
+  lonejson_stream *stream;
+  stream = lonejson_stream_open_fd(runtime, map, fd, error);
+  if (stream != NULL) {
+    lonejson__stream_state_mut(stream)->accept_nonobject_roots = 1;
+  }
   return stream;
 }
 
@@ -30417,30 +30561,14 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
 
   for (;;) {
     if (lonejson__parser_root_complete(state->parser)) {
-      if (state->parser->error.code == LONEJSON_STATUS_OK &&
-          !state->parser->error.truncated) {
-        stream->error.code = LONEJSON_STATUS_OK;
-        stream->error.line = 0u;
-        stream->error.column = 0u;
-        stream->error.offset = 0u;
-        stream->error.system_errno = 0;
-        stream->error.truncated = 0;
-        stream->error.message[0] = '\0';
-      } else {
-        stream->error = state->parser->error;
-      }
-      state->object_in_progress = 0;
-      state->current_dst = NULL;
-      if (error != NULL) {
-        *error = stream->error;
-      }
-      return LONEJSON_STREAM_OBJECT;
+      return lonejson__stream_complete_result(state, error);
     }
 
     if (state->source_kind == LONEJSON_STREAM_SOURCE_MEMORY) {
       if (state->memory_input_offset >= state->memory_input_len) {
         state->saw_eof = 1;
-        if (!state->parser->root_started) {
+        if (!state->parser->root_started &&
+            state->parser->lex_mode == LONEJSON_LEX_NONE) {
           if (error != NULL) {
             *error = stream->error;
           }
@@ -30448,6 +30576,11 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
         }
         stream->error.code = lonejson_parser_finish(state->parser);
         stream->error = state->parser->error;
+        if ((stream->error.code == LONEJSON_STATUS_OK ||
+             stream->error.code == LONEJSON_STATUS_TRUNCATED) &&
+            lonejson__parser_root_complete(state->parser)) {
+          return lonejson__stream_complete_result(state, error);
+        }
         state->object_in_progress = 0;
         state->current_dst = NULL;
         if (error != NULL) {
@@ -30465,9 +30598,10 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
         if (state->memory_input_offset >= state->memory_input_len) {
           continue;
         }
-        if (state->memory_input[state->memory_input_offset] != '{') {
-          lonejson__set_error(&stream->error, LONEJSON_STATUS_INVALID_JSON, 0u,
-                              0u, 0u, "expected top-level object");
+        status = lonejson__stream_prepare_root(
+            state, state->memory_input[state->memory_input_offset]);
+        if (status != LONEJSON_STATUS_OK) {
+          stream->error = state->parser->error;
           if (error != NULL) {
             *error = stream->error;
           }
@@ -30493,24 +30627,7 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
         return LONEJSON_STREAM_ERROR;
       }
       if (lonejson__parser_root_complete(state->parser)) {
-        if (state->parser->error.code == LONEJSON_STATUS_OK &&
-            !state->parser->error.truncated) {
-          stream->error.code = LONEJSON_STATUS_OK;
-          stream->error.line = 0u;
-          stream->error.column = 0u;
-          stream->error.offset = 0u;
-          stream->error.system_errno = 0;
-          stream->error.truncated = 0;
-          stream->error.message[0] = '\0';
-        } else {
-          stream->error = state->parser->error;
-        }
-        state->object_in_progress = 0;
-        state->current_dst = NULL;
-        if (error != NULL) {
-          *error = stream->error;
-        }
-        return LONEJSON_STREAM_OBJECT;
+        return lonejson__stream_complete_result(state, error);
       }
       continue;
     }
@@ -30534,7 +30651,8 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
       }
       if (chunk.bytes_read == 0u && chunk.eof) {
         state->saw_eof = 1;
-        if (!state->parser->root_started) {
+        if (!state->parser->root_started &&
+            state->parser->lex_mode == LONEJSON_LEX_NONE) {
           if (error != NULL) {
             *error = stream->error;
           }
@@ -30542,6 +30660,11 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
         }
         stream->error.code = lonejson_parser_finish(state->parser);
         stream->error = state->parser->error;
+        if ((stream->error.code == LONEJSON_STATUS_OK ||
+             stream->error.code == LONEJSON_STATUS_TRUNCATED) &&
+            lonejson__parser_root_complete(state->parser)) {
+          return lonejson__stream_complete_result(state, error);
+        }
         state->object_in_progress = 0;
         state->current_dst = NULL;
         if (error != NULL) {
@@ -30564,9 +30687,10 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
       if (state->buffered_start == state->buffered_end) {
         continue;
       }
-      if (state->io_buffer[state->buffered_start] != '{') {
-        lonejson__set_error(&stream->error, LONEJSON_STATUS_INVALID_JSON, 0u,
-                            0u, 0u, "expected top-level object");
+      status = lonejson__stream_prepare_root(
+          state, state->io_buffer[state->buffered_start]);
+      if (status != LONEJSON_STATUS_OK) {
+        stream->error = state->parser->error;
         if (error != NULL) {
           *error = stream->error;
         }
@@ -30592,24 +30716,7 @@ lonejson_stream_result lonejson_stream_next(lonejson_stream *stream, void *dst,
       return LONEJSON_STREAM_ERROR;
     }
     if (lonejson__parser_root_complete(state->parser)) {
-      if (state->parser->error.code == LONEJSON_STATUS_OK &&
-          !state->parser->error.truncated) {
-        stream->error.code = LONEJSON_STATUS_OK;
-        stream->error.line = 0u;
-        stream->error.column = 0u;
-        stream->error.offset = 0u;
-        stream->error.system_errno = 0;
-        stream->error.truncated = 0;
-        stream->error.message[0] = '\0';
-      } else {
-        stream->error = state->parser->error;
-      }
-      state->object_in_progress = 0;
-      state->current_dst = NULL;
-      if (error != NULL) {
-        *error = stream->error;
-      }
-      return LONEJSON_STREAM_OBJECT;
+      return lonejson__stream_complete_result(state, error);
     }
   }
 }

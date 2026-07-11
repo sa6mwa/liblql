@@ -72,6 +72,10 @@ if(BUILD_TESTING)
   add_executable(lql_direct_stream_test tests/direct_stream_test.c)
   target_link_libraries(lql_direct_stream_test PRIVATE lql_static)
   add_test(NAME lql.direct_stream COMMAND lql_direct_stream_test)
+  add_executable(lonejson_mapped_candidate_test
+    tests/lonejson_mapped_candidate_test.c)
+  target_link_libraries(lonejson_mapped_candidate_test PRIVATE lonejson::lonejson)
+  add_test(NAME lonejson.mapped_candidate COMMAND lonejson_mapped_candidate_test)
 endif()
 
 if(LQL_BUILD_DIRECT_PROBE)
