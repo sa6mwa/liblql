@@ -2,7 +2,7 @@ add_library(lonejson_vendored STATIC "${CMAKE_SOURCE_DIR}/vendor/lonejson/lonejs
 add_library(lonejson::lonejson ALIAS lonejson_vendored)
 set_target_properties(lonejson_vendored PROPERTIES
   POSITION_INDEPENDENT_CODE ON
-  # CMake calls the ANSI C89 / ISO C90 language standard "90".
+  # CMake has no C89 setting; GNU/Clang targets explicitly override it below.
   C_STANDARD 90
   C_STANDARD_REQUIRED ON
   C_EXTENSIONS OFF)
@@ -14,5 +14,6 @@ if(UNIX OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     _FILE_OFFSET_BITS=64)
 endif()
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-  target_compile_options(lonejson_vendored PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  target_compile_options(lonejson_vendored PRIVATE
+    -Wall -Wextra -Wpedantic -Werror)
 endif()

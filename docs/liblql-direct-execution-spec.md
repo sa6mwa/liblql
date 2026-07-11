@@ -72,9 +72,10 @@ suitable for upstreaming.
 
 ## Compiler And Performance Baseline
 
-liblql and its LoneJSON integration remain ANSI C89 compatible. CMake names
-that language mode `C_STANDARD 90` because ISO C90 ratified ANSI C89; this is
-not permission to require C99 or a newer language standard.
+liblql and its LoneJSON integration remain ANSI C89 compatible. CMake has no
+`C_STANDARD 89` value, so GCC and Clang builds explicitly end with
+`-std=c89`; this is not permission to require C99 or a newer language
+standard.
 
 GNU GCC is the authoritative C compiler for the performance acceptance gate.
 Every required C/Go row must reach at least `1.0x` when liblql and the

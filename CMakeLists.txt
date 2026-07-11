@@ -4,6 +4,12 @@ project(liblql VERSION 0.0.0 LANGUAGES C)
 
 include(CTest)
 
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+  # CMake has no C89 setting. This is intentionally directory-wide so tests
+  # and tools compile under the same language contract as the library.
+  add_compile_options($<$<COMPILE_LANGUAGE:C>:-std=c89>)
+endif()
+
 option(LQL_BUILD_STATIC "Build static liblql" ON)
 option(LQL_BUILD_SHARED "Build shared liblql" ON)
 option(LQL_BUILD_DIRECT_PROBE "Build the direct-execution architecture probe" ON)
@@ -20,7 +26,7 @@ include(LqlLonejson)
 configure_file(cmake/lql_version.h.in
   "${CMAKE_CURRENT_BINARY_DIR}/generated/include/lql/version.h" @ONLY)
 
-# CMake calls the ANSI C89 / ISO C90 language standard "90".
+# CMake has no C89 setting; GNU/Clang targets explicitly override it below.
 set(CMAKE_C_STANDARD 90)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -38,7 +44,8 @@ target_include_directories(lql_common PUBLIC
 target_link_libraries(lql_common PUBLIC lonejson::lonejson)
 
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-  target_compile_options(lql_common PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  target_compile_options(lql_common PRIVATE
+    -Wall -Wextra -Wpedantic -Werror)
 endif()
 
 if(LQL_BUILD_STATIC)
