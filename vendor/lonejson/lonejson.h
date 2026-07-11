@@ -48676,7 +48676,6 @@ typedef struct lonejson__candidate_run_state {
   lonejson_writer writer;
   lonejson_spooled action_stage;
   lonejson_spooled transformed_stage;
-  lonejson__byte_buffer action_record;
   lonejson_path_value_visitor visitor;
   lonejson_value_visitor direct_visitor;
   lonejson_candidate_stream_options candidate_options;
@@ -49066,7 +49065,6 @@ lonejson__candidate_run_cleanup(lonejson__candidate_run_state *state) {
   for (i = 0u; i < state->input_frame_cap; ++i) {
     lonejson__byte_free(&state->input_frames[i].key, state->allocator);
   }
-  lonejson__byte_free(&state->action_record, state->allocator);
   lonejson__byte_free(&state->scalar, state->allocator);
   lonejson__buffer_free(state->allocator, state->frames,
                         state->frame_cap * sizeof(*state->frames));
@@ -49246,30 +49244,21 @@ static lonejson_status lonejson__candidate_action_append(
           kind == LONEJSON__CANDIDATE_ACTION_STRING_CHUNK ||
           kind == LONEJSON__CANDIDATE_ACTION_NUMBER_CHUNK;
   (void)path;
-  lonejson__byte_reset(&state->action_record);
-  status = lonejson__byte_append(&state->action_record, &opcode, sizeof(opcode),
-                                 SIZE_MAX - 1u, state->allocator, state->error);
+  status = lonejson_spooled_append(&state->action_stage, &opcode,
+                                   sizeof(opcode), state->error);
   if (status == LONEJSON_STATUS_OK && chunk) {
-    status =
-        lonejson__byte_append(&state->action_record, &len, sizeof(len),
-                              SIZE_MAX - 1u, state->allocator, state->error);
+    status = lonejson_spooled_append(&state->action_stage, &len, sizeof(len),
+                                     state->error);
   } else if (status == LONEJSON_STATUS_OK &&
              kind == LONEJSON__CANDIDATE_ACTION_BOOL) {
-    status = lonejson__byte_append(&state->action_record, &encoded_bool,
-                                   sizeof(encoded_bool), SIZE_MAX - 1u,
-                                   state->allocator, state->error);
+    status = lonejson_spooled_append(&state->action_stage, &encoded_bool,
+                                     sizeof(encoded_bool), state->error);
   }
-  if (status == LONEJSON_STATUS_OK) {
+  if (status == LONEJSON_STATUS_OK && len != 0u) {
     status =
-        lonejson__byte_append(&state->action_record, data, len, SIZE_MAX - 1u,
-                              state->allocator, state->error);
+        lonejson_spooled_append(&state->action_stage, data, len, state->error);
   }
-  if (status != LONEJSON_STATUS_OK) {
-    return status;
-  }
-  return lonejson_spooled_append(&state->action_stage,
-                                 state->action_record.data,
-                                 state->action_record.len, state->error);
+  return status;
 }
 
 static int lonejson__candidate_action_deferred(
