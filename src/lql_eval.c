@@ -3295,6 +3295,15 @@ static lonejson_status fast_flat_key_chunk(void *user, const char *data,
   size_t cmp_len;
   (void)error;
   doc = (eval_doc *)user;
+  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match) {
+    if (doc->fast_mutation_key_len >= doc->fast_mutation_top_key_len ||
+        len > doc->fast_mutation_top_key_len - doc->fast_mutation_key_len ||
+        memcmp(doc->fast_mutation_top_key + doc->fast_mutation_key_len, data,
+               len) != 0) {
+      doc->fast_mutation_key_match = 0;
+    }
+    doc->fast_mutation_key_len += len;
+  }
   if (!doc->fast_flat_key_active || !doc->fast_flat_key_match) {
     return LONEJSON_STATUS_OK;
   }
@@ -3315,15 +3324,6 @@ static lonejson_status fast_flat_key_chunk(void *user, const char *data,
     }
   }
   doc->fast_flat_key_len += len;
-  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match) {
-    if (doc->fast_mutation_key_len >= doc->fast_mutation_top_key_len ||
-        len > doc->fast_mutation_top_key_len - doc->fast_mutation_key_len ||
-        memcmp(doc->fast_mutation_top_key + doc->fast_mutation_key_len, data,
-               len) != 0) {
-      doc->fast_mutation_key_match = 0;
-    }
-    doc->fast_mutation_key_len += len;
-  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -6735,7 +6735,7 @@ mutation_plan_fast_root_create_eligible(const lql_mutation_plan *plan,
   item = &plan->items[0];
   if (item->kind != LQL_MUTATION_SET || !item->can_create_missing_object ||
       item->file_mode != LQL_MUTATION_FILE_NONE ||
-      item->path.segment_count < 2u || item->path.segment_kinds == NULL ||
+      item->path.segment_count == 0u || item->path.segment_kinds == NULL ||
       item->path.segments == NULL || item->path.segment_lens == NULL ||
       item->value_kind == LQL_MUTATION_VALUE_STRING) {
     return 0;
