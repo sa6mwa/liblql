@@ -5353,7 +5353,9 @@ static void expect_source_mutation_api(void) {
       ++failures;
     }
 
-    fclose(out);
+    if (out != NULL) {
+      fclose(out);
+    }
     out = tmpfile();
     if (out == NULL) {
       printf("source mutation read-failure tmpfile failed\n");
@@ -5373,7 +5375,9 @@ static void expect_source_mutation_api(void) {
       ++failures;
     }
 
-    fclose(out);
+    if (out != NULL) {
+      fclose(out);
+    }
     out = tmpfile();
     if (out == NULL) {
       printf("source mutation over-capacity tmpfile failed\n");
@@ -5807,7 +5811,73 @@ static void expect_source_candidate_mutation_api(void) {
       ++failures;
     }
 
-    fclose(out);
+    {
+      static const char staged_doc[] =
+          "{\"status\":\"open\",\"count\":1}\n"
+          "{\"status\":\"closed\",\"count\":\"bad\"}\n";
+      const char *increment_mutation = "/count=+1";
+      lql_selector *staged_selector = NULL;
+      lql_mutation_plan *increment_plan = NULL;
+
+      fclose(out);
+      out = tmpfile();
+      if (out == NULL) {
+        printf("source staged mutation tmpfile failed\n");
+        ++failures;
+      } else {
+        lql_error_init(&error);
+        st = test_ctx->selector_parse(test_ctx, "/status=\"open\"",
+                                      &staged_selector, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("source staged mutation selector failed: %s\n", error.message);
+          ++failures;
+        }
+        lql_error_init(&error);
+        st = test_ctx->mutation_plan_parse(test_ctx, &increment_mutation, 1u,
+                                           &increment_plan, &error);
+        if (st != LQL_STATUS_OK) {
+          printf("source staged mutation plan failed: %s\n", error.message);
+          ++failures;
+        }
+        if (staged_selector != NULL && increment_plan != NULL) {
+          memset(&reader, 0, sizeof(reader));
+          reader.data = staged_doc;
+          reader.len = strlen(staged_doc);
+          reader.chunk_size = 4u;
+          memset(&result, 0, sizeof(result));
+          lql_error_init(&error);
+          st = test_ctx->mutate_source_candidates(
+              test_ctx, staged_selector, increment_plan, read_chunk, &reader,
+              out, 1, 1, &result, &error);
+          if (st != LQL_STATUS_OK) {
+            printf("source staged mutation failed: %s\n", error.message);
+            ++failures;
+          } else if (result.candidates_seen != 2u ||
+                     result.candidates_matched != 1u || result.stopped_early) {
+            printf("source staged mutation result mismatch: seen=%lu "
+                   "matched=%lu stopped=%d\n",
+                   (unsigned long)result.candidates_seen,
+                   (unsigned long)result.candidates_matched,
+                   result.stopped_early);
+            ++failures;
+          } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                     strcmp(buf, "{\"status\":\"open\",\"count\":2}\n") != 0) {
+            printf("source staged mutation output mismatch: %s\n", buf);
+            ++failures;
+          }
+        }
+      }
+      if (increment_plan != NULL) {
+        test_ctx->mutation_plan_destroy(test_ctx, increment_plan);
+      }
+      if (staged_selector != NULL) {
+        test_ctx->selector_destroy(test_ctx, staged_selector);
+      }
+    }
+
+    if (out != NULL) {
+      fclose(out);
+    }
     out = tmpfile();
     if (out == NULL) {
       printf("source candidate mutation options tmpfile failed\n");

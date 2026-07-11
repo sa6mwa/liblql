@@ -5385,7 +5385,12 @@ typedef struct source_output_state {
   int current_output_enabled;
   int transform_failed;
   int gated_transform;
+  int staged_output;
+  int output_stage_initialized;
+  lonejson_spooled output_stage;
+  FILE *out;
   lql_status callback_status;
+  lql_error transform_error;
   source_output_policy current_policy;
 } source_output_state;
 
@@ -5816,6 +5821,28 @@ source_output_replace(void *user, const lonejson_candidate_output_event *event,
         event->old_value->value_type != LONEJSON_VALUE_NUMBER ||
         !source_output_parse_number(event->old_value->data,
                                     event->old_value->len, &existing)) {
+      if (state->staged_output) {
+        state->transform_failed = 1;
+        lql_set_error(&state->transform_error, LQL_STATUS_JSON_ERROR,
+                      "mutation increment target not numeric");
+        if (event->old_value != NULL) {
+          switch (event->old_value->value_type) {
+          case LONEJSON_VALUE_STRING:
+            return lonejson_writer_string(writer, event->old_value->data,
+                                          event->old_value->len, error);
+          case LONEJSON_VALUE_NUMBER:
+            return lonejson_writer_number_text(writer, event->old_value->data,
+                                               event->old_value->len, error);
+          case LONEJSON_VALUE_BOOL:
+            return lonejson_writer_bool(writer, event->old_value->boolean_value,
+                                        error);
+          case LONEJSON_VALUE_NULL:
+            return lonejson_writer_null(writer, error);
+          default:
+            break;
+          }
+        }
+      }
       if (error != NULL) {
         error->code = LONEJSON_STATUS_CALLBACK_FAILED;
         strcpy(error->message, "mutation increment target not numeric");
@@ -5858,6 +5885,13 @@ source_output_decide(void *user, const lonejson_candidate_output_event *event,
       state->current_output_enabled = policy->emit_candidate;
       state->current_root_object =
           policy->root_object || event->value_type == LONEJSON_VALUE_OBJECT;
+    } else if (state->staged_output) {
+      /* Selection completes at candidate end; stage speculative output. */
+      state->current_matched = 1;
+      state->current_output_enabled = 1;
+      if (event->value_type == LONEJSON_VALUE_OBJECT) {
+        state->current_root_object = 1;
+      }
     } else {
       if (state->selector != NULL) {
         state->current_matched = eval_doc_matches(state->selector, &state->doc);
@@ -6205,7 +6239,8 @@ source_output_old_scalar(void *user,
   state = (source_output_state *)user;
   if (state == NULL || event == NULL || event->path == NULL ||
       state->mutation_plan == NULL ||
-      event->value_type != LONEJSON_VALUE_NUMBER) {
+      (event->value_type != LONEJSON_VALUE_NUMBER &&
+       event->value_type != LONEJSON_VALUE_STRING)) {
     return LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_NONE;
   }
   if (event->candidate_policy != NULL &&
@@ -8696,6 +8731,10 @@ source_output_candidate_begin(void *user,
   state->current_output_enabled =
       state->selector == NULL || !state->matches_only;
   state->transform_failed = 0;
+  lql_error_init(&state->transform_error);
+  if (state->staged_output && state->output_stage_initialized) {
+    lonejson_spooled_reset(&state->output_stage);
+  }
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
@@ -8719,6 +8758,22 @@ source_output_candidate_end(void *user,
       (lql_uint64)(candidate->stream_offset + candidate->byte_size);
   if (matched) {
     ++state->result.candidates_matched;
+  }
+  if (state->staged_output && matched && state->transform_failed) {
+    state->callback_status = state->transform_error.code;
+    if (error != NULL) {
+      error->code = LONEJSON_STATUS_CALLBACK_FAILED;
+      strcpy(error->message, state->transform_error.message);
+    }
+    return LONEJSON_CANDIDATE_ERROR;
+  }
+  if (state->staged_output && matched) {
+    if (lonejson_spooled_write_to_sink(&state->output_stage, file_sink_unlocked,
+                                       state->out,
+                                       error) != LONEJSON_STATUS_OK) {
+      state->callback_status = LQL_STATUS_JSON_ERROR;
+      return LONEJSON_CANDIDATE_ERROR;
+    }
   }
   if (query_result_stop_if_limited(&state->result, &state->options,
                                    state->limit_flags)) {
@@ -8756,6 +8811,20 @@ static void source_output_cleanup(source_output_state *state) {
   }
   state->applied = NULL;
   state->applied_alloc = NULL;
+  if (state->output_stage_initialized) {
+    lonejson_spooled_cleanup(&state->output_stage);
+    state->output_stage_initialized = 0;
+  }
+}
+
+static lonejson_status source_output_stage_sink(void *user, const void *data,
+                                                size_t len,
+                                                lonejson_error *error) {
+  source_output_state *state = (source_output_state *)user;
+  if (state == NULL || !state->output_stage_initialized) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  return lonejson_spooled_append(&state->output_stage, data, len, error);
 }
 
 static int
@@ -8888,6 +8957,7 @@ static lql_status execute_query_source_output(
   state.mutation_plan = mutation_plan;
   state.matches_only = matches_only;
   state.callback_status = LQL_STATUS_OK;
+  state.out = out;
   if (query_options != NULL) {
     state.options = *query_options;
   }
@@ -8945,7 +9015,19 @@ static lql_status execute_query_source_output(
   memset(&options, 0, sizeof(options));
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.output_framing = LONEJSON_CANDIDATE_OUTPUT_NDJSON;
-  options.mode = selector == NULL && !matches_only
+  /* A selector needs its final truth before output can commit. In the
+   * vendored engine, stage the first parse rather than capture and replay it.
+   * Project-then-mutate still requires the legacy composition until that
+   * composition moves into the new primitive. */
+#if defined(LONEJSON_HAS_CANDIDATE_OUTPUT_STAGED)
+  state.staged_output = selector != NULL && matches_only &&
+                        !(projection != NULL && mutation_plan != NULL);
+#endif
+  if (state.staged_output) {
+    lonejson_spooled_init(runtime, &state.output_stage);
+    state.output_stage_initialized = 1;
+  }
+  options.mode = state.staged_output || (selector == NULL && !matches_only)
                      ? LONEJSON_CANDIDATE_OUTPUT_MODE_STREAMING
                      : LONEJSON_CANDIDATE_OUTPUT_MODE_GATED_SPOOLED;
   state.gated_transform =
@@ -8953,10 +9035,14 @@ static lql_status execute_query_source_output(
   options.old_scalar_mode = source_output_has_increment(mutation_plan)
                                 ? LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_COMPLETE
                                 : LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_NONE;
-  options.sink = file_sink_unlocked;
-  options.sink_user = out;
+  options.sink =
+      state.staged_output ? source_output_stage_sink : file_sink_unlocked;
+  options.sink_user = state.staged_output ? (void *)&state : (void *)out;
 #if defined(LONEJSON_HAS_CANDIDATE_OUTPUT_VALUE_OBSERVER)
-  if (selector_fast_flat_scalar_eligible(selector)) {
+  if (state.staged_output) {
+    options.observer = &observer;
+    options.observer_user = &state;
+  } else if (selector_fast_flat_scalar_eligible(selector)) {
     init_fast_flat_scalar_visitor(&value_observer);
     options.observer_value = &value_observer;
     options.observer_user = &state.doc;
@@ -9025,6 +9111,11 @@ static lql_status execute_query_source_output(
   source_output_cleanup(&state);
   destroy_doc(&state.doc);
   if (st != LONEJSON_STATUS_OK) {
+    if (state.callback_status != LQL_STATUS_OK) {
+      lql_set_error(error, state.callback_status,
+                    state.transform_error.message);
+      return state.callback_status;
+    }
     if (adapter.error_code != 0) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR, "source read failed");
       return LQL_STATUS_JSON_ERROR;
