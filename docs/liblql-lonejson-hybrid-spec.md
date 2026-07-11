@@ -62,6 +62,81 @@ do not remove a row merely because a faster sibling path exists.
 | `execute_mutate_file_range_candidates_fast()` | Separate seekable mutation scanner/writer path | Fold into `candidate_output` without changing matches-only or unmatched-output semantics. |
 | `source_spooled_match_state` payload delivery | Public callback-scoped raw payload handles | Preserve as `candidate_payload`; retain bounded capture only for this public contract. |
 
+## Execution Correction
+
+The first implementation attempt did not cut over to this architecture. It
+renamed the transform executor, added staged-output and selector-specific fast
+paths around it, and repeatedly verified those increments while the gated raw
+capture, parser replay, projected replay, compatibility aliases, and duplicate
+liblql execution paths remained authoritative. Source mutation consequently
+continued to serialize rejected candidates and measured only 0.37x to 0.57x
+of Go on the representative steady-state rows.
+
+That failure establishes these implementation rules:
+
+- A rename, adapter, sibling fast path, or bypass does not count as migration.
+  Progress requires replacing ownership and deleting the superseded path.
+- Do not optimize a legacy executor scheduled for deletion. Performance work
+  belongs inside the final primitive after the complete hot path uses it.
+- Do not begin at one liblql call site. Build the generic LoneJSON lifecycle
+  and candidate-specific action stage first, then migrate all callers in one
+  cutover slice.
+- Do not retrofit delayed candidate output into the global LoneJSON writer.
+  Ordinary JSON writing must not acquire candidate spools, action modes, or
+  candidate lifecycle branches. The action stage is private state owned by
+  `candidate_run` and exposes only generic JSON writer commands.
+- Do not use speculative full-candidate serialization as selection deferral.
+  While truth is unknown, record bounded generic writer actions. On accept,
+  commit the prefix once and continue directly; on reject, discard it and
+  continue validation without output work.
+- Do not preserve the vendored legacy API for compatibility. The normal preset
+  may continue using released upstream LoneJSON until handoff, but it must not
+  constrain or alias the vendored implementation.
+- Do not commit additive architecture. A cutover commit must remove the old
+  caller, branch, state, or executor it replaces. Temporary code may exist
+  inside an unfinished large slice, not as a sequence of permanent siblings.
+
+### Large-Slice Development Protocol
+
+Implementation proceeds in three large slices. Within a slice, temporary
+compile breakage and incomplete internal wiring are acceptable. The objective
+is architectural completion of the slice, not keeping every intermediate edit
+green.
+
+1. **Candidate-engine cutover.** Implement `candidate_run`, its spill-backed
+   candidate-specific writer-action stage, strict NDJSON lifecycle, plan
+   observer, output policy, payload policy, and deferred errors. Migrate source
+   and seekable projection/mutation, including matches-only, unmatched output,
+   and projection-then-mutation. Delete `lonejson_candidate_output_*`, gated
+   raw transform replay, projected replay, and their aliases in the same
+   slice.
+2. **liblql collapse.** Move decision and payload execution onto the same
+   lifecycle, collapse file/source differences into reader and payload
+   policies, retain only the four execution families, and delete duplicate
+   scanners, adapters, feature macros, state machines, and stale tests.
+3. **Hardening and performance.** Run complete semantic, sanitizer, fuzz, RSS,
+   and benchmark gates. Profile only final hot paths, implement improvements
+   inside the final ownership boundary, and repeat the complete gates after
+   the >=1.2x requirement is met.
+
+Verification is deliberately sparse during implementation:
+
+- use compilation or one directly relevant executable only when needed to
+  resolve an interface or lifecycle error;
+- do not run normal and vendored full suites after individual functions,
+  fields, or call-site edits;
+- run focused behavior tests when a large slice first becomes executable;
+- run the full suite once at the end of each large slice;
+- run the benchmark matrix only after the complete final hot path is active;
+- run formatting immediately before a slice commit so formatting changes are
+  committed with that slice.
+
+Correctness and RSS invariants are maintained structurally while coding:
+one input parse, current-candidate-only state, spill-backed stages, reset before
+the next candidate, strict root-array rejection, no hidden whole-input storage,
+and no second parser. Tests prove those invariants at slice boundaries; they do
+not substitute for designing them into the implementation.
+
 ## Ownership
 
 LoneJSON owns only JSON mechanics:
@@ -245,28 +320,17 @@ one of these four families and shares its behavior tests.
 
 ## Migration Checklist
 
-Work is ordered. Do not claim the clean cut is complete early.
+The three large slices above are the migration unit. This checklist is an exit
+check, not an instruction to create separately verified micro-commits.
 
-1. Inventory every current liblql call site and LoneJSON symbol using the old
-   transform/replay surface. Record its public behavior, output form, and test
-   coverage.
-2. Specify and implement the one internal candidate primitive in vendored
-   LoneJSON, including staged-output and deferred-error semantics.
-3. Move direct, recursive, and top-level fast scans behind its opaque plan
-   dispatch. Remove their public option fields and feature macros.
-4. Migrate `candidate_decide` and `candidate_payload`; prove counters, stops,
-   payload lifetime, and root-array errors.
-5. Migrate projection and all mutation shapes, including unmatched emission,
-   matches-only, increments, removals, creates, wildcards, recursive paths,
-   projection-before-mutation, and malformed/read-error partial results.
-6. Delete the old transform/replay executor and all callers in the same change
-   sequence. A build must fail if an old symbol remains referenced.
-7. Simplify liblql to the four execution families. Delete duplicate adapters,
-   state structs, and tests for deleted internals.
-8. Run the gates below and write the upstream LoneJSON handoff specification.
-9. Upstream the final generic candidate surface. After an upstream release,
-   switch normal presets to it and prove that semantics, RSS, and performance
-   remain intact.
+- Candidate-engine slice: all output and payload shapes use `candidate_run`;
+  old output/transform/replay symbols, aliases, modes, and callers are deleted.
+- liblql-collapse slice: only the four execution families remain; scanner and
+  selector acceleration is behind one opaque plan adapter.
+- Hardening slice: all completion gates below pass and the upstream LoneJSON
+  handoff specification describes only the final generic surface.
+- Upstream release: replace the normal-preset adapter with the released API and
+  rerun semantic, RSS, and performance gates without vendored exceptions.
 
 ## Completion Gates
 
