@@ -238,6 +238,11 @@ static int run_mapped_string_predicates(lql *ctx) {
       "\"env\":\"dev\",\"a\":false}\n"
       "{\"status\":\"closed\",\"msg\":\"all clear\",\"service\":\"Other\","
       "\"env\":\"stage\",\"a\":null}\n";
+  static const char nested_input[] =
+      "{\"items\":[{\"sku\":\"A\",\"price\":5},{\"sku\":\"B\",\"price\":20}],"
+      "\"meta\":{\"etag\":\"x\"}}\n"
+      "{\"items\":[{\"sku\":\"B\",\"price\":30}],\"meta\":{\"etag\":null}}\n"
+      "{\"items\":[{\"sku\":\"C\",\"price\":1}]}\n";
   if (run_selection(ctx, "contains{f=/msg,a=Timeout|degraded}", input, 3u,
                     1u)) {
     return 1;
@@ -259,6 +264,16 @@ static int run_mapped_string_predicates(lql *ctx) {
   if (run_selection(ctx, "or./status=\"open\",or./status=\"pending\"",
                     input, 3u, 2u)) {
     return 6;
+  }
+  if (run_selection(ctx, "/items/1/sku=\"B\"", nested_input, 3u, 1u)) {
+    return 7;
+  }
+  if (run_selection(ctx, "exists{/meta/etag}", nested_input, 3u, 1u)) {
+    return 8;
+  }
+  if (run_selection(ctx, "range{field=/items/1/price,gte=20}", nested_input,
+                    3u, 1u)) {
+    return 9;
   }
   return 0;
 }
@@ -358,10 +373,8 @@ int main(void) {
     return 1;
   }
   if (run_status_selection(ctx) || run_conjunction_selection(ctx) ||
-      run_or_selection(ctx) ||
-      run_not_selection(ctx) ||
-      run_mapped_string_predicates(ctx) ||
-      run_match_all(ctx) ||
+      run_or_selection(ctx) || run_not_selection(ctx) ||
+      run_mapped_string_predicates(ctx) || run_match_all(ctx) ||
       run_stop_and_root_array(ctx)) {
     ctx->destroy(ctx);
     return 1;
