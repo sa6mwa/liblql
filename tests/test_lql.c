@@ -6124,6 +6124,65 @@ static void expect_source_candidate_mutation_api(void) {
     fclose(out);
     out = tmpfile();
     if (out == NULL) {
+      printf("source candidate mutation existing fast key tmpfile failed\n");
+      ++failures;
+    } else {
+      lql_selector *existing_selector;
+      lql_mutation_plan *existing_plan;
+      const char *existing_mutation;
+      static const char existing_doc[] =
+          "{\"event\":\"tabs_update\",\"processed\":false,\"id\":1}";
+      existing_selector = NULL;
+      existing_plan = NULL;
+      existing_mutation = "/processed=true";
+      lql_error_init(&error);
+      st = test_ctx->selector_parse(test_ctx, "/event=\"tabs_update\"",
+                                    &existing_selector, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation existing fast key selector failed: "
+               "%s\n",
+               error.message);
+        ++failures;
+      }
+      lql_error_init(&error);
+      st = test_ctx->mutation_plan_parse(test_ctx, &existing_mutation, 1u,
+                                         &existing_plan, &error);
+      if (st != LQL_STATUS_OK) {
+        printf("source candidate mutation existing fast key plan failed: %s\n",
+               error.message);
+        ++failures;
+      }
+      if (existing_selector != NULL && existing_plan != NULL) {
+        memset(&reader, 0, sizeof(reader));
+        reader.data = existing_doc;
+        reader.len = strlen(existing_doc);
+        reader.chunk_size = 3u;
+        memset(&result, 0, sizeof(result));
+        lql_error_init(&error);
+        st = test_ctx->mutate_source_candidates(
+            test_ctx, existing_selector, existing_plan, read_chunk, &reader,
+            out, 1, 1, &result, &error);
+        if (st != LQL_STATUS_OK || result.candidates_seen != 1u ||
+            result.candidates_matched != 1u) {
+          printf("source candidate mutation existing fast key failed: %s\n",
+                 error.message);
+          ++failures;
+        } else if (!read_tmpfile(out, buf, sizeof(buf), &len) ||
+                   strcmp(buf, "{\"event\":\"tabs_update\",\"processed\":true,"
+                               "\"id\":1}\n") != 0) {
+          printf("source candidate mutation existing fast key output mismatch: "
+                 "%s\n",
+                 buf);
+          ++failures;
+        }
+      }
+      test_ctx->mutation_plan_destroy(test_ctx, existing_plan);
+      test_ctx->selector_destroy(test_ctx, existing_selector);
+    }
+
+    fclose(out);
+    out = tmpfile();
+    if (out == NULL) {
       printf("source candidate mutation lockd handoff tmpfile failed\n");
       ++failures;
     } else {

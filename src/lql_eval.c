@@ -3278,6 +3278,11 @@ static lonejson_status fast_flat_key_begin(void *user, lonejson_error *error) {
                               !hit_marked_fast(doc, selector);
   doc->fast_flat_key_match = doc->fast_flat_key_active;
   doc->fast_flat_key_len = 0u;
+  doc->fast_mutation_key_active = doc->fast_flat_depth == 1u &&
+                                  doc->fast_mutation_top_key != NULL &&
+                                  !doc->fast_mutation_key_seen;
+  doc->fast_mutation_key_match = doc->fast_mutation_key_active;
+  doc->fast_mutation_key_len = 0u;
   return LONEJSON_STATUS_OK;
 }
 
@@ -3310,6 +3315,15 @@ static lonejson_status fast_flat_key_chunk(void *user, const char *data,
     }
   }
   doc->fast_flat_key_len += len;
+  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match) {
+    if (doc->fast_mutation_key_len >= doc->fast_mutation_top_key_len ||
+        len > doc->fast_mutation_top_key_len - doc->fast_mutation_key_len ||
+        memcmp(doc->fast_mutation_top_key + doc->fast_mutation_key_len, data,
+               len) != 0) {
+      doc->fast_mutation_key_match = 0;
+    }
+    doc->fast_mutation_key_len += len;
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -3323,6 +3337,11 @@ static lonejson_status fast_flat_key_end(void *user, lonejson_error *error) {
       doc->fast_flat_key_active && doc->fast_flat_key_match &&
       doc->fast_flat_key_len == selector->field_segment_lens[0];
   doc->fast_flat_key_active = 0;
+  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match &&
+      doc->fast_mutation_key_len == doc->fast_mutation_top_key_len) {
+    doc->fast_mutation_key_seen = 1;
+  }
+  doc->fast_mutation_key_active = 0;
   return LONEJSON_STATUS_OK;
 }
 
