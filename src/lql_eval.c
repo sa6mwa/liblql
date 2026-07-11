@@ -8944,7 +8944,7 @@ static lql_status execute_query_source_output(
   source_output_init_observer(&observer);
   memset(&options, 0, sizeof(options));
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
-  options.output_framing = LONEJSON_CANDIDATE_OUTPUT_OUTPUT_NDJSON;
+  options.output_framing = LONEJSON_CANDIDATE_OUTPUT_NDJSON;
   options.mode = selector == NULL && !matches_only
                      ? LONEJSON_CANDIDATE_OUTPUT_MODE_STREAMING
                      : LONEJSON_CANDIDATE_OUTPUT_MODE_GATED_SPOOLED;

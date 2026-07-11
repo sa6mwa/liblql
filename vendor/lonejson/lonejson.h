@@ -2796,15 +2796,15 @@ typedef struct lonejson_candidate_stream_options {
 } lonejson_candidate_stream_options;
 
 /** Output framing policy for transformed candidate streams. */
-typedef enum lonejson_candidate_output_output_framing {
+typedef enum lonejson_candidate_output_framing {
   /** Emit each transformed candidate as one JSON value followed by `\n`.
    *
    * Dropped candidates emit no bytes. When no candidates are emitted, no
    * newline is emitted. This is the standard transformed candidate stream
    * framing.
    */
-  LONEJSON_CANDIDATE_OUTPUT_OUTPUT_NDJSON = 1
-} lonejson_candidate_output_output_framing;
+  LONEJSON_CANDIDATE_OUTPUT_NDJSON = 1
+} lonejson_candidate_output_framing;
 
 /** Execution mode selected before transformed candidate output is committed. */
 typedef enum lonejson_candidate_output_mode {
@@ -3123,7 +3123,7 @@ typedef struct lonejson_candidate_output_options {
   /** Input framing policy; zero defaults to auto-detection. */
   lonejson_candidate_framing framing;
   /** Output framing policy; zero defaults to NDJSON. */
-  lonejson_candidate_output_output_framing output_framing;
+  lonejson_candidate_output_framing output_framing;
   /** Transform execution mode; zero selects real streaming mode. */
   lonejson_candidate_output_mode mode;
   /** Runtime spool class used by gated-spooled mode; zero selects default. */
@@ -9139,8 +9139,8 @@ void lonejson_oidc_jwks_cache_parse_cleanup(
 /** Gated candidate capture failed the stream. */
 #define LJ_CANDIDATE_DECISION_ERROR LONEJSON_CANDIDATE_DECISION_ERROR
 /** Emit transformed candidates as NDJSON. */
-#define LJ_CANDIDATE_OUTPUT_OUTPUT_NDJSON                                   \
-  LONEJSON_CANDIDATE_OUTPUT_OUTPUT_NDJSON
+#define LJ_CANDIDATE_OUTPUT_NDJSON                                   \
+  LONEJSON_CANDIDATE_OUTPUT_NDJSON
 /** Transform candidates by streaming when output can be committed safely. */
 #define LJ_CANDIDATE_OUTPUT_MODE_STREAMING                                  \
   LONEJSON_CANDIDATE_OUTPUT_MODE_STREAMING
@@ -9642,8 +9642,8 @@ typedef lonejson_candidate_event_fn lj_candidate_event_fn;
 /** Gated candidate capture callback signature. */
 typedef lonejson_candidate_capture_decision_fn lj_candidate_capture_decision_fn;
 /** Output framing policy for transformed candidate streams. */
-typedef lonejson_candidate_output_output_framing
-    lj_candidate_output_output_framing;
+typedef lonejson_candidate_output_framing
+    lj_candidate_output_framing;
 /** Execution mode selected before transformed candidate output is committed. */
 typedef lonejson_candidate_output_mode lj_candidate_output_mode;
 /** Composition policy for structural projection and transform callbacks. */
@@ -51703,9 +51703,9 @@ static lonejson_status lonejson__candidate_output_reader_common(
                                "required");
   }
   if (local.output_framing == 0) {
-    local.output_framing = LONEJSON_CANDIDATE_OUTPUT_OUTPUT_NDJSON;
+    local.output_framing = LONEJSON_CANDIDATE_OUTPUT_NDJSON;
   }
-  if (local.output_framing != LONEJSON_CANDIDATE_OUTPUT_OUTPUT_NDJSON) {
+  if (local.output_framing != LONEJSON_CANDIDATE_OUTPUT_NDJSON) {
     lonejson__runtime_borrow_release(&borrow);
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u,
@@ -51800,9 +51800,9 @@ static lonejson_status lonejson__candidate_output_cursor_common(
                                "required");
   }
   if (local.output_framing == 0) {
-    local.output_framing = LONEJSON_CANDIDATE_OUTPUT_OUTPUT_NDJSON;
+    local.output_framing = LONEJSON_CANDIDATE_OUTPUT_NDJSON;
   }
-  if (local.output_framing != LONEJSON_CANDIDATE_OUTPUT_OUTPUT_NDJSON) {
+  if (local.output_framing != LONEJSON_CANDIDATE_OUTPUT_NDJSON) {
     lonejson__runtime_borrow_release(&borrow);
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u,
