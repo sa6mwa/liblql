@@ -86,6 +86,10 @@ if(BUILD_TESTING)
     tests/lonejson_value_rewriter_test.c)
   target_link_libraries(lonejson_value_rewriter_test PRIVATE lonejson::lonejson)
   add_test(NAME lonejson.value_rewriter COMMAND lonejson_value_rewriter_test)
+  add_executable(lonejson_value_event_tape_test
+    tests/lonejson_value_event_tape_test.c)
+  target_link_libraries(lonejson_value_event_tape_test PRIVATE lonejson::lonejson)
+  add_test(NAME lonejson.value_event_tape COMMAND lonejson_value_event_tape_test)
 endif()
 
 if(LQL_BUILD_DIRECT_PROBE)

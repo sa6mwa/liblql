@@ -2561,6 +2561,12 @@ typedef struct lonejson_value_rewriter {
   lonejson_error error;
 } lonejson_value_rewriter;
 
+/** Bounded replayable prefix of structured JSON value events. */
+typedef struct lonejson_value_event_tape {
+  void *state;
+  lonejson_error error;
+} lonejson_value_event_tape;
+
 /** Path-aware visitor callbacks for one arbitrary JSON value. String values
  * and object keys are delivered as decoded UTF-8 in chunks. Number values are
  * delivered as raw token bytes in chunks. Any callback may be `NULL` when the
@@ -5283,6 +5289,8 @@ void lonejson_value_rewriter_init(lonejson_value_rewriter *rewriter);
  * normalized-path rewrite `options`. `out_visitor` and `out_user` are valid
  * until close or cleanup. Closing finalizes exactly one complete rewritten
  * JSON value. The rewriter may be opened again after a successful close.
+ * Reopening with the same live runtime reuses its retained runtime-policy
+ * snapshot and writer allocations.
  */
 lonejson_status lonejson_value_rewriter_open(
     lonejson_value_rewriter *rewriter, lonejson *runtime, lonejson_sink_fn sink,
@@ -5294,6 +5302,27 @@ lonejson_status lonejson_value_rewriter_close(lonejson_value_rewriter *rewriter,
                                               lonejson_error *error);
 /** Releases all resources retained by a value rewriter. */
 void lonejson_value_rewriter_cleanup(lonejson_value_rewriter *rewriter);
+/** Initializes a reusable bounded structured-event tape. */
+void lonejson_value_event_tape_init(lonejson_value_event_tape *tape);
+/** Opens a tape that records one prefix of JSON value events.
+ *
+ * `max_bytes` bounds retained event metadata and decoded chunk data. A zero
+ * limit permits unbounded retention. When the next event would exceed the
+ * limit, its callback returns `LONEJSON_STATUS_OVERFLOW` without recording
+ * that event. `out_visitor` and `out_user` remain valid until reset or cleanup.
+ */
+lonejson_status lonejson_value_event_tape_open(
+    lonejson_value_event_tape *tape, lonejson *runtime, size_t max_bytes,
+    lonejson_value_visitor *out_visitor, void **out_user,
+    lonejson_error *error);
+/** Replays all retained events into `visitor` in their original order. */
+lonejson_status lonejson_value_event_tape_replay(
+    const lonejson_value_event_tape *tape,
+    const lonejson_value_visitor *visitor, void *user, lonejson_error *error);
+/** Clears retained events while preserving reusable allocations. */
+void lonejson_value_event_tape_reset(lonejson_value_event_tape *tape);
+/** Releases all resources retained by an event tape. */
+void lonejson_value_event_tape_cleanup(lonejson_value_event_tape *tape);
 /** Initializes a mapped string-array stream field with no handler. */
 void lonejson_string_array_stream_init(lonejson_string_array_stream *stream);
 /** Configures callbacks for a mapped string-array stream field.
@@ -5335,7 +5364,9 @@ void lonejson_spooled_init_with_allocator(
     lonejson_spooled *value, const lonejson__spool_options *options,
     const lonejson_allocator *allocator);
 #endif
-/** Clears a spool handle while preserving its configured thresholds. */
+/** Clears a spool handle while preserving its configured thresholds and
+ * retained in-memory capacity. Use cleanup to release retained storage.
+ */
 void lonejson_spooled_reset(lonejson_spooled *value);
 /** Releases all resources owned by a spool handle, including any temporary
  * file. */
@@ -9082,6 +9113,8 @@ typedef lonejson_value_visitor lj_value_visitor;
 typedef lonejson_writer_visitor lj_writer_visitor;
 /** Incremental generic structured-event JSON rewriter. */
 typedef lonejson_value_rewriter lj_value_rewriter;
+/** Bounded replayable prefix of structured JSON value events. */
+typedef lonejson_value_event_tape lj_value_event_tape;
 /** One decoded path segment in a parser-owned arbitrary JSON value path. */
 typedef lonejson_path_segment lj_path_segment;
 /** Current normalized location while visiting one arbitrary JSON value. */
@@ -9595,6 +9628,29 @@ lj_value_rewriter_close(lj_value_rewriter *rewriter, lj_error *error) {
 LONEJSON_SHORT_ALIAS_INLINE void
 lj_value_rewriter_cleanup(lj_value_rewriter *rewriter) {
   lonejson_value_rewriter_cleanup(rewriter);
+}
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_value_event_tape_init(lj_value_event_tape *tape) {
+  lonejson_value_event_tape_init(tape);
+}
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_value_event_tape_open(
+    lj_value_event_tape *tape, lonejson *runtime, size_t max_bytes,
+    lj_value_visitor *out_visitor, void **out_user, lj_error *error) {
+  return lonejson_value_event_tape_open(tape, runtime, max_bytes, out_visitor,
+                                        out_user, error);
+}
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_value_event_tape_replay(
+    const lj_value_event_tape *tape, const lj_value_visitor *visitor,
+    void *user, lj_error *error) {
+  return lonejson_value_event_tape_replay(tape, visitor, user, error);
+}
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_value_event_tape_reset(lj_value_event_tape *tape) {
+  lonejson_value_event_tape_reset(tape);
+}
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_value_event_tape_cleanup(lj_value_event_tape *tape) {
+  lonejson_value_event_tape_cleanup(tape);
 }
 /** Returns the empty path-aware visitor with all callbacks set to `NULL`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_path_value_visitor
@@ -13683,27 +13739,6 @@ void lonejson_spooled_cleanup(lonejson_spooled *value) {
       lonejson__init_cookie(value, LONEJSON__SPOOLED_MAGIC);
 }
 
-void lonejson_spooled_reset(lonejson_spooled *value) {
-  lonejson__spool_options options;
-  lonejson_allocator allocator;
-  char *saved_temp_dir = NULL;
-
-  if (value == NULL) {
-    return;
-  }
-  options.memory_limit = value->memory_limit;
-  options.max_bytes = value->max_bytes;
-  saved_temp_dir = value->owned_temp_dir;
-  value->owned_temp_dir = NULL;
-  options.temp_dir = saved_temp_dir;
-  allocator = value->allocator;
-  lonejson_spooled_cleanup(value);
-  lonejson__spooled_apply_options(value, &options);
-  value->allocator = allocator;
-  value->owned_temp_dir = saved_temp_dir;
-  value->temp_dir = saved_temp_dir;
-}
-
 static void lonejson__spooled_reset_preserve_memory(lonejson_spooled *value) {
   if (value == NULL) {
     return;
@@ -13715,6 +13750,10 @@ static void lonejson__spooled_reset_preserve_memory(lonejson_spooled *value) {
   value->spill_write_offset = 0u;
   value->spill_write_dirty = 0;
   lonejson__spooled_close_temp(value);
+}
+
+void lonejson_spooled_reset(lonejson_spooled *value) {
+  lonejson__spooled_reset_preserve_memory(value);
 }
 
 size_t lonejson_spooled_size(const lonejson_spooled *value) {
@@ -46052,6 +46091,35 @@ typedef struct lonejson__value_rewrite_frame {
   size_t key_cap;
 } lonejson__value_rewrite_frame;
 
+typedef enum lonejson__value_event_tape_kind {
+  LONEJSON__VALUE_TAPE_OBJECT_BEGIN = 1,
+  LONEJSON__VALUE_TAPE_OBJECT_END = 2,
+  LONEJSON__VALUE_TAPE_OBJECT_KEY_BEGIN = 3,
+  LONEJSON__VALUE_TAPE_OBJECT_KEY_CHUNK = 4,
+  LONEJSON__VALUE_TAPE_OBJECT_KEY_END = 5,
+  LONEJSON__VALUE_TAPE_ARRAY_BEGIN = 6,
+  LONEJSON__VALUE_TAPE_ARRAY_END = 7,
+  LONEJSON__VALUE_TAPE_STRING_BEGIN = 8,
+  LONEJSON__VALUE_TAPE_STRING_CHUNK = 9,
+  LONEJSON__VALUE_TAPE_STRING_END = 10,
+  LONEJSON__VALUE_TAPE_NUMBER_BEGIN = 11,
+  LONEJSON__VALUE_TAPE_NUMBER_CHUNK = 12,
+  LONEJSON__VALUE_TAPE_NUMBER_END = 13,
+  LONEJSON__VALUE_TAPE_TRUE = 14,
+  LONEJSON__VALUE_TAPE_FALSE = 15,
+  LONEJSON__VALUE_TAPE_NULL = 16
+} lonejson__value_event_tape_kind;
+
+typedef struct lonejson__value_event_tape_state {
+  lonejson_allocator allocator;
+  lonejson *runtime_handle;
+  unsigned char *data;
+  size_t data_len;
+  size_t data_cap;
+  size_t max_bytes;
+  int open;
+} lonejson__value_event_tape_state;
+
 typedef struct lonejson__value_rewrite_state {
   lonejson_writer writer;
   lonejson_value_rewrite_options options;
@@ -47297,26 +47365,39 @@ lonejson_status lonejson_value_rewriter_open(
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "value rewriter arguments are invalid");
   }
-  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
-  if (runtime_state == NULL) {
-    return LONEJSON_STATUS_INVALID_ARGUMENT;
-  }
   status = lonejson__value_rewrite_validate_options(options, error);
   if (status != LONEJSON_STATUS_OK) {
-    lonejson__runtime_borrow_release(&borrow);
     return status;
   }
   state = (lonejson__value_rewrite_state *)rewriter->state;
   if (state != NULL && state->event_open) {
-    lonejson__runtime_borrow_release(&borrow);
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
                                0u, 0u, "value rewriter is already open");
   }
-  if (state != NULL && state->runtime_handle != runtime) {
-    lonejson__value_rewriter_destroy(rewriter);
-    state = NULL;
-  }
-  if (state == NULL) {
+  if (state != NULL && state->runtime_handle == runtime) {
+    runtime_state = lonejson__writer_runtime(
+        (const lonejson__writer_state *)state->writer.state);
+    if (runtime_state == NULL) {
+      lonejson__value_rewriter_destroy(rewriter);
+      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                                 0u, 0u,
+                                 "value rewriter runtime snapshot is invalid");
+    }
+    status = lonejson__writer_reset_sink(&state->writer, sink, sink_user,
+                                          error);
+    if (status != LONEJSON_STATUS_OK) {
+      lonejson__value_rewriter_destroy(rewriter);
+      return status;
+    }
+  } else {
+    if (state != NULL) {
+      lonejson__value_rewriter_destroy(rewriter);
+      state = NULL;
+    }
+    runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+    if (runtime_state == NULL) {
+      return LONEJSON_STATUS_INVALID_ARGUMENT;
+    }
     allocator =
         lonejson__allocator_resolve(runtime_state->parse_options.allocator);
     state = (lonejson__value_rewrite_state *)lonejson__buffer_alloc(
@@ -47339,14 +47420,7 @@ lonejson_status lonejson_value_rewriter_open(
       return status;
     }
     rewriter->state = state;
-  } else {
-    status = lonejson__writer_reset_sink(&state->writer, sink, sink_user,
-                                          error);
-    if (status != LONEJSON_STATUS_OK) {
-      lonejson__value_rewriter_destroy(rewriter);
-      lonejson__runtime_borrow_release(&borrow);
-      return status;
-    }
+    lonejson__runtime_borrow_release(&borrow);
   }
   state->options = *options;
   state->parse_options = runtime_state->parse_options;
@@ -47368,7 +47442,6 @@ lonejson_status lonejson_value_rewriter_open(
   lonejson__value_rewrite_assign_visitor(out_visitor);
   *out_user = state;
   lonejson_error_init(&rewriter->error);
-  lonejson__runtime_borrow_release(&borrow);
   return LONEJSON_STATUS_OK;
 }
 
@@ -47410,6 +47483,316 @@ void lonejson_value_rewriter_cleanup(lonejson_value_rewriter *rewriter) {
   lonejson__value_rewriter_destroy(rewriter);
   if (rewriter != NULL) {
     lonejson_error_init(&rewriter->error);
+  }
+}
+
+static void lonejson__value_event_tape_destroy(
+    lonejson_value_event_tape *tape) {
+  lonejson__value_event_tape_state *state;
+  if (tape == NULL || tape->state == NULL) {
+    return;
+  }
+  state = (lonejson__value_event_tape_state *)tape->state;
+  lonejson__buffer_free(&state->allocator, state->data, state->data_cap);
+  lonejson__buffer_free(&state->allocator, state, sizeof(*state));
+  tape->state = NULL;
+}
+
+static lonejson_status lonejson__value_event_tape_reserve(
+    lonejson__value_event_tape_state *state, size_t encoded_len,
+    lonejson_error *error) {
+  size_t data_cap;
+  unsigned char *next_data;
+
+  if (state == NULL || encoded_len > (size_t)-1 - state->data_len) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "value event tape is full");
+  }
+  if (state->max_bytes != 0u &&
+      encoded_len > state->max_bytes - state->data_len) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "value event tape limit exceeded");
+  }
+  if (state->data_len + encoded_len > state->data_cap) {
+    data_cap = state->data_cap == 0u ? 64u : state->data_cap;
+    while (data_cap < state->data_len + encoded_len) {
+      if (data_cap > ((size_t)-1) / 2u) {
+        data_cap = state->data_len + encoded_len;
+        break;
+      }
+      data_cap *= 2u;
+    }
+    next_data = (unsigned char *)lonejson__buffer_realloc(
+        &state->allocator, state->data, state->data_cap, data_cap);
+    if (next_data == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to grow value event tape");
+    }
+    state->data = next_data;
+    state->data_cap = data_cap;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__value_event_tape_record(
+  lonejson__value_event_tape_state *state,
+    lonejson__value_event_tape_kind kind, const void *data, size_t data_len,
+    int boolean_value, lonejson_error *error) {
+  lonejson_status status;
+  size_t encoded_len;
+  int has_data;
+
+  if (state == NULL || !state->open || (data == NULL && data_len != 0u)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u, "open value event tape is required");
+  }
+  has_data = kind == LONEJSON__VALUE_TAPE_OBJECT_KEY_CHUNK ||
+             kind == LONEJSON__VALUE_TAPE_STRING_CHUNK ||
+             kind == LONEJSON__VALUE_TAPE_NUMBER_CHUNK;
+  (void)boolean_value;
+  encoded_len = 1u + (has_data ? sizeof(data_len) + data_len : 0u);
+  if (encoded_len < data_len || state->data_len > state->data_cap ||
+      (state->max_bytes != 0u &&
+       encoded_len > state->max_bytes - state->data_len) ||
+      encoded_len > state->data_cap - state->data_len) {
+    status = lonejson__value_event_tape_reserve(state, encoded_len, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  }
+  state->data[state->data_len++] = (unsigned char)kind;
+  if (has_data) {
+    memcpy(state->data + state->data_len, &data_len, sizeof(data_len));
+    state->data_len += sizeof(data_len);
+  }
+  if (has_data && data_len != 0u) {
+    memcpy(state->data + state->data_len, data, data_len);
+    state->data_len += data_len;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+#define LONEJSON__VALUE_TAPE_EVENT(name, kind)                                \
+  static lonejson_status lonejson__value_event_tape_##name(                   \
+      void *user, lonejson_error *error) {                                    \
+    return lonejson__value_event_tape_record(                                 \
+        (lonejson__value_event_tape_state *)user, kind, NULL, 0u, 0, error); \
+  }
+
+#define LONEJSON__VALUE_TAPE_CHUNK(name, kind)                                \
+  static lonejson_status lonejson__value_event_tape_##name(                   \
+      void *user, const char *data, size_t len, lonejson_error *error) {      \
+    return lonejson__value_event_tape_record(                                 \
+        (lonejson__value_event_tape_state *)user, kind, data, len, 0, error);\
+  }
+
+LONEJSON__VALUE_TAPE_EVENT(object_begin, LONEJSON__VALUE_TAPE_OBJECT_BEGIN)
+LONEJSON__VALUE_TAPE_EVENT(object_end, LONEJSON__VALUE_TAPE_OBJECT_END)
+LONEJSON__VALUE_TAPE_EVENT(object_key_begin,
+                            LONEJSON__VALUE_TAPE_OBJECT_KEY_BEGIN)
+LONEJSON__VALUE_TAPE_CHUNK(object_key_chunk,
+                            LONEJSON__VALUE_TAPE_OBJECT_KEY_CHUNK)
+LONEJSON__VALUE_TAPE_EVENT(object_key_end, LONEJSON__VALUE_TAPE_OBJECT_KEY_END)
+LONEJSON__VALUE_TAPE_EVENT(array_begin, LONEJSON__VALUE_TAPE_ARRAY_BEGIN)
+LONEJSON__VALUE_TAPE_EVENT(array_end, LONEJSON__VALUE_TAPE_ARRAY_END)
+LONEJSON__VALUE_TAPE_EVENT(string_begin, LONEJSON__VALUE_TAPE_STRING_BEGIN)
+LONEJSON__VALUE_TAPE_CHUNK(string_chunk, LONEJSON__VALUE_TAPE_STRING_CHUNK)
+LONEJSON__VALUE_TAPE_EVENT(string_end, LONEJSON__VALUE_TAPE_STRING_END)
+LONEJSON__VALUE_TAPE_EVENT(number_begin, LONEJSON__VALUE_TAPE_NUMBER_BEGIN)
+LONEJSON__VALUE_TAPE_CHUNK(number_chunk, LONEJSON__VALUE_TAPE_NUMBER_CHUNK)
+LONEJSON__VALUE_TAPE_EVENT(number_end, LONEJSON__VALUE_TAPE_NUMBER_END)
+LONEJSON__VALUE_TAPE_EVENT(null_value, LONEJSON__VALUE_TAPE_NULL)
+
+static lonejson_status lonejson__value_event_tape_boolean(
+    void *user, int value, lonejson_error *error) {
+  return lonejson__value_event_tape_record(
+      (lonejson__value_event_tape_state *)user,
+      value ? LONEJSON__VALUE_TAPE_TRUE : LONEJSON__VALUE_TAPE_FALSE, NULL,
+      0u, 0, error);
+}
+
+#undef LONEJSON__VALUE_TAPE_CHUNK
+#undef LONEJSON__VALUE_TAPE_EVENT
+
+static void lonejson__value_event_tape_assign_visitor(
+    lonejson_value_visitor *visitor) {
+  *visitor = lonejson_default_value_visitor();
+  visitor->object_begin = lonejson__value_event_tape_object_begin;
+  visitor->object_end = lonejson__value_event_tape_object_end;
+  visitor->object_key_begin = lonejson__value_event_tape_object_key_begin;
+  visitor->object_key_chunk = lonejson__value_event_tape_object_key_chunk;
+  visitor->object_key_end = lonejson__value_event_tape_object_key_end;
+  visitor->array_begin = lonejson__value_event_tape_array_begin;
+  visitor->array_end = lonejson__value_event_tape_array_end;
+  visitor->string_begin = lonejson__value_event_tape_string_begin;
+  visitor->string_chunk = lonejson__value_event_tape_string_chunk;
+  visitor->string_end = lonejson__value_event_tape_string_end;
+  visitor->number_begin = lonejson__value_event_tape_number_begin;
+  visitor->number_chunk = lonejson__value_event_tape_number_chunk;
+  visitor->number_end = lonejson__value_event_tape_number_end;
+  visitor->boolean_value = lonejson__value_event_tape_boolean;
+  visitor->null_value = lonejson__value_event_tape_null_value;
+}
+
+void lonejson_value_event_tape_init(lonejson_value_event_tape *tape) {
+  if (tape != NULL) {
+    memset(tape, 0, sizeof(*tape));
+    lonejson_error_init(&tape->error);
+  }
+}
+
+lonejson_status lonejson_value_event_tape_open(
+    lonejson_value_event_tape *tape, lonejson *runtime, size_t max_bytes,
+    lonejson_value_visitor *out_visitor, void **out_user,
+    lonejson_error *error) {
+  lonejson__value_event_tape_state *state;
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+
+  if (tape == NULL || out_visitor == NULL || out_user == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u, "value event tape arguments are invalid");
+  }
+  state = (lonejson__value_event_tape_state *)tape->state;
+  if (state != NULL && state->runtime_handle != runtime) {
+    lonejson__value_event_tape_destroy(tape);
+    state = NULL;
+  }
+  if (state == NULL) {
+    runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+    if (runtime_state == NULL) {
+      return LONEJSON_STATUS_INVALID_ARGUMENT;
+    }
+    state = (lonejson__value_event_tape_state *)lonejson__buffer_alloc(
+        &runtime_state->allocator_storage, sizeof(*state));
+    if (state == NULL) {
+      lonejson__runtime_borrow_release(&borrow);
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to allocate value event tape");
+    }
+    memset(state, 0, sizeof(*state));
+    state->allocator = runtime_state->allocator_storage;
+    state->runtime_handle = runtime;
+    tape->state = state;
+    lonejson__runtime_borrow_release(&borrow);
+  }
+  state->data_len = 0u;
+  state->max_bytes = max_bytes;
+  state->open = 1;
+  lonejson__clear_error(error);
+  lonejson_error_init(&tape->error);
+  lonejson__value_event_tape_assign_visitor(out_visitor);
+  *out_user = state;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__value_event_tape_replay_event(
+    lonejson__value_event_tape_kind kind, const char *chunk, size_t chunk_len,
+    const lonejson_value_visitor *visitor, void *user, lonejson_error *error) {
+  if (visitor == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u, "value event tape replay is invalid");
+  }
+  switch (kind) {
+  case LONEJSON__VALUE_TAPE_OBJECT_BEGIN:
+    return visitor->object_begin != NULL ? visitor->object_begin(user, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_OBJECT_END:
+    return visitor->object_end != NULL ? visitor->object_end(user, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_OBJECT_KEY_BEGIN:
+    return visitor->object_key_begin != NULL ? visitor->object_key_begin(user, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_OBJECT_KEY_CHUNK:
+    return visitor->object_key_chunk != NULL ? visitor->object_key_chunk(user, chunk, chunk_len, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_OBJECT_KEY_END:
+    return visitor->object_key_end != NULL ? visitor->object_key_end(user, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_ARRAY_BEGIN:
+    return visitor->array_begin != NULL ? visitor->array_begin(user, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_ARRAY_END:
+    return visitor->array_end != NULL ? visitor->array_end(user, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_STRING_BEGIN:
+    return visitor->string_begin != NULL ? visitor->string_begin(user, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_STRING_CHUNK:
+    return visitor->string_chunk != NULL ? visitor->string_chunk(user, chunk, chunk_len, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_STRING_END:
+    return visitor->string_end != NULL ? visitor->string_end(user, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_NUMBER_BEGIN:
+    return visitor->number_begin != NULL ? visitor->number_begin(user, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_NUMBER_CHUNK:
+    return visitor->number_chunk != NULL ? visitor->number_chunk(user, chunk, chunk_len, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_NUMBER_END:
+    return visitor->number_end != NULL ? visitor->number_end(user, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_TRUE:
+    return visitor->boolean_value != NULL ? visitor->boolean_value(user, 1, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_FALSE:
+    return visitor->boolean_value != NULL ? visitor->boolean_value(user, 0, error) : LONEJSON_STATUS_OK;
+  case LONEJSON__VALUE_TAPE_NULL:
+    return visitor->null_value != NULL ? visitor->null_value(user, error) : LONEJSON_STATUS_OK;
+  default:
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u, "value event tape event is invalid");
+  }
+}
+
+lonejson_status lonejson_value_event_tape_replay(
+    const lonejson_value_event_tape *tape,
+    const lonejson_value_visitor *visitor, void *user, lonejson_error *error) {
+  const lonejson__value_event_tape_state *state;
+  size_t offset;
+  size_t chunk_len;
+  lonejson__value_event_tape_kind kind;
+  const char *chunk;
+  lonejson_status status;
+  if (tape == NULL || tape->state == NULL || visitor == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u, "open value event tape is required");
+  }
+  state = (const lonejson__value_event_tape_state *)tape->state;
+  offset = 0u;
+  while (offset < state->data_len) {
+    kind = (lonejson__value_event_tape_kind)state->data[offset++];
+    chunk = NULL;
+    chunk_len = 0u;
+    if (kind == LONEJSON__VALUE_TAPE_OBJECT_KEY_CHUNK ||
+        kind == LONEJSON__VALUE_TAPE_STRING_CHUNK ||
+        kind == LONEJSON__VALUE_TAPE_NUMBER_CHUNK) {
+      if (state->data_len - offset < sizeof(chunk_len)) {
+        return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                   0u, 0u, "value event tape is corrupt");
+      }
+      memcpy(&chunk_len, state->data + offset, sizeof(chunk_len));
+      offset += sizeof(chunk_len);
+      if (chunk_len > state->data_len - offset) {
+        return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                   0u, 0u, "value event tape is corrupt");
+      }
+      chunk = chunk_len != 0u ? (const char *)(state->data + offset) : NULL;
+      offset += chunk_len;
+    }
+    status = lonejson__value_event_tape_replay_event(kind, chunk, chunk_len,
+                                                      visitor, user, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+void lonejson_value_event_tape_reset(lonejson_value_event_tape *tape) {
+  lonejson__value_event_tape_state *state;
+  if (tape == NULL || tape->state == NULL) {
+    return;
+  }
+  state = (lonejson__value_event_tape_state *)tape->state;
+  state->data_len = 0u;
+  state->open = 0;
+  lonejson_error_init(&tape->error);
+}
+
+void lonejson_value_event_tape_cleanup(lonejson_value_event_tape *tape) {
+  lonejson__value_event_tape_destroy(tape);
+  if (tape != NULL) {
+    lonejson_error_init(&tape->error);
   }
 }
 
