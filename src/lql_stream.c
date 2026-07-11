@@ -35,6 +35,7 @@ typedef struct lql_stream_state {
   int active_mismatch;
   int key_active;
   int active;
+  int root_value_started;
 } lql_stream_state;
 
 static void stream_lonejson_error(lonejson_error *out, const char *message) {
@@ -217,6 +218,7 @@ stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
   state->key_active = 0;
   state->active_mismatch = 0;
   state->active_pos = 0u;
+  state->root_value_started = 0;
   ++state->result->records_seen;
   (void)error;
   return LONEJSON_CANDIDATE_CONTINUE;
@@ -306,6 +308,28 @@ static lonejson_status stream_object_begin(void *user, lonejson_error *error) {
     stream_clear_current(state);
   }
   ++state->object_depth;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status stream_match_all_object_begin(void *user,
+                                                      lonejson_error *error) {
+  lql_stream_state *state;
+  (void)error;
+  state = (lql_stream_state *)user;
+  state->root_value_started = 1;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status stream_match_all_array_begin(void *user,
+                                                     lonejson_error *error) {
+  lql_stream_state *state;
+  state = (lql_stream_state *)user;
+  if (!state->root_value_started) {
+    stream_fail(state, LQL_STATUS_JSON_ERROR,
+                "root JSON arrays are not valid NDJSON records");
+    stream_lonejson_error(error, state->failure.message);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -523,17 +547,22 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
   visitor = lonejson_default_value_visitor();
-  visitor.object_begin = stream_object_begin;
-  visitor.object_end = stream_object_end;
-  visitor.object_key_begin = stream_key_begin;
-  visitor.object_key_chunk = stream_key_chunk;
-  visitor.array_begin = stream_array_begin;
-  visitor.array_end = stream_array_end;
-  visitor.string_begin = stream_string_begin;
-  visitor.string_chunk = stream_string_chunk;
-  visitor.number_begin = stream_scalar_value;
-  visitor.boolean_value = stream_boolean_value;
-  visitor.null_value = stream_scalar_value;
+  if (state.program == NULL || state.program->match_all) {
+    visitor.object_begin = stream_match_all_object_begin;
+    visitor.array_begin = stream_match_all_array_begin;
+  } else {
+    visitor.object_begin = stream_object_begin;
+    visitor.object_end = stream_object_end;
+    visitor.object_key_begin = stream_key_begin;
+    visitor.object_key_chunk = stream_key_chunk;
+    visitor.array_begin = stream_array_begin;
+    visitor.array_end = stream_array_end;
+    visitor.string_begin = stream_string_begin;
+    visitor.string_chunk = stream_string_chunk;
+    visitor.number_begin = stream_scalar_value;
+    visitor.boolean_value = stream_boolean_value;
+    visitor.null_value = stream_scalar_value;
+  }
   options.visitor = &visitor;
   options.visitor_user = &state;
   options.candidate_begin = stream_candidate_begin;
