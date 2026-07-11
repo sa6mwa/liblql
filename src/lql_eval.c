@@ -5349,6 +5349,7 @@ typedef struct transform_path_frame {
 
 #define TRANSFORM_FRAME_INLINE_BITS (sizeof(unsigned long) * CHAR_BIT)
 #define TRANSFORM_FRAME_INLINE_COUNT 32u
+#define SOURCE_OUTPUT_STAGE_BUFFER_CAP 16384u
 
 typedef struct source_output_policy {
   int matched;
@@ -5388,6 +5389,8 @@ typedef struct source_output_state {
   int staged_output;
   int output_stage_initialized;
   lonejson_spooled output_stage;
+  unsigned char output_stage_buffer[SOURCE_OUTPUT_STAGE_BUFFER_CAP];
+  size_t output_stage_buffer_len;
   FILE *out;
   lql_status callback_status;
   lql_error transform_error;
@@ -8749,6 +8752,24 @@ static void source_output_clear_applied(source_output_state *state) {
   }
 }
 
+static lonejson_status source_output_stage_flush(source_output_state *state,
+                                                 lonejson_error *error) {
+  lonejson_status st;
+
+  if (state == NULL || !state->output_stage_initialized) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (state->output_stage_buffer_len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  st = lonejson_spooled_append(&state->output_stage, state->output_stage_buffer,
+                               state->output_stage_buffer_len, error);
+  if (st == LONEJSON_STATUS_OK) {
+    state->output_stage_buffer_len = 0u;
+  }
+  return st;
+}
+
 static lonejson_candidate_callback_result
 source_output_candidate_begin(void *user,
                               const lonejson_candidate_info *candidate,
@@ -8773,6 +8794,7 @@ source_output_candidate_begin(void *user,
   lql_error_init(&state->transform_error);
   if (state->staged_output && state->output_stage_initialized) {
     lonejson_spooled_reset(&state->output_stage);
+    state->output_stage_buffer_len = 0u;
   }
   return LONEJSON_CANDIDATE_CONTINUE;
 }
@@ -8807,6 +8829,10 @@ source_output_candidate_end(void *user,
     return LONEJSON_CANDIDATE_ERROR;
   }
   if (state->staged_output && matched) {
+    if (source_output_stage_flush(state, error) != LONEJSON_STATUS_OK) {
+      state->callback_status = LQL_STATUS_JSON_ERROR;
+      return LONEJSON_CANDIDATE_ERROR;
+    }
     if (lonejson_spooled_write_to_sink(&state->output_stage, file_sink_unlocked,
                                        state->out,
                                        error) != LONEJSON_STATUS_OK) {
@@ -8860,10 +8886,29 @@ static lonejson_status source_output_stage_sink(void *user, const void *data,
                                                 size_t len,
                                                 lonejson_error *error) {
   source_output_state *state = (source_output_state *)user;
+  const unsigned char *bytes = (const unsigned char *)data;
+  size_t available;
   if (state == NULL || !state->output_stage_initialized) {
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
-  return lonejson_spooled_append(&state->output_stage, data, len, error);
+  while (len != 0u) {
+    available = SOURCE_OUTPUT_STAGE_BUFFER_CAP - state->output_stage_buffer_len;
+    if (available == 0u) {
+      if (source_output_stage_flush(state, error) != LONEJSON_STATUS_OK) {
+        return LONEJSON_STATUS_CALLBACK_FAILED;
+      }
+      available = SOURCE_OUTPUT_STAGE_BUFFER_CAP;
+    }
+    if (len < available) {
+      available = len;
+    }
+    memcpy(state->output_stage_buffer + state->output_stage_buffer_len, bytes,
+           available);
+    state->output_stage_buffer_len += available;
+    bytes += available;
+    len -= available;
+  }
+  return LONEJSON_STATUS_OK;
 }
 
 static int
