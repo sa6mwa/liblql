@@ -5,9 +5,9 @@ parsing and writing.
 
 ## Reset State
 
-The previous Candidate Run architecture is being removed before its
-replacement is written. This branch is intentionally not releasable during
-that deletion phase. The governing contract and completion gates are in
+The previous execution architecture is being removed before its replacement is
+written. This branch is intentionally not releasable during that deletion
+phase. The governing contract and completion gates are in
 [`docs/liblql-direct-execution-spec.md`](docs/liblql-direct-execution-spec.md).
 
 The replacement will execute compiled LQL directly in liblql over LoneJSON's

@@ -31,10 +31,6 @@ static int selector_is_empty_method(const lql *self,
 static void selector_capabilities_get_method(const lql *self,
                                              const lql_selector *selector,
                                              lql_selector_capabilities *out);
-static void
-selector_execution_traits_get_method(const lql *self,
-                                     const lql_selector *selector,
-                                     lql_selector_execution_traits *out);
 static lql_status selector_root_method(const lql *self,
                                        const lql_selector *selector,
                                        lql_selector_node *out,
@@ -128,7 +124,6 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
   ctx->selector_destroy = selector_destroy_method;
   ctx->selector_is_empty = selector_is_empty_method;
   ctx->selector_capabilities_get = selector_capabilities_get_method;
-  ctx->selector_execution_traits_get = selector_execution_traits_get_method;
   ctx->selector_root = selector_root_method;
   ctx->selector_node_child_count = selector_node_child_count_method;
   ctx->selector_node_child = selector_node_child_method;
@@ -148,9 +143,6 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
   ctx->selector_build_date = lql_selector_build_date_internal;
   ctx->selector_build_in = lql_selector_build_in_internal;
   ctx->selector_build_exists = lql_selector_build_exists_internal;
-  lql_eval_methods_install(ctx);
-  lql_project_methods_install(ctx);
-  lql_mutation_methods_install(ctx);
   ctx->destroy = receiver_destroy;
   *out = ctx;
   return LQL_STATUS_OK;
@@ -209,30 +201,6 @@ static void capabilities_fill(lql_capabilities *out) {
   memset(out, 0, sizeof(*out));
   out->selector_parse = 1;
   out->selector_inspection = 1;
-  out->matches_json = 1;
-  out->file_decision_stream = 1;
-  out->source_decision_stream = 1;
-  out->file_match_stream = 1;
-  out->seekable_range_payloads = 1;
-  out->source_spooled_match_stream = 1;
-  out->spooled_payloads = 1;
-  out->payload_sink_write = 1;
-  out->payload_projection = 1;
-  out->projection_file_range = 1;
-  out->projection_source = 1;
-  out->projection_buffered_json = 1;
-  out->compact_file_range = 1;
-  out->compact_source = 1;
-  out->compact_buffered_json = 1;
-  out->mutation_parse = 1;
-  out->mutation_file_range = 1;
-  out->mutation_file_range_candidates = 1;
-  out->mutation_source = 1;
-  out->mutation_source_candidates = 1;
-  out->mutation_file_range_projected_candidates = 1;
-  out->mutation_source_projected_candidates = 1;
-  out->mutation_buffered_json = 1;
-  out->mutation_file_values = 1;
 }
 
 static const char *receiver_version(const lql *self) {
@@ -254,21 +222,6 @@ static void receiver_destroy(lql *self) {
   impl = (lql_impl *)self->impl;
   allocator = lql_allocator_from_receiver(self);
   if (impl != NULL) {
-    if (impl->eval_runtime != NULL) {
-      lonejson_free(impl->eval_runtime);
-      impl->eval_runtime = NULL;
-    }
-    if (impl->eval_runtime_nested != NULL) {
-      lonejson_free(impl->eval_runtime_nested);
-      impl->eval_runtime_nested = NULL;
-    }
-    allocator->destroy(allocator, impl->eval_hits);
-    allocator->destroy(allocator, impl->eval_stream_misses);
-    allocator->destroy(allocator, impl->eval_scalar_family_predicates);
-    allocator->destroy(allocator, impl->eval_in_matches);
-    allocator->destroy(allocator, impl->eval_contains_positions);
-    allocator->destroy(allocator, impl->eval_contains_tail_buf);
-    allocator->destroy(allocator, impl->eval_container_types);
     allocator->destroy(allocator, impl);
   }
   allocator->destroy(allocator, self);
@@ -292,9 +245,6 @@ LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
   }
   allocator->destroy(allocator, selector->any);
   allocator->destroy(allocator, selector->any_lens);
-  allocator->destroy(allocator, selector->any_firsts);
-  allocator->destroy(allocator, selector->any_ifirsts);
-  allocator->destroy(allocator, selector->contains_lps);
   allocator->destroy(allocator, selector->range_gt_text);
   allocator->destroy(allocator, selector->range_gte_text);
   allocator->destroy(allocator, selector->range_lt_text);
@@ -307,12 +257,6 @@ LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
   allocator->destroy(allocator, selector->date_gte_text);
   allocator->destroy(allocator, selector->date_lt_text);
   allocator->destroy(allocator, selector->date_lte_text);
-  allocator->destroy(allocator, selector->field_segment_offsets);
-  allocator->destroy(allocator, selector->field_segment_lens);
-  allocator->destroy(allocator, selector->field_segment_kinds);
-  allocator->destroy(allocator, (void *)selector->predicates);
-  allocator->destroy(allocator, selector->predicate_depth_indexes);
-  allocator->destroy(allocator, selector->predicate_depth_offsets);
   for (i = 0u; i < selector->child_count; ++i) {
     lql_selector_cleanup(self, &selector->children[i]);
   }
@@ -1230,24 +1174,4 @@ static void selector_capabilities_get_method(const lql *self,
     return;
   }
   selector_capabilities_visit(out, selector);
-}
-
-static void
-selector_execution_traits_get_method(const lql *self,
-                                     const lql_selector *selector,
-                                     lql_selector_execution_traits *out) {
-  lql_selector_capabilities capabilities;
-
-  if (out == NULL) {
-    return;
-  }
-  memset(out, 0, sizeof(*out));
-  selector_capabilities_get_method(self, selector, &capabilities);
-  out->uses_contains_like = capabilities.contains || capabilities.prefix;
-  out->uses_recursive_path = capabilities.recursive_path;
-  out->uses_wildcard_path = capabilities.wildcard_path;
-  out->requires_object_root = !selector_is_empty_method(self, selector);
-  out->early_non_match_likely = out->requires_object_root &&
-                                !out->uses_contains_like &&
-                                !out->uses_recursive_path;
 }

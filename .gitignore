@@ -1,12 +1,6 @@
-/stash/
 /build/
-/dist/
-/.cache/
-/VERSION
 compile_commands.json
 *.o
 *.a
 *.so
 *.dylib
-*.gcda
-*.gcno

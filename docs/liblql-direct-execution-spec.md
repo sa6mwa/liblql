@@ -53,6 +53,22 @@ use capture as the normal decision or mutation mechanism. The design must be
 understandable as direct LQL execution, not an adapter around a renamed
 transform engine.
 
+This is a fresh execution implementation. The retained selector AST and
+allocator are language and ownership foundations only; no previous evaluator,
+projection executor, mutation executor, receiver execution method, or callback
+adapter may be reused as the replacement program.
+
+## Consumer Boundary
+
+The liblql receiver is the public library API. The direct executor is an
+internal liblql implementation detail behind that receiver. `clql` is a
+separate CLI consumer, not a receiver shell and not an architectural layer.
+
+`clql` is absent during the deletion phase because every previous command path
+depended on the removed execution API. It returns only after the replacement
+receiver stream contract exists, as a thin CLI over that contract. CLI needs
+must not shape, preserve, or reintroduce the discarded executor.
+
 ## Deletion Gate
 
 Before writing the replacement executor, remove every dependency on the
@@ -60,8 +76,8 @@ discarded Candidate Run architecture. The removal includes:
 
 - the Candidate Run public and private surface from vendored LoneJSON;
 - liblql Candidate Run adapters and all candidate-mutation receiver methods;
-- corresponding capability fields, headers, source wiring, CLI paths, and Lua
-  bindings;
+- corresponding capability fields, headers, source wiring, the dependent CLI,
+  and Lua bindings;
 - benchmarks, parity adapters, inventories, tests, scripts, fixtures, and
   documentation that exercise or claim the removed path;
 - stale release, completion, parity, and performance assertions about that
@@ -79,11 +95,11 @@ not a liblql execution API and must not be wrapped as one during the reset.
 ## Static Proof Of Deletion
 
 The deletion commit must include a repository-wide, tracked-file proof that,
-outside this specification and git history, there are no Candidate Run tokens,
-candidate-transform tokens, old adapter symbols, removed receiver methods, or
-references to their old tests and benchmarks. The proof must cover source,
-public headers, bindings, CLI, tests, benchmarks, parity tooling, scripts,
-README, and documentation.
+outside this specification, the absence-check script, and git history, there
+are no Candidate Run tokens, candidate-transform tokens, old adapter symbols,
+removed receiver methods, or references to their old tests and benchmarks. The
+proof must cover source, public headers, bindings, CLI, tests, benchmarks,
+parity tooling, scripts, README, and documentation.
 
 Build or test failures caused by the removed API are expected during this
 phase. Do not preserve a compatibility shim to make them pass. Delete the

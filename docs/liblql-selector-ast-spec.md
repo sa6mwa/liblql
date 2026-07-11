@@ -71,21 +71,13 @@ payloads, and may carry parsed temporal state. Those are representation
 choices. The architectural boundary is that they are fields or helper payloads
 of the `lql_selector` AST, not a separate AST that `lql_selector` merely wraps.
 
-## Current Status
+## Reset Status
 
-As of the canonical AST cutover, the installed C receiver API exposes parsed
-selector traversal, Go-compatible selector AST JSON import/export, and
-receiver-based builders for every selector family. The C implementation now
-uses `lql_selector` as the recursive selector AST consumed by parser, JSON,
-builders, evaluator, capability inspection, and public traversal. The previous
-private `lql_node`/`lql_term` tree and `LQL_NODE_*` vocabulary are removed from
-source.
-
-The Lua facade exposes selector userdata backed by the public C selector API for
-text parse, AST JSON import/export, AST traversal, builders, method-style
-inspection, and query reuse. The selector AST work remains incomplete only in
-the broader parity-proof sense until the remaining oracle inventory rows are
-audited or narrowed.
+The selector AST is retained as an independent foundation during the direct
+execution reset. It owns selector text/JSON parsing, traversal, serialization,
+and construction. It does not provide query, projection, or mutation execution
+until the new direct executor is implemented under
+`docs/liblql-direct-execution-spec.md`.
 
 ## Public Model
 
