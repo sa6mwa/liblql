@@ -168,6 +168,7 @@ typedef unsigned long long lonejson_uint64;
 
 #define LONEJSON_HAS_CANDIDATE_TRANSFORM_VALUE_OBSERVER 1
 #define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR 1
+#define LONEJSON_HAS_CANDIDATE_RECURSIVE_FIELD_VISITOR 1
 #define LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE 1
 #define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE 1
 #define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_FIRST_KEY 1
@@ -2740,6 +2741,12 @@ typedef struct lonejson_candidate_stream_options {
   void *top_level_field_match_user;
   lonejson_candidate_capture_prune_fn top_level_field_prune;
   void *top_level_field_prune_user;
+  /** Optional decoded object key for a recursive field visitor. When set,
+   * candidate streams scan every object and array but only deliver scalar
+   * visitor callbacks for values whose key matches at any depth.
+   */
+  const char *recursive_field_key;
+  size_t recursive_field_key_len;
   const char *top_level_string_eq_key;
   size_t top_level_string_eq_key_len;
   const char *top_level_string_eq_value;
@@ -19941,6 +19948,219 @@ static lonejson_status lonejson__json_visit_top_level_fields_array(
   }
 }
 
+static lonejson_status lonejson__json_visit_recursive_field_value(
+    lonejson__json_io *io, const char *key, size_t key_len, int deliver);
+
+static lonejson_status lonejson__json_visit_recursive_field_array(
+    lonejson__json_io *io, const char *key, size_t key_len) {
+  int ch;
+  int first = 1;
+  lonejson_status status;
+
+  if (io->depth >= io->limits.max_depth) {
+    return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                               0u, "JSON value nesting exceeds maximum depth");
+  }
+  status = lonejson__json_visit_event(io, io->visitor->array_begin);
+  if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+    return status;
+  }
+  for (;;) {
+    ch = lonejson__json_peek_nonspace(io);
+    if (ch == -2) {
+      return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (ch == EOF) {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "unterminated JSON array");
+    }
+    if (ch == ']') {
+      (void)lonejson__json_cursor_getc(io);
+      return lonejson__json_visit_event(io, io->visitor->array_end);
+    }
+    if (!first) {
+      ch = lonejson__json_cursor_getc(io);
+      if (ch != ',') {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                   0u, 0u, 0u, "expected ',' in array");
+      }
+    }
+    ++io->depth;
+    status = lonejson__json_visit_recursive_field_value(io, key, key_len, 0);
+    --io->depth;
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      return status;
+    }
+    first = 0;
+  }
+}
+
+static lonejson_status lonejson__json_visit_recursive_field_object(
+    lonejson__json_io *io, const char *key, size_t key_len) {
+  int ch;
+  int first = 1;
+  lonejson_status status;
+
+  if (io->depth >= io->limits.max_depth) {
+    return lonejson__set_error(io->error, LONEJSON_STATUS_OVERFLOW, 0u, 0u,
+                               0u, "JSON value nesting exceeds maximum depth");
+  }
+  status = lonejson__json_visit_event(io, io->visitor->object_begin);
+  if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+    return status;
+  }
+  for (;;) {
+    int match = 0;
+    ch = lonejson__json_peek_nonspace(io);
+    if (ch == -2) {
+      return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+    }
+    if (ch == EOF) {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "unterminated JSON object");
+    }
+    if (ch == '}') {
+      (void)lonejson__json_cursor_getc(io);
+      return lonejson__json_visit_event(io, io->visitor->object_end);
+    }
+    if (!first) {
+      ch = lonejson__json_cursor_getc(io);
+      if (ch != ',') {
+        return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON,
+                                   0u, 0u, 0u, "expected ',' in object");
+      }
+    }
+    ch = lonejson__json_peek_nonspace(io);
+    if (ch != '"') {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "expected object key");
+    }
+    (void)lonejson__json_cursor_getc(io);
+    status = lonejson__json_read_key_match(io, key, key_len, &match);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    ch = lonejson__json_peek_nonspace(io);
+    if (ch != ':') {
+      return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                 0u, 0u, "expected ':' after object key");
+    }
+    (void)lonejson__json_cursor_getc(io);
+    ++io->depth;
+    if (match) {
+      status = lonejson__json_emit_fast_field_key(io, key, key_len);
+      if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
+        status = lonejson__json_visit_recursive_field_value(io, key, key_len,
+                                                             1);
+      }
+    } else {
+      status = lonejson__json_visit_recursive_field_value(io, key, key_len, 0);
+    }
+    --io->depth;
+    if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
+      return status;
+    }
+    first = 0;
+  }
+}
+
+static lonejson_status lonejson__json_visit_recursive_field_value(
+    lonejson__json_io *io, const char *key, size_t key_len, int deliver) {
+  int ch;
+
+  ch = lonejson__json_peek_nonspace(io);
+  if (ch == -2) {
+    return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (ch == EOF) {
+    return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                               0u, 0u, "expected JSON value");
+  }
+  if (ch == '{') {
+    (void)lonejson__json_cursor_getc(io);
+    return lonejson__json_visit_recursive_field_object(io, key, key_len);
+  }
+  if (ch == '[') {
+    (void)lonejson__json_cursor_getc(io);
+    return lonejson__json_visit_recursive_field_array(io, key, key_len);
+  }
+  return deliver ? lonejson__json_visit_value_no_path(io)
+                 : lonejson__json_skip_value(io);
+}
+
+static lonejson_status lonejson__json_visit_one_recursive_field_cursor(
+    lonejson__json_cursor *cursor, const lonejson_allocator *allocator,
+    const lonejson_value_visitor *visitor, void *user, const char *key,
+    size_t key_len, const lonejson__value_limits *limits,
+    lonejson_spooled *raw_capture_spool, int *raw_capture_disabled,
+    lonejson_error *error) {
+  lonejson__json_io io;
+  lonejson__value_limits defaults;
+  unsigned char raw_capture_buffer[LONEJSON_RAW_CAPTURE_BUFFER_SIZE];
+  lonejson_status status;
+
+  if (cursor == NULL || visitor == NULL || key == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u,
+                               "JSON value source, visitor, and field key are "
+                               "required");
+  }
+  memset(&io, 0, sizeof(io));
+  io.cursor = cursor;
+  io.visitor = visitor;
+  io.visitor_user = user;
+  io.raw_capture_spool = raw_capture_spool;
+  io.raw_capture_disabled = raw_capture_disabled;
+  if (raw_capture_spool != NULL) {
+    io.raw_capture_buffer = raw_capture_buffer;
+    io.raw_capture_buffer_cap = LONEJSON_RAW_CAPTURE_BUFFER_SIZE;
+  }
+  io.error = error;
+  io.allocator = allocator;
+  if (limits != NULL && limits->max_depth != 0u &&
+      limits->max_string_bytes != 0u && limits->max_number_bytes != 0u &&
+      limits->max_key_bytes != 0u) {
+    io.limits = *limits;
+  } else {
+    defaults = lonejson__default_value_limits();
+    io.limits = limits ? *limits : defaults;
+    if (io.limits.max_depth == 0u) {
+      io.limits.max_depth = defaults.max_depth;
+    }
+    if (io.limits.max_string_bytes == 0u) {
+      io.limits.max_string_bytes = defaults.max_string_bytes;
+    }
+    if (io.limits.max_number_bytes == 0u) {
+      io.limits.max_number_bytes = defaults.max_number_bytes;
+    }
+    if (io.limits.max_key_bytes == 0u) {
+      io.limits.max_key_bytes = defaults.max_key_bytes;
+    }
+  }
+  if (cursor->has_pushback) {
+    io.has_pushback = 1;
+    io.pushback_counted = cursor->count_pushback;
+    io.pushback = cursor->pushback;
+    cursor->has_pushback = 0;
+    cursor->count_pushback = 0;
+  }
+  status = lonejson__json_visit_recursive_field_value(&io, key, key_len, 0);
+  if (io.has_pushback) {
+    cursor->has_pushback = 1;
+    cursor->count_pushback = io.pushback_counted;
+    cursor->pushback = io.pushback;
+    cursor->pushback_offset = lonejson__json_cursor_last_offset(cursor);
+  }
+  if (status == LONEJSON_STATUS_OK || status == LONEJSON_STATUS_TRUNCATED) {
+    lonejson_status flush_status = lonejson__json_cursor_flush_raw_capture(&io);
+    if (flush_status != LONEJSON_STATUS_OK &&
+        flush_status != LONEJSON_STATUS_TRUNCATED) {
+      status = flush_status;
+    }
+  }
+  return status;
+}
+
 static lonejson_status lonejson__json_visit_one_top_level_field_cursor(
     lonejson__json_cursor *cursor, const lonejson_allocator *allocator,
     const lonejson_value_visitor *visitor, void *user, const char *key,
@@ -34790,6 +35010,13 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
         scan->options->top_level_string_eq_matched,
         scan->options->top_level_string_eq_root_kind, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
+             scan->options->recursive_field_key != NULL) {
+    status = lonejson__json_visit_one_recursive_field_cursor(
+        scan->cursor, scan->allocator, visitor, visitor_user,
+        scan->options->recursive_field_key,
+        scan->options->recursive_field_key_len, scan->limits, NULL, NULL,
+        scan->error);
+  } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
       scan->options->top_level_field_keys != NULL) {
     status = lonejson__json_visit_one_top_level_fields_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user,
@@ -34810,6 +35037,13 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
         scan->options->top_level_field_key_len, scan->limits, NULL,
         scan->options->top_level_field_stop_after_truncated, NULL,
         scan->error);
+  } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED &&
+             capture.raw_spooled && scan->options->recursive_field_key != NULL) {
+    status = lonejson__json_visit_one_recursive_field_cursor(
+        scan->cursor, scan->allocator, visitor, visitor_user,
+        scan->options->recursive_field_key,
+        scan->options->recursive_field_key_len, scan->limits, &capture.spool,
+        &raw_capture_disabled, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED &&
              capture.raw_spooled &&
              scan->options->top_level_field_keys != NULL) {
@@ -35163,10 +35397,30 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
                                "candidate capture decision callback is "
                                "required");
   }
+  if (local.recursive_field_key != NULL &&
+      (local.path_visitor != NULL || local.visitor == NULL ||
+       (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
+        local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) ||
+       local.top_level_field_key != NULL ||
+       local.top_level_field_keys != NULL ||
+       local.top_level_string_eq_key != NULL)) {
+    return lonejson__set_error(
+        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
+        "recursive field candidate visitor requires no path visitor, a value "
+        "visitor, no other fast candidate visitor, and no capture or gated "
+        "spooled capture");
+  }
+  if (local.recursive_field_key == NULL && local.recursive_field_key_len != 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u,
+                               "recursive field candidate key length requires "
+                               "a key");
+  }
   if (local.top_level_field_key != NULL &&
       (local.path_visitor != NULL || local.visitor == NULL ||
        (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
-        local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED))) {
+        local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) ||
+       local.recursive_field_key != NULL)) {
     return lonejson__set_error(
         error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
         "top-level field candidate visitor requires no path visitor, a value "
@@ -35179,7 +35433,7 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
        local.path_visitor != NULL || local.visitor == NULL ||
        (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
         local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) ||
-       local.top_level_field_key != NULL)) {
+       local.top_level_field_key != NULL || local.recursive_field_key != NULL)) {
     return lonejson__set_error(
         error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
         "multi top-level field candidate visitor requires keys, key lengths, "
@@ -35212,7 +35466,7 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
        local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE ||
        local.path_visitor != NULL || local.visitor != NULL ||
        local.top_level_field_key != NULL ||
-       local.top_level_field_keys != NULL)) {
+       local.top_level_field_keys != NULL || local.recursive_field_key != NULL)) {
     return lonejson__set_error(
         error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
         "top-level string equality candidate scan requires key, value, match "
@@ -35255,7 +35509,7 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
   if (local.capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
       local.visitor == NULL && local.path_visitor == NULL &&
       local.top_level_field_key == NULL &&
-      local.top_level_field_keys == NULL) {
+      local.top_level_field_keys == NULL && local.recursive_field_key == NULL) {
     scan.empty_visitor = lonejson_default_value_visitor();
   }
 

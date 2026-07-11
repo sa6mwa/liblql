@@ -4061,8 +4061,13 @@ static void init_fast_direct_scalar_visitor(lonejson_value_visitor *visitor) {
 static lonejson_status fast_recursive_prepare_value(eval_doc *doc, int scalar) {
   const lql_selector *selector;
 
-  selector = doc == NULL ? NULL : doc->selector;
   if (doc == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  selector = doc->selector;
+  if (selector == NULL || !doc->fast_recursive_next_value_target ||
+      hit_marked_fast(doc, selector)) {
+    doc->fast_recursive_next_value_target = 0;
     return LONEJSON_STATUS_OK;
   }
   doc->scalar_path_features = 0u;
@@ -4072,11 +4077,6 @@ static lonejson_status fast_recursive_prepare_value(eval_doc *doc, int scalar) {
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;
   doc->prefix_need = 0u;
-  if (selector == NULL || !doc->fast_recursive_next_value_target ||
-      hit_marked_fast(doc, selector)) {
-    doc->fast_recursive_next_value_target = 0;
-    return LONEJSON_STATUS_OK;
-  }
   doc->fast_recursive_next_value_target = 0;
   memset(doc->scalar_family_counts, 0, sizeof(doc->scalar_family_counts));
   if (doc->stream_misses != NULL) {
@@ -4944,6 +4944,11 @@ configure_candidate_eval_visitors(lonejson_candidate_stream_options *options,
     init_fast_recursive_suffix_scalar_visitor(value_visitor);
     options->visitor = value_visitor;
     options->visitor_user = doc;
+#if defined(LONEJSON_HAS_CANDIDATE_RECURSIVE_FIELD_VISITOR)
+    options->recursive_field_key =
+        doc->selector->field + doc->selector->field_segment_offsets[0];
+    options->recursive_field_key_len = doc->selector->field_segment_lens[0];
+#endif
     return;
   }
   if (selector_fast_top_level_multi_eligible(doc != NULL ? doc->selector
