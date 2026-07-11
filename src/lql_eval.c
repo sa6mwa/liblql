@@ -174,13 +174,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
     const lql_query_options *query_options, lql_query_match_fn on_match,
     void *user, const lql_mutation_plan *mutation_plan, FILE *mutation_out,
     lql_error *mutation_error, lql_query_result *out_result, lql_error *error);
-static lql_status execute_query_file_range_spooled_matches(
-    lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, int compact, const lql_projection *projection,
-    const lql_mutation_plan *mutation_plan, int matches_only,
-    const lql_query_options *query_options, lql_query_result *out_result,
-    lql_error *error);
-static lql_status execute_query_source_output(
+static lql_status execute_query_source_candidate_run(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     FILE *out, int compact, const lql_projection *projection,
     const lql_mutation_plan *mutation_plan, int matches_only,
@@ -5277,50 +5271,11 @@ typedef struct source_reader_adapter {
   int prefix_eof;
 } source_reader_adapter;
 
-typedef struct eval_limited_file_reader {
-  FILE *file;
-  lql_uint64 remaining;
-} eval_limited_file_reader;
-
 typedef struct eval_pread_range_reader {
   int fd;
   lql_uint64 offset;
   lql_uint64 remaining;
 } eval_pread_range_reader;
-
-typedef struct spooled_match_state {
-  lql *receiver;
-  const lql_selector *selector;
-  FILE *out;
-  int compact;
-  const lql_projection *projection;
-  const lql_mutation_plan *mutation_plan;
-  lql_query_options options;
-  unsigned int limit_flags;
-  int matches_only;
-  lonejson *compact_runtime;
-  lql_query_result result;
-  lql_error projection_error;
-  lql_error mutation_error;
-  eval_doc doc;
-} spooled_match_state;
-
-typedef struct file_mutation_range_state {
-  lql *receiver;
-  const lql_selector *selector;
-  FILE *file;
-  int fd;
-  lql_uint64 offset_base;
-  FILE *out;
-  int compact;
-  const lql_mutation_plan *mutation_plan;
-  int matches_only;
-  lql_query_options options;
-  unsigned int limit_flags;
-  lql_query_result result;
-  lql_error mutation_error;
-  eval_doc doc;
-} file_mutation_range_state;
 
 typedef struct source_spooled_match_state {
   lql *receiver;
@@ -5340,23 +5295,7 @@ typedef struct source_spooled_match_state {
   eval_doc doc;
 } source_spooled_match_state;
 
-typedef struct transform_path_frame {
-  unsigned char *array_segments;
-  unsigned long array_segment_bits;
-  size_t segment_count;
-  char container;
-} transform_path_frame;
-
-#define TRANSFORM_FRAME_INLINE_BITS (sizeof(unsigned long) * CHAR_BIT)
-#define TRANSFORM_FRAME_INLINE_COUNT 32u
-typedef struct source_output_policy {
-  int matched;
-  int emit_candidate;
-  int mutate_candidate;
-  int root_object;
-} source_output_policy;
-
-typedef struct source_output_state {
+typedef struct source_candidate_run_state {
   lql *receiver;
   lql_allocator *allocator;
   const lql_selector *selector;
@@ -5368,10 +5307,6 @@ typedef struct source_output_state {
   lql_query_result result;
   eval_doc doc;
   lonejson_path_value_visitor eval_visitor;
-  transform_path_frame *frames;
-  size_t frame_count;
-  size_t frame_cap;
-  transform_path_frame inline_frames[TRANSFORM_FRAME_INLINE_COUNT];
   int *applied;
   int inline_applied[16];
   void *applied_alloc;
@@ -5383,176 +5318,20 @@ typedef struct source_output_state {
   int current_root_seen;
   int current_output_enabled;
   int transform_failed;
-  int gated_transform;
   int staged_output;
   FILE *out;
   lql_status callback_status;
   lql_error transform_error;
-  source_output_policy current_policy;
-} source_output_state;
+} source_candidate_run_state;
 
-static int transform_frame_array_segment(const transform_path_frame *frame,
-                                         size_t index) {
-  if (frame == NULL || index >= frame->segment_count) {
-    return 0;
-  }
-  if (frame->array_segments != NULL) {
-    return frame->array_segments[index] ? 1 : 0;
-  }
-  if (index >= TRANSFORM_FRAME_INLINE_BITS) {
-    return 0;
-  }
-  return (frame->array_segment_bits & (1UL << index)) != 0u;
+static int source_candidate_run_path_segment_is_array(
+    const lonejson_candidate_run_event *event, size_t index) {
+  return lonejson_candidate_run_path_segment_is_array(event, index);
 }
 
-static void transform_frame_set_array_segment(transform_path_frame *frame,
-                                              size_t index) {
-  if (frame == NULL || index >= frame->segment_count) {
-    return;
-  }
-  if (frame->array_segments != NULL) {
-    frame->array_segments[index] = 1u;
-  } else if (index < TRANSFORM_FRAME_INLINE_BITS) {
-    frame->array_segment_bits |= 1UL << index;
-  }
-}
-
-static transform_path_frame *
-source_output_parent_frame(source_output_state *state) {
-  if (state == NULL || state->frame_count == 0u) {
-    return NULL;
-  }
-  return &state->frames[state->frame_count - 1u];
-}
-
-static int source_output_ensure_frame_capacity(source_output_state *state) {
-  transform_path_frame *next;
-  size_t next_cap;
-  if (state->frames == NULL) {
-    state->frames = state->inline_frames;
-    state->frame_cap = TRANSFORM_FRAME_INLINE_COUNT;
-  }
-  if (state->frame_count < state->frame_cap) {
-    return 1;
-  }
-  next_cap = state->frame_cap * 2u;
-  if (next_cap <= state->frame_cap) {
-    return 0;
-  }
-  if (state->frames == state->inline_frames) {
-    next = (transform_path_frame *)state->allocator->alloc(
-        state->allocator, sizeof(next[0]) * next_cap);
-    if (next == NULL) {
-      return 0;
-    }
-    memcpy(next, state->frames, sizeof(next[0]) * state->frame_count);
-  } else {
-    next = (transform_path_frame *)state->allocator->realloc(
-        state->allocator, state->frames, sizeof(next[0]) * next_cap);
-    if (next == NULL) {
-      return 0;
-    }
-  }
-  state->frames = next;
-  state->frame_cap = next_cap;
-  return 1;
-}
-
-static lonejson_status source_output_push_frame(source_output_state *state,
-                                                const lonejson_value_path *path,
-                                                char container) {
-  transform_path_frame frame;
-  transform_path_frame *parent;
-  size_t i;
-  memset(&frame, 0, sizeof(frame));
-  frame.container = container;
-  frame.segment_count = path == NULL ? 0u : path->segment_count;
-  if (frame.segment_count > TRANSFORM_FRAME_INLINE_BITS) {
-    frame.array_segments = (unsigned char *)state->allocator->calloc(
-        state->allocator, frame.segment_count, sizeof(frame.array_segments[0]));
-    if (frame.array_segments == NULL) {
-      return LONEJSON_STATUS_ALLOCATION_FAILED;
-    }
-  }
-  parent = source_output_parent_frame(state);
-  if (parent != NULL && frame.segment_count != 0u) {
-    if (frame.array_segments == NULL && parent->array_segments == NULL) {
-      frame.array_segment_bits = parent->array_segment_bits;
-    } else {
-      for (i = 0u; i < parent->segment_count && i < frame.segment_count; ++i) {
-        if (transform_frame_array_segment(parent, i)) {
-          transform_frame_set_array_segment(&frame, i);
-        }
-      }
-    }
-    if (frame.segment_count > parent->segment_count &&
-        parent->container == 'a') {
-      transform_frame_set_array_segment(&frame, frame.segment_count - 1u);
-    }
-  }
-  if (!source_output_ensure_frame_capacity(state)) {
-    state->allocator->destroy(state->allocator, frame.array_segments);
-    return LONEJSON_STATUS_ALLOCATION_FAILED;
-  }
-  state->frames[state->frame_count++] = frame;
-  return LONEJSON_STATUS_OK;
-}
-
-static void source_output_pop_frame(source_output_state *state) {
-  if (state == NULL || state->frame_count == 0u) {
-    return;
-  }
-  --state->frame_count;
-  state->allocator->destroy(state->allocator,
-                            state->frames[state->frame_count].array_segments);
-  if (state->frame_count == 0u && state->frames != state->inline_frames) {
-    state->allocator->destroy(state->allocator, state->frames);
-    state->frames = NULL;
-    state->frame_cap = 0u;
-  }
-}
-
-static void source_output_cleanup_frames(source_output_state *state) {
-  while (state != NULL && state->frame_count != 0u) {
-    source_output_pop_frame(state);
-  }
-}
-
-static int
-source_output_path_segment_is_array_fallback(const transform_path_frame *frame,
-                                             const lonejson_value_path *path,
-                                             size_t index) {
-  if (frame == NULL || path == NULL || index >= path->segment_count) {
-    return 0;
-  }
-  if (frame->segment_count == path->segment_count) {
-    return transform_frame_array_segment(frame, index);
-  }
-  if (frame->segment_count + 1u == path->segment_count) {
-    if (index < frame->segment_count) {
-      return transform_frame_array_segment(frame, index);
-    }
-    return frame->container == 'a';
-  }
-  return 0;
-}
-
-static int source_output_path_segment_is_array(
-    const lonejson_candidate_output_event *event,
-    const transform_path_frame *frame, const lonejson_value_path *path,
-    size_t index) {
-  if (event != NULL && path != NULL && path->segment_count != 0u &&
-      index + 1u == path->segment_count) {
-    return event->relationship == LONEJSON_CANDIDATE_OUTPUT_EVENT_ARRAY_ELEMENT;
-  }
-  return source_output_path_segment_is_array_fallback(frame, path, index);
-}
-
-static int source_output_segment_matches(unsigned char expected_kind,
-                                         const char *expected,
-                                         size_t expected_len,
-                                         const lonejson_path_segment *actual,
-                                         int actual_is_array) {
+static int source_candidate_run_segment_matches(
+    unsigned char expected_kind, const char *expected, size_t expected_len,
+    const lonejson_path_segment *actual, int actual_is_array) {
   switch (expected_kind) {
   case LQL_MUTATION_PATH_OBJECT_WILDCARD:
     return !actual_is_array;
@@ -5566,10 +5345,10 @@ static int source_output_segment_matches(unsigned char expected_kind,
   }
 }
 
-static int source_output_path_matches_from(
-    const lonejson_candidate_output_event *event,
-    const transform_path_frame *frame, const lql_mutation_path *item_path,
-    size_t item_index, const lonejson_value_path *path, size_t path_index) {
+static int source_candidate_run_path_matches_from(
+    const lonejson_candidate_run_event *event,
+    const lql_mutation_path *item_path, size_t item_index,
+    const lonejson_value_path *path, size_t path_index) {
   size_t i;
   while (item_index < item_path->segment_count) {
     if (item_path->segment_kinds[item_index] == LQL_MUTATION_PATH_ELLIPSIS) {
@@ -5577,20 +5356,19 @@ static int source_output_path_matches_from(
         return 1;
       }
       for (i = path_index; i <= path->segment_count; ++i) {
-        if (source_output_path_matches_from(event, frame, item_path,
-                                            item_index + 1u, path, i)) {
+        if (source_candidate_run_path_matches_from(event, item_path,
+                                                   item_index + 1u, path, i)) {
           return 1;
         }
       }
       return 0;
     }
     if (path_index >= path->segment_count ||
-        !source_output_segment_matches(item_path->segment_kinds[item_index],
-                                       item_path->segments[item_index],
-                                       item_path->segment_lens[item_index],
-                                       &path->segments[path_index],
-                                       source_output_path_segment_is_array(
-                                           event, frame, path, path_index))) {
+        !source_candidate_run_segment_matches(
+            item_path->segment_kinds[item_index],
+            item_path->segments[item_index],
+            item_path->segment_lens[item_index], &path->segments[path_index],
+            source_candidate_run_path_segment_is_array(event, path_index))) {
       return 0;
     }
     ++item_index;
@@ -5599,29 +5377,19 @@ static int source_output_path_matches_from(
   return path_index == path->segment_count;
 }
 
-static int source_output_value_is_array_element(
-    const lonejson_candidate_output_event *event,
-    const transform_path_frame *frame, const lonejson_value_path *path) {
-  if (event != NULL) {
-    return event->relationship == LONEJSON_CANDIDATE_OUTPUT_EVENT_ARRAY_ELEMENT;
-  }
-  if (path == NULL || path->segment_count == 0u) {
-    return 0;
-  }
-  return source_output_path_segment_is_array(NULL, frame, path,
-                                             path->segment_count - 1u);
+static int source_candidate_run_value_is_array_element(
+    const lonejson_candidate_run_event *event) {
+  return event->relationship == LONEJSON_CANDIDATE_RUN_EVENT_ARRAY_ELEMENT;
 }
 
-static int source_output_find_item(source_output_state *state,
-                                   const lonejson_candidate_output_event *event,
-                                   const lonejson_value_path *path,
-                                   size_t *out) {
-  const transform_path_frame *frame;
+static int
+source_candidate_run_find_item(source_candidate_run_state *state,
+                               const lonejson_candidate_run_event *event,
+                               const lonejson_value_path *path, size_t *out) {
   size_t i;
   size_t index;
   size_t start;
   size_t end;
-  frame = source_output_parent_frame(state);
   if (state == NULL || state->mutation_plan == NULL || path == NULL) {
     return 0;
   }
@@ -5633,9 +5401,8 @@ static int source_output_find_item(source_output_state *state,
     end = state->mutation_plan->value_depth_offsets[path->segment_count + 1u];
     for (i = start; i < end; ++i) {
       index = state->mutation_plan->value_depth_indexes[i];
-      if (source_output_path_matches_from(
-              event, frame, &state->mutation_plan->items[index].path, 0u, path,
-              0u)) {
+      if (source_candidate_run_path_matches_from(
+              event, &state->mutation_plan->items[index].path, 0u, path, 0u)) {
         *out = index;
         return 1;
       }
@@ -5643,8 +5410,8 @@ static int source_output_find_item(source_output_state *state,
     return 0;
   }
   for (i = 0u; i < state->mutation_plan->count; ++i) {
-    if (source_output_path_matches_from(
-            event, frame, &state->mutation_plan->items[i].path, 0u, path, 0u)) {
+    if (source_candidate_run_path_matches_from(
+            event, &state->mutation_plan->items[i].path, 0u, path, 0u)) {
       *out = i;
       return 1;
     }
@@ -5652,9 +5419,8 @@ static int source_output_find_item(source_output_state *state,
   return 0;
 }
 
-static int source_output_path_is_parent_of_item(
-    const lonejson_candidate_output_event *event,
-    const transform_path_frame *frame, const lql_mutation_item *item,
+static int source_candidate_run_path_is_parent_of_item(
+    const lonejson_candidate_run_event *event, const lql_mutation_item *item,
     const lonejson_value_path *path) {
   size_t i;
   if (item == NULL || path == NULL ||
@@ -5662,36 +5428,35 @@ static int source_output_path_is_parent_of_item(
     return 0;
   }
   for (i = 0u; i < path->segment_count; ++i) {
-    if (!source_output_segment_matches(
+    if (!source_candidate_run_segment_matches(
             item->path.segment_kinds[i], item->path.segments[i],
             item->path.segment_lens[i], &path->segments[i],
-            source_output_path_segment_is_array(event, frame, path, i))) {
+            source_candidate_run_path_segment_is_array(event, i))) {
       return 0;
     }
   }
   return 1;
 }
 
-static int source_output_item_child_key_available(const lql_mutation_item *item,
-                                                  size_t depth) {
+static int
+source_candidate_run_item_child_key_available(const lql_mutation_item *item,
+                                              size_t depth) {
   if (item == NULL || depth >= item->path.segment_count) {
     return 0;
   }
   return item->path.segment_kinds[depth] == LQL_MUTATION_PATH_LITERAL;
 }
 
-static lonejson_status
-source_output_write_item_value(source_output_state *state,
-                               const lql_mutation_item *item,
-                               lonejson_writer *writer, lonejson_error *error) {
+static lonejson_status source_candidate_run_write_item_value(
+    source_candidate_run_state *state, const lql_mutation_item *item,
+    lonejson_writer *writer, lonejson_error *error) {
   (void)state;
   return lql_mutation_write_item_value(writer, item, error);
 }
 
-static lonejson_status
-source_output_write_subtree(source_output_state *state,
-                            const lql_mutation_item *anchor, size_t depth,
-                            lonejson_writer *writer, lonejson_error *error) {
+static lonejson_status source_candidate_run_write_subtree(
+    source_candidate_run_state *state, const lql_mutation_item *anchor,
+    size_t depth, lonejson_writer *writer, lonejson_error *error) {
   const lql_mutation_item *item;
   size_t i;
   size_t item_index;
@@ -5703,8 +5468,8 @@ source_output_write_subtree(source_output_state *state,
     item = &state->mutation_plan->items[item_index];
     if (state->applied[item_index] || item->path.segment_count <= depth ||
         item->path.segment_count < anchor->path.segment_count ||
-        !source_output_item_child_key_available(item, depth) ||
-        !source_output_item_child_key_available(anchor, depth) ||
+        !source_candidate_run_item_child_key_available(item, depth) ||
+        !source_candidate_run_item_child_key_available(anchor, depth) ||
         item->path.segment_lens[depth] != anchor->path.segment_lens[depth] ||
         memcmp(item->path.segments[depth], anchor->path.segments[depth],
                item->path.segment_lens[depth]) != 0) {
@@ -5716,15 +5481,15 @@ source_output_write_subtree(source_output_state *state,
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
     if (item->path.segment_count == depth + 1u) {
-      if (source_output_write_item_value(state, item, writer, error) !=
+      if (source_candidate_run_write_item_value(state, item, writer, error) !=
           LONEJSON_STATUS_OK) {
         return LONEJSON_STATUS_CALLBACK_FAILED;
       }
       state->applied[item_index] = 1;
     } else {
       if (lonejson_writer_begin_object(writer, error) != LONEJSON_STATUS_OK ||
-          source_output_write_subtree(state, item, depth + 1u, writer, error) !=
-              LONEJSON_STATUS_OK ||
+          source_candidate_run_write_subtree(state, item, depth + 1u, writer,
+                                             error) != LONEJSON_STATUS_OK ||
           lonejson_writer_end_object(writer, error) != LONEJSON_STATUS_OK) {
         return LONEJSON_STATUS_CALLBACK_FAILED;
       }
@@ -5733,51 +5498,44 @@ source_output_write_subtree(source_output_state *state,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status
-source_output_insert_missing(void *user,
-                             const lonejson_candidate_output_event *event,
-                             lonejson_writer *writer, lonejson_error *error) {
-  source_output_state *state;
-  const transform_path_frame *frame;
+static lonejson_status source_candidate_run_insert_missing(
+    void *user, const lonejson_candidate_run_event *event,
+    lonejson_writer *writer, lonejson_error *error) {
+  source_candidate_run_state *state;
   const lql_mutation_item *item;
   size_t i;
   size_t item_index;
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   if (state == NULL || state->mutation_plan == NULL || event == NULL ||
       event->path == NULL ||
-      event->insert_phase != LONEJSON_CANDIDATE_OUTPUT_INSERT_OBJECT_END ||
+      event->insert_phase != LONEJSON_CANDIDATE_RUN_INSERT_OBJECT_END ||
       !state->current_output_enabled) {
     return LONEJSON_STATUS_OK;
   }
-  if (event->candidate_policy != NULL &&
-      !((const source_output_policy *)event->candidate_policy)
-           ->mutate_candidate) {
+  if (!state->current_matched) {
     return LONEJSON_STATUS_OK;
   }
-  if (event->candidate_policy == NULL && !state->current_matched) {
-    return LONEJSON_STATUS_OK;
-  }
-  frame = source_output_parent_frame(state);
   for (i = 0u; i < state->mutation_plan->create_count; ++i) {
     item_index = state->mutation_plan->create_indexes[i];
     item = &state->mutation_plan->items[item_index];
     if (state->applied[item_index] ||
-        !source_output_path_is_parent_of_item(event, frame, item,
-                                              event->path) ||
-        !source_output_item_child_key_available(item,
-                                                event->path->segment_count)) {
+        !source_candidate_run_path_is_parent_of_item(event, item,
+                                                     event->path) ||
+        !source_candidate_run_item_child_key_available(
+            item, event->path->segment_count)) {
       continue;
     }
-    if (source_output_write_subtree(state, item, event->path->segment_count,
-                                    writer, error) != LONEJSON_STATUS_OK) {
+    if (source_candidate_run_write_subtree(state, item,
+                                           event->path->segment_count, writer,
+                                           error) != LONEJSON_STATUS_OK) {
       return LONEJSON_STATUS_CALLBACK_FAILED;
     }
   }
   return LONEJSON_STATUS_OK;
 }
 
-static int source_output_parse_number(const char *data, size_t len,
-                                      double *out) {
+static int source_candidate_run_parse_number(const char *data, size_t len,
+                                             double *out) {
   char buf[128];
   char *end;
   double value;
@@ -5795,14 +5553,15 @@ static int source_output_parse_number(const char *data, size_t len,
 }
 
 static lonejson_status
-source_output_replace(void *user, const lonejson_candidate_output_event *event,
-                      lonejson_writer *writer, lonejson_error *error) {
-  source_output_state *state;
+source_candidate_run_replace(void *user,
+                             const lonejson_candidate_run_event *event,
+                             lonejson_writer *writer, lonejson_error *error) {
+  source_candidate_run_state *state;
   const lql_mutation_item *item;
   double existing;
   double next_value;
   char number_buf[64];
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   if (state == NULL || event == NULL || writer == NULL ||
       !state->active_item_set || state->mutation_plan == NULL ||
       state->active_item >= state->mutation_plan->count) {
@@ -5816,8 +5575,8 @@ source_output_replace(void *user, const lonejson_candidate_output_event *event,
   if (item->kind == LQL_MUTATION_INCREMENT) {
     if (event->old_value == NULL ||
         event->old_value->value_type != LONEJSON_VALUE_NUMBER ||
-        !source_output_parse_number(event->old_value->data,
-                                    event->old_value->len, &existing)) {
+        !source_candidate_run_parse_number(event->old_value->data,
+                                           event->old_value->len, &existing)) {
       if (state->staged_output) {
         state->transform_failed = 1;
         lql_set_error(&state->transform_error, LQL_STATUS_JSON_ERROR,
@@ -5853,39 +5612,30 @@ source_output_replace(void *user, const lonejson_candidate_output_event *event,
                                        error);
   }
   state->applied[state->active_item] = 1;
-  return source_output_write_item_value(state, item, writer, error);
+  return source_candidate_run_write_item_value(state, item, writer, error);
 }
 
-static lonejson_candidate_output_action
-source_output_decide(void *user, const lonejson_candidate_output_event *event,
-                     lonejson_error *error) {
-  source_output_state *state;
+static lonejson_candidate_run_action
+source_candidate_run_decide(void *user,
+                            const lonejson_candidate_run_event *event,
+                            lonejson_error *error) {
+  source_candidate_run_state *state;
   const lql_mutation_item *item;
   size_t index;
   int array_element;
   (void)error;
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   if (state == NULL || event == NULL || event->path == NULL) {
-    return LONEJSON_CANDIDATE_OUTPUT_ERROR;
-  }
-  if (state->gated_transform &&
-      event->phase == LONEJSON_CANDIDATE_OUTPUT_EVENT_PHASE_SOURCE) {
-    return LONEJSON_CANDIDATE_OUTPUT_KEEP;
+    return LONEJSON_CANDIDATE_RUN_ERROR;
   }
   state->active_item_set = 0;
   if (event->path->segment_count == 0u) {
-    if (event->candidate_policy != NULL) {
-      const source_output_policy *policy;
-      policy = (const source_output_policy *)event->candidate_policy;
-      state->current_matched = policy->matched;
-      state->current_matched_known = 1;
-      state->current_output_enabled = policy->emit_candidate;
-      state->current_root_object =
-          policy->root_object || event->value_type == LONEJSON_VALUE_OBJECT;
-    } else if (state->staged_output) {
-      /* Selection completes at candidate end; stage speculative output. */
-      state->current_matched = 1;
-      state->current_output_enabled = 1;
+    if (state->staged_output) {
+      if (!state->current_matched_known) {
+        state->current_matched = 1;
+      }
+      state->current_output_enabled =
+          state->current_matched || !state->matches_only;
       if (event->value_type == LONEJSON_VALUE_OBJECT) {
         state->current_root_object = 1;
       }
@@ -5904,49 +5654,50 @@ source_output_decide(void *user, const lonejson_candidate_output_event *event,
       }
     }
     if (!state->current_output_enabled) {
-      return LONEJSON_CANDIDATE_OUTPUT_DROP;
+      return LONEJSON_CANDIDATE_RUN_DROP;
     }
-    return LONEJSON_CANDIDATE_OUTPUT_KEEP;
+    return LONEJSON_CANDIDATE_RUN_KEEP;
   }
-  if (state->staged_output && state->current_matched_known &&
-      !state->current_matched) {
-    return LONEJSON_CANDIDATE_OUTPUT_DROP;
+  if (state->staged_output && state->matches_only &&
+      state->current_matched_known && !state->current_matched) {
+    return LONEJSON_CANDIDATE_RUN_DROP;
   }
   if (!state->current_output_enabled || !state->current_matched ||
       state->mutation_plan == NULL || !state->current_root_object) {
-    return LONEJSON_CANDIDATE_OUTPUT_KEEP;
+    return LONEJSON_CANDIDATE_RUN_KEEP;
   }
-  if (event->candidate_policy != NULL &&
-      !((const source_output_policy *)event->candidate_policy)
-           ->mutate_candidate) {
-    return LONEJSON_CANDIDATE_OUTPUT_KEEP;
-  }
-  if (!source_output_find_item(state, event, event->path, &index)) {
-    return LONEJSON_CANDIDATE_OUTPUT_KEEP;
+  if (!source_candidate_run_find_item(state, event, event->path, &index)) {
+    return LONEJSON_CANDIDATE_RUN_KEEP;
   }
   item = &state->mutation_plan->items[index];
   state->active_item = index;
   state->active_item_set = 1;
   if (item->kind == LQL_MUTATION_REMOVE) {
-    array_element = source_output_value_is_array_element(
-        event, source_output_parent_frame(state), event->path);
+    array_element = source_candidate_run_value_is_array_element(event);
     state->applied[index] = 1;
-    return array_element ? LONEJSON_CANDIDATE_OUTPUT_REPLACE
-                         : LONEJSON_CANDIDATE_OUTPUT_DROP;
+    return array_element ? LONEJSON_CANDIDATE_RUN_REPLACE
+                         : LONEJSON_CANDIDATE_RUN_DROP;
   }
-  return LONEJSON_CANDIDATE_OUTPUT_REPLACE;
+  return LONEJSON_CANDIDATE_RUN_REPLACE;
 }
 
-#if defined(LONEJSON_HAS_CANDIDATE_OUTPUT_STAGED)
-static lonejson_candidate_output_transition
-source_output_transition(void *user, const lonejson_candidate_info *candidate,
-                         int finalizing, lonejson_error *error) {
-  source_output_state *state = (source_output_state *)user;
+#if defined(LONEJSON_HAS_CANDIDATE_RUN_STAGED)
+static lonejson_candidate_run_transition
+source_candidate_run_transition(void *user,
+                                const lonejson_candidate_info *candidate,
+                                int finalizing, lonejson_error *error) {
+  source_candidate_run_state *state = (source_candidate_run_state *)user;
   int matched;
   (void)candidate;
 
   if (state == NULL || !state->staged_output) {
-    return LONEJSON_CANDIDATE_OUTPUT_TRANSITION_ACCEPT;
+    return LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT;
+  }
+  if (!state->current_matched_known && state->selector != NULL &&
+      state->selector->match_sticky_once_true && state->doc.candidate_matched) {
+    state->current_matched = 1;
+    state->current_matched_known = 1;
+    state->current_output_enabled = 1;
   }
   if (!state->current_matched_known && state->doc.root_kind == '{') {
     if (state->doc.fast_exact_selector != NULL && state->doc.fast_exact_miss) {
@@ -5959,22 +5710,26 @@ source_output_transition(void *user, const lonejson_candidate_info *candidate,
       state->current_matched_known = 1;
     }
     if (state->current_matched_known) {
-      state->current_output_enabled = state->current_matched;
+      state->current_output_enabled =
+          state->current_matched || !state->matches_only;
     }
   }
   if (!state->current_matched_known && !finalizing) {
-    return LONEJSON_CANDIDATE_OUTPUT_TRANSITION_UNKNOWN;
+    return LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN;
   }
   if (finalizing && !state->current_matched_known) {
     matched = eval_doc_matches(state->selector, &state->doc);
     state->current_matched = matched;
     state->current_matched_known = 1;
-    state->current_output_enabled = matched;
+    state->current_output_enabled = matched || !state->matches_only;
   }
   if (!finalizing) {
-    return state->current_matched_known
-               ? LONEJSON_CANDIDATE_OUTPUT_TRANSITION_REJECT
-               : LONEJSON_CANDIDATE_OUTPUT_TRANSITION_UNKNOWN;
+    if (!state->current_matched_known) {
+      return LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN;
+    }
+    return state->current_matched || !state->matches_only
+               ? LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT
+               : LONEJSON_CANDIDATE_RUN_TRANSITION_REJECT;
   }
   if (state->current_matched && state->transform_failed) {
     state->callback_status = state->transform_error.code;
@@ -5982,19 +5737,19 @@ source_output_transition(void *user, const lonejson_candidate_info *candidate,
       error->code = LONEJSON_STATUS_CALLBACK_FAILED;
       strcpy(error->message, state->transform_error.message);
     }
-    return LONEJSON_CANDIDATE_OUTPUT_TRANSITION_ERROR;
+    return LONEJSON_CANDIDATE_RUN_TRANSITION_ERROR;
   }
-  return state->current_matched ? LONEJSON_CANDIDATE_OUTPUT_TRANSITION_ACCEPT
-                                : LONEJSON_CANDIDATE_OUTPUT_TRANSITION_REJECT;
+  return state->current_matched || !state->matches_only
+             ? LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT
+             : LONEJSON_CANDIDATE_RUN_TRANSITION_REJECT;
 }
 #endif
 
-static lonejson_status
-source_output_observer_object_begin(void *user, const lonejson_value_path *path,
-                                    lonejson_error *error) {
-  source_output_state *state;
+static lonejson_status source_candidate_run_observer_object_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_candidate_run_state *state;
   lonejson_status st;
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   st = state->eval_visitor.object_begin == NULL
            ? LONEJSON_STATUS_OK
            : state->eval_visitor.object_begin(&state->doc, path, error);
@@ -6005,33 +5760,25 @@ source_output_observer_object_begin(void *user, const lonejson_value_path *path,
     state->current_root_seen = 1;
     state->current_root_object = 1;
   }
-  if (state->gated_transform) {
-    return LONEJSON_STATUS_OK;
-  }
-  return source_output_push_frame(state, path, 'o');
+  return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status
-source_output_observer_object_end(void *user, const lonejson_value_path *path,
-                                  lonejson_error *error) {
-  source_output_state *state;
+static lonejson_status source_candidate_run_observer_object_end(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_candidate_run_state *state;
   lonejson_status st;
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   st = state->eval_visitor.object_end == NULL
            ? LONEJSON_STATUS_OK
            : state->eval_visitor.object_end(&state->doc, path, error);
-  if (!state->gated_transform) {
-    source_output_pop_frame(state);
-  }
   return st;
 }
 
-static lonejson_status
-source_output_observer_array_begin(void *user, const lonejson_value_path *path,
-                                   lonejson_error *error) {
-  source_output_state *state;
+static lonejson_status source_candidate_run_observer_array_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_candidate_run_state *state;
   lonejson_status st;
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   st = state->eval_visitor.array_begin == NULL
            ? LONEJSON_STATUS_OK
            : state->eval_visitor.array_begin(&state->doc, path, error);
@@ -6042,64 +5789,53 @@ source_output_observer_array_begin(void *user, const lonejson_value_path *path,
     state->current_root_seen = 1;
     state->current_root_object = 0;
   }
-  if (state->gated_transform) {
-    return LONEJSON_STATUS_OK;
-  }
-  return source_output_push_frame(state, path, 'a');
+  return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status
-source_output_observer_array_end(void *user, const lonejson_value_path *path,
-                                 lonejson_error *error) {
-  source_output_state *state;
+static lonejson_status source_candidate_run_observer_array_end(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_candidate_run_state *state;
   lonejson_status st;
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   st = state->eval_visitor.array_end == NULL
            ? LONEJSON_STATUS_OK
            : state->eval_visitor.array_end(&state->doc, path, error);
-  if (!state->gated_transform) {
-    source_output_pop_frame(state);
-  }
   return st;
 }
 
-static lonejson_status
-source_output_observer_key_begin(void *user, const lonejson_value_path *path,
-                                 lonejson_error *error) {
-  source_output_state *state;
-  state = (source_output_state *)user;
+static lonejson_status source_candidate_run_observer_key_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_candidate_run_state *state;
+  state = (source_candidate_run_state *)user;
   return state->eval_visitor.object_key_begin == NULL
              ? LONEJSON_STATUS_OK
              : state->eval_visitor.object_key_begin(&state->doc, path, error);
 }
 
-static lonejson_status
-source_output_observer_key_chunk(void *user, const lonejson_value_path *path,
-                                 const char *data, size_t len,
-                                 lonejson_error *error) {
-  source_output_state *state;
-  state = (source_output_state *)user;
+static lonejson_status source_candidate_run_observer_key_chunk(
+    void *user, const lonejson_value_path *path, const char *data, size_t len,
+    lonejson_error *error) {
+  source_candidate_run_state *state;
+  state = (source_candidate_run_state *)user;
   return state->eval_visitor.object_key_chunk == NULL
              ? LONEJSON_STATUS_OK
              : state->eval_visitor.object_key_chunk(&state->doc, path, data,
                                                     len, error);
 }
 
-static lonejson_status
-source_output_observer_key_end(void *user, const lonejson_value_path *path,
-                               lonejson_error *error) {
-  source_output_state *state;
-  state = (source_output_state *)user;
+static lonejson_status source_candidate_run_observer_key_end(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_candidate_run_state *state;
+  state = (source_candidate_run_state *)user;
   return state->eval_visitor.object_key_end == NULL
              ? LONEJSON_STATUS_OK
              : state->eval_visitor.object_key_end(&state->doc, path, error);
 }
 
-static lonejson_status
-source_output_observer_string_begin(void *user, const lonejson_value_path *path,
-                                    lonejson_error *error) {
-  source_output_state *state;
-  state = (source_output_state *)user;
+static lonejson_status source_candidate_run_observer_string_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_candidate_run_state *state;
+  state = (source_candidate_run_state *)user;
   if (path != NULL && path->segment_count == 0u) {
     state->current_root_seen = 1;
     state->current_root_object = 0;
@@ -6109,35 +5845,32 @@ source_output_observer_string_begin(void *user, const lonejson_value_path *path,
              : state->eval_visitor.string_begin(&state->doc, path, error);
 }
 
-static lonejson_status
-source_output_observer_string_chunk(void *user, const lonejson_value_path *path,
-                                    const char *data, size_t len,
-                                    lonejson_error *error) {
-  source_output_state *state;
-  state = (source_output_state *)user;
+static lonejson_status source_candidate_run_observer_string_chunk(
+    void *user, const lonejson_value_path *path, const char *data, size_t len,
+    lonejson_error *error) {
+  source_candidate_run_state *state;
+  state = (source_candidate_run_state *)user;
   return state->eval_visitor.string_chunk == NULL
              ? LONEJSON_STATUS_OK
              : state->eval_visitor.string_chunk(&state->doc, path, data, len,
                                                 error);
 }
 
-static lonejson_status
-source_output_observer_string_end(void *user, const lonejson_value_path *path,
-                                  lonejson_error *error) {
-  source_output_state *state;
+static lonejson_status source_candidate_run_observer_string_end(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_candidate_run_state *state;
   lonejson_status st;
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   st = state->eval_visitor.string_end == NULL
            ? LONEJSON_STATUS_OK
            : state->eval_visitor.string_end(&state->doc, path, error);
   return st;
 }
 
-static lonejson_status
-source_output_observer_number_begin(void *user, const lonejson_value_path *path,
-                                    lonejson_error *error) {
-  source_output_state *state;
-  state = (source_output_state *)user;
+static lonejson_status source_candidate_run_observer_number_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_candidate_run_state *state;
+  state = (source_candidate_run_state *)user;
   if (path != NULL && path->segment_count == 0u) {
     state->current_root_seen = 1;
     state->current_root_object = 0;
@@ -6147,24 +5880,22 @@ source_output_observer_number_begin(void *user, const lonejson_value_path *path,
              : state->eval_visitor.number_begin(&state->doc, path, error);
 }
 
-static lonejson_status
-source_output_observer_number_chunk(void *user, const lonejson_value_path *path,
-                                    const char *data, size_t len,
-                                    lonejson_error *error) {
-  source_output_state *state;
-  state = (source_output_state *)user;
+static lonejson_status source_candidate_run_observer_number_chunk(
+    void *user, const lonejson_value_path *path, const char *data, size_t len,
+    lonejson_error *error) {
+  source_candidate_run_state *state;
+  state = (source_candidate_run_state *)user;
   return state->eval_visitor.number_chunk == NULL
              ? LONEJSON_STATUS_OK
              : state->eval_visitor.number_chunk(&state->doc, path, data, len,
                                                 error);
 }
 
-static lonejson_status
-source_output_observer_number_end(void *user, const lonejson_value_path *path,
-                                  lonejson_error *error) {
-  source_output_state *state;
+static lonejson_status source_candidate_run_observer_number_end(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  source_candidate_run_state *state;
   lonejson_status st;
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   st = state->eval_visitor.number_end == NULL
            ? LONEJSON_STATUS_OK
            : state->eval_visitor.number_end(&state->doc, path, error);
@@ -6172,10 +5903,11 @@ source_output_observer_number_end(void *user, const lonejson_value_path *path,
 }
 
 static lonejson_status
-source_output_observer_boolean(void *user, const lonejson_value_path *path,
-                               int value, lonejson_error *error) {
-  source_output_state *state;
-  state = (source_output_state *)user;
+source_candidate_run_observer_boolean(void *user,
+                                      const lonejson_value_path *path,
+                                      int value, lonejson_error *error) {
+  source_candidate_run_state *state;
+  state = (source_candidate_run_state *)user;
   if (path != NULL && path->segment_count == 0u) {
     state->current_root_seen = 1;
     state->current_root_object = 0;
@@ -6187,10 +5919,10 @@ source_output_observer_boolean(void *user, const lonejson_value_path *path,
 }
 
 static lonejson_status
-source_output_observer_null(void *user, const lonejson_value_path *path,
-                            lonejson_error *error) {
-  source_output_state *state;
-  state = (source_output_state *)user;
+source_candidate_run_observer_null(void *user, const lonejson_value_path *path,
+                                   lonejson_error *error) {
+  source_candidate_run_state *state;
+  state = (source_candidate_run_state *)user;
   if (path != NULL && path->segment_count == 0u) {
     state->current_root_seen = 1;
     state->current_root_object = 0;
@@ -6200,26 +5932,27 @@ source_output_observer_null(void *user, const lonejson_value_path *path,
              : state->eval_visitor.null_value(&state->doc, path, error);
 }
 
-static void source_output_init_observer(lonejson_path_value_visitor *visitor) {
+static void
+source_candidate_run_init_observer(lonejson_path_value_visitor *visitor) {
   *visitor = lonejson_default_path_value_visitor();
-  visitor->object_begin = source_output_observer_object_begin;
-  visitor->object_end = source_output_observer_object_end;
-  visitor->object_key_begin = source_output_observer_key_begin;
-  visitor->object_key_chunk = source_output_observer_key_chunk;
-  visitor->object_key_end = source_output_observer_key_end;
-  visitor->array_begin = source_output_observer_array_begin;
-  visitor->array_end = source_output_observer_array_end;
-  visitor->string_begin = source_output_observer_string_begin;
-  visitor->string_chunk = source_output_observer_string_chunk;
-  visitor->string_end = source_output_observer_string_end;
-  visitor->number_begin = source_output_observer_number_begin;
-  visitor->number_chunk = source_output_observer_number_chunk;
-  visitor->number_end = source_output_observer_number_end;
-  visitor->boolean_value = source_output_observer_boolean;
-  visitor->null_value = source_output_observer_null;
+  visitor->object_begin = source_candidate_run_observer_object_begin;
+  visitor->object_end = source_candidate_run_observer_object_end;
+  visitor->object_key_begin = source_candidate_run_observer_key_begin;
+  visitor->object_key_chunk = source_candidate_run_observer_key_chunk;
+  visitor->object_key_end = source_candidate_run_observer_key_end;
+  visitor->array_begin = source_candidate_run_observer_array_begin;
+  visitor->array_end = source_candidate_run_observer_array_end;
+  visitor->string_begin = source_candidate_run_observer_string_begin;
+  visitor->string_chunk = source_candidate_run_observer_string_chunk;
+  visitor->string_end = source_candidate_run_observer_string_end;
+  visitor->number_begin = source_candidate_run_observer_number_begin;
+  visitor->number_chunk = source_candidate_run_observer_number_chunk;
+  visitor->number_end = source_candidate_run_observer_number_end;
+  visitor->boolean_value = source_candidate_run_observer_boolean;
+  visitor->null_value = source_candidate_run_observer_null;
 }
 
-static int source_output_has_increment(const lql_mutation_plan *plan) {
+static int source_candidate_run_has_increment(const lql_mutation_plan *plan) {
   size_t i;
   if (plan == NULL) {
     return 0;
@@ -6232,88 +5965,27 @@ static int source_output_has_increment(const lql_mutation_plan *plan) {
   return 0;
 }
 
-static lonejson_candidate_output_candidate_policy
-source_output_candidate_decision(
-    void *user, const lonejson_candidate_info *candidate,
-    const lonejson_candidate_output_candidate_info *transform_candidate,
-    lonejson_error *error) {
-  source_output_state *state;
-  lonejson_candidate_output_candidate_policy policy;
-  int matched;
-  (void)candidate;
-  (void)transform_candidate;
-  (void)error;
-  memset(&policy, 0, sizeof(policy));
-  state = (source_output_state *)user;
-  if (state == NULL) {
-    policy.decision = LONEJSON_CANDIDATE_OUTPUT_CANDIDATE_ERROR;
-    return policy;
-  }
-  matched = state->current_matched_known
-                ? state->current_matched
-                : eval_doc_matches(state->selector, &state->doc);
-  state->current_matched = matched;
-  state->current_matched_known = 1;
-  state->current_policy.matched = matched;
-  state->current_policy.emit_candidate = matched || !state->matches_only;
-  state->current_policy.mutate_candidate =
-      matched && state->mutation_plan != NULL;
-  state->current_policy.root_object =
-      state->current_root_object || state->doc.root_kind == '{';
-  if (!state->current_policy.emit_candidate) {
-    policy.decision = LONEJSON_CANDIDATE_OUTPUT_CANDIDATE_DROP;
-    return policy;
-  }
-  policy.decision = LONEJSON_CANDIDATE_OUTPUT_CANDIDATE_EMIT;
-  policy.candidate_policy = &state->current_policy;
-  return policy;
-}
-
-#if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
-static int source_output_capture_prune(void *user, lonejson_error *error) {
-  source_output_state *state;
-  (void)error;
-  state = (source_output_state *)user;
-  if (state == NULL || !state->matches_only || state->selector == NULL ||
-      state->doc.root_kind != '{') {
-    return 0;
-  }
-  if (state->doc.fast_exact_selector != NULL) {
-    return !state->doc.fast_exact_hit && state->doc.fast_exact_miss;
-  }
-  return top_level_multi_candidate_payload_discardable(&state->doc,
-                                                       state->selector);
-}
-#endif
-
-static lonejson_candidate_output_old_scalar_mode
-source_output_old_scalar(void *user,
-                         const lonejson_candidate_output_event *event,
-                         lonejson_error *error) {
-  source_output_state *state;
+static lonejson_candidate_run_old_scalar_mode
+source_candidate_run_old_scalar(void *user,
+                                const lonejson_candidate_run_event *event,
+                                lonejson_error *error) {
+  source_candidate_run_state *state;
   size_t index;
   (void)error;
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   if (state == NULL || event == NULL || event->path == NULL ||
       state->mutation_plan == NULL ||
       (event->value_type != LONEJSON_VALUE_NUMBER &&
        event->value_type != LONEJSON_VALUE_STRING)) {
-    return LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_NONE;
+    return LONEJSON_CANDIDATE_RUN_OLD_SCALAR_NONE;
   }
-  if (event->candidate_policy != NULL &&
-      !((const source_output_policy *)event->candidate_policy)
-           ->mutate_candidate) {
-    return LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_NONE;
-  }
-  if (!source_output_find_item(state, event, event->path, &index)) {
-    return LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_NONE;
+  if (!source_candidate_run_find_item(state, event, event->path, &index)) {
+    return LONEJSON_CANDIDATE_RUN_OLD_SCALAR_NONE;
   }
   return state->mutation_plan->items[index].kind == LQL_MUTATION_INCREMENT
-             ? LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_COMPLETE
-             : LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_NONE;
+             ? LONEJSON_CANDIDATE_RUN_OLD_SCALAR_COMPLETE
+             : LONEJSON_CANDIDATE_RUN_OLD_SCALAR_NONE;
 }
-
-static int query_limit_enabled(lql_uint64 limit) { return limit != 0u; }
 
 static unsigned int query_limit_flags(const lql_query_options *options) {
   unsigned int flags;
@@ -6331,65 +6003,6 @@ static unsigned int query_limit_flags(const lql_query_options *options) {
     flags |= LQL_QUERY_LIMIT_BYTES;
   }
   return flags;
-}
-
-static lql_query_options
-query_remaining_options(const lql_query_options *options,
-                        const lql_query_result *result) {
-  lql_query_options remaining;
-  memset(&remaining, 0, sizeof(remaining));
-  if (options == NULL || result == NULL) {
-    return remaining;
-  }
-  remaining = *options;
-  if (query_limit_enabled(options->max_matches)) {
-    remaining.max_matches =
-        result->candidates_matched >= options->max_matches
-            ? (lql_uint64)1
-            : options->max_matches - result->candidates_matched;
-  }
-  if (query_limit_enabled(options->max_candidates)) {
-    remaining.max_candidates =
-        result->candidates_seen >= options->max_candidates
-            ? (lql_uint64)1
-            : options->max_candidates - result->candidates_seen;
-  }
-  if (query_limit_enabled(options->max_bytes_read)) {
-    remaining.max_bytes_read = options->max_bytes_read;
-  }
-  return remaining;
-}
-
-static int eval_seek_u64(FILE *file, lql_uint64 offset) {
-  off_t seek_offset;
-  seek_offset = (off_t)offset;
-  if (seek_offset < (off_t)0 || (lql_uint64)seek_offset != offset) {
-    return 0;
-  }
-  return fseeko(file, seek_offset, SEEK_SET) == 0;
-}
-
-static int eval_file_size_u64(FILE *file, lql_uint64 *out) {
-  off_t end;
-  if (file == NULL || out == NULL) {
-    return 0;
-  }
-  if (fseeko(file, (off_t)0, SEEK_END) != 0) {
-    return 0;
-  }
-  end = ftello(file);
-  if (end < (off_t)0) {
-    return 0;
-  }
-  *out = (lql_uint64)end;
-  return (off_t)(*out) == end;
-}
-
-static int eval_file_write(FILE *out, const void *data, size_t len) {
-  if (len == 0u) {
-    return 1;
-  }
-  return fwrite(data, 1u, len, out) == len;
 }
 
 static int eval_file_write_unlocked(FILE *out, const void *data, size_t len) {
@@ -6411,24 +6024,6 @@ static int eval_file_putc_unlocked(FILE *out, int ch) {
 #endif
 }
 
-static int eval_copy_range(FILE *in, FILE *out, lql_uint64 size) {
-  char buf[8192];
-  size_t want;
-  size_t got;
-  while (size != 0u) {
-    want = size > (lql_uint64)sizeof(buf) ? sizeof(buf) : (size_t)size;
-    got = fread(buf, 1u, want, in);
-    if (got == 0u) {
-      return 0;
-    }
-    if (!eval_file_write(out, buf, got)) {
-      return 0;
-    }
-    size -= (lql_uint64)got;
-  }
-  return 1;
-}
-
 static int eval_copy_range_unlocked_output(FILE *in, FILE *out,
                                            lql_uint64 size) {
   char buf[8192];
@@ -6443,32 +6038,6 @@ static int eval_copy_range_unlocked_output(FILE *in, FILE *out,
     if (!eval_file_write_unlocked(out, buf, got)) {
       return 0;
     }
-    size -= (lql_uint64)got;
-  }
-  return 1;
-}
-
-static int eval_copy_fd_range_unlocked(int fd, lql_uint64 offset, FILE *out,
-                                       lql_uint64 size) {
-  char buf[8192];
-  size_t want;
-  ssize_t got;
-  off_t pos;
-
-  while (size != 0u) {
-    want = size > (lql_uint64)sizeof(buf) ? sizeof(buf) : (size_t)size;
-    pos = (off_t)offset;
-    if (pos < (off_t)0 || (lql_uint64)pos != offset) {
-      return 0;
-    }
-    got = pread(fd, buf, want, pos);
-    if (got <= (ssize_t)0) {
-      return 0;
-    }
-    if (!eval_file_write_unlocked(out, buf, (size_t)got)) {
-      return 0;
-    }
-    offset += (lql_uint64)got;
     size -= (lql_uint64)got;
   }
   return 1;
@@ -6618,31 +6187,6 @@ query_finish_source_bytes_with_base(lql_query_result *result,
   result->bytes_read = offset_base + adapter->total_read;
 }
 
-static lonejson_read_result
-eval_limited_file_read(void *user, unsigned char *buffer, size_t capacity) {
-  eval_limited_file_reader *reader;
-  lonejson_read_result result;
-  size_t want;
-
-  result = lonejson_default_read_result();
-  reader = (eval_limited_file_reader *)user;
-  if (reader->remaining == 0u) {
-    result.eof = 1;
-    return result;
-  }
-  want = reader->remaining > (lql_uint64)capacity ? capacity
-                                                  : (size_t)reader->remaining;
-  result.bytes_read = fread(buffer, 1u, want, reader->file);
-  reader->remaining -= (lql_uint64)result.bytes_read;
-  if (result.bytes_read != want) {
-    result.error_code = 1;
-  }
-  if (reader->remaining == 0u) {
-    result.eof = 1;
-  }
-  return result;
-}
-
 static lonejson_read_result eval_pread_range(void *user, unsigned char *buffer,
                                              size_t capacity) {
   eval_pread_range_reader *reader;
@@ -6681,84 +6225,16 @@ static lonejson_read_result eval_pread_range(void *user, unsigned char *buffer,
   return result;
 }
 
-static lql_read_result eval_lql_pread_range(void *user, unsigned char *buffer,
+static lql_read_result eval_pread_range_lql(void *user, unsigned char *buffer,
                                             size_t capacity) {
-  eval_pread_range_reader *reader;
+  lonejson_read_result source;
   lql_read_result result;
-  size_t want;
-  ssize_t got;
-  off_t pos;
-
+  source = eval_pread_range(user, buffer, capacity);
   memset(&result, 0, sizeof(result));
-  reader = (eval_pread_range_reader *)user;
-  if (reader->remaining == 0u) {
-    result.eof = 1;
-    return result;
-  }
-  want = reader->remaining > (lql_uint64)capacity ? capacity
-                                                  : (size_t)reader->remaining;
-  pos = (off_t)reader->offset;
-  if (pos < (off_t)0 || (lql_uint64)pos != reader->offset) {
-    result.error_code = 1;
-    return result;
-  }
-  got = pread(reader->fd, buffer, want, pos);
-  if (got < (ssize_t)0) {
-    result.error_code = 1;
-    return result;
-  }
-  result.bytes_read = (size_t)got;
-  reader->offset += (lql_uint64)result.bytes_read;
-  reader->remaining -= (lql_uint64)result.bytes_read;
-  if ((size_t)got != want) {
-    result.error_code = 1;
-  }
-  if (reader->remaining == 0u) {
-    result.eof = 1;
-  }
+  result.bytes_read = source.bytes_read;
+  result.eof = source.eof;
+  result.error_code = source.error_code;
   return result;
-}
-
-static lql_status eval_project_then_maybe_mutate_spooled(
-    lql *self, const lql_projection *projection,
-    const lql_mutation_plan *mutation_plan, int matched,
-    const lonejson_spooled *spooled, FILE *out, int *out_projected,
-    lql_error *error) {
-  FILE *projected_file;
-  lql_uint64 projected_size;
-  lql_status st;
-  spooled_source_reader reader;
-
-  if (out_projected != NULL) {
-    *out_projected = 0;
-  }
-  projected_file = tmpfile();
-  if (projected_file == NULL) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                  "failed to create projection temp file");
-    return LQL_STATUS_JSON_ERROR;
-  }
-  reader.cursor = *spooled;
-  reader.cursor.read_offset = 0u;
-  st = self->project_source(self, projection, spooled_source_read, &reader,
-                            projected_file, out_projected, error);
-  if (st == LQL_STATUS_OK && out_projected != NULL && *out_projected) {
-    if (!eval_file_size_u64(projected_file, &projected_size)) {
-      lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                    "failed to size projection temp file");
-      st = LQL_STATUS_JSON_ERROR;
-    } else if (matched && mutation_plan != NULL) {
-      st = self->mutate_file_range_paths(self, mutation_plan, projected_file,
-                                         0u, projected_size, out, error);
-    } else if (!eval_seek_u64(projected_file, 0u) ||
-               !eval_copy_range(projected_file, out, projected_size)) {
-      lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                    "failed to write projected candidate");
-      st = LQL_STATUS_JSON_ERROR;
-    }
-  }
-  fclose(projected_file);
-  return st;
 }
 
 static void query_stop(query_stream_state *state,
@@ -6919,32 +6395,6 @@ static lonejson_status file_sink_unlocked(void *user, const void *data,
     return LONEJSON_STATUS_IO_ERROR;
   }
   return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status write_spooled_payload(
-    FILE *out, const lonejson_spooled *spooled, int compact,
-    lonejson_status (*sink)(void *, const void *, size_t, lonejson_error *),
-    lonejson *runtime, lonejson_error *error) {
-  lonejson_writer writer;
-  lonejson_status st;
-  int writer_initialized;
-
-  if (!compact) {
-    return lonejson_spooled_write_to_sink(spooled, sink, out, error);
-  }
-  writer_initialized = 0;
-  st = lonejson_writer_init_sink(runtime, &writer, sink, out, error);
-  if (st == LONEJSON_STATUS_OK) {
-    writer_initialized = 1;
-    st = lonejson_writer_json_value_spooled(&writer, spooled, error);
-  }
-  if (st == LONEJSON_STATUS_OK) {
-    st = lonejson_writer_finish(&writer, error);
-  }
-  if (writer_initialized) {
-    lonejson_writer_cleanup(&writer);
-  }
-  return st;
 }
 
 static int raw_json_safe_key(const char *data, size_t len) {
@@ -7194,103 +6644,6 @@ static int write_spilled_spooled_object_with_fast_root_create(
   return 1;
 }
 
-static int find_file_range_object_end(int fd, lql_uint64 offset,
-                                      lql_uint64 size, lql_uint64 *out_end) {
-  unsigned char tail[4096];
-  lql_uint64 tail_offset;
-  size_t want;
-  ssize_t got;
-  size_t i;
-  if (size < 2u || out_end == NULL) {
-    return 0;
-  }
-  want = size > (lql_uint64)sizeof(tail) ? sizeof(tail) : (size_t)size;
-  tail_offset = offset + size - (lql_uint64)want;
-  got = pread(fd, tail, want, (off_t)tail_offset);
-  if (got < 0 || (size_t)got != want) {
-    return 0;
-  }
-  i = want;
-  while (i != 0u && json_space_byte(tail[i - 1u])) {
-    --i;
-  }
-  if (i == 0u || tail[i - 1u] != '}') {
-    return 0;
-  }
-  *out_end = (tail_offset - offset) + (lql_uint64)i;
-  return 1;
-}
-
-static int file_range_object_has_member(int fd, lql_uint64 offset,
-                                        lql_uint64 end, int *out) {
-  unsigned char head[4096];
-  lql_uint64 remaining;
-  lql_uint64 cursor;
-  size_t want;
-  ssize_t got;
-  size_t i;
-  if (out == NULL || end < 2u) {
-    return 0;
-  }
-  remaining = end;
-  cursor = offset;
-  while (remaining != 0u) {
-    want =
-        remaining > (lql_uint64)sizeof(head) ? sizeof(head) : (size_t)remaining;
-    got = pread(fd, head, want, (off_t)cursor);
-    if (got < 0 || (size_t)got != want) {
-      return 0;
-    }
-    for (i = cursor == offset ? 1u : 0u; i < want; ++i) {
-      if (!json_space_byte(head[i])) {
-        *out = head[i] != '}';
-        return 1;
-      }
-    }
-    cursor += (lql_uint64)want;
-    remaining -= (lql_uint64)want;
-  }
-  return 0;
-}
-
-static int write_file_range_object_with_fast_root_create(
-    FILE *out, int fd, lql_uint64 offset, lql_uint64 size,
-    const lql_mutation_item *item, lql_error *error) {
-  lql_uint64 end;
-  int has_member;
-  if (out == NULL || fd < 0 || item == NULL ||
-      !find_file_range_object_end(fd, offset, size, &end) ||
-      !file_range_object_has_member(fd, offset, end, &has_member)) {
-    return 0;
-  }
-  if (!eval_copy_fd_range_unlocked(fd, offset, out, end - 1u) ||
-      (has_member && !eval_file_putc_unlocked(out, ',')) ||
-      !write_fast_mutation_subtree(out, item, 0u) ||
-      !eval_file_putc_unlocked(out, '}')) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                  "failed to write fast mutated file candidate");
-    return 0;
-  }
-  return 1;
-}
-
-static lonejson_candidate_callback_result
-on_spooled_candidate_begin(void *user, const lonejson_candidate_info *candidate,
-                           lonejson_error *error);
-static lonejson_candidate_callback_result
-on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
-                         lonejson_error *error);
-
-static lonejson_candidate_callback_result
-on_spooled_candidate_begin(void *user, const lonejson_candidate_info *candidate,
-                           lonejson_error *error) {
-  spooled_match_state *state = (spooled_match_state *)user;
-  (void)candidate;
-  (void)error;
-  reset_doc(&state->doc);
-  return LONEJSON_CANDIDATE_CONTINUE;
-}
-
 static lonejson_candidate_callback_result
 on_source_spooled_candidate_begin(void *user,
                                   const lonejson_candidate_info *candidate,
@@ -7404,372 +6757,6 @@ on_source_spooled_candidate_end(void *user,
     return LONEJSON_CANDIDATE_STOP;
   }
   return LONEJSON_CANDIDATE_CONTINUE;
-}
-
-static lonejson_candidate_callback_result
-on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
-                         lonejson_error *error) {
-  spooled_match_state *state = (spooled_match_state *)user;
-  lonejson_status write_status;
-  int matched;
-  int projected;
-  int wrote_output;
-  write_status = LONEJSON_STATUS_OK;
-  projected = 0;
-  wrote_output = 0;
-  if (state->doc.root_kind == '[') {
-    reset_doc(&state->doc);
-    return reject_root_array_candidate(error);
-  }
-  matched = eval_doc_matches(state->selector, &state->doc);
-  if (!matched && state->mutation_plan != NULL && state->matches_only) {
-    state->result.candidates_seen++;
-    state->result.bytes_read =
-        (lql_uint64)(candidate->stream_offset + candidate->byte_size);
-    reset_doc(&state->doc);
-    if (query_result_stop_if_limited(&state->result, &state->options,
-                                     state->limit_flags)) {
-      return LONEJSON_CANDIDATE_STOP;
-    }
-    return LONEJSON_CANDIDATE_CONTINUE;
-  }
-  if (matched || state->mutation_plan != NULL) {
-    if (candidate->payload_spool == NULL) {
-      reset_doc(&state->doc);
-      return LONEJSON_CANDIDATE_ERROR;
-    }
-    if (state->mutation_plan != NULL) {
-      if (state->projection != NULL) {
-        if (eval_project_then_maybe_mutate_spooled(
-                state->receiver, state->projection, state->mutation_plan,
-                matched, candidate->payload_spool, state->out, &projected,
-                &state->mutation_error) != LQL_STATUS_OK) {
-          error->code = LONEJSON_STATUS_CALLBACK_FAILED;
-          strncpy(error->message, state->mutation_error.message,
-                  sizeof(error->message) - 1u);
-          error->message[sizeof(error->message) - 1u] = '\0';
-          reset_doc(&state->doc);
-          return LONEJSON_CANDIDATE_ERROR;
-        }
-        if (!projected) {
-          state->result.candidates_seen++;
-          state->result.bytes_read =
-              (lql_uint64)(candidate->stream_offset + candidate->byte_size);
-          reset_doc(&state->doc);
-          return LONEJSON_CANDIDATE_CONTINUE;
-        }
-        wrote_output = 1;
-      } else if (matched) {
-        if (state->doc.root_kind != '{') {
-          write_status = write_spooled_payload(
-              state->out, candidate->payload_spool, state->compact,
-              file_sink_unlocked, state->compact_runtime, error);
-          if (write_status != LONEJSON_STATUS_OK) {
-            reset_doc(&state->doc);
-            return LONEJSON_CANDIDATE_ERROR;
-          }
-          wrote_output = 1;
-        } else {
-          spooled_source_reader reader;
-          reader.cursor = *candidate->payload_spool;
-          reader.cursor.read_offset = 0u;
-          if (state->receiver->mutate_source_paths(
-                  state->receiver, state->mutation_plan, spooled_source_read,
-                  &reader, state->out,
-                  &state->mutation_error) != LQL_STATUS_OK) {
-            error->code = LONEJSON_STATUS_CALLBACK_FAILED;
-            strncpy(error->message, state->mutation_error.message,
-                    sizeof(error->message) - 1u);
-            error->message[sizeof(error->message) - 1u] = '\0';
-            reset_doc(&state->doc);
-            return LONEJSON_CANDIDATE_ERROR;
-          }
-        }
-        if (state->doc.root_kind == '{') {
-          wrote_output = 1;
-        }
-      } else {
-        write_status = write_spooled_payload(
-            state->out, candidate->payload_spool, state->compact,
-            file_sink_unlocked, state->compact_runtime, error);
-        if (write_status != LONEJSON_STATUS_OK) {
-          reset_doc(&state->doc);
-          return LONEJSON_CANDIDATE_ERROR;
-        }
-        wrote_output = 1;
-      }
-    } else if (state->projection != NULL) {
-      spooled_source_reader reader;
-      reader.cursor = *candidate->payload_spool;
-      reader.cursor.read_offset = 0u;
-      if (state->receiver->project_source(
-              state->receiver, state->projection, spooled_source_read, &reader,
-              state->out, &projected,
-              &state->projection_error) != LQL_STATUS_OK) {
-        error->code = LONEJSON_STATUS_CALLBACK_FAILED;
-        strncpy(error->message, state->projection_error.message,
-                sizeof(error->message) - 1u);
-        error->message[sizeof(error->message) - 1u] = '\0';
-        reset_doc(&state->doc);
-        return LONEJSON_CANDIDATE_ERROR;
-      }
-      if (!projected) {
-        state->result.candidates_seen++;
-        state->result.bytes_read =
-            (lql_uint64)(candidate->stream_offset + candidate->byte_size);
-        reset_doc(&state->doc);
-        return LONEJSON_CANDIDATE_CONTINUE;
-      }
-      wrote_output = 1;
-    } else {
-      write_status = write_spooled_payload(state->out, candidate->payload_spool,
-                                           state->compact, file_sink_unlocked,
-                                           state->compact_runtime, error);
-      if (write_status != LONEJSON_STATUS_OK) {
-        reset_doc(&state->doc);
-        return LONEJSON_CANDIDATE_ERROR;
-      }
-      wrote_output = 1;
-    }
-    if (wrote_output && !eval_file_putc_unlocked(state->out, '\n')) {
-      reset_doc(&state->doc);
-      return LONEJSON_CANDIDATE_ERROR;
-    }
-    if (matched) {
-      state->result.candidates_matched++;
-    }
-  }
-  state->result.candidates_seen++;
-  state->result.bytes_read =
-      (lql_uint64)(candidate->stream_offset + candidate->byte_size);
-  reset_doc(&state->doc);
-  if (query_result_stop_if_limited(&state->result, &state->options,
-                                   state->limit_flags)) {
-    return LONEJSON_CANDIDATE_STOP;
-  }
-  return LONEJSON_CANDIDATE_CONTINUE;
-}
-
-static lonejson_candidate_capture_decision
-retain_spooled_candidate(void *user, const lonejson_candidate_info *candidate,
-                         lonejson_error *error) {
-  (void)user;
-  (void)candidate;
-  (void)error;
-  return LONEJSON_CANDIDATE_RETAIN;
-}
-
-static lonejson_candidate_callback_result
-on_file_mutation_candidate_begin(void *user,
-                                 const lonejson_candidate_info *candidate,
-                                 lonejson_error *error) {
-  file_mutation_range_state *state = (file_mutation_range_state *)user;
-  (void)candidate;
-  (void)error;
-  reset_doc(&state->doc);
-  return LONEJSON_CANDIDATE_CONTINUE;
-}
-
-static lonejson_candidate_callback_result
-on_file_mutation_candidate_end(void *user,
-                               const lonejson_candidate_info *candidate,
-                               lonejson_error *error) {
-  file_mutation_range_state *state;
-  lql_query_options nested_options;
-  lql_query_result nested_result;
-  eval_pread_range_reader reader;
-  lql_status st;
-  lql_uint64 offset;
-  lql_uint64 size;
-  const lql_mutation_item *fast_item;
-  int matched;
-  int wrote_output;
-
-  state = (file_mutation_range_state *)user;
-  offset = state->offset_base + (lql_uint64)candidate->stream_offset;
-  size = (lql_uint64)candidate->byte_size;
-
-  if (state->doc.root_kind == '[') {
-    return reject_root_array_candidate(error);
-  }
-
-  matched = eval_doc_matches(state->selector, &state->doc);
-  if (!matched && state->matches_only) {
-    state->result.candidates_seen++;
-    state->result.bytes_read = offset + size;
-    reset_doc(&state->doc);
-    if (query_result_stop_if_limited(&state->result, &state->options,
-                                     state->limit_flags)) {
-      return LONEJSON_CANDIDATE_STOP;
-    }
-    return LONEJSON_CANDIDATE_CONTINUE;
-  }
-  if (state->compact && (!matched || state->doc.root_kind != '{')) {
-    nested_options = query_remaining_options(&state->options, &state->result);
-    memset(&nested_result, 0, sizeof(nested_result));
-    st = execute_query_file_range_spooled_matches(
-        state->receiver, state->selector, state->file, offset, size, state->out,
-        state->compact, NULL, state->mutation_plan, state->matches_only,
-        &nested_options, &nested_result, &state->mutation_error);
-    reset_doc(&state->doc);
-    state->result.candidates_seen += nested_result.candidates_seen;
-    state->result.candidates_matched += nested_result.candidates_matched;
-    state->result.bytes_read = offset + size;
-    if (nested_result.stopped_early) {
-      state->result.stopped_early = 1;
-      state->result.stop_reason = nested_result.stop_reason;
-      return LONEJSON_CANDIDATE_STOP;
-    }
-    if (st != LQL_STATUS_OK) {
-      return LONEJSON_CANDIDATE_ERROR;
-    }
-    return LONEJSON_CANDIDATE_CONTINUE;
-  }
-  wrote_output = 0;
-  if (matched) {
-    state->result.candidates_matched++;
-    if (state->doc.root_kind == '{') {
-      if (state->doc.fast_mutation_top_key != NULL &&
-          !state->doc.fast_mutation_key_seen &&
-          mutation_plan_fast_root_create_eligible(state->mutation_plan,
-                                                  &fast_item) &&
-          write_file_range_object_with_fast_root_create(
-              state->out, state->fd, offset, size, fast_item,
-              &state->mutation_error)) {
-        wrote_output = 1;
-      } else {
-        reader.fd = state->fd;
-        reader.offset = offset;
-        reader.remaining = size;
-        st = state->receiver->mutate_source_paths(
-            state->receiver, state->mutation_plan, eval_lql_pread_range,
-            &reader, state->out, &state->mutation_error);
-        if (st != LQL_STATUS_OK) {
-          reset_doc(&state->doc);
-          return LONEJSON_CANDIDATE_ERROR;
-        }
-        wrote_output = 1;
-      }
-    } else if (!eval_copy_fd_range_unlocked(state->fd, offset, state->out,
-                                            size)) {
-      reset_doc(&state->doc);
-      return LONEJSON_CANDIDATE_ERROR;
-    } else {
-      wrote_output = 1;
-    }
-  } else if (!state->matches_only) {
-    if (!eval_copy_fd_range_unlocked(state->fd, offset, state->out, size)) {
-      reset_doc(&state->doc);
-      return LONEJSON_CANDIDATE_ERROR;
-    }
-    wrote_output = 1;
-  }
-  if (wrote_output && !eval_file_putc_unlocked(state->out, '\n')) {
-    reset_doc(&state->doc);
-    return LONEJSON_CANDIDATE_ERROR;
-  }
-  state->result.candidates_seen++;
-  state->result.bytes_read = offset + size;
-  reset_doc(&state->doc);
-  if (query_result_stop_if_limited(&state->result, &state->options,
-                                   state->limit_flags)) {
-    return LONEJSON_CANDIDATE_STOP;
-  }
-  return LONEJSON_CANDIDATE_CONTINUE;
-}
-
-static lql_status execute_mutate_file_range_candidates_fast(
-    lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
-    FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
-    int matches_only, const lql_query_options *query_options,
-    lql_query_result *out_result, lql_error *error) {
-  lonejson *runtime;
-  lonejson_error lj_error;
-  lonejson_path_value_visitor visitor;
-  lonejson_value_visitor value_visitor;
-  lonejson_candidate_stream_options options;
-  lonejson_status st;
-  file_mutation_range_state state;
-  eval_pread_range_reader reader;
-  int runtime_pooled;
-  int root_array;
-
-  memset(&state, 0, sizeof(state));
-  state.receiver = self;
-  state.selector = selector;
-  state.file = file;
-  state.out = out;
-  state.compact = compact;
-  state.mutation_plan = plan;
-  state.matches_only = matches_only;
-  state.offset_base = offset;
-  state.fd = fileno(file);
-  if (state.fd < 0) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                  "failed to access mutation input descriptor");
-    return LQL_STATUS_JSON_ERROR;
-  }
-  if (!eval_seek_u64(file, offset) ||
-      !file_next_nonspace_is_root_array(file, &root_array)) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR, "failed to inspect input");
-    return LQL_STATUS_JSON_ERROR;
-  }
-  if (root_array) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR, LQL_ROOT_ARRAY_NDJSON_ERROR);
-    return LQL_STATUS_JSON_ERROR;
-  }
-  if (query_options != NULL) {
-    state.options = *query_options;
-  }
-  state.limit_flags = query_limit_flags(&state.options);
-  lql_error_init(&state.mutation_error);
-  if (!init_doc(&state.doc, self, selector)) {
-    return LQL_STATUS_NO_MEMORY;
-  }
-  if (selector_fast_direct_scalar_eligible(selector) &&
-      mutation_plan_fast_root_create_eligible(plan, NULL)) {
-    state.doc.fast_mutation_top_key = plan->items[0].path.segments[0];
-    state.doc.fast_mutation_top_key_len = plan->items[0].path.segment_lens[0];
-  }
-  runtime_pooled = 0;
-  runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
-  if (runtime == NULL) {
-    destroy_doc(&state.doc);
-    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    return LQL_STATUS_JSON_ERROR;
-  }
-  reader.fd = state.fd;
-  reader.offset = offset;
-  reader.remaining = size;
-  options = lonejson_default_candidate_stream_options();
-  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
-                                    &state.doc);
-  options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  enable_fast_top_level_multi_field_candidate(&options, &state.doc);
-  enable_fast_top_level_field_candidate(&options, &state.doc);
-  options.candidate_begin = on_file_mutation_candidate_begin;
-  options.candidate_end = on_file_mutation_candidate_end;
-  options.candidate_user = &state;
-  flockfile(out);
-  st = lonejson_visit_candidates_reader(runtime, eval_pread_range, &reader,
-                                        &options, &lj_error);
-  funlockfile(out);
-  destroy_doc(&state.doc);
-  lql_lonejson_release(self, runtime, runtime_pooled);
-  if (out_result != NULL) {
-    *out_result = state.result;
-  }
-  if (st != LONEJSON_STATUS_OK) {
-    if (state.mutation_error.code != LQL_STATUS_OK) {
-      lql_set_error(error, state.mutation_error.code,
-                    state.mutation_error.message);
-      return state.mutation_error.code;
-    }
-    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    return LQL_STATUS_JSON_ERROR;
-  }
-  return LQL_STATUS_OK;
 }
 
 static lql_status eval_selector_buffer(lql *self, const lql_selector *selector,
@@ -8108,6 +7095,41 @@ static lql_status payload_project_json_method(lql *self,
   return LQL_STATUS_UNSUPPORTED;
 }
 
+static lql_status execute_query_file_range_candidate_run(
+    lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
+    lql_uint64 size, FILE *out, int compact, const lql_projection *projection,
+    const lql_mutation_plan *mutation_plan, int matches_only,
+    const lql_query_options *query_options, lql_query_result *out_result,
+    lql_error *error) {
+  eval_pread_range_reader reader;
+  lql_query_result result;
+  lql_status status;
+  int fd;
+
+  fd = fileno(file);
+  if (fd < 0) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "failed to access input descriptor");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  reader.fd = fd;
+  reader.offset = offset;
+  reader.remaining = size;
+  memset(&result, 0, sizeof(result));
+  status = execute_query_source_candidate_run(
+      self, selector, eval_pread_range_lql, &reader, out, compact, projection,
+      mutation_plan, matches_only, query_options, &result, error);
+  if (result.bytes_read <= (lql_uint64)-1 - offset) {
+    result.bytes_read += offset;
+  } else {
+    result.bytes_read = (lql_uint64)-1;
+  }
+  if (out_result != NULL) {
+    *out_result = result;
+  }
+  return status;
+}
+
 static lql_status mutate_file_range_candidates_method(
     lql *self, const lql_selector *selector, const lql_mutation_plan *plan,
     FILE *file, lql_uint64 offset, lql_uint64 size, FILE *out, int compact,
@@ -8118,9 +7140,9 @@ static lql_status mutate_file_range_candidates_method(
                   "plan, file, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_mutate_file_range_candidates_fast(
-      self, selector, plan, file, offset, size, out, compact, matches_only,
-      NULL, out_result, error);
+  return execute_query_file_range_candidate_run(
+      self, selector, file, offset, size, out, compact, NULL, plan,
+      matches_only, NULL, out_result, error);
 }
 
 static lql_status mutate_file_range_candidates_with_options_method(
@@ -8134,9 +7156,9 @@ static lql_status mutate_file_range_candidates_with_options_method(
                   "plan, file, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_mutate_file_range_candidates_fast(
-      self, selector, plan, file, offset, size, out, compact, matches_only,
-      query_options, out_result, error);
+  return execute_query_file_range_candidate_run(
+      self, selector, file, offset, size, out, compact, NULL, plan,
+      matches_only, query_options, out_result, error);
 }
 
 static lql_status mutate_file_range_projected_candidates_method(
@@ -8150,7 +7172,7 @@ static lql_status mutate_file_range_projected_candidates_method(
                   "projection, plan, file, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_file_range_spooled_matches(
+  return execute_query_file_range_candidate_run(
       self, selector, file, offset, size, out, compact, projection, plan,
       matches_only, NULL, out_result, error);
 }
@@ -8167,7 +7189,7 @@ static lql_status mutate_file_range_projected_candidates_with_options_method(
                   "projection, plan, file, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_file_range_spooled_matches(
+  return execute_query_file_range_candidate_run(
       self, selector, file, offset, size, out, compact, projection, plan,
       matches_only, query_options, out_result, error);
 }
@@ -8182,9 +7204,9 @@ static lql_status mutate_source_candidates_method(
                   "plan, read, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_source_output(self, selector, read, read_user, out,
-                                     compact, NULL, plan, matches_only, NULL,
-                                     out_result, error);
+  return execute_query_source_candidate_run(
+      self, selector, read, read_user, out, compact, NULL, plan, matches_only,
+      NULL, out_result, error);
 }
 
 static lql_status mutate_source_candidates_with_options_method(
@@ -8198,9 +7220,9 @@ static lql_status mutate_source_candidates_with_options_method(
                   "plan, read, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_source_output(self, selector, read, read_user, out,
-                                     compact, NULL, plan, matches_only,
-                                     query_options, out_result, error);
+  return execute_query_source_candidate_run(
+      self, selector, read, read_user, out, compact, NULL, plan, matches_only,
+      query_options, out_result, error);
 }
 
 static lql_status mutate_source_projected_candidates_method(
@@ -8214,9 +7236,9 @@ static lql_status mutate_source_projected_candidates_method(
                   "projection, plan, read, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_source_output(self, selector, read, read_user, out,
-                                     compact, projection, plan, matches_only,
-                                     NULL, out_result, error);
+  return execute_query_source_candidate_run(
+      self, selector, read, read_user, out, compact, projection, plan,
+      matches_only, NULL, out_result, error);
 }
 
 static lql_status mutate_source_projected_candidates_with_options_method(
@@ -8230,9 +7252,9 @@ static lql_status mutate_source_projected_candidates_with_options_method(
                   "projection, plan, read, and out are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  return execute_query_source_output(self, selector, read, read_user, out,
-                                     compact, projection, plan, matches_only,
-                                     query_options, out_result, error);
+  return execute_query_source_candidate_run(
+      self, selector, read, read_user, out, compact, projection, plan,
+      matches_only, query_options, out_result, error);
 }
 
 static lql_status
@@ -8661,106 +7683,8 @@ static lql_status execute_query_source_spooled_matches_with_base(
   return LQL_STATUS_OK;
 }
 
-static lql_status execute_query_file_range_spooled_matches(
-    lql *self, const lql_selector *selector, FILE *file, lql_uint64 offset,
-    lql_uint64 size, FILE *out, int compact, const lql_projection *projection,
-    const lql_mutation_plan *mutation_plan, int matches_only,
-    const lql_query_options *query_options, lql_query_result *out_result,
-    lql_error *error) {
-  lonejson *runtime;
-  lonejson_error lj_error;
-  lonejson_path_value_visitor visitor;
-  lonejson_value_visitor value_visitor;
-  lonejson_candidate_stream_options options;
-  lonejson_status st;
-  spooled_match_state state;
-  eval_limited_file_reader reader;
-
-  if (file == NULL || out == NULL) {
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "input and output files are required");
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
-  if (!eval_seek_u64(file, offset)) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR, "failed to seek input range");
-    return LQL_STATUS_JSON_ERROR;
-  }
-  memset(&state, 0, sizeof(state));
-  state.receiver = self;
-  state.selector = selector;
-  state.out = out;
-  state.compact = compact;
-  state.projection = projection;
-  state.mutation_plan = mutation_plan;
-  state.matches_only = matches_only;
-  if (query_options != NULL) {
-    state.options = *query_options;
-  }
-  state.limit_flags = query_limit_flags(&state.options);
-  lql_error_init(&state.projection_error);
-  lql_error_init(&state.mutation_error);
-  if (!init_doc(&state.doc, self, selector)) {
-    return LQL_STATUS_NO_MEMORY;
-  }
-  runtime = lql_lonejson_new(self, &lj_error);
-  if (runtime == NULL) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    destroy_doc(&state.doc);
-    return LQL_STATUS_JSON_ERROR;
-  }
-  if (compact) {
-    state.compact_runtime = lql_lonejson_new(self, &lj_error);
-    if (state.compact_runtime == NULL) {
-      lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-      lonejson_free(runtime);
-      destroy_doc(&state.doc);
-      return LQL_STATUS_JSON_ERROR;
-    }
-  }
-  reader.file = file;
-  reader.remaining = size;
-  options = lonejson_default_candidate_stream_options();
-  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
-                                    &state.doc);
-  options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED;
-  options.candidate_begin = on_spooled_candidate_begin;
-  options.candidate_end = on_spooled_candidate_end;
-  options.candidate_user = &state;
-  options.capture_decision = retain_spooled_candidate;
-  flockfile(out);
-  st = lonejson_visit_candidates_reader(runtime, eval_limited_file_read,
-                                        &reader, &options, &lj_error);
-  funlockfile(out);
-  if (state.compact_runtime != NULL) {
-    lonejson_free(state.compact_runtime);
-  }
-  destroy_doc(&state.doc);
-  lonejson_free(runtime);
-  if (st != LONEJSON_STATUS_OK) {
-    if (out_result != NULL) {
-      *out_result = state.result;
-    }
-    if (state.mutation_error.code != LQL_STATUS_OK) {
-      lql_set_error(error, state.mutation_error.code,
-                    state.mutation_error.message);
-      return state.mutation_error.code;
-    }
-    if (state.projection_error.code != LQL_STATUS_OK) {
-      lql_set_error(error, state.projection_error.code,
-                    state.projection_error.message);
-      return state.projection_error.code;
-    }
-    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    return LQL_STATUS_JSON_ERROR;
-  }
-  if (out_result != NULL) {
-    *out_result = state.result;
-  }
-  return LQL_STATUS_OK;
-}
-
-static void source_output_clear_applied(source_output_state *state) {
+static void
+source_candidate_run_clear_applied(source_candidate_run_state *state) {
   if (state != NULL && state->applied != NULL && state->mutation_plan != NULL) {
     memset(state->applied, 0,
            sizeof(state->applied[0]) * state->mutation_plan->count);
@@ -8768,17 +7692,15 @@ static void source_output_clear_applied(source_output_state *state) {
 }
 
 static lonejson_candidate_callback_result
-source_output_candidate_begin(void *user,
-                              const lonejson_candidate_info *candidate,
-                              lonejson_error *error) {
-  source_output_state *state;
+source_candidate_run_candidate_begin(void *user,
+                                     const lonejson_candidate_info *candidate,
+                                     lonejson_error *error) {
+  source_candidate_run_state *state;
   (void)candidate;
   (void)error;
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   reset_doc(&state->doc);
-  source_output_cleanup_frames(state);
-  source_output_clear_applied(state);
-  memset(&state->current_policy, 0, sizeof(state->current_policy));
+  source_candidate_run_clear_applied(state);
   state->active_item = 0u;
   state->active_item_set = 0;
   state->current_matched = state->selector == NULL;
@@ -8793,12 +7715,12 @@ source_output_candidate_begin(void *user,
 }
 
 static lonejson_candidate_callback_result
-source_output_candidate_end(void *user,
-                            const lonejson_candidate_info *candidate,
-                            lonejson_error *error) {
-  source_output_state *state;
+source_candidate_run_candidate_end(void *user,
+                                   const lonejson_candidate_info *candidate,
+                                   lonejson_error *error) {
+  source_candidate_run_state *state;
   int matched;
-  state = (source_output_state *)user;
+  state = (source_candidate_run_state *)user;
   if (state->doc.root_kind == '[') {
     return reject_root_array_candidate(error);
   }
@@ -8820,7 +7742,8 @@ source_output_candidate_end(void *user,
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
-static int source_output_alloc_applied(source_output_state *state) {
+static int
+source_candidate_run_alloc_applied(source_candidate_run_state *state) {
   size_t count;
   if (state == NULL || state->mutation_plan == NULL) {
     return 1;
@@ -8839,11 +7762,10 @@ static int source_output_alloc_applied(source_output_state *state) {
   return state->applied != NULL;
 }
 
-static void source_output_cleanup(source_output_state *state) {
+static void source_candidate_run_cleanup(source_candidate_run_state *state) {
   if (state == NULL) {
     return;
   }
-  source_output_cleanup_frames(state);
   if (state->applied_alloc != NULL) {
     state->allocator->destroy(state->allocator, state->applied_alloc);
   }
@@ -8852,8 +7774,8 @@ static void source_output_cleanup(source_output_state *state) {
 }
 
 static int
-source_output_projection_segment_count(const lql_projection *projection,
-                                       size_t *out) {
+source_candidate_run_projection_segment_count(const lql_projection *projection,
+                                              size_t *out) {
   size_t i;
   size_t count;
   count = 0u;
@@ -8871,12 +7793,12 @@ source_output_projection_segment_count(const lql_projection *projection,
   return 1;
 }
 
-static int source_output_build_projection_paths(
+static int source_candidate_run_build_projection_paths(
     lql_allocator *allocator, const lql_projection *projection,
-    lonejson_candidate_output_projection_path **out_paths,
-    lonejson_candidate_output_projection_segment **out_segments) {
-  lonejson_candidate_output_projection_path *paths;
-  lonejson_candidate_output_projection_segment *segments;
+    lonejson_candidate_run_projection_path **out_paths,
+    lonejson_candidate_run_projection_segment **out_segments) {
+  lonejson_candidate_run_projection_path *paths;
+  lonejson_candidate_run_projection_segment *segments;
   size_t segment_count;
   size_t i;
   size_t j;
@@ -8890,15 +7812,16 @@ static int source_output_build_projection_paths(
   if (projection == NULL || projection->path_count == 0u) {
     return 1;
   }
-  if (!source_output_projection_segment_count(projection, &segment_count)) {
+  if (!source_candidate_run_projection_segment_count(projection,
+                                                     &segment_count)) {
     return 0;
   }
-  paths = (lonejson_candidate_output_projection_path *)allocator->calloc(
+  paths = (lonejson_candidate_run_projection_path *)allocator->calloc(
       allocator, projection->path_count, sizeof(paths[0]));
   if (paths == NULL) {
     return 0;
   }
-  segments = (lonejson_candidate_output_projection_segment *)allocator->calloc(
+  segments = (lonejson_candidate_run_projection_segment *)allocator->calloc(
       allocator, segment_count == 0u ? 1u : segment_count, sizeof(segments[0]));
   if (segments == NULL) {
     allocator->destroy(allocator, paths);
@@ -8911,8 +7834,8 @@ static int source_output_build_projection_paths(
     for (j = 0u; j < projection->paths[i].segment_count; ++j) {
       segments[cursor].kind =
           projection->paths[i].segment_is_array_index[j]
-              ? LONEJSON_CANDIDATE_OUTPUT_PROJECT_ARRAY_INDEX
-              : LONEJSON_CANDIDATE_OUTPUT_PROJECT_OBJECT_MEMBER;
+              ? LONEJSON_CANDIDATE_RUN_PROJECT_ARRAY_INDEX
+              : LONEJSON_CANDIDATE_RUN_PROJECT_OBJECT_MEMBER;
       segments[cursor].key = projection->paths[i].segments[j];
       segments[cursor].key_len = projection->paths[i].segment_lens[j];
       segments[cursor].index =
@@ -8925,9 +7848,9 @@ static int source_output_build_projection_paths(
   return 1;
 }
 
-static void source_output_free_projection_paths(
-    lql_allocator *allocator, lonejson_candidate_output_projection_path *paths,
-    lonejson_candidate_output_projection_segment *segments) {
+static void source_candidate_run_free_projection_paths(
+    lql_allocator *allocator, lonejson_candidate_run_projection_path *paths,
+    lonejson_candidate_run_projection_segment *segments) {
   if (allocator == NULL) {
     return;
   }
@@ -8935,7 +7858,7 @@ static void source_output_free_projection_paths(
   allocator->destroy(allocator, paths);
 }
 
-static lql_status execute_query_source_output(
+static lql_status execute_query_source_candidate_run(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     FILE *out, int compact, const lql_projection *projection,
     const lql_mutation_plan *mutation_plan, int matches_only,
@@ -8944,15 +7867,14 @@ static lql_status execute_query_source_output(
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor observer;
-#if defined(LONEJSON_HAS_CANDIDATE_OUTPUT_VALUE_OBSERVER)
+#if defined(LONEJSON_HAS_CANDIDATE_RUN_VALUE_OBSERVER)
   lonejson_value_visitor value_observer;
 #endif
-  lonejson_candidate_output_options options;
-  lonejson_candidate_output_result transform_result;
-  lonejson_candidate_output_projection_path *projection_paths;
-  lonejson_candidate_output_projection_segment *projection_segments;
+  lonejson_candidate_run_options options;
+  lonejson_candidate_run_projection_path *projection_paths;
+  lonejson_candidate_run_projection_segment *projection_segments;
   lonejson_status st;
-  source_output_state state;
+  source_candidate_run_state state;
   source_reader_adapter adapter;
   lql_allocator *allocator;
   int runtime_pooled;
@@ -8971,7 +7893,6 @@ static lql_status execute_query_source_output(
   }
   memset(&state, 0, sizeof(state));
   memset(&adapter, 0, sizeof(adapter));
-  memset(&transform_result, 0, sizeof(transform_result));
   projection_paths = NULL;
   projection_segments = NULL;
   state.receiver = self;
@@ -8991,13 +7912,13 @@ static lql_status execute_query_source_output(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-  if (!source_output_alloc_applied(&state)) {
+  if (!source_candidate_run_alloc_applied(&state)) {
     destroy_doc(&state.doc);
     return LQL_STATUS_NO_MEMORY;
   }
-  if (!source_output_build_projection_paths(
+  if (!source_candidate_run_build_projection_paths(
           allocator, projection, &projection_paths, &projection_segments)) {
-    source_output_cleanup(&state);
+    source_candidate_run_cleanup(&state);
     destroy_doc(&state.doc);
     return LQL_STATUS_NO_MEMORY;
   }
@@ -9005,9 +7926,9 @@ static lql_status execute_query_source_output(
     if (out_result != NULL) {
       *out_result = state.result;
     }
-    source_output_free_projection_paths(allocator, projection_paths,
-                                        projection_segments);
-    source_output_cleanup(&state);
+    source_candidate_run_free_projection_paths(allocator, projection_paths,
+                                               projection_segments);
+    source_candidate_run_cleanup(&state);
     destroy_doc(&state.doc);
     lql_set_error(error, LQL_STATUS_JSON_ERROR, "source read failed");
     return LQL_STATUS_JSON_ERROR;
@@ -9016,9 +7937,9 @@ static lql_status execute_query_source_output(
     if (out_result != NULL) {
       *out_result = state.result;
     }
-    source_output_free_projection_paths(allocator, projection_paths,
-                                        projection_segments);
-    source_output_cleanup(&state);
+    source_candidate_run_free_projection_paths(allocator, projection_paths,
+                                               projection_segments);
+    source_candidate_run_cleanup(&state);
     destroy_doc(&state.doc);
     lql_set_error(error, LQL_STATUS_JSON_ERROR, LQL_ROOT_ARRAY_NDJSON_ERROR);
     return LQL_STATUS_JSON_ERROR;
@@ -9027,41 +7948,29 @@ static lql_status execute_query_source_output(
   runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
-    source_output_free_projection_paths(allocator, projection_paths,
-                                        projection_segments);
-    source_output_cleanup(&state);
+    source_candidate_run_free_projection_paths(allocator, projection_paths,
+                                               projection_segments);
+    source_candidate_run_cleanup(&state);
     destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
   init_eval_visitor(&state.eval_visitor);
   configure_eval_visitor_for_doc(&state.eval_visitor, &state.doc);
-  source_output_init_observer(&observer);
+  source_candidate_run_init_observer(&observer);
   memset(&options, 0, sizeof(options));
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
-  options.output_framing = LONEJSON_CANDIDATE_OUTPUT_NDJSON;
-  /* A selector needs its final truth before output can commit. In the
-   * vendored engine, stage the first parse rather than capture and replay it.
-   * Project-then-mutate still requires the legacy composition until that
-   * composition moves into the new primitive. */
-#if defined(LONEJSON_HAS_CANDIDATE_OUTPUT_STAGED)
-  state.staged_output = selector != NULL && matches_only &&
-                        !(projection != NULL && mutation_plan != NULL);
+  options.output_framing = LONEJSON_CANDIDATE_RUN_NDJSON;
+  /* Selector truth gates command replay. No source candidate is reparsed. */
+#if defined(LONEJSON_HAS_CANDIDATE_RUN_STAGED)
+  state.staged_output = selector != NULL;
 #endif
-  options.mode = state.staged_output || (selector == NULL && !matches_only)
-                     ? LONEJSON_CANDIDATE_OUTPUT_MODE_STREAMING
-                     : LONEJSON_CANDIDATE_OUTPUT_MODE_GATED_SPOOLED;
-  state.gated_transform =
-      options.mode == LONEJSON_CANDIDATE_OUTPUT_MODE_GATED_SPOOLED;
-  options.old_scalar_mode = source_output_has_increment(mutation_plan)
-                                ? LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_COMPLETE
-                                : LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_NONE;
+  options.old_scalar_mode = source_candidate_run_has_increment(mutation_plan)
+                                ? LONEJSON_CANDIDATE_RUN_OLD_SCALAR_COMPLETE
+                                : LONEJSON_CANDIDATE_RUN_OLD_SCALAR_NONE;
   options.sink = file_sink_unlocked;
   options.sink_user = out;
-#if defined(LONEJSON_HAS_CANDIDATE_OUTPUT_VALUE_OBSERVER)
-  if (state.staged_output) {
-    options.observer = &observer;
-    options.observer_user = &state;
-  } else if (selector_fast_flat_scalar_eligible(selector)) {
+#if defined(LONEJSON_HAS_CANDIDATE_RUN_VALUE_OBSERVER)
+  if (selector_fast_flat_scalar_eligible(selector)) {
     init_fast_flat_scalar_visitor(&value_observer);
     options.observer_value = &value_observer;
     options.observer_user = &state.doc;
@@ -9077,51 +7986,38 @@ static lql_status execute_query_source_output(
     init_fast_top_level_multi_visitor(&value_observer);
     options.observer_value = &value_observer;
     options.observer_user = &state.doc;
-  } else if (state.gated_transform) {
-    options.observer = &state.eval_visitor;
-    options.observer_user = &state.doc;
   } else
 #endif
   {
     options.observer = &observer;
     options.observer_user = &state;
   }
-  options.transform = source_output_decide;
-  options.replace = source_output_replace;
-  options.insert = source_output_insert_missing;
+  options.transform = source_candidate_run_decide;
+  options.replace = source_candidate_run_replace;
+  options.insert = source_candidate_run_insert_missing;
+  options.insert_phase_mask = LONEJSON_CANDIDATE_RUN_INSERT_PHASE_BIT(
+      LONEJSON_CANDIDATE_RUN_INSERT_OBJECT_END);
   options.projection_paths = projection_paths;
   options.projection_path_count =
       projection == NULL ? 0u : projection->path_count;
   options.transform_user = &state;
-  options.candidate_begin = source_output_candidate_begin;
-  options.candidate_end = source_output_candidate_end;
+  options.candidate_begin = source_candidate_run_candidate_begin;
+  options.candidate_end = source_candidate_run_candidate_end;
   options.candidate_user = &state;
-  options.result = &transform_result;
-  if (projection != NULL && mutation_plan != NULL) {
-    options.composition =
-        LONEJSON_CANDIDATE_OUTPUT_COMPOSITION_PROJECT_THEN_TRANSFORM;
-  }
-  options.old_scalar = source_output_old_scalar;
+  options.old_scalar = source_candidate_run_old_scalar;
   options.old_scalar_user = &state;
-  options.candidate_decision = source_output_candidate_decision;
-  options.candidate_decision_user = &state;
-#if defined(LONEJSON_HAS_CANDIDATE_OUTPUT_STAGED)
+#if defined(LONEJSON_HAS_CANDIDATE_RUN_STAGED)
   if (state.staged_output) {
-    options.output_transition = source_output_transition;
+    if (mutation_plan != NULL && projection == NULL) {
+      options.transform_stage_threshold = 1024u;
+    }
+    options.output_transition = source_candidate_run_transition;
     options.output_transition_user = &state;
   }
 #endif
-#if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
-  if ((selector_fast_exact_eligible(selector) &&
-       selector_fast_flat_scalar_eligible(selector)) ||
-      selector_fast_top_level_multi_eligible(selector)) {
-    options.capture_prune = source_output_capture_prune;
-    options.capture_prune_user = &state;
-  }
-#endif
   flockfile(out);
-  st = lonejson_output_candidates_reader(runtime, source_reader_read, &adapter,
-                                         &options, &lj_error);
+  st = lonejson_candidate_run_reader(runtime, source_reader_read, &adapter,
+                                     &options, &lj_error);
   funlockfile(out);
   if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||
       state.callback_status != LQL_STATUS_OK) {
@@ -9131,9 +8027,9 @@ static lql_status execute_query_source_output(
     *out_result = state.result;
   }
   lql_lonejson_release(self, runtime, runtime_pooled);
-  source_output_free_projection_paths(allocator, projection_paths,
-                                      projection_segments);
-  source_output_cleanup(&state);
+  source_candidate_run_free_projection_paths(allocator, projection_paths,
+                                             projection_segments);
+  source_candidate_run_cleanup(&state);
   destroy_doc(&state.doc);
   if (st != LONEJSON_STATUS_OK) {
     if (state.callback_status != LQL_STATUS_OK) {

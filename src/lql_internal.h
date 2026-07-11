@@ -5,63 +5,6 @@
 
 #include <lonejson.h>
 
-/* Normal presets remain on LoneJSON 0.41.0 until the vendored output surface
- * is upstreamed. Keep the vocabulary adaptation at this one boundary. */
-#if !defined(LONEJSON_HAS_CANDIDATE_OUTPUT_VALUE_OBSERVER)
-#define lonejson_candidate_output_action lonejson_candidate_transform_action
-#define lonejson_candidate_output_candidate_info                               \
-  lonejson_candidate_transform_candidate_info
-#define lonejson_candidate_output_candidate_policy                             \
-  lonejson_candidate_transform_candidate_policy
-#define lonejson_candidate_output_event lonejson_candidate_transform_event
-#define lonejson_candidate_output_old_scalar_mode                              \
-  lonejson_candidate_transform_old_scalar_mode
-#define lonejson_candidate_output_options lonejson_candidate_transform_options
-#define lonejson_candidate_output_projection_path                              \
-  lonejson_candidate_transform_projection_path
-#define lonejson_candidate_output_projection_segment                           \
-  lonejson_candidate_transform_projection_segment
-#define lonejson_candidate_output_result lonejson_candidate_transform_result
-#define lonejson_output_candidates_reader lonejson_transform_candidates_reader
-#define LONEJSON_CANDIDATE_OUTPUT_CANDIDATE_DROP                               \
-  LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_DROP
-#define LONEJSON_CANDIDATE_OUTPUT_CANDIDATE_EMIT                               \
-  LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_EMIT
-#define LONEJSON_CANDIDATE_OUTPUT_CANDIDATE_ERROR                              \
-  LONEJSON_CANDIDATE_TRANSFORM_CANDIDATE_ERROR
-#define LONEJSON_CANDIDATE_OUTPUT_COMPOSITION_PROJECT_THEN_TRANSFORM           \
-  LONEJSON_CANDIDATE_TRANSFORM_COMPOSITION_PROJECT_THEN_TRANSFORM
-#define LONEJSON_CANDIDATE_OUTPUT_DROP LONEJSON_CANDIDATE_TRANSFORM_DROP
-#define LONEJSON_CANDIDATE_OUTPUT_ERROR LONEJSON_CANDIDATE_TRANSFORM_ERROR
-#define LONEJSON_CANDIDATE_OUTPUT_EVENT_ARRAY_ELEMENT                          \
-  LONEJSON_CANDIDATE_TRANSFORM_EVENT_ARRAY_ELEMENT
-#define LONEJSON_CANDIDATE_OUTPUT_EVENT_PHASE_SOURCE                           \
-  LONEJSON_CANDIDATE_TRANSFORM_EVENT_PHASE_SOURCE
-#define LONEJSON_CANDIDATE_OUTPUT_INSERT_OBJECT_END                            \
-  LONEJSON_CANDIDATE_TRANSFORM_INSERT_OBJECT_END
-#define LONEJSON_CANDIDATE_OUTPUT_KEEP LONEJSON_CANDIDATE_TRANSFORM_KEEP
-#define LONEJSON_CANDIDATE_OUTPUT_MODE_GATED_SPOOLED                           \
-  LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED
-#define LONEJSON_CANDIDATE_OUTPUT_MODE_STREAMING                               \
-  LONEJSON_CANDIDATE_TRANSFORM_MODE_STREAMING
-#define LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_COMPLETE                          \
-  LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_COMPLETE
-#define LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_NONE                              \
-  LONEJSON_CANDIDATE_TRANSFORM_OLD_SCALAR_NONE
-#define LONEJSON_CANDIDATE_OUTPUT_NDJSON                                       \
-  LONEJSON_CANDIDATE_TRANSFORM_OUTPUT_NDJSON
-#define LONEJSON_CANDIDATE_OUTPUT_PROJECT_ARRAY_INDEX                          \
-  LONEJSON_CANDIDATE_TRANSFORM_PROJECT_ARRAY_INDEX
-#define LONEJSON_CANDIDATE_OUTPUT_PROJECT_OBJECT_MEMBER                        \
-  LONEJSON_CANDIDATE_TRANSFORM_PROJECT_OBJECT_MEMBER
-#define LONEJSON_CANDIDATE_OUTPUT_REPLACE LONEJSON_CANDIDATE_TRANSFORM_REPLACE
-#endif
-
-#if !defined(LONEJSON_HAS_CANDIDATE_OUTPUT_VALUE_OBSERVER) &&                  \
-    defined(LONEJSON_HAS_CANDIDATE_TRANSFORM_VALUE_OBSERVER)
-#define LONEJSON_HAS_CANDIDATE_OUTPUT_VALUE_OBSERVER 1
-#endif
-
 #if defined(__GNUC__) || defined(__clang__)
 #define LQL_INTERNAL_SYMBOL __attribute__((visibility("hidden")))
 #else

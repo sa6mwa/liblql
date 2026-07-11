@@ -10,7 +10,10 @@ state.
 liblql is unreleased. The vendored LoneJSON candidate and transform APIs are
 private to this repository and have no compatibility obligation. The normal
 presets continue to consume released upstream LoneJSON unchanged. The vendored
-preset exists to prove the final design before an upstream handoff.
+preset exists to prove the final design before an upstream handoff. Until that
+handoff, candidate-engine development, verification, profiling, and performance
+acceptance use the vendored preset exclusively. The normal preset is neither a
+compatibility target nor a required build or test gate for this implementation.
 
 The hard outcomes are:
 
@@ -23,30 +26,29 @@ The hard outcomes are:
 - one coherent candidate engine, no compatibility layer, dead executor, or
   selector-specific LoneJSON API surface left behind.
 
-## Current Debt
+## Current Implementation And Debt
 
-The current vendored header contains useful performance work but is not the
-final design. In particular, it still contains the old generic
-`lonejson_candidate_output_*` executor and gated raw-spool replay path.
-liblql still uses that executor for general source mutation and projection.
-It must not be described as retired until it is deleted.
+The vendored path now has one `lonejson_candidate_run_*` executor. It parses a
+candidate once, observes original decoded events, records a spill-backed
+compact writer-action prefix while selection is unknown, commits that prefix
+without reparsing on acceptance, and discards it on rejection. Source and
+seekable projection/mutation use this executor. The former raw-source replay,
+projected replay, output modes, decision callbacks, compatibility adapter, and
+separate liblql file mutation executor have been deleted.
 
-The current header also exposes an accumulated set of liblql-shaped knobs:
+The remaining architecture debt is narrower but still material:
 
-- top-level string-equality fields;
-- top-level multi-field fields;
-- recursive literal-field fields;
-- direct-path key/kind arrays;
-- gated capture and capture-prune callbacks.
-
-Those optimizations may remain temporarily as private implementations, but the
-individual knobs are not an acceptable final boundary. They create spread-out
-selection logic and make LoneJSON's candidate interface an accidental LQL
-execution API.
-
-The recent source-spooled match-decision reuse is a small liblql improvement,
-not this clean cut. The large-candidate RSS test is a guardrail, not proof that
-the old executor has been removed.
+- stale candidate scan accelerators and aliases must be inventoried and
+  collapsed behind one generic plan surface;
+- Candidate Run still traverses the generic path-visitor callback stack for
+  every token and invokes the transform boundary for every accepted value;
+- projection synthesis remains interleaved with the transform writer and needs
+  a final dead-code audit;
+- completion terminology and documentation still contain historical
+  `candidate_output` and parser-replay wording that must be removed;
+- the complete parity, sanitizer, fuzz, RSS, and performance matrices have not
+  run against the final code because the architecture/performance slice is
+  still open.
 
 ### Live Inventory Baseline
 
@@ -57,9 +59,8 @@ do not remove a row merely because a faster sibling path exists.
 | --- | --- | --- |
 | `lonejson_candidate_scan_plan` | Vendored generic JSON scan descriptor now owns object-member, descendant-member, path, and string-equality acceleration. Normal presets use a narrow source adapter until upstream ships the plan. | Delete the upstream-field adapter and the old feature macros when the upstream handoff lands; retain private scanner dispatch only. |
 | `configure_candidate_eval_visitors()` and `enable_fast_*()` in `src/lql_eval.c` | Maps LQL selector shapes into LoneJSON selector-shaped option fields | Fold into one liblql plan adapter for the final primitive. |
-| `execute_query_source_output()` | The only external caller of `lonejson_output_candidates_reader()`; selector-gated `matches_only` source projection/mutation now uses one parsed, bounded transformed stage. Unmatched-output and projection-then-mutation shapes still use replay. | Add the dual original/transformed stage for unmatched output, migrate projected mutation, then delete all `source_output_*` output-executor glue. |
-| `execute_query_file_range_spooled_matches()` | Seekable projection/mutation capture followed by separate projection/mutation work | Migrate to `candidate_output`; delete gated capture as an internal transform fallback. |
-| `execute_mutate_file_range_candidates_fast()` | Separate seekable mutation scanner/writer path | Fold into `candidate_output` without changing matches-only or unmatched-output semantics. |
+| `execute_query_source_candidate_run()` | Sole liblql projection/mutation executor for source and seekable readers | Collapse remaining liblql transform matching into a compiled generic traversal plan, then minimize glue. |
+| Candidate Run action stage | Compact opcode stream with spill-backed per-candidate storage and no source/path replay metadata | Retain; profile command production/commit and prove repeated-large-candidate RSS. |
 | `source_spooled_match_state` payload delivery | Public callback-scoped raw payload handles | Preserve as `candidate_payload`; retain bounded capture only for this public contract. |
 
 ## Execution Correction
@@ -95,6 +96,52 @@ That failure establishes these implementation rules:
 - Do not commit additive architecture. A cutover commit must remove the old
   caller, branch, state, or executor it replaces. Temporary code may exist
   inside an unfinished large slice, not as a sequence of permanent siblings.
+
+### Current Performance Assessment
+
+The small 128-candidate diagnostic fixture previously measured about 0.595 ms
+for C and 0.576 ms for Go on `eq_status_open/mutate_source_selector`. After
+compact action commits and writer changes, the 4 KiB-per-record diagnostic
+measures C at 1.07 ms versus Go at 1.23 ms for equality, and C at 1.50 ms
+versus Go at 2.01 ms for all-match `contains` under the vendored native bench
+preset. These are diagnostic measurements, not acceptance results: the full
+accepted matrix remains below the required 1.2x in multiple rows.
+
+The profile and rejected experiments establish the next work:
+
+- compacting delayed commands from a legacy 24-byte header and dead path
+  payload to one-byte structural opcodes improved the row by roughly 5%;
+- in-memory delayed stages now commit directly from the bounded spool buffer;
+  spilled stages keep the streaming decoder, preserving the candidate RSS
+  bound;
+- commitment is polled after decoded chunks as well as completed values, so a
+  monotonic streaming predicate can stop staging as soon as it proves a match;
+- enabling fast non-path selector observation during staged mutation preserved
+  behavior but did not remove the dominant transform/parser cost;
+- polling output commitment only at complete-value boundaries and filtering
+  unused insertion phases are correct simplifications but were not measurable;
+- replacing the parser's native path visitor with Candidate Run's reconstructed
+  traversal stack regressed the row to about 0.62 ms and must not be retained;
+- LTO was neutral on this row, so compiler configuration is not the missing
+  architectural speedup;
+- Go's mutation path pipelines selection and mutation parsers in separate
+  goroutines. C remains single-pass and single-threaded, so its remaining loss
+  is generic callback, path, staging, and writer work rather than a second
+  parse.
+
+The next implementation slice must reduce work while commitment is unknown and
+compile mutation target traversal into LoneJSON's generic plan. It must not add
+selector syntax, cache candidate decisions, duplicate traversal stacks, or
+weaken spill-backed RSS bounds.
+
+For selectors that resolve only at a candidate's final field, the action stage
+still dispatches the candidate's decoded events once to record actions and once
+to commit them. Candidate Run now has a bounded hybrid representation for this
+case: action staging remains the default, while liblql selector-gated mutation
+switches after 1 KiB at a completed scalar/container boundary to a spill-backed
+transformed-output stage without reparsing source bytes. The switch never occurs
+inside an open streamed scalar. Mutation errors remain deferred until the
+selection result and early-rejected candidates remain action-only.
 
 ### Large-Slice Development Protocol
 
@@ -261,10 +308,10 @@ deleted once the primitive exposes generic `accept`, `reject`, `unknown`, and
 
 Completion requires deleting, not merely bypassing:
 
-- the existing `lonejson_candidate_output_*` types, options, aliases,
+- the retired `lonejson_candidate_output_*` types, options, aliases,
   output executor, projection/replay executor, and gated raw-spool replay
   executor;
-- `LONEJSON_CANDIDATE_OUTPUT_MODE_GATED_SPOOLED` and its replay-count/
+- `LONEJSON_CANDIDATE_RUN_MODE_GATED_SPOOLED` and its replay-count/
   projected-replay bookkeeping;
 - public or semi-public LoneJSON option fields dedicated to top-level equality,
   top-level multi-field, recursive-field, or direct-path LQL acceleration;
@@ -309,7 +356,7 @@ liblql has four execution families only:
 1. `candidate_decide`: decision-only scan with no capture.
 2. `candidate_payload`: seekable range metadata or explicit callback-scoped
    current-candidate spool.
-3. `candidate_output`: projection, mutation, and projection-then-mutation
+3. `candidate_run`: projection, mutation, and projection-then-mutation
    through the final LoneJSON candidate primitive.
 4. `buffered_value`: explicitly buffered single-value helper APIs only.
 

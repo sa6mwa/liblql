@@ -5731,6 +5731,91 @@ static void expect_file_range_candidate_mutation_api(void) {
   }
 }
 
+static void expect_candidate_mutation_large_action_stage_api(void) {
+  FILE *source;
+  FILE *out;
+  lql_error error;
+  lql_status st;
+  lql_selector *selector;
+  lql_mutation_plan *plan;
+  lql_query_result result;
+  const char *expr;
+  const char *mutation;
+  char buf[4096];
+  long size;
+  size_t len;
+  size_t i;
+
+  source = tmpfile();
+  out = tmpfile();
+  selector = NULL;
+  plan = NULL;
+  if (source == NULL || out == NULL) {
+    printf("large candidate mutation tmpfile failed\n");
+    if (source != NULL) {
+      fclose(source);
+    }
+    if (out != NULL) {
+      fclose(out);
+    }
+    ++failures;
+    return;
+  }
+  if (fputs("{\"id\":\"large\",\"blob\":\"", source) == EOF) {
+    printf("large candidate mutation source prefix failed\n");
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  for (i = 0u; i < 2048u; ++i) {
+    if (fputc('x', source) == EOF) {
+      printf("large candidate mutation source body failed\n");
+      fclose(source);
+      fclose(out);
+      ++failures;
+      return;
+    }
+  }
+  if (fputs("\"}\n", source) == EOF || fflush(source) != 0 ||
+      fseek(source, 0L, SEEK_END) != 0 || (size = ftell(source)) < 0L ||
+      fseek(source, 0L, SEEK_SET) != 0) {
+    printf("large candidate mutation source setup failed\n");
+    fclose(source);
+    fclose(out);
+    ++failures;
+    return;
+  }
+  expr = "contains{field=/blob,value=xxxx}";
+  mutation = "/bench/touched=true";
+  lql_error_init(&error);
+  st = test_ctx->selector_parse(test_ctx, expr, &selector, &error);
+  if (st == LQL_STATUS_OK) {
+    lql_error_init(&error);
+    st = test_ctx->mutation_plan_parse(test_ctx, &mutation, 1u, &plan, &error);
+  }
+  if (st == LQL_STATUS_OK) {
+    memset(&result, 0, sizeof(result));
+    lql_error_init(&error);
+    st = test_ctx->mutate_file_range_candidates(test_ctx, selector, plan,
+                                                source, 0u, (lql_uint64)size,
+                                                out, 1, 1, &result, &error);
+  }
+  if (st != LQL_STATUS_OK) {
+    printf("large candidate mutation failed: %s\n", error.message);
+    ++failures;
+  } else if (result.candidates_seen != 1u || result.candidates_matched != 1u ||
+             !read_tmpfile(out, buf, sizeof(buf), &len) ||
+             strstr(buf, "\"bench\":{\"touched\":true}") == NULL) {
+    printf("large candidate mutation result mismatch\n");
+    ++failures;
+  }
+  test_ctx->mutation_plan_destroy(test_ctx, plan);
+  test_ctx->selector_destroy(test_ctx, selector);
+  fclose(source);
+  fclose(out);
+}
+
 static void expect_source_candidate_mutation_api(void) {
   FILE *out;
   lql_error error;
@@ -7844,6 +7929,8 @@ static void expect_sdk_contract_manifest(void) {
        expect_source_mutation_api},
       {"mutation", "seekable candidate stream mutation",
        expect_file_range_candidate_mutation_api},
+      {"mutation", "large candidate action-to-output stage transition",
+       expect_candidate_mutation_large_action_stage_api},
       {"mutation", "callback-source candidate stream mutation",
        expect_source_candidate_mutation_api},
       {"mutation", "projection-before-mutation candidate streams",
@@ -7871,7 +7958,7 @@ static void expect_sdk_contract_manifest(void) {
   static const sdk_contract_surface_count surface_counts[] = {
       {"receiver", 1},   {"utility", 1},   {"api-contract", 2},
       {"version", 1},    {"selector", 14}, {"streaming", 14},
-      {"projection", 7}, {"compact", 2},   {"mutation", 20},
+      {"projection", 7}, {"compact", 2},   {"mutation", 21},
   };
   size_t i;
   size_t j;
@@ -9565,6 +9652,7 @@ int main(void) {
   expect_buffered_wildcard_mutation_api();
   expect_source_mutation_api();
   expect_file_range_candidate_mutation_api();
+  expect_candidate_mutation_large_action_stage_api();
   expect_source_candidate_mutation_api();
   expect_projected_candidate_mutation_api();
   expect_mutation_quoted_value_api();
