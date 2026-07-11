@@ -1,88 +1,104 @@
-# liblql Direct Execution Specification
+# Direct liblql Execution Reset
 
-## Decision
+## Status
 
-liblql owns all LQL execution: selector compilation, candidate decisions,
-projection, mutation, temporal matching, and output policy. Vendored LoneJSON
-is restricted to JSON basics: input reading, strict framing, tokenization,
-validation, generic value events, spooling, and JSON writing. LoneJSON must
-not contain Candidate Run, candidate transforms, selector-shaped options, or
-LQL-aware state.
+This document is the sole execution specification for the reset. The current
+tree is intentionally incomplete. No implementation work may begin until the
+deletion gate in this document is satisfied and committed. Historical parity,
+completion, port, dependency-gap, and benchmark claims were removed because
+they described the discarded architecture.
 
-This replaces the candidate-engine and hybrid designs. liblql is unreleased;
-there is no compatibility obligation for the removed candidate API.
+## Product Contract
 
-## Required Execution Model
+liblql implements the LQL behavior accepted by the Go reference. It accepts
+strict NDJSON only at streaming entry points. A root JSON array is an error;
+there is no array flattening in liblql or clql.
 
-liblql compiles selector and mutation input into reusable flat programs. One
-direct liblql stream state consumes LoneJSON token events for each strict NDJSON
-candidate. It owns path stacks, compiled-program state, match truth, mutation
-state, and output. No callback forwards a generic LoneJSON transform event into
-an LQL decision adapter.
+The completed implementation must preserve these invariants:
 
-The initial implementation must reproduce Go LQL stream behavior exactly:
+- Go behavioral parity for the accepted selector, projection, mutation, and
+  temporal cases;
+- bounded RSS independent of total input size, record count, match count, and
+  result count;
+- no default candidate/result cache, full-input materialization, or hidden
+  spool/replay transform path;
+- the 100 MiB large-JSON gate remains below 128 MiB RSS, including repeated
+  large records so reset behavior is proven;
+- every accepted Go/C benchmark row is at least 1.0x in C; 1.2x is the stretch
+  target only where the resulting code remains simpler.
 
-- duplicate object keys are evaluated in source order;
-- selector truth, temporal semantics, mutation ordering, and deferred errors
-  match the accepted Go parity cases;
-- matched-only output applies mutations only to selected candidates;
-- projection and mutation use the same direct program state;
-- file, reader, callback source, CLI, and Lua routes share the same executor.
+## Boundary
 
-The direct executor may use bounded per-candidate spooling only for public
-payload callbacks or semantics that require delayed output. It must not copy or
-retain every candidate by default, cache candidates or results, or materialize
-the whole input.
+Vendored LoneJSON is used through its public `lonejson.h` interface only. It
+provides JSON reading, strict NDJSON framing, token/value events, diagnostics,
+JSON writing, and its ordinary bounded spooling facilities. liblql owns all
+LQL compilation and execution: selector state, temporal behavior, projection,
+mutation ordering, output policy, and record lifecycle.
 
-## LoneJSON Retained Surface
+LoneJSON must not contain LQL-aware state, selector-shaped options, mutation
+actions, output decisions, or a record transform engine. liblql must not use
+LoneJSON implementation headers or private symbols.
 
-Retain only ordinary JSON capabilities required by liblql:
+## Required Design
 
-- reader, file, buffer, fd, and callback adapters;
-- strict NDJSON framing and root-array rejection support;
-- generic value/path visitor parsing and JSON diagnostics;
-- writer/escaping support;
-- bounded memory and spill-backed spools used by public payload APIs.
+The replacement is a direct, compiled LQL program in liblql. A single stream
+executor consumes LoneJSON public events and owns the path stack, selector
+truth, projection state, mutation state, and output for the current NDJSON
+record. File, callback-source, CLI, and Lua entry points call that same
+executor.
 
-Delete from vendored LoneJSON in this cutover:
+The executor may use a bounded current-record spool only when an observable
+public payload contract or delayed-output semantic requires it. It must not
+use capture as the normal decision or mutation mechanism. The design must be
+understandable as direct LQL execution, not an adapter around a renamed
+transform engine.
 
-- `lonejson_candidate_run_*` public APIs, aliases, options, enums, callbacks,
-  and implementation;
-- candidate transform/action staging, deferred output decisions, transform
-  projection, old-value, and candidate writer state;
-- candidate-only tests, macros, and documentation.
+## Deletion Gate
 
-Candidate stream framing and public payload capture remain only where they are
-ordinary LoneJSON JSON-stream features, not LQL transform features.
+Before writing the replacement executor, remove every dependency on the
+discarded Candidate Run architecture. The removal includes:
 
-## Invariants
+- the Candidate Run public and private surface from vendored LoneJSON;
+- liblql Candidate Run adapters and all candidate-mutation receiver methods;
+- corresponding capability fields, headers, source wiring, CLI paths, and Lua
+  bindings;
+- benchmarks, parity adapters, inventories, tests, scripts, fixtures, and
+  documentation that exercise or claim the removed path;
+- stale release, completion, parity, and performance assertions about that
+  path.
 
-- Input is strict NDJSON at every liblql entry point. Root arrays are errors;
-  there is no flattening.
-- RSS is bounded by the direct program, parser/writer stacks, bounded transport
-  buffers, and at most one current callback payload spool. It does not grow
-  with input size, candidate count, match count, or result count.
-- The 100 MiB large-JSON gate remains below 128 MiB. Repeated large candidates
-  prove spool reset rather than only a per-candidate bound.
-- No selector-specific feature is added to LoneJSON. Selector specialization
-  belongs entirely to liblql's compiled program.
+After this deletion, the project is expected to have a deliberate functional
+hole: no streaming projection/mutation implementation and no public API that
+pretends it exists. Selector parsing and other independent public contracts may
+remain. The project is not releasable at this point.
 
-## Cutover
+The only permitted retained LoneJSON candidate facility is its generic JSON
+stream framing/capture API where it is unrelated to LQL transformation. It is
+not a liblql execution API and must not be wrapped as one during the reset.
 
-1. Implement direct liblql program execution over LoneJSON basic events and
-   prove Go behavioral parity before deleting working callers.
-2. Route every liblql selector/projection/mutation entry point through that
-   executor. Delete `source_candidate_run_*` and all Candidate Run adapters.
-3. Delete the vendored Candidate Run/transform surface and its tests.
-4. Run vendored C tests, sanitizer/fuzz gates, strict-NDJSON tests, large RSS
-   gates, and the complete Go/C benchmark matrix.
+## Static Proof Of Deletion
 
-## Acceptance
+The deletion commit must include a repository-wide, tracked-file proof that,
+outside this specification and git history, there are no Candidate Run tokens,
+candidate-transform tokens, old adapter symbols, removed receiver methods, or
+references to their old tests and benchmarks. The proof must cover source,
+public headers, bindings, CLI, tests, benchmarks, parity tooling, scripts,
+README, and documentation.
 
-Completion requires:
+Build or test failures caused by the removed API are expected during this
+phase. Do not preserve a compatibility shim to make them pass. Delete the
+dependent tests instead; replacement tests are written only for the new public
+behavior after the direct executor exists.
 
-- no Candidate Run/transform surface remains in vendored LoneJSON or liblql;
-- all accepted Go/C parity behavior passes;
-- strict NDJSON and bounded RSS gates pass;
-- every accepted Go/C benchmark row is at least 1.0x, with 1.2x pursued only
-  where the direct program stays simpler and clearer.
+## Implementation And Proof Order
+
+1. Commit the documentation reset and the deletion gate.
+2. Commit the complete deletion and record its static absence proof. Stop.
+3. In a fresh implementation session, define the small replacement streaming
+   public contract and implement one direct executor in large coherent slices.
+4. Add observable behavior tests, then run the focused and complete C, Go
+   parity, sanitizer, fuzz, RSS, and benchmark gates.
+5. Commit only when the direct implementation meets the contract and evidence
+   above.
+
+No completion claim is valid before step 5.
