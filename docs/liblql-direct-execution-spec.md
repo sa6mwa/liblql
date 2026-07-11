@@ -56,8 +56,33 @@ explicit decision.
 
 ## Non-Negotiable Architecture
 
-liblql owns all LQL execution. Vendored LoneJSON is used only through public
-`lonejson.h`; liblql must not use LoneJSON private headers or symbols.
+liblql owns all LQL execution. During this rewrite, the vendored LoneJSON
+source is an iteration harness and is used only through public `lonejson.h`;
+liblql must not use LoneJSON private headers or symbols.
+
+The v0 deliverable does **not** vendor or embed a private LoneJSON instance.
+It links the supported upstream LoneJSON binary ABI (`.a` for static linkage
+or `.so` for shared linkage), so one LoneJSON instance can be shared by the
+other downstream components in a deliverable. The current source-vendored
+harness must therefore preserve that boundary: no private APIs, no
+cross-library IPO/LTO assumptions, and no optimization whose validity depends
+on compiling LoneJSON and liblql as one translation unit or with one compiler.
+Changes made to vendored LoneJSON must be general public-API improvements
+suitable for upstreaming.
+
+## Compiler And Performance Baseline
+
+GNU GCC is the authoritative C compiler for the performance acceptance gate.
+Every required C/Go row must reach at least `1.0x` when liblql and the
+rewrite-time LoneJSON harness are separately compiled with GCC at the normal
+release optimization level, without cross-library IPO/LTO. This models the
+upstream binary-ABI deployment boundary and prevents a Clang-specific codegen
+win from masking an execution-path shortcoming.
+
+Clang remains a supported diagnostic and comparison compiler, but a Clang win
+cannot accept a row that fails under GCC. The exact GCC release and benchmark
+host are recorded with each benchmark run. Do not pin the project preset to a
+compiler as a performance workaround.
 
 LoneJSON provides JSON input, strict framing, token/value events, diagnostics,
 escaping, JSON writing, and ordinary bounded spooling primitives. It must not
@@ -275,8 +300,8 @@ at least `1.0x` Go.
 ## Prohibited Shortcuts
 
 - restoring or adapting deleted Candidate Run/candidate-transform code;
-- using LoneJSON internal headers or normal upstream SDK mode during this
-  rewrite;
+- using LoneJSON internal headers, private symbols, or an optimization that
+  assumes a co-compiled LoneJSON implementation during this rewrite;
 - root-array flattening in liblql, clql, parity, or benchmarks;
 - result/candidate caches or hidden capture/replay for speed;
 - whole-input or whole-record materialization disguised as streaming;

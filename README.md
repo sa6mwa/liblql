@@ -1,7 +1,9 @@
 # liblql
 
-`liblql` is a C implementation of LQL using vendored LoneJSON for JSON
-parsing and writing.
+`liblql` is a C implementation of LQL using LoneJSON for JSON parsing and
+writing. The current vendored LoneJSON source is a rewrite-time iteration
+harness; the v0 deliverable will link the upstream LoneJSON binary ABI so it
+can be shared with other consumers.
 
 ## Reset State
 

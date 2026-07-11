@@ -33,6 +33,19 @@ The removal is enforced by:
 This check must keep passing. If an old symbol is needed, the correct action is
 to design the direct equivalent, not whitelist or restore it.
 
+## LoneJSON Delivery Boundary
+
+The vendored LoneJSON source is a rewrite-time iteration harness only. It is
+not the intended v0 packaging model. The final liblql binary links the
+upstream LoneJSON ABI (`.a` or `.so`) so a deliverable contains one shared
+LoneJSON implementation for all of its consumers. Consequently, every direct
+execution design must be valid without cross-library IPO/LTO and without
+assuming a particular compiler for LoneJSON. Use only public `lonejson.h`;
+make vendored changes generic and upstreamable.
+
+GCC is the authoritative performance-gate compiler. A row that wins under
+Clang but loses to Go under GCC is not accepted.
+
 ## First Actions
 
 1. Read `docs/liblql-direct-execution-spec.md` completely.
