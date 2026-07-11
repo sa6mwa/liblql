@@ -232,6 +232,15 @@ static lql_status bench_write(void *user, const void *data, size_t len,
   return LQL_STATUS_OK;
 }
 
+static lql_status bench_discard_write(void *user, const void *data, size_t len,
+                                      lql_error *error) {
+  (void)user;
+  (void)data;
+  (void)len;
+  (void)error;
+  return LQL_STATUS_OK;
+}
+
 static int mode_is_decision(const char *mode) {
   return strcmp(mode, "decision_only_selector") == 0 ||
          strcmp(mode, "decision_only_plan") == 0 ||
@@ -433,8 +442,12 @@ static int run_once(FILE *file, lql *ctx, lql_selector *selector,
   request.selector = temporary != NULL ? temporary : selector;
   request.matched_only = 1;
   if (!mode_is_decision(mode)) {
-    request.writer = bench_write;
-    request.writer_user = writer;
+    if (mode_is_mutation(mode)) {
+      request.writer = bench_discard_write;
+    } else {
+      request.writer = bench_write;
+      request.writer_user = writer;
+    }
   }
   if (mode_is_selected(mode)) {
     request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
