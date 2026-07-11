@@ -213,6 +213,15 @@ if(LQL_BUILD_TESTS)
   set_tests_properties(lql.handle-allocator PROPERTIES LABELS "unit;api"
     TIMEOUT 5)
 
+  add_executable(lql_source_spool_rss_test tests/source_spool_rss_test.c)
+  target_include_directories(lql_source_spool_rss_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(lql_source_spool_rss_test PRIVATE lql_common)
+  lql_apply_project_warnings(lql_source_spool_rss_test)
+  add_test(NAME lql.source-spool-rss COMMAND lql_source_spool_rss_test)
+  set_tests_properties(lql.source-spool-rss PROPERTIES LABELS "unit;api"
+    TIMEOUT 30)
+
   add_executable(lql_fuzz_smoke tests/fuzz_smoke.c)
   target_link_libraries(lql_fuzz_smoke PRIVATE $<IF:$<BOOL:${LQL_BUILD_STATIC}>,lql_static,lql_shared>)
   lql_apply_project_warnings(lql_fuzz_smoke)
