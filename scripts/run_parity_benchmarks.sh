@@ -65,6 +65,7 @@ bench_dep_library_dir="${LQL_BENCH_DEP_LIBRARY_DIR:-$root/.cache/deps/x86_64-lin
 time_bin="${LQL_BENCH_TIME:-/usr/bin/time}"
 require_lua_rss="${LQL_BENCH_REQUIRE_LUA_RSS:-0}"
 bench_cpu="${LQL_BENCH_CPU:-auto}"
+warmup_forks="${LQL_BENCH_WARMUP_FORKS:-5}"
 bench_taskset=""
 mkdir -p "$fixture_dir"
 ndjson_fixture="$fixture_dir/large_ndjson.jsonl"
@@ -309,6 +310,48 @@ kv_field() {
   field=$1
   record=$2
   printf '%s\n' "$record" | sed -n "s/.*$field=\\([0-9][0-9]*\\).*/\\1/p"
+}
+
+validate_warmup_forks() {
+  case "$warmup_forks" in
+    ''|*[!0-9]*)
+      printf '%s\n' 'benchmark warmup fork count must be a positive odd integer' >&2
+      return 1
+      ;;
+  esac
+  if [ "$warmup_forks" -eq 0 ] || [ $((warmup_forks % 2)) -eq 0 ]; then
+    printf '%s\n' 'benchmark warmup fork count must be a positive odd integer' >&2
+    return 1
+  fi
+}
+
+run_bench_process_median() {
+  submode=$1
+  impl=$2
+  shift 2
+  forks=1
+  samples=
+  sample=0
+  if [ "$submode" = "warmup_included" ]; then
+    forks=$warmup_forks
+  fi
+  while [ "$sample" -lt "$forks" ]; do
+    record=$(run_bench_process "$@") || return 1
+    case "$impl" in
+      c) elapsed=$(kv_field elapsed_ns "$record") ;;
+      go) elapsed=$(json_number_field ns_per_op "$record") ;;
+      *) return 2 ;;
+    esac
+    if [ -z "$elapsed" ]; then
+      printf 'benchmark process emitted no elapsed time: %s\n' "$record" >&2
+      return 1
+    fi
+    samples="${samples}${elapsed} ${record}\n"
+    sample=$((sample + 1))
+  done
+  median=$(((forks + 1) / 2))
+  printf '%b' "$samples" | sort -n -k1,1 | awk -v median="$median" \
+    'NR == median { sub(/^[0-9][0-9]* /, ""); print; exit }'
 }
 
 is_selected() {
@@ -876,7 +919,7 @@ run_c_native_mode() {
     project_*) payload_source_type=projection ;;
   esac
   for submode in ${LQL_BENCH_SUBMODES:-warmup_included steady_state}; do
-    record=$(run_bench_process "$payload_bench" "$mode" "$expr" \
+    record=$(run_bench_process_median "$submode" c "$payload_bench" "$mode" "$expr" \
       "$fixture_path" "$selector_name" "$submode")
     c_candidates=$(kv_field candidates "$record")
     c_matches=$(kv_field matches "$record")
@@ -921,7 +964,7 @@ run_go_mode() {
     return 1
   fi
   for submode in ${LQL_BENCH_SUBMODES:-warmup_included steady_state}; do
-    record=$(run_bench_process "$go_bench" \
+    record=$(run_bench_process_median "$submode" go "$go_bench" \
       --fixture "$fixture_path" \
       --dataset "$dataset_name" \
       --selector-name "$selector_name" \
@@ -1219,6 +1262,9 @@ compare_go_impl() {
 
 exit_status=0
 if ! validate_required_impls; then
+  exit_status=1
+fi
+if [ "$exit_status" -eq 0 ] && ! validate_warmup_forks; then
   exit_status=1
 fi
 if [ "$exit_status" -eq 0 ] && ! resolve_bench_cpu; then

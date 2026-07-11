@@ -173,6 +173,11 @@ Current implementation status:
   systematically inherit the other process's warmed CPU or file state. Set
   `LQL_BENCH_CPU=<cpu-list>` to choose a permitted CPU or
   `LQL_BENCH_CPU=off` to disable pinning where it is unsuitable.
+- `warmup_included` reports the median of five independently spawned, pinned
+  cold forks. Each fork still measures exactly one first pass; the median
+  removes scheduler and page-fault outliers without turning the result into a
+  warmed in-process measurement. Set `LQL_BENCH_WARMUP_FORKS` to another
+  positive odd count when diagnosing variance.
 - the current executable dataset matrix covers NDJSON and single-root JSON
   object fixture shapes for both library-style and CLI-style record forms,
   plus a lockd-shaped NDJSON fixture with session, tab, event, operation,
