@@ -170,7 +170,7 @@ upstream-only lonejson releases, but the current vendored preset lets liblql
 reshape the candidate/transform surface directly.
 
 The governing document is now
-[`docs/liblql-lonejson-hybrid-spec.md`](liblql-lonejson-hybrid-spec.md).
+[`docs/liblql-lonejson-candidate-engine-spec.md`](liblql-lonejson-candidate-engine-spec.md).
 
 The new dependency boundary is:
 

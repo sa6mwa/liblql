@@ -1773,7 +1773,7 @@ Current implementation status:
   ownership and error contract but also use the same scoped output lock for
   spooled and seekable payload byte copies;
 - the next callback-source and transform performance work is governed by
-  `docs/liblql-lonejson-hybrid-spec.md`. The vendored lonejson
+  `docs/liblql-lonejson-candidate-engine-spec.md`. The vendored lonejson
   candidate/transform surface may be rewritten because it is currently
   liblql-local. The target is one strict NDJSON candidate pipeline where
   lonejson owns JSON parsing/framing/writing and liblql owns selector,

@@ -208,7 +208,7 @@ when it removes allocation or repeated derivation without changing the
 observable selector result and without adding invalidation logic to the hot
 path.
 The next candidate-engine work is governed by
-`docs/liblql-lonejson-hybrid-spec.md`. liblql keeps LQL semantics, lonejson
+`docs/liblql-lonejson-candidate-engine-spec.md`. liblql keeps LQL semantics, lonejson
 keeps JSON mechanics, and the vendored lonejson candidate/transform surface may
 be rewritten because it is currently liblql-local. The target is one strict
 NDJSON candidate pipeline that observes, decides, and writes through lonejson
