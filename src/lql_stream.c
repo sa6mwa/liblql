@@ -592,7 +592,10 @@ static lql_status stream_status(lql_stream_state *state, lonejson_status status,
     return LQL_STATUS_OK;
   }
   if (status == LONEJSON_STATUS_ALLOCATION_FAILED) {
-    lql_set_error(out, LQL_STATUS_NO_MEMORY, "lonejson allocation failed");
+    lql_set_error(out, LQL_STATUS_NO_MEMORY,
+                  error != NULL && error->message[0] != '\0'
+                      ? error->message
+                      : "lonejson allocation failed");
     return LQL_STATUS_NO_MEMORY;
   }
   if (status == LONEJSON_STATUS_CALLBACK_FAILED) {

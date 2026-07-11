@@ -8,6 +8,12 @@ typedef struct mapped_candidate_reader {
   size_t offset;
 } mapped_candidate_reader;
 
+typedef struct mapped_large_reader {
+  size_t phase;
+  size_t offset;
+  size_t payload_remaining;
+} mapped_large_reader;
+
 typedef struct mapped_candidate_record {
   char status[6];
 } mapped_candidate_record;
@@ -48,9 +54,64 @@ static lonejson_read_result mapped_candidate_read(void *user,
   return result;
 }
 
+static lonejson_read_result mapped_large_read(void *user,
+                                              unsigned char *buffer,
+                                              size_t capacity) {
+  static const char prefix[] = "{\"status\":\"open\",\"payload\":\"";
+  static const char suffix[] = "\"}\n";
+  mapped_large_reader *reader;
+  lonejson_read_result result;
+  size_t remaining;
+  size_t amount;
+
+  reader = (mapped_large_reader *)user;
+  result = lonejson_default_read_result();
+  if (reader == NULL || buffer == NULL || capacity == 0u) {
+    result.error_code = 1;
+    return result;
+  }
+  if (reader->phase == 0u) {
+    remaining = (sizeof(prefix) - 1u) - reader->offset;
+    amount = remaining < capacity ? remaining : capacity;
+    memcpy(buffer, prefix + reader->offset, amount);
+    reader->offset += amount;
+    if (reader->offset == sizeof(prefix) - 1u) {
+      reader->phase = 1u;
+      reader->offset = 0u;
+    }
+    result.bytes_read = amount;
+    return result;
+  }
+  if (reader->phase == 1u) {
+    amount = reader->payload_remaining < capacity ? reader->payload_remaining
+                                                    : capacity;
+    memset(buffer, 'x', amount);
+    reader->payload_remaining -= amount;
+    if (reader->payload_remaining == 0u) {
+      reader->phase = 2u;
+    }
+    result.bytes_read = amount;
+    return result;
+  }
+  if (reader->phase == 2u) {
+    remaining = (sizeof(suffix) - 1u) - reader->offset;
+    amount = remaining < capacity ? remaining : capacity;
+    memcpy(buffer, suffix + reader->offset, amount);
+    reader->offset += amount;
+    if (reader->offset == sizeof(suffix) - 1u) {
+      reader->phase = 3u;
+    }
+    result.bytes_read = amount;
+    return result;
+  }
+  result.eof = 1;
+  return result;
+}
+
 int main(void) {
   static const char input[] = "{\"status\":\"open\"}\n42\n[1]\n";
   mapped_candidate_reader reader;
+  mapped_large_reader large_reader;
   lonejson *runtime;
   lonejson_stream *stream;
   lonejson_stream_result result;
@@ -92,6 +153,30 @@ int main(void) {
   result = stream->next(stream, &record, &error);
   if (result != LONEJSON_STREAM_VALUE ||
       stream->root_type != LONEJSON_VALUE_ARRAY || record.status[0] != '\0') {
+    stream->close(stream);
+    lonejson_free(runtime);
+    return 1;
+  }
+  result = stream->next(stream, &record, &error);
+  if (result != LONEJSON_STREAM_EOF) {
+    stream->close(stream);
+    lonejson_free(runtime);
+    return 1;
+  }
+  stream->close(stream);
+
+  memset(&large_reader, 0, sizeof(large_reader));
+  large_reader.payload_remaining = 1024u * 1024u;
+  stream = lonejson_stream_open_candidates_reader(
+      runtime, &mapped_candidate_map, mapped_large_read, &large_reader, &error);
+  if (stream == NULL) {
+    lonejson_free(runtime);
+    return 1;
+  }
+  memset(&record, 0, sizeof(record));
+  result = stream->next(stream, &record, &error);
+  if (result != LONEJSON_STREAM_OBJECT ||
+      strcmp(record.status, "open") != 0) {
     stream->close(stream);
     lonejson_free(runtime);
     return 1;

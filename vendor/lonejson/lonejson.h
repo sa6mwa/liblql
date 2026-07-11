@@ -18506,6 +18506,13 @@ static LONEJSON__INLINE lonejson_status lonejson__begin_string_value_lex(
     parser->token.len = 0u;
     return LONEJSON_STATUS_OK;
   }
+  if (field == NULL) {
+    parser->string_capture_mode = LONEJSON_STRING_CAPTURE_DISCARD;
+    parser->token.data = NULL;
+    parser->token.cap = 0u;
+    parser->token.len = 0u;
+    return LONEJSON_STATUS_OK;
+  }
   if (parser->validate_only) {
     parser->string_capture_mode = LONEJSON_STRING_CAPTURE_DISCARD;
     parser->token.data = NULL;
@@ -25090,6 +25097,9 @@ static lonejson_status lonejson__parser_consume_char(lonejson_parser *parser,
                                  parser->error.column,
                                  "control character in string");
     }
+    if (parser->string_capture_mode == LONEJSON_STRING_CAPTURE_DISCARD) {
+      return LONEJSON_STATUS_OK;
+    }
     if (parser->stream_value_active) {
       return lonejson__stream_value_append(parser, &ch, 1u);
     }
@@ -25343,6 +25353,13 @@ static lonejson_status lonejson__parser_consume_char(lonejson_parser *parser,
         parser->lex_escape = 0;
         parser->unicode_pending_high = 0u;
         parser->unicode_digits_needed = 0;
+        if (frame->pending_field == NULL) {
+          parser->string_capture_mode = LONEJSON_STRING_CAPTURE_DISCARD;
+          parser->token.data = NULL;
+          parser->token.cap = 0u;
+          parser->token.len = 0u;
+          return LONEJSON_STATUS_OK;
+        }
         if (lonejson__field_is_streamed(frame->pending_field)) {
           void *ptr =
               lonejson__field_ptr(frame->object_ptr, frame->pending_field);
