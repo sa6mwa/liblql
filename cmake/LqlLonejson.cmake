@@ -2,6 +2,7 @@ add_library(lonejson_vendored STATIC "${CMAKE_SOURCE_DIR}/vendor/lonejson/lonejs
 add_library(lonejson::lonejson ALIAS lonejson_vendored)
 set_target_properties(lonejson_vendored PROPERTIES
   POSITION_INDEPENDENT_CODE ON
+  # CMake calls the ANSI C89 / ISO C90 language standard "90".
   C_STANDARD 90
   C_STANDARD_REQUIRED ON
   C_EXTENSIONS OFF)

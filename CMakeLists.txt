@@ -20,6 +20,7 @@ include(LqlLonejson)
 configure_file(cmake/lql_version.h.in
   "${CMAKE_CURRENT_BINARY_DIR}/generated/include/lql/version.h" @ONLY)
 
+# CMake calls the ANSI C89 / ISO C90 language standard "90".
 set(CMAKE_C_STANDARD 90)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
