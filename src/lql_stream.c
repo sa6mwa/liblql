@@ -676,6 +676,7 @@ static lonejson_status stream_emit_projection(
     lql_stream_state *state, const lonejson_candidate_info *candidate,
     lonejson_error *error) {
   lql_status status;
+  int emitted;
   static const char newline[] = "\n";
   if (candidate == NULL || candidate->payload_spool == NULL) {
     stream_fail(state, LQL_STATUS_CALLBACK_ERROR,
@@ -683,15 +684,19 @@ static lonejson_status stream_emit_projection(
     stream_lonejson_error(error, state->failure.message);
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
+  emitted = 0;
   status = lql_projection_render_top_level(
       state->receiver, state->request->projection, candidate->payload_spool,
-      stream_payload_sink, state, &state->failure);
+      stream_payload_sink, state, &emitted, &state->failure);
   if (status != LQL_STATUS_OK) {
     if (state->failure.code == LQL_STATUS_OK) {
       stream_fail(state, status, "projection rendering failed");
     }
     stream_lonejson_error(error, state->failure.message);
     return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (!emitted) {
+    return LONEJSON_STATUS_OK;
   }
   return stream_payload_sink(state, newline, 1u, error);
 }

@@ -8,28 +8,114 @@ static int projection_is_space(unsigned char ch) {
 }
 
 static int projection_valid_pointer(const char *path) {
-  const char *p;
   if (path == NULL || path[0] != '/' || path[1] == '\0') {
     return 0;
-  }
-  for (p = path; *p != '\0'; ++p) {
-    if (*p == '~' && p[1] != '0' && p[1] != '1') {
-      return 0;
-    }
   }
   return 1;
 }
 
-static int projection_leading_index(const char *path) {
+static void projection_path_cleanup(lql_allocator *allocator,
+                                    lql_projection_path *path) {
+  size_t i;
+  if (allocator == NULL || path == NULL) {
+    return;
+  }
+  for (i = 0u; i < path->segment_count; ++i) {
+    allocator->destroy(allocator, path->segments[i]);
+  }
+  allocator->destroy(allocator, path->segments);
+  path->segments = NULL;
+  path->segment_count = 0u;
+}
+
+static lql_status projection_decode_path(lql_allocator *allocator,
+                                         const char *path,
+                                         lql_projection_path *out,
+                                         lql_error *error) {
+  const char *part;
+  const char *end;
+  const char *slash;
+  char **segments;
+  size_t count;
+  size_t capacity;
+  size_t raw_len;
+  size_t decoded_len;
+  size_t i;
+  char *decoded;
+
+  if (allocator == NULL || path == NULL || out == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection path decoder arguments are invalid");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  memset(out, 0, sizeof(*out));
+  part = path + 1;
+  end = path + strlen(path);
+  segments = NULL;
+  count = 0u;
+  capacity = 0u;
+  for (;;) {
+    slash = part;
+    while (slash < end && *slash != '/') {
+      ++slash;
+    }
+    raw_len = (size_t)(slash - part);
+    decoded = (char *)allocator->alloc(allocator, raw_len + 1u);
+    if (decoded == NULL) {
+      lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+      goto fail;
+    }
+    decoded_len = 0u;
+    for (i = 0u; i < raw_len; ++i) {
+      if (part[i] == '~' && i + 1u < raw_len &&
+          (part[i + 1u] == '0' || part[i + 1u] == '1')) {
+        decoded[decoded_len++] = part[i + 1u] == '0' ? '~' : '/';
+        ++i;
+      } else {
+        decoded[decoded_len++] = part[i];
+      }
+    }
+    decoded[decoded_len] = '\0';
+    if (count == capacity) {
+      size_t next_capacity;
+      char **next;
+      next_capacity = capacity == 0u ? 4u : capacity * 2u;
+      next = (char **)allocator->realloc(allocator, segments,
+                                         next_capacity * sizeof(*segments));
+      if (next == NULL) {
+        allocator->destroy(allocator, decoded);
+        lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+        goto fail;
+      }
+      segments = next;
+      capacity = next_capacity;
+    }
+    segments[count++] = decoded;
+    if (slash == end) {
+      break;
+    }
+    part = slash + 1;
+  }
+  out->segments = segments;
+  out->segment_count = count;
+  return LQL_STATUS_OK;
+
+fail:
+  for (i = 0u; i < count; ++i) {
+    allocator->destroy(allocator, segments[i]);
+  }
+  allocator->destroy(allocator, segments);
+  return error == NULL ? LQL_STATUS_PARSE_ERROR : error->code;
+}
+
+static int projection_leading_index(const lql_projection_path *path) {
   const char *p;
-  if (path == NULL || path[0] != '/') {
+  if (path == NULL || path->segment_count == 0u || path->segments[0] == NULL ||
+      path->segments[0][0] == '\0') {
     return 0;
   }
-  p = path + 1;
-  if (*p == '\0') {
-    return 0;
-  }
-  while (*p != '\0' && *p != '/') {
+  p = path->segments[0];
+  while (*p != '\0') {
     if (*p < '0' || *p > '9') {
       return 0;
     }
@@ -76,18 +162,23 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_internal(
   }
   allocator = lql_allocator_from_receiver(self);
   if (allocator == NULL) {
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "projection receiver required");
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection receiver required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  projection = (lql_projection *)allocator->calloc(allocator, 1u,
-                                                    sizeof(*projection));
+  projection =
+      (lql_projection *)allocator->calloc(allocator, 1u, sizeof(*projection));
   if (projection == NULL) {
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
     return LQL_STATUS_NO_MEMORY;
   }
   projection->paths = (char **)allocator->calloc(allocator, path_count,
-                                                  sizeof(*projection->paths));
-  if (projection->paths == NULL) {
+                                                 sizeof(*projection->paths));
+  projection->compiled_paths = (lql_projection_path *)allocator->calloc(
+      allocator, path_count, sizeof(*projection->compiled_paths));
+  if (projection->paths == NULL || projection->compiled_paths == NULL) {
+    allocator->destroy(allocator, projection->compiled_paths);
+    allocator->destroy(allocator, projection->paths);
     allocator->destroy(allocator, projection);
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
     return LQL_STATUS_NO_MEMORY;
@@ -101,7 +192,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_internal(
     while (begin < end && projection_is_space((unsigned char)paths[i][begin])) {
       ++begin;
     }
-    while (end > begin && projection_is_space((unsigned char)paths[i][end - 1u])) {
+    while (end > begin &&
+           projection_is_space((unsigned char)paths[i][end - 1u])) {
       --end;
     }
     if (begin == end) {
@@ -116,10 +208,11 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_internal(
     }
     memcpy(copy, paths[i] + begin, len);
     copy[len] = '\0';
-    if (!projection_valid_pointer(copy) || projection_leading_index(copy)) {
+    if (!projection_valid_pointer(copy)) {
       allocator->destroy(allocator, copy);
       lql_projection_destroy_internal(self, projection);
-      lql_set_error(error, LQL_STATUS_PARSE_ERROR, "projection path is invalid");
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "projection path is invalid");
       return LQL_STATUS_PARSE_ERROR;
     }
     for (j = 0u; j < projection->path_count; ++j) {
@@ -137,6 +230,24 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_internal(
       }
     }
     if (copy != NULL) {
+      lql_status status;
+      status = projection_decode_path(
+          allocator, copy, &projection->compiled_paths[projection->path_count],
+          error);
+      if (status != LQL_STATUS_OK ||
+          projection_leading_index(
+              &projection->compiled_paths[projection->path_count])) {
+        projection_path_cleanup(
+            allocator, &projection->compiled_paths[projection->path_count]);
+        allocator->destroy(allocator, copy);
+        lql_projection_destroy_internal(self, projection);
+        if (status == LQL_STATUS_OK) {
+          lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                        "projection path is invalid");
+          return LQL_STATUS_PARSE_ERROR;
+        }
+        return status;
+      }
       projection->paths[projection->path_count] = copy;
       ++projection->path_count;
     }
@@ -150,8 +261,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_internal(
   return LQL_STATUS_OK;
 }
 
-LQL_INTERNAL_SYMBOL void lql_projection_destroy_internal(
-    lql *self, lql_projection *projection) {
+LQL_INTERNAL_SYMBOL void
+lql_projection_destroy_internal(lql *self, lql_projection *projection) {
   lql_allocator *allocator;
   size_t i;
   if (projection == NULL) {
@@ -163,15 +274,52 @@ LQL_INTERNAL_SYMBOL void lql_projection_destroy_internal(
   }
   for (i = 0u; i < projection->path_count; ++i) {
     allocator->destroy(allocator, projection->paths[i]);
+    projection_path_cleanup(allocator, &projection->compiled_paths[i]);
   }
   allocator->destroy(allocator, projection->paths);
+  allocator->destroy(allocator, projection->compiled_paths);
   allocator->destroy(allocator, projection);
 }
 
-static lonejson_read_result projection_spool_read(void *user,
-                                                   unsigned char *buffer,
-                                                   size_t capacity) {
+typedef struct projection_capture {
+  lql *receiver;
+  lonejson *runtime;
+  const lql_projection_path *path;
+  lonejson_spooled *spool;
+  lonejson_writer writer;
+  char *key;
+  size_t key_len;
+  size_t key_capacity;
+  int root_object;
+  int active;
+  int writer_ready;
+  int key_active;
+  int found;
+} projection_capture;
+
+typedef struct projection_render_state {
+  const lql_projection *projection;
+  lonejson_spooled *values;
+  lonejson_writer *writer;
+  lonejson_error *error;
+} projection_render_state;
+
+typedef struct projection_capture_set {
+  projection_capture *captures;
+  size_t count;
+} projection_capture_set;
+
+#define LQL_PROJECTION_MAX_INDEX 1048576u
+
+static lonejson_read_result
+projection_spool_read(void *user, unsigned char *buffer, size_t capacity) {
   return lonejson_spooled_read((lonejson_spooled *)user, buffer, capacity);
+}
+
+static lonejson_status projection_spool_sink(void *user, const void *data,
+                                             size_t len,
+                                             lonejson_error *error) {
+  return lonejson_spooled_append((lonejson_spooled *)user, data, len, error);
 }
 
 static lql_status projection_lonejson_status(lonejson_status status,
@@ -191,84 +339,703 @@ static lql_status projection_lonejson_status(lonejson_status status,
   return LQL_STATUS_JSON_ERROR;
 }
 
+static int projection_path_exact(const lql_projection_path *target,
+                                 const lonejson_value_path *path) {
+  size_t i;
+  if (target == NULL || path == NULL ||
+      target->segment_count != path->segment_count) {
+    return 0;
+  }
+  for (i = 0u; i < target->segment_count; ++i) {
+    if (strlen(target->segments[i]) != path->segments[i].len ||
+        memcmp(target->segments[i], path->segments[i].data,
+               path->segments[i].len) != 0) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int projection_path_prefix(const lql_projection_path *target,
+                                  const lonejson_value_path *path) {
+  size_t i;
+  if (target == NULL || path == NULL ||
+      path->segment_count < target->segment_count) {
+    return 0;
+  }
+  for (i = 0u; i < target->segment_count; ++i) {
+    if (strlen(target->segments[i]) != path->segments[i].len ||
+        memcmp(target->segments[i], path->segments[i].data,
+               path->segments[i].len) != 0) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static lonejson_status projection_capture_grow_key(projection_capture *capture,
+                                                   size_t additional,
+                                                   lonejson_error *error) {
+  lql_allocator *allocator;
+  size_t required;
+  size_t capacity;
+  char *next;
+  if (capture == NULL || additional > (size_t)-1 - capture->key_len) {
+    return LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  required = capture->key_len + additional;
+  if (required <= capture->key_capacity) {
+    return LONEJSON_STATUS_OK;
+  }
+  allocator = lql_allocator_from_receiver(capture->receiver);
+  if (allocator == NULL) {
+    return LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  capacity = capture->key_capacity == 0u ? 64u : capture->key_capacity;
+  while (capacity < required) {
+    if (capacity > (size_t)-1 / 2u) {
+      capacity = required;
+      break;
+    }
+    capacity *= 2u;
+  }
+  next = (char *)allocator->realloc(allocator, capture->key, capacity);
+  if (next == NULL) {
+    if (error != NULL) {
+      error->code = LONEJSON_STATUS_ALLOCATION_FAILED;
+      strcpy(error->message, "projection key allocation failed");
+    }
+    return LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  capture->key = next;
+  capture->key_capacity = capacity;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status projection_capture_finish(projection_capture *capture,
+                                                 lonejson_error *error) {
+  lonejson_status status;
+  if (capture == NULL || !capture->writer_ready) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson_writer_finish(&capture->writer, error);
+  lonejson_writer_cleanup(&capture->writer);
+  capture->writer_ready = 0;
+  capture->active = 0;
+  if (status == LONEJSON_STATUS_OK) {
+    capture->found = 1;
+  }
+  return status;
+}
+
+static lonejson_status projection_capture_start(projection_capture *capture,
+                                                lonejson_error *error) {
+  lonejson_status status;
+  if (capture == NULL || capture->runtime == NULL || capture->spool == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  lonejson_spooled_reset(capture->spool);
+  status =
+      lonejson_writer_init_sink(capture->runtime, &capture->writer,
+                                projection_spool_sink, capture->spool, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  capture->writer_ready = 1;
+  capture->active = 1;
+  capture->key_active = 0;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_object_begin(void *user, const lonejson_value_path *path,
+                                lonejson_error *error) {
+  projection_capture *capture;
+  lonejson_status status;
+  capture = (projection_capture *)user;
+  if (path->segment_count == 0u) {
+    capture->root_object = 1;
+  }
+  if (!capture->active && projection_path_exact(capture->path, path)) {
+    status = projection_capture_start(capture, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    return lonejson_writer_begin_object(&capture->writer, error);
+  }
+  if (capture->active && projection_path_prefix(capture->path, path)) {
+    return lonejson_writer_begin_object(&capture->writer, error);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_object_end(void *user, const lonejson_value_path *path,
+                              lonejson_error *error) {
+  projection_capture *capture;
+  lonejson_status status;
+  capture = (projection_capture *)user;
+  if (!capture->active || !projection_path_prefix(capture->path, path)) {
+    return LONEJSON_STATUS_OK;
+  }
+  status = lonejson_writer_end_object(&capture->writer, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (projection_path_exact(capture->path, path)) {
+    return projection_capture_finish(capture, error);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_array_begin(void *user, const lonejson_value_path *path,
+                               lonejson_error *error) {
+  projection_capture *capture;
+  lonejson_status status;
+  capture = (projection_capture *)user;
+  if (!capture->active && projection_path_exact(capture->path, path)) {
+    status = projection_capture_start(capture, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    return lonejson_writer_begin_array(&capture->writer, error);
+  }
+  if (capture->active && projection_path_prefix(capture->path, path)) {
+    return lonejson_writer_begin_array(&capture->writer, error);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_array_end(void *user, const lonejson_value_path *path,
+                             lonejson_error *error) {
+  projection_capture *capture;
+  lonejson_status status;
+  capture = (projection_capture *)user;
+  if (!capture->active || !projection_path_prefix(capture->path, path)) {
+    return LONEJSON_STATUS_OK;
+  }
+  status = lonejson_writer_end_array(&capture->writer, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (projection_path_exact(capture->path, path)) {
+    return projection_capture_finish(capture, error);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_key_begin(void *user, const lonejson_value_path *path,
+                             lonejson_error *error) {
+  projection_capture *capture;
+  (void)error;
+  capture = (projection_capture *)user;
+  if (capture->active && projection_path_prefix(capture->path, path)) {
+    capture->key_len = 0u;
+    capture->key_active = 1;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_key_chunk(void *user, const lonejson_value_path *path,
+                             const char *data, size_t len,
+                             lonejson_error *error) {
+  projection_capture *capture;
+  lonejson_status status;
+  capture = (projection_capture *)user;
+  if (!capture->key_active || !projection_path_prefix(capture->path, path)) {
+    return LONEJSON_STATUS_OK;
+  }
+  status = projection_capture_grow_key(capture, len, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (len != 0u) {
+    memcpy(capture->key + capture->key_len, data, len);
+    capture->key_len += len;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_key_end(void *user, const lonejson_value_path *path,
+                           lonejson_error *error) {
+  projection_capture *capture;
+  capture = (projection_capture *)user;
+  if (!capture->key_active || !projection_path_prefix(capture->path, path)) {
+    return LONEJSON_STATUS_OK;
+  }
+  capture->key_active = 0;
+  return lonejson_writer_key(&capture->writer, capture->key, capture->key_len,
+                             error);
+}
+
+static lonejson_status
+projection_capture_string_begin(void *user, const lonejson_value_path *path,
+                                lonejson_error *error) {
+  projection_capture *capture;
+  lonejson_status status;
+  capture = (projection_capture *)user;
+  if (!capture->active && projection_path_exact(capture->path, path)) {
+    status = projection_capture_start(capture, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    return lonejson_writer_string_begin(&capture->writer, error);
+  }
+  if (capture->active && projection_path_prefix(capture->path, path)) {
+    return lonejson_writer_string_begin(&capture->writer, error);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_string_chunk(void *user, const lonejson_value_path *path,
+                                const char *data, size_t len,
+                                lonejson_error *error) {
+  projection_capture *capture;
+  capture = (projection_capture *)user;
+  if (capture->active && projection_path_prefix(capture->path, path)) {
+    return lonejson_writer_string_chunk(&capture->writer, data, len, error);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_string_end(void *user, const lonejson_value_path *path,
+                              lonejson_error *error) {
+  projection_capture *capture;
+  lonejson_status status;
+  capture = (projection_capture *)user;
+  if (!capture->active || !projection_path_prefix(capture->path, path)) {
+    return LONEJSON_STATUS_OK;
+  }
+  status = lonejson_writer_string_end(&capture->writer, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (projection_path_exact(capture->path, path)) {
+    return projection_capture_finish(capture, error);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_number_begin(void *user, const lonejson_value_path *path,
+                                lonejson_error *error) {
+  projection_capture *capture;
+  lonejson_status status;
+  capture = (projection_capture *)user;
+  if (!capture->active && projection_path_exact(capture->path, path)) {
+    status = projection_capture_start(capture, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    return lonejson_writer_number_begin(&capture->writer, error);
+  }
+  if (capture->active && projection_path_prefix(capture->path, path)) {
+    return lonejson_writer_number_begin(&capture->writer, error);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_number_chunk(void *user, const lonejson_value_path *path,
+                                const char *data, size_t len,
+                                lonejson_error *error) {
+  projection_capture *capture;
+  capture = (projection_capture *)user;
+  if (capture->active && projection_path_prefix(capture->path, path)) {
+    return lonejson_writer_number_chunk(&capture->writer, data, len, error);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_number_end(void *user, const lonejson_value_path *path,
+                              lonejson_error *error) {
+  projection_capture *capture;
+  lonejson_status status;
+  capture = (projection_capture *)user;
+  if (!capture->active || !projection_path_prefix(capture->path, path)) {
+    return LONEJSON_STATUS_OK;
+  }
+  status = lonejson_writer_number_end(&capture->writer, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (projection_path_exact(capture->path, path)) {
+    return projection_capture_finish(capture, error);
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status
+projection_capture_boolean(void *user, const lonejson_value_path *path,
+                           int value, lonejson_error *error) {
+  projection_capture *capture;
+  lonejson_status status;
+  capture = (projection_capture *)user;
+  if (!projection_path_exact(capture->path, path)) {
+    return LONEJSON_STATUS_OK;
+  }
+  status = projection_capture_start(capture, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson_writer_bool(&capture->writer, value, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return projection_capture_finish(capture, error);
+}
+
+static lonejson_status projection_capture_null(void *user,
+                                               const lonejson_value_path *path,
+                                               lonejson_error *error) {
+  projection_capture *capture;
+  lonejson_status status;
+  capture = (projection_capture *)user;
+  if (!projection_path_exact(capture->path, path)) {
+    return LONEJSON_STATUS_OK;
+  }
+  status = projection_capture_start(capture, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson_writer_null(&capture->writer, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return projection_capture_finish(capture, error);
+}
+
+#define PROJECTION_CAPTURE_SET_EVENT(name)                                     \
+  static lonejson_status projection_capture_set_##name(                        \
+      void *user, const lonejson_value_path *path, lonejson_error *error) {    \
+    projection_capture_set *set;                                               \
+    lonejson_status status;                                                    \
+    size_t i;                                                                  \
+    set = (projection_capture_set *)user;                                      \
+    for (i = 0u; i < set->count; ++i) {                                        \
+      status = projection_capture_##name(&set->captures[i], path, error);      \
+      if (status != LONEJSON_STATUS_OK) {                                      \
+        return status;                                                         \
+      }                                                                        \
+    }                                                                          \
+    return LONEJSON_STATUS_OK;                                                 \
+  }
+
+#define PROJECTION_CAPTURE_SET_CHUNK(name)                                     \
+  static lonejson_status projection_capture_set_##name(                        \
+      void *user, const lonejson_value_path *path, const char *data,           \
+      size_t len, lonejson_error *error) {                                     \
+    projection_capture_set *set;                                               \
+    lonejson_status status;                                                    \
+    size_t i;                                                                  \
+    set = (projection_capture_set *)user;                                      \
+    for (i = 0u; i < set->count; ++i) {                                        \
+      status = projection_capture_##name(&set->captures[i], path, data, len,   \
+                                         error);                               \
+      if (status != LONEJSON_STATUS_OK) {                                      \
+        return status;                                                         \
+      }                                                                        \
+    }                                                                          \
+    return LONEJSON_STATUS_OK;                                                 \
+  }
+
+PROJECTION_CAPTURE_SET_EVENT(object_begin)
+PROJECTION_CAPTURE_SET_EVENT(object_end)
+PROJECTION_CAPTURE_SET_EVENT(array_begin)
+PROJECTION_CAPTURE_SET_EVENT(array_end)
+PROJECTION_CAPTURE_SET_EVENT(key_begin)
+PROJECTION_CAPTURE_SET_EVENT(key_end)
+PROJECTION_CAPTURE_SET_EVENT(string_begin)
+PROJECTION_CAPTURE_SET_EVENT(string_end)
+PROJECTION_CAPTURE_SET_EVENT(number_begin)
+PROJECTION_CAPTURE_SET_EVENT(number_end)
+PROJECTION_CAPTURE_SET_CHUNK(key_chunk)
+PROJECTION_CAPTURE_SET_CHUNK(string_chunk)
+PROJECTION_CAPTURE_SET_CHUNK(number_chunk)
+
+static lonejson_status
+projection_capture_set_boolean(void *user, const lonejson_value_path *path,
+                               int value, lonejson_error *error) {
+  projection_capture_set *set;
+  lonejson_status status;
+  size_t i;
+  set = (projection_capture_set *)user;
+  for (i = 0u; i < set->count; ++i) {
+    status = projection_capture_boolean(&set->captures[i], path, value, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+PROJECTION_CAPTURE_SET_EVENT(null)
+
+#undef PROJECTION_CAPTURE_SET_CHUNK
+#undef PROJECTION_CAPTURE_SET_EVENT
+
+static int projection_parse_index(const char *text, size_t *out) {
+  size_t value;
+  const char *p;
+  if (text == NULL || *text == '\0') {
+    return 0;
+  }
+  value = 0u;
+  for (p = text; *p != '\0'; ++p) {
+    if (*p < '0' || *p > '9' || value > LQL_PROJECTION_MAX_INDEX / 10u) {
+      return 0;
+    }
+    value = value * 10u + (size_t)(*p - '0');
+    if (value > LQL_PROJECTION_MAX_INDEX) {
+      return 0;
+    }
+  }
+  if (out != NULL) {
+    *out = value;
+  }
+  return 1;
+}
+
+static int projection_member_compare(const projection_render_state *state,
+                                     size_t left, size_t right, size_t depth,
+                                     int numeric) {
+  const char *left_segment;
+  const char *right_segment;
+  if (numeric) {
+    size_t left_index = 0u;
+    size_t right_index = 0u;
+    (void)projection_parse_index(
+        state->projection->compiled_paths[left].segments[depth], &left_index);
+    (void)projection_parse_index(
+        state->projection->compiled_paths[right].segments[depth], &right_index);
+    return left_index < right_index ? -1 : (left_index > right_index ? 1 : 0);
+  }
+  left_segment = state->projection->compiled_paths[left].segments[depth];
+  right_segment = state->projection->compiled_paths[right].segments[depth];
+  return strcmp(left_segment, right_segment);
+}
+
+static lonejson_status projection_render_value(projection_render_state *state,
+                                               size_t *members, size_t count,
+                                               size_t depth) {
+  size_t i;
+  size_t j;
+  size_t group_begin;
+  size_t index;
+  size_t expected;
+  size_t current;
+  int numeric;
+  lonejson_status status;
+  const lql_projection_path *path;
+
+  if (count == 0u) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  path = &state->projection->compiled_paths[members[0]];
+  if (path->segment_count == depth) {
+    if (count != 1u) {
+      return LONEJSON_STATUS_INVALID_ARGUMENT;
+    }
+    return lonejson_writer_json_value_spooled(
+        state->writer, &state->values[members[0]], state->error);
+  }
+  numeric = projection_parse_index(path->segments[depth], NULL);
+  for (i = 1u; i < count; ++i) {
+    const lql_projection_path *candidate;
+    candidate = &state->projection->compiled_paths[members[i]];
+    if (candidate->segment_count <= depth ||
+        projection_parse_index(candidate->segments[depth], NULL) != numeric) {
+      return LONEJSON_STATUS_TYPE_MISMATCH;
+    }
+  }
+  for (i = 0u; i < count; ++i) {
+    size_t selected;
+    selected = i;
+    for (j = i + 1u; j < count; ++j) {
+      if (projection_member_compare(state, members[j], members[selected], depth,
+                                    numeric) < 0) {
+        selected = j;
+      }
+    }
+    if (selected != i) {
+      size_t swap;
+      swap = members[i];
+      members[i] = members[selected];
+      members[selected] = swap;
+    }
+  }
+  status = numeric ? lonejson_writer_begin_array(state->writer, state->error)
+                   : lonejson_writer_begin_object(state->writer, state->error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  expected = 0u;
+  group_begin = 0u;
+  while (group_begin < count) {
+    const char *segment;
+    size_t group_end;
+    segment =
+        state->projection->compiled_paths[members[group_begin]].segments[depth];
+    group_end = group_begin + 1u;
+    while (group_end < count &&
+           strcmp(segment, state->projection->compiled_paths[members[group_end]]
+                               .segments[depth]) == 0) {
+      ++group_end;
+    }
+    if (numeric) {
+      if (!projection_parse_index(segment, &index)) {
+        return LONEJSON_STATUS_TYPE_MISMATCH;
+      }
+      if (index < expected) {
+        return LONEJSON_STATUS_TYPE_MISMATCH;
+      }
+      while (expected < index) {
+        status = lonejson_writer_null(state->writer, state->error);
+        if (status != LONEJSON_STATUS_OK) {
+          return status;
+        }
+        ++expected;
+      }
+      ++expected;
+    } else {
+      status = lonejson_writer_key(state->writer, segment, strlen(segment),
+                                   state->error);
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+    }
+    status = projection_render_value(state, members + group_begin,
+                                     group_end - group_begin, depth + 1u);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    group_begin = group_end;
+  }
+  current = numeric ? lonejson_writer_end_array(state->writer, state->error)
+                    : lonejson_writer_end_object(state->writer, state->error);
+  return (lonejson_status)current;
+}
+
 LQL_INTERNAL_SYMBOL lql_status lql_projection_render_top_level(
-    lql *self, const lql_projection *projection,
-    const lonejson_spooled *input, lonejson_sink_fn sink, void *sink_user,
+    lql *self, const lql_projection *projection, const lonejson_spooled *input,
+    lonejson_sink_fn sink, void *sink_user, int *out_emitted,
     lql_error *error) {
   lonejson *runtime;
   lonejson_error lonejson_error;
-  lonejson_json_value values[sizeof(unsigned long) * CHAR_BIT];
-  lonejson_field fields[sizeof(unsigned long) * CHAR_BIT];
-  lonejson_map map;
-  lonejson_spooled cursor;
+  lonejson_path_value_visitor visitor;
+  lonejson_spooled *values;
+  unsigned char *found;
+  size_t *members;
+  projection_capture *captures;
+  projection_capture_set capture_set;
+  projection_render_state render;
   lonejson_writer writer;
+  lonejson_spooled cursor;
   lonejson_status status;
-  size_t i;
+  lql_allocator *allocator;
   lql_status out;
+  size_t i;
+  size_t count;
 
+  if (out_emitted != NULL) {
+    *out_emitted = 0;
+  }
   if (projection == NULL || input == NULL || sink == NULL ||
-      projection->path_count == 0u ||
-      projection->path_count > sizeof(values) / sizeof(values[0])) {
+      projection->path_count == 0u) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "projection renderer arguments are invalid");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  for (i = 0u; i < projection->path_count; ++i) {
-    const char *path;
-    path = projection->paths[i];
-    if (path == NULL || path[0] != '/' || path[1] == '\0' ||
-        strchr(path + 1, '/') != NULL || strchr(path + 1, '~') != NULL) {
-      lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                    "nested projection rendering is not implemented");
-      return LQL_STATUS_UNSUPPORTED;
-    }
+  allocator = lql_allocator_from_receiver(self);
+  if (allocator == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection receiver is required");
+    return LQL_STATUS_INVALID_ARGUMENT;
   }
   lonejson_error_init(&lonejson_error);
-  runtime = lql_lonejson_new_mapped_stream(self, &lonejson_error);
+  runtime = lql_lonejson_new(self, &lonejson_error);
   if (runtime == NULL) {
-    lql_set_error(error, LQL_STATUS_NO_MEMORY, "projection runtime allocation failed");
+    lql_set_error(error, LQL_STATUS_NO_MEMORY,
+                  "projection runtime allocation failed");
     return LQL_STATUS_NO_MEMORY;
   }
-  memset(&map, 0, sizeof(map));
-  for (i = 0u; i < projection->path_count; ++i) {
-    const char *key;
-    size_t key_len;
-    key = projection->paths[i] + 1;
-    key_len = strlen(key);
-    memset(&fields[i], 0, sizeof(fields[i]));
-    fields[i].json_key = key;
-    fields[i].json_key_len = key_len;
-    fields[i].json_key_first = (unsigned char)key[0];
-    fields[i].json_key_last = (unsigned char)key[key_len - 1u];
-    fields[i].struct_offset = i * sizeof(lonejson_json_value);
-    fields[i].kind = LONEJSON_FIELD_KIND_JSON_VALUE;
-    fields[i].storage = LONEJSON_STORAGE_FIXED;
-    fields[i].overflow_policy = LONEJSON_OVERFLOW_FAIL;
-    /* Parsing reseeds JSON_VALUE handles. Request capture from the public
-     * mapping contract so capture mode survives that reseed. */
-    fields[i].flags = LONEJSON_FIELD_JSON_VALUE_DEFAULT_CAPTURE;
-    fields[i].spool_class = LONEJSON_SPOOL_CLASS_DEFAULT;
+  values = (lonejson_spooled *)allocator->calloc(
+      allocator, projection->path_count, sizeof(*values));
+  captures = (projection_capture *)allocator->calloc(
+      allocator, projection->path_count, sizeof(*captures));
+  found = (unsigned char *)allocator->calloc(allocator, projection->path_count,
+                                             sizeof(*found));
+  members = (size_t *)allocator->alloc(allocator, projection->path_count *
+                                                      sizeof(*members));
+  if (values == NULL || captures == NULL || found == NULL || members == NULL) {
+    allocator->destroy(allocator, members);
+    allocator->destroy(allocator, found);
+    allocator->destroy(allocator, captures);
+    allocator->destroy(allocator, values);
+    lonejson_free(runtime);
+    lql_set_error(error, LQL_STATUS_NO_MEMORY, "projection allocation failed");
+    return LQL_STATUS_NO_MEMORY;
   }
-  map.name = "lql_projection_top_level";
-  map.struct_size = projection->path_count * sizeof(lonejson_json_value);
-  map.fields = fields;
-  map.field_count = projection->path_count;
-  /* clear_destination_by_default is disabled for this reusable mapped
-   * runtime, so initialize the mapped record before parsing.  The field flag
-   * above arms each JSON_VALUE for capture during initialization. */
-  lonejson_init(runtime, &map, values);
-  /* Use a cursor copy, as the candidate-owned spool remains valid for the
-   * complete callback and must not have its public read position changed. */
+  for (i = 0u; i < projection->path_count; ++i) {
+    lonejson_spooled_init_class(runtime, &values[i],
+                                LONEJSON_SPOOL_CLASS_LARGE_TEXT);
+    captures[i].receiver = self;
+    captures[i].runtime = runtime;
+    captures[i].path = &projection->compiled_paths[i];
+    captures[i].spool = &values[i];
+  }
+  capture_set.captures = captures;
+  capture_set.count = projection->path_count;
+  visitor = lonejson_default_path_value_visitor();
+  visitor.object_begin = projection_capture_set_object_begin;
+  visitor.object_end = projection_capture_set_object_end;
+  visitor.object_key_begin = projection_capture_set_key_begin;
+  visitor.object_key_chunk = projection_capture_set_key_chunk;
+  visitor.object_key_end = projection_capture_set_key_end;
+  visitor.array_begin = projection_capture_set_array_begin;
+  visitor.array_end = projection_capture_set_array_end;
+  visitor.string_begin = projection_capture_set_string_begin;
+  visitor.string_chunk = projection_capture_set_string_chunk;
+  visitor.string_end = projection_capture_set_string_end;
+  visitor.number_begin = projection_capture_set_number_begin;
+  visitor.number_chunk = projection_capture_set_number_chunk;
+  visitor.number_end = projection_capture_set_number_end;
+  visitor.boolean_value = projection_capture_set_boolean;
+  visitor.null_value = projection_capture_set_null;
+  out = LQL_STATUS_OK;
+  count = 0u;
   cursor = *input;
   status = lonejson_spooled_rewind(&cursor, &lonejson_error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson_visit_path_value_reader(runtime, projection_spool_read,
+                                              &cursor, &visitor, &capture_set,
+                                              &lonejson_error);
+  }
   if (status != LONEJSON_STATUS_OK) {
     out = projection_lonejson_status(status, &lonejson_error, error);
     goto cleanup;
   }
-  status = lonejson_parse_reader(runtime, &map, values, projection_spool_read,
-                                 &cursor, &lonejson_error);
-  if (status != LONEJSON_STATUS_OK) {
-    out = projection_lonejson_status(status, &lonejson_error, error);
+  if (!captures[0].root_object) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "projection requires an object record");
+    out = LQL_STATUS_JSON_ERROR;
+    goto cleanup;
+  }
+  for (i = 0u; i < projection->path_count; ++i) {
+    if (captures[i].found) {
+      found[i] = 1u;
+      members[count++] = i;
+    }
+  }
+  if (count == 0u) {
     goto cleanup;
   }
   status = lonejson_writer_init_sink(runtime, &writer, sink, sink_user,
@@ -277,30 +1044,32 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_render_top_level(
     out = projection_lonejson_status(status, &lonejson_error, error);
     goto cleanup;
   }
-  status = writer.begin_object(&writer, &lonejson_error);
-  for (i = 0u; status == LONEJSON_STATUS_OK && i < projection->path_count; ++i) {
-    if (values[i].json == NULL) {
-      continue;
-    }
-    status = writer.key(&writer, projection->paths[i] + 1u,
-                        strlen(projection->paths[i] + 1u), &lonejson_error);
-    if (status == LONEJSON_STATUS_OK) {
-      status = writer.json_value(&writer, &values[i], &lonejson_error);
-    }
-  }
+  render.projection = projection;
+  render.values = values;
+  render.writer = &writer;
+  render.error = &lonejson_error;
+  status = projection_render_value(&render, members, count, 0u);
   if (status == LONEJSON_STATUS_OK) {
-    status = writer.end_object(&writer, &lonejson_error);
+    status = lonejson_writer_finish(&writer, &lonejson_error);
   }
-  if (status == LONEJSON_STATUS_OK) {
-    status = writer.finish(&writer, &lonejson_error);
-  }
-  writer.cleanup(&writer);
+  lonejson_writer_cleanup(&writer);
   out = projection_lonejson_status(status, &lonejson_error, error);
+  if (out == LQL_STATUS_OK && out_emitted != NULL) {
+    *out_emitted = 1;
+  }
 
 cleanup:
   for (i = 0u; i < projection->path_count; ++i) {
-    lonejson_json_value_cleanup(&values[i]);
+    if (captures[i].writer_ready) {
+      lonejson_writer_cleanup(&captures[i].writer);
+    }
+    allocator->destroy(allocator, captures[i].key);
+    lonejson_spooled_cleanup(&values[i]);
   }
+  allocator->destroy(allocator, members);
+  allocator->destroy(allocator, found);
+  allocator->destroy(allocator, captures);
+  allocator->destroy(allocator, values);
   lonejson_free(runtime);
   return out;
 }

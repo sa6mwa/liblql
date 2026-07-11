@@ -506,7 +506,10 @@ static int run_selected_record_output(lql *ctx) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
-  reader.offset = 0u;
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 5u;
   memset(&writer, 0, sizeof(writer));
   request.matched_only = 0;
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
@@ -530,6 +533,93 @@ static int run_selected_record_output(lql *ctx) {
       result.records_seen != 2u || result.records_matched != 1u ||
       writer.len != sizeof(projection_output) - 1u ||
       memcmp(writer.data, projection_output, writer.len) != 0) {
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->projection_destroy(ctx, projection);
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
+static int run_nested_projection_output(lql *ctx) {
+  static const char input[] =
+      "{\"id\":\"x\",\"meta\":{\"trace\":9,\"ignore\":1},"
+      "\"items\":[{\"sku\":\"A\"},{\"sku\":\"B\"}],"
+      "\"slash/key\":true}\n";
+  static const char *const paths[] = {
+      "/meta/trace", "/items/1/sku", "/id", "/slash~1key"};
+  static const char output[] =
+      "{\"id\":\"x\",\"items\":[null,{\"sku\":\"B\"}],"
+      "\"meta\":{\"trace\":9},\"slash/key\":true}\n";
+  static const char *const missing_paths[] = {"/missing"};
+  static const char scalar[] = "1\n";
+  lql_selector *selector;
+  lql_projection *projection;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+
+  selector = NULL;
+  projection = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "", &selector, &error) != LQL_STATUS_OK ||
+      ctx->projection_parse(ctx, paths, 4u, &projection, &error) !=
+          LQL_STATUS_OK) {
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 5u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = selector;
+  request.projection = projection;
+  request.output_mode = LQL_STREAM_OUTPUT_PROJECTION;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(output) - 1u ||
+      memcmp(writer.data, output, writer.len) != 0) {
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)scalar;
+  reader.len = sizeof(scalar) - 1u;
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+      LQL_STATUS_JSON_ERROR) {
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->projection_destroy(ctx, projection);
+  projection = NULL;
+  if (ctx->projection_parse(ctx, missing_paths, 1u, &projection, &error) !=
+      LQL_STATUS_OK) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 5u;
+  memset(&writer, 0, sizeof(writer));
+  request.projection = projection;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != 0u) {
     ctx->projection_destroy(ctx, projection);
     ctx->selector_destroy(ctx, selector);
     return 1;
@@ -701,6 +791,7 @@ int main(void) {
       run_mapped_string_predicates(ctx) || run_match_all(ctx) ||
       run_root_wildcard_array_error(ctx) ||
       run_selected_record_output(ctx) ||
+      run_nested_projection_output(ctx) ||
       run_mutation_output(ctx) ||
       run_stop_and_root_array(ctx)) {
     ctx->destroy(ctx);

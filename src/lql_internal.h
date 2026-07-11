@@ -127,8 +127,14 @@ struct lql_selector {
   lql_stream_program *stream_program;
 };
 
+typedef struct lql_projection_path {
+  char **segments;
+  size_t segment_count;
+} lql_projection_path;
+
 struct lql_projection {
   char **paths;
+  lql_projection_path *compiled_paths;
   size_t path_count;
 };
 
@@ -176,7 +182,7 @@ LQL_INTERNAL_SYMBOL void lql_projection_destroy_internal(
 LQL_INTERNAL_SYMBOL lql_status lql_projection_render_top_level(
     lql *self, const lql_projection *projection,
     const lonejson_spooled *input, lonejson_sink_fn sink, void *sink_user,
-    lql_error *error);
+    int *out_emitted, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal(
     lql *self, const char *const *expressions, size_t expression_count,
     lql_mutation **out, lql_error *error);
