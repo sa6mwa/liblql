@@ -5349,8 +5349,6 @@ typedef struct transform_path_frame {
 
 #define TRANSFORM_FRAME_INLINE_BITS (sizeof(unsigned long) * CHAR_BIT)
 #define TRANSFORM_FRAME_INLINE_COUNT 32u
-#define SOURCE_OUTPUT_STAGE_BUFFER_CAP 16384u
-
 typedef struct source_output_policy {
   int matched;
   int emit_candidate;
@@ -5387,10 +5385,6 @@ typedef struct source_output_state {
   int transform_failed;
   int gated_transform;
   int staged_output;
-  int output_stage_initialized;
-  lonejson_spooled output_stage;
-  unsigned char output_stage_buffer[SOURCE_OUTPUT_STAGE_BUFFER_CAP];
-  size_t output_stage_buffer_len;
   FILE *out;
   lql_status callback_status;
   lql_error transform_error;
@@ -5943,30 +5937,57 @@ source_output_decide(void *user, const lonejson_candidate_output_event *event,
   return LONEJSON_CANDIDATE_OUTPUT_REPLACE;
 }
 
-static void
-source_output_update_staged_exact_match(source_output_state *state) {
-  if (state == NULL || !state->staged_output || state->current_matched_known ||
-      state->doc.root_kind != '{') {
-    return;
+#if defined(LONEJSON_HAS_CANDIDATE_OUTPUT_STAGED)
+static lonejson_candidate_output_transition
+source_output_transition(void *user, const lonejson_candidate_info *candidate,
+                         int finalizing, lonejson_error *error) {
+  source_output_state *state = (source_output_state *)user;
+  int matched;
+  (void)candidate;
+
+  if (state == NULL || !state->staged_output) {
+    return LONEJSON_CANDIDATE_OUTPUT_TRANSITION_ACCEPT;
   }
-  if (state->doc.fast_exact_selector == NULL) {
-#if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
-    if (top_level_multi_candidate_payload_discardable(&state->doc,
-                                                      state->selector)) {
+  if (!state->current_matched_known && state->doc.root_kind == '{') {
+    if (state->doc.fast_exact_selector != NULL && state->doc.fast_exact_miss) {
       state->current_matched = 0;
       state->current_matched_known = 1;
-      state->current_output_enabled = 0;
+    } else if (state->doc.fast_exact_selector == NULL &&
+               top_level_multi_candidate_payload_discardable(&state->doc,
+                                                             state->selector)) {
+      state->current_matched = 0;
+      state->current_matched_known = 1;
     }
-#endif
-    return;
+    if (state->current_matched_known) {
+      state->current_output_enabled = state->current_matched;
+    }
   }
-  if (!state->doc.fast_exact_hit && !state->doc.fast_exact_miss) {
-    return;
+  if (!state->current_matched_known && !finalizing) {
+    return LONEJSON_CANDIDATE_OUTPUT_TRANSITION_UNKNOWN;
   }
-  state->current_matched = state->doc.fast_exact_hit;
-  state->current_matched_known = 1;
-  state->current_output_enabled = state->current_matched;
+  if (finalizing && !state->current_matched_known) {
+    matched = eval_doc_matches(state->selector, &state->doc);
+    state->current_matched = matched;
+    state->current_matched_known = 1;
+    state->current_output_enabled = matched;
+  }
+  if (!finalizing) {
+    return state->current_matched_known
+               ? LONEJSON_CANDIDATE_OUTPUT_TRANSITION_REJECT
+               : LONEJSON_CANDIDATE_OUTPUT_TRANSITION_UNKNOWN;
+  }
+  if (state->current_matched && state->transform_failed) {
+    state->callback_status = state->transform_error.code;
+    if (error != NULL) {
+      error->code = LONEJSON_STATUS_CALLBACK_FAILED;
+      strcpy(error->message, state->transform_error.message);
+    }
+    return LONEJSON_CANDIDATE_OUTPUT_TRANSITION_ERROR;
+  }
+  return state->current_matched ? LONEJSON_CANDIDATE_OUTPUT_TRANSITION_ACCEPT
+                                : LONEJSON_CANDIDATE_OUTPUT_TRANSITION_REJECT;
 }
+#endif
 
 static lonejson_status
 source_output_observer_object_begin(void *user, const lonejson_value_path *path,
@@ -6109,9 +6130,6 @@ source_output_observer_string_end(void *user, const lonejson_value_path *path,
   st = state->eval_visitor.string_end == NULL
            ? LONEJSON_STATUS_OK
            : state->eval_visitor.string_end(&state->doc, path, error);
-  if (st == LONEJSON_STATUS_OK) {
-    source_output_update_staged_exact_match(state);
-  }
   return st;
 }
 
@@ -6150,9 +6168,6 @@ source_output_observer_number_end(void *user, const lonejson_value_path *path,
   st = state->eval_visitor.number_end == NULL
            ? LONEJSON_STATUS_OK
            : state->eval_visitor.number_end(&state->doc, path, error);
-  if (st == LONEJSON_STATUS_OK) {
-    source_output_update_staged_exact_match(state);
-  }
   return st;
 }
 
@@ -8752,24 +8767,6 @@ static void source_output_clear_applied(source_output_state *state) {
   }
 }
 
-static lonejson_status source_output_stage_flush(source_output_state *state,
-                                                 lonejson_error *error) {
-  lonejson_status st;
-
-  if (state == NULL || !state->output_stage_initialized) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
-  }
-  if (state->output_stage_buffer_len == 0u) {
-    return LONEJSON_STATUS_OK;
-  }
-  st = lonejson_spooled_append(&state->output_stage, state->output_stage_buffer,
-                               state->output_stage_buffer_len, error);
-  if (st == LONEJSON_STATUS_OK) {
-    state->output_stage_buffer_len = 0u;
-  }
-  return st;
-}
-
 static lonejson_candidate_callback_result
 source_output_candidate_begin(void *user,
                               const lonejson_candidate_info *candidate,
@@ -8792,10 +8789,6 @@ source_output_candidate_begin(void *user,
       state->selector == NULL || !state->matches_only;
   state->transform_failed = 0;
   lql_error_init(&state->transform_error);
-  if (state->staged_output && state->output_stage_initialized) {
-    lonejson_spooled_reset(&state->output_stage);
-    state->output_stage_buffer_len = 0u;
-  }
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
@@ -8819,26 +8812,6 @@ source_output_candidate_end(void *user,
       (lql_uint64)(candidate->stream_offset + candidate->byte_size);
   if (matched) {
     ++state->result.candidates_matched;
-  }
-  if (state->staged_output && matched && state->transform_failed) {
-    state->callback_status = state->transform_error.code;
-    if (error != NULL) {
-      error->code = LONEJSON_STATUS_CALLBACK_FAILED;
-      strcpy(error->message, state->transform_error.message);
-    }
-    return LONEJSON_CANDIDATE_ERROR;
-  }
-  if (state->staged_output && matched) {
-    if (source_output_stage_flush(state, error) != LONEJSON_STATUS_OK) {
-      state->callback_status = LQL_STATUS_JSON_ERROR;
-      return LONEJSON_CANDIDATE_ERROR;
-    }
-    if (lonejson_spooled_write_to_sink(&state->output_stage, file_sink_unlocked,
-                                       state->out,
-                                       error) != LONEJSON_STATUS_OK) {
-      state->callback_status = LQL_STATUS_JSON_ERROR;
-      return LONEJSON_CANDIDATE_ERROR;
-    }
   }
   if (query_result_stop_if_limited(&state->result, &state->options,
                                    state->limit_flags)) {
@@ -8876,39 +8849,6 @@ static void source_output_cleanup(source_output_state *state) {
   }
   state->applied = NULL;
   state->applied_alloc = NULL;
-  if (state->output_stage_initialized) {
-    lonejson_spooled_cleanup(&state->output_stage);
-    state->output_stage_initialized = 0;
-  }
-}
-
-static lonejson_status source_output_stage_sink(void *user, const void *data,
-                                                size_t len,
-                                                lonejson_error *error) {
-  source_output_state *state = (source_output_state *)user;
-  const unsigned char *bytes = (const unsigned char *)data;
-  size_t available;
-  if (state == NULL || !state->output_stage_initialized) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
-  }
-  while (len != 0u) {
-    available = SOURCE_OUTPUT_STAGE_BUFFER_CAP - state->output_stage_buffer_len;
-    if (available == 0u) {
-      if (source_output_stage_flush(state, error) != LONEJSON_STATUS_OK) {
-        return LONEJSON_STATUS_CALLBACK_FAILED;
-      }
-      available = SOURCE_OUTPUT_STAGE_BUFFER_CAP;
-    }
-    if (len < available) {
-      available = len;
-    }
-    memcpy(state->output_stage_buffer + state->output_stage_buffer_len, bytes,
-           available);
-    state->output_stage_buffer_len += available;
-    bytes += available;
-    len -= available;
-  }
-  return LONEJSON_STATUS_OK;
 }
 
 static int
@@ -9107,10 +9047,6 @@ static lql_status execute_query_source_output(
   state.staged_output = selector != NULL && matches_only &&
                         !(projection != NULL && mutation_plan != NULL);
 #endif
-  if (state.staged_output) {
-    lonejson_spooled_init(runtime, &state.output_stage);
-    state.output_stage_initialized = 1;
-  }
   options.mode = state.staged_output || (selector == NULL && !matches_only)
                      ? LONEJSON_CANDIDATE_OUTPUT_MODE_STREAMING
                      : LONEJSON_CANDIDATE_OUTPUT_MODE_GATED_SPOOLED;
@@ -9119,9 +9055,8 @@ static lql_status execute_query_source_output(
   options.old_scalar_mode = source_output_has_increment(mutation_plan)
                                 ? LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_COMPLETE
                                 : LONEJSON_CANDIDATE_OUTPUT_OLD_SCALAR_NONE;
-  options.sink =
-      state.staged_output ? source_output_stage_sink : file_sink_unlocked;
-  options.sink_user = state.staged_output ? (void *)&state : (void *)out;
+  options.sink = file_sink_unlocked;
+  options.sink_user = out;
 #if defined(LONEJSON_HAS_CANDIDATE_OUTPUT_VALUE_OBSERVER)
   if (state.staged_output) {
     options.observer = &observer;
@@ -9170,6 +9105,12 @@ static lql_status execute_query_source_output(
   options.old_scalar_user = &state;
   options.candidate_decision = source_output_candidate_decision;
   options.candidate_decision_user = &state;
+#if defined(LONEJSON_HAS_CANDIDATE_OUTPUT_STAGED)
+  if (state.staged_output) {
+    options.output_transition = source_output_transition;
+    options.output_transition_user = &state;
+  }
+#endif
 #if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
   if ((selector_fast_exact_eligible(selector) &&
        selector_fast_flat_scalar_eligible(selector)) ||

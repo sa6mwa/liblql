@@ -2947,6 +2947,31 @@ typedef struct lonejson_candidate_output_candidate_policy {
   void *candidate_policy;
 } lonejson_candidate_output_candidate_policy;
 
+/** Output commitment for the candidate currently being parsed. */
+typedef enum lonejson_candidate_output_transition {
+  /** Retain the current bounded output prefix until the policy knows more. */
+  LONEJSON_CANDIDATE_OUTPUT_TRANSITION_UNKNOWN = 0,
+  /** Commit the retained prefix and write later output directly to the sink. */
+  LONEJSON_CANDIDATE_OUTPUT_TRANSITION_ACCEPT = 1,
+  /** Discard the retained prefix and suppress all later output. */
+  LONEJSON_CANDIDATE_OUTPUT_TRANSITION_REJECT = 2,
+  /** Stop successfully before parsing a later candidate. */
+  LONEJSON_CANDIDATE_OUTPUT_TRANSITION_STOP = 3,
+  /** Fail the transform. The callback should populate `error` when possible. */
+  LONEJSON_CANDIDATE_OUTPUT_TRANSITION_ERROR = 4
+} lonejson_candidate_output_transition;
+
+/**
+ * Reports whether delayed candidate output can be committed. LoneJSON calls
+ * this after observer events and once more with `finalizing` non-zero before
+ * candidate output is finished. A finalizing callback must not return
+ * `UNKNOWN`.
+ */
+typedef lonejson_candidate_output_transition (
+    *lonejson_candidate_output_transition_fn)(
+    void *user, const lonejson_candidate_info *candidate, int finalizing,
+    lonejson_error *error);
+
 /** Old scalar materialization policy for transform callbacks. */
 typedef enum lonejson_candidate_output_old_scalar_mode {
   /** Do not retain complete string or number values for `old_value`. */
@@ -3184,6 +3209,13 @@ typedef struct lonejson_candidate_output_options {
   lonejson_candidate_capture_prune_fn capture_prune;
   /** Caller state passed to `capture_prune`. */
   void *capture_prune_user;
+  /** Optional generic delayed-output commitment policy. When present,
+   * LoneJSON retains only the current candidate's output prefix until this
+   * policy accepts or rejects it; no source bytes are replayed.
+   */
+  lonejson_candidate_output_transition_fn output_transition;
+  /** Caller state passed to `output_transition`. */
+  void *output_transition_user;
 } lonejson_candidate_output_options;
 
 struct lonejson_json_value;
@@ -46402,6 +46434,7 @@ static void lonejson__writer_reset_for_reuse(lonejson_writer *writer) {
   state->string_reader_buffer_off = 0u;
   state->string_reader_eof = 0;
   state->number.len = 0u;
+  state->sink_buffer_len = 0u;
   lonejson__clear_error(&writer->error);
   lonejson__writer_assign_methods(writer);
 }
@@ -48769,12 +48802,15 @@ typedef struct lonejson__candidate_output_state {
   lonejson_candidate_info candidate;
   lonejson_candidate_output_candidate_info transform_candidate;
   lonejson_writer writer;
+  lonejson_spooled output_stage;
   lonejson_path_value_visitor visitor;
   lonejson_candidate_stream_options candidate_options;
   lonejson__candidate_output_frame *frames;
   size_t frame_count;
   size_t frame_cap;
   int writer_open;
+  int output_stage_initialized;
+  lonejson_candidate_output_transition output_transition;
   int candidate_output_started;
   int emitted_any_candidate;
   int stopped;
@@ -48842,6 +48878,88 @@ static lonejson_status lonejson__candidate_output_validate_projection(
 static int lonejson__candidate_output_parse_uint64(const char *data,
                                                       size_t len,
                                                       lonejson_uint64 *out);
+
+static lonejson_status lonejson__candidate_output_stage_sink(
+    void *user, const void *data, size_t len, lonejson_error *error) {
+  lonejson__candidate_output_state *state =
+      (lonejson__candidate_output_state *)user;
+
+  if (state == NULL || state->options == NULL) {
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  if (state->output_transition == LONEJSON_CANDIDATE_OUTPUT_TRANSITION_REJECT) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->output_transition == LONEJSON_CANDIDATE_OUTPUT_TRANSITION_ACCEPT) {
+    return state->options->sink(state->options->sink_user, data, len, error);
+  }
+  return lonejson_spooled_append(&state->output_stage, data, len, error);
+}
+
+static lonejson_status lonejson__candidate_output_apply_transition(
+    lonejson__candidate_output_state *state, int finalizing) {
+  lonejson_candidate_output_transition transition;
+  lonejson_status status;
+
+  if (state == NULL || state->options == NULL ||
+      state->options->output_transition == NULL || state->stopped) {
+    return LONEJSON_STATUS_OK;
+  }
+  lonejson__clear_error(state->error);
+  transition = state->options->output_transition(
+      state->options->output_transition_user, &state->candidate, finalizing,
+      state->error);
+  if (transition == LONEJSON_CANDIDATE_OUTPUT_TRANSITION_UNKNOWN) {
+    if (!finalizing || state->output_transition !=
+                           LONEJSON_CANDIDATE_OUTPUT_TRANSITION_UNKNOWN) {
+      return LONEJSON_STATUS_OK;
+    }
+    return lonejson__set_error(
+        state->error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u, 0u,
+        "candidate output transition remained unknown at candidate end");
+  }
+  if (transition == LONEJSON_CANDIDATE_OUTPUT_TRANSITION_ACCEPT) {
+    if (state->output_transition ==
+        LONEJSON_CANDIDATE_OUTPUT_TRANSITION_UNKNOWN) {
+      status = lonejson_spooled_write_to_sink(
+          &state->output_stage, state->options->sink, state->options->sink_user,
+          state->error);
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+      lonejson__spooled_reset_preserve_memory(&state->output_stage);
+      state->output_transition = transition;
+    }
+    return LONEJSON_STATUS_OK;
+  }
+  if (transition == LONEJSON_CANDIDATE_OUTPUT_TRANSITION_REJECT) {
+    if (state->output_transition ==
+        LONEJSON_CANDIDATE_OUTPUT_TRANSITION_UNKNOWN) {
+      lonejson__spooled_reset_preserve_memory(&state->output_stage);
+      state->output_transition = transition;
+    }
+    return LONEJSON_STATUS_OK;
+  }
+  if (transition == LONEJSON_CANDIDATE_OUTPUT_TRANSITION_STOP) {
+    lonejson__spooled_reset_preserve_memory(&state->output_stage);
+    state->output_transition = transition;
+    state->stopped = 1;
+    return LONEJSON_STATUS_OK;
+  }
+  if (transition == LONEJSON_CANDIDATE_OUTPUT_TRANSITION_ERROR) {
+    if (state->error != NULL && (state->error->code == LONEJSON_STATUS_OK ||
+                                 state->error->code == 0)) {
+      return lonejson__set_error(state->error, LONEJSON_STATUS_CALLBACK_FAILED,
+                                 0u, 0u, 0u,
+                                 "candidate output transition callback failed");
+    }
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  return lonejson__set_error(state->error, LONEJSON_STATUS_CALLBACK_FAILED,
+                             0u, 0u, 0u,
+                             "candidate output transition callback returned "
+                             "an invalid action");
+}
 
 static lonejson__candidate_output_frame *
 lonejson__candidate_output_top(lonejson__candidate_output_state *state) {
@@ -49317,6 +49435,9 @@ static void lonejson__candidate_output_cleanup(
   if (state->writer_open) {
     lonejson_writer_cleanup(&state->writer);
   }
+  if (state->output_stage_initialized) {
+    lonejson_spooled_cleanup(&state->output_stage);
+  }
   for (i = 0u; i < state->frame_count; ++i) {
     lonejson__byte_free(&state->frames[i].key, state->allocator);
     lonejson__byte_free(&state->frames[i].seen_keys, state->allocator);
@@ -49349,11 +49470,14 @@ static lonejson_status lonejson__candidate_output_forward_event(
     const lonejson_value_path *path) {
   lonejson_status status;
 
-  if (fn == NULL) {
-    return LONEJSON_STATUS_OK;
+  if (fn != NULL) {
+    status = fn(state->options->observer_user, path, state->error);
+    status = lonejson__candidate_output_record_status(state, status);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
   }
-  status = fn(state->options->observer_user, path, state->error);
-  return lonejson__candidate_output_record_status(state, status);
+  return lonejson__candidate_output_apply_transition(state, 0);
 }
 
 static lonejson_status lonejson__candidate_output_forward_chunk(
@@ -49361,11 +49485,14 @@ static lonejson_status lonejson__candidate_output_forward_chunk(
     const lonejson_value_path *path, const char *data, size_t len) {
   lonejson_status status;
 
-  if (fn == NULL) {
-    return LONEJSON_STATUS_OK;
+  if (fn != NULL) {
+    status = fn(state->options->observer_user, path, data, len, state->error);
+    status = lonejson__candidate_output_record_status(state, status);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
   }
-  status = fn(state->options->observer_user, path, data, len, state->error);
-  return lonejson__candidate_output_record_status(state, status);
+  return lonejson__candidate_output_apply_transition(state, 0);
 }
 
 static lonejson_status lonejson__candidate_output_forward_bool(
@@ -49373,13 +49500,16 @@ static lonejson_status lonejson__candidate_output_forward_bool(
     int value) {
   lonejson_status status;
 
-  if (state->options->observer == NULL ||
-      state->options->observer->boolean_value == NULL) {
-    return LONEJSON_STATUS_OK;
+  if (state->options->observer != NULL &&
+      state->options->observer->boolean_value != NULL) {
+    status = state->options->observer->boolean_value(
+        state->options->observer_user, path, value, state->error);
+    status = lonejson__candidate_output_record_status(state, status);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
   }
-  status = state->options->observer->boolean_value(
-      state->options->observer_user, path, value, state->error);
-  return lonejson__candidate_output_record_status(state, status);
+  return lonejson__candidate_output_apply_transition(state, 0);
 }
 
 static lonejson_status lonejson__candidate_output_prefix(
@@ -50889,6 +51019,7 @@ lonejson__candidate_output_begin(void *user,
                                     lonejson_error *error) {
   lonejson__candidate_output_state *state =
       (lonejson__candidate_output_state *)user;
+  lonejson_candidate_callback_result result;
 
   state->candidate = state->candidate_override != NULL
                          ? *state->candidate_override
@@ -50911,9 +51042,20 @@ lonejson__candidate_output_begin(void *user,
   state->skip_after_member = 0;
   state->current_emit = 0;
   state->current_scalar_replace = 0;
+  if (state->output_stage_initialized) {
+    lonejson_spooled_reset(&state->output_stage);
+    state->output_transition = LONEJSON_CANDIDATE_OUTPUT_TRANSITION_UNKNOWN;
+  }
   if (state->options->candidate_begin != NULL) {
-    return state->options->candidate_begin(state->options->candidate_user,
-                                           candidate, error);
+    result = state->options->candidate_begin(state->options->candidate_user,
+                                             candidate, error);
+    if (result != LONEJSON_CANDIDATE_CONTINUE) {
+      return result;
+    }
+  }
+  if (lonejson__candidate_output_apply_transition(state, 0) !=
+      LONEJSON_STATUS_OK) {
+    return LONEJSON_CANDIDATE_ERROR;
   }
   return LONEJSON_CANDIDATE_CONTINUE;
 }
@@ -50935,7 +51077,15 @@ lonejson__candidate_output_end(void *user,
   } else {
     state->transform_candidate.byte_size = candidate->byte_size;
   }
-  if (state->candidate_output_started) {
+  status = lonejson__candidate_output_apply_transition(state, 1);
+  if (status != LONEJSON_STATUS_OK) {
+    return LONEJSON_CANDIDATE_ERROR;
+  }
+  if (state->output_transition == LONEJSON_CANDIDATE_OUTPUT_TRANSITION_STOP) {
+    return LONEJSON_CANDIDATE_STOP;
+  }
+  if (state->candidate_output_started &&
+      state->output_transition != LONEJSON_CANDIDATE_OUTPUT_TRANSITION_REJECT) {
     status = lonejson_writer_finish(&state->writer, error);
     lonejson__candidate_output_record_status(state, status);
     if (status != LONEJSON_STATUS_OK) {
@@ -50946,6 +51096,9 @@ lonejson__candidate_output_end(void *user,
     if (status != LONEJSON_STATUS_OK) {
       return LONEJSON_CANDIDATE_ERROR;
     }
+  }
+  if (state->output_transition == LONEJSON_CANDIDATE_OUTPUT_TRANSITION_REJECT) {
+    state->candidate_output_started = 0;
   }
   lonejson__writer_reset_for_reuse(&state->writer);
   while (state->frame_count != 0u) {
@@ -51494,6 +51647,11 @@ static lonejson_status lonejson__candidate_output_cursor_core(
   state.projection_trace = projection_trace;
   state.projection_enabled =
       lonejson__candidate_output_projection_has(options);
+  if (options->output_transition != NULL) {
+    lonejson_spooled_init((lonejson *)runtime_state, &state.output_stage);
+    state.output_stage_initialized = 1;
+    state.output_transition = LONEJSON_CANDIDATE_OUTPUT_TRANSITION_UNKNOWN;
+  }
   if (state.projection_enabled) {
     status = lonejson__candidate_output_validate_projection(
         options, &state.projection_root_kind, error);
@@ -51502,7 +51660,10 @@ static lonejson_status lonejson__candidate_output_cursor_core(
     }
   }
   status = lonejson__writer_init_sink_with_options(
-      &state.writer, state.options->sink, state.options->sink_user,
+      &state.writer,
+      state.output_stage_initialized ? lonejson__candidate_output_stage_sink
+                                     : state.options->sink,
+      state.output_stage_initialized ? (void *)&state : state.options->sink_user,
       &state.runtime->write_options, state.runtime, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
