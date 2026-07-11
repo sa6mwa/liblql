@@ -155,6 +155,7 @@ bench-check: build-debug build-debug-lua build-bench-release
 	@./scripts/check_parity_benchmark_failures.sh
 	@./scripts/check_parity_benchmark_fixtures.sh
 	@./scripts/check_parity_benchmark_memory.sh build/bench-check.jsonl
+	@(cd parity && "$${GO:-go}" run ./cmd/benchvalidate --min-c-go-speedup=1.2) < build/bench-check.jsonl
 	@./scripts/check_parity_benchmark_schema.sh
 
 bench-check-vendored-lonejson: build-debug-vendored-lonejson build-debug-lua build-bench-vendored-lonejson
@@ -171,6 +172,7 @@ bench-check-vendored-lonejson: build-debug-vendored-lonejson build-debug-lua bui
 	  ./scripts/check_parity_benchmark_failures.sh
 	@./scripts/check_parity_benchmark_fixtures.sh
 	@./scripts/check_parity_benchmark_memory.sh build/bench-check-vendored-lonejson.jsonl
+	@(cd parity && "$${GO:-go}" run ./cmd/benchvalidate --min-c-go-speedup=1.2) < build/bench-check-vendored-lonejson.jsonl
 	@LQL_PAYLOAD_BENCH_PATH=build/bench-vendored-lonejson/lql_payload_bench \
 	  LQL_BENCH_LIBRARY_DIR=build/bench-vendored-lonejson \
 	  ./scripts/check_parity_benchmark_schema.sh

@@ -35,6 +35,7 @@ func main() {
 	var opts validateOptions
 	flag.Int64Var(&opts.MaxCPeakRSSBytes, "max-c-peak-rss-bytes", 0, "fail supported C records whose peak_rss_bytes exceeds this value")
 	flag.Int64Var(&opts.MaxCSteadyStateNsPerByte, "max-c-steady-state-ns-per-byte", 0, "fail supported C steady_state records whose ns_per_op/bytes_per_iter exceeds this value")
+	flag.Float64Var(&opts.MinCGoSpeedup, "min-c-go-speedup", 0, "fail matched supported C/Go records whose Go/C speedup is below this value")
 	flag.Int64Var(&opts.MaxLuaPeakRSSBytes, "max-lua-peak-rss-bytes", 0, "fail supported Lua records whose peak_rss_bytes exceeds this value")
 	flag.BoolVar(&opts.RequireLuaPeakRSS, "require-lua-peak-rss", false, "fail supported Lua records that do not report peak_rss_bytes")
 	flag.BoolVar(&opts.ForbidUnsupported, "forbid-unsupported", false, "fail any benchmark record marked unsupported")
@@ -48,6 +49,7 @@ func main() {
 type validateOptions struct {
 	MaxCPeakRSSBytes         int64
 	MaxCSteadyStateNsPerByte int64
+	MinCGoSpeedup            float64
 	MaxLuaPeakRSSBytes       int64
 	RequireLuaPeakRSS        bool
 	ForbidUnsupported        bool
@@ -59,6 +61,7 @@ func validate(r io.Reader, opts validateOptions) error {
 	line := 0
 	records := 0
 	submodes := make(map[string]map[string]bool)
+	comparisons := make(map[string]goCComparison)
 	for scanner.Scan() {
 		line++
 		text := scanner.Bytes()
@@ -79,6 +82,17 @@ func validate(r io.Reader, opts validateOptions) error {
 		if err := validateRecord(line, rec, opts); err != nil {
 			return err
 		}
+		if opts.MinCGoSpeedup > 0 && !rec.Unsupported && rec.NsPerOp != nil &&
+			(rec.Impl == "go" || rec.Impl == "c") {
+			key := comparisonKey(rec)
+			pair := comparisons[key]
+			if rec.Impl == "go" {
+				pair.goRecord = &comparisonRecord{line: line, record: rec}
+			} else {
+				pair.cRecord = &comparisonRecord{line: line, record: rec}
+			}
+			comparisons[key] = pair
+		}
 		key := fmt.Sprintf("%s\x00%s\x00%s\x00%s", rec.Impl, rec.Dataset, rec.Selector, rec.Mode)
 		if submodes[key] == nil {
 			submodes[key] = make(map[string]bool)
@@ -97,7 +111,33 @@ func validate(r io.Reader, opts validateOptions) error {
 			return fmt.Errorf("benchmark tuple %q must include warmup_included and steady_state records", key)
 		}
 	}
+	if opts.MinCGoSpeedup > 0 {
+		for _, pair := range comparisons {
+			if pair.goRecord == nil || pair.cRecord == nil {
+				continue
+			}
+			goNS := *pair.goRecord.record.NsPerOp
+			cNS := *pair.cRecord.record.NsPerOp
+			if cNS <= 0 || float64(goNS)/float64(cNS) < opts.MinCGoSpeedup {
+				return fmt.Errorf("line %d: c/go speedup %.3fx below %.3fx for %s/%s/%s/%s/%s (go=%d ns, c=%d ns)", pair.cRecord.line, float64(goNS)/float64(cNS), opts.MinCGoSpeedup, pair.cRecord.record.Dataset, pair.cRecord.record.Selector, pair.cRecord.record.Mode, pair.cRecord.record.Submode, pair.cRecord.record.Expr, goNS, cNS)
+			}
+		}
+	}
 	return nil
+}
+
+type comparisonRecord struct {
+	line   int
+	record record
+}
+
+type goCComparison struct {
+	goRecord *comparisonRecord
+	cRecord  *comparisonRecord
+}
+
+func comparisonKey(rec record) string {
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s", rec.Dataset, rec.Selector, rec.Expr, rec.Mode, rec.Submode, rec.FixtureSHA256)
 }
 
 func requireKeys(line int, raw map[string]json.RawMessage) error {
