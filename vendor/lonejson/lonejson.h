@@ -16348,6 +16348,31 @@ lonejson__json_cursor_plain_span(lonejson__json_io *io, size_t *available,
   return NULL;
 }
 
+/* Detect eight JSON-string bytes requiring per-byte handling. */
+static int lonejson__json_string_word_is_plain(lonejson_uint64 word) {
+  const lonejson_uint64 ones =
+      ((lonejson_uint64)0x01010101u << 32u) | 0x01010101u;
+  const lonejson_uint64 high =
+      ((lonejson_uint64)0x80808080u << 32u) | 0x80808080u;
+  const lonejson_uint64 controls =
+      ((lonejson_uint64)0x20202020u << 32u) | 0x20202020u;
+  const lonejson_uint64 quotes =
+      ((lonejson_uint64)0x22222222u << 32u) | 0x22222222u;
+  const lonejson_uint64 slashes =
+      ((lonejson_uint64)0x5c5c5c5cu << 32u) | 0x5c5c5c5cu;
+  lonejson_uint64 value;
+
+  if (((word - controls) & ~word & high) != 0u) {
+    return 0;
+  }
+  value = word ^ quotes;
+  if (((value - ones) & ~value & high) != 0u) {
+    return 0;
+  }
+  value = word ^ slashes;
+  return ((value - ones) & ~value & high) == 0u;
+}
+
 static lonejson_status lonejson__json_visit_plain_chunk_no_path(
     lonejson__json_io *io, int is_key, lonejson_value_chunk_fn fn,
     unsigned char *plain, size_t *plain_len, size_t *decoded_bytes,
@@ -16477,6 +16502,15 @@ lonejson__json_visit_string_value_no_path(lonejson__json_io *io, int is_key) {
 
     span = lonejson__json_cursor_plain_span(io, &available, &uses_read_buffer);
     while (span != NULL && available != 0u) {
+      lonejson_uint64 word;
+
+      while (plain_span + sizeof(word) <= available) {
+        memcpy(&word, span + plain_span, sizeof(word));
+        if (!lonejson__json_string_word_is_plain(word)) {
+          break;
+        }
+        plain_span += sizeof(word);
+      }
       while (plain_span < available) {
         unsigned char b = span[plain_span];
         if (b == '"' || b == '\\' || b < 0x20u) {
@@ -17072,6 +17106,15 @@ static lonejson_status lonejson__json_visit_string_value(lonejson__json_io *io,
 
     span = lonejson__json_cursor_plain_span(io, &available, &uses_read_buffer);
     while (span != NULL && available != 0u) {
+      lonejson_uint64 word;
+
+      while (plain_span + sizeof(word) <= available) {
+        memcpy(&word, span + plain_span, sizeof(word));
+        if (!lonejson__json_string_word_is_plain(word)) {
+          break;
+        }
+        plain_span += sizeof(word);
+      }
       while (plain_span < available) {
         unsigned char b = span[plain_span];
         if (b == '"' || b == '\\' || b < 0x20u) {

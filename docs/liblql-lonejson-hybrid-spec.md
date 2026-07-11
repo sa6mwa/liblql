@@ -128,11 +128,24 @@ The profile and rejected experiments establish the next work:
   goroutines. C remains single-pass and single-threaded, so its remaining loss
   is generic callback, path, staging, and writer work rather than a second
   parse.
+- A completed Go/C source-mutation run on the 4 KiB-per-record matrix passed
+  observable parity, but is far from the performance floor: the worst
+  pretty/nested sparse row was 0.369x (C 1.93 ms, Go 0.71 ms). Most sparse,
+  recursive, range, and nested rows remain below 1.0x; equality and selected
+  lockd rows are faster than Go. The two direct diagnostic wins do not
+  generalize to the accepted matrix.
+- The pinned Go reference rejects exists at parse time. Direct liblql coverage
+  retains the feature, while the Go/C/Lua performance matrix excludes it until
+  the reference supports the common expression.
 
-The next implementation slice must reduce work while commitment is unknown and
-compile mutation target traversal into LoneJSON's generic plan. It must not add
-selector syntax, cache candidate decisions, duplicate traversal stacks, or
-weaken spill-backed RSS bounds.
+The next implementation slice must introduce Candidate Run direct-value staging
+for fast non-path selectors: while truth is unknown, forward raw events to the
+selector and stage compact actions without constructing generic parser paths.
+On acceptance, replay only the staged prefix through the existing path-aware
+transform state and continue with direct transform traversal; on rejection,
+discard the stage without path construction. It must not add selector syntax,
+cache candidate decisions, duplicate traversal stacks, or weaken spill-backed
+RSS bounds.
 
 For selectors that resolve only at a candidate's final field, the action stage
 still dispatches the candidate's decoded events once to record actions and once

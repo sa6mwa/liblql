@@ -190,8 +190,8 @@ Current implementation status:
 - the current executable selector matrix covers equality, contains,
   `contains.any`, case-insensitive contains, timestamp comparison, date
   window, numeric range terms, and concrete numeric object-key/array-index path
-  traversal over record-stream fixtures, lockd-style `/event="session_sync"`,
-  `/event="tabs_update"`, and `/lockd/key` existence terms, plus nested
+  traversal over record-stream fixtures, lockd-style `/event="session_sync"`
+  and `/event="tabs_update"` terms, plus nested
   `/records[]/...` selection over the single-root JSON fixture. The full runner
   also mirrors Go realworld benchmark selectors for sparse and dense equality,
   no-match equality, numeric ranges, nested hashes, array membership, recursive
@@ -199,6 +199,10 @@ Current implementation status:
   evaluation. The smoke gate includes compact multi-clause realworld selection
   and pretty/nested recursive hash selection so this fixture family remains
   part of the ordinary benchmark gate.
+  `exists` remains covered by liblql's direct selector and streaming tests, but
+  is deliberately outside this cross-language matrix: the pinned Go reference
+  (`pkt.systems/lql v0.17.1`) rejects the term at parse time. It cannot be an
+  accepted Go/C/Lua parity or performance row until the reference supports it.
 - the current executable mode matrix covers `decision_only_selector`,
   `decision_only_plan`, `reuse_selector`, `reparse_selector_each_run`,
   `decision_only_source_selector`, `plus_value_selector`, `plus_value_plan`,

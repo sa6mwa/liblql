@@ -821,7 +821,7 @@ add_lockd_selector_cases() {
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
       "lockd_tabs_update" '/event="tabs_update"'
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
-      "lockd_write_event" 'and.eq{field=/op,value=write},and.exists{field=/lockd/key}'
+      "lockd_write_event" '/op="write"'
   } >> "$case_matrix"
 }
 
@@ -855,7 +855,7 @@ add_realworld_selector_cases() {
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
       "realworld_icontains_any_component_dense" 'icontains{field=/component,any=EDGE|__nope__}'
     printf '%s %s %s %s %s\n' "$dataset_name" "$fixture_path" "$candidates" \
-      "realworld_multi_clause_and" '/component="edge",/event="session_sync",/active_idx=0,/tab_count=1,exists{/session_ids},/code>=10'
+      "realworld_multi_clause_and" '/component="edge",/event="session_sync",/active_idx=0,/tab_count=1,/code>=10'
   } >> "$case_matrix"
 }
 
