@@ -89,6 +89,7 @@ struct lql_stream_member_context {
 struct lql_mapped_projection_field {
   lql_stream_state *state;
   const lql_stream_field *field;
+  lonejson_path_segment segments[sizeof(unsigned long) * CHAR_BIT];
 };
 
 #define LQL_STREAM_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
@@ -1691,7 +1692,6 @@ stream_composed_path_object_key_end(void *user, const lonejson_value_path *path,
   static lonejson_status stream_mapped_projection_##name(                     \
       void *user, const lonejson_value_path *path, lonejson_error *error) {   \
     lql_mapped_projection_field *field;                                       \
-    lonejson_path_segment segments[LQL_STREAM_PATH_CAPACITY];                 \
     lonejson_value_path prefixed;                                             \
     size_t i;                                                                 \
     field = (lql_mapped_projection_field *)user;                              \
@@ -1704,12 +1704,12 @@ stream_composed_path_object_key_end(void *user, const lonejson_value_path *path,
       stream_lonejson_error(error, "projection path depth exceeded");        \
       return LONEJSON_STATUS_CALLBACK_FAILED;                                 \
     }                                                                         \
-    segments[0].data = field->field->key;                                     \
-    segments[0].len = field->field->key_len;                                  \
+    field->segments[0].data = field->field->key;                              \
+    field->segments[0].len = field->field->key_len;                           \
     for (i = 0u; i < path->segment_count; ++i) {                              \
-      segments[i + 1u] = path->segments[i];                                   \
+      field->segments[i + 1u] = path->segments[i];                            \
     }                                                                         \
-    prefixed.segments = segments;                                             \
+    prefixed.segments = field->segments;                                      \
     prefixed.segment_count = path->segment_count + 1u;                        \
     return field->state->projection_visitor->name(                            \
         lql_projection_capture_visitor_user(field->state->projection_capture), \
@@ -1721,7 +1721,6 @@ stream_composed_path_object_key_end(void *user, const lonejson_value_path *path,
       void *user, const lonejson_value_path *path, const char *data,          \
       size_t len, lonejson_error *error) {                                    \
     lql_mapped_projection_field *field;                                       \
-    lonejson_path_segment segments[LQL_STREAM_PATH_CAPACITY];                 \
     lonejson_value_path prefixed;                                             \
     size_t i;                                                                 \
     field = (lql_mapped_projection_field *)user;                              \
@@ -1734,12 +1733,12 @@ stream_composed_path_object_key_end(void *user, const lonejson_value_path *path,
       stream_lonejson_error(error, "projection path depth exceeded");        \
       return LONEJSON_STATUS_CALLBACK_FAILED;                                 \
     }                                                                         \
-    segments[0].data = field->field->key;                                     \
-    segments[0].len = field->field->key_len;                                  \
+    field->segments[0].data = field->field->key;                              \
+    field->segments[0].len = field->field->key_len;                           \
     for (i = 0u; i < path->segment_count; ++i) {                              \
-      segments[i + 1u] = path->segments[i];                                   \
+      field->segments[i + 1u] = path->segments[i];                            \
     }                                                                         \
-    prefixed.segments = segments;                                             \
+    prefixed.segments = field->segments;                                      \
     prefixed.segment_count = path->segment_count + 1u;                        \
     return field->state->projection_visitor->name(                            \
         lql_projection_capture_visitor_user(field->state->projection_capture), \
@@ -1765,7 +1764,6 @@ static lonejson_status stream_mapped_projection_boolean_value(
     void *user, const lonejson_value_path *path, int value,
     lonejson_error *error) {
   lql_mapped_projection_field *field;
-  lonejson_path_segment segments[LQL_STREAM_PATH_CAPACITY];
   lonejson_value_path prefixed;
   size_t i;
   field = (lql_mapped_projection_field *)user;
@@ -1778,12 +1776,12 @@ static lonejson_status stream_mapped_projection_boolean_value(
     stream_lonejson_error(error, "projection path depth exceeded");
     return LONEJSON_STATUS_CALLBACK_FAILED;
   }
-  segments[0].data = field->field->key;
-  segments[0].len = field->field->key_len;
+  field->segments[0].data = field->field->key;
+  field->segments[0].len = field->field->key_len;
   for (i = 0u; i < path->segment_count; ++i) {
-    segments[i + 1u] = path->segments[i];
+    field->segments[i + 1u] = path->segments[i];
   }
-  prefixed.segments = segments;
+  prefixed.segments = field->segments;
   prefixed.segment_count = path->segment_count + 1u;
   return field->state->projection_visitor->boolean_value(
       lql_projection_capture_visitor_user(field->state->projection_capture),

@@ -290,6 +290,10 @@ typedef struct projection_capture {
   char *key;
   size_t key_len;
   size_t key_capacity;
+  char *scalar;
+  size_t scalar_len;
+  size_t scalar_capacity;
+  int scalar_kind;
   int root_object;
   int active;
   int writer_ready;
@@ -297,9 +301,16 @@ typedef struct projection_capture {
   int found;
 } projection_capture;
 
+#define PROJECTION_SCALAR_NONE 0
+#define PROJECTION_SCALAR_STRING 1
+#define PROJECTION_SCALAR_NUMBER 2
+#define PROJECTION_SCALAR_BOOL 3
+#define PROJECTION_SCALAR_NULL 4
+
 typedef struct projection_render_state {
   const lql_projection *projection;
   lonejson_spooled *values;
+  projection_capture *captures;
   lonejson_writer *writer;
   lonejson_error *error;
 } projection_render_state;
@@ -424,6 +435,70 @@ static lonejson_status projection_capture_grow_key(projection_capture *capture,
   return LONEJSON_STATUS_OK;
 }
 
+static lonejson_status projection_capture_grow_scalar(
+    projection_capture *capture, size_t additional, lonejson_error *error) {
+  lql_allocator *allocator;
+  size_t required;
+  size_t capacity;
+  char *next;
+  if (capture == NULL || additional > (size_t)-1 - capture->scalar_len) {
+    return LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  required = capture->scalar_len + additional;
+  if (required <= capture->scalar_capacity) {
+    return LONEJSON_STATUS_OK;
+  }
+  allocator = lql_allocator_from_receiver(capture->receiver);
+  if (allocator == NULL) {
+    return LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  capacity = capture->scalar_capacity == 0u ? 64u : capture->scalar_capacity;
+  while (capacity < required) {
+    if (capacity > (size_t)-1 / 2u) {
+      capacity = required;
+      break;
+    }
+    capacity *= 2u;
+  }
+  next = (char *)allocator->realloc(allocator, capture->scalar, capacity);
+  if (next == NULL) {
+    if (error != NULL) {
+      error->code = LONEJSON_STATUS_ALLOCATION_FAILED;
+      strcpy(error->message, "projection scalar allocation failed");
+    }
+    return LONEJSON_STATUS_ALLOCATION_FAILED;
+  }
+  capture->scalar = next;
+  capture->scalar_capacity = capacity;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status projection_capture_scalar_start(
+    projection_capture *capture, int kind, lonejson_error *error) {
+  if (capture == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  lonejson_spooled_reset(capture->spool);
+  capture->scalar_len = 0u;
+  capture->scalar_kind = kind;
+  capture->active = 1;
+  capture->writer_ready = 0;
+  capture->key_active = 0;
+  capture->found = 0;
+  (void)error;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status projection_capture_scalar_finish(
+    projection_capture *capture) {
+  if (capture == NULL || !capture->active) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  capture->active = 0;
+  capture->found = 1;
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status projection_capture_finish(projection_capture *capture,
                                                  lonejson_error *error) {
   lonejson_status status;
@@ -456,6 +531,9 @@ static lonejson_status projection_capture_start(projection_capture *capture,
   capture->writer_ready = 1;
   capture->active = 1;
   capture->key_active = 0;
+  capture->scalar_len = 0u;
+  capture->scalar_kind = PROJECTION_SCALAR_NONE;
+  capture->found = 0;
   return LONEJSON_STATUS_OK;
 }
 
@@ -589,14 +667,10 @@ static lonejson_status
 projection_capture_string_begin(void *user, const lonejson_value_path *path,
                                 lonejson_error *error) {
   projection_capture *capture;
-  lonejson_status status;
   capture = (projection_capture *)user;
   if (!capture->active && projection_path_exact(capture->path, path)) {
-    status = projection_capture_start(capture, error);
-    if (status != LONEJSON_STATUS_OK) {
-      return status;
-    }
-    return lonejson_writer_string_begin(&capture->writer, error);
+    return projection_capture_scalar_start(capture, PROJECTION_SCALAR_STRING,
+                                           error);
   }
   if (capture->active && projection_path_prefix(capture->path, path)) {
     return lonejson_writer_string_begin(&capture->writer, error);
@@ -610,6 +684,16 @@ projection_capture_string_chunk(void *user, const lonejson_value_path *path,
                                 lonejson_error *error) {
   projection_capture *capture;
   capture = (projection_capture *)user;
+  if (capture->active && capture->scalar_kind == PROJECTION_SCALAR_STRING) {
+    lonejson_status status;
+    status = projection_capture_grow_scalar(capture, len, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    memcpy(capture->scalar + capture->scalar_len, data, len);
+    capture->scalar_len += len;
+    return LONEJSON_STATUS_OK;
+  }
   if (capture->active && projection_path_prefix(capture->path, path)) {
     return lonejson_writer_string_chunk(&capture->writer, data, len, error);
   }
@@ -622,6 +706,9 @@ projection_capture_string_end(void *user, const lonejson_value_path *path,
   projection_capture *capture;
   lonejson_status status;
   capture = (projection_capture *)user;
+  if (capture->active && capture->scalar_kind == PROJECTION_SCALAR_STRING) {
+    return projection_capture_scalar_finish(capture);
+  }
   if (!capture->active || !projection_path_prefix(capture->path, path)) {
     return LONEJSON_STATUS_OK;
   }
@@ -639,14 +726,10 @@ static lonejson_status
 projection_capture_number_begin(void *user, const lonejson_value_path *path,
                                 lonejson_error *error) {
   projection_capture *capture;
-  lonejson_status status;
   capture = (projection_capture *)user;
   if (!capture->active && projection_path_exact(capture->path, path)) {
-    status = projection_capture_start(capture, error);
-    if (status != LONEJSON_STATUS_OK) {
-      return status;
-    }
-    return lonejson_writer_number_begin(&capture->writer, error);
+    return projection_capture_scalar_start(capture, PROJECTION_SCALAR_NUMBER,
+                                           error);
   }
   if (capture->active && projection_path_prefix(capture->path, path)) {
     return lonejson_writer_number_begin(&capture->writer, error);
@@ -660,6 +743,16 @@ projection_capture_number_chunk(void *user, const lonejson_value_path *path,
                                 lonejson_error *error) {
   projection_capture *capture;
   capture = (projection_capture *)user;
+  if (capture->active && capture->scalar_kind == PROJECTION_SCALAR_NUMBER) {
+    lonejson_status status;
+    status = projection_capture_grow_scalar(capture, len, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    memcpy(capture->scalar + capture->scalar_len, data, len);
+    capture->scalar_len += len;
+    return LONEJSON_STATUS_OK;
+  }
   if (capture->active && projection_path_prefix(capture->path, path)) {
     return lonejson_writer_number_chunk(&capture->writer, data, len, error);
   }
@@ -672,6 +765,9 @@ projection_capture_number_end(void *user, const lonejson_value_path *path,
   projection_capture *capture;
   lonejson_status status;
   capture = (projection_capture *)user;
+  if (capture->active && capture->scalar_kind == PROJECTION_SCALAR_NUMBER) {
+    return projection_capture_scalar_finish(capture);
+  }
   if (!capture->active || !projection_path_prefix(capture->path, path)) {
     return LONEJSON_STATUS_OK;
   }
@@ -694,15 +790,18 @@ projection_capture_boolean(void *user, const lonejson_value_path *path,
   if (!projection_path_exact(capture->path, path)) {
     return LONEJSON_STATUS_OK;
   }
-  status = projection_capture_start(capture, error);
+  status = projection_capture_scalar_start(capture, PROJECTION_SCALAR_BOOL,
+                                           error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson_writer_bool(&capture->writer, value, error);
+  capture->scalar_len = value ? 4u : 5u;
+  status = projection_capture_grow_scalar(capture, capture->scalar_len, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  return projection_capture_finish(capture, error);
+  memcpy(capture->scalar, value ? "true" : "false", capture->scalar_len);
+  return projection_capture_scalar_finish(capture);
 }
 
 static lonejson_status projection_capture_null(void *user,
@@ -714,15 +813,18 @@ static lonejson_status projection_capture_null(void *user,
   if (!projection_path_exact(capture->path, path)) {
     return LONEJSON_STATUS_OK;
   }
-  status = projection_capture_start(capture, error);
+  status = projection_capture_scalar_start(capture, PROJECTION_SCALAR_NULL,
+                                           error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  status = lonejson_writer_null(&capture->writer, error);
+  status = projection_capture_grow_scalar(capture, 4u, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  return projection_capture_finish(capture, error);
+  memcpy(capture->scalar, "null", 4u);
+  capture->scalar_len = 4u;
+  return projection_capture_scalar_finish(capture);
 }
 
 #define PROJECTION_CAPTURE_SET_EVENT(name)                                     \
@@ -853,8 +955,25 @@ static lonejson_status projection_render_value(projection_render_state *state,
   }
   path = &state->projection->compiled_paths[members[0]];
   if (path->segment_count == depth) {
+    projection_capture *capture;
     if (count != 1u) {
       return LONEJSON_STATUS_INVALID_ARGUMENT;
+    }
+    capture = &state->captures[members[0]];
+    if (capture->scalar_kind == PROJECTION_SCALAR_STRING) {
+      return lonejson_writer_string(state->writer, capture->scalar,
+                                    capture->scalar_len, state->error);
+    }
+    if (capture->scalar_kind == PROJECTION_SCALAR_NUMBER) {
+      return lonejson_writer_number_text(state->writer, capture->scalar,
+                                         capture->scalar_len, state->error);
+    }
+    if (capture->scalar_kind == PROJECTION_SCALAR_BOOL) {
+      return lonejson_writer_bool(state->writer, capture->scalar_len == 4u,
+                                  state->error);
+    }
+    if (capture->scalar_kind == PROJECTION_SCALAR_NULL) {
+      return lonejson_writer_null(state->writer, state->error);
     }
     return lonejson_writer_json_value_spooled(
         state->writer, &state->values[members[0]], state->error);
@@ -1118,6 +1237,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_capture_render(
   }
   render.projection = capture->projection;
   render.values = capture->values;
+  render.captures = capture->captures;
   render.writer = &writer;
   render.error = &lonejson_error;
   status = projection_render_value(&render, capture->members, count, 0u);
@@ -1254,6 +1374,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_render_top_level(
   }
   render.projection = projection;
   render.values = values;
+  render.captures = captures;
   render.writer = &writer;
   render.error = &lonejson_error;
   status = projection_render_value(&render, members, count, 0u);
