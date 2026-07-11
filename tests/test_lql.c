@@ -2950,7 +2950,13 @@ static void expect_stream_error_corpus_api(void) {
       {"truncated array stream", "[{\"status\":\"open\"},{\"status\":"},
       {"invalid literal", "{\"status\": tru}"},
       {"invalid skipped number", "{\"status\":\"open\",\"count\":1e}"},
-      {"leading zero in skipped number", "{\"status\":\"open\",\"count\":01}"}};
+      {"leading zero in skipped number", "{\"status\":\"open\",\"count\":01}"},
+      {"control byte in skipped string",
+       "{\"status\":\"open\",\"detail\":\"bad\x01\"}"},
+      {"invalid escape in skipped string",
+       "{\"status\":\"open\",\"detail\":\"bad\\q\"}"},
+      {"invalid surrogate in skipped string",
+       "{\"status\":\"open\",\"detail\":\"\\uD800\"}"}};
   lql_selector *selector;
   lql_error error;
   lql_status st;

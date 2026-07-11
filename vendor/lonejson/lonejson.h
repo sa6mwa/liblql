@@ -18009,6 +18009,49 @@ static size_t lonejson__json_control_offset(const unsigned char *data,
   return len;
 }
 
+static size_t lonejson__json_string_special_offset(const unsigned char *data,
+                                                   size_t len) {
+  size_t i;
+  size_t ones;
+  size_t highs;
+  size_t limit;
+  size_t word;
+
+  if (data == NULL) {
+    return len;
+  }
+  ones = ~(size_t)0 / (size_t)0xffu;
+  highs = ones * (size_t)0x80u;
+  limit = len - (len % sizeof(word));
+  for (i = 0u; i < limit; i += sizeof(word)) {
+    size_t quote;
+    size_t escape;
+    size_t special;
+
+    memcpy(&word, data + i, sizeof(word));
+    quote = word ^ (ones * (size_t)'"');
+    escape = word ^ (ones * (size_t)'\\');
+    special = ((word - (ones * (size_t)0x20u)) & ~word & highs) |
+              ((quote - ones) & ~quote & highs) |
+              ((escape - ones) & ~escape & highs);
+    if (special != 0u) {
+      size_t j;
+      for (j = 0u; j < sizeof(word); ++j) {
+        unsigned char ch = data[i + j];
+        if (ch == '"' || ch == '\\' || ch < 0x20u) {
+          return i + j;
+        }
+      }
+    }
+  }
+  for (i = limit; i < len; ++i) {
+    if (data[i] == '"' || data[i] == '\\' || data[i] < 0x20u) {
+      return i;
+    }
+  }
+  return len;
+}
+
 static lonejson_status lonejson__json_skip_string(lonejson__json_io *io,
                                                   size_t limit) {
   size_t decoded_bytes = 0u;
@@ -18022,22 +18065,7 @@ static lonejson_status lonejson__json_skip_string(lonejson__json_io *io,
 
     span = lonejson__json_cursor_plain_span(io, &available, &uses_read_buffer);
     while (span != NULL && available != 0u) {
-      {
-        const unsigned char *quote;
-        const unsigned char *escape;
-        size_t control;
-
-        quote = (const unsigned char *)memchr(span, '"', available);
-        plain_span = quote == NULL ? available : (size_t)(quote - span);
-        escape = (const unsigned char *)memchr(span, '\\', plain_span);
-        if (escape != NULL) {
-          plain_span = (size_t)(escape - span);
-        }
-        control = lonejson__json_control_offset(span, plain_span);
-        if (control < plain_span) {
-          plain_span = control;
-        }
-      }
+      plain_span = lonejson__json_string_special_offset(span, available);
       if (plain_span != 0u) {
         if (io->limits.max_total_bytes != 0u &&
             io->total_bytes + plain_span > io->limits.max_total_bytes) {
