@@ -3618,6 +3618,10 @@ static lonejson_status fast_direct_prepare_scalar(eval_doc *doc) {
   const lql_selector *selector;
 
   selector = fast_direct_selector(doc);
+  if (selector == NULL || !doc->fast_direct_value_target ||
+      hit_marked_fast(doc, selector)) {
+    return LONEJSON_STATUS_OK;
+  }
   doc->scalar_path_features = 0u;
   doc->scalar_stream_features = 0u;
   doc->scalar_len = 0u;
@@ -3625,10 +3629,6 @@ static lonejson_status fast_direct_prepare_scalar(eval_doc *doc) {
   doc->contains_tail_need = 0u;
   doc->prefix_len = 0u;
   doc->prefix_need = 0u;
-  if (selector == NULL || !doc->fast_direct_value_target ||
-      hit_marked_fast(doc, selector)) {
-    return LONEJSON_STATUS_OK;
-  }
   if (doc->fast_exact_selector != NULL) {
     doc->fast_exact_path_active = 1;
     doc->fast_exact_miss = 0;
