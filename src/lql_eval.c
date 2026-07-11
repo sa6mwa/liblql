@@ -99,6 +99,9 @@ typedef struct eval_doc {
   int fast_direct_pending_active;
   int fast_direct_value_target;
   int fast_direct_skip_unmatched_values;
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+  lonejson_candidate_scan_plan candidate_scan_plan;
+#endif
   size_t fast_recursive_depth;
   size_t fast_recursive_key_len;
   int fast_recursive_key_active;
@@ -4956,10 +4959,20 @@ configure_candidate_eval_visitors(lonejson_candidate_stream_options *options,
                 ? LONEJSON_CANDIDATE_PATH_ARRAY_WILDCARD
                 : LONEJSON_CANDIDATE_PATH_LITERAL;
       }
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+      doc->candidate_scan_plan.kind = LONEJSON_CANDIDATE_SCAN_PLAN_PATH;
+      doc->candidate_scan_plan.path_keys = doc->fast_direct_path_keys;
+      doc->candidate_scan_plan.path_key_lens = doc->fast_direct_path_key_lens;
+      doc->candidate_scan_plan.path_kinds = doc->fast_direct_path_kinds;
+      doc->candidate_scan_plan.path_segment_count =
+          doc->selector->field_segment_count;
+      options->scan_plan = &doc->candidate_scan_plan;
+#else
       options->direct_path_keys = doc->fast_direct_path_keys;
       options->direct_path_key_lens = doc->fast_direct_path_key_lens;
       options->direct_path_kinds = doc->fast_direct_path_kinds;
       options->direct_path_segment_count = doc->selector->field_segment_count;
+#endif
     }
 #else
     (void)i;
@@ -4972,9 +4985,19 @@ configure_candidate_eval_visitors(lonejson_candidate_stream_options *options,
     options->visitor = value_visitor;
     options->visitor_user = doc;
 #if defined(LONEJSON_HAS_CANDIDATE_RECURSIVE_FIELD_VISITOR)
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+    doc->candidate_scan_plan.kind =
+        LONEJSON_CANDIDATE_SCAN_PLAN_DESCENDANT_MEMBER;
+    doc->candidate_scan_plan.descendant_member_key =
+        doc->selector->field + doc->selector->field_segment_offsets[0];
+    doc->candidate_scan_plan.descendant_member_key_len =
+        doc->selector->field_segment_lens[0];
+    options->scan_plan = &doc->candidate_scan_plan;
+#else
     options->recursive_field_key =
         doc->selector->field + doc->selector->field_segment_offsets[0];
     options->recursive_field_key_len = doc->selector->field_segment_lens[0];
+#endif
 #endif
     return;
   }
@@ -5001,7 +5024,12 @@ static void enable_fast_top_level_field_candidate(
     return;
   }
 #if defined(LONEJSON_HAS_CANDIDATE_DIRECT_PATH_VISITOR)
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+  if (options->scan_plan != NULL &&
+      options->scan_plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_PATH) {
+#else
   if (options->direct_path_keys != NULL) {
+#endif
     return;
   }
 #endif
@@ -5017,6 +5045,19 @@ static void enable_fast_top_level_field_candidate(
     doc->fast_multi_key_lens[0] = selector_key_len;
     doc->fast_multi_keys[1] = doc->fast_mutation_top_key;
     doc->fast_multi_key_lens[1] = doc->fast_mutation_top_key_len;
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+    doc->candidate_scan_plan.kind =
+        LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER_SET;
+    doc->candidate_scan_plan.object_member_keys = doc->fast_multi_keys;
+    doc->candidate_scan_plan.object_member_key_lens = doc->fast_multi_key_lens;
+    doc->candidate_scan_plan.object_member_key_count =
+        selector_key_len == doc->fast_mutation_top_key_len &&
+                memcmp(selector_key, doc->fast_mutation_top_key,
+                       selector_key_len) == 0
+            ? 1u
+            : 2u;
+    options->scan_plan = &doc->candidate_scan_plan;
+#else
     options->top_level_field_keys = doc->fast_multi_keys;
     options->top_level_field_key_lens = doc->fast_multi_key_lens;
     options->top_level_field_key_count =
@@ -5025,10 +5066,18 @@ static void enable_fast_top_level_field_candidate(
                        selector_key_len) == 0
             ? 1u
             : 2u;
+#endif
     return;
   }
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+  doc->candidate_scan_plan.kind = LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER;
+  doc->candidate_scan_plan.object_member_key = selector_key;
+  doc->candidate_scan_plan.object_member_key_len = selector_key_len;
+  options->scan_plan = &doc->candidate_scan_plan;
+#else
   options->top_level_field_key = selector_key;
   options->top_level_field_key_len = selector_key_len;
+#endif
 #else
   (void)options;
   (void)doc;
@@ -5053,19 +5102,40 @@ static void enable_fast_top_level_multi_field_candidate(
         predicate->field + predicate->field_segment_offsets[0];
     doc->fast_multi_key_lens[i] = predicate->field_segment_lens[0];
   }
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+  doc->candidate_scan_plan.kind =
+      LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER_SET;
+  doc->candidate_scan_plan.object_member_keys = doc->fast_multi_keys;
+  doc->candidate_scan_plan.object_member_key_lens = doc->fast_multi_key_lens;
+  doc->candidate_scan_plan.object_member_key_count = selector->predicate_count;
+  options->scan_plan = &doc->candidate_scan_plan;
+#else
   options->top_level_field_keys = doc->fast_multi_keys;
   options->top_level_field_key_lens = doc->fast_multi_key_lens;
   options->top_level_field_key_count = selector->predicate_count;
+#endif
   if (options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE ||
       options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
     doc->fast_multi_direct_enabled = 1;
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+    doc->candidate_scan_plan.object_member_match =
+        fast_top_level_multi_field_match;
+    doc->candidate_scan_plan.object_member_match_user = doc;
+#else
     options->top_level_field_match = fast_top_level_multi_field_match;
     options->top_level_field_match_user = doc;
+#endif
   }
 #if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE)
   if (options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE) {
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+    doc->candidate_scan_plan.object_member_prune =
+        fast_top_level_multi_field_prune;
+    doc->candidate_scan_plan.object_member_prune_user = doc;
+#else
     options->top_level_field_prune = fast_top_level_multi_field_prune;
     options->top_level_field_prune_user = doc;
+#endif
   }
 #endif
 #else
@@ -5095,12 +5165,21 @@ enable_fast_flat_candidate_stop(lonejson_candidate_stream_options *options,
 #if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
   if (options == NULL || doc == NULL ||
       !selector_fast_flat_scalar_eligible(doc->selector) ||
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+      options->scan_plan == NULL ||
+      options->scan_plan->kind != LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER ||
+#else
       options->top_level_field_key == NULL ||
+#endif
       options->capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE) {
     return;
   }
   doc->fast_flat_stop_after_match = 1;
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+  doc->candidate_scan_plan.stop_after_truncated_member = 1;
+#else
   options->top_level_field_stop_after_truncated = 1;
+#endif
 #else
   (void)options;
   (void)doc;
@@ -5123,6 +5202,27 @@ static void enable_fast_top_level_string_eq_candidate(
   options->visitor = NULL;
   options->path_visitor = NULL;
   options->visitor_user = NULL;
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+  memset(&doc->candidate_scan_plan, 0, sizeof(doc->candidate_scan_plan));
+  doc->candidate_scan_plan.kind =
+      LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_STRING_EQUALS;
+  doc->candidate_scan_plan.expected_string_key =
+      selector->field + selector->field_segment_offsets[0];
+  doc->candidate_scan_plan.expected_string_key_len =
+      selector->field_segment_lens[0];
+  doc->candidate_scan_plan.expected_string_value = selector->value_data;
+  doc->candidate_scan_plan.expected_string_value_len = selector->value_len;
+  doc->candidate_scan_plan.string_equals_matched = &doc->fast_exact_hit;
+  doc->candidate_scan_plan.root_kind = &doc->root_kind;
+  doc->candidate_scan_plan.stop_after_string_match = 1;
+#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_FIRST_KEY)
+  doc->candidate_scan_plan.stop_after_first_member = 1;
+#endif
+  options->scan_plan = &doc->candidate_scan_plan;
+#else
+  options->visitor = NULL;
+  options->path_visitor = NULL;
+  options->visitor_user = NULL;
   options->top_level_field_key = NULL;
   options->top_level_field_key_len = 0u;
   options->top_level_field_stop_after_truncated = 0;
@@ -5136,6 +5236,7 @@ static void enable_fast_top_level_string_eq_candidate(
   options->top_level_string_eq_stop_after_match = 1;
 #if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_FIRST_KEY)
   options->top_level_string_eq_stop_after_first_key = 1;
+#endif
 #endif
 #else
   (void)options;
@@ -6701,8 +6802,17 @@ configure_query_candidate_callbacks(lonejson_candidate_stream_options *options,
   }
 #if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_VISITOR)
   /* The dedicated parser clears its per-candidate match and root outputs. */
+#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
+  options->candidate_begin =
+      options->scan_plan != NULL &&
+              options->scan_plan->kind ==
+                  LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_STRING_EQUALS
+          ? NULL
+          : on_candidate_begin;
+#else
   options->candidate_begin =
       options->top_level_string_eq_key != NULL ? NULL : on_candidate_begin;
+#endif
 #else
   options->candidate_begin = on_candidate_begin;
 #endif

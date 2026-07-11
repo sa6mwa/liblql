@@ -55,7 +55,7 @@ do not remove a row merely because a faster sibling path exists.
 
 | Current owner | Live responsibility | Required disposition |
 | --- | --- | --- |
-| `lonejson_candidate_stream_options` selector fields | Top-level equality/multi-field, recursive-field, direct-path, and capture-prune dispatch | Replace with the one opaque generic plan descriptor; delete fields and feature macros. |
+| `lonejson_candidate_scan_plan` | Vendored generic JSON scan descriptor now owns object-member, descendant-member, path, and string-equality acceleration. Normal presets use a narrow source adapter until upstream ships the plan. | Delete the upstream-field adapter and the old feature macros when the upstream handoff lands; retain private scanner dispatch only. |
 | `configure_candidate_eval_visitors()` and `enable_fast_*()` in `src/lql_eval.c` | Maps LQL selector shapes into LoneJSON selector-shaped option fields | Fold into one liblql plan adapter for the final primitive. |
 | `execute_query_source_v2_transform()` | The only external caller of `lonejson_transform_candidates_reader()`; source projection/mutation and projection-then-mutation | Migrate first to staged output, then delete all `source_transform_*` transform-executor glue. |
 | `execute_query_file_range_spooled_matches()` | Seekable projection/mutation capture followed by separate projection/mutation work | Migrate to `candidate_output`; delete gated capture as an internal transform fallback. |

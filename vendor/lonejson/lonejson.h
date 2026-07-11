@@ -167,6 +167,7 @@ typedef unsigned long long lonejson_uint64;
 #endif
 
 #define LONEJSON_HAS_CANDIDATE_TRANSFORM_VALUE_OBSERVER 1
+#define LONEJSON_HAS_CANDIDATE_SCAN_PLAN 1
 #define LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR 1
 #define LONEJSON_HAS_CANDIDATE_RECURSIVE_FIELD_VISITOR 1
 #define LONEJSON_HAS_CANDIDATE_DIRECT_PATH_VISITOR 1
@@ -2703,11 +2704,61 @@ typedef lonejson_candidate_capture_decision (
     lonejson_error *error);
 typedef int (*lonejson_candidate_capture_prune_fn)(void *user,
                                                    lonejson_error *error);
-typedef lonejson_status (*lonejson_top_level_field_match_fn)(
+typedef lonejson_status (*lonejson_candidate_object_member_match_fn)(
     void *user, size_t index, lonejson_error *error);
 
 #define LONEJSON_CANDIDATE_PATH_LITERAL 0u
 #define LONEJSON_CANDIDATE_PATH_ARRAY_WILDCARD 1u
+
+/** Generic acceleration plan for decoded candidate visitation.
+ *
+ * This describes JSON traversal only. It contains no selector, predicate, or
+ * transform semantics: callers retain ownership of all match truth and use
+ * the visitor callbacks to observe the selected JSON values.
+ */
+typedef enum lonejson_candidate_scan_plan_kind {
+  LONEJSON_CANDIDATE_SCAN_PLAN_NONE = 0,
+  LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER = 1,
+  LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER_SET = 2,
+  LONEJSON_CANDIDATE_SCAN_PLAN_DESCENDANT_MEMBER = 3,
+  LONEJSON_CANDIDATE_SCAN_PLAN_PATH = 4,
+  LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_STRING_EQUALS = 5
+} lonejson_candidate_scan_plan_kind;
+
+/** One opaque-to-policy JSON scan plan.
+ *
+ * Pointer members are borrowed for the candidate-stream call. The selected
+ * plan kind determines which members are read. `object_member_match` and
+ * `object_member_prune` are generic visitation callbacks; they do not change
+ * the parser's JSON semantics.
+ */
+typedef struct lonejson_candidate_scan_plan {
+  lonejson_candidate_scan_plan_kind kind;
+  const char *object_member_key;
+  size_t object_member_key_len;
+  int stop_after_truncated_member;
+  const char *const *object_member_keys;
+  const size_t *object_member_key_lens;
+  size_t object_member_key_count;
+  lonejson_candidate_object_member_match_fn object_member_match;
+  void *object_member_match_user;
+  lonejson_candidate_capture_prune_fn object_member_prune;
+  void *object_member_prune_user;
+  const char *descendant_member_key;
+  size_t descendant_member_key_len;
+  const char *const *path_keys;
+  const size_t *path_key_lens;
+  const unsigned char *path_kinds;
+  size_t path_segment_count;
+  const char *expected_string_key;
+  size_t expected_string_key_len;
+  const char *expected_string_value;
+  size_t expected_string_value_len;
+  int *string_equals_matched;
+  char *root_kind;
+  int stop_after_string_match;
+  int stop_after_first_member;
+} lonejson_candidate_scan_plan;
 
 /** Options for arbitrary JSON candidate streams.
  *
@@ -2731,42 +2782,10 @@ typedef struct lonejson_candidate_stream_options {
   const lonejson_value_visitor *visitor;
   const lonejson_path_value_visitor *path_visitor;
   void *visitor_user;
-  /** Optional decoded object key for a fast top-level field visitor. When set,
-   * candidate streams with no capture skip non-matching top-level object values
-   * and only deliver visitor callbacks for the root object and matching field.
+  /** Optional generic JSON scan acceleration. LoneJSON owns traversal only;
+   * callers retain selector and transform policy outside this descriptor.
    */
-  const char *top_level_field_key;
-  size_t top_level_field_key_len;
-  int top_level_field_stop_after_truncated;
-  const char *const *top_level_field_keys;
-  const size_t *top_level_field_key_lens;
-  size_t top_level_field_key_count;
-  lonejson_top_level_field_match_fn top_level_field_match;
-  void *top_level_field_match_user;
-  lonejson_candidate_capture_prune_fn top_level_field_prune;
-  void *top_level_field_prune_user;
-  /** Optional decoded object key for a recursive field visitor. When set,
-   * candidate streams scan every object and array but only deliver scalar
-   * visitor callbacks for values whose key matches at any depth.
-   */
-  const char *recursive_field_key;
-  size_t recursive_field_key_len;
-  /** Optional direct field path for a fast candidate visitor. Each segment is
-   * a decoded literal key or an array wildcard as described by
-   * `direct_path_kinds`. Unselected subtrees are validated and skipped.
-   */
-  const char *const *direct_path_keys;
-  const size_t *direct_path_key_lens;
-  const unsigned char *direct_path_kinds;
-  size_t direct_path_segment_count;
-  const char *top_level_string_eq_key;
-  size_t top_level_string_eq_key_len;
-  const char *top_level_string_eq_value;
-  size_t top_level_string_eq_value_len;
-  int *top_level_string_eq_matched;
-  char *top_level_string_eq_root_kind;
-  int top_level_string_eq_stop_after_match;
-  int top_level_string_eq_stop_after_first_key;
+  const lonejson_candidate_scan_plan *scan_plan;
   lonejson_candidate_event_fn candidate_begin;
   lonejson_candidate_event_fn candidate_end;
   void *candidate_user;
@@ -19819,7 +19838,7 @@ static lonejson_status lonejson__json_visit_top_level_field_array(
 static lonejson_status lonejson__json_visit_top_level_fields_object(
     lonejson__json_io *io, const char *const *keys, const size_t *key_lens,
     size_t key_count, int stop_after_truncated,
-    lonejson_top_level_field_match_fn match, void *match_user,
+    lonejson_candidate_object_member_match_fn match, void *match_user,
     lonejson_candidate_capture_prune_fn prune, void *prune_user) {
   int ch;
   int first = 1;
@@ -19900,7 +19919,7 @@ static lonejson_status lonejson__json_visit_top_level_fields_object(
 static lonejson_status lonejson__json_visit_top_level_fields_array(
     lonejson__json_io *io, const char *const *keys, const size_t *key_lens,
     size_t key_count, int stop_after_truncated,
-    lonejson_top_level_field_match_fn match, void *match_user,
+    lonejson_candidate_object_member_match_fn match, void *match_user,
     lonejson_candidate_capture_prune_fn prune, void *prune_user) {
   int ch;
   int first = 1;
@@ -20591,7 +20610,7 @@ static lonejson_status lonejson__json_visit_one_top_level_fields_cursor(
     const size_t *key_lens, size_t key_count,
     const lonejson__value_limits *limits, lonejson_spooled *raw_capture_spool,
     int stop_after_truncated, int *raw_capture_disabled,
-    lonejson_top_level_field_match_fn match, void *match_user,
+    lonejson_candidate_object_member_match_fn match, void *match_user,
     lonejson_candidate_capture_prune_fn prune, void *prune_user,
     lonejson_error *error) {
   lonejson__json_io io;
@@ -35250,9 +35269,11 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
   int raw_capture_disabled;
   const lonejson_value_visitor *visitor;
   const lonejson_path_value_visitor *path_visitor;
+  const lonejson_candidate_scan_plan *plan;
   void *visitor_user;
 
   memset(&info, 0, sizeof(info));
+  plan = scan->options->scan_plan;
   raw_capture_disabled = 0;
   start = scan->cursor->has_pushback
               ? scan->cursor->pushback_offset
@@ -35268,16 +35289,14 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
   }
 
   if (scan->options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
-      scan->options->top_level_string_eq_key != NULL) {
+      plan != NULL &&
+      plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_STRING_EQUALS) {
     status = lonejson__json_match_top_level_string_eq_cursor(
-        scan->cursor, scan->options->top_level_string_eq_key,
-        scan->options->top_level_string_eq_key_len,
-        scan->options->top_level_string_eq_value,
-        scan->options->top_level_string_eq_value_len, scan->limits,
-        scan->options->top_level_string_eq_stop_after_match,
-        scan->options->top_level_string_eq_stop_after_first_key,
-        scan->options->top_level_string_eq_matched,
-        scan->options->top_level_string_eq_root_kind, scan->error);
+        scan->cursor, plan->expected_string_key, plan->expected_string_key_len,
+        plan->expected_string_value, plan->expected_string_value_len,
+        scan->limits, plan->stop_after_string_match,
+        plan->stop_after_first_member, plan->string_equals_matched,
+        plan->root_kind, scan->error);
     if (status != LONEJSON_STATUS_OK && status != LONEJSON_STATUS_TRUNCATED) {
       lonejson__candidate_set_parse_offset(scan, start);
       return status;
@@ -35322,85 +35341,78 @@ lonejson__candidate_visit_one(lonejson__candidate_scan *scan) {
     visitor = &scan->empty_visitor;
   }
   if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
-      scan->options->top_level_string_eq_key != NULL) {
+      plan != NULL &&
+      plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_STRING_EQUALS) {
     status = lonejson__json_match_top_level_string_eq_cursor(
-        scan->cursor, scan->options->top_level_string_eq_key,
-        scan->options->top_level_string_eq_key_len,
-        scan->options->top_level_string_eq_value,
-        scan->options->top_level_string_eq_value_len, scan->limits,
-        scan->options->top_level_string_eq_stop_after_match,
-        scan->options->top_level_string_eq_stop_after_first_key,
-        scan->options->top_level_string_eq_matched,
-        scan->options->top_level_string_eq_root_kind, scan->error);
+        scan->cursor, plan->expected_string_key, plan->expected_string_key_len,
+        plan->expected_string_value, plan->expected_string_value_len,
+        scan->limits, plan->stop_after_string_match,
+        plan->stop_after_first_member, plan->string_equals_matched,
+        plan->root_kind, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
-             scan->options->recursive_field_key != NULL) {
+             plan != NULL &&
+             plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_DESCENDANT_MEMBER) {
     status = lonejson__json_visit_one_recursive_field_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user,
-        scan->options->recursive_field_key,
-        scan->options->recursive_field_key_len, scan->limits, NULL, NULL,
-        scan->error);
+        plan->descendant_member_key, plan->descendant_member_key_len,
+        scan->limits, NULL, NULL, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
-             scan->options->direct_path_keys != NULL) {
+             plan != NULL &&
+             plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_PATH) {
     status = lonejson__json_visit_one_direct_path_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user,
-        scan->options->direct_path_keys, scan->options->direct_path_key_lens,
-        scan->options->direct_path_kinds,
-        scan->options->direct_path_segment_count, scan->limits, NULL, NULL,
-        scan->error);
+        plan->path_keys, plan->path_key_lens, plan->path_kinds,
+        plan->path_segment_count, scan->limits, NULL, NULL, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
-      scan->options->top_level_field_keys != NULL) {
+             plan != NULL &&
+             plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER_SET) {
     status = lonejson__json_visit_one_top_level_fields_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user,
-        scan->options->top_level_field_keys,
-        scan->options->top_level_field_key_lens,
-        scan->options->top_level_field_key_count, scan->limits, NULL,
-        scan->options->top_level_field_stop_after_truncated, NULL,
-        scan->options->top_level_field_match,
-        scan->options->top_level_field_match_user,
-        scan->options->top_level_field_prune,
-        scan->options->top_level_field_prune_user,
-        scan->error);
+        plan->object_member_keys, plan->object_member_key_lens,
+        plan->object_member_key_count, scan->limits, NULL,
+        plan->stop_after_truncated_member, NULL, plan->object_member_match,
+        plan->object_member_match_user, plan->object_member_prune,
+        plan->object_member_prune_user, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
-      scan->options->top_level_field_key != NULL) {
+             plan != NULL &&
+             plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER) {
     status = lonejson__json_visit_one_top_level_field_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user,
-        scan->options->top_level_field_key,
-        scan->options->top_level_field_key_len, scan->limits, NULL,
-        scan->options->top_level_field_stop_after_truncated, NULL,
-        scan->error);
+        plan->object_member_key, plan->object_member_key_len, scan->limits,
+        NULL, plan->stop_after_truncated_member, NULL, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED &&
-             capture.raw_spooled && scan->options->recursive_field_key != NULL) {
+             capture.raw_spooled && plan != NULL &&
+             plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_DESCENDANT_MEMBER) {
     status = lonejson__json_visit_one_recursive_field_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user,
-        scan->options->recursive_field_key,
-        scan->options->recursive_field_key_len, scan->limits, &capture.spool,
-        &raw_capture_disabled, scan->error);
+        plan->descendant_member_key, plan->descendant_member_key_len,
+        scan->limits, &capture.spool, &raw_capture_disabled, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED &&
-             capture.raw_spooled && scan->options->direct_path_keys != NULL) {
+             capture.raw_spooled && plan != NULL &&
+             plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_PATH) {
     status = lonejson__json_visit_one_direct_path_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user,
-        scan->options->direct_path_keys, scan->options->direct_path_key_lens,
-        scan->options->direct_path_kinds,
-        scan->options->direct_path_segment_count, scan->limits, &capture.spool,
+        plan->path_keys, plan->path_key_lens, plan->path_kinds,
+        plan->path_segment_count, scan->limits, &capture.spool,
         &raw_capture_disabled, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED &&
              capture.raw_spooled &&
-             scan->options->top_level_field_keys != NULL) {
+             plan != NULL &&
+             plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER_SET) {
     status = lonejson__json_visit_one_top_level_fields_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user,
-        scan->options->top_level_field_keys,
-        scan->options->top_level_field_key_lens,
-        scan->options->top_level_field_key_count, scan->limits, &capture.spool,
-        0, &raw_capture_disabled, scan->options->top_level_field_match,
-        scan->options->top_level_field_match_user, NULL, NULL, scan->error);
+        plan->object_member_keys, plan->object_member_key_lens,
+        plan->object_member_key_count, scan->limits, &capture.spool, 0,
+        &raw_capture_disabled, plan->object_member_match,
+        plan->object_member_match_user, NULL, NULL, scan->error);
   } else if (capture.mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED &&
              capture.raw_spooled &&
-             scan->options->top_level_field_key != NULL) {
+             plan != NULL &&
+             plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER) {
     status = lonejson__json_visit_one_top_level_field_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user,
-        scan->options->top_level_field_key,
-        scan->options->top_level_field_key_len, scan->limits, &capture.spool,
-        0, &raw_capture_disabled, scan->error);
+        plan->object_member_key, plan->object_member_key_len, scan->limits,
+        &capture.spool, 0, &raw_capture_disabled, scan->error);
   } else {
     status = lonejson__json_visit_one_cursor(
         scan->cursor, scan->allocator, visitor, visitor_user, path_visitor,
@@ -35689,6 +35701,7 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
     const lonejson_allocator *allocator, lonejson_error *error) {
   lonejson__candidate_scan scan;
   lonejson_candidate_stream_options local;
+  const lonejson_candidate_scan_plan *plan;
   lonejson_status status;
 
   if (cursor == NULL) {
@@ -35697,6 +35710,7 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
   }
   local =
       options != NULL ? *options : lonejson_default_candidate_stream_options();
+  plan = local.scan_plan;
   if (local.framing != LONEJSON_CANDIDATE_FRAMING_AUTO &&
       local.framing != LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE &&
       local.framing != LONEJSON_CANDIDATE_FRAMING_NDJSON &&
@@ -35736,128 +35750,75 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
                                "candidate capture decision callback is "
                                "required");
   }
-  if (local.direct_path_keys != NULL &&
-      (local.direct_path_key_lens == NULL || local.direct_path_kinds == NULL ||
-       local.direct_path_segment_count == 0u || local.path_visitor != NULL ||
-       local.visitor == NULL ||
-       (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
-        local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) ||
-       local.recursive_field_key != NULL || local.top_level_field_key != NULL ||
-       local.top_level_field_keys != NULL ||
-       local.top_level_string_eq_key != NULL)) {
-    return lonejson__set_error(
-        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "direct path candidate visitor requires path metadata, a value visitor, "
-        "no other fast candidate visitor, and no capture or gated spooled "
-        "capture");
-  }
-  if (local.direct_path_keys == NULL &&
-      (local.direct_path_key_lens != NULL || local.direct_path_kinds != NULL ||
-       local.direct_path_segment_count != 0u)) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
-                               0u, 0u,
-                               "direct path candidate metadata requires keys");
-  }
-  if (local.recursive_field_key != NULL &&
-      (local.path_visitor != NULL || local.visitor == NULL ||
-       (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
-        local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) ||
-       local.top_level_field_key != NULL ||
-       local.top_level_field_keys != NULL ||
-       local.top_level_string_eq_key != NULL)) {
-    return lonejson__set_error(
-        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "recursive field candidate visitor requires no path visitor, a value "
-        "visitor, no other fast candidate visitor, and no capture or gated "
-        "spooled capture");
-  }
-  if (local.recursive_field_key == NULL && local.recursive_field_key_len != 0u) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
-                               0u, 0u,
-                               "recursive field candidate key length requires "
-                               "a key");
-  }
-  if (local.top_level_field_key != NULL &&
-      (local.path_visitor != NULL || local.visitor == NULL ||
-       (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
-        local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) ||
-       local.recursive_field_key != NULL)) {
-    return lonejson__set_error(
-        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "top-level field candidate visitor requires no path visitor, a value "
-        "visitor, and no capture or gated spooled capture");
-  }
-  if (local.top_level_field_keys != NULL &&
-      (local.top_level_field_key_lens == NULL ||
-       local.top_level_field_key_count == 0u ||
-       local.top_level_field_key_count > sizeof(unsigned long) * 8u ||
-       local.path_visitor != NULL || local.visitor == NULL ||
-       (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
-        local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) ||
-       local.top_level_field_key != NULL || local.recursive_field_key != NULL)) {
-    return lonejson__set_error(
-        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "multi top-level field candidate visitor requires keys, key lengths, "
-        "1-64 keys, no path visitor, a value visitor, no single field "
-        "visitor, and no capture or gated spooled capture");
-  }
-  if (local.top_level_field_keys == NULL &&
-      (local.top_level_field_key_lens != NULL ||
-       local.top_level_field_key_count != 0u)) {
-    return lonejson__set_error(
-        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "multi top-level field candidate key lengths require field keys");
-  }
-  if (local.top_level_field_prune != NULL &&
-      (local.top_level_field_keys == NULL ||
-       local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE)) {
-    return lonejson__set_error(
-        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "top-level field prune requires multi field visitor and no capture");
-  }
-  if (local.top_level_field_prune == NULL &&
-      local.top_level_field_prune_user != NULL) {
-    return lonejson__set_error(
-        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "top-level field prune user requires prune callback");
-  }
-  if (local.top_level_string_eq_key != NULL &&
-      (local.top_level_string_eq_value == NULL ||
-       local.top_level_string_eq_matched == NULL ||
-       local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE ||
-       local.path_visitor != NULL || local.visitor != NULL ||
-       local.top_level_field_key != NULL ||
-       local.top_level_field_keys != NULL || local.recursive_field_key != NULL)) {
-    return lonejson__set_error(
-        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "top-level string equality candidate scan requires key, value, match "
-        "output, no visitor, no path visitor, no top-level field visitor, and "
-        "no capture");
-  }
-  if (local.top_level_string_eq_key == NULL &&
-      (local.top_level_string_eq_key_len != 0u ||
-       local.top_level_string_eq_value != NULL ||
-       local.top_level_string_eq_value_len != 0u ||
-       local.top_level_string_eq_matched != NULL ||
-       local.top_level_string_eq_root_kind != NULL ||
-       local.top_level_string_eq_stop_after_match ||
-       local.top_level_string_eq_stop_after_first_key)) {
-    return lonejson__set_error(
-        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "top-level string equality candidate scan options require a key");
-  }
-  if (local.top_level_field_key == NULL && local.top_level_field_key_len != 0u) {
-    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
-                               0u,
-                               "top-level field candidate key length requires "
-                               "a key");
-  }
-  if (local.top_level_field_stop_after_truncated &&
-      (local.top_level_field_key == NULL ||
-       local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE)) {
-    return lonejson__set_error(
-        error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u,
-        "top-level field stop-after-truncated requires no capture");
+  if (plan != NULL) {
+    if (plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_NONE) {
+      plan = NULL;
+      local.scan_plan = NULL;
+    } else if (plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_PATH) {
+      if (plan->path_keys == NULL || plan->path_key_lens == NULL ||
+          plan->path_kinds == NULL || plan->path_segment_count == 0u ||
+          local.path_visitor != NULL || local.visitor == NULL ||
+          (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
+           local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED)) {
+        return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                                   0u, 0u,
+                                   "candidate path scan requires path metadata, "
+                                   "a value visitor, and no captured payload");
+      }
+    } else if (plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_DESCENDANT_MEMBER) {
+      if (plan->descendant_member_key == NULL || local.path_visitor != NULL ||
+          local.visitor == NULL ||
+          (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
+           local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED)) {
+        return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                                   0u, 0u,
+                                   "candidate descendant-member scan requires "
+                                   "a key, value visitor, and no payload capture");
+      }
+    } else if (plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER) {
+      if (plan->object_member_key == NULL || local.path_visitor != NULL ||
+          local.visitor == NULL ||
+          (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
+           local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED)) {
+        return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                                   0u, 0u,
+                                   "candidate object-member scan requires a key, "
+                                   "value visitor, and no payload capture");
+      }
+    } else if (plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER_SET) {
+      if (plan->object_member_keys == NULL ||
+          plan->object_member_key_lens == NULL ||
+          plan->object_member_key_count == 0u ||
+          plan->object_member_key_count > sizeof(unsigned long) * 8u ||
+          local.path_visitor != NULL || local.visitor == NULL ||
+          (local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE &&
+           local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) ||
+          (plan->object_member_prune != NULL &&
+           local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE) ||
+          (plan->object_member_prune == NULL &&
+           plan->object_member_prune_user != NULL)) {
+        return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                                   0u, 0u,
+                                   "candidate object-member-set scan has "
+                                   "invalid metadata or capture policy");
+      }
+    } else if (plan->kind ==
+               LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_STRING_EQUALS) {
+      if (plan->expected_string_key == NULL ||
+          plan->expected_string_value == NULL ||
+          plan->string_equals_matched == NULL ||
+          local.capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE ||
+          local.path_visitor != NULL || local.visitor != NULL) {
+        return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                                   0u, 0u,
+                                   "candidate object string equality scan has "
+                                   "invalid metadata or visitor policy");
+      }
+    } else {
+      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                                 0u, 0u,
+                                 "invalid candidate scan plan kind");
+    }
   }
 
   memset(&scan, 0, sizeof(scan));
@@ -35869,9 +35830,7 @@ static lonejson_status lonejson__visit_candidates_cursor_with_limits(
   scan.error = error;
   if (local.capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
       local.visitor == NULL && local.path_visitor == NULL &&
-      local.top_level_field_key == NULL &&
-      local.top_level_field_keys == NULL && local.recursive_field_key == NULL &&
-      local.direct_path_keys == NULL) {
+      plan == NULL) {
     scan.empty_visitor = lonejson_default_value_visitor();
   }
 
