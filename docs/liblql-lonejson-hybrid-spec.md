@@ -40,8 +40,8 @@ The remaining architecture debt is narrower but still material:
 
 - stale candidate scan accelerators and aliases must be inventoried and
   collapsed behind one generic plan surface;
-- Candidate Run still traverses the generic path-visitor callback stack for
-  every token and invokes the transform boundary for every accepted value;
+- Candidate Run uses direct-value staging for eligible fast selectors, but
+  generic selector shapes still traverse the path-visitor callback stack;
 - projection synthesis remains interleaved with the transform writer and needs
   a final dead-code audit;
 - completion terminology and documentation still contain historical
@@ -137,15 +137,17 @@ The profile and rejected experiments establish the next work:
 - The pinned Go reference rejects exists at parse time. Direct liblql coverage
   retains the feature, while the Go/C/Lua performance matrix excludes it until
   the reference supports the common expression.
+- Direct-value staging now passes the vendored unit and allocator suites plus
+  the full 4 KiB Go/C mutation matrix. It eliminates generic path construction
+  for rejected fast-selector candidates and raised sparse equality rows above
+  the floor, but generic path selectors and array traversal still miss it;
+  the lowest observed row is now 0.401x.
 
-The next implementation slice must introduce Candidate Run direct-value staging
-for fast non-path selectors: while truth is unknown, forward raw events to the
-selector and stage compact actions without constructing generic parser paths.
-On acceptance, replay only the staged prefix through the existing path-aware
-transform state and continue with direct transform traversal; on rejection,
-discard the stage without path construction. It must not add selector syntax,
-cache candidate decisions, duplicate traversal stacks, or weaken spill-backed
-RSS bounds.
+The next implementation slice must compile the remaining common selector
+shapes into Candidate Run traversal state so they do not require generic
+parser-owned path construction. It must preserve path, wildcard, recursive,
+and array semantics without adding selector syntax, cache candidate decisions,
+duplicate traversal stacks, or weaken spill-backed RSS bounds.
 
 For selectors that resolve only at a candidate's final field, the action stage
 still dispatches the candidate's decoded events once to record actions and once
