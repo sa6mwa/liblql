@@ -5740,7 +5740,7 @@ static void expect_candidate_mutation_large_action_stage_api(void) {
   lql_mutation_plan *plan;
   lql_query_result result;
   const char *expr;
-  const char *mutation;
+  const char *mutations[2];
   char buf[4096];
   long size;
   size_t len;
@@ -5768,7 +5768,7 @@ static void expect_candidate_mutation_large_action_stage_api(void) {
     ++failures;
     return;
   }
-  for (i = 0u; i < 2048u; ++i) {
+  for (i = 0u; i < 16384u; ++i) {
     if (fputc('x', source) == EOF) {
       printf("large candidate mutation source body failed\n");
       fclose(source);
@@ -5787,12 +5787,13 @@ static void expect_candidate_mutation_large_action_stage_api(void) {
     return;
   }
   expr = "contains{field=/blob,value=xxxx}";
-  mutation = "/bench/touched=true";
+  mutations[0] = "/bench/touched=true";
+  mutations[1] = "rm:/blob";
   lql_error_init(&error);
   st = test_ctx->selector_parse(test_ctx, expr, &selector, &error);
   if (st == LQL_STATUS_OK) {
     lql_error_init(&error);
-    st = test_ctx->mutation_plan_parse(test_ctx, &mutation, 1u, &plan, &error);
+    st = test_ctx->mutation_plan_parse(test_ctx, mutations, 2u, &plan, &error);
   }
   if (st == LQL_STATUS_OK) {
     memset(&result, 0, sizeof(result));
@@ -5806,7 +5807,8 @@ static void expect_candidate_mutation_large_action_stage_api(void) {
     ++failures;
   } else if (result.candidates_seen != 1u || result.candidates_matched != 1u ||
              !read_tmpfile(out, buf, sizeof(buf), &len) ||
-             strstr(buf, "\"bench\":{\"touched\":true}") == NULL) {
+             strstr(buf, "\"bench\":{\"touched\":true}") == NULL ||
+             strstr(buf, "\"blob\"") != NULL) {
     printf("large candidate mutation result mismatch\n");
     ++failures;
   }

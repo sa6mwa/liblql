@@ -98,16 +98,37 @@ static lql_status observe_spooled_match(void *user,
 }
 
 static lql_uint64 peak_rss_bytes(void) {
-  struct rusage usage;
+#if defined(__linux__)
+  FILE *status;
+  char line[128];
+  unsigned long kib;
 
-  if (getrusage(RUSAGE_SELF, &usage) != 0 || usage.ru_maxrss < 0) {
-    return 0u;
+  status = fopen("/proc/self/status", "r");
+  if (status != NULL) {
+    while (fgets(line, sizeof(line), status) != NULL) {
+      if (sscanf(line, "VmHWM: %lu kB", &kib) == 1) {
+        fclose(status);
+        if (kib > (unsigned long)(~(lql_uint64)0) / 1024u) {
+          return 0u;
+        }
+        return (lql_uint64)kib * 1024u;
+      }
+    }
+    fclose(status);
   }
-#ifdef __APPLE__
-  return (lql_uint64)usage.ru_maxrss;
-#else
-  return (lql_uint64)usage.ru_maxrss * 1024u;
 #endif
+  {
+    struct rusage usage;
+
+    if (getrusage(RUSAGE_SELF, &usage) != 0 || usage.ru_maxrss < 0) {
+      return 0u;
+    }
+#ifdef __APPLE__
+    return (lql_uint64)usage.ru_maxrss;
+#else
+    return (lql_uint64)usage.ru_maxrss * 1024u;
+#endif
+  }
 }
 
 int main(void) {

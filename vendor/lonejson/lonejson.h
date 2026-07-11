@@ -46166,6 +46166,8 @@ typedef enum lonejson__candidate_action_kind {
   LONEJSON__CANDIDATE_ACTION_NULL = 15
 } lonejson__candidate_action_kind;
 
+#define LONEJSON__CANDIDATE_ACTION_BUFFER_SIZE 4096u
+
 typedef struct lonejson__candidate_run_state {
   const lonejson_candidate_run_options *options;
   const lonejson_runtime *runtime;
@@ -46174,6 +46176,8 @@ typedef struct lonejson__candidate_run_state {
   lonejson_candidate_info candidate;
   lonejson_writer writer;
   lonejson_spooled action_stage;
+  unsigned char action_buffer[LONEJSON__CANDIDATE_ACTION_BUFFER_SIZE];
+  size_t action_buffer_len;
   lonejson_path_value_visitor visitor;
   lonejson_candidate_stream_options candidate_options;
   lonejson__candidate_run_frame *frames;
@@ -46617,9 +46621,7 @@ static lonejson_status lonejson__candidate_run_forward_chunk(
     status = LONEJSON_STATUS_OK;
   }
   status = lonejson__candidate_run_record_status(state, status);
-  return status == LONEJSON_STATUS_OK
-             ? lonejson__candidate_run_apply_transition(state, 0)
-             : status;
+  return status;
 }
 
 static lonejson_status
@@ -46706,36 +46708,78 @@ static lonejson_status lonejson__candidate_action_dispatch(
   }
 }
 
+static lonejson_status lonejson__candidate_action_flush(
+    lonejson__candidate_run_state *state) {
+  lonejson_status status;
+
+  if (state == NULL || !state->action_stage_initialized ||
+      state->action_buffer_len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  status = lonejson_spooled_append(&state->action_stage, state->action_buffer,
+                                   state->action_buffer_len, state->error);
+  if (status == LONEJSON_STATUS_OK) {
+    state->action_buffer_len = 0u;
+  }
+  return status;
+}
+
+static lonejson_status lonejson__candidate_action_stage_append(
+    lonejson__candidate_run_state *state, const void *data, size_t len) {
+  const unsigned char *bytes;
+  size_t available;
+  lonejson_status status;
+
+  if (len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  bytes = (const unsigned char *)data;
+  available = sizeof(state->action_buffer) - state->action_buffer_len;
+  if (len <= available) {
+    memcpy(state->action_buffer + state->action_buffer_len, bytes, len);
+    state->action_buffer_len += len;
+    return LONEJSON_STATUS_OK;
+  }
+  status = lonejson__candidate_action_flush(state);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (len <= sizeof(state->action_buffer)) {
+    memcpy(state->action_buffer, bytes, len);
+    state->action_buffer_len = len;
+    return LONEJSON_STATUS_OK;
+  }
+  return lonejson_spooled_append(&state->action_stage, bytes, len,
+                                 state->error);
+}
+
 static lonejson_status lonejson__candidate_action_append(
     lonejson__candidate_run_state *state, lonejson__candidate_action_kind kind,
     const lonejson_value_path *path, const char *data, size_t len,
     int boolean_value) {
-  unsigned char opcode;
-  unsigned char encoded_bool;
+  unsigned char header[1u + sizeof(size_t)];
+  size_t header_len;
   lonejson_status status;
   int chunk;
+
   if (state == NULL || !state->action_stage_initialized) {
     return LONEJSON_STATUS_OK;
   }
-  opcode = (unsigned char)kind;
-  encoded_bool = (unsigned char)(boolean_value != 0);
+  header[0] = (unsigned char)kind;
+  header_len = 1u;
   chunk = kind == LONEJSON__CANDIDATE_ACTION_KEY_CHUNK ||
           kind == LONEJSON__CANDIDATE_ACTION_STRING_CHUNK ||
           kind == LONEJSON__CANDIDATE_ACTION_NUMBER_CHUNK;
   (void)path;
-  status = lonejson_spooled_append(&state->action_stage, &opcode,
-                                   sizeof(opcode), state->error);
-  if (status == LONEJSON_STATUS_OK && chunk) {
-    status = lonejson_spooled_append(&state->action_stage, &len, sizeof(len),
-                                     state->error);
-  } else if (status == LONEJSON_STATUS_OK &&
-             kind == LONEJSON__CANDIDATE_ACTION_BOOL) {
-    status = lonejson_spooled_append(&state->action_stage, &encoded_bool,
-                                     sizeof(encoded_bool), state->error);
+  if (chunk) {
+    memcpy(header + header_len, &len, sizeof(len));
+    header_len += sizeof(len);
+  } else if (kind == LONEJSON__CANDIDATE_ACTION_BOOL) {
+    header[header_len++] = (unsigned char)(boolean_value != 0);
   }
+  status = lonejson__candidate_action_stage_append(state, header, header_len);
   if (status == LONEJSON_STATUS_OK && len != 0u) {
-    status =
-        lonejson_spooled_append(&state->action_stage, data, len, state->error);
+    status = lonejson__candidate_action_stage_append(state, data, len);
   }
   return status;
 }
@@ -46807,6 +46851,10 @@ lonejson__candidate_run_apply_transition(lonejson__candidate_run_state *state,
   }
   if (transition == LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT) {
     if (state->output_transition == LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN) {
+      status = lonejson__candidate_action_flush(state);
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
       state->output_transition = transition;
       state->observer_done = 1;
       status = lonejson__candidate_run_commit_actions(state);
@@ -46819,6 +46867,7 @@ lonejson__candidate_run_apply_transition(lonejson__candidate_run_state *state,
   }
   if (transition == LONEJSON_CANDIDATE_RUN_TRANSITION_REJECT) {
     if (state->output_transition == LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN) {
+      state->action_buffer_len = 0u;
       lonejson_spooled_reset(&state->action_stage);
       state->output_transition = transition;
       state->observer_done = 1;
@@ -46826,6 +46875,7 @@ lonejson__candidate_run_apply_transition(lonejson__candidate_run_state *state,
     return LONEJSON_STATUS_OK;
   }
   if (transition == LONEJSON_CANDIDATE_RUN_TRANSITION_STOP) {
+    state->action_buffer_len = 0u;
     lonejson_spooled_reset(&state->action_stage);
     state->output_transition = transition;
     state->stopped = 1;
@@ -47056,8 +47106,13 @@ lonejson__candidate_run_commit_actions(lonejson__candidate_run_state *state) {
   int chunk;
 
   if (state == NULL || !state->action_stage_initialized ||
-      lonejson_spooled_size(&state->action_stage) == 0u) {
+      (lonejson_spooled_size(&state->action_stage) == 0u &&
+       state->action_buffer_len == 0u)) {
     return LONEJSON_STATUS_OK;
+  }
+  status = lonejson__candidate_action_flush(state);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
   }
   if (!state->action_stage.spilled) {
     return lonejson__candidate_run_commit_actions_memory(state);
@@ -48925,6 +48980,7 @@ lonejson__candidate_run_begin(void *user,
   state->current_emit = 0;
   state->current_scalar_replace = 0;
   if (state->action_stage_initialized) {
+    state->action_buffer_len = 0u;
     lonejson_spooled_reset(&state->action_stage);
     state->output_transition = LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN;
   }

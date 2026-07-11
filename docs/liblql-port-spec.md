@@ -1725,9 +1725,10 @@ Current implementation status:
   operation, while selector parse-cost modes distinguish parsed selector reuse
   from reparsing expression strings on every timed run across Go, C, and Lua,
   and while
-  Go and C helper records also report OS `getrusage` peak RSS as
-  `peak_rss_bytes` for the benchmark schema and Lua records report process peak
-  RSS when host `time` support is available; `make bench-check` enforces a
+  Go helper records report OS `getrusage` peak RSS, while the C native helper
+  reads Linux `/proc/self/status` `VmHWM` (falling back to `getrusage` on other
+  platforms), as `peak_rss_bytes` for the benchmark schema; Lua records report
+  process peak RSS when host `time` support is available. `make bench-check` enforces a
   supported-C smoke RSS ceiling through `LQL_BENCH_MAX_C_PEAK_RSS_BYTES`
   defaulting to 128 MiB; `make bench-memory-check` adds a separate scalable
   Go/C/Lua streaming profile that generates at least 16 MiB of NDJSON by

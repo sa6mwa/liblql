@@ -237,7 +237,8 @@ Current implementation status:
   it is a plan-shaped steady-state path, not a distinct compiled-plan API.
   The C native helper and Lua facade runner report `ns_per_op`; the schema
   validator requires timing for all supported Go, C, and Lua records. The C
-  native helper and Go helper report OS `getrusage` peak RSS as
+  native helper reads Linux `/proc/self/status` `VmHWM` (falling back to
+  `getrusage`), while the Go helper reports OS `getrusage` peak RSS as
   `peak_rss_bytes`; the Lua facade runner records process peak RSS through the
   host `time` command when available. The memory profile requires positive
   `peak_rss_bytes` for supported Lua records.
