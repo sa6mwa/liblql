@@ -48677,7 +48677,6 @@ typedef struct lonejson__candidate_run_state {
   lonejson_spooled action_stage;
   lonejson_spooled transformed_stage;
   lonejson_path_value_visitor visitor;
-  lonejson_value_visitor direct_visitor;
   lonejson_candidate_stream_options candidate_options;
   lonejson__candidate_run_frame *frames;
   size_t frame_count;
@@ -48692,7 +48691,6 @@ typedef struct lonejson__candidate_run_state {
   int transformed_stage_initialized;
   int transformed_stage_active;
   int committing_actions;
-  int direct_value_mode;
   int observer_done;
   lonejson_candidate_run_transition output_transition;
   int candidate_run_started;
@@ -49560,28 +49558,19 @@ static lonejson_status lonejson__candidate_run_commit_actions_memory(
     }
   }
   state->committing_actions = 0;
-  if (state->direct_value_mode) {
-    lonejson__buffer_free(state->allocator, saved_input_frames,
-                          saved_input_frame_cap * sizeof(*saved_input_frames));
-    lonejson__buffer_free(state->allocator, saved_path_segments,
-                          saved_path_segment_cap *
-                              sizeof(*saved_path_segments));
-  } else {
-    while (state->input_frame_count != 0u) {
-      lonejson__candidate_run_pop_input_frame(state);
-    }
-    lonejson__buffer_free(state->allocator, state->input_frames,
-                          state->input_frame_cap *
-                              sizeof(*state->input_frames));
-    lonejson__buffer_free(state->allocator, state->path_segments,
-                          state->path_segment_cap *
-                              sizeof(*state->path_segments));
-    state->input_frames = saved_input_frames;
-    state->input_frame_count = saved_input_frame_count;
-    state->input_frame_cap = saved_input_frame_cap;
-    state->path_segments = saved_path_segments;
-    state->path_segment_cap = saved_path_segment_cap;
+  while (state->input_frame_count != 0u) {
+    lonejson__candidate_run_pop_input_frame(state);
   }
+  lonejson__buffer_free(state->allocator, state->input_frames,
+                        state->input_frame_cap * sizeof(*state->input_frames));
+  lonejson__buffer_free(state->allocator, state->path_segments,
+                        state->path_segment_cap *
+                            sizeof(*state->path_segments));
+  state->input_frames = saved_input_frames;
+  state->input_frame_count = saved_input_frame_count;
+  state->input_frame_cap = saved_input_frame_cap;
+  state->path_segments = saved_path_segments;
+  state->path_segment_cap = saved_path_segment_cap;
   return status;
 }
 
@@ -49707,28 +49696,19 @@ lonejson__candidate_run_commit_actions(lonejson__candidate_run_state *state) {
     }
   }
   state->committing_actions = 0;
-  if (state->direct_value_mode) {
-    lonejson__buffer_free(state->allocator, saved_input_frames,
-                          saved_input_frame_cap * sizeof(*saved_input_frames));
-    lonejson__buffer_free(state->allocator, saved_path_segments,
-                          saved_path_segment_cap *
-                              sizeof(*saved_path_segments));
-  } else {
-    while (state->input_frame_count != 0u) {
-      lonejson__candidate_run_pop_input_frame(state);
-    }
-    lonejson__buffer_free(state->allocator, state->input_frames,
-                          state->input_frame_cap *
-                              sizeof(*state->input_frames));
-    lonejson__buffer_free(state->allocator, state->path_segments,
-                          state->path_segment_cap *
-                              sizeof(*state->path_segments));
-    state->input_frames = saved_input_frames;
-    state->input_frame_count = saved_input_frame_count;
-    state->input_frame_cap = saved_input_frame_cap;
-    state->path_segments = saved_path_segments;
-    state->path_segment_cap = saved_path_segment_cap;
+  while (state->input_frame_count != 0u) {
+    lonejson__candidate_run_pop_input_frame(state);
   }
+  lonejson__buffer_free(state->allocator, state->input_frames,
+                        state->input_frame_cap * sizeof(*state->input_frames));
+  lonejson__buffer_free(state->allocator, state->path_segments,
+                        state->path_segment_cap *
+                            sizeof(*state->path_segments));
+  state->input_frames = saved_input_frames;
+  state->input_frame_count = saved_input_frame_count;
+  state->input_frame_cap = saved_input_frame_cap;
+  state->path_segments = saved_path_segments;
+  state->path_segment_cap = saved_path_segment_cap;
   lonejson__buffer_free(state->allocator, bytes, bytes_cap);
   return status;
 }
@@ -51532,203 +51512,6 @@ lonejson__candidate_run_value_null(void *user, lonejson_error *error) {
   return status;
 }
 
-static int lonejson__candidate_run_direct_stage_unknown(
-    const lonejson__candidate_run_state *state) {
-  return state != NULL && !state->committing_actions &&
-         state->action_stage_initialized && !state->transformed_stage_active &&
-         state->output_transition == LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN;
-}
-
-static lonejson_status lonejson__candidate_run_direct_event(
-    lonejson__candidate_run_state *state, lonejson__candidate_action_kind kind,
-    lonejson_value_event_fn observer, int value_complete, int *handled) {
-  lonejson_status status;
-
-  *handled = 0;
-  if (!state->committing_actions && state->action_stage_initialized &&
-      !state->transformed_stage_active &&
-      state->output_transition != LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN &&
-      state->output_transition != LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT) {
-    *handled = 1;
-    return LONEJSON_STATUS_OK;
-  }
-  if (!lonejson__candidate_run_direct_stage_unknown(state)) {
-    return LONEJSON_STATUS_OK;
-  }
-  status = lonejson__candidate_run_forward_event(state, NULL, observer, NULL,
-                                                 value_complete);
-  if (status != LONEJSON_STATUS_OK) {
-    *handled = 1;
-    return status;
-  }
-  if (state->output_transition == LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN) {
-    *handled = 1;
-    return lonejson__candidate_action_append(state, kind, NULL, NULL, 0u, 0);
-  }
-  if (state->output_transition != LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT ||
-      state->transformed_stage_active) {
-    *handled = 1;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status lonejson__candidate_run_direct_chunk(
-    lonejson__candidate_run_state *state, lonejson__candidate_action_kind kind,
-    lonejson_value_chunk_fn observer, const char *data, size_t len,
-    int *handled) {
-  lonejson_status status;
-
-  *handled = 0;
-  if (!state->committing_actions && state->action_stage_initialized &&
-      !state->transformed_stage_active &&
-      state->output_transition != LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN &&
-      state->output_transition != LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT) {
-    *handled = 1;
-    return LONEJSON_STATUS_OK;
-  }
-  if (!lonejson__candidate_run_direct_stage_unknown(state)) {
-    return LONEJSON_STATUS_OK;
-  }
-  status = lonejson__candidate_run_forward_chunk(state, NULL, observer, NULL,
-                                                 data, len);
-  if (status != LONEJSON_STATUS_OK) {
-    *handled = 1;
-    return status;
-  }
-  if (state->output_transition == LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN) {
-    *handled = 1;
-    return lonejson__candidate_action_append(state, kind, NULL, data, len, 0);
-  }
-  if (state->output_transition != LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT ||
-      state->transformed_stage_active) {
-    *handled = 1;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status
-lonejson__candidate_run_direct_bool(lonejson__candidate_run_state *state,
-                                    int value, int *handled) {
-  lonejson_status status;
-
-  *handled = 0;
-  if (!state->committing_actions && state->action_stage_initialized &&
-      !state->transformed_stage_active &&
-      state->output_transition != LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN &&
-      state->output_transition != LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT) {
-    *handled = 1;
-    return LONEJSON_STATUS_OK;
-  }
-  if (!lonejson__candidate_run_direct_stage_unknown(state)) {
-    return LONEJSON_STATUS_OK;
-  }
-  status = lonejson__candidate_run_forward_bool(state, NULL, value);
-  if (status != LONEJSON_STATUS_OK) {
-    *handled = 1;
-    return status;
-  }
-  if (state->output_transition == LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN) {
-    *handled = 1;
-    return lonejson__candidate_action_append(
-        state, LONEJSON__CANDIDATE_ACTION_BOOL, NULL, NULL, 0u, value);
-  }
-  if (state->output_transition != LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT ||
-      state->transformed_stage_active) {
-    *handled = 1;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-#define LONEJSON__CANDIDATE_DIRECT_EVENT(name, kind, member, complete)         \
-  static lonejson_status lonejson__candidate_run_direct_##name(                \
-      void *user, lonejson_error *error) {                                     \
-    lonejson__candidate_run_state *state =                                     \
-        (lonejson__candidate_run_state *)user;                                 \
-    int handled;                                                               \
-    lonejson_status status = lonejson__candidate_run_direct_event(             \
-        state, kind,                                                           \
-        state->options->observer_value != NULL                                 \
-            ? state->options->observer_value->member                           \
-            : NULL,                                                            \
-        complete, &handled);                                                   \
-    return status != LONEJSON_STATUS_OK || handled                             \
-               ? status                                                        \
-               : lonejson__candidate_run_value_##name(user, error);            \
-  }
-
-#define LONEJSON__CANDIDATE_DIRECT_CHUNK(name, kind, member)                   \
-  static lonejson_status lonejson__candidate_run_direct_##name(                \
-      void *user, const char *data, size_t len, lonejson_error *error) {       \
-    lonejson__candidate_run_state *state =                                     \
-        (lonejson__candidate_run_state *)user;                                 \
-    int handled;                                                               \
-    lonejson_status status = lonejson__candidate_run_direct_chunk(             \
-        state, kind,                                                           \
-        state->options->observer_value != NULL                                 \
-            ? state->options->observer_value->member                           \
-            : NULL,                                                            \
-        data, len, &handled);                                                  \
-    return status != LONEJSON_STATUS_OK || handled                             \
-               ? status                                                        \
-               : lonejson__candidate_run_value_##name(user, data, len, error); \
-  }
-
-LONEJSON__CANDIDATE_DIRECT_EVENT(object_begin,
-                                 LONEJSON__CANDIDATE_ACTION_OBJECT_BEGIN,
-                                 object_begin, 0)
-LONEJSON__CANDIDATE_DIRECT_EVENT(object_end,
-                                 LONEJSON__CANDIDATE_ACTION_OBJECT_END,
-                                 object_end, 1)
-LONEJSON__CANDIDATE_DIRECT_EVENT(array_begin,
-                                 LONEJSON__CANDIDATE_ACTION_ARRAY_BEGIN,
-                                 array_begin, 0)
-LONEJSON__CANDIDATE_DIRECT_EVENT(array_end,
-                                 LONEJSON__CANDIDATE_ACTION_ARRAY_END,
-                                 array_end, 1)
-LONEJSON__CANDIDATE_DIRECT_EVENT(key_begin,
-                                 LONEJSON__CANDIDATE_ACTION_KEY_BEGIN,
-                                 object_key_begin, 0)
-LONEJSON__CANDIDATE_DIRECT_EVENT(key_end, LONEJSON__CANDIDATE_ACTION_KEY_END,
-                                 object_key_end, 0)
-LONEJSON__CANDIDATE_DIRECT_EVENT(string_begin,
-                                 LONEJSON__CANDIDATE_ACTION_STRING_BEGIN,
-                                 string_begin, 0)
-LONEJSON__CANDIDATE_DIRECT_EVENT(string_end,
-                                 LONEJSON__CANDIDATE_ACTION_STRING_END,
-                                 string_end, 1)
-LONEJSON__CANDIDATE_DIRECT_EVENT(number_begin,
-                                 LONEJSON__CANDIDATE_ACTION_NUMBER_BEGIN,
-                                 number_begin, 0)
-LONEJSON__CANDIDATE_DIRECT_EVENT(number_end,
-                                 LONEJSON__CANDIDATE_ACTION_NUMBER_END,
-                                 number_end, 1)
-LONEJSON__CANDIDATE_DIRECT_EVENT(null, LONEJSON__CANDIDATE_ACTION_NULL,
-                                 null_value, 1)
-LONEJSON__CANDIDATE_DIRECT_CHUNK(key_chunk,
-                                 LONEJSON__CANDIDATE_ACTION_KEY_CHUNK,
-                                 object_key_chunk)
-LONEJSON__CANDIDATE_DIRECT_CHUNK(string_chunk,
-                                 LONEJSON__CANDIDATE_ACTION_STRING_CHUNK,
-                                 string_chunk)
-LONEJSON__CANDIDATE_DIRECT_CHUNK(number_chunk,
-                                 LONEJSON__CANDIDATE_ACTION_NUMBER_CHUNK,
-                                 number_chunk)
-
-static lonejson_status
-lonejson__candidate_run_direct_bool_value(void *user, int value,
-                                          lonejson_error *error) {
-  lonejson__candidate_run_state *state = (lonejson__candidate_run_state *)user;
-  int handled;
-  lonejson_status status =
-      lonejson__candidate_run_direct_bool(state, value, &handled);
-  return status != LONEJSON_STATUS_OK || handled
-             ? status
-             : lonejson__candidate_run_value_bool(user, value, error);
-}
-
-#undef LONEJSON__CANDIDATE_DIRECT_EVENT
-#undef LONEJSON__CANDIDATE_DIRECT_CHUNK
-
 #undef LONEJSON__CANDIDATE_VALUE_EVENT_WRAPPER
 #undef LONEJSON__CANDIDATE_VALUE_CHUNK_WRAPPER
 #undef LONEJSON__CANDIDATE_VALUE_END_WRAPPER
@@ -51899,44 +51682,13 @@ static lonejson_status lonejson__candidate_run_cursor_core(
   state.visitor.number_end = lonejson__candidate_run_number_end;
   state.visitor.boolean_value = lonejson__candidate_run_bool;
   state.visitor.null_value = lonejson__candidate_run_null;
-  state.direct_visitor = lonejson_default_value_visitor();
-  state.direct_visitor.object_begin =
-      lonejson__candidate_run_direct_object_begin;
-  state.direct_visitor.object_end = lonejson__candidate_run_direct_object_end;
-  state.direct_visitor.object_key_begin =
-      lonejson__candidate_run_direct_key_begin;
-  state.direct_visitor.object_key_chunk =
-      lonejson__candidate_run_direct_key_chunk;
-  state.direct_visitor.object_key_end = lonejson__candidate_run_direct_key_end;
-  state.direct_visitor.array_begin = lonejson__candidate_run_direct_array_begin;
-  state.direct_visitor.array_end = lonejson__candidate_run_direct_array_end;
-  state.direct_visitor.string_begin =
-      lonejson__candidate_run_direct_string_begin;
-  state.direct_visitor.string_chunk =
-      lonejson__candidate_run_direct_string_chunk;
-  state.direct_visitor.string_end = lonejson__candidate_run_direct_string_end;
-  state.direct_visitor.number_begin =
-      lonejson__candidate_run_direct_number_begin;
-  state.direct_visitor.number_chunk =
-      lonejson__candidate_run_direct_number_chunk;
-  state.direct_visitor.number_end = lonejson__candidate_run_direct_number_end;
-  state.direct_visitor.boolean_value =
-      lonejson__candidate_run_direct_bool_value;
-  state.direct_visitor.null_value = lonejson__candidate_run_direct_null;
   state.candidate_options = lonejson_default_candidate_stream_options();
   state.candidate_options.framing = options->framing;
-  if (options->observer == NULL && options->observer_value != NULL &&
-      options->output_transition != NULL) {
-    state.direct_value_mode = 1;
-    state.candidate_options.visitor = &state.direct_visitor;
-  } else {
-    state.candidate_options.path_visitor = &state.visitor;
-  }
+  state.candidate_options.path_visitor = &state.visitor;
   state.candidate_options.visitor_user = &state;
   state.candidate_options.candidate_begin = lonejson__candidate_run_begin;
   state.candidate_options.candidate_end = lonejson__candidate_run_end;
   state.candidate_options.candidate_user = &state;
-  state.candidate_options.scan_plan = options->scan_plan;
   status = lonejson__visit_candidates_cursor_with_limits(
       cursor, &state.candidate_options, runtime_state,
       &runtime_state->value_limits, runtime_state->config.allocator, error);

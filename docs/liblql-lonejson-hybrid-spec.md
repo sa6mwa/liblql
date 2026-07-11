@@ -19,8 +19,9 @@ The hard outcomes are:
 
 - strict NDJSON only; a root array is a hard error at every candidate-stream
   entry point;
-- C is at least 1.2x Go on every accepted Go/C benchmark row, with 1.5x the
-  operating target;
+- after the clean cutover, C is at least 1.0x Go on every accepted Go/C
+  benchmark row; 1.2x remains a target only when it does not add complexity
+  or weaken the developer experience;
 - RSS is independent of total input size, candidate count, match count, and
   result count; large current candidates spill instead of growing RSS;
 - one coherent candidate engine, no compatibility layer, dead executor, or
@@ -36,19 +37,23 @@ seekable projection/mutation use this executor. The former raw-source replay,
 projected replay, output modes, decision callbacks, compatibility adapter, and
 separate liblql file mutation executor have been deleted.
 
-The remaining architecture debt is narrower but still material:
+The current implementation is not fully cut over. It has one public executor,
+but it still contains competing internal routes:
 
-- stale candidate scan accelerators and aliases must be inventoried and
-  collapsed behind one generic plan surface;
-- Candidate Run uses direct-value staging for eligible fast selectors, but
-  generic selector shapes still traverse the path-visitor callback stack;
-- projection synthesis remains interleaved with the transform writer and needs
-  a final dead-code audit;
-- completion terminology and documentation still contain historical
-  `candidate_output` and parser-replay wording that must be removed;
-- the complete parity, sanitizer, fuzz, RSS, and performance matrices have not
-  run against the final code because the architecture/performance slice is
-  still open.
+- lonejson_candidate_scan_plan, direct-value staging, and the generic
+  path visitor are parallel traversal models;
+- the transformed-output threshold is a second speculative staging model beside
+  the compact action stage;
+- configure_candidate_eval_visitors() and the enable_fast_*() family expose
+  selector shape inside JSON mechanics;
+- projection and mutation still rely on callback glue spread between liblql and
+  LoneJSON.
+
+The final route has exactly one traversal model: a path-aware Candidate Run
+observer. It has exactly one unresolved-output model: the compact spill-backed
+action stage. LoneJSON owns paths, decoded events, writer actions, and spools;
+liblql owns selector and mutation policy. There are no selector-shaped
+LoneJSON options or runtime dispatch choices.
 
 ### Live Inventory Baseline
 

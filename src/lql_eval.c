@@ -7867,9 +7867,6 @@ static lql_status execute_query_source_candidate_run(
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor observer;
-#if defined(LONEJSON_HAS_CANDIDATE_RUN_VALUE_OBSERVER)
-  lonejson_value_visitor value_observer;
-#endif
   lonejson_candidate_run_options options;
   lonejson_candidate_run_projection_path *projection_paths;
   lonejson_candidate_run_projection_segment *projection_segments;
@@ -7969,29 +7966,8 @@ static lql_status execute_query_source_candidate_run(
                                 : LONEJSON_CANDIDATE_RUN_OLD_SCALAR_NONE;
   options.sink = file_sink_unlocked;
   options.sink_user = out;
-#if defined(LONEJSON_HAS_CANDIDATE_RUN_VALUE_OBSERVER)
-  if (selector_fast_flat_scalar_eligible(selector)) {
-    init_fast_flat_scalar_visitor(&value_observer);
-    options.observer_value = &value_observer;
-    options.observer_user = &state.doc;
-  } else if (selector_fast_direct_scalar_eligible(selector)) {
-    init_fast_direct_scalar_visitor(&value_observer);
-    options.observer_value = &value_observer;
-    options.observer_user = &state.doc;
-  } else if (selector_fast_recursive_suffix_scalar_eligible(selector)) {
-    init_fast_recursive_suffix_scalar_visitor(&value_observer);
-    options.observer_value = &value_observer;
-    options.observer_user = &state.doc;
-  } else if (selector_fast_top_level_multi_eligible(selector)) {
-    init_fast_top_level_multi_visitor(&value_observer);
-    options.observer_value = &value_observer;
-    options.observer_user = &state.doc;
-  } else
-#endif
-  {
-    options.observer = &observer;
-    options.observer_user = &state;
-  }
+  options.observer = &observer;
+  options.observer_user = &state;
   options.transform = source_candidate_run_decide;
   options.replace = source_candidate_run_replace;
   options.insert = source_candidate_run_insert_missing;
@@ -8008,9 +7984,6 @@ static lql_status execute_query_source_candidate_run(
   options.old_scalar_user = &state;
 #if defined(LONEJSON_HAS_CANDIDATE_RUN_STAGED)
   if (state.staged_output) {
-    if (mutation_plan != NULL && projection == NULL) {
-      options.transform_stage_threshold = 1024u;
-    }
     options.output_transition = source_candidate_run_transition;
     options.output_transition_user = &state;
   }
