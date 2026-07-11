@@ -16,7 +16,7 @@ The hard outcomes are:
 
 - strict NDJSON only; a root array is a hard error at every candidate-stream
   entry point;
-- C is at least 1.0x Go on every accepted Go/C benchmark row, with 1.5x the
+- C is at least 1.2x Go on every accepted Go/C benchmark row, with 1.5x the
   operating target;
 - RSS is independent of total input size, candidate count, match count, and
   result count; large current candidates spill instead of growing RSS;
@@ -251,7 +251,7 @@ The clean cut is not complete until all of these are true:
   vendored implementation;
 - 100 MiB and large-candidate RSS gates pass, including repeated spilled
   callback-source candidates;
-- every accepted Go/C benchmark row is at least 1.0x, and the result records
+- every accepted Go/C benchmark row is at least 1.2x, and the result records
   all remaining rows below 1.5x with a concrete owner;
 - the vendored header contains one coherent generic candidate surface suitable
   for upstream review, not a set of liblql-shaped performance hooks;
