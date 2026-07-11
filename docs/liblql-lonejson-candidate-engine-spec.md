@@ -80,6 +80,11 @@ not reparse raw candidate bytes. The action stage is a compact generic writer
 command stream, never selector syntax or liblql transform state. It may spill
 only the current candidate; it is reset before the next candidate.
 
+The action codec omits key, string, and number begin markers. Replay opens the
+corresponding writer state on its first chunk, or on its end marker for an empty
+key or string. This remains a generic parsed-event representation rather than
+raw JSON or selector-specific state.
+
 When liblql proves rejection, LoneJSON stops output work but continues JSON
 validation and observer delivery. When it proves acceptance, LoneJSON commits
 the staged prefix and writes subsequent events directly. If truth remains
