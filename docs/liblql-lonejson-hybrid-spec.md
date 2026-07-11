@@ -48,6 +48,21 @@ The recent source-spooled match-decision reuse is a small liblql improvement,
 not this clean cut. The large-candidate RSS test is a guardrail, not proof that
 the old executor has been removed.
 
+### Live Inventory Baseline
+
+This is the required starting inventory. Update it as migrations delete rows;
+do not remove a row merely because a faster sibling path exists.
+
+| Current owner | Live responsibility | Required disposition |
+| --- | --- | --- |
+| `lonejson_candidate_stream_options` selector fields | Top-level equality/multi-field, recursive-field, direct-path, and capture-prune dispatch | Replace with the one opaque generic plan descriptor; delete fields and feature macros. |
+| `configure_candidate_eval_visitors()` and `enable_fast_*()` in `src/lql_eval.c` | Maps LQL selector shapes into LoneJSON selector-shaped option fields | Fold into one liblql plan adapter for the final primitive. |
+| `execute_query_source_v2_transform()` | The only external caller of `lonejson_transform_candidates_reader()`; source projection/mutation and projection-then-mutation | Migrate first to staged output, then delete all `source_transform_*` transform-executor glue. |
+| `execute_query_file_range_spooled_matches()` | Seekable projection/mutation capture followed by separate projection/mutation work | Migrate to `candidate_output`; delete gated capture as an internal transform fallback. |
+| `execute_mutate_source_matches_only_spooled()` | Root-create source-mutation special case that captures then reparses | Delete after staged output supports root creation. |
+| `execute_mutate_file_range_candidates_fast()` | Separate seekable mutation scanner/writer path | Fold into `candidate_output` without changing matches-only or unmatched-output semantics. |
+| `source_spooled_match_state` payload delivery | Public callback-scoped raw payload handles | Preserve as `candidate_payload`; retain bounded capture only for this public contract. |
+
 ## Ownership
 
 LoneJSON owns only JSON mechanics:
