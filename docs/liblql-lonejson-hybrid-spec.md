@@ -150,6 +150,38 @@ If a required operation cannot satisfy those rules, it is unsupported until the
 candidate engine supports it. It must not silently route to the old replay
 executor, a second parser, a whole-input spool, or a liblql JSON writer.
 
+### Delayed Output Requirement
+
+The final primitive must not make speculative full-candidate serialization the
+only way to defer selection. That design is semantically valid but loses to Go
+when most candidates are rejected: it writes every rejected candidate through
+the transform writer before discarding it.
+
+Candidate parsing therefore has a generic delayed-output state with these
+properties:
+
+1. LoneJSON delivers decoded events to liblql while retaining only the
+   current candidate's bounded output/event prefix needed before a commit
+   decision.
+2. When liblql can prove a candidate rejected, LoneJSON stops producing
+   transformed output for its remaining events but continues JSON validation
+   and observer delivery.
+3. When liblql can prove a candidate accepted, LoneJSON commits the staged
+   prefix and writes the remaining events directly through the selected output
+   policy.
+4. When truth remains unknown until candidate end, LoneJSON commits or
+   discards the bounded stage there. It does not invoke a second JSON parser.
+
+The stage is LoneJSON-owned and generic. It records JSON writer actions or an
+equivalent decoded event representation, never selector syntax or liblql
+mutation state. Its implementation may use a bounded spillable current-
+candidate spool; it must not retain output from a previous candidate.
+
+This is the required replacement for the current source-only exact/multi
+early-discard helpers. Those helpers are interim measurements and must be
+deleted once the primitive exposes generic `accept`, `reject`, `unknown`, and
+`stop` output-policy transitions.
+
 ## Required Deletions
 
 Completion requires deleting, not merely bypassing:
