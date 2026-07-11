@@ -5,17 +5,24 @@
 
 typedef struct lql_stream_term {
   const lql_selector *selector;
-  const char *key;
-  size_t key_len;
+  lql_selector_kind kind;
+  size_t field_index;
   const char *value;
   size_t value_len;
+  size_t *failure;
   unsigned long bit;
 } lql_stream_term;
+
+typedef struct lql_stream_field {
+  const char *key;
+  size_t key_len;
+} lql_stream_field;
 
 struct lql_stream_program {
   lql_stream_term terms[sizeof(unsigned long) * CHAR_BIT];
   size_t term_count;
-  unsigned long required_hits;
+  lql_stream_field fields[sizeof(unsigned long) * CHAR_BIT];
+  size_t field_count;
   int match_all;
   lonejson_field mapped_fields[sizeof(unsigned long) * CHAR_BIT];
   lonejson_map mapped_map;
@@ -43,12 +50,133 @@ typedef struct lql_stream_state {
 
 typedef struct lql_stream_member_context {
   lql_stream_state *state;
-  size_t term_index;
-  size_t value_pos;
+  size_t field_index;
+  size_t positions[sizeof(unsigned long) * CHAR_BIT];
   size_t container_depth;
   int active_string;
-  int mismatch;
+  unsigned long mismatches;
 } lql_stream_member_context;
+
+#define LQL_STREAM_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
+
+static int stream_top_level_field(const char *field, const char **key,
+                                  size_t *key_len) {
+  const char *out;
+  if (field == NULL || field[0] != '/' || field[1] == '\0' ||
+      strchr(field + 1, '/') != NULL || strchr(field + 1, '~') != NULL) {
+    return 0;
+  }
+  out = field + 1;
+  if (key != NULL) {
+    *key = out;
+  }
+  if (key_len != NULL) {
+    *key_len = strlen(out);
+  }
+  return 1;
+}
+
+static int stream_term_matches_selector(const lql_stream_program *program,
+                                        const lql_selector *selector,
+                                        unsigned long hits) {
+  size_t i;
+  int found;
+  found = 0;
+  for (i = 0u; i < program->term_count; ++i) {
+    if (program->terms[i].selector == selector) {
+      found = 1;
+      if ((hits & program->terms[i].bit) != 0ul) {
+        return 1;
+      }
+    }
+  }
+  return found ? 0 : -1;
+}
+
+static void stream_term_failure_table(lql_allocator *allocator,
+                                      lql_stream_term *term) {
+  size_t i;
+  size_t matched;
+  if (term->kind != LQL_SELECTOR_KIND_CONTAINS || term->value_len == 0u) {
+    return;
+  }
+  term->failure = (size_t *)allocator->calloc(allocator, term->value_len,
+                                               sizeof(*term->failure));
+  if (term->failure == NULL) {
+    return;
+  }
+  matched = 0u;
+  for (i = 1u; i < term->value_len; ++i) {
+    while (matched != 0u && term->value[i] != term->value[matched]) {
+      matched = term->failure[matched - 1u];
+    }
+    if (term->value[i] == term->value[matched]) {
+      ++matched;
+    }
+    term->failure[i] = matched;
+  }
+}
+
+static lql_status stream_field_get(lql_stream_program *program,
+                                   const char *key, size_t key_len,
+                                   size_t *out, lql_error *error) {
+  size_t i;
+  for (i = 0u; i < program->field_count; ++i) {
+    if (program->fields[i].key_len == key_len &&
+        memcmp(program->fields[i].key, key, key_len) == 0) {
+      *out = i;
+      return LQL_STATUS_OK;
+    }
+  }
+  if (program->field_count == LQL_STREAM_TERM_CAPACITY) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "direct stream selector has too many mapped fields");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  i = program->field_count;
+  program->fields[i].key = key;
+  program->fields[i].key_len = key_len;
+  ++program->field_count;
+  *out = i;
+  return LQL_STATUS_OK;
+}
+
+static lql_status stream_append_term(lql_stream_program *program,
+                                     lql_allocator *allocator,
+                                     const lql_selector *selector,
+                                     lql_selector_kind kind,
+                                     const char *key, size_t key_len,
+                                     const char *value, size_t value_len,
+                                     lql_error *error) {
+  lql_stream_term *term;
+  lql_status status;
+  size_t field_index;
+  if (program->term_count == LQL_STREAM_TERM_CAPACITY) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "direct stream selector has too many predicate terms");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  status = stream_field_get(program, key, key_len, &field_index, error);
+  if (status != LQL_STATUS_OK) {
+    return status;
+  }
+  term = &program->terms[program->term_count];
+  term->selector = selector;
+  term->kind = kind;
+  term->field_index = field_index;
+  term->value = value;
+  term->value_len = value_len;
+  term->bit = 1ul << program->term_count;
+  if (kind == LQL_SELECTOR_KIND_CONTAINS && value_len != 0u) {
+    stream_term_failure_table(allocator, term);
+    if (term->failure == NULL) {
+      lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+      return LQL_STATUS_NO_MEMORY;
+    }
+  }
+  ++program->term_count;
+  return LQL_STATUS_OK;
+}
 
 static void stream_lonejson_error(lonejson_error *out, const char *message) {
   if (out == NULL) {
@@ -71,9 +199,13 @@ static void stream_fail(lql_stream_state *state, lql_status status,
 }
 
 static lql_status stream_compile_term(lql_stream_program *program,
+                                      lql_allocator *allocator,
                                       const lql_selector *selector,
                                       lql_error *error) {
-  lql_stream_term *term;
+  const char *key;
+  const char *value;
+  lql_selector_kind kind;
+  lql_status status;
   size_t i;
   if (selector == NULL) {
     return LQL_STATUS_OK;
@@ -82,51 +214,92 @@ static lql_status stream_compile_term(lql_stream_program *program,
       selector->kind == LQL_SELECTOR_KIND_OR ||
       selector->kind == LQL_SELECTOR_KIND_NOT) {
     for (i = 0u; i < selector->child_count; ++i) {
-      lql_status status = stream_compile_term(program, &selector->children[i],
-                                              error);
+      status = stream_compile_term(program, allocator, &selector->children[i],
+                                   error);
       if (status != LQL_STATUS_OK) {
         return status;
       }
     }
     return LQL_STATUS_OK;
   }
-  if (selector->kind != LQL_SELECTOR_KIND_EQ || selector->field == NULL ||
-      selector->value == NULL || selector->value_is_temporal ||
-      selector->field[0] != '/' || selector->field[1] == '\0' ||
-      strchr(selector->field + 1, '/') != NULL ||
-      strchr(selector->field + 1, '~') != NULL) {
+  if (!stream_top_level_field(selector->field, &key, &i) ||
+      selector->value_is_temporal) {
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                  "direct stream probe supports only top-level string equality conjunctions");
+                  "direct stream supports only non-temporal top-level fields");
     return LQL_STATUS_UNSUPPORTED;
   }
-  if (program->term_count >= sizeof(program->terms) / sizeof(program->terms[0])) {
-    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                  "direct stream probe selector has too many equality terms");
-    return LQL_STATUS_UNSUPPORTED;
-  }
-  for (i = 0u; i < program->term_count; ++i) {
-    if (strcmp(program->terms[i].key, selector->field + 1) == 0) {
+  kind = selector->kind;
+  if (kind == LQL_SELECTOR_KIND_EQ) {
+    if (selector->value == NULL) {
       lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                    "direct stream probe does not support duplicate equality paths");
+                    "direct stream equality requires a string value");
       return LQL_STATUS_UNSUPPORTED;
     }
+    return stream_append_term(program, allocator, selector, kind, key, i,
+                              selector->value, strlen(selector->value), error);
   }
-  term = &program->terms[program->term_count];
-  term->selector = selector;
-  term->key = selector->field + 1;
-  term->key_len = strlen(term->key);
-  term->value = selector->value;
-  term->value_len = strlen(term->value);
-  term->bit = 1ul << program->term_count;
-  program->required_hits |= term->bit;
-  ++program->term_count;
-  return LQL_STATUS_OK;
+  if (kind == LQL_SELECTOR_KIND_IN) {
+    if (selector->any_count == 0u) {
+      lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                    "direct stream in selector requires values");
+      return LQL_STATUS_UNSUPPORTED;
+    }
+    for (i = 0u; i < selector->any_count; ++i) {
+      status = stream_append_term(program, allocator, selector,
+                                  LQL_SELECTOR_KIND_EQ, key, strlen(key),
+                                  selector->any[i], selector->any_lens[i], error);
+      if (status != LQL_STATUS_OK) {
+        return status;
+      }
+    }
+    return LQL_STATUS_OK;
+  }
+  if (kind == LQL_SELECTOR_KIND_EXISTS) {
+    return stream_append_term(program, allocator, selector, kind, key, i,
+                              NULL, 0u, error);
+  }
+  if (kind != LQL_SELECTOR_KIND_CONTAINS && kind != LQL_SELECTOR_KIND_PREFIX) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "direct stream selector predicate is not implemented");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  if (selector->ignore_case) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "direct stream case-insensitive string predicates are not implemented");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  if (!selector->value_set && selector->any_count == 0u &&
+      (selector->value == NULL || selector->value[0] == '\0')) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "direct stream omitted string predicate values are not implemented");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  if (selector->any_count != 0u) {
+    if (kind != LQL_SELECTOR_KIND_CONTAINS) {
+      lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                    "direct stream string predicate does not accept any values");
+      return LQL_STATUS_UNSUPPORTED;
+    }
+    for (i = 0u; i < selector->any_count; ++i) {
+      status = stream_append_term(program, allocator, selector, kind, key,
+                                  strlen(key), selector->any[i],
+                                  selector->any_lens[i], error);
+      if (status != LQL_STATUS_OK) {
+        return status;
+      }
+    }
+    return LQL_STATUS_OK;
+  }
+  value = selector->value == NULL ? "" : selector->value;
+  return stream_append_term(program, allocator, selector, kind, key,
+                            strlen(key), value, strlen(value), error);
 }
 
 static int stream_selector_matches(const lql_stream_program *program,
                                    const lql_selector *selector,
                                    unsigned long hits) {
   size_t i;
+  int matched;
   if (selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL) {
     return 1;
   }
@@ -150,12 +323,8 @@ static int stream_selector_matches(const lql_stream_program *program,
     return selector->child_count == 1u &&
            !stream_selector_matches(program, &selector->children[0], hits);
   }
-  for (i = 0u; i < program->term_count; ++i) {
-    if (program->terms[i].selector == selector) {
-      return (hits & program->terms[i].bit) != 0ul;
-    }
-  }
-  return 0;
+  matched = stream_term_matches_selector(program, selector, hits);
+  return matched > 0;
 }
 
 static lql_status stream_program_get(lql *self, const lql_selector *selector,
@@ -186,26 +355,30 @@ static lql_status stream_program_get(lql *self, const lql_selector *selector,
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
     return LQL_STATUS_NO_MEMORY;
   }
-  status = stream_compile_term(program, selector, error);
+  status = stream_compile_term(program, allocator, selector, error);
   if (status != LQL_STATUS_OK) {
+    for (i = 0u; i < program->term_count; ++i) {
+      allocator->destroy(allocator, program->terms[i].failure);
+    }
     allocator->destroy(allocator, program);
     return status;
   }
   if (program->term_count == 0u) {
     program->match_all = 1;
   } else {
-    for (i = 0u; i < program->term_count; ++i) {
+    for (i = 0u; i < program->field_count; ++i) {
       lonejson_field *field = &program->mapped_fields[i];
-      const lql_stream_term *term = &program->terms[i];
+      const lql_stream_field *stream_field = &program->fields[i];
       memset(field, 0, sizeof(*field));
-      field->json_key = term->key;
-      field->json_key_len = term->key_len;
-      field->json_key_first = term->key_len == 0u
+      field->json_key = stream_field->key;
+      field->json_key_len = stream_field->key_len;
+      field->json_key_first = stream_field->key_len == 0u
                                   ? 0u
-                                  : (unsigned char)term->key[0];
-      field->json_key_last = term->key_len == 0u
+                                  : (unsigned char)stream_field->key[0];
+      field->json_key_last = stream_field->key_len == 0u
                                  ? 0u
-                                 : (unsigned char)term->key[term->key_len - 1u];
+                                 : (unsigned char)stream_field->key[
+                                       stream_field->key_len - 1u];
       field->struct_offset = i * sizeof(lonejson_json_value);
       field->kind = LONEJSON_FIELD_KIND_JSON_VALUE;
       field->storage = LONEJSON_STORAGE_FIXED;
@@ -215,9 +388,9 @@ static lql_status stream_program_get(lql *self, const lql_selector *selector,
     memset(&program->mapped_map, 0, sizeof(program->mapped_map));
     program->mapped_map.name = "lql_stream_program";
     program->mapped_map.struct_size =
-        program->term_count * sizeof(lonejson_json_value);
+        program->field_count * sizeof(lonejson_json_value);
     program->mapped_map.fields = program->mapped_fields;
-    program->mapped_map.field_count = program->term_count;
+    program->mapped_map.field_count = program->field_count;
   }
   mutable_selector->stream_program = program;
   *out = program;
@@ -232,6 +405,10 @@ LQL_INTERNAL_SYMBOL void lql_stream_program_destroy(lql *self,
   }
   allocator = lql_allocator_from_receiver(self);
   if (allocator != NULL) {
+    size_t i;
+    for (i = 0u; i < selector->stream_program->term_count; ++i) {
+      allocator->destroy(allocator, selector->stream_program->terms[i].failure);
+    }
     allocator->destroy(allocator, selector->stream_program);
   }
   selector->stream_program = NULL;
@@ -364,10 +541,10 @@ static void stream_finish_key(lql_stream_state *state) {
   if (!state->key_active) {
     return;
   }
-  for (i = 0u; state->program != NULL && i < state->program->term_count; ++i) {
-    const lql_stream_term *term = &state->program->terms[i];
-    if ((state->key_candidates & term->bit) != 0ul &&
-        state->key_pos == term->key_len) {
+  for (i = 0u; state->program != NULL && i < state->program->field_count; ++i) {
+    const lql_stream_field *field = &state->program->fields[i];
+    if ((state->key_candidates & (1ul << i)) != 0ul &&
+        state->key_pos == field->key_len) {
       state->current_term = i;
       break;
     }
@@ -473,7 +650,13 @@ static lonejson_status stream_key_begin(void *user, lonejson_error *error) {
   stream_clear_current(state);
   state->key_active = state->object_depth == 1u && state->array_depth == 0u;
   state->key_pos = 0u;
-  state->key_candidates = state->program == NULL ? 0ul : state->program->required_hits;
+  if (state->program == NULL) {
+    state->key_candidates = 0ul;
+  } else if (state->program->field_count == LQL_STREAM_TERM_CAPACITY) {
+    state->key_candidates = ~0ul;
+  } else {
+    state->key_candidates = (1ul << state->program->field_count) - 1ul;
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -486,13 +669,13 @@ static lonejson_status stream_key_chunk(void *user, const char *data, size_t len
   if (!state->key_active) {
     return LONEJSON_STATUS_OK;
   }
-  for (i = 0u; state->program != NULL && i < state->program->term_count; ++i) {
-    const lql_stream_term *term = &state->program->terms[i];
-    if ((state->key_candidates & term->bit) != 0ul &&
-        (state->key_pos > term->key_len ||
-         len > term->key_len - state->key_pos ||
-         memcmp(data, term->key + state->key_pos, len) != 0)) {
-      state->key_candidates &= ~term->bit;
+  for (i = 0u; state->program != NULL && i < state->program->field_count; ++i) {
+    const lql_stream_field *field = &state->program->fields[i];
+    if ((state->key_candidates & (1ul << i)) != 0ul &&
+        (state->key_pos > field->key_len ||
+         len > field->key_len - state->key_pos ||
+         memcmp(data, field->key + state->key_pos, len) != 0)) {
+      state->key_candidates &= ~(1ul << i);
     }
   }
   state->key_pos += len;
@@ -554,8 +737,16 @@ static lonejson_status stream_boolean_value(void *user, int value,
 static lonejson_status stream_mapped_object_begin(void *user,
                                                    lonejson_error *error) {
   lql_stream_member_context *member;
+  size_t i;
   (void)error;
   member = (lql_stream_member_context *)user;
+  for (i = 0u; i < member->state->program->term_count; ++i) {
+    const lql_stream_term *term = &member->state->program->terms[i];
+    if (term->field_index == member->field_index &&
+        term->kind == LQL_SELECTOR_KIND_EXISTS) {
+      member->state->hits |= term->bit;
+    }
+  }
   ++member->container_depth;
   return LONEJSON_STATUS_OK;
 }
@@ -574,11 +765,24 @@ static lonejson_status stream_mapped_object_end(void *user,
 static lonejson_status stream_mapped_string_begin(void *user,
                                                    lonejson_error *error) {
   lql_stream_member_context *member;
+  size_t i;
   (void)error;
   member = (lql_stream_member_context *)user;
   member->active_string = member->container_depth == 0u;
-  member->value_pos = 0u;
-  member->mismatch = 0;
+  member->mismatches = 0ul;
+  for (i = 0u; i < member->state->program->term_count; ++i) {
+    const lql_stream_term *term = &member->state->program->terms[i];
+    if (term->field_index != member->field_index) {
+      continue;
+    }
+    member->positions[i] = 0u;
+    if (term->kind == LQL_SELECTOR_KIND_EXISTS) {
+      member->state->hits |= term->bit;
+    } else if (term->kind == LQL_SELECTOR_KIND_CONTAINS &&
+               term->value_len == 0u) {
+      member->state->hits |= term->bit;
+    }
+  }
   return LONEJSON_STATUS_OK;
 }
 
@@ -586,38 +790,124 @@ static lonejson_status stream_mapped_string_chunk(void *user, const char *data,
                                                    size_t len,
                                                    lonejson_error *error) {
   lql_stream_member_context *member;
-  const lql_stream_term *term;
+  size_t i;
+  size_t pos;
+  size_t offset;
   (void)error;
   member = (lql_stream_member_context *)user;
   if (!member->active_string) {
     return LONEJSON_STATUS_OK;
   }
-  term = &member->state->program->terms[member->term_index];
-  if (!member->mismatch &&
-      (member->value_pos > term->value_len ||
-       len > term->value_len - member->value_pos ||
-       memcmp(data, term->value + member->value_pos, len) != 0)) {
-    member->mismatch = 1;
+  for (i = 0u; i < member->state->program->term_count; ++i) {
+    const lql_stream_term *term = &member->state->program->terms[i];
+    if (term->field_index != member->field_index ||
+        (member->state->hits & term->bit) != 0ul ||
+        term->kind == LQL_SELECTOR_KIND_EXISTS) {
+      continue;
+    }
+    if (term->kind == LQL_SELECTOR_KIND_EQ ||
+        term->kind == LQL_SELECTOR_KIND_PREFIX) {
+      pos = member->positions[i];
+      if ((member->mismatches & term->bit) == 0ul) {
+        if (term->kind == LQL_SELECTOR_KIND_EQ &&
+            (pos > term->value_len || len > term->value_len - pos ||
+             memcmp(data, term->value + pos, len) != 0)) {
+          member->mismatches |= term->bit;
+        }
+        if (term->kind == LQL_SELECTOR_KIND_PREFIX && pos < term->value_len) {
+          size_t compare_len;
+          compare_len = term->value_len - pos;
+          if (compare_len > len) {
+            compare_len = len;
+          }
+          if (memcmp(data, term->value + pos, compare_len) != 0) {
+            member->mismatches |= term->bit;
+          }
+        }
+      }
+      member->positions[i] = pos + len;
+      continue;
+    }
+    if (term->kind == LQL_SELECTOR_KIND_CONTAINS) {
+      pos = member->positions[i];
+      for (offset = 0u; offset < len; ++offset) {
+        while (pos != 0u && data[offset] != term->value[pos]) {
+          pos = term->failure[pos - 1u];
+        }
+        if (data[offset] == term->value[pos]) {
+          ++pos;
+        }
+        if (pos == term->value_len) {
+          member->state->hits |= term->bit;
+          pos = 0u;
+          break;
+        }
+      }
+      member->positions[i] = pos;
+    }
   }
-  member->value_pos += len;
   return LONEJSON_STATUS_OK;
 }
 
 static lonejson_status stream_mapped_string_end(void *user,
                                                  lonejson_error *error) {
   lql_stream_member_context *member;
-  const lql_stream_term *term;
+  size_t i;
   (void)error;
   member = (lql_stream_member_context *)user;
   if (!member->active_string) {
     return LONEJSON_STATUS_OK;
   }
-  term = &member->state->program->terms[member->term_index];
-  if (!member->mismatch && member->value_pos == term->value_len) {
-    member->state->hits |= term->bit;
+  for (i = 0u; i < member->state->program->term_count; ++i) {
+    const lql_stream_term *term = &member->state->program->terms[i];
+    if (term->field_index != member->field_index ||
+        (member->state->hits & term->bit) != 0ul) {
+      continue;
+    }
+    if (term->kind == LQL_SELECTOR_KIND_EQ &&
+        (member->mismatches & term->bit) == 0ul &&
+        member->positions[i] == term->value_len) {
+      member->state->hits |= term->bit;
+    }
+    if (term->kind == LQL_SELECTOR_KIND_PREFIX &&
+        (member->mismatches & term->bit) == 0ul &&
+        member->positions[i] >= term->value_len) {
+      member->state->hits |= term->bit;
+    }
   }
   member->active_string = 0;
   return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status stream_mapped_number_begin(void *user,
+                                                   lonejson_error *error) {
+  return stream_mapped_object_begin(user, error);
+}
+
+static lonejson_status stream_mapped_number_end(void *user,
+                                                 lonejson_error *error) {
+  return stream_mapped_object_end(user, error);
+}
+
+static lonejson_status stream_mapped_present(void *user, lonejson_error *error) {
+  lql_stream_member_context *member;
+  size_t i;
+  (void)error;
+  member = (lql_stream_member_context *)user;
+  for (i = 0u; i < member->state->program->term_count; ++i) {
+    const lql_stream_term *term = &member->state->program->terms[i];
+    if (term->field_index == member->field_index &&
+        term->kind == LQL_SELECTOR_KIND_EXISTS) {
+      member->state->hits |= term->bit;
+    }
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status stream_mapped_boolean_value(void *user, int value,
+                                                    lonejson_error *error) {
+  (void)value;
+  return stream_mapped_present(user, error);
 }
 
 static lql_status stream_status(lql_stream_state *state, lonejson_status status,
@@ -671,11 +961,14 @@ static lql_status stream_execute_mapped(lql_stream_state *state,
   visitor.string_begin = stream_mapped_string_begin;
   visitor.string_chunk = stream_mapped_string_chunk;
   visitor.string_end = stream_mapped_string_end;
+  visitor.number_begin = stream_mapped_number_begin;
+  visitor.number_end = stream_mapped_number_end;
+  visitor.boolean_value = stream_mapped_boolean_value;
   lonejson_error_init(&lonejson_error);
-  for (i = 0u; i < state->program->term_count; ++i) {
+  for (i = 0u; i < state->program->field_count; ++i) {
     memset(&members[i], 0, sizeof(members[i]));
     members[i].state = state;
-    members[i].term_index = i;
+    members[i].field_index = i;
     lonejson_json_value_init(runtime, &values[i]);
     lonejson_status = lonejson_json_value_set_parse_visitor(
         &values[i], &visitor, &members[i], &lonejson_error);
@@ -690,7 +983,7 @@ static lql_status stream_execute_mapped(lql_stream_state *state,
   stream = lonejson_stream_open_candidates_reader(
       runtime, &state->program->mapped_map, stream_read, state, &lonejson_error);
   if (stream == NULL) {
-    for (i = 0u; i < state->program->term_count; ++i) {
+    for (i = 0u; i < state->program->field_count; ++i) {
       lonejson_json_value_cleanup(&values[i]);
     }
     return stream_status(state, lonejson_error.code, &lonejson_error, error);
@@ -736,7 +1029,7 @@ static lql_status stream_execute_mapped(lql_stream_state *state,
     }
   }
   stream->close(stream);
-  for (i = 0u; i < state->program->term_count; ++i) {
+  for (i = 0u; i < state->program->field_count; ++i) {
     lonejson_json_value_cleanup(&values[i]);
   }
   if (status == LQL_STATUS_OK && state->failure.code != LQL_STATUS_OK) {

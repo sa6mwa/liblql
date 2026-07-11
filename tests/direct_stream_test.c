@@ -61,6 +61,37 @@ static lql_stream_callback_result test_decide(void *user,
              : LQL_STREAM_CALLBACK_CONTINUE;
 }
 
+static int run_selection(lql *ctx, const char *expr, const char *input,
+                         size_t expected_records, size_t expected_matches) {
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, expr, &selector, &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = strlen(input);
+  reader.chunk_size = 1u;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != expected_records ||
+      result.records_matched != expected_matches) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 static int run_status_selection(lql *ctx) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n"
@@ -199,6 +230,39 @@ static int run_not_selection(lql *ctx) {
   return 0;
 }
 
+static int run_mapped_string_predicates(lql *ctx) {
+  static const char input[] =
+      "{\"status\":\"open\",\"msg\":\"Error: Timeout while reading\","
+      "\"service\":\"Auth-Service\",\"env\":\"prod\",\"a\":true}\n"
+      "{\"status\":\"pending\",\"msg\":\"timeout\",\"service\":\"Auth\","
+      "\"env\":\"dev\",\"a\":false}\n"
+      "{\"status\":\"closed\",\"msg\":\"all clear\",\"service\":\"Other\","
+      "\"env\":\"stage\",\"a\":null}\n";
+  if (run_selection(ctx, "contains{f=/msg,a=Timeout|degraded}", input, 3u,
+                    1u)) {
+    return 1;
+  }
+  if (run_selection(ctx, "prefix{f=/service,v=Auth}", input, 3u, 2u)) {
+    return 2;
+  }
+  if (run_selection(ctx, "in{f=/env,a=prod|stage}", input, 3u, 2u)) {
+    return 3;
+  }
+  if (run_selection(ctx, "exists{/a}", input, 3u, 2u)) {
+    return 4;
+  }
+  if (run_selection(ctx, "contains{f=/msg,a=Timeout|degraded},"
+                    "prefix{f=/service,v=Auth},in{f=/env,a=prod|stage},"
+                    "exists{/a}", input, 3u, 1u)) {
+    return 5;
+  }
+  if (run_selection(ctx, "or./status=\"open\",or./status=\"pending\"",
+                    input, 3u, 2u)) {
+    return 6;
+  }
+  return 0;
+}
+
 static int run_match_all(lql *ctx) {
   static const char input[] = "{\"ignored\":[1,2]}\n42\n";
   static const char root_array[] = "[1]\n";
@@ -296,6 +360,7 @@ int main(void) {
   if (run_status_selection(ctx) || run_conjunction_selection(ctx) ||
       run_or_selection(ctx) ||
       run_not_selection(ctx) ||
+      run_mapped_string_predicates(ctx) ||
       run_match_all(ctx) ||
       run_stop_and_root_array(ctx)) {
     ctx->destroy(ctx);
