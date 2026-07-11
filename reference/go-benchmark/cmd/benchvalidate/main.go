@@ -86,6 +86,9 @@ func validate(r io.Reader, opts validateOptions) error {
 			(rec.Impl == "go" || rec.Impl == "c") {
 			key := comparisonKey(rec)
 			pair := comparisons[key]
+			if pair.name == "" {
+				pair.name = fmt.Sprintf("%s/%s/%s/%s/%s", rec.Dataset, rec.Selector, rec.Expr, rec.Mode, rec.Submode)
+			}
 			if rec.Impl == "go" {
 				pair.goRecord = &comparisonRecord{line: line, record: rec}
 			} else {
@@ -114,7 +117,10 @@ func validate(r io.Reader, opts validateOptions) error {
 	if opts.MinCGoSpeedup > 0 {
 		for _, pair := range comparisons {
 			if pair.goRecord == nil || pair.cRecord == nil {
-				continue
+				return fmt.Errorf("missing supported Go/C benchmark counterpart for %s", pair.name)
+			}
+			if err := validateComparison(*pair.goRecord, *pair.cRecord); err != nil {
+				return err
 			}
 			goNS := *pair.goRecord.record.NsPerOp
 			cNS := *pair.cRecord.record.NsPerOp
@@ -132,12 +138,29 @@ type comparisonRecord struct {
 }
 
 type goCComparison struct {
+	name     string
 	goRecord *comparisonRecord
 	cRecord  *comparisonRecord
 }
 
 func comparisonKey(rec record) string {
-	return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s", rec.Dataset, rec.Selector, rec.Expr, rec.Mode, rec.Submode, rec.FixtureSHA256)
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s", rec.Dataset, rec.Selector, rec.Expr, rec.Mode, rec.Submode)
+}
+
+func validateComparison(goRecord comparisonRecord, cRecord comparisonRecord) error {
+	goRec := goRecord.record
+	cRec := cRecord.record
+	if goRec.FixtureSHA256 != cRec.FixtureSHA256 {
+		return fmt.Errorf("line %d: fixture_sha256 differs from Go line %d for %s/%s/%s/%s (go=%s c=%s)", cRecord.line, goRecord.line, cRec.Dataset, cRec.Selector, cRec.Mode, cRec.Submode, goRec.FixtureSHA256, cRec.FixtureSHA256)
+	}
+	if goRec.BytesPerIter != cRec.BytesPerIter ||
+		goRec.Candidates != cRec.Candidates ||
+		goRec.Matches != cRec.Matches ||
+		goRec.Payloads != cRec.Payloads ||
+		goRec.PayloadBytes != cRec.PayloadBytes {
+		return fmt.Errorf("line %d: counters differ from Go line %d for %s/%s/%s/%s (go bytes=%d candidates=%d matches=%d payloads=%d payload_bytes=%d; c bytes=%d candidates=%d matches=%d payloads=%d payload_bytes=%d)", cRecord.line, goRecord.line, cRec.Dataset, cRec.Selector, cRec.Mode, cRec.Submode, goRec.BytesPerIter, goRec.Candidates, goRec.Matches, goRec.Payloads, goRec.PayloadBytes, cRec.BytesPerIter, cRec.Candidates, cRec.Matches, cRec.Payloads, cRec.PayloadBytes)
+	}
+	return nil
 }
 
 func requireKeys(line int, raw map[string]json.RawMessage) error {
