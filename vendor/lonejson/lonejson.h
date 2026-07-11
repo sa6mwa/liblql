@@ -19948,6 +19948,15 @@ static lonejson_status lonejson__json_visit_top_level_fields_array(
   }
 }
 
+static int lonejson__json_cursor_get_nonspace(lonejson__json_io *io) {
+  int ch;
+
+  do {
+    ch = lonejson__json_cursor_getc(io);
+  } while (ch >= 0 && lonejson__is_json_space(ch));
+  return ch;
+}
+
 static lonejson_status lonejson__json_visit_recursive_field_value(
     lonejson__json_io *io, const char *key, size_t key_len, int deliver);
 
@@ -20068,7 +20077,7 @@ static lonejson_status lonejson__json_visit_recursive_field_value(
     lonejson__json_io *io, const char *key, size_t key_len, int deliver) {
   int ch;
 
-  ch = lonejson__json_peek_nonspace(io);
+  ch = lonejson__json_cursor_get_nonspace(io);
   if (ch == -2) {
     return io->error ? io->error->code : LONEJSON_STATUS_CALLBACK_FAILED;
   }
@@ -20077,15 +20086,31 @@ static lonejson_status lonejson__json_visit_recursive_field_value(
                                0u, 0u, "expected JSON value");
   }
   if (ch == '{') {
-    (void)lonejson__json_cursor_getc(io);
     return lonejson__json_visit_recursive_field_object(io, key, key_len);
   }
   if (ch == '[') {
-    (void)lonejson__json_cursor_getc(io);
     return lonejson__json_visit_recursive_field_array(io, key, key_len);
   }
-  return deliver ? lonejson__json_visit_value_no_path(io)
-                 : lonejson__json_skip_value(io);
+  if (deliver) {
+    lonejson__json_cursor_ungetc(io, ch);
+    return lonejson__json_visit_value_no_path(io);
+  }
+  switch (ch) {
+  case '"':
+    return lonejson__json_skip_string(io, io->limits.max_string_bytes);
+  case 't':
+    return lonejson__json_skip_literal(io, "rue");
+  case 'f':
+    return lonejson__json_skip_literal(io, "alse");
+  case 'n':
+    return lonejson__json_skip_literal(io, "ull");
+  default:
+    if (ch == '-' || lonejson__is_digit(ch)) {
+      return lonejson__json_skip_number(io, ch);
+    }
+    return lonejson__set_error(io->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                               0u, 0u, "expected JSON value");
+  }
 }
 
 static lonejson_status lonejson__json_visit_one_recursive_field_cursor(
