@@ -71,6 +71,7 @@ typedef struct lql_stream_state {
   void *mutation_visitor_user;
   int mutation_direct;
   int mutation_ready;
+  int mutation_abandoned;
 } lql_stream_state;
 
 struct lql_stream_member_context {
@@ -957,6 +958,7 @@ stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
   if (state->mutation_direct) {
     lonejson_spooled_reset(&state->mutation_spool);
     state->mutation_ready = 0;
+    state->mutation_abandoned = 0;
     status = stream_mutation_rewriter_open(state, error);
     if (status != LONEJSON_STATUS_OK) {
       lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
@@ -2259,6 +2261,9 @@ stream_flat_mutation_chunk(lql_stream_state *state,
     lql_stream_state *state;                                                  \
     lonejson_status status;                                                   \
     state = (lql_stream_state *)user;                                         \
+    if (state->mutation_abandoned) {                                          \
+      return LONEJSON_STATUS_OK;                                              \
+    }                                                                         \
     status = selector_event(user, error);                                     \
     if (status != LONEJSON_STATUS_OK) {                                       \
       return status;                                                          \
@@ -2273,6 +2278,9 @@ stream_flat_mutation_chunk(lql_stream_state *state,
     lql_stream_state *state;                                                  \
     lonejson_status status;                                                   \
     state = (lql_stream_state *)user;                                         \
+    if (state->mutation_abandoned) {                                          \
+      return LONEJSON_STATUS_OK;                                              \
+    }                                                                         \
     status = selector_event(user, data, len, error);                          \
     if (status != LONEJSON_STATUS_OK) {                                       \
       return status;                                                          \
@@ -2306,6 +2314,7 @@ static lonejson_status stream_flat_mutation_string_end(void *user,
       (state->hits & state->program->terms[0].bit) == 0ul) {
     lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
     state->mutation_ready = 0;
+    state->mutation_abandoned = 1;
     return LONEJSON_STATUS_OK;
   }
   return stream_flat_mutation_event(state, state->mutation_visitor.string_end,
@@ -2317,6 +2326,9 @@ stream_flat_mutation_object_key_end(void *user, lonejson_error *error) {
   lql_stream_state *state;
   lonejson_status status;
   state = (lql_stream_state *)user;
+  if (state->mutation_abandoned) {
+    return LONEJSON_STATUS_SKIP_VALUE;
+  }
   stream_finish_key(state);
   status = stream_flat_mutation_event(
       state, state->mutation_visitor.object_key_end, error);
@@ -2328,6 +2340,9 @@ stream_flat_mutation_number_chunk(void *user, const char *data, size_t len,
                                   lonejson_error *error) {
   lql_stream_state *state;
   state = (lql_stream_state *)user;
+  if (state->mutation_abandoned) {
+    return LONEJSON_STATUS_OK;
+  }
   return stream_flat_mutation_chunk(state, state->mutation_visitor.number_chunk,
                                     data, len, error);
 }
@@ -2336,6 +2351,9 @@ static lonejson_status
 stream_flat_mutation_number_end(void *user, lonejson_error *error) {
   lql_stream_state *state;
   state = (lql_stream_state *)user;
+  if (state->mutation_abandoned) {
+    return LONEJSON_STATUS_OK;
+  }
   return stream_flat_mutation_event(state, state->mutation_visitor.number_end,
                                     error);
 }
@@ -2345,6 +2363,9 @@ stream_flat_mutation_boolean(void *user, int value, lonejson_error *error) {
   lql_stream_state *state;
   lonejson_status status;
   state = (lql_stream_state *)user;
+  if (state->mutation_abandoned) {
+    return LONEJSON_STATUS_OK;
+  }
   status = stream_boolean_value(user, value, error);
   if (status != LONEJSON_STATUS_OK || !state->mutation_ready) {
     return status;
@@ -2358,6 +2379,9 @@ static lonejson_status stream_flat_mutation_null(void *user,
   lql_stream_state *state;
   lonejson_status status;
   state = (lql_stream_state *)user;
+  if (state->mutation_abandoned) {
+    return LONEJSON_STATUS_OK;
+  }
   status = stream_scalar_value(user, error);
   if (status != LONEJSON_STATUS_OK) {
     return status;
