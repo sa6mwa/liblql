@@ -49104,12 +49104,146 @@ lonejson__candidate_run_end(void *user,
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
+static lonejson_read_result
+lonejson__candidate_run_spooled_reader(void *user, unsigned char *data,
+                                       size_t cap) {
+  return lonejson_spooled_read((lonejson_spooled *)user, data, cap);
+}
+
+static lonejson_candidate_callback_result
+lonejson__candidate_run_raw_begin(void *user,
+                                  const lonejson_candidate_info *candidate,
+                                  lonejson_error *error) {
+  lonejson__candidate_run_state *state = (lonejson__candidate_run_state *)user;
+
+  state->candidate = *candidate;
+  state->output_transition = LONEJSON_CANDIDATE_RUN_TRANSITION_UNKNOWN;
+  state->stopped = 0;
+  if (state->options->candidate_begin != NULL) {
+    return state->options->candidate_begin(state->options->candidate_user,
+                                           candidate, error);
+  }
+  return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static lonejson_candidate_capture_decision
+lonejson__candidate_run_raw_capture_decision(
+    void *user, const lonejson_candidate_info *candidate, lonejson_error *error) {
+  lonejson__candidate_run_state *state = (lonejson__candidate_run_state *)user;
+  lonejson_candidate_run_transition transition;
+
+  state->candidate = *candidate;
+  lonejson__clear_error(error);
+  transition = state->options->output_transition(
+      state->options->output_transition_user, candidate, 1, error);
+  if (transition == LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT) {
+    state->output_transition = transition;
+    return LONEJSON_CANDIDATE_RETAIN;
+  }
+  if (transition == LONEJSON_CANDIDATE_RUN_TRANSITION_REJECT) {
+    state->output_transition = transition;
+    return LONEJSON_CANDIDATE_DISCARD;
+  }
+  if (transition == LONEJSON_CANDIDATE_RUN_TRANSITION_STOP) {
+    state->output_transition = transition;
+    state->stopped = 1;
+    return LONEJSON_CANDIDATE_DECISION_STOP;
+  }
+  if (transition == LONEJSON_CANDIDATE_RUN_TRANSITION_ERROR) {
+    return LONEJSON_CANDIDATE_DECISION_ERROR;
+  }
+  lonejson__set_error(error, LONEJSON_STATUS_CALLBACK_FAILED, 0u, 0u, 0u,
+                      "candidate transition remained unknown at candidate end");
+  return LONEJSON_CANDIDATE_DECISION_ERROR;
+}
+
+static lonejson_candidate_callback_result
+lonejson__candidate_run_raw_end(void *user,
+                                const lonejson_candidate_info *candidate,
+                                lonejson_error *error) {
+  lonejson__candidate_run_state *state = (lonejson__candidate_run_state *)user;
+  lonejson_candidate_run_options replay;
+  lonejson_status status;
+
+  state->candidate = *candidate;
+  if (state->output_transition == LONEJSON_CANDIDATE_RUN_TRANSITION_ACCEPT) {
+    if (candidate->payload_spool == NULL) {
+      lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u, 0u,
+                          "accepted candidate raw spool is unavailable");
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+    status = lonejson_spooled_rewind((lonejson_spooled *)candidate->payload_spool,
+                                     error);
+    if (status == LONEJSON_STATUS_OK) {
+      replay = *state->options;
+      replay.framing = LONEJSON_CANDIDATE_FRAMING_SINGLE_VALUE;
+      replay.observer = NULL;
+      replay.observer_user = NULL;
+      replay.output_transition = NULL;
+      replay.output_transition_user = NULL;
+      replay.candidate_begin = NULL;
+      replay.candidate_end = NULL;
+      status = lonejson__candidate_run_reader_core(
+          state->runtime, lonejson__candidate_run_spooled_reader,
+          (void *)candidate->payload_spool, &replay, error);
+    }
+    if (status != LONEJSON_STATUS_OK) {
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+  }
+  if (state->stopped) {
+    return LONEJSON_CANDIDATE_STOP;
+  }
+  if (state->options->candidate_end != NULL) {
+    return state->options->candidate_end(state->options->candidate_user,
+                                         candidate, error);
+  }
+  return LONEJSON_CANDIDATE_CONTINUE;
+}
+
+static lonejson_status lonejson__candidate_run_raw_cursor_core(
+    const lonejson_runtime *runtime_state, lonejson__json_cursor *cursor,
+    const lonejson_candidate_run_options *options, lonejson_error *error) {
+  lonejson__candidate_run_state state;
+  lonejson_status status;
+
+  memset(&state, 0, sizeof(state));
+  state.options = options;
+  state.runtime = runtime_state;
+  state.allocator = runtime_state->config.allocator;
+  state.error = error;
+  state.candidate_options = lonejson_default_candidate_stream_options();
+  state.candidate_options.framing = options->framing;
+  state.candidate_options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED;
+  state.candidate_options.spool_class = options->spool_class;
+  state.candidate_options.max_spooled_payload_bytes =
+      options->max_staged_candidate_bytes;
+  state.candidate_options.path_visitor = options->observer;
+  state.candidate_options.visitor_user = options->observer_user;
+  state.candidate_options.candidate_begin = lonejson__candidate_run_raw_begin;
+  state.candidate_options.candidate_end = lonejson__candidate_run_raw_end;
+  state.candidate_options.candidate_user = &state;
+  state.candidate_options.capture_decision =
+      lonejson__candidate_run_raw_capture_decision;
+  state.candidate_options.capture_decision_user = &state;
+  status = lonejson__visit_candidates_cursor_with_limits(
+      cursor, &state.candidate_options, runtime_state,
+      &runtime_state->value_limits, runtime_state->config.allocator, error);
+  lonejson__candidate_run_cleanup(&state);
+  return status;
+}
+
 static lonejson_status lonejson__candidate_run_cursor_core(
     const lonejson_runtime *runtime_state, lonejson__json_cursor *cursor,
     const lonejson_candidate_run_options *options, lonejson_error *error) {
   lonejson__candidate_run_state state;
   lonejson__spool_options stage_options;
   lonejson_status status;
+
+  if (options->output_transition != NULL) {
+    return lonejson__candidate_run_raw_cursor_core(runtime_state, cursor,
+                                                   options, error);
+  }
 
   memset(&state, 0, sizeof(state));
   state.options = options;
