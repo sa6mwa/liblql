@@ -956,7 +956,6 @@ stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
   }
   if (state->mutation_direct) {
     lonejson_spooled_reset(&state->mutation_spool);
-    lonejson_value_rewriter_init(&state->mutation_rewriter);
     state->mutation_ready = 0;
     status = stream_mutation_rewriter_open(state, error);
     if (status != LONEJSON_STATUS_OK) {
@@ -2605,6 +2604,7 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   if (state->mutation_direct) {
     lonejson_spooled_init_class(runtime, &state->mutation_spool,
                                 LONEJSON_SPOOL_CLASS_LARGE_TEXT);
+    lonejson_value_rewriter_init(&state->mutation_rewriter);
   }
   flat_mutation_selector = stream_mutation_flat_selector_eligible(state);
   if (state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION) {

@@ -43546,6 +43546,51 @@ void lonejson_writer_cleanup(lonejson_writer *writer) {
   lonejson__writer_assign_methods(writer);
 }
 
+static lonejson_status lonejson__writer_reset_sink(lonejson_writer *writer,
+                                                   lonejson_sink_fn sink,
+                                                   void *sink_user,
+                                                   lonejson_error *error) {
+  lonejson__writer_state *state;
+  if (writer == NULL || writer->state == NULL || sink == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "finished writer and sink are required");
+  }
+  state = (lonejson__writer_state *)writer->state;
+  if (state->mode != LONEJSON__WRITER_MODE_SINK || !state->finished) {
+    return lonejson__writer_set_error(
+        writer, error, LONEJSON_STATUS_INVALID_JSON,
+        "writer must finish before resetting its sink");
+  }
+  lonejson__writer_clear_event(state);
+  lonejson__byte_reset(&state->number);
+  state->sink = sink;
+  state->sink_user = sink_user;
+  state->external_error = error;
+  state->sink_buffer_len = 0u;
+  state->frame_count = 0u;
+  state->root_written = 0;
+  state->finished = 0;
+  state->string_open = 0;
+  state->number_open = 0;
+  state->event_kind = LONEJSON__WRITER_EVENT_NONE;
+  state->event_data = NULL;
+  state->event_data2 = NULL;
+  state->event_len = 0u;
+  state->event_off = 0u;
+  state->event_phase = 0u;
+  state->event_child_active = 0;
+  state->failed = 0;
+  state->value_stream_active = 0;
+  state->string_reader_active = 0;
+  state->string_reader = NULL;
+  state->string_reader_user = NULL;
+  state->string_reader_buffer_len = 0u;
+  state->string_reader_buffer_off = 0u;
+  state->string_reader_eof = 0;
+  lonejson__clear_error(&writer->error);
+  return LONEJSON_STATUS_OK;
+}
+
 lonejson_status lonejson_writer_begin_object(lonejson_writer *writer,
                                              lonejson_error *error) {
   lonejson_status status;
@@ -46026,6 +46071,8 @@ typedef struct lonejson__value_rewrite_state {
   size_t replace_depth;
   int skipping;
   size_t skip_depth;
+  lonejson *runtime_handle;
+  int event_open;
 } lonejson__value_rewrite_state;
 
 typedef struct lonejson__value_rewrite_selector {
@@ -46330,14 +46377,25 @@ lonejson__value_rewrite_push_frame(lonejson__value_rewrite_state *state,
                                  LONEJSON_STATUS_ALLOCATION_FAILED, 0u, 0u, 0u,
                                  "failed to grow value rewrite stack");
     }
+    memset(next + state->frame_cap, 0,
+           (next_cap - state->frame_cap) * sizeof(*next));
     state->frames = next;
     state->frame_cap = next_cap;
   }
-  memset(&state->frames[state->frame_count], 0,
-         sizeof(state->frames[state->frame_count]));
-  state->frames[state->frame_count].kind = kind;
-  state->frames[state->frame_count].path_len = path_len;
-  state->frames[state->frame_count].prefix_matches = prefix_matches;
+  {
+    lonejson__value_rewrite_frame *frame;
+    char *key;
+    size_t key_cap;
+    frame = &state->frames[state->frame_count];
+    key = frame->key;
+    key_cap = frame->key_cap;
+    memset(frame, 0, sizeof(*frame));
+    frame->key = key;
+    frame->key_cap = key_cap;
+    frame->kind = kind;
+    frame->path_len = path_len;
+    frame->prefix_matches = prefix_matches;
+  }
   state->frame_count++;
   return LONEJSON_STATUS_OK;
 }
@@ -46351,8 +46409,12 @@ lonejson__value_rewrite_pop_frame(lonejson__value_rewrite_state *state) {
                                0u, 0u, "value rewrite frame underflow");
   }
   frame = &state->frames[state->frame_count - 1u];
-  lonejson__buffer_free(&state->allocator, frame->key, frame->key_cap);
-  memset(frame, 0, sizeof(*frame));
+  frame->kind = 0;
+  frame->path_len = 0u;
+  frame->count = 0u;
+  frame->prefix_matches = 0;
+  frame->saw_target_child = 0;
+  frame->key_len = 0u;
   state->frame_count--;
   return LONEJSON_STATUS_OK;
 }
@@ -47040,7 +47102,7 @@ lonejson__value_rewrite_cleanup(lonejson__value_rewrite_state *state) {
   size_t i;
 
   lonejson_writer_cleanup(&state->writer);
-  for (i = 0u; i < state->frame_count; ++i) {
+  for (i = 0u; i < state->frame_cap; ++i) {
     lonejson__buffer_free(&state->allocator, state->frames[i].key,
                           state->frames[i].key_cap);
   }
@@ -47231,7 +47293,7 @@ lonejson_status lonejson_value_rewriter_open(
   lonejson_status status;
 
   if (rewriter == NULL || sink == NULL || options == NULL ||
-      out_visitor == NULL || out_user == NULL || rewriter->state != NULL) {
+      out_visitor == NULL || out_user == NULL) {
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "value rewriter arguments are invalid");
   }
@@ -47244,37 +47306,70 @@ lonejson_status lonejson_value_rewriter_open(
     lonejson__runtime_borrow_release(&borrow);
     return status;
   }
-  allocator = lonejson__allocator_resolve(runtime_state->parse_options.allocator);
-  state = (lonejson__value_rewrite_state *)lonejson__buffer_alloc(
-      &allocator, sizeof(*state));
-  if (state == NULL) {
+  state = (lonejson__value_rewrite_state *)rewriter->state;
+  if (state != NULL && state->event_open) {
     lonejson__runtime_borrow_release(&borrow);
-    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
-                               0u, 0u, "failed to allocate value rewriter");
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u, "value rewriter is already open");
   }
-  memset(state, 0, sizeof(*state));
+  if (state != NULL && state->runtime_handle != runtime) {
+    lonejson__value_rewriter_destroy(rewriter);
+    state = NULL;
+  }
+  if (state == NULL) {
+    allocator =
+        lonejson__allocator_resolve(runtime_state->parse_options.allocator);
+    state = (lonejson__value_rewrite_state *)lonejson__buffer_alloc(
+        &allocator, sizeof(*state));
+    if (state == NULL) {
+      lonejson__runtime_borrow_release(&borrow);
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u, "failed to allocate value rewriter");
+    }
+    memset(state, 0, sizeof(*state));
+    state->allocator = allocator;
+    state->runtime_handle = runtime;
+    status = lonejson__writer_init_sink_with_options(
+        &state->writer, sink, sink_user, &runtime_state->write_options,
+        runtime_state, error);
+    if (status != LONEJSON_STATUS_OK) {
+      lonejson__value_rewrite_cleanup(state);
+      lonejson__buffer_free(&allocator, state, sizeof(*state));
+      lonejson__runtime_borrow_release(&borrow);
+      return status;
+    }
+    rewriter->state = state;
+  } else {
+    status = lonejson__writer_reset_sink(&state->writer, sink, sink_user,
+                                          error);
+    if (status != LONEJSON_STATUS_OK) {
+      lonejson__value_rewriter_destroy(rewriter);
+      lonejson__runtime_borrow_release(&borrow);
+      return status;
+    }
+  }
   state->options = *options;
   state->parse_options = runtime_state->parse_options;
-  state->allocator = allocator;
   state->error = error;
+  memset(&state->old_value, 0, sizeof(state->old_value));
+  lonejson__byte_reset(&state->number);
+  state->found = 0;
+  state->current_emit = 0;
+  state->current_replace = 0;
+  state->replacing = 0;
+  state->replace_depth = 0u;
+  state->skipping = 0;
+  state->skip_depth = 0u;
+  state->event_open = 1;
   lonejson__clear_error(error);
-  status = lonejson__writer_init_sink_with_options(
-      &state->writer, sink, sink_user, &runtime_state->write_options,
-      runtime_state, error);
-  if (status == LONEJSON_STATUS_OK) {
-    lonejson__value_rewrite_resolve_limits(&state->parse_options, runtime_state,
-                                           &limits);
-    state->number_limit = limits.max_number_bytes;
-    lonejson__value_rewrite_assign_visitor(out_visitor);
-    *out_user = state;
-    rewriter->state = state;
-    lonejson_error_init(&rewriter->error);
-  } else {
-    lonejson__value_rewrite_cleanup(state);
-    lonejson__buffer_free(&allocator, state, sizeof(*state));
-  }
+  lonejson__value_rewrite_resolve_limits(&state->parse_options, runtime_state,
+                                         &limits);
+  state->number_limit = limits.max_number_bytes;
+  lonejson__value_rewrite_assign_visitor(out_visitor);
+  *out_user = state;
+  lonejson_error_init(&rewriter->error);
   lonejson__runtime_borrow_release(&borrow);
-  return status;
+  return LONEJSON_STATUS_OK;
 }
 
 lonejson_status lonejson_value_rewriter_close(lonejson_value_rewriter *rewriter,
@@ -47287,6 +47382,10 @@ lonejson_status lonejson_value_rewriter_close(lonejson_value_rewriter *rewriter,
                                0u, "open value rewriter is required");
   }
   state = (lonejson__value_rewrite_state *)rewriter->state;
+  if (!state->event_open) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u, "open value rewriter is required");
+  }
   state->error = error;
   if (state->frame_count != 0u || state->replacing || state->skipping ||
       state->current_replace || state->number.len != 0u) {
@@ -47299,7 +47398,11 @@ lonejson_status lonejson_value_rewriter_close(lonejson_value_rewriter *rewriter,
   } else {
     status = lonejson_writer_finish(&state->writer, error);
   }
-  lonejson__value_rewriter_destroy(rewriter);
+  if (status == LONEJSON_STATUS_OK) {
+    state->event_open = 0;
+  } else {
+    lonejson__value_rewriter_destroy(rewriter);
+  }
   return status;
 }
 

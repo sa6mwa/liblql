@@ -26,6 +26,34 @@ static lonejson_status rewriter_emit_true(lonejson_writer *writer, void *user,
   return lonejson_writer_bool(writer, 1, error);
 }
 
+static lonejson_status rewriter_emit_input(const lonejson_value_visitor *visitor,
+                                           void *user, lonejson_error *error) {
+  lonejson_status status;
+  status = visitor->object_begin(user, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = visitor->object_key_begin(user, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = visitor->object_key_chunk(user, "status", 6u, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = visitor->object_key_end(user, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = visitor->string_begin(user, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = visitor->string_chunk(user, "open", 4u, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = visitor->string_end(user, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    status = visitor->object_end(user, error);
+  }
+  return status;
+}
+
 int main(void) {
   static const char *const target[] = {"meta", "ready"};
   lonejson *runtime;
@@ -53,15 +81,21 @@ int main(void) {
                                         &sink, &options, &visitor, &user,
                                         &error);
   if (status != LONEJSON_STATUS_OK ||
-      visitor.object_begin(user, &error) != LONEJSON_STATUS_OK ||
-      visitor.object_key_begin(user, &error) != LONEJSON_STATUS_OK ||
-      visitor.object_key_chunk(user, "status", 6u, &error) !=
-          LONEJSON_STATUS_OK ||
-      visitor.object_key_end(user, &error) != LONEJSON_STATUS_OK ||
-      visitor.string_begin(user, &error) != LONEJSON_STATUS_OK ||
-      visitor.string_chunk(user, "open", 4u, &error) != LONEJSON_STATUS_OK ||
-      visitor.string_end(user, &error) != LONEJSON_STATUS_OK ||
-      visitor.object_end(user, &error) != LONEJSON_STATUS_OK ||
+      rewriter_emit_input(&visitor, user, &error) != LONEJSON_STATUS_OK ||
+      lonejson_value_rewriter_close(&rewriter, &error) != LONEJSON_STATUS_OK ||
+      sink.len != strlen("{\"status\":\"open\",\"meta\":{\"ready\":true}}") ||
+      memcmp(sink.data, "{\"status\":\"open\",\"meta\":{\"ready\":true}}",
+             sink.len) != 0) {
+    lonejson_value_rewriter_cleanup(&rewriter);
+    lonejson_free(runtime);
+    return 1;
+  }
+  memset(&sink, 0, sizeof(sink));
+  status = lonejson_value_rewriter_open(&rewriter, runtime, rewriter_sink_write,
+                                        &sink, &options, &visitor, &user,
+                                        &error);
+  if (status != LONEJSON_STATUS_OK ||
+      rewriter_emit_input(&visitor, user, &error) != LONEJSON_STATUS_OK ||
       lonejson_value_rewriter_close(&rewriter, &error) != LONEJSON_STATUS_OK ||
       sink.len != strlen("{\"status\":\"open\",\"meta\":{\"ready\":true}}") ||
       memcmp(sink.data, "{\"status\":\"open\",\"meta\":{\"ready\":true}}",
