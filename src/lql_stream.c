@@ -672,6 +672,30 @@ static lonejson_status stream_emit_selected(
   return stream_payload_sink(state, newline, 1u, error);
 }
 
+static lonejson_status stream_emit_projection(
+    lql_stream_state *state, const lonejson_candidate_info *candidate,
+    lonejson_error *error) {
+  lql_status status;
+  static const char newline[] = "\n";
+  if (candidate == NULL || candidate->payload_spool == NULL) {
+    stream_fail(state, LQL_STATUS_CALLBACK_ERROR,
+                "projection record capture is unavailable");
+    stream_lonejson_error(error, state->failure.message);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  status = lql_projection_render_top_level(
+      state->receiver, state->request->projection, candidate->payload_spool,
+      stream_payload_sink, state, &state->failure);
+  if (status != LQL_STATUS_OK) {
+    if (state->failure.code == LQL_STATUS_OK) {
+      stream_fail(state, status, "projection rendering failed");
+    }
+    stream_lonejson_error(error, state->failure.message);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  return stream_payload_sink(state, newline, 1u, error);
+}
+
 static lonejson_candidate_callback_result
 stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
                        lonejson_error *error) {
@@ -743,6 +767,11 @@ stream_candidate_end(void *user, const lonejson_candidate_info *candidate,
   if (state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD &&
       (matched || !state->request->matched_only)) {
     if (stream_emit_selected(state, candidate, error) != LONEJSON_STATUS_OK) {
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+  }
+  if (state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION && matched) {
+    if (stream_emit_projection(state, candidate, error) != LONEJSON_STATUS_OK) {
       return LONEJSON_CANDIDATE_ERROR;
     }
   }
@@ -1607,7 +1636,8 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   options = lonejson_default_candidate_stream_options();
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode =
-      state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD
+      (state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
+       state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION)
           ? LONEJSON_CANDIDATE_CAPTURE_SPOOLED
           : LONEJSON_CANDIDATE_CAPTURE_NONE;
   options.spool_class = LONEJSON_SPOOL_CLASS_LARGE_TEXT;
@@ -1658,16 +1688,24 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   if ((request->output_mode != LQL_STREAM_OUTPUT_DECISION_ONLY &&
-       request->output_mode != LQL_STREAM_OUTPUT_SELECTED_RECORD) ||
-      request->projection != NULL || request->mutation != NULL) {
+       request->output_mode != LQL_STREAM_OUTPUT_SELECTED_RECORD &&
+       request->output_mode != LQL_STREAM_OUTPUT_PROJECTION) ||
+      request->mutation != NULL) {
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                   "direct stream output mode is not implemented");
     return LQL_STATUS_UNSUPPORTED;
   }
-  if (request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD &&
+  if ((request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
+       request->output_mode == LQL_STREAM_OUTPUT_PROJECTION) &&
       request->writer == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                  "selected record output requires a writer");
+                  "record output requires a writer");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (request->output_mode == LQL_STREAM_OUTPUT_PROJECTION &&
+      request->projection == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection output requires a projection handle");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   if (request->limits.max_bytes != 0u) {
@@ -1707,7 +1745,8 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
     return LQL_STATUS_NO_MEMORY;
   }
   if ((state.program != NULL && state.program->requires_generic_path) ||
-      request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD) {
+      request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
+      request->output_mode == LQL_STREAM_OUTPUT_PROJECTION) {
     status = stream_execute_generic_path(&state, runtime, error);
     lonejson_free(runtime);
     return status;

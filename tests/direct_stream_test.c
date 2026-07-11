@@ -469,7 +469,10 @@ static int run_selected_record_output(lql *ctx) {
   static const char all_records[] =
       "{\"status\":\"open\",\"n\":1}\n"
       "{\"status\":\"closed\",\"n\":2}\n";
+  static const char *const projection_paths[] = {"/n", "/status"};
+  static const char projection_output[] = "{\"n\":1,\"status\":\"open\"}\n";
   lql_selector *selector;
+  lql_projection *projection;
   lql_stream_request request;
   lql_stream_result result;
   lql_error error;
@@ -477,6 +480,7 @@ static int run_selected_record_output(lql *ctx) {
   test_writer writer;
 
   selector = NULL;
+  projection = NULL;
   lql_error_init(&error);
   if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
       LQL_STATUS_OK) {
@@ -512,6 +516,25 @@ static int run_selected_record_output(lql *ctx) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
+  if (ctx->projection_parse(ctx, projection_paths, 2u, &projection, &error) !=
+      LQL_STATUS_OK) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  reader.offset = 0u;
+  memset(&writer, 0, sizeof(writer));
+  request.output_mode = LQL_STREAM_OUTPUT_PROJECTION;
+  request.projection = projection;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(projection_output) - 1u ||
+      memcmp(writer.data, projection_output, writer.len) != 0) {
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->projection_destroy(ctx, projection);
   ctx->selector_destroy(ctx, selector);
   return 0;
 }

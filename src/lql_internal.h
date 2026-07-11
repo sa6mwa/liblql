@@ -146,6 +146,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_internal(
     lql_projection **out, lql_error *error);
 LQL_INTERNAL_SYMBOL void lql_projection_destroy_internal(
     lql *self, lql_projection *projection);
+LQL_INTERNAL_SYMBOL lql_status lql_projection_render_top_level(
+    lql *self, const lql_projection *projection,
+    const lonejson_spooled *input, lonejson_sink_fn sink, void *sink_user,
+    lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status
 lql_parse_selector_json_internal(lql *self, const void *json, size_t json_len,
                                  lql_selector **out, lql_error *error);
