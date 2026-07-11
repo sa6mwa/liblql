@@ -15,6 +15,11 @@ typedef struct test_decisions {
   int stop_after_first;
 } test_decisions;
 
+typedef struct test_writer {
+  unsigned char data[1024];
+  size_t len;
+} test_writer;
+
 static lql_status test_read(void *user, unsigned char *buffer, size_t capacity,
                             size_t *out_len, lql_error *error) {
   test_reader *reader;
@@ -40,6 +45,19 @@ static lql_status test_read(void *user, unsigned char *buffer, size_t capacity,
   memcpy(buffer, reader->data + reader->offset, amount);
   reader->offset += amount;
   *out_len = amount;
+  return LQL_STATUS_OK;
+}
+
+static lql_status test_write(void *user, const void *data, size_t len,
+                             lql_error *error) {
+  test_writer *writer;
+  (void)error;
+  writer = (test_writer *)user;
+  if (writer == NULL || data == NULL || len > sizeof(writer->data) - writer->len) {
+    return LQL_STATUS_CALLBACK_ERROR;
+  }
+  memcpy(writer->data + writer->len, data, len);
+  writer->len += len;
   return LQL_STATUS_OK;
 }
 
@@ -408,6 +426,61 @@ static int run_root_wildcard_array_error(lql *ctx) {
   return 0;
 }
 
+static int run_selected_record_output(lql *ctx) {
+  static const char input[] =
+      "{ \"status\" : \"open\", \"n\" : 1 }\n"
+      "{\"status\":\"closed\",\"n\":2}\n";
+  static const char matched_only[] = "{\"status\":\"open\",\"n\":1}\n";
+  static const char all_records[] =
+      "{\"status\":\"open\",\"n\":1}\n"
+      "{\"status\":\"closed\",\"n\":2}\n";
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = selector;
+  request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(matched_only) - 1u ||
+      memcmp(writer.data, matched_only, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  reader.offset = 0u;
+  memset(&writer, 0, sizeof(writer));
+  request.matched_only = 0;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(all_records) - 1u ||
+      memcmp(writer.data, all_records, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 static int run_stop_and_root_array(lql *ctx) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"open\"}\n";
@@ -467,6 +540,7 @@ int main(void) {
       run_or_selection(ctx) || run_not_selection(ctx) ||
       run_mapped_string_predicates(ctx) || run_match_all(ctx) ||
       run_root_wildcard_array_error(ctx) ||
+      run_selected_record_output(ctx) ||
       run_stop_and_root_array(ctx)) {
     ctx->destroy(ctx);
     return 1;

@@ -631,6 +631,47 @@ static lonejson_read_result stream_read(void *user, unsigned char *buffer,
   return out;
 }
 
+static lonejson_status stream_payload_sink(void *user, const void *data,
+                                           size_t len, lonejson_error *error) {
+  lql_stream_state *state;
+  lql_status status;
+  state = (lql_stream_state *)user;
+  status = state->request->writer(state->request->writer_user, data, len,
+                                  &state->failure);
+  if (status != LQL_STATUS_OK) {
+    if (state->failure.code == LQL_STATUS_OK) {
+      stream_fail(state, status, "stream writer failed");
+    }
+    stream_lonejson_error(error, state->failure.message);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status stream_emit_selected(
+    lql_stream_state *state, const lonejson_candidate_info *candidate,
+    lonejson_error *error) {
+  lonejson_status status;
+  static const char newline[] = "\n";
+  if (candidate == NULL || candidate->payload_spool == NULL) {
+    stream_fail(state, LQL_STATUS_CALLBACK_ERROR,
+                "selected record capture is unavailable");
+    stream_lonejson_error(error, state->failure.message);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  status = lonejson_spooled_write_to_sink(candidate->payload_spool,
+                                           stream_payload_sink, state, error);
+  if (status != LONEJSON_STATUS_OK) {
+    if (state->failure.code == LQL_STATUS_OK) {
+      stream_fail(state, LQL_STATUS_CALLBACK_ERROR,
+                  "selected record write failed");
+      stream_lonejson_error(error, state->failure.message);
+    }
+    return status;
+  }
+  return stream_payload_sink(state, newline, 1u, error);
+}
+
 static lonejson_candidate_callback_result
 stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
                        lonejson_error *error) {
@@ -673,7 +714,6 @@ stream_candidate_end(void *user, const lonejson_candidate_info *candidate,
   lql_stream_decision decision;
   lql_stream_callback_result callback_result;
   int matched;
-  (void)candidate;
   state = (lql_stream_state *)user;
   matched = state->program == NULL || state->program->match_all ||
             stream_selector_matches(state->program, state->request->selector,
@@ -698,6 +738,12 @@ stream_candidate_end(void *user, const lonejson_candidate_info *candidate,
       state->result->stopped_early = 1;
       state->result->stop_reason = LQL_STREAM_STOP_CALLBACK;
       return LONEJSON_CANDIDATE_STOP;
+    }
+  }
+  if (state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD &&
+      (matched || !state->request->matched_only)) {
+    if (stream_emit_selected(state, candidate, error) != LONEJSON_STATUS_OK) {
+      return LONEJSON_CANDIDATE_ERROR;
     }
   }
   if (matched && state->request->limits.max_matches != 0u &&
@@ -1545,14 +1591,26 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   lonejson_path_value_visitor visitor;
   lonejson_error lonejson_error;
   lql_status status;
+  const lql_stream_program *saved_program;
+  lql_stream_program match_all_program;
 
   memset(&member, 0, sizeof(member));
+  saved_program = state->program;
+  if (state->program == NULL) {
+    memset(&match_all_program, 0, sizeof(match_all_program));
+    match_all_program.match_all = 1;
+    state->program = &match_all_program;
+  }
   member.state = state;
   member.full_path = 1;
   state->generic_member = &member;
   options = lonejson_default_candidate_stream_options();
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  options.capture_mode =
+      state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD
+          ? LONEJSON_CANDIDATE_CAPTURE_SPOOLED
+          : LONEJSON_CANDIDATE_CAPTURE_NONE;
+  options.spool_class = LONEJSON_SPOOL_CLASS_LARGE_TEXT;
   visitor = lonejson_default_path_value_visitor();
   visitor.object_begin = stream_mapped_path_object_begin;
   visitor.object_end = stream_mapped_path_object_end;
@@ -1577,6 +1635,7 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
                                                           &lonejson_error),
                          &lonejson_error, error);
   state->generic_member = NULL;
+  state->program = saved_program;
   return status;
 }
 
@@ -1598,12 +1657,18 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
                   "stream receiver, request, result, and reader are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  if (request->output_mode != LQL_STREAM_OUTPUT_DECISION_ONLY ||
-      request->writer != NULL || request->projection != NULL ||
-      request->mutation != NULL) {
+  if ((request->output_mode != LQL_STREAM_OUTPUT_DECISION_ONLY &&
+       request->output_mode != LQL_STREAM_OUTPUT_SELECTED_RECORD) ||
+      request->projection != NULL || request->mutation != NULL) {
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                  "direct stream probe currently supports decision-only output");
+                  "direct stream output mode is not implemented");
     return LQL_STATUS_UNSUPPORTED;
+  }
+  if (request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD &&
+      request->writer == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "selected record output requires a writer");
+    return LQL_STATUS_INVALID_ARGUMENT;
   }
   if (request->limits.max_bytes != 0u) {
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
@@ -1631,7 +1696,8 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
   }
   lonejson_error_init(&lonejson_error);
   runtime = state.program != NULL && !state.program->match_all &&
-                !state.program->requires_generic_path
+                !state.program->requires_generic_path &&
+                request->output_mode == LQL_STREAM_OUTPUT_DECISION_ONLY
                 ? lql_lonejson_new_mapped_stream(self, &lonejson_error)
                 : lql_lonejson_new(self, &lonejson_error);
   if (runtime == NULL) {
@@ -1640,7 +1706,8 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
                                                      : lonejson_error.message);
     return LQL_STATUS_NO_MEMORY;
   }
-  if (state.program != NULL && state.program->requires_generic_path) {
+  if ((state.program != NULL && state.program->requires_generic_path) ||
+      request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD) {
     status = stream_execute_generic_path(&state, runtime, error);
     lonejson_free(runtime);
     return status;
