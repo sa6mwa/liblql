@@ -731,6 +731,66 @@ static int run_mutation_output(lql *ctx) {
   return 0;
 }
 
+static int run_projection_then_mutation_output(lql *ctx) {
+  static const char input[] = "{\"status\":\"open\",\"n\":1,\"drop\":9}\n";
+  static const char *const projection_paths[] = {"/status", "/n"};
+  static const char *const mutations[] = {"/n=+2", "/added=true"};
+  static const char output[] =
+      "{\"n\":3,\"status\":\"open\",\"added\":true}\n";
+  lql_selector *selector;
+  lql_projection *projection;
+  lql_mutation *mutation;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+
+  selector = NULL;
+  projection = NULL;
+  mutation = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+          LQL_STATUS_OK ||
+      ctx->projection_parse(ctx, projection_paths, 2u, &projection, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_parse(ctx, mutations, 2u, &mutation, &error) !=
+          LQL_STATUS_OK) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = selector;
+  request.projection = projection;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(output) - 1u ||
+      memcmp(writer.data, output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  ctx->projection_destroy(ctx, projection);
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 static int run_stop_and_root_array(lql *ctx) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"open\"}\n";
@@ -793,6 +853,7 @@ int main(void) {
       run_selected_record_output(ctx) ||
       run_nested_projection_output(ctx) ||
       run_mutation_output(ctx) ||
+      run_projection_then_mutation_output(ctx) ||
       run_stop_and_root_array(ctx)) {
     ctx->destroy(ctx);
     return 1;
