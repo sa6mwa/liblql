@@ -107,6 +107,11 @@ typedef struct eval_doc {
   size_t fast_direct_match_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
   size_t fast_direct_array_index_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
   char fast_direct_container_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
+#if defined(LONEJSON_HAS_CANDIDATE_DIRECT_PATH_VISITOR)
+  const char *fast_direct_path_keys[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
+  size_t fast_direct_path_key_lens[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
+  unsigned char fast_direct_path_kinds[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
+#endif
   const lql_selector *fast_multi_value_selector;
   const lql_selector *fast_multi_active_selector;
   const char *fast_multi_keys[LQL_EVAL_FAST_MULTI_PRED_CAP];
@@ -4934,9 +4939,31 @@ configure_candidate_eval_visitors(lonejson_candidate_stream_options *options,
   }
   if (selector_fast_direct_scalar_eligible(doc != NULL ? doc->selector
                                                        : NULL)) {
+    size_t i;
     init_fast_direct_scalar_visitor(value_visitor);
     options->visitor = value_visitor;
     options->visitor_user = doc;
+#if defined(LONEJSON_HAS_CANDIDATE_DIRECT_PATH_VISITOR)
+    if (doc->fast_mutation_top_key == NULL) {
+      for (i = 0u; i < doc->selector->field_segment_count; ++i) {
+        doc->fast_direct_path_keys[i] =
+            doc->selector->field + doc->selector->field_segment_offsets[i];
+        doc->fast_direct_path_key_lens[i] =
+            doc->selector->field_segment_lens[i];
+        doc->fast_direct_path_kinds[i] =
+            doc->selector->field_segment_kinds[i] ==
+                    LQL_FIELD_SEGMENT_ARRAY_WILDCARD
+                ? LONEJSON_CANDIDATE_PATH_ARRAY_WILDCARD
+                : LONEJSON_CANDIDATE_PATH_LITERAL;
+      }
+      options->direct_path_keys = doc->fast_direct_path_keys;
+      options->direct_path_key_lens = doc->fast_direct_path_key_lens;
+      options->direct_path_kinds = doc->fast_direct_path_kinds;
+      options->direct_path_segment_count = doc->selector->field_segment_count;
+    }
+#else
+    (void)i;
+#endif
     return;
   }
   if (selector_fast_recursive_suffix_scalar_eligible(doc != NULL ? doc->selector
@@ -4973,6 +5000,11 @@ static void enable_fast_top_level_field_candidate(
   if (options == NULL || doc == NULL) {
     return;
   }
+#if defined(LONEJSON_HAS_CANDIDATE_DIRECT_PATH_VISITOR)
+  if (options->direct_path_keys != NULL) {
+    return;
+  }
+#endif
   if (!selector_fast_flat_scalar_eligible(doc->selector) &&
       !selector_fast_direct_scalar_eligible(doc->selector)) {
     return;
