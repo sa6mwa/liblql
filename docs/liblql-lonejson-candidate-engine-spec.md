@@ -12,12 +12,11 @@ verification, profiling, and performance acceptance use only the vendored
 preset until an upstream LoneJSON release implements the final surface. The
 normal preset is not a build, test, or compatibility gate during this work.
 
-The action-stage cutover is complete but rejected by the performance evidence
-recorded below. The final target is a generic path-aware first pass plus one
-spill-backed raw-candidate replay spool. Scan plans, specialized candidate
-visitors, transformed staging, and payload-side mutation bypasses remain
-deleted. The remaining implementation work is to replace the action stage in
-one cutover, then harden and measure that final path.
+The architectural cutover is complete. Candidate Run uses a path-aware
+observer and one spill-backed action stage. Decision and payload execution use
+the same generic path-event lifecycle; scan plans, specialized candidate
+visitors, transformed staging, and payload-side mutation bypasses are deleted.
+The remaining work is hardening and performance acceptance on this final path.
 
 ## Outcomes
 
@@ -25,8 +24,8 @@ one cutover, then harden and measure that final path.
   liblql, clql, SDK, Lua, and benchmark entry point. There is no flattening.
 - LoneJSON has one generic Candidate Run traversal: decoded JSON events with
   parser-owned paths delivered to one path-aware observer.
-- LoneJSON has one unresolved-output representation: a raw current-candidate
-  spool, bounded in memory and spill-backed when necessary.
+- LoneJSON has one unresolved-output representation: a compact current-
+  candidate action stage, bounded in memory and spill-backed when necessary.
 - LoneJSON owns JSON mechanics. liblql owns selector, projection, mutation,
   temporal, and public API policy.
 - RSS does not grow with total input, candidate count, match count, or result
@@ -49,9 +48,9 @@ Its roles are deliberately narrow:
 - `strict_ndjson`: framing and root-array rejection.
 - `path_observer`: generic decoded path/value events. LoneJSON never receives
   an LQL selector, predicate, mutation, or temporal rule.
-- `output_policy`: records the final candidate decision, then replays an
-  accepted raw candidate through the generic writer lifecycle.
-- `payload_policy`: no payload, seekable range metadata, or the same explicit
+- `output_policy`: pass through, suppress, transform, or stop using the same
+  writer lifecycle.
+- `payload_policy`: no payload, seekable range metadata, or an explicit
   callback-scoped current-candidate spool.
 
 There are no Candidate Run scan plans, non-path observers, direct visitors,
@@ -66,27 +65,31 @@ Every candidate follows this lifecycle exactly once:
 
 ```text
 begin
-  -> capture raw candidate bytes while parsing and delivering decoded path events
+  -> parse and deliver decoded path events
   -> liblql updates selector truth and transform policy
+  -> retain generic writer actions while output commitment is unknown
   -> finalize selector truth and deferred transform errors
-  -> accept: replay raw candidate through the generic writer/transform lifecycle
-     reject: discard raw candidate bytes without output
+  -> accept: commit actions and finish directly
+     reject: discard actions and finish validation without output
      stop/fail: propagate the generic result
 end
 ```
 
-LoneJSON parses every source candidate once for generic evaluation. Accepted
-candidates are parsed once more from the current raw spool for generic writer,
-projection, and mutation execution; that replay has evaluation disabled.
-liblql never tokenizes, parses, serializes, escapes, or frames JSON. The raw
-spool is not selector syntax or transform state, may spill only the current
-candidate, and is reset before the next candidate.
+LoneJSON parses a source candidate once. Generic projection and mutation do
+not reparse raw candidate bytes. The action stage is a compact generic writer
+command stream, never selector syntax or liblql transform state. It may spill
+only the current candidate; it is reset before the next candidate.
+
+The action codec omits key, string, and number begin markers. Replay opens the
+corresponding writer state on its first chunk, or on its end marker for an empty
+key or string. This remains a generic parsed-event representation rather than
+raw JSON or selector-specific state.
 
 When liblql proves rejection, LoneJSON stops output work but continues JSON
-validation and observer delivery. When it proves acceptance, LoneJSON retains
-the raw spool until candidate completion and then runs the replay writer pass.
-If truth remains unknown until candidate end, it accepts or discards there.
-Deferred mutation errors remain deferred until the candidate outcome is known.
+validation and observer delivery. When it proves acceptance, LoneJSON commits
+the staged prefix and writes subsequent events directly. If truth remains
+unknown until candidate end, it commits or discards there. Deferred mutation
+errors remain deferred until the candidate outcome is known.
 
 Callback-source payload delivery may retain a raw current-candidate spool only
 for that public callback contract. It is not a transform fallback.
@@ -97,8 +100,8 @@ LoneJSON owns:
 
 - strict NDJSON framing, tokenization, validation, decoded path/value events,
   source offsets, parser/writer stacks, escaping, and output framing;
-- bounded parser and writer buffers plus one shared current-candidate raw
-  spool for replay or callback payload delivery;
+- bounded parser and writer buffers plus current-candidate action or payload
+  spools;
 - generic stop, callback, I/O, and JSON diagnostics.
 
 liblql owns:
@@ -151,8 +154,9 @@ Allowed per execution:
 
 - selector-plan scratch proportional only to selector complexity;
 - parser/writer stacks and bounded transport buffers;
-- one current-candidate raw spool for delayed output and public callback
-  payload delivery.
+- one current-candidate action stage for delayed output;
+- one raw current-candidate payload spool only for public callback payload
+  delivery.
 
 Forbidden:
 
@@ -160,7 +164,7 @@ Forbidden:
   result caches;
 - retaining a completed candidate past its callback or output lifecycle;
 - full-message materialization behind a streaming API;
-- a JSON parser or ad hoc JSON rewriting in liblql.
+- a second JSON parser or ad hoc JSON rewriting in liblql.
 
 The 8 MiB process target is the architectural target. The 128 MiB limit for
 the 100 MiB large-JSON gate is a regression ceiling. The large-candidate RSS
@@ -174,9 +178,9 @@ Implement architectural slices before broad verification. Intermediate edits
 inside a slice may not compile. Do not preserve an old path merely to keep a
 micro-step green.
 
-1. **Raw-replay cutover.** Delete the action codec and all action-stage state.
-   Keep one generic path observer, one raw spool, and one replay-only generic
-   writer pass for accepted candidates.
+1. **Candidate-engine cutover.** Delete all alternate Candidate Run observer,
+   staging, and scan-plan surfaces. Keep one path observer and one action
+   stage.
 2. **liblql collapse.** Move decision and payload execution to the same
    path-event lifecycle. Delete fast selector visitors, duplicate scanners,
    adapters, macros, and stale tests in the same slice.
@@ -193,13 +197,10 @@ hot path is active. Formatting is part of every slice commit.
 ## Performance Decision Record
 
 The completed one-parse action-stage implementation is semantically clean but
-does not meet the performance floor. Its first 4 KiB mutation matrix recorded
+does not yet meet the performance floor. The 4 KiB mutation matrix recorded
 288 Go/C pairs: 188 at or above 1.0x, 100 below, with a 1.13x median and a
-0.65x worst row. After removing key, string, and number begin actions, the
-same matrix improved to 208 pairs at or above 1.0x and 80 below, with a 1.15x
-median. Its worst sparse recursive mutation row was 0.37x. C peak RSS across
-both matrices was 2.7-3.2 MiB after correcting the Linux measurement to read
-`/proc/self/status` `VmHWM`.
+0.65x worst row. C peak RSS across those rows was 2.7-3.2 MiB after correcting
+the Linux measurement to read `/proc/self/status` `VmHWM`.
 
 Profiling removed direct spool writes as the dominant cost, but rejected
 candidates still require decoded action recording. This cannot be safely
@@ -208,33 +209,21 @@ later occurrence of the same path can make the candidate match. The Go
 reference retains bounded raw candidate bytes and reparses only accepted
 candidates, which avoids that rejected-candidate decoded-action cost.
 
-Profiling the remaining worst case puts generic JSON visitation first and
-action staging at roughly eight percent. Further action-codec compaction cannot
-close a 0.37x row without obscuring the design. The current action-stage
-architecture is therefore rejected as the route to the required performance
-floor.
-
-The required replacement is one bounded raw current-candidate spool captured
-while the first generic path-event pass evaluates liblql policy. At candidate
-completion, a rejected spool is reset. An accepted spool is parsed once more
-through the existing generic writer/transform lifecycle with evaluation
-disabled. The replay pass must not receive selector syntax, predicate state,
-or a specialized visitor. This is two parses only for accepted candidates; it
-removes decoded action recording from every rejected candidate.
-
-The revision must preserve strict NDJSON, parser-owned generic path events,
-one-candidate lifetime, deferred matched-only mutation errors, and the
-repeated-large-candidate RSS proof. It must not reintroduce scan plans,
-selector-shaped LoneJSON fields, or an unbounded cache. It is a material
-architecture change: this specification defines the required lifecycle and
-verification, and the former action-stage path must be deleted in one cutover.
+Do not reintroduce scan plans, selector-shaped LoneJSON fields, or an
+unbounded cache to close this gap. If the one-parse action stage cannot reach
+the 1.0x floor after further generic codec work, an explicit revision must
+choose a single bounded raw-candidate replay representation for unresolved
+output. That revision must preserve strict NDJSON, parser-owned generic path
+events, one-candidate lifetime, deferred matched-only mutation errors, and
+the repeated-large-candidate RSS proof. It is a material architecture change,
+not an implicit optimization under the current specification.
 
 ## Architecture Cutover Gates
 
 The architectural cutover is complete only when all of these are true:
 
-- `rg` finds no action-stage, transformed-stage, scan-plan, or fast-candidate
-  selector surfaces outside this migration record;
+- `rg` finds no deleted Candidate Run observer, transformed-stage, scan-plan,
+  or fast-candidate selector surfaces outside this migration record;
 - no LoneJSON candidate option or macro is selector-family-specific;
 - strict NDJSON root-array errors pass in C SDK, CLI, Lua, parity, and
   benchmark fixtures;
