@@ -168,8 +168,10 @@ Current implementation status:
 - On Linux hosts with `taskset`, the parity runner pins Go and C benchmark
   subprocesses to the first CPU permitted to the runner. This prevents the
   compared implementations from landing on different cores during a single
-  run, and executes them adjacently for each dataset/selector/mode tuple.
-  Set `LQL_BENCH_CPU=<cpu-list>` to choose a permitted CPU or
+  run. It executes one submode at a time and alternates Go/C order for each
+  dataset/selector/mode/submode tuple so one implementation does not
+  systematically inherit the other process's warmed CPU or file state. Set
+  `LQL_BENCH_CPU=<cpu-list>` to choose a permitted CPU or
   `LQL_BENCH_CPU=off` to disable pinning where it is unsuitable.
 - the current executable dataset matrix covers NDJSON and single-root JSON
   object fixture shapes for both library-style and CLI-style record forms,

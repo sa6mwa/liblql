@@ -875,7 +875,7 @@ run_c_native_mode() {
     plus_value_*) payload_source_type=seekable_range ;;
     project_*) payload_source_type=projection ;;
   esac
-  for submode in warmup_included steady_state; do
+  for submode in ${LQL_BENCH_SUBMODES:-warmup_included steady_state}; do
     record=$(run_bench_process "$payload_bench" "$mode" "$expr" \
       "$fixture_path" "$selector_name" "$submode")
     c_candidates=$(kv_field candidates "$record")
@@ -920,7 +920,7 @@ run_go_mode() {
     emit_unsupported_impl "go" "go executable not found"
     return 1
   fi
-  for submode in warmup_included steady_state; do
+  for submode in ${LQL_BENCH_SUBMODES:-warmup_included steady_state}; do
     record=$(run_bench_process "$go_bench" \
       --fixture "$fixture_path" \
       --dataset "$dataset_name" \
@@ -971,7 +971,7 @@ run_lua_mode() {
     plus_value_source_selector) payload_source_type=spooled ;;
     plus_value_*) payload_source_type=lua_liblql ;;
   esac
-  for submode in warmup_included steady_state; do
+  for submode in ${LQL_BENCH_SUBMODES:-warmup_included steady_state}; do
     safe_tag=$(printf '%s-%s-%s-%s' "$dataset_name" "$selector_name" "$mode" "$submode" |
       sed 's/[^A-Za-z0-9_.-]/_/g')
     lua_out="$fixture_dir/lua-$safe_tag.out"
@@ -1136,21 +1136,41 @@ mode_applies_to_case() {
 }
 
 run_matrix() {
+  run_order=0
   while read dataset_name fixture_path candidates selector_name expr; do
     for mode in $(selected_modes); do
       mode_applies_to_case "$mode" "$selector_name" || continue
-      if is_selected go; then
-        run_go_mode "$mode" "$dataset_name" "$fixture_path" "$candidates" \
-          "$selector_name" "$expr" || return 1
-      fi
-      if is_selected c; then
-        run_c_native_mode "$mode" "$dataset_name" "$fixture_path" \
-          "$candidates" "$selector_name" "$expr" || return 1
-      fi
-      if is_selected lua; then
-        run_lua_mode "$mode" "$dataset_name" "$fixture_path" "$candidates" \
-          "$selector_name" "$expr" || return 1
-      fi
+      for submode in warmup_included steady_state; do
+        if [ $((run_order % 2)) -eq 0 ]; then
+          if is_selected go; then
+            LQL_BENCH_SUBMODES=$submode run_go_mode \
+              "$mode" "$dataset_name" "$fixture_path" "$candidates" \
+              "$selector_name" "$expr" || return 1
+          fi
+          if is_selected c; then
+            LQL_BENCH_SUBMODES=$submode run_c_native_mode \
+              "$mode" "$dataset_name" "$fixture_path" "$candidates" \
+              "$selector_name" "$expr" || return 1
+          fi
+        else
+          if is_selected c; then
+            LQL_BENCH_SUBMODES=$submode run_c_native_mode \
+              "$mode" "$dataset_name" "$fixture_path" "$candidates" \
+              "$selector_name" "$expr" || return 1
+          fi
+          if is_selected go; then
+            LQL_BENCH_SUBMODES=$submode run_go_mode \
+              "$mode" "$dataset_name" "$fixture_path" "$candidates" \
+              "$selector_name" "$expr" || return 1
+          fi
+        fi
+        if is_selected lua; then
+          LQL_BENCH_SUBMODES=$submode run_lua_mode \
+            "$mode" "$dataset_name" "$fixture_path" "$candidates" \
+            "$selector_name" "$expr" || return 1
+        fi
+        run_order=$((run_order + 1))
+      done
     done
   done < "$case_matrix"
 }
