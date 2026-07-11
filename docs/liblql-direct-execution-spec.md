@@ -96,19 +96,21 @@ transform program, Candidate Run, or candidate-transform compatibility code.
 
 When liblql needs to preserve a current record while its selector decision is
 not known until the record closes, LoneJSON may provide a public,
-library-neutral structured-event-to-writer adapter. The adapter accepts
-ordinary `lonejson_value_visitor` events and emits the corresponding compact
-JSON through a caller-owned `lonejson_writer`; it owns only JSON framing,
+library-neutral event-fed rewriter over its existing normalized-path rewrite
+options. The rewriter accepts ordinary `lonejson_value_visitor` events and
+emits one compact transformed JSON value through a caller-owned sink. It owns
+only generic JSON framing, normalized path matching, replacement emission,
 decoded key buffering, escaping, and writer error propagation. It must not
-accept a selector, a path matcher, a mutation expression, a record decision,
-or any LQL-specific option. Its public state and init/reset/cleanup rules must
-be usable across the upstream static and shared ABI boundary.
+accept a selector, an LQL mutation expression, a record decision, or any
+LQL-specific option. Its public state and init/close/cleanup rules must be
+usable across the upstream static and shared ABI boundary.
 
-liblql composes that adapter with its direct selector and mutation state to
-build at most one transformed current-record spool. It decides whether to emit
-or discard that spool only after the selector result is final. This replaces
-capture-then-reparse mutation execution; it is not permission to restore a
-generic transform engine or an input/result cache.
+liblql compiles its mutation action into those generic rewrite options and
+composes the rewriter with direct selector state to build at most one
+transformed current-record spool. It decides whether to emit or discard that
+spool only after the selector result is final. This replaces
+capture-then-reparse mutation execution; it is not permission to restore an
+input/result cache or a selector-aware transform layer in LoneJSON.
 
 For direct-object selector fields, liblql may use LoneJSON's public mapped
 candidate stream with fixed schema fields configured as `lonejson_json_value`

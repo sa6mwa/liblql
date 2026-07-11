@@ -82,6 +82,10 @@ if(BUILD_TESTING)
     tests/lonejson_writer_visitor_test.c)
   target_link_libraries(lonejson_writer_visitor_test PRIVATE lonejson::lonejson)
   add_test(NAME lonejson.writer_visitor COMMAND lonejson_writer_visitor_test)
+  add_executable(lonejson_value_rewriter_test
+    tests/lonejson_value_rewriter_test.c)
+  target_link_libraries(lonejson_value_rewriter_test PRIVATE lonejson::lonejson)
+  add_test(NAME lonejson.value_rewriter COMMAND lonejson_value_rewriter_test)
 endif()
 
 if(LQL_BUILD_DIRECT_PROBE)

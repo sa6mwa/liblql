@@ -141,7 +141,9 @@ static lonejson *lql_lonejson_new_with_stream_mode(lql *self,
 
   config = lonejson_default_config();
   config.candidate_read_buffer_size = 64u * 1024u;
+  config.json_value_max_string_bytes = (size_t)-1;
   config.json_value_max_number_bytes = 4096u;
+  config.spool_large_text.max_bytes = (size_t)-1;
   if (mapped_stream) {
     config.clear_destination_by_default = 0;
   }

@@ -2555,6 +2555,12 @@ typedef struct lonejson_writer_visitor {
   lonejson_error error;
 } lonejson_writer_visitor;
 
+/** Incremental generic JSON value rewriter driven by structured events. */
+typedef struct lonejson_value_rewriter {
+  void *state;
+  lonejson_error error;
+} lonejson_value_rewriter;
+
 /** Path-aware visitor callbacks for one arbitrary JSON value. String values
  * and object keys are delivered as decoded UTF-8 in chunks. Number values are
  * delivered as raw token bytes in chunks. Any callback may be `NULL` when the
@@ -5269,6 +5275,25 @@ lonejson_status lonejson_writer_visitor_open(
 lonejson_status lonejson_writer_visitor_close(lonejson_writer_visitor *visitor,
                                               lonejson_error *error);
 void lonejson_writer_visitor_cleanup(lonejson_writer_visitor *visitor);
+/** Initializes a reusable structured-event JSON value rewriter. */
+void lonejson_value_rewriter_init(lonejson_value_rewriter *rewriter);
+/** Opens one rewriter that receives a balanced JSON value event sequence.
+ *
+ * The rewriter compacts and transforms that value into `sink` using the
+ * normalized-path rewrite `options`. `out_visitor` and `out_user` are valid
+ * until close or cleanup. Closing finalizes exactly one complete rewritten
+ * JSON value. The rewriter may be opened again after a successful close.
+ */
+lonejson_status lonejson_value_rewriter_open(
+    lonejson_value_rewriter *rewriter, lonejson *runtime, lonejson_sink_fn sink,
+    void *sink_user, const struct lonejson_value_rewrite_options *options,
+    lonejson_value_visitor *out_visitor, void **out_user,
+    lonejson_error *error);
+/** Finalizes one event-fed rewritten value. */
+lonejson_status lonejson_value_rewriter_close(lonejson_value_rewriter *rewriter,
+                                              lonejson_error *error);
+/** Releases all resources retained by a value rewriter. */
+void lonejson_value_rewriter_cleanup(lonejson_value_rewriter *rewriter);
 /** Initializes a mapped string-array stream field with no handler. */
 void lonejson_string_array_stream_init(lonejson_string_array_stream *stream);
 /** Configures callbacks for a mapped string-array stream field.
@@ -9053,6 +9078,10 @@ typedef lonejson_json_value_parse_mode lj_json_value_parse_mode;
  * begin/chunk/end triplets for keys, strings, and numbers.
  */
 typedef lonejson_value_visitor lj_value_visitor;
+/** Structured JSON writer visitor adapter. */
+typedef lonejson_writer_visitor lj_writer_visitor;
+/** Incremental generic structured-event JSON rewriter. */
+typedef lonejson_value_rewriter lj_value_rewriter;
 /** One decoded path segment in a parser-owned arbitrary JSON value path. */
 typedef lonejson_path_segment lj_path_segment;
 /** Current normalized location while visiting one arbitrary JSON value. */
@@ -9529,6 +9558,43 @@ lj_buffer_reader_read(void *user, unsigned char *buffer, size_t capacity) {
 /** Returns the empty visitor with all callbacks set to `NULL`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_value_visitor lj_default_value_visitor(void) {
   return lonejson_default_value_visitor();
+}
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_writer_visitor_init(lj_writer_visitor *visitor) {
+  lonejson_writer_visitor_init(visitor);
+}
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_visitor_open(
+    lj_writer_visitor *visitor, lj_writer *writer, lj_value_visitor *out_visitor,
+    void **out_user, lj_error *error) {
+  return lonejson_writer_visitor_open(visitor, writer, out_visitor, out_user,
+                                      error);
+}
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_writer_visitor_close(lj_writer_visitor *visitor, lj_error *error) {
+  return lonejson_writer_visitor_close(visitor, error);
+}
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_writer_visitor_cleanup(lj_writer_visitor *visitor) {
+  lonejson_writer_visitor_cleanup(visitor);
+}
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_value_rewriter_init(lj_value_rewriter *rewriter) {
+  lonejson_value_rewriter_init(rewriter);
+}
+LONEJSON_SHORT_ALIAS_INLINE lj_status lj_value_rewriter_open(
+    lj_value_rewriter *rewriter, lonejson *runtime, lj_sink_fn sink,
+    void *sink_user, const lj_value_rewrite_options *options,
+    lj_value_visitor *out_visitor, void **out_user, lj_error *error) {
+  return lonejson_value_rewriter_open(rewriter, runtime, sink, sink_user,
+                                      options, out_visitor, out_user, error);
+}
+LONEJSON_SHORT_ALIAS_INLINE lj_status
+lj_value_rewriter_close(lj_value_rewriter *rewriter, lj_error *error) {
+  return lonejson_value_rewriter_close(rewriter, error);
+}
+LONEJSON_SHORT_ALIAS_INLINE void
+lj_value_rewriter_cleanup(lj_value_rewriter *rewriter) {
+  lonejson_value_rewriter_cleanup(rewriter);
 }
 /** Returns the empty path-aware visitor with all callbacks set to `NULL`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_path_value_visitor
@@ -47111,6 +47177,137 @@ static lonejson_status lonejson__value_rewrite_reader_with_options(
   }
   lonejson__value_rewrite_cleanup(&state);
   return status;
+}
+
+static void lonejson__value_rewrite_assign_visitor(
+    lonejson_value_visitor *visitor) {
+  *visitor = lonejson_default_value_visitor();
+  visitor->object_begin = lonejson__value_rewrite_object_begin;
+  visitor->object_end = lonejson__value_rewrite_object_end;
+  visitor->object_key_begin = lonejson__value_rewrite_key_begin;
+  visitor->object_key_chunk = lonejson__value_rewrite_key_chunk;
+  visitor->object_key_end = lonejson__value_rewrite_key_end;
+  visitor->array_begin = lonejson__value_rewrite_array_begin;
+  visitor->array_end = lonejson__value_rewrite_array_end;
+  visitor->string_begin = lonejson__value_rewrite_string_begin;
+  visitor->string_chunk = lonejson__value_rewrite_string_chunk;
+  visitor->string_end = lonejson__value_rewrite_string_end;
+  visitor->number_begin = lonejson__value_rewrite_number_begin;
+  visitor->number_chunk = lonejson__value_rewrite_number_chunk;
+  visitor->number_end = lonejson__value_rewrite_number_end;
+  visitor->boolean_value = lonejson__value_rewrite_boolean;
+  visitor->null_value = lonejson__value_rewrite_null;
+}
+
+static void lonejson__value_rewriter_destroy(
+    lonejson_value_rewriter *rewriter) {
+  lonejson__value_rewrite_state *state;
+  if (rewriter == NULL || rewriter->state == NULL) {
+    return;
+  }
+  state = (lonejson__value_rewrite_state *)rewriter->state;
+  lonejson__value_rewrite_cleanup(state);
+  lonejson__buffer_free(&state->allocator, state, sizeof(*state));
+  rewriter->state = NULL;
+}
+
+void lonejson_value_rewriter_init(lonejson_value_rewriter *rewriter) {
+  if (rewriter != NULL) {
+    memset(rewriter, 0, sizeof(*rewriter));
+    lonejson_error_init(&rewriter->error);
+  }
+}
+
+lonejson_status lonejson_value_rewriter_open(
+    lonejson_value_rewriter *rewriter, lonejson *runtime, lonejson_sink_fn sink,
+    void *sink_user, const lonejson_value_rewrite_options *options,
+    lonejson_value_visitor *out_visitor, void **out_user,
+    lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  lonejson__value_rewrite_state *state;
+  lonejson_allocator allocator;
+  lonejson__value_limits limits;
+  lonejson_status status;
+
+  if (rewriter == NULL || sink == NULL || options == NULL ||
+      out_visitor == NULL || out_user == NULL || rewriter->state != NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "value rewriter arguments are invalid");
+  }
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  status = lonejson__value_rewrite_validate_options(options, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson__runtime_borrow_release(&borrow);
+    return status;
+  }
+  allocator = lonejson__allocator_resolve(runtime_state->parse_options.allocator);
+  state = (lonejson__value_rewrite_state *)lonejson__buffer_alloc(
+      &allocator, sizeof(*state));
+  if (state == NULL) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                               0u, 0u, "failed to allocate value rewriter");
+  }
+  memset(state, 0, sizeof(*state));
+  state->options = *options;
+  state->parse_options = runtime_state->parse_options;
+  state->allocator = allocator;
+  state->error = error;
+  lonejson__clear_error(error);
+  status = lonejson__writer_init_sink_with_options(
+      &state->writer, sink, sink_user, &runtime_state->write_options,
+      runtime_state, error);
+  if (status == LONEJSON_STATUS_OK) {
+    lonejson__value_rewrite_resolve_limits(&state->parse_options, runtime_state,
+                                           &limits);
+    state->number_limit = limits.max_number_bytes;
+    lonejson__value_rewrite_assign_visitor(out_visitor);
+    *out_user = state;
+    rewriter->state = state;
+    lonejson_error_init(&rewriter->error);
+  } else {
+    lonejson__value_rewrite_cleanup(state);
+    lonejson__buffer_free(&allocator, state, sizeof(*state));
+  }
+  lonejson__runtime_borrow_release(&borrow);
+  return status;
+}
+
+lonejson_status lonejson_value_rewriter_close(lonejson_value_rewriter *rewriter,
+                                              lonejson_error *error) {
+  lonejson__value_rewrite_state *state;
+  lonejson_status status;
+
+  if (rewriter == NULL || rewriter->state == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                               0u, "open value rewriter is required");
+  }
+  state = (lonejson__value_rewrite_state *)rewriter->state;
+  state->error = error;
+  if (state->frame_count != 0u || state->replacing || state->skipping ||
+      state->current_replace || state->number.len != 0u) {
+    status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                                 0u, "value rewriter value is incomplete");
+  } else if (!state->found &&
+             state->options.action != LONEJSON_VALUE_REWRITE_KEEP) {
+    status = lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                                 0u, "value rewrite target was not found");
+  } else {
+    status = lonejson_writer_finish(&state->writer, error);
+  }
+  lonejson__value_rewriter_destroy(rewriter);
+  return status;
+}
+
+void lonejson_value_rewriter_cleanup(lonejson_value_rewriter *rewriter) {
+  lonejson__value_rewriter_destroy(rewriter);
+  if (rewriter != NULL) {
+    lonejson_error_init(&rewriter->error);
+  }
 }
 
 lonejson_status lonejson_value_rewrite_reader(

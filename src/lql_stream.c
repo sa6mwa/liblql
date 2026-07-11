@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -63,6 +64,13 @@ typedef struct lql_stream_state {
   lql_stream_member_context *generic_member;
   lql_projection_capture *projection_capture;
   const lonejson_path_value_visitor *projection_visitor;
+  lonejson *runtime;
+  lonejson_spooled mutation_spool;
+  lonejson_value_rewriter mutation_rewriter;
+  lonejson_value_visitor mutation_visitor;
+  void *mutation_visitor_user;
+  int mutation_direct;
+  int mutation_ready;
 } lql_stream_state;
 
 struct lql_stream_member_context {
@@ -736,6 +744,19 @@ stream_emit_mutation(lql_stream_state *state,
                      lonejson_error *error) {
   lql_status status;
   static const char newline[] = "\n";
+  if (state->mutation_ready) {
+    lonejson_status lonejson_status;
+    lonejson_status = lonejson_spooled_write_to_sink(
+        &state->mutation_spool, stream_payload_sink, state, error);
+    if (lonejson_status != LONEJSON_STATUS_OK) {
+      if (state->failure.code == LQL_STATUS_OK) {
+        stream_fail(state, LQL_STATUS_CALLBACK_ERROR,
+                    "direct mutation output write failed");
+      }
+      return lonejson_status;
+    }
+    return stream_payload_sink(state, newline, 1u, error);
+  }
   if (candidate == NULL || candidate->payload_spool == NULL) {
     stream_fail(state, LQL_STATUS_CALLBACK_ERROR,
                 "mutation record capture is unavailable");
@@ -760,6 +781,99 @@ static lonejson_status stream_projection_spool_sink(void *user,
                                                     size_t len,
                                                     lonejson_error *error) {
   return lonejson_spooled_append((lonejson_spooled *)user, data, len, error);
+}
+
+static int stream_mutation_direct_eligible(const lql_mutation *mutation) {
+  return mutation != NULL && mutation->action_count == 1u;
+}
+
+static lonejson_status
+stream_mutation_emit_value(lonejson_writer *writer, void *user,
+                           lonejson_error *error) {
+  const lql_mutation_action *action;
+  action = (const lql_mutation_action *)user;
+  switch (action->value_kind) {
+  case LQL_MUTATION_VALUE_STRING:
+    return lonejson_writer_string(writer, action->value, strlen(action->value),
+                                  error);
+  case LQL_MUTATION_VALUE_NUMBER:
+    return lonejson_writer_number_text(writer, action->value,
+                                       strlen(action->value), error);
+  case LQL_MUTATION_VALUE_BOOL:
+    return lonejson_writer_bool(writer, action->value[0] == 't', error);
+  case LQL_MUTATION_VALUE_NULL:
+    return lonejson_writer_null(writer, error);
+  default:
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+}
+
+static lonejson_status
+stream_mutation_emit_increment(
+    lonejson_writer *writer, const lonejson_value_rewrite_old_value *old_value,
+    void *user, lonejson_error *error) {
+  const lql_mutation_action *action;
+  char *end;
+  double current;
+  double next;
+  action = (const lql_mutation_action *)user;
+  if (!old_value->present) {
+    return lonejson_writer_f64(writer, action->delta, error);
+  }
+  if (old_value->type != LONEJSON_VALUE_NUMBER) {
+    if (error != NULL) {
+      error->code = LONEJSON_STATUS_TYPE_MISMATCH;
+      strcpy(error->message, "increment target is not numeric");
+    }
+    return LONEJSON_STATUS_TYPE_MISMATCH;
+  }
+  errno = 0;
+  current = strtod(old_value->number, &end);
+  if (end != old_value->number + old_value->number_len || errno == ERANGE) {
+    if (error != NULL) {
+      error->code = LONEJSON_STATUS_TYPE_MISMATCH;
+      strcpy(error->message, "increment target number is invalid");
+    }
+    return LONEJSON_STATUS_TYPE_MISMATCH;
+  }
+  next = current + action->delta;
+  if (next != next || next == HUGE_VAL || next == -HUGE_VAL) {
+    if (error != NULL) {
+      error->code = LONEJSON_STATUS_OVERFLOW;
+      strcpy(error->message, "increment result is not finite");
+    }
+    return LONEJSON_STATUS_OVERFLOW;
+  }
+  return lonejson_writer_f64(writer, next, error);
+}
+
+static lonejson_status
+stream_mutation_rewriter_open(lql_stream_state *state, lonejson_error *error) {
+  const lql_mutation_action *action;
+  lonejson_value_rewrite_options options;
+  if (state->request->mutation == NULL ||
+      state->request->mutation->action_count != 1u) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  action = &state->request->mutation->actions[0];
+  memset(&options, 0, sizeof(options));
+  options.target_segments = (const char *const *)action->segments;
+  options.target_segment_count = action->segment_count;
+  if (action->kind == LQL_MUTATION_REMOVE) {
+    options.action = LONEJSON_VALUE_REWRITE_DROP;
+  } else if (action->kind == LQL_MUTATION_INCREMENT) {
+    options.action = LONEJSON_VALUE_REWRITE_REPLACE_WITH;
+    options.replace = stream_mutation_emit_increment;
+    options.replace_user = (void *)action;
+  } else {
+    options.action = LONEJSON_VALUE_REWRITE_REPLACE;
+    options.replacement.emit = stream_mutation_emit_value;
+    options.replacement.emit_user = (void *)action;
+  }
+  return lonejson_value_rewriter_open(
+      &state->mutation_rewriter, state->runtime, stream_projection_spool_sink,
+      &state->mutation_spool, &options, &state->mutation_visitor,
+      &state->mutation_visitor_user, error);
 }
 
 static lonejson_status
@@ -817,6 +931,7 @@ static lonejson_candidate_callback_result
 stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
                        lonejson_error *error) {
   lql_stream_state *state;
+  lonejson_status status;
   (void)candidate;
   state = (lql_stream_state *)user;
   if (state->request->limits.max_records != 0u &&
@@ -839,6 +954,23 @@ stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
   if (state->projection_capture != NULL) {
     lql_projection_capture_reset(state->projection_capture);
   }
+  if (state->mutation_direct) {
+    lonejson_spooled_reset(&state->mutation_spool);
+    lonejson_value_rewriter_init(&state->mutation_rewriter);
+    state->mutation_ready = 0;
+    status = stream_mutation_rewriter_open(state, error);
+    if (status != LONEJSON_STATUS_OK) {
+      lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
+      stream_fail(state, status == LONEJSON_STATUS_ALLOCATION_FAILED
+                             ? LQL_STATUS_NO_MEMORY
+                             : LQL_STATUS_JSON_ERROR,
+                  error != NULL && error->message[0] != '\0'
+                      ? error->message
+                      : "direct mutation initialization failed");
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+    state->mutation_ready = 1;
+  }
   if (state->generic_member != NULL) {
     lql_stream_member_context *member;
     member = state->generic_member;
@@ -859,6 +991,20 @@ stream_candidate_end(void *user, const lonejson_candidate_info *candidate,
   lql_stream_callback_result callback_result;
   int matched;
   state = (lql_stream_state *)user;
+  if (state->mutation_ready) {
+    lonejson_status status;
+    status = lonejson_value_rewriter_close(&state->mutation_rewriter, error);
+    if (status != LONEJSON_STATUS_OK) {
+      state->mutation_ready = 0;
+      stream_fail(state, status == LONEJSON_STATUS_ALLOCATION_FAILED
+                             ? LQL_STATUS_NO_MEMORY
+                             : LQL_STATUS_JSON_ERROR,
+                  error != NULL && error->message[0] != '\0'
+                      ? error->message
+                      : "direct mutation finalization failed");
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+  }
   matched = state->program == NULL || state->program->match_all ||
             stream_selector_matches(state->program, state->request->selector,
                                     state->hits);
@@ -1566,6 +1712,41 @@ stream_projection_chunk(lql_stream_member_context *member,
       path, data, len, error);
 }
 
+static lonejson_status
+stream_mutation_event(lql_stream_member_context *member,
+                      lonejson_value_event_fn event, lonejson_error *error) {
+  lql_stream_state *state;
+  state = member->state;
+  if (!state->mutation_ready || event == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return event(state->mutation_visitor_user, error);
+}
+
+static lonejson_status
+stream_mutation_chunk(lql_stream_member_context *member,
+                      lonejson_value_chunk_fn event, const char *data,
+                      size_t len, lonejson_error *error) {
+  lql_stream_state *state;
+  state = member->state;
+  if (!state->mutation_ready || event == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return event(state->mutation_visitor_user, data, len, error);
+}
+
+static lonejson_status
+stream_mutation_boolean(lql_stream_member_context *member, int value,
+                        lonejson_error *error) {
+  lql_stream_state *state;
+  state = member->state;
+  if (!state->mutation_ready || state->mutation_visitor.boolean_value == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return state->mutation_visitor.boolean_value(state->mutation_visitor_user,
+                                               value, error);
+}
+
 #define STREAM_COMPOSE_PATH_EVENT(name)                                        \
   static lonejson_status stream_composed_path_##name(                          \
       void *user, const lonejson_value_path *path, lonejson_error *error) {    \
@@ -1576,12 +1757,20 @@ stream_projection_chunk(lql_stream_member_context *member,
     if (status != LONEJSON_STATUS_OK) {                                        \
       return status;                                                           \
     }                                                                          \
-    return stream_projection_event(                                            \
+    status = stream_projection_event(                                          \
         member,                                                                \
         member->state->projection_visitor == NULL                              \
             ? NULL                                                             \
             : member->state->projection_visitor->name,                         \
         path, error);                                                          \
+    if (status != LONEJSON_STATUS_OK) {                                        \
+      return status;                                                           \
+    }                                                                          \
+    return stream_mutation_event(                                              \
+        member, member->state->mutation_ready                                  \
+                    ? member->state->mutation_visitor.name                    \
+                    : NULL,                                                    \
+        error);                                                                \
   }
 
 #define STREAM_COMPOSE_PATH_CHUNK(name)                                        \
@@ -1595,12 +1784,20 @@ stream_projection_chunk(lql_stream_member_context *member,
     if (status != LONEJSON_STATUS_OK) {                                        \
       return status;                                                           \
     }                                                                          \
-    return stream_projection_chunk(                                            \
+    status = stream_projection_chunk(                                          \
         member,                                                                \
         member->state->projection_visitor == NULL                              \
             ? NULL                                                             \
             : member->state->projection_visitor->name,                         \
         path, data, len, error);                                               \
+    if (status != LONEJSON_STATUS_OK) {                                        \
+      return status;                                                           \
+    }                                                                          \
+    return stream_mutation_chunk(                                              \
+        member, member->state->mutation_ready                                  \
+                    ? member->state->mutation_visitor.name                    \
+                    : NULL,                                                    \
+        data, len, error);                                                     \
   }
 
 STREAM_COMPOSE_PATH_EVENT(object_begin)
@@ -1624,65 +1821,104 @@ stream_composed_path_boolean_value(void *user, const lonejson_value_path *path,
   if (status != LONEJSON_STATUS_OK) {
     return status;
   }
-  if (member->state->projection_capture == NULL ||
-      member->state->projection_visitor == NULL ||
-      member->state->projection_visitor->boolean_value == NULL) {
-    return LONEJSON_STATUS_OK;
+  if (member->state->projection_capture != NULL &&
+      member->state->projection_visitor != NULL &&
+      member->state->projection_visitor->boolean_value != NULL) {
+    status = member->state->projection_visitor->boolean_value(
+        lql_projection_capture_visitor_user(member->state->projection_capture),
+        path, value, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
   }
-  return member->state->projection_visitor->boolean_value(
-      lql_projection_capture_visitor_user(member->state->projection_capture),
-      path, value, error);
+  return stream_mutation_boolean(member, value, error);
 }
 
 static lonejson_status
 stream_composed_path_null_value(void *user, const lonejson_value_path *path,
                                 lonejson_error *error) {
   lql_stream_member_context *member;
+  lonejson_status status;
   member = (lql_stream_member_context *)user;
-  return stream_projection_event(
+  status = stream_projection_event(
       member,
       member->state->projection_visitor == NULL
           ? NULL
           : member->state->projection_visitor->null_value,
       path, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return stream_mutation_event(
+      member, member->state->mutation_ready
+                  ? member->state->mutation_visitor.null_value
+                  : NULL,
+      error);
 }
 
 static lonejson_status stream_composed_path_object_key_begin(
     void *user, const lonejson_value_path *path, lonejson_error *error) {
   lql_stream_member_context *member;
+  lonejson_status status;
   member = (lql_stream_member_context *)user;
-  return stream_projection_event(
+  status = stream_projection_event(
       member,
       member->state->projection_visitor == NULL
           ? NULL
           : member->state->projection_visitor->object_key_begin,
       path, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return stream_mutation_event(
+      member, member->state->mutation_ready
+                  ? member->state->mutation_visitor.object_key_begin
+                  : NULL,
+      error);
 }
 
 static lonejson_status stream_composed_path_object_key_chunk(
     void *user, const lonejson_value_path *path, const char *data, size_t len,
     lonejson_error *error) {
   lql_stream_member_context *member;
+  lonejson_status status;
   member = (lql_stream_member_context *)user;
-  return stream_projection_chunk(
+  status = stream_projection_chunk(
       member,
       member->state->projection_visitor == NULL
           ? NULL
           : member->state->projection_visitor->object_key_chunk,
       path, data, len, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return stream_mutation_chunk(
+      member, member->state->mutation_ready
+                  ? member->state->mutation_visitor.object_key_chunk
+                  : NULL,
+      data, len, error);
 }
 
 static lonejson_status
 stream_composed_path_object_key_end(void *user, const lonejson_value_path *path,
                                     lonejson_error *error) {
   lql_stream_member_context *member;
+  lonejson_status status;
   member = (lql_stream_member_context *)user;
-  return stream_projection_event(
+  status = stream_projection_event(
       member,
       member->state->projection_visitor == NULL
           ? NULL
           : member->state->projection_visitor->object_key_end,
       path, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return stream_mutation_event(
+      member, member->state->mutation_ready
+                  ? member->state->mutation_visitor.object_key_end
+                  : NULL,
+      error);
 }
 
 #undef STREAM_COMPOSE_PATH_CHUNK
@@ -1975,6 +2211,165 @@ static int stream_projection_mapped_eligible(const lql_stream_state *state) {
   return 1;
 }
 
+static int stream_mutation_flat_selector_eligible(
+    const lql_stream_state *state) {
+  const lql_stream_term *term;
+  char *end;
+  if (!state->mutation_direct || state->program == NULL ||
+      state->program->match_all || state->program->requires_generic_path ||
+      state->program->has_nested_paths || state->program->term_count != 1u ||
+      state->program->field_count != 1u) {
+    return 0;
+  }
+  term = &state->program->terms[0];
+  if (term->kind != LQL_SELECTOR_KIND_EQ || term->selector->value_is_temporal ||
+      term->value == NULL || term->value[0] == '\0' ||
+      strcmp(term->value, "true") == 0 || strcmp(term->value, "false") == 0 ||
+      strcmp(term->value, "null") == 0) {
+    return 0;
+  }
+  errno = 0;
+  end = NULL;
+  (void)strtod(term->value, &end);
+  return errno != 0 || end == term->value || *end != '\0';
+}
+
+static lonejson_status
+stream_flat_mutation_event(lql_stream_state *state,
+                           lonejson_value_event_fn event,
+                           lonejson_error *error) {
+  if (!state->mutation_ready || event == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return event(state->mutation_visitor_user, error);
+}
+
+static lonejson_status
+stream_flat_mutation_chunk(lql_stream_state *state,
+                           lonejson_value_chunk_fn event, const char *data,
+                           size_t len, lonejson_error *error) {
+  if (!state->mutation_ready || event == NULL) {
+    return LONEJSON_STATUS_OK;
+  }
+  return event(state->mutation_visitor_user, data, len, error);
+}
+
+#define STREAM_FLAT_MUTATION_EVENT(name, selector_event)                      \
+  static lonejson_status stream_flat_mutation_##name(                         \
+      void *user, lonejson_error *error) {                                    \
+    lql_stream_state *state;                                                  \
+    lonejson_status status;                                                   \
+    state = (lql_stream_state *)user;                                         \
+    status = selector_event(user, error);                                     \
+    if (status != LONEJSON_STATUS_OK) {                                       \
+      return status;                                                          \
+    }                                                                         \
+    return stream_flat_mutation_event(                                        \
+        state, state->mutation_visitor.name, error);                          \
+  }
+
+#define STREAM_FLAT_MUTATION_CHUNK(name, selector_event)                      \
+  static lonejson_status stream_flat_mutation_##name(                         \
+      void *user, const char *data, size_t len, lonejson_error *error) {      \
+    lql_stream_state *state;                                                  \
+    lonejson_status status;                                                   \
+    state = (lql_stream_state *)user;                                         \
+    status = selector_event(user, data, len, error);                          \
+    if (status != LONEJSON_STATUS_OK) {                                       \
+      return status;                                                          \
+    }                                                                         \
+    return stream_flat_mutation_chunk(                                        \
+        state, state->mutation_visitor.name, data, len, error);               \
+  }
+
+STREAM_FLAT_MUTATION_EVENT(object_begin, stream_object_begin)
+STREAM_FLAT_MUTATION_EVENT(object_end, stream_object_end)
+STREAM_FLAT_MUTATION_EVENT(array_begin, stream_array_begin)
+STREAM_FLAT_MUTATION_EVENT(array_end, stream_array_end)
+STREAM_FLAT_MUTATION_EVENT(object_key_begin, stream_key_begin)
+STREAM_FLAT_MUTATION_CHUNK(object_key_chunk, stream_key_chunk)
+STREAM_FLAT_MUTATION_EVENT(string_begin, stream_string_begin)
+STREAM_FLAT_MUTATION_CHUNK(string_chunk, stream_string_chunk)
+STREAM_FLAT_MUTATION_EVENT(number_begin, stream_scalar_value)
+
+static lonejson_status stream_flat_mutation_string_end(void *user,
+                                                       lonejson_error *error) {
+  lql_stream_state *state;
+  lonejson_status status;
+  int selector_value;
+  state = (lql_stream_state *)user;
+  selector_value = state->active && state->active_term == 0u;
+  status = stream_scalar_value(user, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (selector_value &&
+      (state->hits & state->program->terms[0].bit) == 0ul) {
+    lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
+    state->mutation_ready = 0;
+    return LONEJSON_STATUS_OK;
+  }
+  return stream_flat_mutation_event(state, state->mutation_visitor.string_end,
+                                    error);
+}
+
+static lonejson_status
+stream_flat_mutation_object_key_end(void *user, lonejson_error *error) {
+  lql_stream_state *state;
+  lonejson_status status;
+  state = (lql_stream_state *)user;
+  stream_finish_key(state);
+  status = stream_flat_mutation_event(
+      state, state->mutation_visitor.object_key_end, error);
+  return status;
+}
+
+static lonejson_status
+stream_flat_mutation_number_chunk(void *user, const char *data, size_t len,
+                                  lonejson_error *error) {
+  lql_stream_state *state;
+  state = (lql_stream_state *)user;
+  return stream_flat_mutation_chunk(state, state->mutation_visitor.number_chunk,
+                                    data, len, error);
+}
+
+static lonejson_status
+stream_flat_mutation_number_end(void *user, lonejson_error *error) {
+  lql_stream_state *state;
+  state = (lql_stream_state *)user;
+  return stream_flat_mutation_event(state, state->mutation_visitor.number_end,
+                                    error);
+}
+
+static lonejson_status
+stream_flat_mutation_boolean(void *user, int value, lonejson_error *error) {
+  lql_stream_state *state;
+  lonejson_status status;
+  state = (lql_stream_state *)user;
+  status = stream_boolean_value(user, value, error);
+  if (status != LONEJSON_STATUS_OK || !state->mutation_ready) {
+    return status;
+  }
+  return state->mutation_visitor.boolean_value(state->mutation_visitor_user,
+                                               value, error);
+}
+
+static lonejson_status stream_flat_mutation_null(void *user,
+                                                  lonejson_error *error) {
+  lql_stream_state *state;
+  lonejson_status status;
+  state = (lql_stream_state *)user;
+  status = stream_scalar_value(user, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return stream_flat_mutation_event(state, state->mutation_visitor.null_value,
+                                    error);
+}
+
+#undef STREAM_FLAT_MUTATION_CHUNK
+#undef STREAM_FLAT_MUTATION_EVENT
+
 static lql_status stream_execute_mapped(lql_stream_state *state,
                                         lonejson *runtime, lql_error *error) {
   lonejson_json_value values[sizeof(unsigned long) * CHAR_BIT];
@@ -2180,12 +2575,14 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
                                               lql_error *error) {
   lql_stream_member_context member;
   lonejson_candidate_stream_options options;
+  lonejson_value_visitor flat_visitor;
   lonejson_path_value_visitor visitor;
   lonejson_path_value_visitor projection_visitor;
   lonejson_error lonejson_error;
   lql_status status;
   const lql_stream_program *saved_program;
   lql_stream_program match_all_program;
+  int flat_mutation_selector;
 
   memset(&member, 0, sizeof(member));
   saved_program = state->program;
@@ -2199,11 +2596,26 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   state->generic_member = &member;
   state->projection_capture = NULL;
   state->projection_visitor = NULL;
+  state->runtime = runtime;
+  state->mutation_direct =
+      state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION &&
+      state->request->matched_only &&
+      stream_mutation_direct_eligible(state->request->mutation);
+  state->mutation_ready = 0;
+  if (state->mutation_direct) {
+    lonejson_spooled_init_class(runtime, &state->mutation_spool,
+                                LONEJSON_SPOOL_CLASS_LARGE_TEXT);
+  }
+  flat_mutation_selector = stream_mutation_flat_selector_eligible(state);
   if (state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION) {
     status = lql_projection_capture_create(state->receiver,
                                            state->request->projection, runtime,
                                            &state->projection_capture, error);
     if (status != LQL_STATUS_OK) {
+      if (state->mutation_direct) {
+        lonejson_spooled_cleanup(&state->mutation_spool);
+        state->mutation_direct = 0;
+      }
       state->generic_member = NULL;
       state->program = saved_program;
       return status;
@@ -2215,14 +2627,35 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode =
       (state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
-       state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
+       (state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION &&
+        !state->mutation_direct) ||
        state->request->output_mode ==
            LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION)
           ? LONEJSON_CANDIDATE_CAPTURE_SPOOLED
           : LONEJSON_CANDIDATE_CAPTURE_NONE;
   options.spool_class = LONEJSON_SPOOL_CLASS_LARGE_TEXT;
-  visitor = lonejson_default_path_value_visitor();
-  if (state->projection_capture != NULL) {
+  if (flat_mutation_selector) {
+    flat_visitor = lonejson_default_value_visitor();
+    flat_visitor.object_begin = stream_flat_mutation_object_begin;
+    flat_visitor.object_end = stream_flat_mutation_object_end;
+    flat_visitor.object_key_begin = stream_flat_mutation_object_key_begin;
+    flat_visitor.object_key_chunk = stream_flat_mutation_object_key_chunk;
+    flat_visitor.object_key_end = stream_flat_mutation_object_key_end;
+    flat_visitor.array_begin = stream_flat_mutation_array_begin;
+    flat_visitor.array_end = stream_flat_mutation_array_end;
+    flat_visitor.string_begin = stream_flat_mutation_string_begin;
+    flat_visitor.string_chunk = stream_flat_mutation_string_chunk;
+    flat_visitor.string_end = stream_flat_mutation_string_end;
+    flat_visitor.number_begin = stream_flat_mutation_number_begin;
+    flat_visitor.number_chunk = stream_flat_mutation_number_chunk;
+    flat_visitor.number_end = stream_flat_mutation_number_end;
+    flat_visitor.boolean_value = stream_flat_mutation_boolean;
+    flat_visitor.null_value = stream_flat_mutation_null;
+    options.visitor = &flat_visitor;
+    options.visitor_user = state;
+  } else {
+    visitor = lonejson_default_path_value_visitor();
+    if (state->projection_capture != NULL || state->mutation_direct) {
     visitor.object_begin = stream_composed_path_object_begin;
     visitor.object_end = stream_composed_path_object_end;
     visitor.object_key_begin = stream_composed_path_object_key_begin;
@@ -2238,7 +2671,7 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
     visitor.number_end = stream_composed_path_number_end;
     visitor.boolean_value = stream_composed_path_boolean_value;
     visitor.null_value = stream_composed_path_null_value;
-  } else {
+    } else {
     visitor.object_begin = stream_mapped_path_object_begin;
     visitor.object_end = stream_mapped_path_object_end;
     visitor.array_begin = stream_mapped_path_array_begin;
@@ -2250,9 +2683,10 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
     visitor.number_chunk = stream_mapped_path_number_chunk;
     visitor.number_end = stream_mapped_path_number_end;
     visitor.boolean_value = stream_mapped_path_boolean_value;
+    }
+    options.path_visitor = &visitor;
+    options.visitor_user = &member;
   }
-  options.path_visitor = &visitor;
-  options.visitor_user = &member;
   options.candidate_begin = stream_candidate_begin;
   options.candidate_end = stream_candidate_end;
   options.candidate_user = state;
@@ -2262,6 +2696,12 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
                     lonejson_visit_candidates_reader(
                         runtime, stream_read, state, &options, &lonejson_error),
                     &lonejson_error, error);
+  lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
+  if (state->mutation_direct) {
+    lonejson_spooled_cleanup(&state->mutation_spool);
+  }
+  state->mutation_direct = 0;
+  state->mutation_ready = 0;
   lql_projection_capture_destroy(state->projection_capture);
   state->projection_capture = NULL;
   state->projection_visitor = NULL;
