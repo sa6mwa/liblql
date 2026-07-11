@@ -4,6 +4,7 @@
 #include <string.h>
 
 typedef struct lql_stream_term {
+  const lql_selector *selector;
   const char *key;
   size_t key_len;
   const char *value;
@@ -77,7 +78,9 @@ static lql_status stream_compile_term(lql_stream_program *program,
   if (selector == NULL) {
     return LQL_STATUS_OK;
   }
-  if (selector->kind == LQL_SELECTOR_KIND_AND) {
+  if (selector->kind == LQL_SELECTOR_KIND_AND ||
+      selector->kind == LQL_SELECTOR_KIND_OR ||
+      selector->kind == LQL_SELECTOR_KIND_NOT) {
     for (i = 0u; i < selector->child_count; ++i) {
       lql_status status = stream_compile_term(program, &selector->children[i],
                                               error);
@@ -109,6 +112,7 @@ static lql_status stream_compile_term(lql_stream_program *program,
     }
   }
   term = &program->terms[program->term_count];
+  term->selector = selector;
   term->key = selector->field + 1;
   term->key_len = strlen(term->key);
   term->value = selector->value;
@@ -117,6 +121,41 @@ static lql_status stream_compile_term(lql_stream_program *program,
   program->required_hits |= term->bit;
   ++program->term_count;
   return LQL_STATUS_OK;
+}
+
+static int stream_selector_matches(const lql_stream_program *program,
+                                   const lql_selector *selector,
+                                   unsigned long hits) {
+  size_t i;
+  if (selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return 1;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_AND) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      if (!stream_selector_matches(program, &selector->children[i], hits)) {
+        return 0;
+      }
+    }
+    return 1;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_OR) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      if (stream_selector_matches(program, &selector->children[i], hits)) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_NOT) {
+    return selector->child_count == 1u &&
+           !stream_selector_matches(program, &selector->children[0], hits);
+  }
+  for (i = 0u; i < program->term_count; ++i) {
+    if (program->terms[i].selector == selector) {
+      return (hits & program->terms[i].bit) != 0ul;
+    }
+  }
+  return 0;
 }
 
 static lql_status stream_program_get(lql *self, const lql_selector *selector,
@@ -271,7 +310,8 @@ stream_candidate_end(void *user, const lonejson_candidate_info *candidate,
   (void)candidate;
   state = (lql_stream_state *)user;
   matched = state->program == NULL || state->program->match_all ||
-            state->hits == state->program->required_hits;
+            stream_selector_matches(state->program, state->request->selector,
+                                    state->hits);
   if (matched) {
     ++state->result->records_matched;
   }
