@@ -298,6 +298,18 @@ static void stream_finish_key(lql_stream_state *state) {
   state->key_active = 0;
 }
 
+static lonejson_status stream_key_end(void *user, lonejson_error *error) {
+  lql_stream_state *state;
+  (void)error;
+  state = (lql_stream_state *)user;
+  stream_finish_key(state);
+  if (state->object_depth == 1u && state->array_depth == 0u &&
+      state->current_term == (size_t)-1) {
+    return LONEJSON_STATUS_SKIP_VALUE;
+  }
+  return LONEJSON_STATUS_OK;
+}
+
 static lonejson_status stream_object_begin(void *user, lonejson_error *error) {
   lql_stream_state *state;
   (void)error;
@@ -392,23 +404,21 @@ static lonejson_status stream_key_chunk(void *user, const char *data, size_t len
                                         lonejson_error *error) {
   lql_stream_state *state;
   size_t i;
-  size_t j;
   (void)error;
   state = (lql_stream_state *)user;
   if (!state->key_active) {
     return LONEJSON_STATUS_OK;
   }
-  for (j = 0u; j < len; ++j) {
-    for (i = 0u; state->program != NULL && i < state->program->term_count; ++i) {
-      const lql_stream_term *term = &state->program->terms[i];
-      if ((state->key_candidates & term->bit) != 0ul &&
-          (state->key_pos >= term->key_len ||
-           data[j] != term->key[state->key_pos])) {
-        state->key_candidates &= ~term->bit;
-      }
+  for (i = 0u; state->program != NULL && i < state->program->term_count; ++i) {
+    const lql_stream_term *term = &state->program->terms[i];
+    if ((state->key_candidates & term->bit) != 0ul &&
+        (state->key_pos > term->key_len ||
+         len > term->key_len - state->key_pos ||
+         memcmp(data, term->key + state->key_pos, len) != 0)) {
+      state->key_candidates &= ~term->bit;
     }
-    ++state->key_pos;
   }
+  state->key_pos += len;
   return LONEJSON_STATUS_OK;
 }
 
@@ -432,20 +442,19 @@ static lonejson_status stream_string_chunk(void *user, const char *data,
                                            size_t len, lonejson_error *error) {
   lql_stream_state *state;
   const lql_stream_term *term;
-  size_t i;
   (void)error;
   state = (lql_stream_state *)user;
   if (!state->active) {
     return LONEJSON_STATUS_OK;
   }
   term = &state->program->terms[state->active_term];
-  for (i = 0u; i < len; ++i) {
-    if (state->active_pos >= term->value_len ||
-        data[i] != term->value[state->active_pos]) {
-      state->active_mismatch = 1;
-    }
-    ++state->active_pos;
+  if (!state->active_mismatch &&
+      (state->active_pos > term->value_len ||
+       len > term->value_len - state->active_pos ||
+       memcmp(data, term->value + state->active_pos, len) != 0)) {
+    state->active_mismatch = 1;
   }
+  state->active_pos += len;
   return LONEJSON_STATUS_OK;
 }
 
@@ -555,6 +564,7 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
     visitor.object_end = stream_object_end;
     visitor.object_key_begin = stream_key_begin;
     visitor.object_key_chunk = stream_key_chunk;
+    visitor.object_key_end = stream_key_end;
     visitor.array_begin = stream_array_begin;
     visitor.array_end = stream_array_end;
     visitor.string_begin = stream_string_begin;
