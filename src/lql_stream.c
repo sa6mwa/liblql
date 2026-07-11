@@ -20,12 +20,15 @@ typedef struct lql_stream_field {
   size_t key_len;
 } lql_stream_field;
 
+typedef struct lql_stream_member_context lql_stream_member_context;
+
 struct lql_stream_program {
   lql_stream_term terms[sizeof(unsigned long) * CHAR_BIT];
   size_t term_count;
   lql_stream_field fields[sizeof(unsigned long) * CHAR_BIT];
   size_t field_count;
   int has_nested_paths;
+  int requires_generic_path;
   int needs_execution_clock;
   int match_all;
   lonejson_field mapped_fields[sizeof(unsigned long) * CHAR_BIT];
@@ -56,9 +59,10 @@ typedef struct lql_stream_state {
   int execution_now_ready;
   int execution_today_ready;
   int execution_yesterday_ready;
+  lql_stream_member_context *generic_member;
 } lql_stream_state;
 
-typedef struct lql_stream_member_context {
+struct lql_stream_member_context {
   lql_stream_state *state;
   size_t field_index;
   size_t positions[sizeof(unsigned long) * CHAR_BIT];
@@ -75,7 +79,9 @@ typedef struct lql_stream_member_context {
   int number_overflow;
   int temporal_overflow;
   unsigned long mismatches;
-} lql_stream_member_context;
+  int full_path;
+  int root_object;
+};
 
 #define LQL_STREAM_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
 #define LQL_STREAM_PATH_CAPACITY 128u
@@ -103,6 +109,19 @@ static int stream_field_root(const char *field, const char **key,
     *key_len = end == NULL ? strlen(out) : (size_t)(end - out);
   }
   return 1;
+}
+
+static int stream_field_has_root_wildcard(const char *field) {
+  const char *end;
+  size_t len;
+  if (field == NULL || field[0] != '/') {
+    return 0;
+  }
+  end = strchr(field + 1, '/');
+  len = end == NULL ? strlen(field + 1) : (size_t)(end - (field + 1));
+  return (len == 1u && field[1] == '*') ||
+         (len == 2u && memcmp(field + 1, "**", 2u) == 0) ||
+         (len == 3u && memcmp(field + 1, "...", 3u) == 0);
 }
 
 static int stream_path_segment_matches(const lql_stream_member_context *member,
@@ -165,6 +184,9 @@ static int stream_term_path_matches(const lql_stream_term *term,
     return 0;
   }
   segment = field + 1;
+  if (member->full_path) {
+    return stream_path_tail_matches(member, path, segment, 0u);
+  }
   end = strchr(segment, '/');
   if (end == NULL) {
     return path->segment_count == 0u;
@@ -320,9 +342,14 @@ static lql_status stream_compile_term(lql_stream_program *program,
     return LQL_STATUS_OK;
   }
   if (!stream_field_root(selector->field, &key, &i)) {
-    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                  "direct stream supports only non-temporal literal JSON pointer fields");
-    return LQL_STATUS_UNSUPPORTED;
+    if (!stream_field_has_root_wildcard(selector->field)) {
+      lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                    "direct stream selector path is not implemented");
+      return LQL_STATUS_UNSUPPORTED;
+    }
+    key = "";
+    i = 0u;
+    program->requires_generic_path = 1;
   }
   kind = selector->kind;
   if (strchr(selector->field + 1, '/') != NULL) {
@@ -627,6 +654,13 @@ stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
   state->active_mismatch = 0;
   state->active_pos = 0u;
   state->root_value_started = 0;
+  if (state->generic_member != NULL) {
+    lql_stream_member_context *member;
+    member = state->generic_member;
+    memset(member, 0, sizeof(*member));
+    member->state = state;
+    member->full_path = 1;
+  }
   ++state->result->records_seen;
   (void)error;
   return LONEJSON_CANDIDATE_CONTINUE;
@@ -895,12 +929,15 @@ static lonejson_status stream_mapped_path_object_begin(
   size_t i;
   (void)error;
   member = (lql_stream_member_context *)user;
+  if (member->full_path && path->segment_count == 0u) {
+    member->root_object = 1;
+  }
   if (path->segment_count < LQL_STREAM_PATH_CAPACITY) {
     member->path_containers[path->segment_count] = LQL_STREAM_PATH_OBJECT;
   }
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
-    if (term->field_index == member->field_index &&
+    if ((member->full_path || term->field_index == member->field_index) &&
         term->kind == LQL_SELECTOR_KIND_EXISTS &&
         stream_term_path_matches(term, path, member)) {
       member->state->hits |= term->bit;
@@ -929,14 +966,19 @@ static lonejson_status stream_mapped_path_array_begin(
     void *user, const lonejson_value_path *path, lonejson_error *error) {
   lql_stream_member_context *member;
   size_t i;
-  (void)error;
   member = (lql_stream_member_context *)user;
+  if (member->full_path && path->segment_count == 0u) {
+    stream_fail(member->state, LQL_STATUS_JSON_ERROR,
+                "root JSON arrays are not valid NDJSON records");
+    stream_lonejson_error(error, member->state->failure.message);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
   if (path->segment_count < LQL_STREAM_PATH_CAPACITY) {
     member->path_containers[path->segment_count] = LQL_STREAM_PATH_ARRAY;
   }
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
-    if (term->field_index == member->field_index &&
+    if ((member->full_path || term->field_index == member->field_index) &&
         term->kind == LQL_SELECTOR_KIND_EXISTS &&
         stream_term_path_matches(term, path, member)) {
       member->state->hits |= term->bit;
@@ -957,6 +999,11 @@ static lonejson_status stream_mapped_path_string_begin(
   size_t i;
   (void)error;
   member = (lql_stream_member_context *)user;
+  if (member->full_path && path->segment_count == 0u && !member->root_object) {
+    member->active_string = 0;
+    member->active_terms = 0ul;
+    return LONEJSON_STATUS_OK;
+  }
   member->active_string = 1;
   member->active_terms = 0ul;
   member->active_temporal_terms = 0ul;
@@ -965,7 +1012,7 @@ static lonejson_status stream_mapped_path_string_begin(
   member->temporal_overflow = 0;
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
-    if (term->field_index != member->field_index ||
+    if ((!member->full_path && term->field_index != member->field_index) ||
         !stream_term_path_matches(term, path, member)) {
       continue;
     }
@@ -1065,6 +1112,9 @@ static lonejson_status stream_mapped_path_string_end(
   size_t i;
   (void)error;
   member = (lql_stream_member_context *)user;
+  if (member->full_path && path->segment_count == 0u && !member->root_object) {
+    return LONEJSON_STATUS_OK;
+  }
   (void)path;
   if (!member->active_string) {
     return LONEJSON_STATUS_OK;
@@ -1129,12 +1179,16 @@ static lonejson_status stream_mapped_path_number_begin(
     return status;
   }
   member = (lql_stream_member_context *)user;
+  if (member->full_path && path->segment_count == 0u && !member->root_object) {
+    member->active_number_terms = 0ul;
+    return LONEJSON_STATUS_OK;
+  }
   member->number_len = 0u;
   member->number_overflow = 0;
   member->active_number_terms = 0ul;
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
-    if (term->field_index == member->field_index &&
+    if ((member->full_path || term->field_index == member->field_index) &&
         (term->kind == LQL_SELECTOR_KIND_RANGE ||
          (term->kind == LQL_SELECTOR_KIND_EQ &&
           !term->selector->value_is_temporal)) &&
@@ -1152,6 +1206,9 @@ static lonejson_status stream_mapped_path_number_chunk(
   (void)path;
   (void)error;
   member = (lql_stream_member_context *)user;
+  if (member->full_path && path->segment_count == 0u && !member->root_object) {
+    return LONEJSON_STATUS_OK;
+  }
   if (member->active_number_terms == 0ul) {
     return LONEJSON_STATUS_OK;
   }
@@ -1218,7 +1275,7 @@ static lonejson_status stream_mapped_path_present(
   member = (lql_stream_member_context *)user;
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
-    if (term->field_index == member->field_index &&
+    if ((member->full_path || term->field_index == member->field_index) &&
         term->kind == LQL_SELECTOR_KIND_EXISTS &&
         stream_term_path_matches(term, path, member)) {
       member->state->hits |= term->bit;
@@ -1240,7 +1297,7 @@ static lonejson_status stream_mapped_path_boolean_value(
   member = (lql_stream_member_context *)user;
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
-    if (term->field_index == member->field_index &&
+    if ((member->full_path || term->field_index == member->field_index) &&
         term->kind == LQL_SELECTOR_KIND_EQ && !term->selector->value_is_temporal &&
         stream_term_path_matches(term, path, member) &&
         ((value && strcmp(term->value, "true") == 0) ||
@@ -1480,6 +1537,49 @@ static lql_status stream_execute_mapped(lql_stream_state *state,
   return status;
 }
 
+static lql_status stream_execute_generic_path(lql_stream_state *state,
+                                              lonejson *runtime,
+                                              lql_error *error) {
+  lql_stream_member_context member;
+  lonejson_candidate_stream_options options;
+  lonejson_path_value_visitor visitor;
+  lonejson_error lonejson_error;
+  lql_status status;
+
+  memset(&member, 0, sizeof(member));
+  member.state = state;
+  member.full_path = 1;
+  state->generic_member = &member;
+  options = lonejson_default_candidate_stream_options();
+  options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  visitor = lonejson_default_path_value_visitor();
+  visitor.object_begin = stream_mapped_path_object_begin;
+  visitor.object_end = stream_mapped_path_object_end;
+  visitor.array_begin = stream_mapped_path_array_begin;
+  visitor.array_end = stream_mapped_path_array_end;
+  visitor.string_begin = stream_mapped_path_string_begin;
+  visitor.string_chunk = stream_mapped_path_string_chunk;
+  visitor.string_end = stream_mapped_path_string_end;
+  visitor.number_begin = stream_mapped_path_number_begin;
+  visitor.number_chunk = stream_mapped_path_number_chunk;
+  visitor.number_end = stream_mapped_path_number_end;
+  visitor.boolean_value = stream_mapped_path_boolean_value;
+  options.path_visitor = &visitor;
+  options.visitor_user = &member;
+  options.candidate_begin = stream_candidate_begin;
+  options.candidate_end = stream_candidate_end;
+  options.candidate_user = state;
+  lonejson_error_init(&lonejson_error);
+  status = stream_status(state,
+                         lonejson_visit_candidates_reader(runtime, stream_read,
+                                                          state, &options,
+                                                          &lonejson_error),
+                         &lonejson_error, error);
+  state->generic_member = NULL;
+  return status;
+}
+
 lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
                               lql_stream_result *result, lql_error *error) {
   lql_stream_state state;
@@ -1530,7 +1630,8 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
         lql_temporal_yesterday(&state.execution_yesterday);
   }
   lonejson_error_init(&lonejson_error);
-  runtime = state.program != NULL && !state.program->match_all
+  runtime = state.program != NULL && !state.program->match_all &&
+                !state.program->requires_generic_path
                 ? lql_lonejson_new_mapped_stream(self, &lonejson_error)
                 : lql_lonejson_new(self, &lonejson_error);
   if (runtime == NULL) {
@@ -1538,6 +1639,11 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
                   lonejson_error.message[0] == '\0' ? "lonejson initialization failed"
                                                      : lonejson_error.message);
     return LQL_STATUS_NO_MEMORY;
+  }
+  if (state.program != NULL && state.program->requires_generic_path) {
+    status = stream_execute_generic_path(&state, runtime, error);
+    lonejson_free(runtime);
+    return status;
   }
   if (state.program != NULL && !state.program->match_all) {
     status = stream_execute_mapped(&state, runtime, error);

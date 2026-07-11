@@ -260,6 +260,10 @@ static int run_mapped_string_predicates(lql *ctx) {
       "{\"code\":1,\"enabled\":true}\n"
       "{\"code\":2,\"enabled\":false}\n"
       "{\"code\":1.0,\"enabled\":false}\n";
+  static const char root_wildcard_input[] =
+      "{\"alpha\":{\"state\":\"open\"},\"beta\":{\"state\":\"closed\"}}\n"
+      "{\"alpha\":{\"state\":\"closed\"}}\n"
+      "42\n";
   if (run_selection(ctx, "contains{f=/msg,a=Timeout|degraded}", input, 3u,
                     1u)) {
     return 1;
@@ -329,6 +333,10 @@ static int run_mapped_string_predicates(lql *ctx) {
       run_selection(ctx, "/enabled=true", scalar_input, 3u, 1u)) {
     return 16;
   }
+  if (run_selection(ctx, "/*/state=\"open\"", root_wildcard_input, 3u,
+                    1u)) {
+    return 17;
+  }
   return 0;
 }
 
@@ -363,6 +371,35 @@ static int run_match_all(lql *ctx) {
   reader.data = (const unsigned char *)root_array;
   reader.len = sizeof(root_array) - 1u;
   request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_JSON_ERROR) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
+static int run_root_wildcard_array_error(lql *ctx) {
+  static const char root_array[] = "[{\"state\":\"open\"}]\n";
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/*/state=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)root_array;
+  reader.len = sizeof(root_array) - 1u;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_JSON_ERROR) {
     ctx->selector_destroy(ctx, selector);
     return 1;
@@ -429,6 +466,7 @@ int main(void) {
   if (run_status_selection(ctx) || run_conjunction_selection(ctx) ||
       run_or_selection(ctx) || run_not_selection(ctx) ||
       run_mapped_string_predicates(ctx) || run_match_all(ctx) ||
+      run_root_wildcard_array_error(ctx) ||
       run_stop_and_root_array(ctx)) {
     ctx->destroy(ctx);
     return 1;
