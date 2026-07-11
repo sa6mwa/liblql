@@ -70,6 +70,7 @@ typedef struct lql_stream_member_context {
   unsigned long active_terms;
   unsigned long active_number_terms;
   unsigned long active_temporal_terms;
+  unsigned char path_containers[128];
   int active_string;
   int number_overflow;
   int temporal_overflow;
@@ -77,18 +78,22 @@ typedef struct lql_stream_member_context {
 } lql_stream_member_context;
 
 #define LQL_STREAM_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
+#define LQL_STREAM_PATH_CAPACITY 128u
+#define LQL_STREAM_PATH_OBJECT 1u
+#define LQL_STREAM_PATH_ARRAY 2u
 
 static int stream_field_root(const char *field, const char **key,
                              size_t *key_len) {
   const char *out;
   const char *end;
   if (field == NULL || field[0] != '/' || field[1] == '\0' ||
-      strchr(field + 1, '~') != NULL || strchr(field + 1, '*') != NULL) {
+      strchr(field + 1, '~') != NULL) {
     return 0;
   }
   out = field + 1;
   end = strchr(out, '/');
-  if (end == out) {
+  if (end == out ||
+      (end != NULL && memchr(out, '*', (size_t)(end - out)) != NULL)) {
     return 0;
   }
   if (key != NULL) {
@@ -100,13 +105,61 @@ static int stream_field_root(const char *field, const char **key,
   return 1;
 }
 
+static int stream_path_segment_matches(const lql_stream_member_context *member,
+                                       const lonejson_value_path *path,
+                                       size_t index, const char *pattern,
+                                       size_t pattern_len) {
+  if (index == path->segment_count) {
+    return 0;
+  }
+  if (pattern_len == 2u && memcmp(pattern, "[]", 2u) == 0) {
+    return index < LQL_STREAM_PATH_CAPACITY &&
+           member->path_containers[index] == LQL_STREAM_PATH_ARRAY;
+  }
+  if (pattern_len == 1u && pattern[0] == '*') {
+    return index < LQL_STREAM_PATH_CAPACITY &&
+           member->path_containers[index] == LQL_STREAM_PATH_OBJECT;
+  }
+  if (pattern_len == 2u && memcmp(pattern, "**", 2u) == 0) {
+    return 1;
+  }
+  return path->segments[index].len == pattern_len &&
+         memcmp(path->segments[index].data, pattern, pattern_len) == 0;
+}
+
+static int stream_path_tail_matches(const lql_stream_member_context *member,
+                                    const lonejson_value_path *path,
+                                    const char *pattern, size_t index) {
+  const char *end;
+  const char *next;
+  size_t len;
+  size_t i;
+  if (*pattern == '\0') {
+    return index == path->segment_count;
+  }
+  end = strchr(pattern, '/');
+  len = end == NULL ? strlen(pattern) : (size_t)(end - pattern);
+  next = end == NULL ? pattern + len : end + 1;
+  if (len == 3u && memcmp(pattern, "...", 3u) == 0) {
+    for (i = index; i <= path->segment_count; ++i) {
+      if (stream_path_tail_matches(member, path, next, i)) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+  if (!stream_path_segment_matches(member, path, index, pattern, len)) {
+    return 0;
+  }
+  return stream_path_tail_matches(member, path, next, index + 1u);
+}
+
 static int stream_term_path_matches(const lql_stream_term *term,
-                                    const lonejson_value_path *path) {
+                                    const lonejson_value_path *path,
+                                    const lql_stream_member_context *member) {
   const char *field;
   const char *segment;
   const char *end;
-  size_t index;
-  size_t len;
   field = term->selector->field;
   if (field == NULL || field[0] != '/') {
     return 0;
@@ -117,21 +170,7 @@ static int stream_term_path_matches(const lql_stream_term *term,
     return path->segment_count == 0u;
   }
   segment = end + 1;
-  index = 0u;
-  while (*segment != '\0') {
-    end = strchr(segment, '/');
-    len = end == NULL ? strlen(segment) : (size_t)(end - segment);
-    if (index == path->segment_count || path->segments[index].len != len ||
-        memcmp(path->segments[index].data, segment, len) != 0) {
-      return 0;
-    }
-    ++index;
-    if (end == NULL) {
-      break;
-    }
-    segment = end + 1;
-  }
-  return index == path->segment_count;
+  return stream_path_tail_matches(member, path, segment, 0u);
 }
 
 static int stream_term_matches_selector(const lql_stream_program *program,
@@ -856,11 +895,14 @@ static lonejson_status stream_mapped_path_object_begin(
   size_t i;
   (void)error;
   member = (lql_stream_member_context *)user;
+  if (path->segment_count < LQL_STREAM_PATH_CAPACITY) {
+    member->path_containers[path->segment_count] = LQL_STREAM_PATH_OBJECT;
+  }
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
     if (term->field_index == member->field_index &&
         term->kind == LQL_SELECTOR_KIND_EXISTS &&
-        stream_term_path_matches(term, path)) {
+        stream_term_path_matches(term, path, member)) {
       member->state->hits |= term->bit;
     }
   }
@@ -874,10 +916,39 @@ static lonejson_status stream_mapped_path_object_end(
   (void)path;
   (void)error;
   member = (lql_stream_member_context *)user;
+  if (path->segment_count < LQL_STREAM_PATH_CAPACITY) {
+    member->path_containers[path->segment_count] = 0u;
+  }
   if (member->container_depth != 0u) {
     --member->container_depth;
   }
   return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status stream_mapped_path_array_begin(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  lql_stream_member_context *member;
+  size_t i;
+  (void)error;
+  member = (lql_stream_member_context *)user;
+  if (path->segment_count < LQL_STREAM_PATH_CAPACITY) {
+    member->path_containers[path->segment_count] = LQL_STREAM_PATH_ARRAY;
+  }
+  for (i = 0u; i < member->state->program->term_count; ++i) {
+    const lql_stream_term *term = &member->state->program->terms[i];
+    if (term->field_index == member->field_index &&
+        term->kind == LQL_SELECTOR_KIND_EXISTS &&
+        stream_term_path_matches(term, path, member)) {
+      member->state->hits |= term->bit;
+    }
+  }
+  ++member->container_depth;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status stream_mapped_path_array_end(
+    void *user, const lonejson_value_path *path, lonejson_error *error) {
+  return stream_mapped_path_object_end(user, path, error);
 }
 
 static lonejson_status stream_mapped_path_string_begin(
@@ -895,7 +966,7 @@ static lonejson_status stream_mapped_path_string_begin(
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
     if (term->field_index != member->field_index ||
-        !stream_term_path_matches(term, path)) {
+        !stream_term_path_matches(term, path, member)) {
       continue;
     }
     member->active_terms |= term->bit;
@@ -1065,7 +1136,7 @@ static lonejson_status stream_mapped_path_number_begin(
     const lql_stream_term *term = &member->state->program->terms[i];
     if (term->field_index == member->field_index &&
         term->kind == LQL_SELECTOR_KIND_RANGE &&
-        stream_term_path_matches(term, path)) {
+        stream_term_path_matches(term, path, member)) {
       member->active_number_terms |= term->bit;
     }
   }
@@ -1140,7 +1211,7 @@ static lonejson_status stream_mapped_path_present(
     const lql_stream_term *term = &member->state->program->terms[i];
     if (term->field_index == member->field_index &&
         term->kind == LQL_SELECTOR_KIND_EXISTS &&
-        stream_term_path_matches(term, path)) {
+        stream_term_path_matches(term, path, member)) {
       member->state->hits |= term->bit;
     }
   }
@@ -1285,8 +1356,8 @@ static lql_status stream_execute_mapped(lql_stream_state *state,
   path_visitor = lonejson_default_path_value_visitor();
   path_visitor.object_begin = stream_mapped_path_object_begin;
   path_visitor.object_end = stream_mapped_path_object_end;
-  path_visitor.array_begin = stream_mapped_path_object_begin;
-  path_visitor.array_end = stream_mapped_path_object_end;
+  path_visitor.array_begin = stream_mapped_path_array_begin;
+  path_visitor.array_end = stream_mapped_path_array_end;
   path_visitor.string_begin = stream_mapped_path_string_begin;
   path_visitor.string_chunk = stream_mapped_path_string_chunk;
   path_visitor.string_end = stream_mapped_path_string_end;

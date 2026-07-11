@@ -247,6 +247,15 @@ static int run_mapped_string_predicates(lql *ctx) {
       "{\"timestamp\":\"2026-03-05T10:29:00+01:00\"}\n"
       "{\"timestamp\":\"2026-03-05T10:29:00Z\"}\n"
       "{\"timestamp\":\"2026-03-05\"}\n";
+  static const char wildcard_input[] =
+      "{\"items\":[{\"sku\":\"A\"},{\"sku\":\"B\"}],"
+      "\"object\":{\"0\":{\"state\":\"open\"}},"
+      "\"array\":[{\"state\":\"open\"}],"
+      "\"tree\":{\"branch\":{\"deep\":{\"sku\":\"needle\"}}}}\n"
+      "{\"items\":[{\"sku\":\"B\"}],\"object\":{},\"array\":[],"
+      "\"tree\":{\"branch\":{\"sku\":\"other\"}}}\n"
+      "{\"items\":[{\"sku\":\"C\"}],\"object\":{},\"array\":[],"
+      "\"tree\":{}}\n";
   if (run_selection(ctx, "contains{f=/msg,a=Timeout|degraded}", input, 3u,
                     1u)) {
     return 1;
@@ -293,6 +302,23 @@ static int run_mapped_string_predicates(lql *ctx) {
                     "before=2026-03-05T10:30:00Z}", temporal_input, 3u,
                     1u)) {
     return 12;
+  }
+  if (run_selection(ctx, "/items[]/sku=\"B\"", wildcard_input, 3u, 2u)) {
+    return 13;
+  }
+  if (run_selection(ctx, "/object/*/state=\"open\"", wildcard_input, 3u,
+                    1u) ||
+      run_selection(ctx, "/array/*/state=\"open\"", wildcard_input, 3u,
+                    0u) ||
+      run_selection(ctx, "/array/[]/state=\"open\"", wildcard_input, 3u,
+                    1u)) {
+    return 14;
+  }
+  if (run_selection(ctx, "/tree/**/sku=\"other\"", wildcard_input, 3u,
+                    1u) ||
+      run_selection(ctx, "/tree/.../sku=\"needle\"", wildcard_input, 3u,
+                    1u)) {
+    return 15;
   }
   return 0;
 }
