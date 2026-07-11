@@ -256,6 +256,10 @@ static int run_mapped_string_predicates(lql *ctx) {
       "\"tree\":{\"branch\":{\"sku\":\"other\"}}}\n"
       "{\"items\":[{\"sku\":\"C\"}],\"object\":{},\"array\":[],"
       "\"tree\":{}}\n";
+  static const char scalar_input[] =
+      "{\"code\":1,\"enabled\":true}\n"
+      "{\"code\":2,\"enabled\":false}\n"
+      "{\"code\":1.0,\"enabled\":false}\n";
   if (run_selection(ctx, "contains{f=/msg,a=Timeout|degraded}", input, 3u,
                     1u)) {
     return 1;
@@ -319,6 +323,11 @@ static int run_mapped_string_predicates(lql *ctx) {
       run_selection(ctx, "/tree/.../sku=\"needle\"", wildcard_input, 3u,
                     1u)) {
     return 15;
+  }
+  if (run_selection(ctx, "/code=1", scalar_input, 3u, 1u) ||
+      run_selection(ctx, "in{field=/code,any=1|2}", scalar_input, 3u, 2u) ||
+      run_selection(ctx, "/enabled=true", scalar_input, 3u, 1u)) {
+    return 16;
   }
   return 0;
 }

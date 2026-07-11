@@ -1135,7 +1135,9 @@ static lonejson_status stream_mapped_path_number_begin(
   for (i = 0u; i < member->state->program->term_count; ++i) {
     const lql_stream_term *term = &member->state->program->terms[i];
     if (term->field_index == member->field_index &&
-        term->kind == LQL_SELECTOR_KIND_RANGE &&
+        (term->kind == LQL_SELECTOR_KIND_RANGE ||
+         (term->kind == LQL_SELECTOR_KIND_EQ &&
+          !term->selector->value_is_temporal)) &&
         stream_term_path_matches(term, path, member)) {
       member->active_number_terms |= term->bit;
     }
@@ -1190,6 +1192,13 @@ static lonejson_status stream_mapped_path_number_end(
       continue;
     }
     selector = term->selector;
+    if (term->kind == LQL_SELECTOR_KIND_EQ) {
+      if (term->value_len == member->number_len &&
+          memcmp(term->value, member->number, member->number_len) == 0) {
+        member->state->hits |= term->bit;
+      }
+      continue;
+    }
     if ((!selector->has_range_gt || value > selector->range_gt) &&
         (!selector->has_range_gte || value >= selector->range_gte) &&
         (!selector->has_range_lt || value < selector->range_lt) &&
@@ -1221,8 +1230,25 @@ static lonejson_status stream_mapped_path_present(
 static lonejson_status stream_mapped_path_boolean_value(
     void *user, const lonejson_value_path *path, int value,
     lonejson_error *error) {
-  (void)value;
-  return stream_mapped_path_present(user, path, error);
+  lql_stream_member_context *member;
+  size_t i;
+  lonejson_status status;
+  status = stream_mapped_path_present(user, path, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  member = (lql_stream_member_context *)user;
+  for (i = 0u; i < member->state->program->term_count; ++i) {
+    const lql_stream_term *term = &member->state->program->terms[i];
+    if (term->field_index == member->field_index &&
+        term->kind == LQL_SELECTOR_KIND_EQ && !term->selector->value_is_temporal &&
+        stream_term_path_matches(term, path, member) &&
+        ((value && strcmp(term->value, "true") == 0) ||
+         (!value && strcmp(term->value, "false") == 0))) {
+      member->state->hits |= term->bit;
+    }
+  }
+  return LONEJSON_STATUS_OK;
 }
 
 static const lonejson_value_path stream_mapped_root_path = {NULL, 0u};
