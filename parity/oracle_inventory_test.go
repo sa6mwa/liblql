@@ -159,6 +159,7 @@ func validateOracleInventory(rows []oracleInventoryRow, actual map[string]int) e
 	seen := make(map[string]struct{})
 	knownStatus := map[string]bool{
 		"covered":        true,
+		"excluded":       true,
 		"partial":        true,
 		"gap":            true,
 		"not-applicable": true,

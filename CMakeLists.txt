@@ -383,6 +383,12 @@ if(LQL_BUILD_TESTS)
   set_tests_properties(lql.header-cxx PROPERTIES LABELS "unit;api" TIMEOUT 5)
 
   find_program(GO_EXECUTABLE go)
+  set(LQL_SDK_PARITY_LONEJSON_DIR "${LQL_EXTERNAL_ROOT}/lib")
+  set(LQL_SDK_PARITY_LONEJSON_LINK "-llonejson")
+  if(LQL_LONEJSON_PROVIDER STREQUAL "vendored")
+    set(LQL_SDK_PARITY_LONEJSON_DIR "$<TARGET_FILE_DIR:lonejson_vendored>")
+    set(LQL_SDK_PARITY_LONEJSON_LINK "$<TARGET_FILE:lonejson_vendored>")
+  endif()
   if(GO_EXECUTABLE AND LQL_BUILD_BINARY)
     add_test(NAME lql.parity
       COMMAND ${CMAKE_COMMAND} -E env
@@ -400,9 +406,9 @@ if(LQL_BUILD_TESTS)
       COMMAND ${CMAKE_COMMAND} -E env
         CGO_ENABLED=1
         "CGO_CFLAGS=-I${CMAKE_CURRENT_SOURCE_DIR}/include -I${CMAKE_CURRENT_BINARY_DIR}/generated/include"
-        "CGO_LDFLAGS=-L$<TARGET_FILE_DIR:lql_shared> -L${LQL_EXTERNAL_ROOT}/lib -llql -llonejson"
-        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:lql_shared>:${LQL_EXTERNAL_ROOT}/lib"
-        "DYLD_LIBRARY_PATH=$<TARGET_FILE_DIR:lql_shared>:${LQL_EXTERNAL_ROOT}/lib"
+        "CGO_LDFLAGS=-L$<TARGET_FILE_DIR:lql_shared> -L${LQL_SDK_PARITY_LONEJSON_DIR} -llql ${LQL_SDK_PARITY_LONEJSON_LINK}"
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:lql_shared>:${LQL_SDK_PARITY_LONEJSON_DIR}"
+        "DYLD_LIBRARY_PATH=$<TARGET_FILE_DIR:lql_shared>:${LQL_SDK_PARITY_LONEJSON_DIR}"
         ${GO_EXECUTABLE} test -tags liblql_sdk_parity ./...
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/parity)
     set_tests_properties(lql.sdk-parity PROPERTIES LABELS "parity;api;local" TIMEOUT 60)

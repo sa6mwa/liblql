@@ -23,8 +23,6 @@
 
 #define LQL_SOURCE_PREFIX_CAP 1024u
 #define LQL_EVAL_FEATURE_PREFIX_CAPTURE 0x80000000u
-#define LQL_EVAL_FAST_DIRECT_DEPTH_CAP 16u
-#define LQL_EVAL_FAST_MULTI_PRED_CAP 16u
 #define LQL_QUERY_LIMIT_MATCHES 0x01u
 #define LQL_QUERY_LIMIT_CANDIDATES 0x02u
 #define LQL_QUERY_LIMIT_BYTES 0x04u
@@ -85,54 +83,6 @@ typedef struct eval_doc {
   int fast_exact_path_active;
   int fast_exact_hit;
   int fast_exact_miss;
-  int fast_flat_stop_after_match;
-  size_t fast_flat_depth;
-  size_t fast_flat_key_len;
-  int fast_flat_key_active;
-  int fast_flat_key_match;
-  int fast_flat_next_value_target;
-  size_t fast_direct_depth;
-  size_t fast_direct_key_len;
-  size_t fast_direct_pending_match;
-  int fast_direct_key_active;
-  int fast_direct_key_match;
-  int fast_direct_pending_active;
-  int fast_direct_value_target;
-  int fast_direct_skip_unmatched_values;
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-  lonejson_candidate_scan_plan candidate_scan_plan;
-#endif
-  size_t fast_recursive_depth;
-  size_t fast_recursive_key_len;
-  int fast_recursive_key_active;
-  int fast_recursive_key_match;
-  int fast_recursive_next_value_target;
-  size_t fast_direct_match_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
-  size_t fast_direct_array_index_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
-  char fast_direct_container_stack[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
-#if defined(LONEJSON_HAS_CANDIDATE_DIRECT_PATH_VISITOR)
-  const char *fast_direct_path_keys[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
-  size_t fast_direct_path_key_lens[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
-  unsigned char fast_direct_path_kinds[LQL_EVAL_FAST_DIRECT_DEPTH_CAP];
-#endif
-  const lql_selector *fast_multi_value_selector;
-  const lql_selector *fast_multi_active_selector;
-  const char *fast_multi_keys[LQL_EVAL_FAST_MULTI_PRED_CAP];
-  size_t fast_multi_key_lens[LQL_EVAL_FAST_MULTI_PRED_CAP];
-  int fast_multi_skip_unmatched_strings;
-  int fast_multi_eligible;
-  int fast_multi_direct_enabled;
-  int fast_multi_direct_miss;
-  size_t fast_multi_depth;
-  size_t fast_multi_key_len;
-  unsigned int fast_multi_key_candidates;
-  int fast_multi_key_active;
-  const char *fast_mutation_top_key;
-  size_t fast_mutation_top_key_len;
-  size_t fast_mutation_key_len;
-  int fast_mutation_key_active;
-  int fast_mutation_key_match;
-  int fast_mutation_key_seen;
 } eval_doc;
 
 typedef struct lql_payload_sink_adapter {
@@ -172,8 +122,7 @@ static lql_status execute_query_source_spooled_matches_with_base(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     lql_uint64 offset_base, lql_uint64 index_base,
     const lql_query_options *query_options, lql_query_match_fn on_match,
-    void *user, const lql_mutation_plan *mutation_plan, FILE *mutation_out,
-    lql_error *mutation_error, lql_query_result *out_result, lql_error *error);
+    void *user, lql_query_result *out_result, lql_error *error);
 static lql_status execute_query_source_candidate_run(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     FILE *out, int compact, const lql_projection *projection,
@@ -266,6 +215,12 @@ static lql_read_result spooled_source_read(void *user, unsigned char *buffer,
   return result;
 }
 
+static lonejson_read_result
+spooled_lonejson_read(void *user, unsigned char *buffer, size_t capacity) {
+  spooled_source_reader *reader = (spooled_source_reader *)user;
+  return lonejson_spooled_read(&reader->cursor, buffer, capacity);
+}
+
 static lonejson_status payload_lql_sink(void *user, const void *data,
                                         size_t len, lonejson_error *error) {
   lql_payload_sink_adapter *adapter;
@@ -350,161 +305,6 @@ static int selector_fast_exact_eligible(const lql_selector *selector) {
          selector->observer_family == LQL_EVAL_FAMILY_EXACT;
 }
 
-static int selector_fast_flat_scalar_eligible(const lql_selector *selector) {
-  return selector != NULL && selector->hit_count == 1u &&
-         selector->predicate_count == 1u && selector->predicates != NULL &&
-         selector->predicates[0] == selector && selector->field_path_direct &&
-         selector->field_path_literal && selector->field_segment_count == 1u &&
-         selector->field_segment_kinds != NULL &&
-         selector->field_segment_kinds[0] == LQL_FIELD_SEGMENT_LITERAL &&
-         selector->observer_feature != 0u &&
-         selector->observer_family < LQL_EVAL_FAMILY_COUNT;
-}
-
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
-static int text_is_json_number_literal(const char *value, size_t len) {
-  size_t i = 0u;
-
-  if (value == NULL || len == 0u) {
-    return 0;
-  }
-  if (value[i] == '-') {
-    ++i;
-    if (i == len) {
-      return 0;
-    }
-  }
-  if (value[i] == '0') {
-    ++i;
-    if (i < len && value[i] >= '0' && value[i] <= '9') {
-      return 0;
-    }
-  } else {
-    if (value[i] < '1' || value[i] > '9') {
-      return 0;
-    }
-    while (i < len && value[i] >= '0' && value[i] <= '9') {
-      ++i;
-    }
-  }
-  if (i < len && value[i] == '.') {
-    ++i;
-    if (i == len || value[i] < '0' || value[i] > '9') {
-      return 0;
-    }
-    while (i < len && value[i] >= '0' && value[i] <= '9') {
-      ++i;
-    }
-  }
-  if (i < len && (value[i] == 'e' || value[i] == 'E')) {
-    ++i;
-    if (i < len && (value[i] == '+' || value[i] == '-')) {
-      ++i;
-    }
-    if (i == len || value[i] < '0' || value[i] > '9') {
-      return 0;
-    }
-    while (i < len && value[i] >= '0' && value[i] <= '9') {
-      ++i;
-    }
-  }
-  return i == len;
-}
-
-static int text_is_json_nonstring_literal(const char *value, size_t len) {
-  if (value == NULL) {
-    return 0;
-  }
-  if ((len == 4u && memcmp(value, "true", 4u) == 0) ||
-      (len == 4u && memcmp(value, "null", 4u) == 0) ||
-      (len == 5u && memcmp(value, "false", 5u) == 0)) {
-    return 1;
-  }
-  return text_is_json_number_literal(value, len);
-}
-#endif
-
-static int selector_fast_direct_scalar_eligible(const lql_selector *selector) {
-  size_t i;
-  if (selector == NULL || selector->hit_count != 1u ||
-      selector->predicate_count != 1u || selector->predicates == NULL ||
-      selector->predicates[0] != selector || !selector->field_path_direct ||
-      selector->field_segment_count <= 1u ||
-      selector->field_segment_count >= LQL_EVAL_FAST_DIRECT_DEPTH_CAP ||
-      selector->field_segment_kinds == NULL ||
-      selector->observer_feature == 0u ||
-      selector->observer_family >= LQL_EVAL_FAMILY_COUNT) {
-    return 0;
-  }
-  for (i = 0u; i < selector->field_segment_count; ++i) {
-    if (selector->field_segment_kinds[i] != LQL_FIELD_SEGMENT_LITERAL &&
-        selector->field_segment_kinds[i] != LQL_FIELD_SEGMENT_ARRAY_WILDCARD) {
-      return 0;
-    }
-  }
-  return selector->field_segment_kinds[selector->field_segment_count - 1u] ==
-         LQL_FIELD_SEGMENT_LITERAL;
-}
-
-static int
-selector_fast_recursive_suffix_scalar_eligible(const lql_selector *selector) {
-  return selector != NULL && selector->hit_count == 1u &&
-         selector->predicate_count == 1u && selector->predicates != NULL &&
-         selector->predicates[0] == selector &&
-         selector->field_path_recursive_literal_suffix &&
-         selector->field_segment_count == 1u &&
-         selector->field_segment_kinds != NULL &&
-         selector->field_segment_kinds[0] == LQL_FIELD_SEGMENT_LITERAL &&
-         selector->observer_feature != 0u &&
-         selector->observer_family < LQL_EVAL_FAMILY_COUNT;
-}
-
-static int
-selector_fast_top_level_multi_eligible(const lql_selector *selector) {
-  const lql_selector *a;
-  const lql_selector *b;
-  size_t i;
-  size_t j;
-  size_t a_offset;
-  size_t b_offset;
-  size_t a_len;
-  size_t b_len;
-
-  if (selector == NULL || selector->kind != LQL_SELECTOR_KIND_AND ||
-      selector->predicate_count == 0u ||
-      selector->predicate_count > LQL_EVAL_FAST_MULTI_PRED_CAP ||
-      selector->hit_count != selector->predicate_count ||
-      selector->predicates == NULL || selector->predicate_has_variable_path ||
-      selector->match_sticky_once_true == 0) {
-    return 0;
-  }
-  for (i = 0u; i < selector->predicate_count; ++i) {
-    a = selector->predicates[i];
-    if (a == NULL || a->field_path_direct == 0 || a->field_path_literal == 0 ||
-        a->field_segment_count != 1u || a->field_segment_kinds == NULL ||
-        a->field_segment_kinds[0] != LQL_FIELD_SEGMENT_LITERAL ||
-        a->observer_feature == 0u ||
-        a->observer_family >= LQL_EVAL_FAMILY_COUNT) {
-      return 0;
-    }
-    a_offset = a->field_segment_offsets[0];
-    a_len = a->field_segment_lens[0];
-    for (j = i + 1u; j < selector->predicate_count; ++j) {
-      b = selector->predicates[j];
-      if (b == NULL) {
-        return 0;
-      }
-      b_offset = b->field_segment_offsets[0];
-      b_len = b->field_segment_lens[0];
-      if (a_len == b_len &&
-          memcmp(a->field + a_offset, b->field + b_offset, a_len) == 0) {
-        return 0;
-      }
-    }
-  }
-  return 1;
-}
-
 static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   lql_impl *impl;
   unsigned int *next_hits;
@@ -524,7 +324,6 @@ static int init_doc(eval_doc *doc, lql *self, const lql_selector *selector) {
   impl = self == NULL ? NULL : (lql_impl *)self->impl;
   doc->impl = impl;
   doc->selector = selector;
-  doc->fast_multi_eligible = selector_fast_top_level_multi_eligible(selector);
   if (doc->allocator == NULL) {
     return 0;
   }
@@ -702,42 +501,6 @@ static void reset_doc(eval_doc *doc) {
   doc->fast_exact_path_active = 0;
   doc->fast_exact_hit = 0;
   doc->fast_exact_miss = 0;
-  doc->fast_flat_depth = 0u;
-  doc->fast_flat_key_len = 0u;
-  doc->fast_flat_key_active = 0;
-  doc->fast_flat_key_match = 0;
-  doc->fast_flat_next_value_target = 0;
-  doc->fast_direct_depth = 0u;
-  doc->fast_direct_key_len = 0u;
-  doc->fast_direct_pending_match = 0u;
-  doc->fast_direct_key_active = 0;
-  doc->fast_direct_key_match = 0;
-  doc->fast_direct_pending_active = 0;
-  doc->fast_direct_value_target = 0;
-  doc->fast_recursive_depth = 0u;
-  doc->fast_recursive_key_len = 0u;
-  doc->fast_recursive_key_active = 0;
-  doc->fast_recursive_key_match = 0;
-  doc->fast_recursive_next_value_target = 0;
-  if (selector_fast_direct_scalar_eligible(doc->selector)) {
-    memset(doc->fast_direct_match_stack, 0,
-           sizeof(doc->fast_direct_match_stack));
-    memset(doc->fast_direct_array_index_stack, 0,
-           sizeof(doc->fast_direct_array_index_stack));
-    memset(doc->fast_direct_container_stack, 0,
-           sizeof(doc->fast_direct_container_stack));
-  }
-  doc->fast_multi_value_selector = NULL;
-  doc->fast_multi_active_selector = NULL;
-  doc->fast_multi_direct_miss = 0;
-  doc->fast_multi_depth = 0u;
-  doc->fast_multi_key_len = 0u;
-  doc->fast_multi_key_candidates = 0u;
-  doc->fast_multi_key_active = 0;
-  doc->fast_mutation_key_len = 0u;
-  doc->fast_mutation_key_active = 0;
-  doc->fast_mutation_key_match = 0;
-  doc->fast_mutation_key_seen = 0;
 }
 
 static char *contains_tail_data(eval_doc *doc) {
@@ -1504,71 +1267,6 @@ static int stream_miss_marked_fast(const eval_doc *doc,
   }
   return doc->stream_misses[selector->hit_index] == doc->candidate_epoch;
 }
-
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE) ||                   \
-    defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
-static int top_level_multi_candidate_impossible(const eval_doc *doc,
-                                                const lql_selector *selector) {
-  size_t i;
-  if (doc == NULL || selector == NULL || doc->root_kind != '{' ||
-      !doc->fast_multi_eligible || doc->stream_misses == NULL) {
-    return 0;
-  }
-  if (doc->candidate_matched && selector->match_sticky_once_true) {
-    return 1;
-  }
-  for (i = 0u; i < selector->predicate_count; ++i) {
-    if (!hit_marked_fast(doc, selector->predicates[i]) &&
-        stream_miss_marked_fast(doc, selector->predicates[i])) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-static int
-top_level_multi_candidate_payload_discardable(const eval_doc *doc,
-                                              const lql_selector *selector) {
-  size_t i;
-  if (doc == NULL || selector == NULL || doc->root_kind != '{' ||
-      !doc->fast_multi_eligible || doc->stream_misses == NULL) {
-    return 0;
-  }
-  for (i = 0u; i < selector->predicate_count; ++i) {
-    if (!hit_marked_fast(doc, selector->predicates[i]) &&
-        stream_miss_marked_fast(doc, selector->predicates[i])) {
-      return 1;
-    }
-  }
-  return 0;
-}
-#endif
-
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE)
-static int fast_top_level_multi_field_prune(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  return top_level_multi_candidate_impossible(doc, doc != NULL ? doc->selector
-                                                               : NULL);
-}
-#endif
-
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
-static lonejson_status fast_top_level_multi_field_match(void *user,
-                                                        size_t index,
-                                                        lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc == NULL || doc->selector == NULL ||
-      index >= doc->selector->predicate_count) {
-    return LONEJSON_STATUS_CALLBACK_FAILED;
-  }
-  doc->fast_multi_value_selector = doc->selector->predicates[index];
-  return LONEJSON_STATUS_OK;
-}
-#endif
 
 static unsigned int *in_match_row_fast(eval_doc *doc,
                                        const lql_selector *selector) {
@@ -2842,52 +2540,6 @@ static lonejson_status on_array_end(void *user, const lonejson_value_path *path,
   return LONEJSON_STATUS_OK;
 }
 
-static lonejson_status on_key_begin(void *user, const lonejson_value_path *path,
-                                    lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  doc->fast_mutation_key_len = 0u;
-  doc->fast_mutation_key_active = doc->fast_mutation_top_key != NULL &&
-                                  path != NULL && path->segment_count == 0u &&
-                                  !doc->fast_mutation_key_seen;
-  doc->fast_mutation_key_match = doc->fast_mutation_key_active;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status on_key_chunk(void *user, const lonejson_value_path *path,
-                                    const char *data, size_t len,
-                                    lonejson_error *error) {
-  eval_doc *doc;
-  (void)path;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match) {
-    if (doc->fast_mutation_key_len >= doc->fast_mutation_top_key_len ||
-        len > doc->fast_mutation_top_key_len - doc->fast_mutation_key_len ||
-        memcmp(doc->fast_mutation_top_key + doc->fast_mutation_key_len, data,
-               len) != 0) {
-      doc->fast_mutation_key_match = 0;
-    }
-    doc->fast_mutation_key_len += len;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status on_key_end(void *user, const lonejson_value_path *path,
-                                  lonejson_error *error) {
-  eval_doc *doc;
-  (void)path;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match &&
-      doc->fast_mutation_key_len == doc->fast_mutation_top_key_len) {
-    doc->fast_mutation_key_seen = 1;
-  }
-  doc->fast_mutation_key_active = 0;
-  return LONEJSON_STATUS_OK;
-}
-
 static lonejson_status on_string_begin(void *user,
                                        const lonejson_value_path *path,
                                        lonejson_error *error) {
@@ -3113,11 +2765,6 @@ static void init_eval_visitor(lonejson_path_value_visitor *visitor) {
 
 static void configure_eval_visitor_for_doc(lonejson_path_value_visitor *visitor,
                                            const eval_doc *doc) {
-  if (visitor != NULL && doc != NULL && doc->fast_mutation_top_key != NULL) {
-    visitor->object_key_begin = on_key_begin;
-    visitor->object_key_chunk = on_key_chunk;
-    visitor->object_key_end = on_key_end;
-  }
   if (visitor != NULL && doc != NULL && !doc->track_container_types &&
       (doc->selector == NULL ||
        doc->selector->container_observer_features == 0u)) {
@@ -3131,2111 +2778,6 @@ static void configure_eval_visitor_for_doc(lonejson_path_value_visitor *visitor,
     visitor->object_end = NULL;
     visitor->array_end = NULL;
   }
-}
-
-static const lql_selector *fast_flat_active_selector(const eval_doc *doc) {
-  if (doc == NULL) {
-    return NULL;
-  }
-  return doc->fast_exact_selector != NULL ? doc->fast_exact_selector
-                                          : doc->selector;
-}
-
-static lonejson_status fast_flat_begin_value(eval_doc *doc, int scalar) {
-  const lql_selector *selector;
-  int target;
-  if (doc == NULL) {
-    return LONEJSON_STATUS_OK;
-  }
-  selector = fast_flat_active_selector(doc);
-  target = doc->fast_flat_next_value_target;
-  doc->fast_exact_path_active = 0;
-  doc->fast_flat_next_value_target = 0;
-  doc->fast_exact_miss = 0;
-  doc->scalar_path_features = 0u;
-  doc->scalar_stream_features = 0u;
-  doc->scalar_len = 0u;
-  doc->contains_tail_len = 0u;
-  doc->contains_tail_need = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = 0u;
-  if (selector == NULL || !target) {
-    return LONEJSON_STATUS_OK;
-  }
-  if (doc->fast_exact_selector != NULL) {
-    doc->fast_exact_path_active = scalar;
-    if (scalar) {
-      doc->scalar_path_features = LQL_SELECTOR_FEATURE_EXACT;
-      doc->prefix_need = doc->fast_exact_selector->observer_prefix_need;
-      doc->scalar_stream_features = LQL_SELECTOR_FEATURE_EXACT;
-    }
-    return LONEJSON_STATUS_OK;
-  }
-  if (doc->scalar_family_predicates == NULL || hit_marked_fast(doc, selector)) {
-    return LONEJSON_STATUS_OK;
-  }
-  memset(doc->scalar_family_counts, 0, sizeof(doc->scalar_family_counts));
-  if (doc->stream_misses != NULL) {
-    stream_miss_clear_fast(doc, selector);
-  }
-  doc->scalar_path_features = selector->observer_feature;
-  scalar_family_append_fast(doc, selector);
-  doc->contains_tail_need = selector->observer_contains_tail_need;
-  doc->prefix_need = selector->observer_prefix_need;
-  if (!scalar) {
-    observe_prepared_value(doc, "", 0, 1, 0);
-    return LONEJSON_STATUS_OK;
-  }
-  doc->scalar_stream_features =
-      doc->scalar_path_features &
-      (LQL_SELECTOR_FEATURE_CONTAINS | LQL_SELECTOR_FEATURE_PREFIX |
-       LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL);
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) == 0u &&
-      (doc->scalar_stream_features &
-       (LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL)) != 0u) {
-    doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
-    if (!ensure_contains_tail(doc)) {
-      return LONEJSON_STATUS_ALLOCATION_FAILED;
-    }
-    observe_contains_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prefix_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u &&
-      selector->kind == LQL_SELECTOR_KIND_IN) {
-    observe_in_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_path_features & LQL_SELECTOR_FEATURE_EXISTS) != 0u) {
-    observe_scalar_exists_begin(doc, doc->selector, NULL);
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_object_begin(void *user,
-                                              lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_flat_depth == 0u) {
-    doc->root_kind = '{';
-  } else {
-    st = fast_flat_begin_value(doc, 0);
-    if (st != LONEJSON_STATUS_OK) {
-      return st;
-    }
-  }
-  doc->fast_flat_depth++;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_object_end(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_flat_depth != 0u) {
-    doc->fast_flat_depth--;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_array_begin(void *user,
-                                             lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_flat_depth == 0u) {
-    doc->root_kind = '[';
-  } else {
-    st = fast_flat_begin_value(doc, 0);
-    if (st != LONEJSON_STATUS_OK) {
-      return st;
-    }
-  }
-  doc->fast_flat_depth++;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_array_end(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_flat_depth != 0u) {
-    doc->fast_flat_depth--;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_key_begin(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  (void)error;
-  doc = (eval_doc *)user;
-  selector = fast_flat_active_selector(doc);
-  doc->fast_flat_key_active = doc->fast_flat_depth == 1u && selector != NULL &&
-                              !hit_marked_fast(doc, selector);
-  doc->fast_flat_key_match = doc->fast_flat_key_active;
-  doc->fast_flat_key_len = 0u;
-  doc->fast_mutation_key_active = doc->fast_flat_depth == 1u &&
-                                  doc->fast_mutation_top_key != NULL &&
-                                  !doc->fast_mutation_key_seen;
-  doc->fast_mutation_key_match = doc->fast_mutation_key_active;
-  doc->fast_mutation_key_len = 0u;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_key_chunk(void *user, const char *data,
-                                           size_t len, lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  size_t key_offset;
-  size_t key_len;
-  size_t cmp_len;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match) {
-    if (doc->fast_mutation_key_len >= doc->fast_mutation_top_key_len ||
-        len > doc->fast_mutation_top_key_len - doc->fast_mutation_key_len ||
-        memcmp(doc->fast_mutation_top_key + doc->fast_mutation_key_len, data,
-               len) != 0) {
-      doc->fast_mutation_key_match = 0;
-    }
-    doc->fast_mutation_key_len += len;
-  }
-  if (!doc->fast_flat_key_active || !doc->fast_flat_key_match) {
-    return LONEJSON_STATUS_OK;
-  }
-  selector = fast_flat_active_selector(doc);
-  key_offset = selector->field_segment_offsets[0];
-  key_len = selector->field_segment_lens[0];
-  if (doc->fast_flat_key_len >= key_len) {
-    doc->fast_flat_key_match = 0;
-  } else {
-    cmp_len = key_len - doc->fast_flat_key_len;
-    if (cmp_len > len) {
-      cmp_len = len;
-    }
-    if (memcmp(selector->field + key_offset + doc->fast_flat_key_len, data,
-               cmp_len) != 0 ||
-        len > key_len - doc->fast_flat_key_len) {
-      doc->fast_flat_key_match = 0;
-    }
-  }
-  doc->fast_flat_key_len += len;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_key_end(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  (void)error;
-  doc = (eval_doc *)user;
-  selector = fast_flat_active_selector(doc);
-  doc->fast_flat_next_value_target =
-      doc->fast_flat_key_active && doc->fast_flat_key_match &&
-      doc->fast_flat_key_len == selector->field_segment_lens[0];
-  doc->fast_flat_key_active = 0;
-  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match &&
-      doc->fast_mutation_key_len == doc->fast_mutation_top_key_len) {
-    doc->fast_mutation_key_seen = 1;
-  }
-  doc->fast_mutation_key_active = 0;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_string_begin(void *user,
-                                              lonejson_error *error) {
-  (void)error;
-  return fast_flat_begin_value((eval_doc *)user, 1);
-}
-
-static lonejson_status fast_flat_string_chunk(void *user, const char *data,
-                                              size_t len,
-                                              lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->scalar_stream_features == 0u) {
-    return LONEJSON_STATUS_OK;
-  }
-  doc->scalar_len += len;
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
-    observe_contains_stream_chunk(doc, doc->selector, NULL, data, len);
-    contains_stream_update_tail(doc, data, len);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prefix_stream_chunk(doc, doc->selector, NULL, data, len);
-    prefix_stream_update(doc, data, len);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
-    observe_exact_stream_chunk(doc, doc->selector, NULL, data, len);
-  }
-  if ((doc->scalar_stream_features & LQL_EVAL_FEATURE_PREFIX_CAPTURE) != 0u) {
-    prefix_stream_update(doc, data, len);
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_done_status(const eval_doc *doc) {
-  return doc != NULL && doc->fast_flat_stop_after_match &&
-                 doc->candidate_matched
-             ? LONEJSON_STATUS_TRUNCATED
-             : LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_string_end(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status status;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_flat_depth == 0u) {
-    doc->root_kind = 's';
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prefix_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
-    observe_exact_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
-    observe_temporal_stream_end(doc, doc->selector, NULL);
-  }
-  status = fast_flat_done_status(doc);
-  doc->fast_exact_path_active = 0;
-  doc->scalar_len = 0u;
-  doc->scalar_stream_features = 0u;
-  doc->contains_tail_len = 0u;
-  doc->contains_tail_need = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = 0u;
-  return status;
-}
-
-static lonejson_status fast_flat_number_begin(void *user,
-                                              lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-
-  st = fast_flat_string_begin(user, error);
-  if (st != LONEJSON_STATUS_OK) {
-    return st;
-  }
-  doc = (eval_doc *)user;
-  if (doc->scalar_path_features == 0u) {
-    return LONEJSON_STATUS_OK;
-  }
-  doc->scalar_stream_features |=
-      doc->scalar_path_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
-      0u) {
-    if ((doc->scalar_stream_features &
-         (LQL_SELECTOR_FEATURE_PREFIX | LQL_SELECTOR_FEATURE_EXACT |
-          LQL_SELECTOR_FEATURE_TEMPORAL)) == 0u) {
-      doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
-    }
-    numeric_stream_reset(doc);
-    if (doc->prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
-      doc->prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
-      doc->prefix_buf[0] = '\0';
-    }
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_number_chunk(void *user, const char *data,
-                                              size_t len,
-                                              lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-
-  st = fast_flat_string_chunk(user, data, len, error);
-  if (st != LONEJSON_STATUS_OK) {
-    return st;
-  }
-  doc = (eval_doc *)user;
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
-      0u) {
-    numeric_stream_update(doc, data, len);
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_flat_number_end(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status status;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_flat_depth == 0u) {
-    doc->root_kind = 'n';
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prefix_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
-    observe_exact_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
-    observe_temporal_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
-      0u) {
-    observe_numeric_range_stream_end(doc, doc->selector, NULL);
-  }
-  status = fast_flat_done_status(doc);
-  doc->fast_exact_path_active = 0;
-  doc->scalar_len = 0u;
-  doc->scalar_stream_features = 0u;
-  doc->contains_tail_len = 0u;
-  doc->contains_tail_need = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = 0u;
-  return status;
-}
-
-static lonejson_status fast_flat_boolean(void *user, int value,
-                                         lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_flat_depth == 0u) {
-    doc->root_kind = 'b';
-  }
-  if (fast_flat_begin_value(doc, 1) != LONEJSON_STATUS_OK) {
-    return LONEJSON_STATUS_ALLOCATION_FAILED;
-  }
-  if (doc->scalar_path_features != 0u) {
-    observe_prepared_value(doc, value ? "true" : "false", 0, 0, 0);
-  }
-  doc->fast_exact_path_active = 0;
-  return fast_flat_done_status(doc);
-}
-
-static lonejson_status fast_flat_null(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_flat_depth == 0u) {
-    doc->root_kind = '0';
-  }
-  if (fast_flat_begin_value(doc, 1) != LONEJSON_STATUS_OK) {
-    return LONEJSON_STATUS_ALLOCATION_FAILED;
-  }
-  if (doc->scalar_path_features != 0u) {
-    observe_prepared_value(doc, "", 0, 0, 1);
-  }
-  doc->fast_exact_path_active = 0;
-  return fast_flat_done_status(doc);
-}
-
-static void init_fast_flat_scalar_visitor(lonejson_value_visitor *visitor) {
-  *visitor = lonejson_default_value_visitor();
-  visitor->object_begin = fast_flat_object_begin;
-  visitor->object_end = fast_flat_object_end;
-  visitor->object_key_begin = fast_flat_key_begin;
-  visitor->object_key_chunk = fast_flat_key_chunk;
-  visitor->object_key_end = fast_flat_key_end;
-  visitor->array_begin = fast_flat_array_begin;
-  visitor->array_end = fast_flat_array_end;
-  visitor->string_begin = fast_flat_string_begin;
-  visitor->string_chunk = fast_flat_string_chunk;
-  visitor->string_end = fast_flat_string_end;
-  visitor->number_begin = fast_flat_number_begin;
-  visitor->number_chunk = fast_flat_number_chunk;
-  visitor->number_end = fast_flat_number_end;
-  visitor->boolean_value = fast_flat_boolean;
-  visitor->null_value = fast_flat_null;
-}
-
-static const lql_selector *fast_direct_selector(const eval_doc *doc) {
-  return doc == NULL ? NULL : doc->selector;
-}
-
-static int fast_direct_segment_matches(const lql_selector *selector,
-                                       size_t index, const char *data,
-                                       size_t len, size_t offset) {
-  size_t segment_offset;
-  size_t segment_len;
-  size_t cmp_len;
-
-  if (selector == NULL || index >= selector->field_segment_count ||
-      selector->field_segment_kinds[index] != LQL_FIELD_SEGMENT_LITERAL) {
-    return 0;
-  }
-  segment_offset = selector->field_segment_offsets[index];
-  segment_len = selector->field_segment_lens[index];
-  if (offset >= segment_len) {
-    return 0;
-  }
-  cmp_len = segment_len - offset;
-  if (cmp_len > len) {
-    cmp_len = len;
-  }
-  return memcmp(selector->field + segment_offset + offset, data, cmp_len) ==
-             0 &&
-         len <= segment_len - offset;
-}
-
-static int fast_direct_segment_matches_array_index(const lql_selector *selector,
-                                                   size_t segment_index,
-                                                   size_t array_index) {
-  const char *segment;
-  char digits[32];
-  size_t segment_len;
-  size_t digit_len;
-  size_t value;
-
-  if (selector == NULL || segment_index >= selector->field_segment_count ||
-      selector->field_segment_kinds[segment_index] !=
-          LQL_FIELD_SEGMENT_LITERAL) {
-    return 0;
-  }
-  segment = selector->field + selector->field_segment_offsets[segment_index];
-  segment_len = selector->field_segment_lens[segment_index];
-  digit_len = 0u;
-  value = array_index;
-  do {
-    if (digit_len >= sizeof(digits)) {
-      return 0;
-    }
-    digits[digit_len++] = (char)('0' + (value % 10u));
-    value /= 10u;
-  } while (value != 0u);
-  if (segment_len != digit_len) {
-    return 0;
-  }
-  while (digit_len != 0u) {
-    --digit_len;
-    if (*segment++ != digits[digit_len]) {
-      return 0;
-    }
-  }
-  return 1;
-}
-
-static lonejson_status fast_direct_prepare_scalar(eval_doc *doc) {
-  const lql_selector *selector;
-
-  selector = fast_direct_selector(doc);
-  if (selector == NULL || !doc->fast_direct_value_target ||
-      hit_marked_fast(doc, selector)) {
-    return LONEJSON_STATUS_OK;
-  }
-  doc->scalar_path_features = 0u;
-  doc->scalar_stream_features = 0u;
-  doc->scalar_len = 0u;
-  doc->contains_tail_len = 0u;
-  doc->contains_tail_need = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = 0u;
-  if (doc->fast_exact_selector != NULL) {
-    doc->fast_exact_path_active = 1;
-    doc->fast_exact_miss = 0;
-    doc->scalar_path_features = LQL_SELECTOR_FEATURE_EXACT;
-    doc->prefix_need = doc->fast_exact_selector->observer_prefix_need;
-    doc->scalar_stream_features = LQL_SELECTOR_FEATURE_EXACT;
-    return LONEJSON_STATUS_OK;
-  }
-  memset(doc->scalar_family_counts, 0, sizeof(doc->scalar_family_counts));
-  if (doc->stream_misses != NULL) {
-    stream_miss_clear_fast(doc, selector);
-  }
-  doc->scalar_path_features = selector->observer_feature;
-  scalar_family_append_fast(doc, selector);
-  doc->contains_tail_need = selector->observer_contains_tail_need;
-  doc->prefix_need = selector->observer_prefix_need;
-  doc->scalar_stream_features =
-      doc->scalar_path_features &
-      (LQL_SELECTOR_FEATURE_CONTAINS | LQL_SELECTOR_FEATURE_PREFIX |
-       LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL);
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) == 0u &&
-      (doc->scalar_stream_features &
-       (LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL)) != 0u) {
-    doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
-    if (!ensure_contains_tail(doc)) {
-      return LONEJSON_STATUS_ALLOCATION_FAILED;
-    }
-    observe_contains_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prefix_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u &&
-      selector->kind == LQL_SELECTOR_KIND_IN) {
-    observe_in_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_path_features & LQL_SELECTOR_FEATURE_EXISTS) != 0u) {
-    observe_scalar_exists_begin(doc, doc->selector, NULL);
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static size_t fast_direct_begin_match(eval_doc *doc) {
-  const lql_selector *selector;
-  size_t array_index;
-  size_t prefix;
-
-  selector = fast_direct_selector(doc);
-  if (selector == NULL) {
-    return 0u;
-  }
-  if (doc->fast_direct_pending_active) {
-    doc->fast_direct_pending_active = 0;
-    return doc->fast_direct_pending_match;
-  }
-  if (doc->fast_direct_depth >= LQL_EVAL_FAST_DIRECT_DEPTH_CAP) {
-    return 0u;
-  }
-  prefix = doc->fast_direct_match_stack[doc->fast_direct_depth];
-  if (prefix < selector->field_segment_count &&
-      doc->fast_direct_container_stack[doc->fast_direct_depth] == '[') {
-    array_index = doc->fast_direct_array_index_stack[doc->fast_direct_depth]++;
-    if (selector->field_segment_kinds[prefix] ==
-        LQL_FIELD_SEGMENT_ARRAY_WILDCARD) {
-      return prefix + 1u;
-    }
-    if (fast_direct_segment_matches_array_index(selector, prefix,
-                                                array_index)) {
-      return prefix + 1u;
-    }
-  }
-  return 0u;
-}
-
-static lonejson_status fast_direct_object_begin(void *user,
-                                                lonejson_error *error) {
-  eval_doc *doc;
-  size_t match;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_direct_depth == 0u) {
-    doc->root_kind = '{';
-    match = 0u;
-  } else {
-    match = fast_direct_begin_match(doc);
-  }
-  if (doc->fast_direct_depth + 1u < LQL_EVAL_FAST_DIRECT_DEPTH_CAP) {
-    ++doc->fast_direct_depth;
-    doc->fast_direct_match_stack[doc->fast_direct_depth] = match;
-    doc->fast_direct_array_index_stack[doc->fast_direct_depth] = 0u;
-    doc->fast_direct_container_stack[doc->fast_direct_depth] = '{';
-  } else {
-    ++doc->fast_direct_depth;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_direct_object_end(void *user,
-                                              lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_direct_depth != 0u) {
-    if (doc->fast_direct_depth < LQL_EVAL_FAST_DIRECT_DEPTH_CAP) {
-      doc->fast_direct_match_stack[doc->fast_direct_depth] = 0u;
-      doc->fast_direct_array_index_stack[doc->fast_direct_depth] = 0u;
-      doc->fast_direct_container_stack[doc->fast_direct_depth] = 0;
-    }
-    --doc->fast_direct_depth;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_direct_array_begin(void *user,
-                                               lonejson_error *error) {
-  eval_doc *doc;
-  size_t match;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_direct_depth == 0u) {
-    doc->root_kind = '[';
-    match = 0u;
-  } else {
-    match = fast_direct_begin_match(doc);
-  }
-  if (doc->fast_direct_depth + 1u < LQL_EVAL_FAST_DIRECT_DEPTH_CAP) {
-    ++doc->fast_direct_depth;
-    doc->fast_direct_match_stack[doc->fast_direct_depth] = match;
-    doc->fast_direct_array_index_stack[doc->fast_direct_depth] = 0u;
-    doc->fast_direct_container_stack[doc->fast_direct_depth] = '[';
-  } else {
-    ++doc->fast_direct_depth;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_direct_array_end(void *user,
-                                             lonejson_error *error) {
-  return fast_direct_object_end(user, error);
-}
-
-static lonejson_status fast_direct_key_begin(void *user,
-                                             lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  size_t prefix;
-  (void)error;
-  doc = (eval_doc *)user;
-  selector = fast_direct_selector(doc);
-  doc->fast_direct_key_active = 0;
-  doc->fast_direct_key_match = 0;
-  doc->fast_direct_key_len = 0u;
-  doc->fast_direct_pending_active = 0;
-  doc->fast_direct_pending_match = 0u;
-  doc->fast_mutation_key_len = 0u;
-  doc->fast_mutation_key_active =
-      doc->fast_mutation_top_key != NULL && doc->fast_direct_depth == 1u &&
-      doc->fast_direct_container_stack[doc->fast_direct_depth] == '{' &&
-      !doc->fast_mutation_key_seen;
-  doc->fast_mutation_key_match = doc->fast_mutation_key_active;
-  if (selector == NULL ||
-      doc->fast_direct_depth >= LQL_EVAL_FAST_DIRECT_DEPTH_CAP ||
-      doc->fast_direct_container_stack[doc->fast_direct_depth] != '{' ||
-      hit_marked_fast(doc, selector)) {
-    return LONEJSON_STATUS_OK;
-  }
-  prefix = doc->fast_direct_match_stack[doc->fast_direct_depth];
-  if (prefix >= selector->field_segment_count ||
-      selector->field_segment_kinds[prefix] != LQL_FIELD_SEGMENT_LITERAL) {
-    return LONEJSON_STATUS_OK;
-  }
-  doc->fast_direct_key_active = 1;
-  doc->fast_direct_key_match = 1;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_direct_key_chunk(void *user, const char *data,
-                                             size_t len,
-                                             lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  size_t prefix;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match) {
-    if (doc->fast_mutation_key_len >= doc->fast_mutation_top_key_len ||
-        len > doc->fast_mutation_top_key_len - doc->fast_mutation_key_len ||
-        memcmp(doc->fast_mutation_top_key + doc->fast_mutation_key_len, data,
-               len) != 0) {
-      doc->fast_mutation_key_match = 0;
-    }
-    doc->fast_mutation_key_len += len;
-  }
-  if (!doc->fast_direct_key_active || !doc->fast_direct_key_match ||
-      doc->fast_direct_depth >= LQL_EVAL_FAST_DIRECT_DEPTH_CAP) {
-    return LONEJSON_STATUS_OK;
-  }
-  selector = fast_direct_selector(doc);
-  prefix = doc->fast_direct_match_stack[doc->fast_direct_depth];
-  if (!fast_direct_segment_matches(selector, prefix, data, len,
-                                   doc->fast_direct_key_len)) {
-    doc->fast_direct_key_match = 0;
-  }
-  doc->fast_direct_key_len += len;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_direct_key_end(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  size_t prefix;
-#if defined(LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP)
-  int skip_value;
-#endif
-  (void)error;
-  doc = (eval_doc *)user;
-  selector = fast_direct_selector(doc);
-#if defined(LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP)
-  skip_value = 0;
-#endif
-  if (doc->fast_mutation_key_active && doc->fast_mutation_key_match &&
-      doc->fast_mutation_key_len == doc->fast_mutation_top_key_len) {
-    doc->fast_mutation_key_seen = 1;
-  }
-  if (doc->fast_direct_key_active && doc->fast_direct_key_match &&
-      doc->fast_direct_depth < LQL_EVAL_FAST_DIRECT_DEPTH_CAP &&
-      selector != NULL) {
-    prefix = doc->fast_direct_match_stack[doc->fast_direct_depth];
-    if (doc->fast_direct_key_len == selector->field_segment_lens[prefix]) {
-      doc->fast_direct_pending_active = 1;
-      doc->fast_direct_pending_match = prefix + 1u;
-    }
-  }
-#if defined(LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP)
-  if (doc->fast_direct_skip_unmatched_values &&
-      (selector == NULL || hit_marked_fast(doc, selector) ||
-       !doc->fast_direct_pending_active)) {
-    skip_value = 1;
-  }
-#endif
-  doc->fast_direct_key_active = 0;
-  doc->fast_mutation_key_active = 0;
-#if defined(LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP)
-  return skip_value ? LONEJSON_STATUS_SKIP_VALUE : LONEJSON_STATUS_OK;
-#else
-  return LONEJSON_STATUS_OK;
-#endif
-}
-
-static lonejson_status fast_direct_string_begin(void *user,
-                                                lonejson_error *error) {
-  eval_doc *doc;
-  size_t match;
-  (void)error;
-  doc = (eval_doc *)user;
-  match = fast_direct_begin_match(doc);
-  doc->fast_direct_value_target =
-      match == fast_direct_selector(doc)->field_segment_count;
-  return fast_direct_prepare_scalar(doc);
-}
-
-static lonejson_status fast_direct_string_chunk(void *user, const char *data,
-                                                size_t len,
-                                                lonejson_error *error) {
-  return fast_flat_string_chunk(user, data, len, error);
-}
-
-static lonejson_status fast_direct_string_end(void *user,
-                                              lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_direct_depth == 0u) {
-    doc->root_kind = 's';
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prefix_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
-    observe_exact_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
-    observe_temporal_stream_end(doc, doc->selector, NULL);
-  }
-  doc->scalar_len = 0u;
-  doc->scalar_stream_features = 0u;
-  doc->contains_tail_len = 0u;
-  doc->contains_tail_need = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = 0u;
-  doc->fast_exact_path_active = 0;
-  doc->fast_direct_value_target = 0;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_direct_number_begin(void *user,
-                                                lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  st = fast_direct_string_begin(user, error);
-  if (st != LONEJSON_STATUS_OK) {
-    return st;
-  }
-  doc = (eval_doc *)user;
-  if (doc->scalar_path_features == 0u) {
-    return LONEJSON_STATUS_OK;
-  }
-  doc->scalar_stream_features |=
-      doc->scalar_path_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
-      0u) {
-    if ((doc->scalar_stream_features &
-         (LQL_SELECTOR_FEATURE_PREFIX | LQL_SELECTOR_FEATURE_EXACT |
-          LQL_SELECTOR_FEATURE_TEMPORAL)) == 0u) {
-      doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
-    }
-    numeric_stream_reset(doc);
-    if (doc->prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
-      doc->prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
-      doc->prefix_buf[0] = '\0';
-    }
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_direct_number_chunk(void *user, const char *data,
-                                                size_t len,
-                                                lonejson_error *error) {
-  return fast_flat_number_chunk(user, data, len, error);
-}
-
-static lonejson_status fast_direct_number_end(void *user,
-                                              lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_direct_depth == 0u) {
-    doc->root_kind = 'n';
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prefix_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
-    observe_exact_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
-    observe_temporal_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
-      0u) {
-    observe_numeric_range_stream_end(doc, doc->selector, NULL);
-  }
-  doc->scalar_len = 0u;
-  doc->scalar_stream_features = 0u;
-  doc->contains_tail_len = 0u;
-  doc->contains_tail_need = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = 0u;
-  doc->fast_exact_path_active = 0;
-  doc->fast_direct_value_target = 0;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_direct_boolean(void *user, int value,
-                                           lonejson_error *error) {
-  eval_doc *doc;
-  size_t match;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_direct_depth == 0u) {
-    doc->root_kind = 'b';
-  }
-  match = fast_direct_begin_match(doc);
-  doc->fast_direct_value_target =
-      match == fast_direct_selector(doc)->field_segment_count;
-  if (fast_direct_prepare_scalar(doc) != LONEJSON_STATUS_OK) {
-    return LONEJSON_STATUS_ALLOCATION_FAILED;
-  }
-  if (doc->scalar_path_features != 0u) {
-    observe_prepared_value(doc, value ? "true" : "false", 0, 0, 0);
-  }
-  doc->fast_exact_path_active = 0;
-  doc->fast_direct_value_target = 0;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_direct_null(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  size_t match;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_direct_depth == 0u) {
-    doc->root_kind = '0';
-  }
-  match = fast_direct_begin_match(doc);
-  doc->fast_direct_value_target =
-      match == fast_direct_selector(doc)->field_segment_count;
-  if (fast_direct_prepare_scalar(doc) != LONEJSON_STATUS_OK) {
-    return LONEJSON_STATUS_ALLOCATION_FAILED;
-  }
-  if (doc->scalar_path_features != 0u) {
-    observe_prepared_value(doc, "", 0, 0, 1);
-  }
-  doc->fast_exact_path_active = 0;
-  doc->fast_direct_value_target = 0;
-  return LONEJSON_STATUS_OK;
-}
-
-static void init_fast_direct_scalar_visitor(lonejson_value_visitor *visitor) {
-  *visitor = lonejson_default_value_visitor();
-  visitor->object_begin = fast_direct_object_begin;
-  visitor->object_end = fast_direct_object_end;
-  visitor->object_key_begin = fast_direct_key_begin;
-  visitor->object_key_chunk = fast_direct_key_chunk;
-  visitor->object_key_end = fast_direct_key_end;
-  visitor->array_begin = fast_direct_array_begin;
-  visitor->array_end = fast_direct_array_end;
-  visitor->string_begin = fast_direct_string_begin;
-  visitor->string_chunk = fast_direct_string_chunk;
-  visitor->string_end = fast_direct_string_end;
-  visitor->number_begin = fast_direct_number_begin;
-  visitor->number_chunk = fast_direct_number_chunk;
-  visitor->number_end = fast_direct_number_end;
-  visitor->boolean_value = fast_direct_boolean;
-  visitor->null_value = fast_direct_null;
-}
-
-static lonejson_status fast_recursive_prepare_value(eval_doc *doc, int scalar) {
-  const lql_selector *selector;
-
-  if (doc == NULL) {
-    return LONEJSON_STATUS_OK;
-  }
-  selector = doc->selector;
-  if (selector == NULL || !doc->fast_recursive_next_value_target ||
-      hit_marked_fast(doc, selector)) {
-    doc->fast_recursive_next_value_target = 0;
-    return LONEJSON_STATUS_OK;
-  }
-  doc->scalar_path_features = 0u;
-  doc->scalar_stream_features = 0u;
-  doc->scalar_len = 0u;
-  doc->contains_tail_len = 0u;
-  doc->contains_tail_need = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = 0u;
-  doc->fast_recursive_next_value_target = 0;
-  memset(doc->scalar_family_counts, 0, sizeof(doc->scalar_family_counts));
-  if (doc->stream_misses != NULL) {
-    stream_miss_clear_fast(doc, selector);
-  }
-  doc->scalar_path_features = selector->observer_feature;
-  scalar_family_append_fast(doc, selector);
-  doc->contains_tail_need = selector->observer_contains_tail_need;
-  doc->prefix_need = selector->observer_prefix_need;
-  if (!scalar) {
-    observe_prepared_value(doc, "", 0, 1, 0);
-    return LONEJSON_STATUS_OK;
-  }
-  doc->scalar_stream_features =
-      doc->scalar_path_features &
-      (LQL_SELECTOR_FEATURE_CONTAINS | LQL_SELECTOR_FEATURE_PREFIX |
-       LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL);
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) == 0u &&
-      (doc->scalar_stream_features &
-       (LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL)) != 0u) {
-    doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
-    if (!ensure_contains_tail(doc)) {
-      return LONEJSON_STATUS_ALLOCATION_FAILED;
-    }
-    observe_contains_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prefix_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u &&
-      selector->kind == LQL_SELECTOR_KIND_IN) {
-    observe_in_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_path_features & LQL_SELECTOR_FEATURE_EXISTS) != 0u) {
-    observe_scalar_exists_begin(doc, doc->selector, NULL);
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_recursive_object_begin(void *user,
-                                                   lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_recursive_depth == 0u) {
-    doc->root_kind = '{';
-  } else if (doc->fast_recursive_next_value_target) {
-    st = fast_recursive_prepare_value(doc, 0);
-    if (st != LONEJSON_STATUS_OK) {
-      return st;
-    }
-  }
-  ++doc->fast_recursive_depth;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_recursive_object_end(void *user,
-                                                 lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_recursive_depth != 0u) {
-    --doc->fast_recursive_depth;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_recursive_array_begin(void *user,
-                                                  lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_recursive_depth == 0u) {
-    doc->root_kind = '[';
-  } else if (doc->fast_recursive_next_value_target) {
-    st = fast_recursive_prepare_value(doc, 0);
-    if (st != LONEJSON_STATUS_OK) {
-      return st;
-    }
-  }
-  ++doc->fast_recursive_depth;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_recursive_array_end(void *user,
-                                                lonejson_error *error) {
-  return fast_recursive_object_end(user, error);
-}
-
-static lonejson_status fast_recursive_key_begin(void *user,
-                                                lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  (void)error;
-  doc = (eval_doc *)user;
-  selector = doc->selector;
-  doc->fast_recursive_key_active = selector != NULL &&
-                                   doc->fast_recursive_depth != 0u &&
-                                   !hit_marked_fast(doc, selector);
-  doc->fast_recursive_key_match = doc->fast_recursive_key_active;
-  doc->fast_recursive_key_len = 0u;
-  doc->fast_recursive_next_value_target = 0;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_recursive_key_chunk(void *user, const char *data,
-                                                size_t len,
-                                                lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (!doc->fast_recursive_key_active || !doc->fast_recursive_key_match) {
-    return LONEJSON_STATUS_OK;
-  }
-  selector = doc->selector;
-  if (!fast_direct_segment_matches(selector, 0u, data, len,
-                                   doc->fast_recursive_key_len)) {
-    doc->fast_recursive_key_match = 0;
-  }
-  doc->fast_recursive_key_len += len;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_recursive_key_end(void *user,
-                                              lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  (void)error;
-  doc = (eval_doc *)user;
-  selector = doc->selector;
-  doc->fast_recursive_next_value_target =
-      doc->fast_recursive_key_active && doc->fast_recursive_key_match &&
-      selector != NULL &&
-      doc->fast_recursive_key_len == selector->field_segment_lens[0];
-  doc->fast_recursive_key_active = 0;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_recursive_string_begin(void *user,
-                                                   lonejson_error *error) {
-  (void)error;
-  return fast_recursive_prepare_value((eval_doc *)user, 1);
-}
-
-static lonejson_status fast_recursive_string_chunk(void *user, const char *data,
-                                                   size_t len,
-                                                   lonejson_error *error) {
-  return fast_flat_string_chunk(user, data, len, error);
-}
-
-static lonejson_status fast_recursive_string_end(void *user,
-                                                 lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_recursive_depth == 0u) {
-    doc->root_kind = 's';
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prefix_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
-    observe_exact_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
-    observe_temporal_stream_end(doc, doc->selector, NULL);
-  }
-  doc->scalar_len = 0u;
-  doc->scalar_stream_features = 0u;
-  doc->contains_tail_len = 0u;
-  doc->contains_tail_need = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = 0u;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_recursive_number_begin(void *user,
-                                                   lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  st = fast_recursive_string_begin(user, error);
-  if (st != LONEJSON_STATUS_OK) {
-    return st;
-  }
-  doc = (eval_doc *)user;
-  if (doc->scalar_path_features == 0u) {
-    return LONEJSON_STATUS_OK;
-  }
-  doc->scalar_stream_features |=
-      doc->scalar_path_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
-      0u) {
-    if ((doc->scalar_stream_features &
-         (LQL_SELECTOR_FEATURE_PREFIX | LQL_SELECTOR_FEATURE_EXACT |
-          LQL_SELECTOR_FEATURE_TEMPORAL)) == 0u) {
-      doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
-    }
-    numeric_stream_reset(doc);
-    if (doc->prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
-      doc->prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
-      doc->prefix_buf[0] = '\0';
-    }
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_recursive_number_chunk(void *user, const char *data,
-                                                   size_t len,
-                                                   lonejson_error *error) {
-  return fast_flat_number_chunk(user, data, len, error);
-}
-
-static lonejson_status fast_recursive_number_end(void *user,
-                                                 lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_recursive_depth == 0u) {
-    doc->root_kind = 'n';
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prefix_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u) {
-    observe_exact_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_TEMPORAL) != 0u) {
-    observe_temporal_stream_end(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
-      0u) {
-    observe_numeric_range_stream_end(doc, doc->selector, NULL);
-  }
-  doc->scalar_len = 0u;
-  doc->scalar_stream_features = 0u;
-  doc->contains_tail_len = 0u;
-  doc->contains_tail_need = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = 0u;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_recursive_boolean(void *user, int value,
-                                              lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_recursive_depth == 0u) {
-    doc->root_kind = 'b';
-  }
-  st = fast_recursive_prepare_value(doc, 1);
-  if (st != LONEJSON_STATUS_OK) {
-    return st;
-  }
-  if (doc->scalar_path_features != 0u) {
-    observe_prepared_value(doc, value ? "true" : "false", 0, 0, 0);
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_recursive_null(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_recursive_depth == 0u) {
-    doc->root_kind = '0';
-  }
-  st = fast_recursive_prepare_value(doc, 1);
-  if (st != LONEJSON_STATUS_OK) {
-    return st;
-  }
-  if (doc->scalar_path_features != 0u) {
-    observe_prepared_value(doc, "", 0, 0, 1);
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static void
-init_fast_recursive_suffix_scalar_visitor(lonejson_value_visitor *visitor) {
-  *visitor = lonejson_default_value_visitor();
-  visitor->object_begin = fast_recursive_object_begin;
-  visitor->object_end = fast_recursive_object_end;
-  visitor->object_key_begin = fast_recursive_key_begin;
-  visitor->object_key_chunk = fast_recursive_key_chunk;
-  visitor->object_key_end = fast_recursive_key_end;
-  visitor->array_begin = fast_recursive_array_begin;
-  visitor->array_end = fast_recursive_array_end;
-  visitor->string_begin = fast_recursive_string_begin;
-  visitor->string_chunk = fast_recursive_string_chunk;
-  visitor->string_end = fast_recursive_string_end;
-  visitor->number_begin = fast_recursive_number_begin;
-  visitor->number_chunk = fast_recursive_number_chunk;
-  visitor->number_end = fast_recursive_number_end;
-  visitor->boolean_value = fast_recursive_boolean;
-  visitor->null_value = fast_recursive_null;
-}
-
-static int fast_multi_direct_supported(const lql_selector *selector) {
-  if (selector == NULL) {
-    return 0;
-  }
-  switch (selector->kind) {
-  case LQL_SELECTOR_KIND_EQ:
-  case LQL_SELECTOR_KIND_NE:
-    return !selector->value_is_temporal;
-  case LQL_SELECTOR_KIND_RANGE:
-    return !selector->range_is_temporal;
-  case LQL_SELECTOR_KIND_EXISTS:
-    return 1;
-  default:
-    return 0;
-  }
-}
-
-static int fast_multi_direct_value_matches_exact(const lql_selector *selector,
-                                                 const char *value,
-                                                 size_t value_len,
-                                                 int is_null) {
-  if (selector == NULL) {
-    return 0;
-  }
-  if (selector->kind == LQL_SELECTOR_KIND_NE && is_null) {
-    return 1;
-  }
-  if (is_null) {
-    return 0;
-  }
-  if (selector->kind == LQL_SELECTOR_KIND_EQ) {
-    return value_len == selector->value_len &&
-           (value_len == 0u ||
-            memcmp(value, selector->value_data, value_len) == 0);
-  }
-  if (selector->kind == LQL_SELECTOR_KIND_NE) {
-    return value_len != selector->value_len ||
-           (value_len != 0u &&
-            memcmp(value, selector->value_data, value_len) != 0);
-  }
-  return 0;
-}
-
-static void fast_multi_direct_scalar_begin(eval_doc *doc,
-                                           const lql_selector *selector,
-                                           int is_number, int is_null) {
-  if (doc == NULL || selector == NULL) {
-    return;
-  }
-  doc->fast_multi_active_selector = selector;
-  doc->fast_multi_direct_miss = 0;
-  doc->scalar_len = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = selector->value_len > LQL_EVAL_EXACT_CAP
-                         ? LQL_EVAL_EXACT_CAP
-                         : selector->value_len;
-  if (selector->kind == LQL_SELECTOR_KIND_EXISTS) {
-    if (!is_null) {
-      hit_mark_fast(doc, selector);
-    }
-    doc->fast_multi_active_selector = NULL;
-    return;
-  }
-  if (selector->kind == LQL_SELECTOR_KIND_RANGE && is_number) {
-    numeric_stream_reset(doc);
-    doc->prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
-  }
-}
-
-static void fast_multi_direct_scalar_chunk(eval_doc *doc, const char *data,
-                                           size_t len, int is_number) {
-  const lql_selector *selector;
-  size_t offset;
-  size_t value_len;
-  if (doc == NULL || doc->fast_multi_active_selector == NULL || data == NULL ||
-      len == 0u) {
-    return;
-  }
-  selector = doc->fast_multi_active_selector;
-  doc->scalar_len += len;
-  if (selector->kind == LQL_SELECTOR_KIND_RANGE && is_number) {
-    numeric_stream_update(doc, data, len);
-    prefix_stream_update(doc, data, len);
-    return;
-  }
-  if (selector->kind != LQL_SELECTOR_KIND_EQ &&
-      selector->kind != LQL_SELECTOR_KIND_NE) {
-    return;
-  }
-  offset = doc->scalar_len - len;
-  value_len = selector->value_len;
-  if (offset >= value_len ||
-      !literal_chunk_matches(selector->value_data, value_len, offset, data, len,
-                             0, value_len)) {
-    doc->fast_multi_direct_miss = 1;
-  }
-}
-
-static void fast_multi_direct_scalar_end(eval_doc *doc, const char *value,
-                                         size_t value_len, int is_number,
-                                         int is_null) {
-  const lql_selector *selector;
-  double number;
-  int matched;
-  if (doc == NULL || doc->fast_multi_active_selector == NULL) {
-    return;
-  }
-  selector = doc->fast_multi_active_selector;
-  matched = 0;
-  if (selector->kind == LQL_SELECTOR_KIND_RANGE && is_number) {
-    number = numeric_stream_value(doc);
-    matched = (!selector->has_range_gt || number > selector->range_gt) &&
-              (!selector->has_range_gte || number >= selector->range_gte) &&
-              (!selector->has_range_lt || number < selector->range_lt) &&
-              (!selector->has_range_lte || number <= selector->range_lte);
-  } else if (value != NULL) {
-    matched = fast_multi_direct_value_matches_exact(selector, value, value_len,
-                                                    is_null);
-  } else if (selector->kind == LQL_SELECTOR_KIND_EQ) {
-    matched =
-        !doc->fast_multi_direct_miss && doc->scalar_len == selector->value_len;
-  } else if (selector->kind == LQL_SELECTOR_KIND_NE) {
-    matched =
-        doc->fast_multi_direct_miss || doc->scalar_len != selector->value_len;
-  }
-  if (matched) {
-    hit_mark_fast(doc, selector);
-  } else {
-    stream_miss_mark_fast(doc, selector);
-  }
-  doc->fast_multi_active_selector = NULL;
-  doc->fast_multi_direct_miss = 0;
-  doc->scalar_len = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = 0u;
-}
-
-static lonejson_status fast_multi_prepare_value(eval_doc *doc,
-                                                const lql_selector *selector,
-                                                int scalar) {
-  doc->scalar_path_features = 0u;
-  doc->scalar_stream_features = 0u;
-  doc->scalar_len = 0u;
-  doc->contains_tail_len = 0u;
-  doc->contains_tail_need = 0u;
-  doc->prefix_len = 0u;
-  doc->prefix_need = 0u;
-  if (selector == NULL || hit_marked_fast(doc, selector)) {
-    return LONEJSON_STATUS_OK;
-  }
-  if (doc->fast_multi_direct_enabled && fast_multi_direct_supported(selector)) {
-    fast_multi_direct_scalar_begin(doc, selector, 0, 0);
-    if (!scalar && selector->kind != LQL_SELECTOR_KIND_EXISTS) {
-      stream_miss_mark_fast(doc, selector);
-      doc->fast_multi_active_selector = NULL;
-    }
-    return LONEJSON_STATUS_OK;
-  }
-  memset(doc->scalar_family_counts, 0, sizeof(doc->scalar_family_counts));
-  if (doc->stream_misses != NULL) {
-    stream_miss_clear_fast(doc, selector);
-  }
-  doc->scalar_path_features = selector->observer_feature;
-  scalar_family_append_fast(doc, selector);
-  doc->contains_tail_need = selector->observer_contains_tail_need;
-  doc->prefix_need = selector->observer_prefix_need;
-  if (!scalar) {
-    observe_prepared_value(doc, "", 0, 1, 0);
-    return LONEJSON_STATUS_OK;
-  }
-  doc->scalar_stream_features =
-      doc->scalar_path_features &
-      (LQL_SELECTOR_FEATURE_CONTAINS | LQL_SELECTOR_FEATURE_PREFIX |
-       LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL);
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) == 0u &&
-      (doc->scalar_stream_features &
-       (LQL_SELECTOR_FEATURE_EXACT | LQL_SELECTOR_FEATURE_TEMPORAL)) != 0u) {
-    doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_CONTAINS) != 0u) {
-    if (!ensure_contains_tail(doc)) {
-      return LONEJSON_STATUS_ALLOCATION_FAILED;
-    }
-    observe_contains_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_PREFIX) != 0u) {
-    observe_prefix_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_EXACT) != 0u &&
-      selector->kind == LQL_SELECTOR_KIND_IN) {
-    observe_in_stream_begin(doc, doc->selector, NULL);
-  }
-  if ((doc->scalar_path_features & LQL_SELECTOR_FEATURE_EXISTS) != 0u) {
-    observe_scalar_exists_begin(doc, doc->selector, NULL);
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_multi_object_begin(void *user,
-                                               lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_multi_depth == 0u) {
-    doc->root_kind = '{';
-  } else if (doc->fast_multi_value_selector != NULL) {
-    st = fast_multi_prepare_value(doc, doc->fast_multi_value_selector, 0);
-    doc->fast_multi_value_selector = NULL;
-    if (st != LONEJSON_STATUS_OK) {
-      return st;
-    }
-  }
-  ++doc->fast_multi_depth;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_multi_object_end(void *user,
-                                             lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_multi_depth != 0u) {
-    --doc->fast_multi_depth;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_multi_array_begin(void *user,
-                                              lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_multi_depth == 0u) {
-    doc->root_kind = '[';
-  } else if (doc->fast_multi_value_selector != NULL) {
-    st = fast_multi_prepare_value(doc, doc->fast_multi_value_selector, 0);
-    doc->fast_multi_value_selector = NULL;
-    if (st != LONEJSON_STATUS_OK) {
-      return st;
-    }
-  }
-  ++doc->fast_multi_depth;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_multi_array_end(void *user, lonejson_error *error) {
-  return fast_multi_object_end(user, error);
-}
-
-static lonejson_status fast_multi_key_begin(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  size_t i;
-  (void)error;
-  doc = (eval_doc *)user;
-  doc->fast_multi_key_active = 0;
-  doc->fast_multi_key_len = 0u;
-  doc->fast_multi_key_candidates = 0u;
-  doc->fast_multi_value_selector = NULL;
-  selector = doc->selector;
-  if (selector == NULL || doc->fast_multi_depth != 1u ||
-      (doc->candidate_matched && selector->match_sticky_once_true)) {
-    return LONEJSON_STATUS_OK;
-  }
-  for (i = 0u; i < selector->predicate_count; ++i) {
-    if (!hit_marked_fast(doc, selector->predicates[i])) {
-      doc->fast_multi_key_candidates |= (unsigned int)(1u << i);
-    }
-  }
-  doc->fast_multi_key_active = doc->fast_multi_key_candidates != 0u;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_multi_key_chunk(void *user, const char *data,
-                                            size_t len, lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  size_t i;
-  unsigned int bit;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (!doc->fast_multi_key_active || doc->fast_multi_key_candidates == 0u) {
-    return LONEJSON_STATUS_OK;
-  }
-  selector = doc->selector;
-  if (doc->fast_multi_key_len == 0u) {
-    for (i = 0u; i < selector->predicate_count; ++i) {
-      bit = (unsigned int)(1u << i);
-      if ((doc->fast_multi_key_candidates & bit) == 0u) {
-        continue;
-      }
-      if (len == selector->predicates[i]->field_segment_lens[0] &&
-          data == selector->predicates[i]->field +
-                      selector->predicates[i]->field_segment_offsets[0]) {
-        doc->fast_multi_key_candidates = bit;
-        doc->fast_multi_key_len = len;
-        return LONEJSON_STATUS_OK;
-      }
-    }
-  }
-  for (i = 0u; i < selector->predicate_count; ++i) {
-    bit = (unsigned int)(1u << i);
-    if ((doc->fast_multi_key_candidates & bit) == 0u) {
-      continue;
-    }
-    if (!fast_direct_segment_matches(selector->predicates[i], 0u, data, len,
-                                     doc->fast_multi_key_len)) {
-      doc->fast_multi_key_candidates &= ~bit;
-    }
-  }
-  doc->fast_multi_key_len += len;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_multi_key_end(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  size_t i;
-  unsigned int bit;
-  (void)error;
-  doc = (eval_doc *)user;
-  selector = doc->selector;
-  if (doc->fast_multi_key_active && doc->fast_multi_key_candidates != 0u &&
-      selector != NULL) {
-    for (i = 0u; i < selector->predicate_count; ++i) {
-      bit = (unsigned int)(1u << i);
-      if ((doc->fast_multi_key_candidates & bit) != 0u &&
-          doc->fast_multi_key_len ==
-              selector->predicates[i]->field_segment_lens[0]) {
-        doc->fast_multi_value_selector = selector->predicates[i];
-        break;
-      }
-    }
-  }
-  doc->fast_multi_key_active = 0;
-  doc->fast_multi_key_candidates = 0u;
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_multi_string_begin(void *user,
-                                               lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-#if defined(LONEJSON_HAS_VALUE_SKIP)
-  if (doc->fast_multi_skip_unmatched_strings && doc->fast_multi_depth == 0u) {
-    doc->root_kind = 's';
-    return LONEJSON_STATUS_SKIP_VALUE;
-  }
-  selector = doc->fast_multi_value_selector;
-  if (doc->fast_multi_skip_unmatched_strings &&
-      (selector == NULL || hit_marked_fast(doc, selector))) {
-    doc->fast_multi_value_selector = NULL;
-    return LONEJSON_STATUS_SKIP_VALUE;
-  }
-#else
-  selector = doc->fast_multi_value_selector;
-#endif
-  if (doc->fast_multi_direct_enabled && fast_multi_direct_supported(selector)) {
-    fast_multi_direct_scalar_begin(doc, selector, 0, 0);
-    doc->fast_multi_value_selector = NULL;
-    return LONEJSON_STATUS_OK;
-  }
-  st = fast_multi_prepare_value(doc, selector, 1);
-  doc->fast_multi_value_selector = NULL;
-  return st;
-}
-
-static lonejson_status fast_multi_string_chunk(void *user, const char *data,
-                                               size_t len,
-                                               lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_multi_active_selector != NULL) {
-    fast_multi_direct_scalar_chunk(doc, data, len, 0);
-    return LONEJSON_STATUS_OK;
-  }
-  return fast_flat_string_chunk(user, data, len, error);
-}
-
-static lonejson_status fast_multi_string_end(void *user,
-                                             lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_multi_active_selector != NULL) {
-    fast_multi_direct_scalar_end(doc, NULL, 0u, 0, 0);
-    return LONEJSON_STATUS_OK;
-  }
-  return fast_direct_string_end(user, error);
-}
-
-static lonejson_status fast_multi_number_begin(void *user,
-                                               lonejson_error *error) {
-  eval_doc *doc;
-  const lql_selector *selector;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_multi_depth == 0u) {
-    doc->root_kind = '0';
-    doc->scalar_path_features = 0u;
-    doc->scalar_stream_features = 0u;
-    return LONEJSON_STATUS_OK;
-  }
-  selector = doc->fast_multi_value_selector;
-  if (selector == NULL || hit_marked_fast(doc, selector)) {
-    doc->fast_multi_value_selector = NULL;
-    doc->scalar_path_features = 0u;
-    doc->scalar_stream_features = 0u;
-    return LONEJSON_STATUS_OK;
-  }
-  if (doc->fast_multi_direct_enabled && fast_multi_direct_supported(selector)) {
-    fast_multi_direct_scalar_begin(doc, selector, 1, 0);
-    doc->fast_multi_value_selector = NULL;
-    return LONEJSON_STATUS_OK;
-  }
-  st = fast_multi_prepare_value(doc, selector, 1);
-  doc->fast_multi_value_selector = NULL;
-  if (st != LONEJSON_STATUS_OK) {
-    return st;
-  }
-  if (doc->scalar_path_features == 0u) {
-    return LONEJSON_STATUS_OK;
-  }
-  doc->scalar_stream_features |=
-      doc->scalar_path_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE;
-  if ((doc->scalar_stream_features & LQL_SELECTOR_FEATURE_NUMERIC_RANGE) !=
-      0u) {
-    if ((doc->scalar_stream_features &
-         (LQL_SELECTOR_FEATURE_PREFIX | LQL_SELECTOR_FEATURE_EXACT |
-          LQL_SELECTOR_FEATURE_TEMPORAL)) == 0u) {
-      doc->scalar_stream_features |= LQL_EVAL_FEATURE_PREFIX_CAPTURE;
-    }
-    numeric_stream_reset(doc);
-    if (doc->prefix_need < LQL_EVAL_NUMERIC_PREFIX_CAP) {
-      doc->prefix_need = LQL_EVAL_NUMERIC_PREFIX_CAP;
-      doc->prefix_buf[0] = '\0';
-    }
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_multi_number_chunk(void *user, const char *data,
-                                               size_t len,
-                                               lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_multi_active_selector != NULL) {
-    fast_multi_direct_scalar_chunk(doc, data, len, 1);
-    return LONEJSON_STATUS_OK;
-  }
-  return fast_flat_number_chunk(user, data, len, error);
-}
-
-static lonejson_status fast_multi_number_end(void *user,
-                                             lonejson_error *error) {
-  eval_doc *doc;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_multi_active_selector != NULL) {
-    fast_multi_direct_scalar_end(doc, NULL, 0u, 1, 0);
-    return LONEJSON_STATUS_OK;
-  }
-  return fast_direct_number_end(user, error);
-}
-
-static lonejson_status fast_multi_boolean(void *user, int value,
-                                          lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_multi_direct_enabled &&
-      fast_multi_direct_supported(doc->fast_multi_value_selector)) {
-    fast_multi_direct_scalar_begin(doc, doc->fast_multi_value_selector, 0, 0);
-    doc->fast_multi_value_selector = NULL;
-    fast_multi_direct_scalar_end(doc, value ? "true" : "false", value ? 4u : 5u,
-                                 0, 0);
-    return LONEJSON_STATUS_OK;
-  }
-  st = fast_multi_prepare_value(doc, doc->fast_multi_value_selector, 1);
-  doc->fast_multi_value_selector = NULL;
-  if (st != LONEJSON_STATUS_OK) {
-    return st;
-  }
-  if (doc->scalar_path_features != 0u) {
-    observe_prepared_value(doc, value ? "true" : "false", 0, 0, 0);
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status fast_multi_null(void *user, lonejson_error *error) {
-  eval_doc *doc;
-  lonejson_status st;
-  (void)error;
-  doc = (eval_doc *)user;
-  if (doc->fast_multi_direct_enabled &&
-      fast_multi_direct_supported(doc->fast_multi_value_selector)) {
-    fast_multi_direct_scalar_begin(doc, doc->fast_multi_value_selector, 0, 1);
-    doc->fast_multi_value_selector = NULL;
-    fast_multi_direct_scalar_end(doc, "", 0u, 0, 1);
-    return LONEJSON_STATUS_OK;
-  }
-  st = fast_multi_prepare_value(doc, doc->fast_multi_value_selector, 1);
-  doc->fast_multi_value_selector = NULL;
-  if (st != LONEJSON_STATUS_OK) {
-    return st;
-  }
-  if (doc->scalar_path_features != 0u) {
-    observe_prepared_value(doc, "", 0, 0, 1);
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static void init_fast_top_level_multi_visitor(lonejson_value_visitor *visitor) {
-  *visitor = lonejson_default_value_visitor();
-  visitor->object_begin = fast_multi_object_begin;
-  visitor->object_end = fast_multi_object_end;
-  visitor->object_key_begin = fast_multi_key_begin;
-  visitor->object_key_chunk = fast_multi_key_chunk;
-  visitor->object_key_end = fast_multi_key_end;
-  visitor->array_begin = fast_multi_array_begin;
-  visitor->array_end = fast_multi_array_end;
-  visitor->string_begin = fast_multi_string_begin;
-  visitor->string_chunk = fast_multi_string_chunk;
-  visitor->string_end = fast_multi_string_end;
-  visitor->number_begin = fast_multi_number_begin;
-  visitor->number_chunk = fast_multi_number_chunk;
-  visitor->number_end = fast_multi_number_end;
-  visitor->boolean_value = fast_multi_boolean;
-  visitor->null_value = fast_multi_null;
-}
-
-static void
-configure_candidate_eval_visitors(lonejson_candidate_stream_options *options,
-                                  lonejson_path_value_visitor *path_visitor,
-                                  lonejson_value_visitor *value_visitor,
-                                  eval_doc *doc) {
-  if (selector_fast_flat_scalar_eligible(doc != NULL ? doc->selector : NULL)) {
-    init_fast_flat_scalar_visitor(value_visitor);
-    options->visitor = value_visitor;
-    options->visitor_user = doc;
-    return;
-  }
-  if (selector_fast_direct_scalar_eligible(doc != NULL ? doc->selector
-                                                       : NULL)) {
-    size_t i;
-    init_fast_direct_scalar_visitor(value_visitor);
-    options->visitor = value_visitor;
-    options->visitor_user = doc;
-#if defined(LONEJSON_HAS_CANDIDATE_DIRECT_PATH_VISITOR)
-    if (doc->fast_mutation_top_key == NULL) {
-      for (i = 0u; i < doc->selector->field_segment_count; ++i) {
-        doc->fast_direct_path_keys[i] =
-            doc->selector->field + doc->selector->field_segment_offsets[i];
-        doc->fast_direct_path_key_lens[i] =
-            doc->selector->field_segment_lens[i];
-        doc->fast_direct_path_kinds[i] =
-            doc->selector->field_segment_kinds[i] ==
-                    LQL_FIELD_SEGMENT_ARRAY_WILDCARD
-                ? LONEJSON_CANDIDATE_PATH_ARRAY_WILDCARD
-                : LONEJSON_CANDIDATE_PATH_LITERAL;
-      }
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-      doc->candidate_scan_plan.kind = LONEJSON_CANDIDATE_SCAN_PLAN_PATH;
-      doc->candidate_scan_plan.path_keys = doc->fast_direct_path_keys;
-      doc->candidate_scan_plan.path_key_lens = doc->fast_direct_path_key_lens;
-      doc->candidate_scan_plan.path_kinds = doc->fast_direct_path_kinds;
-      doc->candidate_scan_plan.path_segment_count =
-          doc->selector->field_segment_count;
-      options->scan_plan = &doc->candidate_scan_plan;
-#else
-      options->direct_path_keys = doc->fast_direct_path_keys;
-      options->direct_path_key_lens = doc->fast_direct_path_key_lens;
-      options->direct_path_kinds = doc->fast_direct_path_kinds;
-      options->direct_path_segment_count = doc->selector->field_segment_count;
-#endif
-    }
-#else
-    (void)i;
-#endif
-    return;
-  }
-  if (selector_fast_recursive_suffix_scalar_eligible(doc != NULL ? doc->selector
-                                                                 : NULL)) {
-    init_fast_recursive_suffix_scalar_visitor(value_visitor);
-    options->visitor = value_visitor;
-    options->visitor_user = doc;
-#if defined(LONEJSON_HAS_CANDIDATE_RECURSIVE_FIELD_VISITOR)
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-    doc->candidate_scan_plan.kind =
-        LONEJSON_CANDIDATE_SCAN_PLAN_DESCENDANT_MEMBER;
-    doc->candidate_scan_plan.descendant_member_key =
-        doc->selector->field + doc->selector->field_segment_offsets[0];
-    doc->candidate_scan_plan.descendant_member_key_len =
-        doc->selector->field_segment_lens[0];
-    options->scan_plan = &doc->candidate_scan_plan;
-#else
-    options->recursive_field_key =
-        doc->selector->field + doc->selector->field_segment_offsets[0];
-    options->recursive_field_key_len = doc->selector->field_segment_lens[0];
-#endif
-#endif
-    return;
-  }
-  if (selector_fast_top_level_multi_eligible(doc != NULL ? doc->selector
-                                                         : NULL)) {
-    init_fast_top_level_multi_visitor(value_visitor);
-    options->visitor = value_visitor;
-    options->visitor_user = doc;
-    return;
-  }
-  init_eval_visitor(path_visitor);
-  configure_eval_visitor_for_doc(path_visitor, doc);
-  options->path_visitor = path_visitor;
-  options->visitor_user = doc;
-}
-
-static void enable_fast_top_level_field_candidate(
-    lonejson_candidate_stream_options *options, eval_doc *doc) {
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
-  const lql_selector *selector;
-  const char *selector_key;
-  size_t selector_key_len;
-  if (options == NULL || doc == NULL) {
-    return;
-  }
-#if defined(LONEJSON_HAS_CANDIDATE_DIRECT_PATH_VISITOR)
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-  if (options->scan_plan != NULL &&
-      options->scan_plan->kind == LONEJSON_CANDIDATE_SCAN_PLAN_PATH) {
-#else
-  if (options->direct_path_keys != NULL) {
-#endif
-    return;
-  }
-#endif
-  if (!selector_fast_flat_scalar_eligible(doc->selector) &&
-      !selector_fast_direct_scalar_eligible(doc->selector)) {
-    return;
-  }
-  selector = doc->selector;
-  selector_key = selector->field + selector->field_segment_offsets[0];
-  selector_key_len = selector->field_segment_lens[0];
-  if (doc->fast_mutation_top_key != NULL) {
-    doc->fast_multi_keys[0] = selector_key;
-    doc->fast_multi_key_lens[0] = selector_key_len;
-    doc->fast_multi_keys[1] = doc->fast_mutation_top_key;
-    doc->fast_multi_key_lens[1] = doc->fast_mutation_top_key_len;
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-    doc->candidate_scan_plan.kind =
-        LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER_SET;
-    doc->candidate_scan_plan.object_member_keys = doc->fast_multi_keys;
-    doc->candidate_scan_plan.object_member_key_lens = doc->fast_multi_key_lens;
-    doc->candidate_scan_plan.object_member_key_count =
-        selector_key_len == doc->fast_mutation_top_key_len &&
-                memcmp(selector_key, doc->fast_mutation_top_key,
-                       selector_key_len) == 0
-            ? 1u
-            : 2u;
-    options->scan_plan = &doc->candidate_scan_plan;
-#else
-    options->top_level_field_keys = doc->fast_multi_keys;
-    options->top_level_field_key_lens = doc->fast_multi_key_lens;
-    options->top_level_field_key_count =
-        selector_key_len == doc->fast_mutation_top_key_len &&
-                memcmp(selector_key, doc->fast_mutation_top_key,
-                       selector_key_len) == 0
-            ? 1u
-            : 2u;
-#endif
-    return;
-  }
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-  doc->candidate_scan_plan.kind = LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER;
-  doc->candidate_scan_plan.object_member_key = selector_key;
-  doc->candidate_scan_plan.object_member_key_len = selector_key_len;
-  options->scan_plan = &doc->candidate_scan_plan;
-#else
-  options->top_level_field_key = selector_key;
-  options->top_level_field_key_len = selector_key_len;
-#endif
-#else
-  (void)options;
-  (void)doc;
-#endif
-}
-
-static void enable_fast_top_level_multi_field_candidate(
-    lonejson_candidate_stream_options *options, eval_doc *doc) {
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
-  const lql_selector *selector;
-  const lql_selector *predicate;
-  size_t i;
-  if (options == NULL || doc == NULL ||
-      !selector_fast_top_level_multi_eligible(doc->selector) ||
-      doc->selector->predicate_count > LQL_EVAL_FAST_MULTI_PRED_CAP) {
-    return;
-  }
-  selector = doc->selector;
-  for (i = 0u; i < selector->predicate_count; ++i) {
-    predicate = selector->predicates[i];
-    doc->fast_multi_keys[i] =
-        predicate->field + predicate->field_segment_offsets[0];
-    doc->fast_multi_key_lens[i] = predicate->field_segment_lens[0];
-  }
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-  doc->candidate_scan_plan.kind =
-      LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER_SET;
-  doc->candidate_scan_plan.object_member_keys = doc->fast_multi_keys;
-  doc->candidate_scan_plan.object_member_key_lens = doc->fast_multi_key_lens;
-  doc->candidate_scan_plan.object_member_key_count = selector->predicate_count;
-  options->scan_plan = &doc->candidate_scan_plan;
-#else
-  options->top_level_field_keys = doc->fast_multi_keys;
-  options->top_level_field_key_lens = doc->fast_multi_key_lens;
-  options->top_level_field_key_count = selector->predicate_count;
-#endif
-  if (options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE ||
-      options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED) {
-    doc->fast_multi_direct_enabled = 1;
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-    doc->candidate_scan_plan.object_member_match =
-        fast_top_level_multi_field_match;
-    doc->candidate_scan_plan.object_member_match_user = doc;
-#else
-    options->top_level_field_match = fast_top_level_multi_field_match;
-    options->top_level_field_match_user = doc;
-#endif
-  }
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_PRUNE)
-  if (options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE) {
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-    doc->candidate_scan_plan.object_member_prune =
-        fast_top_level_multi_field_prune;
-    doc->candidate_scan_plan.object_member_prune_user = doc;
-#else
-    options->top_level_field_prune = fast_top_level_multi_field_prune;
-    options->top_level_field_prune_user = doc;
-#endif
-  }
-#endif
-#else
-  (void)options;
-  (void)doc;
-#endif
-}
-
-static void
-enable_fast_direct_value_skip(const lonejson_candidate_stream_options *options,
-                              eval_doc *doc) {
-#if defined(LONEJSON_HAS_VISITOR_KEY_VALUE_SKIP)
-  if (options != NULL && doc != NULL &&
-      options->capture_mode == LONEJSON_CANDIDATE_CAPTURE_NONE &&
-      selector_fast_direct_scalar_eligible(doc->selector)) {
-    doc->fast_direct_skip_unmatched_values = 1;
-  }
-#else
-  (void)options;
-  (void)doc;
-#endif
-}
-
-static void
-enable_fast_flat_candidate_stop(lonejson_candidate_stream_options *options,
-                                eval_doc *doc) {
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
-  if (options == NULL || doc == NULL ||
-      !selector_fast_flat_scalar_eligible(doc->selector) ||
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-      options->scan_plan == NULL ||
-      options->scan_plan->kind != LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_MEMBER ||
-#else
-      options->top_level_field_key == NULL ||
-#endif
-      options->capture_mode != LONEJSON_CANDIDATE_CAPTURE_NONE) {
-    return;
-  }
-  doc->fast_flat_stop_after_match = 1;
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-  doc->candidate_scan_plan.stop_after_truncated_member = 1;
-#else
-  options->top_level_field_stop_after_truncated = 1;
-#endif
-#else
-  (void)options;
-  (void)doc;
-#endif
-}
-
-static void enable_fast_top_level_string_eq_candidate(
-    lonejson_candidate_stream_options *options, eval_doc *doc) {
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_FIELD_VISITOR)
-  const lql_selector *selector;
-  if (options == NULL || doc == NULL || doc->fast_exact_selector == NULL ||
-      !selector_fast_flat_scalar_eligible(doc->fast_exact_selector)) {
-    return;
-  }
-  selector = doc->fast_exact_selector;
-  if (text_is_json_nonstring_literal(selector->value_data,
-                                     selector->value_len)) {
-    return;
-  }
-  options->visitor = NULL;
-  options->path_visitor = NULL;
-  options->visitor_user = NULL;
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-  memset(&doc->candidate_scan_plan, 0, sizeof(doc->candidate_scan_plan));
-  doc->candidate_scan_plan.kind =
-      LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_STRING_EQUALS;
-  doc->candidate_scan_plan.expected_string_key =
-      selector->field + selector->field_segment_offsets[0];
-  doc->candidate_scan_plan.expected_string_key_len =
-      selector->field_segment_lens[0];
-  doc->candidate_scan_plan.expected_string_value = selector->value_data;
-  doc->candidate_scan_plan.expected_string_value_len = selector->value_len;
-  doc->candidate_scan_plan.string_equals_matched = &doc->fast_exact_hit;
-  doc->candidate_scan_plan.root_kind = &doc->root_kind;
-  doc->candidate_scan_plan.stop_after_string_match = 1;
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_FIRST_KEY)
-  doc->candidate_scan_plan.stop_after_first_member = 1;
-#endif
-  options->scan_plan = &doc->candidate_scan_plan;
-#else
-  options->visitor = NULL;
-  options->path_visitor = NULL;
-  options->visitor_user = NULL;
-  options->top_level_field_key = NULL;
-  options->top_level_field_key_len = 0u;
-  options->top_level_field_stop_after_truncated = 0;
-  options->top_level_string_eq_key =
-      selector->field + selector->field_segment_offsets[0];
-  options->top_level_string_eq_key_len = selector->field_segment_lens[0];
-  options->top_level_string_eq_value = selector->value_data;
-  options->top_level_string_eq_value_len = selector->value_len;
-  options->top_level_string_eq_matched = &doc->fast_exact_hit;
-  options->top_level_string_eq_root_kind = &doc->root_kind;
-  options->top_level_string_eq_stop_after_match = 1;
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_FIRST_KEY)
-  options->top_level_string_eq_stop_after_first_key = 1;
-#endif
-#endif
-#else
-  (void)options;
-  (void)doc;
-#endif
 }
 
 typedef struct query_stream_state {
@@ -5286,9 +2828,6 @@ typedef struct source_spooled_match_state {
   unsigned int limit_flags;
   lql_query_match_fn on_match;
   void *user;
-  const lql_mutation_plan *mutation_plan;
-  FILE *mutation_out;
-  lql_error *mutation_error;
   lql_query_result result;
   lql_status callback_status;
   int capture_matched;
@@ -5703,11 +3242,6 @@ source_candidate_run_transition(void *user,
     if (state->doc.fast_exact_selector != NULL && state->doc.fast_exact_miss) {
       state->current_matched = 0;
       state->current_matched_known = 1;
-    } else if (state->doc.fast_exact_selector == NULL &&
-               top_level_multi_candidate_payload_discardable(&state->doc,
-                                                             state->selector)) {
-      state->current_matched = 0;
-      state->current_matched_known = 1;
     }
     if (state->current_matched_known) {
       state->current_output_enabled =
@@ -6014,33 +3548,6 @@ static int eval_file_write_unlocked(FILE *out, const void *data, size_t len) {
 #else
   return fwrite(data, 1u, len, out) == len;
 #endif
-}
-
-static int eval_file_putc_unlocked(FILE *out, int ch) {
-#if defined(__linux__)
-  return fputc_unlocked(ch, out) != EOF;
-#else
-  return fputc(ch, out) != EOF;
-#endif
-}
-
-static int eval_copy_range_unlocked_output(FILE *in, FILE *out,
-                                           lql_uint64 size) {
-  char buf[8192];
-  size_t want;
-  size_t got;
-  while (size != 0u) {
-    want = size > (lql_uint64)sizeof(buf) ? sizeof(buf) : (size_t)size;
-    got = fread(buf, 1u, want, in);
-    if (got == 0u) {
-      return 0;
-    }
-    if (!eval_file_write_unlocked(out, buf, got)) {
-      return 0;
-    }
-    size -= (lql_uint64)got;
-  }
-  return 1;
 }
 
 static lonejson_read_result
@@ -6366,22 +3873,7 @@ configure_query_candidate_callbacks(lonejson_candidate_stream_options *options,
   if (options == NULL || state == NULL) {
     return;
   }
-#if defined(LONEJSON_HAS_CANDIDATE_TOP_LEVEL_STRING_EQ_VISITOR)
-  /* The dedicated parser clears its per-candidate match and root outputs. */
-#if defined(LONEJSON_HAS_CANDIDATE_SCAN_PLAN)
-  options->candidate_begin =
-      options->scan_plan != NULL &&
-              options->scan_plan->kind ==
-                  LONEJSON_CANDIDATE_SCAN_PLAN_OBJECT_STRING_EQUALS
-          ? NULL
-          : on_candidate_begin;
-#else
-  options->candidate_begin =
-      options->top_level_string_eq_key != NULL ? NULL : on_candidate_begin;
-#endif
-#else
   options->candidate_begin = on_candidate_begin;
-#endif
   options->candidate_end = on_candidate_end;
   options->candidate_user = state;
 }
@@ -6395,253 +3887,6 @@ static lonejson_status file_sink_unlocked(void *user, const void *data,
     return LONEJSON_STATUS_IO_ERROR;
   }
   return LONEJSON_STATUS_OK;
-}
-
-static int raw_json_safe_key(const char *data, size_t len) {
-  size_t i;
-  if (data == NULL) {
-    return 0;
-  }
-  for (i = 0u; i < len; ++i) {
-    if ((unsigned char)data[i] < 0x20u || data[i] == '"' || data[i] == '\\') {
-      return 0;
-    }
-  }
-  return 1;
-}
-
-static int
-mutation_plan_fast_root_create_eligible(const lql_mutation_plan *plan,
-                                        const lql_mutation_item **out) {
-  const lql_mutation_item *item;
-  size_t i;
-  if (plan == NULL || plan->count != 1u || plan->create_count != 1u ||
-      plan->create_indexes == NULL || plan->create_indexes[0] != 0u ||
-      !plan->literal_only_paths || plan->variable_depth_paths) {
-    return 0;
-  }
-  item = &plan->items[0];
-  if (item->kind != LQL_MUTATION_SET || !item->can_create_missing_object ||
-      item->file_mode != LQL_MUTATION_FILE_NONE ||
-      item->path.segment_count == 0u || item->path.segment_kinds == NULL ||
-      item->path.segments == NULL || item->path.segment_lens == NULL ||
-      item->value_kind == LQL_MUTATION_VALUE_STRING) {
-    return 0;
-  }
-  for (i = 0u; i < item->path.segment_count; ++i) {
-    if (item->path.segment_kinds[i] != LQL_MUTATION_PATH_LITERAL ||
-        !raw_json_safe_key(item->path.segments[i],
-                           item->path.segment_lens[i])) {
-      return 0;
-    }
-  }
-  if (out != NULL) {
-    *out = item;
-  }
-  return 1;
-}
-
-static int json_space_byte(unsigned char ch) {
-  return ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t';
-}
-
-static int write_raw_json_key(FILE *out, const char *key, size_t key_len) {
-  return eval_file_putc_unlocked(out, '"') &&
-         eval_file_write_unlocked(out, key, key_len) &&
-         eval_file_putc_unlocked(out, '"');
-}
-
-static int write_fast_mutation_value(FILE *out, const lql_mutation_item *item) {
-  const char *text;
-  size_t len;
-  switch (item->value_kind) {
-  case LQL_MUTATION_VALUE_BOOL_TRUE:
-    return eval_file_write_unlocked(out, "true", 4u);
-  case LQL_MUTATION_VALUE_BOOL_FALSE:
-    return eval_file_write_unlocked(out, "false", 5u);
-  case LQL_MUTATION_VALUE_NULL:
-    return eval_file_write_unlocked(out, "null", 4u);
-  case LQL_MUTATION_VALUE_NUMBER:
-    text = item->value == NULL ? "" : item->value + item->value_offset;
-    len = item->value_len;
-    return len != 0u && eval_file_write_unlocked(out, text, len);
-  default:
-    return 0;
-  }
-}
-
-static int write_fast_mutation_subtree(FILE *out, const lql_mutation_item *item,
-                                       size_t depth) {
-  if (!write_raw_json_key(out, item->path.segments[depth],
-                          item->path.segment_lens[depth]) ||
-      !eval_file_putc_unlocked(out, ':')) {
-    return 0;
-  }
-  if (depth + 1u == item->path.segment_count) {
-    return write_fast_mutation_value(out, item);
-  }
-  return eval_file_putc_unlocked(out, '{') &&
-         write_fast_mutation_subtree(out, item, depth + 1u) &&
-         eval_file_putc_unlocked(out, '}');
-}
-
-static int write_spooled_object_with_fast_root_create(
-    FILE *out, const lonejson_spooled *spooled, const lql_mutation_item *item,
-    lql_error *error) {
-  const unsigned char *data;
-  size_t end;
-  size_t first_member;
-  int has_member;
-  if (out == NULL || spooled == NULL || item == NULL || spooled->spilled ||
-      spooled->memory == NULL || spooled->memory_len != spooled->size ||
-      spooled->size < 2u) {
-    return 0;
-  }
-  data = spooled->memory;
-  end = spooled->size;
-  while (end != 0u && json_space_byte(data[end - 1u])) {
-    --end;
-  }
-  if (end < 2u || data[0] != '{' || data[end - 1u] != '}') {
-    return 0;
-  }
-  first_member = 1u;
-  while (first_member + 1u < end && json_space_byte(data[first_member])) {
-    ++first_member;
-  }
-  has_member = first_member + 1u < end;
-  if (!eval_file_write_unlocked(out, data, end - 1u) ||
-      (has_member && !eval_file_putc_unlocked(out, ',')) ||
-      !write_fast_mutation_subtree(out, item, 0u) ||
-      !eval_file_putc_unlocked(out, '}') ||
-      !eval_file_putc_unlocked(out, '\n')) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                  "failed to write fast mutated source candidate");
-    return 0;
-  }
-  return 1;
-}
-
-static int read_spooled_exact(const lonejson_spooled *spooled, size_t offset,
-                              unsigned char *buffer, size_t len) {
-  lonejson_spooled cursor;
-  size_t total;
-  if (spooled == NULL || (buffer == NULL && len != 0u) ||
-      offset > spooled->size || len > spooled->size - offset) {
-    return 0;
-  }
-  cursor = *spooled;
-  cursor.read_offset = offset;
-  total = 0u;
-  while (total < len) {
-    lonejson_read_result chunk =
-        lonejson_spooled_read(&cursor, buffer + total, len - total);
-    if (chunk.error_code != 0 || chunk.bytes_read == 0u) {
-      return 0;
-    }
-    total += chunk.bytes_read;
-  }
-  return 1;
-}
-
-static int find_spooled_object_end(const lonejson_spooled *spooled,
-                                   size_t *out_end) {
-  unsigned char tail[4096];
-  size_t want;
-  size_t offset;
-  size_t i;
-  if (spooled == NULL || out_end == NULL || spooled->size < 2u) {
-    return 0;
-  }
-  want = spooled->size > sizeof(tail) ? sizeof(tail) : spooled->size;
-  offset = spooled->size - want;
-  if (!read_spooled_exact(spooled, offset, tail, want)) {
-    return 0;
-  }
-  i = want;
-  while (i != 0u && json_space_byte(tail[i - 1u])) {
-    --i;
-  }
-  if (i == 0u || tail[i - 1u] != '}') {
-    return 0;
-  }
-  *out_end = offset + i;
-  return 1;
-}
-
-static int spooled_object_has_member(const lonejson_spooled *spooled,
-                                     size_t end, int *out) {
-  unsigned char head[4096];
-  size_t remaining;
-  size_t cursor;
-  size_t want;
-  size_t i;
-  if (spooled == NULL || out == NULL || end < 2u) {
-    return 0;
-  }
-  remaining = end;
-  cursor = 0u;
-  while (remaining != 0u) {
-    want = remaining > sizeof(head) ? sizeof(head) : remaining;
-    if (!read_spooled_exact(spooled, cursor, head, want)) {
-      return 0;
-    }
-    for (i = cursor == 0u ? 1u : 0u; i < want; ++i) {
-      if (!json_space_byte(head[i])) {
-        *out = head[i] != '}';
-        return 1;
-      }
-    }
-    cursor += want;
-    remaining -= want;
-  }
-  return 0;
-}
-
-static int eval_copy_spooled_range_unlocked(const lonejson_spooled *spooled,
-                                            FILE *out, size_t len) {
-  unsigned char buffer[4096];
-  lonejson_spooled cursor;
-  size_t remaining;
-  if (spooled == NULL || out == NULL || len > spooled->size) {
-    return 0;
-  }
-  cursor = *spooled;
-  cursor.read_offset = 0u;
-  remaining = len;
-  while (remaining != 0u) {
-    size_t want = remaining > sizeof(buffer) ? sizeof(buffer) : remaining;
-    lonejson_read_result chunk = lonejson_spooled_read(&cursor, buffer, want);
-    if (chunk.error_code != 0 || chunk.bytes_read == 0u ||
-        chunk.bytes_read > remaining ||
-        !eval_file_write_unlocked(out, buffer, chunk.bytes_read)) {
-      return 0;
-    }
-    remaining -= chunk.bytes_read;
-  }
-  return 1;
-}
-
-static int write_spilled_spooled_object_with_fast_root_create(
-    FILE *out, const lonejson_spooled *spooled, const lql_mutation_item *item,
-    lql_error *error) {
-  size_t end;
-  int has_member;
-  if (out == NULL || spooled == NULL || item == NULL ||
-      !find_spooled_object_end(spooled, &end) ||
-      !spooled_object_has_member(spooled, end, &has_member)) {
-    return 0;
-  }
-  if (!eval_copy_spooled_range_unlocked(spooled, out, end - 1u) ||
-      (has_member && !eval_file_putc_unlocked(out, ',')) ||
-      !write_fast_mutation_subtree(out, item, 0u) ||
-      !eval_file_putc_unlocked(out, '}') ||
-      !eval_file_putc_unlocked(out, '\n')) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                  "failed to write fast mutated source candidate");
-    return 0;
-  }
-  return 1;
 }
 
 static lonejson_candidate_callback_result
@@ -6672,29 +3917,12 @@ on_source_spooled_capture_decision(void *user,
   return LONEJSON_CANDIDATE_DISCARD;
 }
 
-#if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
-static int on_source_spooled_capture_prune(void *user, lonejson_error *error) {
-  source_spooled_match_state *state;
-  (void)error;
-  state = (source_spooled_match_state *)user;
-  if (state == NULL || state->doc.root_kind != '{') {
-    return 0;
-  }
-  if (state->doc.fast_exact_selector != NULL) {
-    return !state->doc.fast_exact_hit && state->doc.fast_exact_miss;
-  }
-  return top_level_multi_candidate_payload_discardable(&state->doc,
-                                                       state->selector);
-}
-#endif
-
 static lonejson_candidate_callback_result
 on_source_spooled_candidate_end(void *user,
                                 const lonejson_candidate_info *candidate,
                                 lonejson_error *error) {
   source_spooled_match_state *state;
   lql_query_match match;
-  const lql_mutation_item *fast_item;
   lql_status st;
   int matched;
 
@@ -6710,24 +3938,6 @@ on_source_spooled_candidate_end(void *user,
   if (matched) {
     if (candidate->payload_spool == NULL) {
       return LONEJSON_CANDIDATE_ERROR;
-    }
-    if (state->doc.fast_mutation_top_key != NULL &&
-        state->mutation_plan != NULL && state->mutation_out != NULL &&
-        !state->doc.fast_mutation_key_seen &&
-        mutation_plan_fast_root_create_eligible(state->mutation_plan,
-                                                &fast_item) &&
-        (write_spooled_object_with_fast_root_create(
-             state->mutation_out, candidate->payload_spool, fast_item,
-             state->mutation_error) ||
-         write_spilled_spooled_object_with_fast_root_create(
-             state->mutation_out, candidate->payload_spool, fast_item,
-             state->mutation_error))) {
-      state->result.candidates_matched++;
-      if (query_result_stop_if_limited(&state->result, &state->options,
-                                       state->limit_flags)) {
-        return LONEJSON_CANDIDATE_STOP;
-      }
-      return LONEJSON_CANDIDATE_CONTINUE;
     }
     memset(&match, 0, sizeof(match));
     match.decision.matched = 1;
@@ -6906,60 +4116,75 @@ static lql_status query_file_matches_with_options_method(
 static lql_status payload_write_json_method(lql *self,
                                             const lql_payload *payload,
                                             FILE *out, lql_error *error) {
+  lonejson *runtime;
   lonejson_error lj_error;
-  off_t current;
-  int fd;
-  int copy_ok;
+  int runtime_pooled;
   if (payload == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "payload and output file are required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   if (payload->kind == LQL_PAYLOAD_SPOOLED && payload->spooled != NULL) {
+    spooled_source_reader reader;
+    lonejson_value_rewrite_options rewrite_options;
+
+    runtime_pooled = 0;
     memset(&lj_error, 0, sizeof(lj_error));
+    memset(&rewrite_options, 0, sizeof(rewrite_options));
+    runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
+    if (runtime == NULL) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+      return LQL_STATUS_JSON_ERROR;
+    }
+    reader.cursor = *(const lonejson_spooled *)payload->spooled;
+    reader.cursor.read_offset = 0u;
     flockfile(out);
-    if (lonejson_spooled_write_to_sink(
-            (const lonejson_spooled *)payload->spooled, file_sink_unlocked, out,
-            &lj_error) == LONEJSON_STATUS_OK) {
+    if (lonejson_value_rewrite_reader(runtime, spooled_lonejson_read, &reader,
+                                      file_sink_unlocked, out, &rewrite_options,
+                                      &lj_error) == LONEJSON_STATUS_OK) {
       funlockfile(out);
+      lql_lonejson_release(self, runtime, runtime_pooled);
       return LQL_STATUS_OK;
     }
     funlockfile(out);
+    lql_lonejson_release(self, runtime, runtime_pooled);
     lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
     return LQL_STATUS_JSON_ERROR;
   }
   if (payload->kind == LQL_PAYLOAD_SEEKABLE_RANGE && payload->source != NULL) {
+    eval_pread_range_reader reader;
+    lonejson_value_rewrite_options rewrite_options;
+    int fd;
+
     fd = fileno(payload->source);
-    if (fd >= 0) {
-      if (copy_fd_range_to_sink(fd, payload->offset, payload->size,
-                                payload_file_write, out) == LQL_STATUS_OK) {
-        return LQL_STATUS_OK;
-      }
-      lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                    "failed to write seekable payload range");
-      return LQL_STATUS_JSON_ERROR;
-    }
-    current = ftello(payload->source);
-    if (current < (off_t)0) {
+    if (fd < 0) {
       lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                    "failed to record source position");
+                    "seekable payload has no file descriptor");
       return LQL_STATUS_UNSUPPORTED;
     }
-    if (!payload_seek_u64(payload->source, payload->offset)) {
-      lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                    "failed to write seekable payload range");
+    runtime_pooled = 0;
+    memset(&lj_error, 0, sizeof(lj_error));
+    memset(&rewrite_options, 0, sizeof(rewrite_options));
+    runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
+    if (runtime == NULL) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
       return LQL_STATUS_JSON_ERROR;
     }
+    reader.fd = fd;
+    reader.offset = payload->offset;
+    reader.remaining = payload->size;
     flockfile(out);
-    copy_ok =
-        eval_copy_range_unlocked_output(payload->source, out, payload->size);
-    funlockfile(out);
-    if (fseeko(payload->source, current, SEEK_SET) != 0 || !copy_ok) {
-      lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                    "failed to write seekable payload range");
-      return LQL_STATUS_JSON_ERROR;
+    if (lonejson_value_rewrite_reader(runtime, eval_pread_range, &reader,
+                                      file_sink_unlocked, out, &rewrite_options,
+                                      &lj_error) == LONEJSON_STATUS_OK) {
+      funlockfile(out);
+      lql_lonejson_release(self, runtime, runtime_pooled);
+      return LQL_STATUS_OK;
     }
-    return LQL_STATUS_OK;
+    funlockfile(out);
+    lql_lonejson_release(self, runtime, runtime_pooled);
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, lj_error.message);
+    return LQL_STATUS_JSON_ERROR;
   }
   return self->payload_write_json_sink(self, payload, payload_file_write, out,
                                        error);
@@ -7265,7 +4490,6 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
-  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   int runtime_pooled;
@@ -7296,11 +4520,6 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-#if defined(LONEJSON_HAS_VALUE_SKIP)
-  if (selector_fast_top_level_multi_eligible(selector)) {
-    state.doc.fast_multi_skip_unmatched_strings = 1;
-  }
-#endif
   runtime_pooled = 0;
   runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
@@ -7309,15 +4528,12 @@ execute_query_file_decisions(lql *self, const lql_selector *selector,
     return LQL_STATUS_JSON_ERROR;
   }
   options = lonejson_default_candidate_stream_options();
-  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
-                                    &state.doc);
+  init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
+  options.path_visitor = &visitor;
+  options.visitor_user = &state.doc;
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  enable_fast_top_level_multi_field_candidate(&options, &state.doc);
-  enable_fast_top_level_field_candidate(&options, &state.doc);
-  enable_fast_direct_value_skip(&options, &state.doc);
-  enable_fast_flat_candidate_stop(&options, &state.doc);
-  enable_fast_top_level_string_eq_candidate(&options, &state.doc);
   configure_query_candidate_callbacks(&options, &state);
   st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
   if (st != LONEJSON_STATUS_OK) {
@@ -7351,7 +4567,6 @@ execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
-  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   int runtime_pooled;
@@ -7382,11 +4597,6 @@ execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-#if defined(LONEJSON_HAS_VALUE_SKIP)
-  if (selector_fast_top_level_multi_eligible(selector)) {
-    state.doc.fast_multi_skip_unmatched_strings = 1;
-  }
-#endif
   runtime_pooled = 0;
   runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
@@ -7395,15 +4605,12 @@ execute_query_file_matches(lql *self, const lql_selector *selector, FILE *file,
     return LQL_STATUS_JSON_ERROR;
   }
   options = lonejson_default_candidate_stream_options();
-  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
-                                    &state.doc);
+  init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
+  options.path_visitor = &visitor;
+  options.visitor_user = &state.doc;
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  enable_fast_top_level_multi_field_candidate(&options, &state.doc);
-  enable_fast_top_level_field_candidate(&options, &state.doc);
-  enable_fast_direct_value_skip(&options, &state.doc);
-  enable_fast_flat_candidate_stop(&options, &state.doc);
-  enable_fast_top_level_string_eq_candidate(&options, &state.doc);
   configure_query_candidate_callbacks(&options, &state);
   st = lonejson_visit_candidates_filep(runtime, file, &options, &lj_error);
   if (st != LONEJSON_STATUS_OK) {
@@ -7446,7 +4653,6 @@ static lql_status execute_query_source_decisions_with_base(
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
-  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   int runtime_pooled;
@@ -7468,11 +4674,6 @@ static lql_status execute_query_source_decisions_with_base(
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
   }
-#if defined(LONEJSON_HAS_VALUE_SKIP)
-  if (selector_fast_top_level_multi_eligible(selector)) {
-    state.doc.fast_multi_skip_unmatched_strings = 1;
-  }
-#endif
   runtime_pooled = 0;
   runtime = lql_lonejson_acquire(self, &runtime_pooled, &lj_error);
   if (runtime == NULL) {
@@ -7503,15 +4704,12 @@ static lql_status execute_query_source_decisions_with_base(
     return LQL_STATUS_JSON_ERROR;
   }
   options = lonejson_default_candidate_stream_options();
-  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
-                                    &state.doc);
+  init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
+  options.path_visitor = &visitor;
+  options.visitor_user = &state.doc;
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
-  enable_fast_top_level_multi_field_candidate(&options, &state.doc);
-  enable_fast_top_level_field_candidate(&options, &state.doc);
-  enable_fast_direct_value_skip(&options, &state.doc);
-  enable_fast_flat_candidate_stop(&options, &state.doc);
-  enable_fast_top_level_string_eq_candidate(&options, &state.doc);
   configure_query_candidate_callbacks(&options, &state);
   st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
                                         &options, &lj_error);
@@ -7555,19 +4753,17 @@ static lql_status execute_query_source_spooled_matches(
     void *user, lql_query_result *out_result, lql_error *error) {
   return execute_query_source_spooled_matches_with_base(
       self, selector, read, read_user, 0u, 0u, query_options, on_match, user,
-      NULL, NULL, NULL, out_result, error);
+      out_result, error);
 }
 
 static lql_status execute_query_source_spooled_matches_with_base(
     lql *self, const lql_selector *selector, lql_read_fn read, void *read_user,
     lql_uint64 offset_base, lql_uint64 index_base,
     const lql_query_options *query_options, lql_query_match_fn on_match,
-    void *user, const lql_mutation_plan *mutation_plan, FILE *mutation_out,
-    lql_error *mutation_error, lql_query_result *out_result, lql_error *error) {
+    void *user, lql_query_result *out_result, lql_error *error) {
   lonejson *runtime;
   lonejson_error lj_error;
   lonejson_path_value_visitor visitor;
-  lonejson_value_visitor value_visitor;
   lonejson_candidate_stream_options options;
   lonejson_status st;
   int runtime_pooled;
@@ -7582,9 +4778,6 @@ static lql_status execute_query_source_spooled_matches_with_base(
   state.index_base = index_base;
   state.on_match = on_match;
   state.user = user;
-  state.mutation_plan = mutation_plan;
-  state.mutation_out = mutation_out;
-  state.mutation_error = mutation_error;
   state.callback_status = LQL_STATUS_OK;
   if (query_options != NULL) {
     state.options = *query_options;
@@ -7592,13 +4785,6 @@ static lql_status execute_query_source_spooled_matches_with_base(
   state.limit_flags = query_limit_flags(&state.options);
   if (!init_doc(&state.doc, self, selector)) {
     return LQL_STATUS_NO_MEMORY;
-  }
-  if (state.mutation_plan != NULL &&
-      mutation_plan_fast_root_create_eligible(state.mutation_plan, NULL)) {
-    state.doc.fast_mutation_top_key =
-        state.mutation_plan->items[0].path.segments[0];
-    state.doc.fast_mutation_top_key_len =
-        state.mutation_plan->items[0].path.segment_lens[0];
   }
   runtime_pooled = 0;
   runtime_can_pool = lql_lonejson_default_runtime_pool_allowed(self);
@@ -7632,25 +4818,17 @@ static lql_status execute_query_source_spooled_matches_with_base(
     return LQL_STATUS_JSON_ERROR;
   }
   options = lonejson_default_candidate_stream_options();
-  configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
-                                    &state.doc);
+  init_eval_visitor(&visitor);
+  configure_eval_visitor_for_doc(&visitor, &state.doc);
+  options.path_visitor = &visitor;
+  options.visitor_user = &state.doc;
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED;
-  enable_fast_top_level_multi_field_candidate(&options, &state.doc);
-  enable_fast_top_level_field_candidate(&options, &state.doc);
   options.candidate_begin = on_source_spooled_candidate_begin;
   options.candidate_end = on_source_spooled_candidate_end;
   options.candidate_user = &state;
   options.capture_decision = on_source_spooled_capture_decision;
   options.capture_decision_user = &state;
-#if defined(LONEJSON_HAS_CANDIDATE_CAPTURE_PRUNE)
-  if ((selector_fast_exact_eligible(selector) &&
-       selector_fast_flat_scalar_eligible(selector)) ||
-      selector_fast_top_level_multi_eligible(selector)) {
-    options.capture_prune = on_source_spooled_capture_prune;
-    options.capture_prune_user = &state;
-  }
-#endif
   st = lonejson_visit_candidates_reader(runtime, source_reader_read, &adapter,
                                         &options, &lj_error);
   if (st == LONEJSON_STATUS_OK || adapter.error_code != 0 ||

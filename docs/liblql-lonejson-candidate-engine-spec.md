@@ -12,11 +12,11 @@ verification, profiling, and performance acceptance use only the vendored
 preset until an upstream LoneJSON release implements the final surface. The
 normal preset is not a build, test, or compatibility gate during this work.
 
-The cutover is incomplete. Candidate Run already uses a path-aware observer
-and a single spill-backed action stage; the direct-value observer and
-transformed-output stage have been deleted. Remaining work is to remove the
-scan-plan and liblql fast-selector architecture and place every execution
-family on the same generic lifecycle.
+The architectural cutover is complete. Candidate Run uses a path-aware
+observer and one spill-backed action stage. Decision and payload execution use
+the same generic path-event lifecycle; scan plans, specialized candidate
+visitors, transformed staging, and payload-side mutation bypasses are deleted.
+The remaining work is hardening and performance acceptance on this final path.
 
 ## Outcomes
 
@@ -128,9 +128,9 @@ not have separate selector, projection, mutation, or transform state machines.
 The cutover requires deletion, not bypassing:
 
 - `lonejson_candidate_scan_plan`, its stream-option field, scan dispatch, and
-  related feature macros;
+  related feature macros; these are deleted;
 - `configure_candidate_eval_visitors()` and the `enable_fast_*()` candidate
-  selector routes in `src/lql_eval.c`;
+  selector routes in `src/lql_eval.c`; these are deleted;
 - Candidate Run `observer_value`, direct-value visitor state, and all related
   macros and tests; these are deleted from Candidate Run;
 - Candidate Run `transform_stage_threshold`, transformed-output spool, and
@@ -189,9 +189,9 @@ direct test only to resolve an interface error; run a full vendored suite at
 the end of each large executable slice; run the Go/C matrix only once the final
 hot path is active. Formatting is part of every slice commit.
 
-## Completion Gates
+## Architecture Cutover Gates
 
-The clean cut is complete only when all of these are true:
+The architectural cutover is complete only when all of these are true:
 
 - `rg` finds no deleted Candidate Run observer, transformed-stage, scan-plan,
   or fast-candidate selector surfaces outside this migration record;
@@ -200,14 +200,20 @@ The clean cut is complete only when all of these are true:
   benchmark fixtures;
 - Go/C behavioral parity passes for accepted selector, projection, mutation,
   source, seekable, payload, stop, and error paths;
-- vendored C suites, sanitizers, and fuzz runs pass;
-- 100 MiB and repeated large-candidate RSS gates pass;
-- every accepted Go/C benchmark row is at least 1.0x; results identify rows
-  below 1.2x without treating them as an architectural reason to add paths;
 - the vendored header is a coherent generic candidate surface suitable for
   upstream review;
 - the worktree contains no obsolete candidate-engine code, stale tests, or
   contradictory documentation.
+
+## Post-Cutover Acceptance
+
+The performance goal is not part of architectural cutover. It is accepted only
+after the final path satisfies all of these gates:
+
+- vendored C suites, sanitizers, and fuzz runs pass;
+- 100 MiB and repeated large-candidate RSS gates pass;
+- every accepted Go/C benchmark row is at least 1.0x; results identify rows
+  below 1.2x without treating them as an architectural reason to add paths;
 
 ## Non-Goals
 
