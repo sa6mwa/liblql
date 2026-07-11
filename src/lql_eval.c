@@ -7310,6 +7310,15 @@ on_spooled_candidate_end(void *user, const lonejson_candidate_info *candidate,
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
+static lonejson_candidate_capture_decision
+retain_spooled_candidate(void *user, const lonejson_candidate_info *candidate,
+                         lonejson_error *error) {
+  (void)user;
+  (void)candidate;
+  (void)error;
+  return LONEJSON_CANDIDATE_RETAIN;
+}
+
 static lonejson_candidate_callback_result
 on_file_mutation_candidate_begin(void *user,
                                  const lonejson_candidate_info *candidate,
@@ -7443,6 +7452,7 @@ static lql_status execute_mutate_file_range_candidates_fast(
   file_mutation_range_state state;
   eval_pread_range_reader reader;
   int runtime_pooled;
+  int root_array;
 
   memset(&state, 0, sizeof(state));
   state.receiver = self;
@@ -7457,6 +7467,15 @@ static lql_status execute_mutate_file_range_candidates_fast(
   if (state.fd < 0) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
                   "failed to access mutation input descriptor");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (!eval_seek_u64(file, offset) ||
+      !file_next_nonspace_is_root_array(file, &root_array)) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, "failed to inspect input");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (root_array) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, LQL_ROOT_ARRAY_NDJSON_ERROR);
     return LQL_STATUS_JSON_ERROR;
   }
   if (query_options != NULL) {
@@ -7487,6 +7506,8 @@ static lql_status execute_mutate_file_range_candidates_fast(
                                     &state.doc);
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_NONE;
+  enable_fast_top_level_multi_field_candidate(&options, &state.doc);
+  enable_fast_top_level_field_candidate(&options, &state.doc);
   options.candidate_begin = on_file_mutation_candidate_begin;
   options.candidate_end = on_file_mutation_candidate_end;
   options.candidate_user = &state;
@@ -8522,10 +8543,11 @@ static lql_status execute_query_file_range_spooled_matches(
   configure_candidate_eval_visitors(&options, &visitor, &value_visitor,
                                     &state.doc);
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
-  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_SPOOLED;
+  options.capture_mode = LONEJSON_CANDIDATE_CAPTURE_GATED_SPOOLED;
   options.candidate_begin = on_spooled_candidate_begin;
   options.candidate_end = on_spooled_candidate_end;
   options.candidate_user = &state;
+  options.capture_decision = retain_spooled_candidate;
   flockfile(out);
   st = lonejson_visit_candidates_reader(runtime, eval_limited_file_read,
                                         &reader, &options, &lj_error);
