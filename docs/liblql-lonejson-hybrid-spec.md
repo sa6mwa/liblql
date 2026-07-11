@@ -149,6 +149,17 @@ parser-owned path construction. It must preserve path, wildcard, recursive,
 and array semantics without adding selector syntax, cache candidate decisions,
 duplicate traversal stacks, or weaken spill-backed RSS bounds.
 
+### Current Hot Path
+
+The direct-value profile of sparse array selection shows that generic path
+reconstruction is no longer the dominant cost in eligible rows. JSON value and
+string parsing consume about 23% of cycles and compact action staging consumes
+about 12%; path reconstruction is about 4.5% and occurs only for accepted
+prefixes. The candidate engine must therefore reduce whole-event staging work
+for unresolved candidates as well as compiling generic selector traversal.
+Changing only mutation path matching or the accepted-prefix traversal cannot
+reach the 1.2x floor.
+
 For selectors that resolve only at a candidate's final field, the action stage
 still dispatches the candidate's decoded events once to record actions and once
 to commit them. Candidate Run now has a bounded hybrid representation for this
