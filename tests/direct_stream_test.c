@@ -150,6 +150,41 @@ static int run_status_selection(lql *ctx) {
   return 0;
 }
 
+static int run_projection_parse(lql *ctx) {
+  static const char *const paths[] = {" /id ", "/meta/trace", "/id"};
+  static const char *const conflict[] = {"/meta", "/meta/trace"};
+  static const char *const leading_index[] = {"/0/id"};
+  lql_projection *projection;
+  lql_error error;
+  lql_string_view path;
+
+  projection = NULL;
+  lql_error_init(&error);
+  if (ctx->projection_parse(ctx, paths, 3u, &projection, &error) !=
+          LQL_STATUS_OK ||
+      ctx->projection_path_count(ctx, projection) != 2u ||
+      ctx->projection_path(ctx, projection, 0u, &path, &error) !=
+          LQL_STATUS_OK ||
+      path.len != 3u || memcmp(path.data, "/id", path.len) != 0 ||
+      ctx->projection_path(ctx, projection, 1u, &path, &error) !=
+          LQL_STATUS_OK ||
+      path.len != 11u || memcmp(path.data, "/meta/trace", path.len) != 0) {
+    ctx->projection_destroy(ctx, projection);
+    return 1;
+  }
+  ctx->projection_destroy(ctx, projection);
+  projection = NULL;
+  if (ctx->projection_parse(ctx, conflict, 2u, &projection, &error) !=
+          LQL_STATUS_PARSE_ERROR ||
+      projection != NULL ||
+      ctx->projection_parse(ctx, leading_index, 1u, &projection, &error) !=
+          LQL_STATUS_PARSE_ERROR ||
+      projection != NULL) {
+    return 1;
+  }
+  return 0;
+}
+
 static int run_conjunction_selection(lql *ctx) {
   static const char input[] =
       "{\"status\":\"open\",\"region\":\"us-west\"}\n"
@@ -536,7 +571,7 @@ int main(void) {
   if (lql_new(&ctx, &error) != LQL_STATUS_OK) {
     return 1;
   }
-  if (run_status_selection(ctx) || run_conjunction_selection(ctx) ||
+  if (run_projection_parse(ctx) || run_status_selection(ctx) || run_conjunction_selection(ctx) ||
       run_or_selection(ctx) || run_not_selection(ctx) ||
       run_mapped_string_predicates(ctx) || run_match_all(ctx) ||
       run_root_wildcard_array_error(ctx) ||

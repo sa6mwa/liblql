@@ -34,6 +34,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 add_library(lql_common OBJECT
   src/lql.c
   src/lql_allocator.c
+  src/lql_projection.c
   src/lql_selector.c
   src/lql_stream.c
   src/lql_temporal.c)

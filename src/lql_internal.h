@@ -127,6 +127,11 @@ struct lql_selector {
   lql_stream_program *stream_program;
 };
 
+struct lql_projection {
+  char **paths;
+  size_t path_count;
+};
+
 LQL_INTERNAL_SYMBOL void lql_set_error(lql_error *error, lql_status status,
                                        const char *message);
 LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
@@ -136,6 +141,11 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
                                                            int or_mode,
                                                            lql_selector **out,
                                                            lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_projection_parse_internal(
+    lql *self, const char *const *paths, size_t path_count,
+    lql_projection **out, lql_error *error);
+LQL_INTERNAL_SYMBOL void lql_projection_destroy_internal(
+    lql *self, lql_projection *projection);
 LQL_INTERNAL_SYMBOL lql_status
 lql_parse_selector_json_internal(lql *self, const void *json, size_t json_len,
                                  lql_selector **out, lql_error *error);

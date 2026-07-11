@@ -26,6 +26,17 @@ static lql_status selector_parse_json_method(lql *self, const void *json,
                                              lql_selector **out,
                                              lql_error *error);
 static void selector_destroy_method(lql *self, lql_selector *selector);
+static lql_status projection_parse_method(lql *self, const char *const *paths,
+                                          size_t path_count,
+                                          lql_projection **out,
+                                          lql_error *error);
+static void projection_destroy_method(lql *self, lql_projection *projection);
+static size_t projection_path_count_method(const lql *self,
+                                           const lql_projection *projection);
+static lql_status projection_path_method(const lql *self,
+                                         const lql_projection *projection,
+                                         size_t index, lql_string_view *out,
+                                         lql_error *error);
 static int selector_is_empty_method(const lql *self,
                                     const lql_selector *selector);
 static void selector_capabilities_get_method(const lql *self,
@@ -122,6 +133,10 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
   ctx->selector_parse_or = selector_parse_or_method;
   ctx->selector_parse_json = selector_parse_json_method;
   ctx->selector_destroy = selector_destroy_method;
+  ctx->projection_parse = projection_parse_method;
+  ctx->projection_destroy = projection_destroy_method;
+  ctx->projection_path_count = projection_path_count_method;
+  ctx->projection_path = projection_path_method;
   ctx->selector_is_empty = selector_is_empty_method;
   ctx->selector_capabilities_get = selector_capabilities_get_method;
   ctx->selector_root = selector_root_method;
@@ -297,6 +312,39 @@ static void selector_destroy_method(lql *self, lql_selector *selector) {
     }
     allocator->destroy(allocator, selector);
   }
+}
+
+static lql_status projection_parse_method(lql *self, const char *const *paths,
+                                          size_t path_count,
+                                          lql_projection **out,
+                                          lql_error *error) {
+  return lql_projection_parse_internal(self, paths, path_count, out, error);
+}
+
+static void projection_destroy_method(lql *self, lql_projection *projection) {
+  lql_projection_destroy_internal(self, projection);
+}
+
+static size_t projection_path_count_method(const lql *self,
+                                           const lql_projection *projection) {
+  (void)self;
+  return projection == NULL ? 0u : projection->path_count;
+}
+
+static lql_status projection_path_method(const lql *self,
+                                         const lql_projection *projection,
+                                         size_t index, lql_string_view *out,
+                                         lql_error *error) {
+  (void)self;
+  if (out == NULL || projection == NULL || index >= projection->path_count) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection path index is invalid");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  out->data = projection->paths[index];
+  out->len = strlen(projection->paths[index]);
+  lql_error_init(error);
+  return LQL_STATUS_OK;
 }
 
 static int selector_is_empty_method(const lql *self,

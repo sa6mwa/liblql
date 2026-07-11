@@ -211,6 +211,16 @@ struct lql {
                                     size_t json_len, lql_selector **out,
                                     lql_error *error);
   void (*selector_destroy)(lql *self, lql_selector *selector);
+  lql_status (*projection_parse)(lql *self, const char *const *paths,
+                                 size_t path_count, lql_projection **out,
+                                 lql_error *error);
+  void (*projection_destroy)(lql *self, lql_projection *projection);
+  size_t (*projection_path_count)(const lql *self,
+                                  const lql_projection *projection);
+  lql_status (*projection_path)(const lql *self,
+                                const lql_projection *projection,
+                                size_t index, lql_string_view *out,
+                                lql_error *error);
   int (*selector_is_empty)(const lql *self, const lql_selector *selector);
   void (*selector_capabilities_get)(const lql *self,
                                     const lql_selector *selector,
