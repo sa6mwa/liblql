@@ -189,6 +189,30 @@ direct test only to resolve an interface error; run a full vendored suite at
 the end of each large executable slice; run the Go/C matrix only once the final
 hot path is active. Formatting is part of every slice commit.
 
+## Performance Decision Record
+
+The completed one-parse action-stage implementation is semantically clean but
+does not yet meet the performance floor. The 4 KiB mutation matrix recorded
+288 Go/C pairs: 188 at or above 1.0x, 100 below, with a 1.13x median and a
+0.65x worst row. C peak RSS across those rows was 2.7-3.2 MiB after correcting
+the Linux measurement to read `/proc/self/status` `VmHWM`.
+
+Profiling removed direct spool writes as the dominant cost, but rejected
+candidates still require decoded action recording. This cannot be safely
+discarded after a direct-path miss: JSON permits duplicate object keys and a
+later occurrence of the same path can make the candidate match. The Go
+reference retains bounded raw candidate bytes and reparses only accepted
+candidates, which avoids that rejected-candidate decoded-action cost.
+
+Do not reintroduce scan plans, selector-shaped LoneJSON fields, or an
+unbounded cache to close this gap. If the one-parse action stage cannot reach
+the 1.0x floor after further generic codec work, an explicit revision must
+choose a single bounded raw-candidate replay representation for unresolved
+output. That revision must preserve strict NDJSON, parser-owned generic path
+events, one-candidate lifetime, deferred matched-only mutation errors, and
+the repeated-large-candidate RSS proof. It is a material architecture change,
+not an implicit optimization under the current specification.
+
 ## Architecture Cutover Gates
 
 The architectural cutover is complete only when all of these are true:
