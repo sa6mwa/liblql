@@ -696,6 +696,30 @@ static lonejson_status stream_emit_projection(
   return stream_payload_sink(state, newline, 1u, error);
 }
 
+static lonejson_status stream_emit_mutation(
+    lql_stream_state *state, const lonejson_candidate_info *candidate,
+    lonejson_error *error) {
+  lql_status status;
+  static const char newline[] = "\n";
+  if (candidate == NULL || candidate->payload_spool == NULL) {
+    stream_fail(state, LQL_STATUS_CALLBACK_ERROR,
+                "mutation record capture is unavailable");
+    stream_lonejson_error(error, state->failure.message);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  status = lql_mutation_render(state->receiver, state->request->mutation,
+                               candidate->payload_spool, stream_payload_sink,
+                               state, &state->failure);
+  if (status != LQL_STATUS_OK) {
+    if (state->failure.code == LQL_STATUS_OK) {
+      stream_fail(state, status, "mutation rendering failed");
+    }
+    stream_lonejson_error(error, state->failure.message);
+    return LONEJSON_STATUS_CALLBACK_FAILED;
+  }
+  return stream_payload_sink(state, newline, 1u, error);
+}
+
 static lonejson_candidate_callback_result
 stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
                        lonejson_error *error) {
@@ -772,6 +796,17 @@ stream_candidate_end(void *user, const lonejson_candidate_info *candidate,
   }
   if (state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION && matched) {
     if (stream_emit_projection(state, candidate, error) != LONEJSON_STATUS_OK) {
+      return LONEJSON_CANDIDATE_ERROR;
+    }
+  }
+  if (state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION) {
+    if (matched) {
+      if (stream_emit_mutation(state, candidate, error) != LONEJSON_STATUS_OK) {
+        return LONEJSON_CANDIDATE_ERROR;
+      }
+    } else if (!state->request->matched_only &&
+               stream_emit_selected(state, candidate, error) !=
+                   LONEJSON_STATUS_OK) {
       return LONEJSON_CANDIDATE_ERROR;
     }
   }
@@ -1637,7 +1672,8 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode =
       (state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
-       state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION)
+       state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
+       state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION)
           ? LONEJSON_CANDIDATE_CAPTURE_SPOOLED
           : LONEJSON_CANDIDATE_CAPTURE_NONE;
   options.spool_class = LONEJSON_SPOOL_CLASS_LARGE_TEXT;
@@ -1689,14 +1725,17 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
   }
   if ((request->output_mode != LQL_STREAM_OUTPUT_DECISION_ONLY &&
        request->output_mode != LQL_STREAM_OUTPUT_SELECTED_RECORD &&
-       request->output_mode != LQL_STREAM_OUTPUT_PROJECTION) ||
-      request->mutation != NULL) {
+       request->output_mode != LQL_STREAM_OUTPUT_PROJECTION &&
+       request->output_mode != LQL_STREAM_OUTPUT_MUTATION) ||
+      (request->mutation != NULL &&
+       request->output_mode != LQL_STREAM_OUTPUT_MUTATION)) {
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                   "direct stream output mode is not implemented");
     return LQL_STATUS_UNSUPPORTED;
   }
   if ((request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
-       request->output_mode == LQL_STREAM_OUTPUT_PROJECTION) &&
+       request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
+       request->output_mode == LQL_STREAM_OUTPUT_MUTATION) &&
       request->writer == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "record output requires a writer");
@@ -1706,6 +1745,12 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
       request->projection == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "projection output requires a projection handle");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (request->output_mode == LQL_STREAM_OUTPUT_MUTATION &&
+      request->mutation == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "mutation output requires a mutation handle");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   if (request->limits.max_bytes != 0u) {
@@ -1746,7 +1791,8 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
   }
   if ((state.program != NULL && state.program->requires_generic_path) ||
       request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
-      request->output_mode == LQL_STREAM_OUTPUT_PROJECTION) {
+      request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
+      request->output_mode == LQL_STREAM_OUTPUT_MUTATION) {
     status = stream_execute_generic_path(&state, runtime, error);
     lonejson_free(runtime);
     return status;

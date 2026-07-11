@@ -221,6 +221,12 @@ struct lql {
                                 const lql_projection *projection,
                                 size_t index, lql_string_view *out,
                                 lql_error *error);
+  lql_status (*mutation_parse)(lql *self,
+                               const char *const *expressions,
+                               size_t expression_count,
+                               lql_mutation **out, lql_error *error);
+  void (*mutation_destroy)(lql *self, lql_mutation *mutation);
+  size_t (*mutation_count)(const lql *self, const lql_mutation *mutation);
   int (*selector_is_empty)(const lql *self, const lql_selector *selector);
   void (*selector_capabilities_get)(const lql *self,
                                     const lql_selector *selector,

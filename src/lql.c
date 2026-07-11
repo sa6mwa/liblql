@@ -37,6 +37,14 @@ static lql_status projection_path_method(const lql *self,
                                          const lql_projection *projection,
                                          size_t index, lql_string_view *out,
                                          lql_error *error);
+static lql_status mutation_parse_method(lql *self,
+                                        const char *const *expressions,
+                                        size_t expression_count,
+                                        lql_mutation **out,
+                                        lql_error *error);
+static void mutation_destroy_method(lql *self, lql_mutation *mutation);
+static size_t mutation_count_method(const lql *self,
+                                    const lql_mutation *mutation);
 static int selector_is_empty_method(const lql *self,
                                     const lql_selector *selector);
 static void selector_capabilities_get_method(const lql *self,
@@ -137,6 +145,9 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
   ctx->projection_destroy = projection_destroy_method;
   ctx->projection_path_count = projection_path_count_method;
   ctx->projection_path = projection_path_method;
+  ctx->mutation_parse = mutation_parse_method;
+  ctx->mutation_destroy = mutation_destroy_method;
+  ctx->mutation_count = mutation_count_method;
   ctx->selector_is_empty = selector_is_empty_method;
   ctx->selector_capabilities_get = selector_capabilities_get_method;
   ctx->selector_root = selector_root_method;
@@ -345,6 +356,25 @@ static lql_status projection_path_method(const lql *self,
   out->len = strlen(projection->paths[index]);
   lql_error_init(error);
   return LQL_STATUS_OK;
+}
+
+static lql_status mutation_parse_method(lql *self,
+                                        const char *const *expressions,
+                                        size_t expression_count,
+                                        lql_mutation **out,
+                                        lql_error *error) {
+  return lql_mutation_parse_internal(self, expressions, expression_count, out,
+                                     error);
+}
+
+static void mutation_destroy_method(lql *self, lql_mutation *mutation) {
+  lql_mutation_destroy_internal(self, mutation);
+}
+
+static size_t mutation_count_method(const lql *self,
+                                    const lql_mutation *mutation) {
+  (void)self;
+  return mutation == NULL ? 0u : mutation->action_count;
 }
 
 static int selector_is_empty_method(const lql *self,

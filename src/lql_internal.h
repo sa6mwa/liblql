@@ -132,6 +132,33 @@ struct lql_projection {
   size_t path_count;
 };
 
+typedef enum lql_mutation_kind {
+  LQL_MUTATION_SET = 0,
+  LQL_MUTATION_INCREMENT = 1,
+  LQL_MUTATION_REMOVE = 2
+} lql_mutation_kind;
+
+typedef enum lql_mutation_value_kind {
+  LQL_MUTATION_VALUE_STRING = 0,
+  LQL_MUTATION_VALUE_NUMBER = 1,
+  LQL_MUTATION_VALUE_BOOL = 2,
+  LQL_MUTATION_VALUE_NULL = 3
+} lql_mutation_value_kind;
+
+typedef struct lql_mutation_action {
+  lql_mutation_kind kind;
+  char **segments;
+  size_t segment_count;
+  char *value;
+  lql_mutation_value_kind value_kind;
+  double delta;
+} lql_mutation_action;
+
+struct lql_mutation {
+  lql_mutation_action *actions;
+  size_t action_count;
+};
+
 LQL_INTERNAL_SYMBOL void lql_set_error(lql_error *error, lql_status status,
                                        const char *message);
 LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
@@ -150,6 +177,14 @@ LQL_INTERNAL_SYMBOL lql_status lql_projection_render_top_level(
     lql *self, const lql_projection *projection,
     const lonejson_spooled *input, lonejson_sink_fn sink, void *sink_user,
     lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal(
+    lql *self, const char *const *expressions, size_t expression_count,
+    lql_mutation **out, lql_error *error);
+LQL_INTERNAL_SYMBOL void lql_mutation_destroy_internal(
+    lql *self, lql_mutation *mutation);
+LQL_INTERNAL_SYMBOL lql_status lql_mutation_render(
+    lql *self, const lql_mutation *mutation, const lonejson_spooled *input,
+    lonejson_sink_fn sink, void *sink_user, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status
 lql_parse_selector_json_internal(lql *self, const void *json, size_t json_len,
                                  lql_selector **out, lql_error *error);

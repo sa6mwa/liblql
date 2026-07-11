@@ -539,6 +539,108 @@ static int run_selected_record_output(lql *ctx) {
   return 0;
 }
 
+static int run_mutation_output(lql *ctx) {
+  static const char input[] =
+      "{\"status\":\"open\",\"n\":1}\n"
+      "{\"status\":\"closed\",\"n\":2}\n";
+  static const char *const increment[] = {"/n=+2"};
+  static const char increment_output[] = "{\"status\":\"open\",\"n\":3}\n";
+  static const char increment_all_output[] =
+      "{\"status\":\"open\",\"n\":3}\n"
+      "{\"status\":\"closed\",\"n\":2}\n";
+  static const char *const ordered[] = {
+      "/status=ready", "rm:/n", "/meta/a~1b=true"};
+  static const char ordered_output[] =
+      "{\"status\":\"ready\",\"meta\":{\"a/b\":true}}\n";
+  static const char *const invalid_root[] = {"/=value"};
+  lql_selector *selector;
+  lql_mutation *mutation;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+
+  selector = NULL;
+  mutation = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  if (ctx->mutation_parse(ctx, invalid_root, 1u, &mutation, &error) !=
+          LQL_STATUS_PARSE_ERROR ||
+      mutation != NULL) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  if (ctx->mutation_parse(ctx, increment, 1u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = selector;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(increment_output) - 1u ||
+      memcmp(writer.data, increment_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  reader.offset = 0u;
+  memset(&writer, 0, sizeof(writer));
+  request.matched_only = 0;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(increment_all_output) - 1u ||
+      memcmp(writer.data, increment_all_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, ordered, 3u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 3u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  reader.offset = 0u;
+  memset(&writer, 0, sizeof(writer));
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(ordered_output) - 1u ||
+      memcmp(writer.data, ordered_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 static int run_stop_and_root_array(lql *ctx) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"open\"}\n";
@@ -599,6 +701,7 @@ int main(void) {
       run_mapped_string_predicates(ctx) || run_match_all(ctx) ||
       run_root_wildcard_array_error(ctx) ||
       run_selected_record_output(ctx) ||
+      run_mutation_output(ctx) ||
       run_stop_and_root_array(ctx)) {
     ctx->destroy(ctx);
     return 1;
