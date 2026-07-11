@@ -1,266 +1,252 @@
-# liblql/lonejson Hybrid Candidate Engine Spec
+# liblql/LoneJSON Clean-Cut Candidate Engine Specification
 
-## Purpose
+## Status And Authority
 
-This document defines the next liblql/lonejson architecture. It supersedes the
-old lonejson CR notes for predicate-gated capture, single-pass candidate
-transform visitors, chunked number writing, and generic streaming-candidate
-processing.
+This is the sole authority for vendored LoneJSON candidate-engine work. It
+replaces the previous hybrid-direction document, the retired candidate CR
+notes, and any assumption that additive fast paths are an acceptable end
+state.
 
-liblql is not released yet. Public C APIs, internal execution paths, and the
-vendored lonejson candidate/transform surface may be rewritten when that
-reduces complexity, improves performance, or clarifies ownership. Backward
-compatibility with the current vendored candidate/transform APIs is not a
-requirement.
+liblql is unreleased. The vendored LoneJSON candidate and transform APIs are
+private to this repository and have no compatibility obligation. The normal
+presets continue to consume released upstream LoneJSON unchanged. The vendored
+preset exists to prove the final design before an upstream handoff.
 
-The goal is a smaller, faster, easier-to-audit hybrid:
+The hard outcomes are:
 
-```text
-input bytes -> lonejson JSON candidate engine -> liblql plan callbacks
-           -> lonejson JSON writer/output engine
-```
+- strict NDJSON only; a root array is a hard error at every candidate-stream
+  entry point;
+- C is at least 1.0x Go on every accepted Go/C benchmark row, with 1.5x the
+  operating target;
+- RSS is independent of total input size, candidate count, match count, and
+  result count; large current candidates spill instead of growing RSS;
+- one coherent candidate engine, no compatibility layer, dead executor, or
+  selector-specific LoneJSON API surface left behind.
 
-not:
+## Current Debt
 
-```text
-input bytes -> candidate capture -> payload callback -> replay -> second parse
-           -> projection/mutation writer
-```
+The current vendored header contains useful performance work but is not the
+final design. In particular, it still contains the old generic
+`lonejson_candidate_transform_*` executor and gated raw-spool replay path.
+liblql still uses that executor for general source mutation and projection.
+It must not be described as retired until it is deleted.
 
-except where the public liblql API explicitly exposes a callback-scoped payload
-handle.
+The current header also exposes an accumulated set of liblql-shaped knobs:
 
-## Design Decision
+- top-level string-equality fields;
+- top-level multi-field fields;
+- recursive literal-field fields;
+- direct-path key/kind arrays;
+- gated capture and capture-prune callbacks.
 
-The chosen approach is a strict hybrid.
+Those optimizations may remain temporarily as private implementations, but the
+individual knobs are not an acceptable final boundary. They create spread-out
+selection logic and make LoneJSON's candidate interface an accidental LQL
+execution API.
 
-- lonejson owns JSON mechanics.
-- liblql owns LQL semantics.
-- The boundary between them is a small candidate-plan interface, not an
-  expanding set of special-purpose visitor layers.
+The recent source-spooled match-decision reuse is a small liblql improvement,
+not this clean cut. The large-candidate RSS test is a guardrail, not proof that
+the old executor has been removed.
 
-Rejected alternatives:
+## Ownership
 
-- Implement LQL directly in lonejson. This would make lonejson a domain query
-  engine, tie LQL semantic changes to lonejson releases, and weaken the JSON
-  component boundary.
-- Implement all JSON handling in liblql. This would require liblql to own a
-  second streaming parser, writer, framer, escaping implementation, and
-  validation matrix.
+LoneJSON owns only JSON mechanics:
 
-## Ownership Boundary
+- strict NDJSON framing and root-array rejection requested by the caller;
+- tokenization, validation, decoded key/scalar delivery, and source offsets;
+- parser and writer stacks, escaping, commas, structural validity, and output
+  framing;
+- bounded read/write buffers and bounded current-candidate spools;
+- raw or transformed candidate spool lifecycle and spill-to-disk mechanics;
+- generic stop, callback, I/O, and JSON diagnostics.
 
-lonejson owns:
+liblql owns only LQL mechanics:
 
-- JSON tokenization, validation, escaping, serialization, and compaction.
-- NDJSON candidate framing for repeated top-level values.
-- Root-array rejection or other framing-policy enforcement requested by the
-  caller.
-- Candidate byte accounting: stream offset, candidate byte size, consumed
-  bytes, and payload byte size where a payload exists.
-- Parser and writer stack state.
-- Current-candidate capture when a public payload handle is explicitly needed.
-- Streaming transform mechanics: pass-through, suppression, replacement,
-  insertion points, output separators, and malformed-output prevention.
-- Bounded reader and writer chunk buffering.
-- Dependency-owned diagnostics for JSON/framing failures.
+- selector AST parsing, planning, path matching, predicates, temporal rules,
+  and final match truth;
+- projection and mutation semantics, ordering, and error precedence;
+- public C, CLI, and Lua policy; benchmark acceptance; and Go parity policy.
 
-liblql owns:
+LoneJSON must not know selector syntax, mutation syntax, LQL date behavior, or
+Go parity fixtures. liblql must not tokenize JSON, serialize JSON, escape JSON,
+or reimplement NDJSON framing.
 
-- Selector parsing, ASTs, validation, and planning.
-- Path matching, predicate dispatch, scalar comparison, temporal behavior, and
-  truth-state finalization.
-- Projection path semantics.
-- Mutation path semantics, operation ordering, and error precedence.
-- Public C receiver API, CLI behavior, Lua facade behavior, and parity policy.
-- Deciding which public operations need payload handles versus direct output.
-- Performance acceptance against Go.
+## Final Boundary
 
-lonejson must not contain LQL selector, projection, mutation, or parity
-knowledge. liblql must not contain a JSON parser, JSON serializer, JSON
-escaper, candidate framer, or hidden full-document normalization layer.
-
-## Candidate Model
-
-The canonical liblql stream shape is NDJSON: repeated top-level JSON values.
-
-Root arrays are not valid NDJSON candidate streams for liblql or clql. They
-must be hard errors in candidate-stream entry points and must not appear in
-Go/C parity tests or performance benchmarks. liblql must not emulate root-array
-flattening by spooling, materializing, or reparsing the array.
-
-Nested arrays inside an object candidate remain ordinary JSON values. They are
-not candidate streams unless a future public API explicitly defines such a
-mode.
-
-Candidate metadata is source-relative and stable:
-
-- `index`: logical candidate number in stream order.
-- `stream_offset`: byte offset of the candidate JSON value.
-- `byte_size`: byte length of the candidate JSON value, excluding surrounding
-  whitespace and NDJSON separators.
-- `payload_size`: byte length of an exposed payload, when a payload exists.
-- `bytes_read`: total source bytes consumed, including whitespace and trailing
-  accepted delimiters where the active framing mode accepts them.
-
-## Required Engine Shape
-
-There should be one dominant candidate execution path in liblql:
+There is one internal LoneJSON candidate primitive, conceptually:
 
 ```text
-parse candidate once
-observe values through a compiled liblql plan
-finalize candidate decision
-emit, suppress, project, or mutate through lonejson writer mechanics
-advance to next candidate
+candidate_run(reader, framing, plan-observer, output-policy, payload-policy)
 ```
 
-The same engine must support these operation families:
+Its concrete C names may differ, but it has exactly these roles:
 
-- decision-only queries;
-- plus-value queries over seekable inputs through byte ranges;
-- plus-value queries over non-seekable inputs through explicit payload capture
-  only when the public API requires a payload callback;
-- projection;
-- mutation;
-- projection-before-mutation;
-- matches-only output;
-- stop limits and callback failure propagation.
+- `reader`: reader/file/fd/path adapters converge before parsing;
+- `framing`: strict NDJSON for liblql, including root-array hard error;
+- `plan-observer`: generic decoded JSON event delivery plus optional opaque
+  acceleration hints; LoneJSON never interprets LQL meaning;
+- `output-policy`: pass through, suppress, staged transformed output, or stop;
+- `payload-policy`: no payload, seekable range metadata, or explicit
+  callback-scoped current-candidate spool.
 
-The engine must avoid a second parse for normal projection and mutation. If a
-shape cannot be transformed correctly in one pass, the operation must either:
+There must be one event model and one candidate lifecycle. Fast top-level,
+recursive, and direct-path scans are permitted only as private dispatch choices
+behind that primitive. liblql supplies one opaque observer/plan descriptor,
+not separate `top_level_*`, `recursive_*`, or `direct_path_*` option fields.
 
-- return an explicit unsupported status for that shape; or
-- route through a clearly named public spooled/captured API path whose cost is
-  documented and benchmarked separately.
+The public-upstreamable LoneJSON surface must be generic JSON vocabulary:
+candidate metadata, decoded path/value events, writer actions, current-candidate
+spools, and stop/error results. It must not expose a field that exists only for
+one liblql selector family.
 
-It must not silently hide full-candidate buffering, output spooling, or
-temporary-file staging behind an API that claims to be streaming.
+## Required Candidate Lifecycle
 
-## lonejson Candidate Surface
+Every candidate follows this lifecycle exactly once:
 
-The vendored lonejson candidate/transform code is effectively project-local for
-this phase. It may be rewritten substantially. The desired public-upstreamable
-surface is smaller than the current accumulated candidate API.
+```text
+begin
+  -> parse and deliver decoded events
+  -> liblql updates selector truth and optional transform state
+  -> finalize selector truth and deferred transform errors
+  -> commit one of: emit original, emit staged transform, emit payload, discard,
+     stop, or fail
+end
+```
 
-Keep or design toward:
+The parser reads a source candidate once. Generic projection and mutation must
+not reparse captured raw candidate bytes merely because selection completes at
+candidate end.
 
-- one candidate runner for reader/file/fd/path inputs where practical;
-- explicit framing mode, with liblql using strict NDJSON;
-- one observer interface for path/value events needed by liblql plans;
-- one transform interface for output policy and value replacement;
-- one payload-capture mode used only for public payload-handle APIs;
-- one writer/sink abstraction for output bytes;
-- explicit stop/error propagation;
-- clear bounded-memory guarantees;
-- candidate metadata as a first-class result.
+Selection-gated output uses an explicit bounded current-candidate stage:
 
-Remove or collapse:
+- For `matches_only`, LoneJSON writes speculative transformed output to a
+  current-candidate spool while liblql observes the same parse. At finalization,
+  it emits or discards that spool. Mutation errors are deferred until the
+  selection result is known, so an unmatched candidate cannot fail a query.
+- For modes that must emit unmatched candidates, the engine uses an explicit
+  staged original/transformed representation selected at finalization. The
+  representation and output spelling must be covered by Go parity tests; it
+  may use bounded disk-backed current-candidate staging, but may not replay the
+  source through a second parser.
+- Public callback-source payload APIs retain a raw current-candidate spool only
+  for callback delivery. Their bounded capture is a public contract, not a
+  hidden transform fallback.
 
-- legacy root-array flattening support for liblql candidate streams;
-- duplicate candidate replay paths used only because old transform surfaces
-  were insufficient;
-- capture modes that exist only as intermediate implementation scaffolding;
-- transform options that encode historical liblql workarounds rather than
-  generic JSON mechanics;
-- nested delegated candidate parsers used to simulate framing behavior;
-- callbacks that expose mutable parser internals instead of stable event or
-  policy data;
-- compatibility shims for candidate/transform APIs that no other consumer uses.
+If a required operation cannot satisfy those rules, it is unsupported until the
+candidate engine supports it. It must not silently route to the old replay
+executor, a second parser, a whole-input spool, or a liblql JSON writer.
 
-The upstream lonejson handoff should be one coherent surface, not a collection
-of CR fragments. Upstream lonejson can then implement the same semantics under
-its own review, sanitizer, fuzzing, and portability matrix.
+## Required Deletions
 
-## liblql Simplification Targets
+Completion requires deleting, not merely bypassing:
 
-The current liblql implementation has too many overlapping execution shapes.
-The rewrite should reduce these to a small set:
+- the existing `lonejson_candidate_transform_*` types, options, aliases,
+  transform executor, projection/replay executor, and gated raw-spool replay
+  executor;
+- `LONEJSON_CANDIDATE_TRANSFORM_MODE_GATED_SPOOLED` and its replay-count/
+  projected-replay bookkeeping;
+- public or semi-public LoneJSON option fields dedicated to top-level equality,
+  top-level multi-field, recursive-field, or direct-path LQL acceleration;
+- liblql source/file mutation and projection fallbacks that invoke the removed
+  executor or parse a retained candidate a second time;
+- feature macros and compatibility shims that preserve either deleted surface.
 
-- `candidate_decide`: parse and count/query decisions without payload capture.
-- `candidate_emit`: parse and emit matched payloads by seekable range or
-  explicit capture.
-- `candidate_transform`: parse, observe, and write projected/mutated output in
-  one pass.
-- `buffered_value`: intentionally buffered single JSON helper APIs only.
+Delete tests whose sole purpose is preserving removed API behavior. Replace
+them with behavior tests for the final primitive. Do not retain a fallback for
+normal presets: normal presets use the released upstream package, while the
+vendored preset carries the clean implementation until upstream ships it.
 
-Everything else should justify its existence by exposing a distinct public
-contract. Internal paths that differ only because one input is `FILE *` and
-another is a callback source should share the same candidate engine after the
-read abstraction boundary.
+## Allowed State And Memory
 
-Candidate spooling is a fallback or public payload mechanism, not the default
-internal transform strategy.
+Allowed per receiver:
 
-## Performance Contract
+- selector-plan scratch proportional to selector/plan complexity;
+- parser/writer stacks and bounded chunk buffers;
+- one current-candidate raw payload spool only when payload delivery requires
+  it;
+- one or, where unmatched output requires it, two current-candidate output
+  stages that spill at the configured threshold and are reset before the next
+  candidate.
 
-Performance is a product requirement. C must be faster than Go on the parity
-benchmark matrix; below `1.0x` is failure, and `1.5x` or better is the working
-threshold for a healthy margin.
+Forbidden:
 
-Optimization policy:
+- whole-input, whole-stream, all-match, or result caches;
+- persistent candidate-result caches or selector-result caches;
+- retaining a previous candidate after its callback/commit lifecycle ends;
+- a hidden temporary file that changes a streaming API into whole-message
+  materialization;
+- a second JSON parser or ad hoc JSON rewriting in liblql.
 
-- Prefer deleting branches, callbacks, replays, parse passes, and temporary
-  state over adding caches.
-- Do not add selector-result caches, candidate-result caches, or output caches
-  to compensate for an over-general pipeline.
-- Receiver-owned scratch reuse is allowed when it removes allocation or
-  repeated derivation without hot-path invalidation complexity.
-- Memory must remain bounded by parser/writer stack, current-candidate state,
-  configured chunk buffers, and liblql plan scratch.
-- RSS gates remain product gates. A speedup that breaks bounded-memory
-  invariants is not acceptable.
+The 8 MiB process target is the architecture target. The 128 MiB 100 MiB gate
+is only a regression ceiling. The dedicated large-candidate test must continue
+to prove multiple spilled candidates do not accumulate RSS.
 
-Every performance change should answer:
+## liblql Shape After Cutover
 
-1. What work did this remove?
-2. Which benchmark rows improved?
-3. Which rows regressed?
-4. Did code/state-machine complexity go down, stay flat, or go up?
-5. Which tests prove semantics did not change?
+liblql has four execution families only:
 
-Changes that add complexity must clear a higher bar: they should replace a
-larger old path or be rejected.
+1. `candidate_decide`: decision-only scan with no capture.
+2. `candidate_payload`: seekable range metadata or explicit callback-scoped
+   current-candidate spool.
+3. `candidate_output`: projection, mutation, and projection-then-mutation
+   through the final LoneJSON candidate primitive.
+4. `buffered_value`: explicitly buffered single-value helper APIs only.
 
-## Verification Plan
+File and callback-source forms differ only in their reader or payload policy.
+They must not have separate selector, projection, mutation, or transform state
+machines. A fast path is valid only when it is an internal implementation of
+one of these four families and shares its behavior tests.
 
-The rewrite is complete only when these gates pass:
+## Migration Checklist
 
-- public C SDK tests for query, projection, mutation, payloads, stop controls,
-  malformed JSON, and root-array rejection;
-- Go-backed parity tests for the accepted public contract;
-- clql smoke tests, including root-array hard errors for stdin candidate flows;
-- allocator/RSS gates proving bounded memory;
-- Go/C/Lua benchmark counter validation;
-- Go/C performance comparison proving no required C row is below `1.0x`;
-- sanitizer gates for project-owned code;
-- package/source verification where release-facing metadata changes.
+Work is ordered. Do not claim the clean cut is complete early.
 
-During the rewrite, benchmark fixtures and parity rows must exclude root-array
-flattening. If Go still supports flattening internally, that remains a Go-only
-behavior outside the liblql parity matrix.
+1. Inventory every current liblql call site and LoneJSON symbol using the old
+   transform/replay surface. Record its public behavior, output form, and test
+   coverage.
+2. Specify and implement the one internal candidate primitive in vendored
+   LoneJSON, including staged-output and deferred-error semantics.
+3. Move direct, recursive, and top-level fast scans behind its opaque plan
+   dispatch. Remove their public option fields and feature macros.
+4. Migrate `candidate_decide` and `candidate_payload`; prove counters, stops,
+   payload lifetime, and root-array errors.
+5. Migrate projection and all mutation shapes, including unmatched emission,
+   matches-only, increments, removals, creates, wildcards, recursive paths,
+   projection-before-mutation, and malformed/read-error partial results.
+6. Delete the old transform/replay executor and all callers in the same change
+   sequence. A build must fail if an old symbol remains referenced.
+7. Simplify liblql to the four execution families. Delete duplicate adapters,
+   state structs, and tests for deleted internals.
+8. Run the gates below and write the upstream LoneJSON handoff specification.
+9. Upstream the final generic candidate surface. After an upstream release,
+   switch normal presets to it and prove that semantics, RSS, and performance
+   remain intact.
 
-## Migration Sequence
+## Completion Gates
 
-1. Freeze this spec as the authority for candidate-engine work.
-2. Remove stale docs and test expectations that preserve root-array flattening
-   or old candidate CR surfaces.
-3. Audit current liblql execution paths and classify each as keep, collapse,
-   or delete.
-4. Rewrite vendored lonejson candidate/transform internals toward the smaller
-   surface above.
-5. Collapse liblql source/file/projection/mutation paths onto the single
-   candidate engine.
-6. Re-run full tests, sanitizer gates, memory gates, and benchmark parity.
-7. Document the final lonejson surface as an upstream handoff.
-8. After upstream lonejson ships the surface, switch normal presets back to the
-   upstream package and prove the performance sticks.
+The clean cut is not complete until all of these are true:
+
+- `rg` finds no old candidate-transform/replay symbols outside migration notes;
+- no LoneJSON candidate option or macro is selector-family-specific;
+- strict NDJSON root-array hard errors pass in C SDK, CLI, Lua, parity, and
+  benchmark fixtures;
+- Go/C behavioral parity passes for accepted selector, projection, mutation,
+  source, seekable, payload, stop, and error paths;
+- normal and vendored C suites pass; sanitizer and fuzz runs pass for the
+  vendored implementation;
+- 100 MiB and large-candidate RSS gates pass, including repeated spilled
+  callback-source candidates;
+- every accepted Go/C benchmark row is at least 1.0x, and the result records
+  all remaining rows below 1.5x with a concrete owner;
+- the vendored header contains one coherent generic candidate surface suitable
+  for upstream review, not a set of liblql-shaped performance hooks;
+- the worktree has no obsolete candidate-engine code, stale documentation, or
+  compatibility scaffolding.
 
 ## Non-Goals
 
-- No LQL semantics in lonejson.
-- No bespoke JSON parser or writer in liblql.
-- No hidden full-source, full-candidate, or full-output materialization.
-- No cache-heavy performance strategy.
-- No root-array flattening in liblql/clql NDJSON candidate streams.
-- No compatibility promise for the current vendored lonejson candidate API.
+- LQL syntax or semantics in LoneJSON.
+- Root-array flattening in liblql or clql candidate streams.
+- Cache-based performance fixes.
+- A liblql JSON parser, serializer, escaper, or framing layer.
+- Preserving the current vendored candidate/transform API for any consumer.
