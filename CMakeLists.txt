@@ -78,6 +78,10 @@ if(BUILD_TESTING)
     tests/lonejson_mapped_candidate_test.c)
   target_link_libraries(lonejson_mapped_candidate_test PRIVATE lonejson::lonejson)
   add_test(NAME lonejson.mapped_candidate COMMAND lonejson_mapped_candidate_test)
+  add_executable(lonejson_writer_visitor_test
+    tests/lonejson_writer_visitor_test.c)
+  target_link_libraries(lonejson_writer_visitor_test PRIVATE lonejson::lonejson)
+  add_test(NAME lonejson.writer_visitor COMMAND lonejson_writer_visitor_test)
 endif()
 
 if(LQL_BUILD_DIRECT_PROBE)
