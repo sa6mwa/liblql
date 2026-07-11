@@ -2845,7 +2845,6 @@ typedef struct source_candidate_run_state {
   int matches_only;
   lql_query_result result;
   eval_doc doc;
-  lonejson_path_value_visitor eval_visitor;
   int *applied;
   int inline_applied[16];
   void *applied_alloc;
@@ -2854,7 +2853,6 @@ typedef struct source_candidate_run_state {
   int current_matched;
   int current_matched_known;
   int current_root_object;
-  int current_root_seen;
   int current_output_enabled;
   int transform_failed;
   int staged_output;
@@ -3278,213 +3276,6 @@ source_candidate_run_transition(void *user,
              : LONEJSON_CANDIDATE_RUN_TRANSITION_REJECT;
 }
 #endif
-
-static lonejson_status source_candidate_run_observer_object_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
-  source_candidate_run_state *state;
-  lonejson_status st;
-  state = (source_candidate_run_state *)user;
-  st = state->eval_visitor.object_begin == NULL
-           ? LONEJSON_STATUS_OK
-           : state->eval_visitor.object_begin(&state->doc, path, error);
-  if (st != LONEJSON_STATUS_OK) {
-    return st;
-  }
-  if (path != NULL && path->segment_count == 0u) {
-    state->current_root_seen = 1;
-    state->current_root_object = 1;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status source_candidate_run_observer_object_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
-  source_candidate_run_state *state;
-  lonejson_status st;
-  state = (source_candidate_run_state *)user;
-  st = state->eval_visitor.object_end == NULL
-           ? LONEJSON_STATUS_OK
-           : state->eval_visitor.object_end(&state->doc, path, error);
-  return st;
-}
-
-static lonejson_status source_candidate_run_observer_array_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
-  source_candidate_run_state *state;
-  lonejson_status st;
-  state = (source_candidate_run_state *)user;
-  st = state->eval_visitor.array_begin == NULL
-           ? LONEJSON_STATUS_OK
-           : state->eval_visitor.array_begin(&state->doc, path, error);
-  if (st != LONEJSON_STATUS_OK) {
-    return st;
-  }
-  if (path != NULL && path->segment_count == 0u) {
-    state->current_root_seen = 1;
-    state->current_root_object = 0;
-  }
-  return LONEJSON_STATUS_OK;
-}
-
-static lonejson_status source_candidate_run_observer_array_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
-  source_candidate_run_state *state;
-  lonejson_status st;
-  state = (source_candidate_run_state *)user;
-  st = state->eval_visitor.array_end == NULL
-           ? LONEJSON_STATUS_OK
-           : state->eval_visitor.array_end(&state->doc, path, error);
-  return st;
-}
-
-static lonejson_status source_candidate_run_observer_key_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
-  source_candidate_run_state *state;
-  state = (source_candidate_run_state *)user;
-  return state->eval_visitor.object_key_begin == NULL
-             ? LONEJSON_STATUS_OK
-             : state->eval_visitor.object_key_begin(&state->doc, path, error);
-}
-
-static lonejson_status source_candidate_run_observer_key_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
-  source_candidate_run_state *state;
-  state = (source_candidate_run_state *)user;
-  return state->eval_visitor.object_key_chunk == NULL
-             ? LONEJSON_STATUS_OK
-             : state->eval_visitor.object_key_chunk(&state->doc, path, data,
-                                                    len, error);
-}
-
-static lonejson_status source_candidate_run_observer_key_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
-  source_candidate_run_state *state;
-  state = (source_candidate_run_state *)user;
-  return state->eval_visitor.object_key_end == NULL
-             ? LONEJSON_STATUS_OK
-             : state->eval_visitor.object_key_end(&state->doc, path, error);
-}
-
-static lonejson_status source_candidate_run_observer_string_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
-  source_candidate_run_state *state;
-  state = (source_candidate_run_state *)user;
-  if (path != NULL && path->segment_count == 0u) {
-    state->current_root_seen = 1;
-    state->current_root_object = 0;
-  }
-  return state->eval_visitor.string_begin == NULL
-             ? LONEJSON_STATUS_OK
-             : state->eval_visitor.string_begin(&state->doc, path, error);
-}
-
-static lonejson_status source_candidate_run_observer_string_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
-  source_candidate_run_state *state;
-  state = (source_candidate_run_state *)user;
-  return state->eval_visitor.string_chunk == NULL
-             ? LONEJSON_STATUS_OK
-             : state->eval_visitor.string_chunk(&state->doc, path, data, len,
-                                                error);
-}
-
-static lonejson_status source_candidate_run_observer_string_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
-  source_candidate_run_state *state;
-  lonejson_status st;
-  state = (source_candidate_run_state *)user;
-  st = state->eval_visitor.string_end == NULL
-           ? LONEJSON_STATUS_OK
-           : state->eval_visitor.string_end(&state->doc, path, error);
-  return st;
-}
-
-static lonejson_status source_candidate_run_observer_number_begin(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
-  source_candidate_run_state *state;
-  state = (source_candidate_run_state *)user;
-  if (path != NULL && path->segment_count == 0u) {
-    state->current_root_seen = 1;
-    state->current_root_object = 0;
-  }
-  return state->eval_visitor.number_begin == NULL
-             ? LONEJSON_STATUS_OK
-             : state->eval_visitor.number_begin(&state->doc, path, error);
-}
-
-static lonejson_status source_candidate_run_observer_number_chunk(
-    void *user, const lonejson_value_path *path, const char *data, size_t len,
-    lonejson_error *error) {
-  source_candidate_run_state *state;
-  state = (source_candidate_run_state *)user;
-  return state->eval_visitor.number_chunk == NULL
-             ? LONEJSON_STATUS_OK
-             : state->eval_visitor.number_chunk(&state->doc, path, data, len,
-                                                error);
-}
-
-static lonejson_status source_candidate_run_observer_number_end(
-    void *user, const lonejson_value_path *path, lonejson_error *error) {
-  source_candidate_run_state *state;
-  lonejson_status st;
-  state = (source_candidate_run_state *)user;
-  st = state->eval_visitor.number_end == NULL
-           ? LONEJSON_STATUS_OK
-           : state->eval_visitor.number_end(&state->doc, path, error);
-  return st;
-}
-
-static lonejson_status
-source_candidate_run_observer_boolean(void *user,
-                                      const lonejson_value_path *path,
-                                      int value, lonejson_error *error) {
-  source_candidate_run_state *state;
-  state = (source_candidate_run_state *)user;
-  if (path != NULL && path->segment_count == 0u) {
-    state->current_root_seen = 1;
-    state->current_root_object = 0;
-  }
-  return state->eval_visitor.boolean_value == NULL
-             ? LONEJSON_STATUS_OK
-             : state->eval_visitor.boolean_value(&state->doc, path, value,
-                                                 error);
-}
-
-static lonejson_status
-source_candidate_run_observer_null(void *user, const lonejson_value_path *path,
-                                   lonejson_error *error) {
-  source_candidate_run_state *state;
-  state = (source_candidate_run_state *)user;
-  if (path != NULL && path->segment_count == 0u) {
-    state->current_root_seen = 1;
-    state->current_root_object = 0;
-  }
-  return state->eval_visitor.null_value == NULL
-             ? LONEJSON_STATUS_OK
-             : state->eval_visitor.null_value(&state->doc, path, error);
-}
-
-static void
-source_candidate_run_init_observer(lonejson_path_value_visitor *visitor) {
-  *visitor = lonejson_default_path_value_visitor();
-  visitor->object_begin = source_candidate_run_observer_object_begin;
-  visitor->object_end = source_candidate_run_observer_object_end;
-  visitor->object_key_begin = source_candidate_run_observer_key_begin;
-  visitor->object_key_chunk = source_candidate_run_observer_key_chunk;
-  visitor->object_key_end = source_candidate_run_observer_key_end;
-  visitor->array_begin = source_candidate_run_observer_array_begin;
-  visitor->array_end = source_candidate_run_observer_array_end;
-  visitor->string_begin = source_candidate_run_observer_string_begin;
-  visitor->string_chunk = source_candidate_run_observer_string_chunk;
-  visitor->string_end = source_candidate_run_observer_string_end;
-  visitor->number_begin = source_candidate_run_observer_number_begin;
-  visitor->number_chunk = source_candidate_run_observer_number_chunk;
-  visitor->number_end = source_candidate_run_observer_number_end;
-  visitor->boolean_value = source_candidate_run_observer_boolean;
-  visitor->null_value = source_candidate_run_observer_null;
-}
 
 static int source_candidate_run_has_increment(const lql_mutation_plan *plan) {
   size_t i;
@@ -4884,7 +4675,6 @@ source_candidate_run_candidate_begin(void *user,
   state->current_matched = state->selector == NULL;
   state->current_matched_known = state->selector == NULL;
   state->current_root_object = 0;
-  state->current_root_seen = 0;
   state->current_output_enabled =
       state->selector == NULL || !state->matches_only;
   state->transform_failed = 0;
@@ -5129,9 +4919,8 @@ static lql_status execute_query_source_candidate_run(
     destroy_doc(&state.doc);
     return LQL_STATUS_JSON_ERROR;
   }
-  init_eval_visitor(&state.eval_visitor);
-  configure_eval_visitor_for_doc(&state.eval_visitor, &state.doc);
-  source_candidate_run_init_observer(&observer);
+  init_eval_visitor(&observer);
+  configure_eval_visitor_for_doc(&observer, &state.doc);
   memset(&options, 0, sizeof(options));
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.output_framing = LONEJSON_CANDIDATE_RUN_NDJSON;
@@ -5145,7 +4934,7 @@ static lql_status execute_query_source_candidate_run(
   options.sink = file_sink_unlocked;
   options.sink_user = out;
   options.observer = &observer;
-  options.observer_user = &state;
+  options.observer_user = &state.doc;
   options.transform = source_candidate_run_decide;
   options.replace = source_candidate_run_replace;
   options.insert = source_candidate_run_insert_missing;
