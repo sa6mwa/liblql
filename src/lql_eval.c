@@ -5235,6 +5235,7 @@ typedef struct source_spooled_match_state {
   lql_error *mutation_error;
   lql_query_result result;
   lql_status callback_status;
+  int capture_matched;
   eval_doc doc;
 } source_spooled_match_state;
 
@@ -7099,6 +7100,7 @@ on_source_spooled_candidate_begin(void *user,
   (void)error;
   state = (source_spooled_match_state *)user;
   reset_doc(&state->doc);
+  state->capture_matched = 0;
   return LONEJSON_CANDIDATE_CONTINUE;
 }
 
@@ -7110,7 +7112,8 @@ on_source_spooled_capture_decision(void *user,
   (void)candidate;
   (void)error;
   state = (source_spooled_match_state *)user;
-  if (eval_doc_matches(state->selector, &state->doc)) {
+  state->capture_matched = eval_doc_matches(state->selector, &state->doc);
+  if (state->capture_matched) {
     return LONEJSON_CANDIDATE_RETAIN;
   }
   return LONEJSON_CANDIDATE_DISCARD;
@@ -7146,7 +7149,7 @@ on_source_spooled_candidate_end(void *user,
   if (state->doc.root_kind == '[') {
     return reject_root_array_candidate(error);
   }
-  matched = eval_doc_matches(state->selector, &state->doc);
+  matched = state->capture_matched;
   state->result.candidates_seen++;
   state->result.bytes_read = state->offset_base +
                              (lql_uint64)candidate->stream_offset +
