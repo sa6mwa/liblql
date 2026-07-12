@@ -212,6 +212,8 @@ static int run_post_hit_validation(lql *ctx) {
   static const char malformed_array[] = "{\"status\":\"open\",\"bad\":[1,]}\n";
   static const char malformed_string[] =
       "{\"status\":\"open\",\"bad\":\"unterminated}\n";
+  static const char malformed_and[] =
+      "{\"status\":\"open\",\"region\":\"us-west\",\"bad\":[1,]}\n";
   static const char valid_nested[] =
       "{\"status\":\"open\",\"bad\":[1,{\"x\":\"y\"}]}\n";
   lql_selector *selector;
@@ -270,6 +272,30 @@ static int run_post_hit_validation(lql *ctx) {
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
       result.records_seen != 1u || result.records_matched != 1u ||
       decisions.count != 1u || decisions.matches != 1u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  selector = NULL;
+
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\",/region=\"us-west\"",
+                          &selector, &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  request.selector = selector;
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)malformed_and;
+  reader.len = sizeof(malformed_and) - 1u;
+  reader.chunk_size = 2u;
+  memset(&decisions, 0, sizeof(decisions));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+          LQL_STATUS_JSON_ERROR ||
+      result.records_seen != 0u || result.records_matched != 0u ||
+      decisions.count != 0u) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }

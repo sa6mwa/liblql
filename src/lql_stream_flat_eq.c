@@ -25,6 +25,7 @@ typedef struct lql_flat_eq_program {
                         [LQL_FLAT_ICONTAINS_NEEDLE_MAX];
   size_t term_count;
   int stop_matching_on_hit;
+  unsigned long stop_hit_mask;
   const lql_mutation_action *direct_mutation_actions[LQL_FLAT_EQ_TERM_CAPACITY];
   size_t direct_mutation_action_count;
 } lql_flat_eq_program;
@@ -667,6 +668,59 @@ static int lql_flat_eq_matches(const lql_flat_eq_program *program,
     }
   }
   return 0;
+}
+
+static unsigned long
+lql_flat_eq_leaf_stop_mask(const lql_flat_eq_program *program,
+                           const lql_selector *selector) {
+  unsigned long mask;
+  size_t i;
+  if (program == NULL || selector == NULL) {
+    return 0ul;
+  }
+  mask = 0ul;
+  for (i = 0u; i < program->term_count; ++i) {
+    if (program->selectors[i] == selector) {
+      if (mask != 0ul) {
+        return 0ul;
+      }
+      mask = 1ul << i;
+    }
+  }
+  return mask;
+}
+
+static unsigned long
+lql_flat_eq_stop_mask(const lql_flat_eq_program *program,
+                      const lql_selector *selector) {
+  unsigned long mask;
+  size_t i;
+  if (program == NULL || selector == NULL) {
+    return 0ul;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_AND) {
+    mask = 0ul;
+    for (i = 0u; i < selector->child_count; ++i) {
+      unsigned long child;
+      child = lql_flat_eq_stop_mask(program, &selector->children[i]);
+      if (child == 0ul) {
+        return 0ul;
+      }
+      mask |= child;
+    }
+    return mask;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_EQ ||
+      selector->kind == LQL_SELECTOR_KIND_EXISTS ||
+      selector->kind == LQL_SELECTOR_KIND_PREFIX ||
+      selector->kind == LQL_SELECTOR_KIND_IPREFIX ||
+      selector->kind == LQL_SELECTOR_KIND_CONTAINS ||
+      selector->kind == LQL_SELECTOR_KIND_ICONTAINS ||
+      selector->kind == LQL_SELECTOR_KIND_RANGE ||
+      selector->kind == LQL_SELECTOR_KIND_DATE) {
+    return lql_flat_eq_leaf_stop_mask(program, selector);
+  }
+  return 0ul;
 }
 
 static lql_status lql_flat_eq_emit(lql_flat_eq_state *state,
@@ -2432,10 +2486,8 @@ lql_status lql_stream_execute_flat_eq(lql *self,
       !lql_flat_eq_mutation_append(&program, request->mutation)) {
     return LQL_STATUS_OK;
   }
-  program.stop_matching_on_hit =
-      request->selector != NULL &&
-      request->selector->kind == LQL_SELECTOR_KIND_EQ &&
-      program.term_count == 1u;
+  program.stop_hit_mask = lql_flat_eq_stop_mask(&program, request->selector);
+  program.stop_matching_on_hit = program.stop_hit_mask != 0ul;
   *out_handled = 1;
   range_only_value = request->on_value != NULL &&
                      request->range_writer != NULL &&
@@ -2467,6 +2519,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   scan_request.spool = capture ? &spool : NULL;
   scan_request.capture = capture;
   scan_request.stop_matching_on_hit = program.stop_matching_on_hit;
+  scan_request.stop_hit_mask = program.stop_hit_mask;
   scan_request.capture_keys = program.capture_keys;
   scan_request.capture_key_count = program.capture_key_count;
   scan_request.capture_spans = program.capture_spans;

@@ -33,6 +33,7 @@ typedef struct lql_json_scan {
   lql_error *error;
   int flat_eq_active;
   int flat_eq_stop_on_hit;
+  unsigned long flat_eq_stop_hit_mask;
   int flat_eq_has_array_terms;
   const lql_json_flat_eq_term *flat_terms;
   size_t flat_term_count;
@@ -164,6 +165,18 @@ static void lql_json_match_start(lql_json_scan *scan, unsigned long active,
         scan->match_icontains |= 1ul << i;
     }
   }
+}
+
+LQL_JSON_INLINE int lql_json_stop_hit_ready(const lql_json_scan *scan) {
+  unsigned long mask;
+  if (scan == NULL || !scan->flat_eq_stop_on_hit) {
+    return 0;
+  }
+  mask = scan->flat_eq_stop_hit_mask;
+  if (mask == 0ul) {
+    return scan->flat_eq_hits != 0ul;
+  }
+  return (scan->flat_eq_hits & mask) == mask;
 }
 
 static void lql_json_number_range_start(lql_json_scan *scan,
@@ -1966,8 +1979,7 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       lql_json_error(scan, "JSON object key must be a string");
       return LQL_STATUS_JSON_ERROR;
     }
-    if (scan->writer == NULL && scan->flat_eq_stop_on_hit &&
-        scan->flat_eq_hits != 0ul &&
+    if (scan->writer == NULL && lql_json_stop_hit_ready(scan) &&
         scan->capture_path_active[object_depth] == 0ul) {
       status = lql_json_skip_string_fast(scan);
       if (status != LQL_STATUS_OK ||
@@ -1996,8 +2008,7 @@ static lql_status lql_json_object(lql_json_scan *scan) {
     }
     key_active = 0ul;
     inherited_recursive = 0ul;
-    if (scan->flat_eq_active &&
-        !(scan->flat_eq_stop_on_hit && scan->flat_eq_hits != 0ul)) {
+    if (scan->flat_eq_active && !lql_json_stop_hit_ready(scan)) {
       key_active = scan->path_active[object_depth];
       inherited_recursive = scan->recursive_active[object_depth];
     }
@@ -2565,6 +2576,7 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   scan.capture_key_count = request->capture_key_count;
   scan.capture_spans = request->capture_spans;
   scan.flat_eq_stop_on_hit = request->stop_matching_on_hit;
+  scan.flat_eq_stop_hit_mask = request->stop_hit_mask;
   for (records = 0u; records < scan.flat_term_count; ++records) {
     if (scan.flat_terms[records].path_array_segments != 0ul ||
         scan.flat_terms[records].path_object_wildcards != 0ul ||

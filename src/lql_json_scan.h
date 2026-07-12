@@ -108,6 +108,7 @@ typedef struct lql_json_flat_eq_request {
   lql_json_spool *spool;
   int capture;
   int stop_matching_on_hit;
+  unsigned long stop_hit_mask;
   const lql_json_capture_key *capture_keys;
   size_t capture_key_count;
   lql_json_capture_span *capture_spans;
