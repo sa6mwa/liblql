@@ -605,8 +605,17 @@ static int run_match_all(lql *ctx) {
   static const char input[] = "{\"ignored\":[1,2]}\n42\n";
   static const char selected_input[] = " { \"a\" : 1 }\n true\n";
   static const char selected_output[] = "{\"a\":1}\ntrue\n";
+  static const char object_input[] = " { \"a\" : 1, \"b\" : 2 }\n"
+                                    "{\"a\":3,\"c\":4}\n";
+  static const char projection_output[] = "{\"a\":1}\n{\"a\":3}\n";
+  static const char mutation_output[] =
+      "{\"a\":1,\"b\":2,\"t\":true}\n{\"a\":3,\"c\":4,\"t\":true}\n";
+  static const char *const projection_paths[] = {"/a"};
+  static const char *const mutations[] = {"/t=true"};
   static const char root_array[] = "[1]\n";
   lql_selector *selector;
+  lql_projection *projection;
+  lql_mutation *mutation;
   lql_stream_request request;
   lql_stream_result result;
   lql_error error;
@@ -614,6 +623,8 @@ static int run_match_all(lql *ctx) {
   test_writer writer;
 
   selector = NULL;
+  projection = NULL;
+  mutation = NULL;
   lql_error_init(&error);
   if (ctx->selector_parse(ctx, "/", &selector, &error) != LQL_STATUS_OK) {
     return 1;
@@ -666,6 +677,64 @@ static int run_match_all(lql *ctx) {
     ctx->selector_destroy(ctx, selector);
     return 3;
   }
+  if (ctx->projection_parse(ctx, projection_paths, 1u, &projection, &error) !=
+      LQL_STATUS_OK) {
+    ctx->selector_destroy(ctx, selector);
+    return 30;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)object_input;
+  reader.len = sizeof(object_input) - 1u;
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = NULL;
+  request.projection = projection;
+  request.output_mode = LQL_STREAM_OUTPUT_PROJECTION;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 2u ||
+      writer.len != sizeof(projection_output) - 1u ||
+      memcmp(writer.data, projection_output, writer.len) != 0) {
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 31;
+  }
+  ctx->projection_destroy(ctx, projection);
+  projection = NULL;
+  if (ctx->mutation_parse(ctx, mutations, 1u, &mutation, &error) !=
+      LQL_STATUS_OK) {
+    ctx->selector_destroy(ctx, selector);
+    return 40;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)object_input;
+  reader.len = sizeof(object_input) - 1u;
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = NULL;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 2u ||
+      writer.len != sizeof(mutation_output) - 1u ||
+      memcmp(writer.data, mutation_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 41;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
   memset(&request, 0, sizeof(request));
   memset(&reader, 0, sizeof(reader));
   reader.data = (const unsigned char *)root_array;
