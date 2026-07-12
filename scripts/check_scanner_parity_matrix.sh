@@ -99,11 +99,14 @@ scanner_parity_run_row build/direct-probe/array-scalar-100k.ndjson array_scalar_
   array_scalar_indexed_eq '/values/1="B"' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/array-scalar-100k.ndjson array_scalar_100k \
   array_scalar_wildcard_eq '/values/[]="B"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/array-scalar-100k.ndjson array_scalar_100k \
+  array_scalar_exists_wildcard 'exists{/values/[]}' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/array-exists-100k.ndjson array_exists_100k \
   array_exists_indexed 'exists{/values/1}' decision_only_selector /id
-# Do not add exists{/values/[]} here until the Go long-stream oracle anomaly is
-# resolved. C and Go agree on isolated wildcard-exists fixtures, but the pinned
-# Go benchmark reports one fewer match on array-exists-100k.ndjson.
+# Do not add exists{/values/[]} on array-exists-100k until the Go long-stream
+# oracle anomaly is resolved. C and Go agree on the array-scalar wildcard-exists
+# fixture above, but the pinned Go benchmark reports one fewer match on
+# array-exists-100k.ndjson.
 scanner_parity_run_row build/direct-probe/range-code-100k.ndjson range_code_100k \
   range_code_eq_one 'range{field=/code,gte=1,lte=1}' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/recursive-10k.ndjson recursive_10k \
