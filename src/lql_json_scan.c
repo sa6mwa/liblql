@@ -35,6 +35,8 @@ typedef struct lql_json_scan {
   int flat_eq_stop_on_hit;
   unsigned long flat_eq_stop_hit_mask;
   int flat_eq_has_array_terms;
+  int flat_eq_has_object_wildcards;
+  int flat_eq_has_recursive_terms;
   const lql_json_flat_eq_term *flat_terms;
   size_t flat_term_count;
   const lql_json_capture_key *capture_keys;
@@ -2094,14 +2096,18 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       inherited_recursive = scan->recursive_active[object_depth];
     }
     key_source = key_active;
-    recursive_terms =
-        lql_json_match_recursive_terms(scan, key_source, object_depth) |
-        inherited_recursive;
+    recursive_terms = inherited_recursive;
+    if (scan->flat_eq_has_recursive_terms) {
+      recursive_terms |=
+          lql_json_match_recursive_terms(scan, key_source, object_depth);
+    }
     if (scan->flat_eq_has_array_terms) {
       key_active = lql_json_match_object_terms(scan, key_active, object_depth);
     }
-    key_wildcards =
-        lql_json_match_object_wildcards(scan, key_source, object_depth);
+    key_wildcards = scan->flat_eq_has_object_wildcards
+                        ? lql_json_match_object_wildcards(scan, key_source,
+                                                          object_depth)
+                        : 0ul;
     capture_source = scan->capture_path_active[object_depth];
     if (scan->writer == NULL && capture_source == 0ul &&
         lql_json_try_plain_key_match(scan, key_active, recursive_terms,
@@ -2765,13 +2771,19 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   scan.flat_eq_stop_on_hit = request->stop_matching_on_hit;
   scan.flat_eq_stop_hit_mask = request->stop_hit_mask;
   for (records = 0u; records < scan.flat_term_count; ++records) {
+    if (scan.flat_terms[records].path_object_wildcards != 0ul ||
+        scan.flat_terms[records].path_any_wildcards != 0ul) {
+      scan.flat_eq_has_object_wildcards = 1;
+    }
+    if (scan.flat_terms[records].path_recursive_segments != 0ul) {
+      scan.flat_eq_has_recursive_terms = 1;
+    }
     if (scan.flat_terms[records].path_array_segments != 0ul ||
         scan.flat_terms[records].path_object_wildcards != 0ul ||
         scan.flat_terms[records].path_array_wildcards != 0ul ||
         scan.flat_terms[records].path_any_wildcards != 0ul ||
         scan.flat_terms[records].path_recursive_segments != 0ul) {
       scan.flat_eq_has_array_terms = 1;
-      break;
     }
   }
   records = 0u;
