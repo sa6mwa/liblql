@@ -1365,7 +1365,8 @@ static lql_status lql_flat_eq_mutation_find_action(
 static int lql_flat_eq_mutation_groupable(const lql_mutation_action *action) {
   return action != NULL && action->segment_count > 1u &&
          (action->kind == LQL_MUTATION_SET ||
-          action->kind == LQL_MUTATION_REMOVE);
+          action->kind == LQL_MUTATION_REMOVE ||
+          action->kind == LQL_MUTATION_INCREMENT);
 }
 
 static int
@@ -1453,6 +1454,9 @@ static lql_status lql_flat_eq_mutation_apply_nested_to_spool(
         state, action, source, value_start, value_end, 1u, error);
   } else if (action->kind == LQL_MUTATION_REMOVE) {
     status = lql_flat_eq_mutation_nested_remove(
+        state, action, source, value_start, value_end, 1u, error);
+  } else if (action->kind == LQL_MUTATION_INCREMENT) {
+    status = lql_flat_eq_mutation_nested_increment(
         state, action, source, value_start, value_end, 1u, error);
   } else {
     status = LQL_STATUS_INVALID_ARGUMENT;

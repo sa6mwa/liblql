@@ -457,6 +457,8 @@ static const char *const *mutations_for(const char *selector_name,
   static const char *const nested[] = {"/query/hash=ff"};
   static const char *const range[] = {"/code=+1"};
   static const char *const nested_increment[] = {"/meta/count=+1"};
+  static const char *const same_top_nested_increment[] = {"/meta/count=+1",
+                                                          "/meta/state=done"};
   static const char *const remove[] = {"rm:/payload"};
   static const char *const contains[] = {"/meta/bench=true"};
   static const char *const multi[] = {"/component=lql", "/event=session_sync",
@@ -515,6 +517,10 @@ static const char *const *mutations_for(const char *selector_name,
   if (strcmp(selector_name, "eq_status_open_nested_increment") == 0) {
     *count = 1u;
     return nested_increment;
+  }
+  if (strcmp(selector_name, "eq_status_open_same_top_nested_increment") == 0) {
+    *count = 2u;
+    return same_top_nested_increment;
   }
   if (strcmp(selector_name, "eq_code_one_top_multi") == 0) {
     *count = 3u;
