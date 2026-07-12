@@ -46,7 +46,8 @@ add_library(lql_common OBJECT
 set_target_properties(lql_common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(lql_common PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-  "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>"
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>")
+target_include_directories(lql_common PRIVATE
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/lonejson>")
 
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
@@ -58,7 +59,7 @@ if(LQL_BUILD_STATIC)
   add_library(lql_static STATIC $<TARGET_OBJECTS:lql_common>)
   add_library(lql::static ALIAS lql_static)
   set_target_properties(lql_static PROPERTIES OUTPUT_NAME lql)
-  target_link_libraries(lql_static PUBLIC lonejson::static)
+  target_link_libraries(lql_static PRIVATE lonejson::static)
   target_include_directories(lql_static PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>")
@@ -68,7 +69,7 @@ if(LQL_BUILD_SHARED)
   add_library(lql_shared SHARED $<TARGET_OBJECTS:lql_common>)
   add_library(lql::shared ALIAS lql_shared)
   set_target_properties(lql_shared PROPERTIES OUTPUT_NAME lql SOVERSION 0)
-  target_link_libraries(lql_shared PUBLIC lonejson::shared)
+  target_link_libraries(lql_shared PRIVATE lonejson::shared)
   target_include_directories(lql_shared PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>")
