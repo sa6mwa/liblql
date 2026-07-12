@@ -43,6 +43,10 @@ scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   icontains_payload_cde 'icontains{f=/payload,v=CDE}' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   in_status_open_pending 'in{field=/status,any=open|pending}' plus_value_source_selector /id
+scanner_parity_run_row build/direct-probe/scalar-100k.ndjson scalar_100k \
+  code_eq_one '/code=1' plus_value_source_selector /id
+scanner_parity_run_row build/direct-probe/scalar-100k.ndjson scalar_100k \
+  bool_enabled_true '/enabled=true' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' project_file_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
