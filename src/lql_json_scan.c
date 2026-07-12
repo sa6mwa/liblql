@@ -2013,6 +2013,10 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       }
       lql_json_number_range_start(scan, 0ul);
       lql_json_match_start(scan, 0ul, 0, 0u);
+    } else if (scan->writer == NULL && key_matches == 0ul &&
+               descendants == 0ul && recursive_terms == 0ul &&
+               capture_values == 0ul && capture_descendants == 0ul) {
+      status = lql_json_skip_value_fast(scan);
     } else {
       status = lql_json_value(scan);
     }

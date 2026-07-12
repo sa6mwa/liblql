@@ -316,7 +316,6 @@ bench_value(void *user, const lql_stream_value *value, lql_error *error) {
 
 static int mode_is_decision(const char *mode) {
   return strcmp(mode, "decision_only_selector") == 0 ||
-         strcmp(mode, "decision_only_plan") == 0 ||
          strcmp(mode, "reuse_selector") == 0 ||
          strcmp(mode, "reparse_selector_each_run") == 0 ||
          strcmp(mode, "decision_only_source_selector") == 0;
@@ -324,10 +323,8 @@ static int mode_is_decision(const char *mode) {
 
 static int mode_is_selected(const char *mode) {
   return strcmp(mode, "plus_value_selector") == 0 ||
-         strcmp(mode, "plus_value_plan") == 0 ||
          strcmp(mode, "plus_value_source_selector") == 0 ||
-         strcmp(mode, "plus_value_openjson_selector") == 0 ||
-         strcmp(mode, "plus_value_openjson_plan") == 0;
+         strcmp(mode, "plus_value_openjson_selector") == 0;
 }
 
 static int mode_is_source(const char *mode) {
@@ -344,7 +341,6 @@ static int mode_is_projection(const char *mode) {
 
 static int mode_is_mutation(const char *mode) {
   return strcmp(mode, "mutate_file_selector") == 0 ||
-         strcmp(mode, "mutate_file_plan") == 0 ||
          strcmp(mode, "mutate_source_selector") == 0;
 }
 
@@ -354,17 +350,14 @@ static int mode_is_project_mutation(const char *mode) {
 
 static int mode_is_supported(const char *mode) {
   return strcmp(mode, "decision_only_selector") == 0 ||
-         strcmp(mode, "decision_only_plan") == 0 ||
          strcmp(mode, "reuse_selector") == 0 ||
          strcmp(mode, "reparse_selector_each_run") == 0 ||
          strcmp(mode, "decision_only_source_selector") == 0 ||
          strcmp(mode, "plus_value_selector") == 0 ||
-         strcmp(mode, "plus_value_plan") == 0 ||
          strcmp(mode, "plus_value_source_selector") == 0 ||
          strcmp(mode, "plus_value_openjson_selector") == 0 ||
          mode_is_projection(mode) || mode_is_project_mutation(mode) ||
          strcmp(mode, "mutate_file_selector") == 0 ||
-         strcmp(mode, "mutate_file_plan") == 0 ||
          strcmp(mode, "mutate_source_selector") == 0;
 }
 
