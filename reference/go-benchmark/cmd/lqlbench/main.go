@@ -95,6 +95,8 @@ func benchmarkMutationsForSelector(selectorName string, expr string) []string {
 		return []string{"rm:/payload"}
 	case "eq_code_one_top_increment":
 		return []string{"/code=+1"}
+	case "eq_code_one_top_increment_multi":
+		return []string{"/code=+1", "/code=+2"}
 	case "eq_status_open_nested_increment":
 		return []string{"/meta/count=+1"}
 	case "eq_status_open_same_top_nested_increment":

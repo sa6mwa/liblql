@@ -1178,6 +1178,13 @@ static int run_mutation_output(lql *ctx) {
   static const char *const increment_missing[] = {"/count=+2"};
   static const char increment_missing_output[] =
       "{\"status\":\"open\",\"n\":1,\"count\":2}\n";
+  static const char *const increment_multi[] = {"/n=+2", "/n=+3"};
+  static const char increment_multi_output[] =
+      "{\"status\":\"open\",\"n\":6}\n";
+  static const char *const increment_multi_missing[] = {"/count=+2",
+                                                        "/count=+3"};
+  static const char increment_multi_missing_output[] =
+      "{\"status\":\"open\",\"n\":1,\"count\":5}\n";
   static const char *const nested_increment[] = {"/meta/count=+1"};
   static const char nested_increment_input[] =
       "{\"status\":\"open\",\"meta\":{\"count\":2}}\n"
@@ -1372,6 +1379,48 @@ static int run_mutation_output(lql *ctx) {
       result.records_seen != 2u || result.records_matched != 1u ||
       writer.len != sizeof(increment_missing_output) - 1u ||
       memcmp(writer.data, increment_missing_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, increment_multi, 2u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 2u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  reader.offset = 0u;
+  memset(&writer, 0, sizeof(writer));
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(increment_multi_output) - 1u ||
+      memcmp(writer.data, increment_multi_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, increment_multi_missing, 2u, &mutation,
+                          &error) != LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 2u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  reader.offset = 0u;
+  memset(&writer, 0, sizeof(writer));
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(increment_multi_missing_output) - 1u ||
+      memcmp(writer.data, increment_multi_missing_output, writer.len) != 0) {
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
     return 1;

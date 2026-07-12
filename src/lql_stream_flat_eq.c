@@ -1363,7 +1363,11 @@ static lql_status lql_flat_eq_mutation_find_action(
 }
 
 static int lql_flat_eq_mutation_groupable(const lql_mutation_action *action) {
-  return action != NULL && action->segment_count > 1u &&
+  if (action == NULL)
+    return 0;
+  if (action->kind == LQL_MUTATION_INCREMENT && action->segment_count == 1u)
+    return 1;
+  return action->segment_count > 1u &&
          (action->kind == LQL_MUTATION_SET ||
           action->kind == LQL_MUTATION_REMOVE ||
           action->kind == LQL_MUTATION_INCREMENT);
@@ -1420,6 +1424,44 @@ static int lql_flat_eq_mutation_group_has_set(
       return 1;
   }
   return 0;
+}
+
+static int lql_flat_eq_mutation_group_is_top_increment(
+    const lql_flat_eq_program *program, const lql_mutation_action *action) {
+  size_t i;
+  if (program == NULL || action == NULL || action->kind != LQL_MUTATION_INCREMENT ||
+      action->segment_count != 1u)
+    return 0;
+  for (i = 0u; i < program->direct_mutation_action_count; ++i) {
+    const lql_mutation_action *candidate;
+    candidate = program->direct_mutation_actions[i];
+    if (!lql_flat_eq_mutation_same_top(candidate, action))
+      continue;
+    if (candidate->kind != LQL_MUTATION_INCREMENT ||
+        candidate->segment_count != 1u)
+      return 0;
+  }
+  return 1;
+}
+
+static lql_status lql_flat_eq_mutation_group_increment_action(
+    const lql_flat_eq_program *program, const lql_mutation_action *group,
+    lql_mutation_action *out) {
+  size_t i;
+  double delta;
+  if (program == NULL || group == NULL || out == NULL ||
+      !lql_flat_eq_mutation_group_is_top_increment(program, group))
+    return LQL_STATUS_INVALID_ARGUMENT;
+  *out = *group;
+  delta = 0.0;
+  for (i = 0u; i < program->direct_mutation_action_count; ++i) {
+    const lql_mutation_action *candidate;
+    candidate = program->direct_mutation_actions[i];
+    if (lql_flat_eq_mutation_same_top(candidate, group))
+      delta += candidate->delta;
+  }
+  out->delta = delta;
+  return LQL_STATUS_OK;
 }
 
 static void lql_flat_eq_mutation_group_mark(
@@ -1647,7 +1689,17 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
           lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
                                      state->writer, state->writer_user, error);
       if (status == LQL_STATUS_OK) {
-        if (group_count > 1u) {
+        if (group_count > 1u &&
+            lql_flat_eq_mutation_group_is_top_increment(state->program,
+                                                        action)) {
+          lql_mutation_action grouped_increment;
+          status = lql_flat_eq_mutation_group_increment_action(
+              state->program, action, &grouped_increment);
+          if (status == LQL_STATUS_OK)
+            status = lql_flat_eq_mutation_increment(
+                state, &grouped_increment, spool, key_end + 1u, value_end, 1,
+                error);
+        } else if (group_count > 1u) {
           status = lql_flat_eq_mutation_emit_existing_group(
               state, spool, action, key_end + 1u, value_end, error);
         } else if (action->kind == LQL_MUTATION_INCREMENT &&
@@ -1702,7 +1754,9 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
           (group_count > 1u &&
            lql_flat_eq_mutation_group_seen(state->program, action, i)) ||
           (group_count > 1u &&
-           !lql_flat_eq_mutation_group_has_set(state->program, action)))
+           !lql_flat_eq_mutation_group_has_set(state->program, action) &&
+           !lql_flat_eq_mutation_group_is_top_increment(state->program,
+                                                        action)))
         continue;
       if (action->kind == LQL_MUTATION_INCREMENT &&
           action->segment_count > 1u) {
@@ -1715,11 +1769,21 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
         return status;
       status = lql_flat_eq_projection_key(state, action->segments[0], error);
       if (status == LQL_STATUS_OK) {
-        if (group_count > 1u)
-          status =
-              lql_flat_eq_mutation_emit_missing_group(state, action, error);
-        else
+        if (group_count > 1u &&
+            lql_flat_eq_mutation_group_is_top_increment(state->program,
+                                                        action)) {
+          lql_mutation_action grouped_increment;
+          status = lql_flat_eq_mutation_group_increment_action(
+              state->program, action, &grouped_increment);
+          if (status == LQL_STATUS_OK)
+            status = lql_flat_eq_mutation_increment(
+                state, &grouped_increment, NULL, 0u, 0u, 0, error);
+        } else if (group_count > 1u) {
+          status = lql_flat_eq_mutation_emit_missing_group(state, action,
+                                                           error);
+        } else {
           status = lql_flat_eq_mutation_key_value(state, action, 0, error);
+        }
       }
       if (status != LQL_STATUS_OK)
         return status;
