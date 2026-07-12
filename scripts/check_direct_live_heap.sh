@@ -19,6 +19,23 @@ if [ ! -x "$binary" ]; then
   exit 0
 fi
 
+ensure_fixture() {
+  fixture=$1
+  count=$2
+  payload_bytes=$3
+  shape=$4
+
+  if [ ! -f "$fixture" ]; then
+    sh scripts/generate_direct_probe_fixture.sh \
+      "$fixture" "$count" "$payload_bytes" "$shape"
+  fi
+}
+
+ensure_fixture build/direct-probe/status-100k.ndjson 100000 24 status
+ensure_fixture build/direct-probe/realworld-100k.ndjson 100000 64 realworld
+ensure_fixture build/direct-probe/large-4x25m.ndjson 4 25000000 status
+ensure_fixture build/direct-probe/large-100m.ndjson 1 100000000 status
+
 check_case() {
   fixture=$1
   dataset=$2
