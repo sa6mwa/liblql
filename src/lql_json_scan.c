@@ -1124,13 +1124,19 @@ static lql_status lql_json_take_expected(lql_json_scan *scan, int expected) {
 }
 
 static lql_status lql_json_skip_space(lql_json_scan *scan) {
-  int value;
   lql_status status;
   for (;;) {
-    status = lql_json_peek(scan, &value);
-    if (status != LQL_STATUS_OK ||
-        (value != ' ' && value != '\t' && value != '\r' && value != '\n')) {
-      return status;
+    unsigned char value;
+    if (scan->offset == scan->length) {
+      status = lql_json_refill(scan);
+      if (status != LQL_STATUS_OK || scan->offset == scan->length) {
+        return status;
+      }
+    }
+    value = scan->buffer[scan->offset];
+    if (value != (unsigned char)' ' && value != (unsigned char)'\t' &&
+        value != (unsigned char)'\r' && value != (unsigned char)'\n') {
+      return LQL_STATUS_OK;
     }
     ++scan->offset;
   }

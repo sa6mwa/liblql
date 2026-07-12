@@ -290,6 +290,7 @@ static int mode_is_project_mutation(const char *mode) {
 
 static int mode_is_supported(const char *mode) {
   return strcmp(mode, "decision_only_selector") == 0 ||
+         strcmp(mode, "decision_only_plan") == 0 ||
          strcmp(mode, "reuse_selector") == 0 ||
          strcmp(mode, "reparse_selector_each_run") == 0 ||
          strcmp(mode, "decision_only_source_selector") == 0 ||
