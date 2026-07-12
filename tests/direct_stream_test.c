@@ -1111,6 +1111,10 @@ static int run_nested_projection_output(lql *ctx) {
   static const char output[] = "{\"id\":\"x\",\"items\":[null,{\"sku\":\"B\"}],"
                                "\"meta\":{\"trace\":9},\"slash/key\":true}\n";
   static const char *const missing_paths[] = {"/missing"};
+  static const char *const scalar_array_paths[] = {"/values/1"};
+  static const char scalar_array_input[] =
+      "{\"values\":[\"A\",\"B\",\"C\"],\"status\":\"open\"}\n";
+  static const char scalar_array_output[] = "{\"values\":[null,\"B\"]}\n";
   static const char scalar[] = "1\n";
   lql_selector *selector;
   lql_projection *projection;
@@ -1178,6 +1182,29 @@ static int run_nested_projection_output(lql *ctx) {
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
       result.records_seen != 1u || result.records_matched != 1u ||
       writer.len != 0u) {
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->projection_destroy(ctx, projection);
+  projection = NULL;
+  if (ctx->projection_parse(ctx, scalar_array_paths, 1u, &projection, &error) !=
+      LQL_STATUS_OK) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)scalar_array_input;
+  reader.len = sizeof(scalar_array_input) - 1u;
+  reader.chunk_size = 5u;
+  memset(&writer, 0, sizeof(writer));
+  request.projection = projection;
+  request.reader_user = &reader;
+  request.writer_user = &writer;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(scalar_array_output) - 1u ||
+      memcmp(writer.data, scalar_array_output, writer.len) != 0) {
     ctx->projection_destroy(ctx, projection);
     ctx->selector_destroy(ctx, selector);
     return 1;
