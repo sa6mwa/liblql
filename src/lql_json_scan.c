@@ -329,8 +329,32 @@ static unsigned long lql_json_match_object_terms(const lql_json_scan *scan,
     bit = 1ul << i;
     if ((active & bit) != 0ul &&
         (path_segment >= sizeof(unsigned long) * CHAR_BIT ||
-         (scan->flat_terms[i].path_array_segments & (1ul << path_segment)) ==
-             0ul)) {
+         ((scan->flat_terms[i].path_array_segments |
+           scan->flat_terms[i].path_object_wildcards |
+           scan->flat_terms[i].path_array_wildcards |
+           scan->flat_terms[i].path_any_wildcards) &
+          (1ul << path_segment)) == 0ul)) {
+      matches |= bit;
+    }
+  }
+  return matches;
+}
+
+static unsigned long lql_json_match_object_wildcards(const lql_json_scan *scan,
+                                                     unsigned long active,
+                                                     size_t path_segment) {
+  unsigned long matches;
+  size_t i;
+  matches = 0ul;
+  if (path_segment >= sizeof(unsigned long) * CHAR_BIT) {
+    return matches;
+  }
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    unsigned long bit;
+    bit = 1ul << i;
+    if ((active & bit) != 0ul && ((scan->flat_terms[i].path_object_wildcards |
+                                   scan->flat_terms[i].path_any_wildcards) &
+                                  (1ul << path_segment)) != 0ul) {
       matches |= bit;
     }
   }
@@ -349,13 +373,18 @@ static unsigned long lql_json_match_array_index(const lql_json_scan *scan,
     unsigned long bit;
     bit = 1ul << i;
     if ((active & bit) != 0ul &&
-        path_segment < sizeof(unsigned long) * CHAR_BIT &&
-        (scan->flat_terms[i].path_array_segments & (1ul << path_segment)) !=
-            0ul &&
-        lql_json_term_array_index(&scan->flat_terms[i], path_segment,
-                                  &expected) &&
-        expected == index) {
-      matches |= bit;
+        path_segment < sizeof(unsigned long) * CHAR_BIT) {
+      if (((scan->flat_terms[i].path_array_wildcards |
+            scan->flat_terms[i].path_any_wildcards) &
+           (1ul << path_segment)) != 0ul) {
+        matches |= bit;
+      } else if ((scan->flat_terms[i].path_array_segments &
+                  (1ul << path_segment)) != 0ul &&
+                 lql_json_term_array_index(&scan->flat_terms[i], path_segment,
+                                           &expected) &&
+                 expected == index) {
+        matches |= bit;
+      }
     }
   }
   return matches;
@@ -720,6 +749,7 @@ static lql_status lql_json_object(lql_json_scan *scan) {
   unsigned long exists_terms;
   unsigned long key_matches;
   unsigned long key_active;
+  unsigned long key_wildcards;
   unsigned long descendants;
   size_t object_depth;
   lql_status status;
@@ -755,9 +785,11 @@ static lql_status lql_json_object(lql_json_scan *scan) {
     if (scan->flat_eq_has_array_terms) {
       key_active = lql_json_match_object_terms(scan, key_active, object_depth);
     }
+    key_wildcards = lql_json_match_object_wildcards(
+        scan, scan->path_active[object_depth], object_depth);
     lql_json_match_start(scan, key_active, 1, object_depth);
     status = lql_json_string(scan);
-    key_matches = lql_json_match_complete(scan);
+    key_matches = lql_json_match_complete(scan) | key_wildcards;
     exists_terms = lql_json_match_exists(scan, key_matches, object_depth);
     lql_json_match_start(scan, 0ul, 0, 0u);
     if (status != LQL_STATUS_OK ||
@@ -1165,7 +1197,10 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   scan.flat_term_count = request->term_count;
   scan.flat_eq_stop_on_hit = request->stop_matching_on_hit;
   for (records = 0u; records < scan.flat_term_count; ++records) {
-    if (scan.flat_terms[records].path_array_segments != 0ul) {
+    if (scan.flat_terms[records].path_array_segments != 0ul ||
+        scan.flat_terms[records].path_object_wildcards != 0ul ||
+        scan.flat_terms[records].path_array_wildcards != 0ul ||
+        scan.flat_terms[records].path_any_wildcards != 0ul) {
       scan.flat_eq_has_array_terms = 1;
       break;
     }

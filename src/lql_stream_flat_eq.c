@@ -39,11 +39,11 @@ static int lql_flat_eq_literal_kind(lql_selector_literal_kind literal_kind,
   }
 }
 
-static int lql_flat_eq_literal_object_path(const char *path,
-                                           size_t *out_path_len,
-                                           size_t *out_segment_count,
-                                           size_t *out_first_segment_len,
-                                           unsigned long *out_array_segments) {
+static int lql_flat_eq_literal_object_path(
+    const char *path, size_t *out_path_len, size_t *out_segment_count,
+    size_t *out_first_segment_len, unsigned long *out_array_segments,
+    unsigned long *out_object_wildcards, unsigned long *out_array_wildcards,
+    unsigned long *out_any_wildcards) {
   const char *segment;
   const char *slash;
   size_t path_len;
@@ -51,16 +51,24 @@ static int lql_flat_eq_literal_object_path(const char *path,
   size_t segment_count;
   size_t i;
   unsigned long array_segments;
+  unsigned long object_wildcards;
+  unsigned long array_wildcards;
+  unsigned long any_wildcards;
   int numeric_segment;
   if (path == NULL || path[0] != '/' || path[1] == '\0' ||
       out_path_len == NULL || out_segment_count == NULL ||
-      out_first_segment_len == NULL || out_array_segments == NULL) {
+      out_first_segment_len == NULL || out_array_segments == NULL ||
+      out_object_wildcards == NULL || out_array_wildcards == NULL ||
+      out_any_wildcards == NULL) {
     return 0;
   }
   path_len = strlen(path);
   segment = path + 1;
   segment_count = 0u;
   array_segments = 0ul;
+  object_wildcards = 0ul;
+  array_wildcards = 0ul;
+  any_wildcards = 0ul;
   for (;;) {
     slash = strchr(segment, '/');
     segment_len = slash == NULL ? strlen(segment) : (size_t)(slash - segment);
@@ -72,12 +80,13 @@ static int lql_flat_eq_literal_object_path(const char *path,
       }
     }
     if (segment_len == 0u || memchr(segment, '~', segment_len) != NULL ||
-        (numeric_segment &&
-         (slash == NULL ||
-          segment_count >= sizeof(unsigned long) * CHAR_BIT)) ||
-        (segment_len == 1u && segment[0] == '*') ||
-        (segment_len == 2u && segment[0] == '[' && segment[1] == ']') ||
-        (segment_len == 2u && segment[0] == '*' && segment[1] == '*') ||
+        segment_count >= sizeof(unsigned long) * CHAR_BIT ||
+        (numeric_segment && slash == NULL) ||
+        ((segment_len == 1u && segment[0] == '*') && slash == NULL) ||
+        ((segment_len == 2u && segment[0] == '[' && segment[1] == ']') &&
+         slash == NULL) ||
+        ((segment_len == 2u && segment[0] == '*' && segment[1] == '*') &&
+         slash == NULL) ||
         (segment_len == 3u && memcmp(segment, "...", 3u) == 0)) {
       return 0;
     }
@@ -86,6 +95,12 @@ static int lql_flat_eq_literal_object_path(const char *path,
     }
     if (numeric_segment) {
       array_segments |= 1ul << segment_count;
+    } else if (segment_len == 1u && segment[0] == '*') {
+      object_wildcards |= 1ul << segment_count;
+    } else if (segment_len == 2u && segment[0] == '[' && segment[1] == ']') {
+      array_wildcards |= 1ul << segment_count;
+    } else if (segment_len == 2u && segment[0] == '*' && segment[1] == '*') {
+      any_wildcards |= 1ul << segment_count;
     }
     ++segment_count;
     if (slash == NULL) {
@@ -96,6 +111,9 @@ static int lql_flat_eq_literal_object_path(const char *path,
   *out_path_len = path_len;
   *out_segment_count = segment_count;
   *out_array_segments = array_segments;
+  *out_object_wildcards = object_wildcards;
+  *out_array_wildcards = array_wildcards;
+  *out_any_wildcards = any_wildcards;
   return 1;
 }
 
@@ -108,6 +126,9 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   size_t path_segment_count;
   size_t first_segment_len;
   unsigned long path_array_segments;
+  unsigned long path_object_wildcards;
+  unsigned long path_array_wildcards;
+  unsigned long path_any_wildcards;
   size_t i;
   if (selector == NULL) {
     return 0;
@@ -132,9 +153,10 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       return 0;
     }
     field = selector->field;
-    if (!lql_flat_eq_literal_object_path(field, &path_len, &path_segment_count,
-                                         &first_segment_len,
-                                         &path_array_segments)) {
+    if (!lql_flat_eq_literal_object_path(
+            field, &path_len, &path_segment_count, &first_segment_len,
+            &path_array_segments, &path_object_wildcards, &path_array_wildcards,
+            &path_any_wildcards)) {
       return 0;
     }
     for (i = 0u; i < selector->any_count; ++i) {
@@ -152,6 +174,9 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       term->path_len = path_len;
       term->path_segment_count = path_segment_count;
       term->path_array_segments = path_array_segments;
+      term->path_object_wildcards = path_object_wildcards;
+      term->path_array_wildcards = path_array_wildcards;
+      term->path_any_wildcards = path_any_wildcards;
       program->selectors[program->term_count] = selector;
       ++program->term_count;
     }
@@ -165,9 +190,10 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     return 0;
   }
   field = selector->field;
-  if (!lql_flat_eq_literal_object_path(field, &path_len, &path_segment_count,
-                                       &first_segment_len,
-                                       &path_array_segments)) {
+  if (!lql_flat_eq_literal_object_path(
+          field, &path_len, &path_segment_count, &first_segment_len,
+          &path_array_segments, &path_object_wildcards, &path_array_wildcards,
+          &path_any_wildcards)) {
     return 0;
   }
   term = &program->terms[program->term_count];
@@ -177,6 +203,9 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   term->path_len = path_len;
   term->path_segment_count = path_segment_count;
   term->path_array_segments = path_array_segments;
+  term->path_object_wildcards = path_object_wildcards;
+  term->path_array_wildcards = path_array_wildcards;
+  term->path_any_wildcards = path_any_wildcards;
   if (selector->kind == LQL_SELECTOR_KIND_EXISTS) {
     term->kind = LQL_JSON_FLAT_TERM_EXISTS;
   } else if (selector->kind == LQL_SELECTOR_KIND_PREFIX) {
