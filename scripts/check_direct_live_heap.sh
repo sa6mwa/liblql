@@ -22,8 +22,10 @@ fi
 check_case() {
   fixture=$1
   dataset=$2
-  mode=$3
-  samples=${4:-2}
+  selector_name=$3
+  expr=$4
+  mode=$5
+  samples=${6:-2}
   if [ ! -f "$fixture" ]; then
     printf 'SKIP: fixture is unavailable: %s\n' "$fixture"
     return 0
@@ -31,26 +33,33 @@ check_case() {
   LQL_BENCH_SAMPLES=$samples valgrind --tool=massif --stacks=no --time-unit=B \
     --massif-out-file="$massif_out" "$binary" \
     --fixture "$fixture" --dataset "$dataset" \
-    --selector-name eq_status_open --expr '/status="open"' \
+    --selector-name "$selector_name" --expr "$expr" \
     --mode "$mode" --submode steady_state >/dev/null
 
   peak=$(awk -F= '/^mem_heap_B=/{ if ($2 > peak) peak=$2 } END { print peak+0 }' \
     "$massif_out")
   if [ "$peak" -gt "$limit_bytes" ]; then
-    printf 'direct live heap exceeded for %s/%s samples=%s: %s bytes (limit %s bytes)\n' \
-      "$dataset" "$mode" "$samples" "$peak" "$limit_bytes" >&2
+    printf 'direct live heap exceeded for %s/%s/%s samples=%s: %s bytes (limit %s bytes)\n' \
+      "$dataset" "$selector_name" "$mode" "$samples" "$peak" "$limit_bytes" >&2
     exit 1
   fi
-  printf 'direct live heap %s/%s samples=%s: %s bytes (limit %s bytes)\n' \
-    "$dataset" "$mode" "$samples" "$peak" "$limit_bytes"
+  printf 'direct live heap %s/%s/%s samples=%s: %s bytes (limit %s bytes)\n' \
+    "$dataset" "$selector_name" "$mode" "$samples" "$peak" "$limit_bytes"
 }
 
 for mode in decision_only_selector plus_value_selector project_file_selector mutate_file_selector
 do
-  check_case build/direct-probe/status-100k.ndjson status_100k "$mode"
-  check_case build/direct-probe/large-4x25m.ndjson large_ndjson "$mode"
+  check_case build/direct-probe/status-100k.ndjson status_100k \
+    eq_status_open '/status="open"' "$mode"
+  check_case build/direct-probe/large-4x25m.ndjson large_ndjson \
+    eq_status_open '/status="open"' "$mode"
 done
 
-check_case build/direct-probe/large-100m.ndjson large_100m plus_value_selector
+check_case build/direct-probe/realworld-100k.ndjson realworld_sparse \
+  realworld_eq_sparse '/event="session_sync"' decision_only_selector
+check_case build/direct-probe/realworld-100k.ndjson realworld_sparse_callback \
+  realworld_eq_sparse '/event="session_sync"' plus_value_selector
+check_case build/direct-probe/large-100m.ndjson large_100m \
+  eq_status_open '/status="open"' plus_value_selector
 check_case build/direct-probe/status-100k.ndjson status_100k_repeated \
-  decision_only_selector 8
+  eq_status_open '/status="open"' decision_only_selector 8
