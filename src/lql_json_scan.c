@@ -863,9 +863,9 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   if (out_bytes_read != NULL) {
     *out_bytes_read = 0u;
   }
-  if (request == NULL || request->reader == NULL || request->terms == NULL ||
-      request->term_count == 0u ||
+  if (request == NULL || request->reader == NULL ||
       request->term_count > LQL_JSON_FLAT_TERM_CAPACITY ||
+      (request->term_count != 0u && request->terms == NULL) ||
       request->record == NULL || (request->capture && request->spool == NULL)) {
     if (error != NULL) {
       error->code = LQL_STATUS_INVALID_ARGUMENT;

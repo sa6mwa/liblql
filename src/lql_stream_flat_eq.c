@@ -26,6 +26,9 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   if (selector == NULL) {
     return 0;
   }
+  if (selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return 1;
+  }
   if (selector->kind == LQL_SELECTOR_KIND_AND ||
       selector->kind == LQL_SELECTOR_KIND_OR ||
       selector->kind == LQL_SELECTOR_KIND_NOT) {
@@ -63,6 +66,9 @@ static int lql_flat_eq_matches(const lql_flat_eq_program *program,
   size_t i;
   if (selector == NULL) {
     return 0;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_ALL) {
+    return 1;
   }
   if (selector->kind == LQL_SELECTOR_KIND_AND) {
     for (i = 0u; i < selector->child_count; ++i) {
@@ -233,8 +239,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
     return LQL_STATUS_OK;
   }
   memset(&program, 0, sizeof(program));
-  if (!lql_flat_eq_append(&program, request->selector) ||
-      program.term_count == 0u) {
+  if (!lql_flat_eq_append(&program, request->selector)) {
     return LQL_STATUS_OK;
   }
   *out_handled = 1;
