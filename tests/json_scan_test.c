@@ -236,6 +236,7 @@ int main(void) {
   size_t flat_bytes;
   unsigned char spool_bytes[3];
   unsigned char spool_fill[1024];
+  size_t string_end;
   size_t spool_len;
   size_t spool_index;
   if (json_test_run(" { \"status\" : \"open\", \"nested\" : [ true, null, "
@@ -779,6 +780,44 @@ int main(void) {
       flat_writer.data[2] != (unsigned char)'x') {
     lql_json_spool_cleanup(&flat_spool);
     return 29;
+  }
+  lql_json_spool_cleanup(&flat_spool);
+  memset(spool_fill, (int)'a', sizeof(spool_fill));
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK ||
+      lql_json_spool_append(&flat_spool, "\"", 1u, &flat_error) !=
+          LQL_STATUS_OK ||
+      lql_json_spool_append(&flat_spool, spool_fill, sizeof(spool_fill),
+                            &flat_error) != LQL_STATUS_OK ||
+      lql_json_spool_append(&flat_spool, spool_fill, sizeof(spool_fill),
+                            &flat_error) != LQL_STATUS_OK ||
+      lql_json_spool_append(&flat_spool, spool_fill, sizeof(spool_fill),
+                            &flat_error) != LQL_STATUS_OK ||
+      lql_json_spool_append(&flat_spool, spool_fill, 1023u, &flat_error) !=
+          LQL_STATUS_OK ||
+      lql_json_spool_append(&flat_spool, "\\\"", 2u, &flat_error) !=
+          LQL_STATUS_OK) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 30;
+  }
+  for (spool_index = 0u;
+       spool_index <= LQL_JSON_SPOOL_MEMORY_BYTES / sizeof(spool_fill);
+       ++spool_index) {
+    if (lql_json_spool_append(&flat_spool, spool_fill, sizeof(spool_fill),
+                              &flat_error) != LQL_STATUS_OK) {
+      lql_json_spool_cleanup(&flat_spool);
+      return 31;
+    }
+  }
+  if (lql_json_spool_append(&flat_spool, "\"", 1u, &flat_error) !=
+          LQL_STATUS_OK ||
+      flat_spool.file == NULL ||
+      lql_json_spool_find_string_end(
+          &flat_spool, 0u, lql_json_spool_size(&flat_spool), &string_end,
+          &flat_error) != LQL_STATUS_OK ||
+      string_end != lql_json_spool_size(&flat_spool)) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 32;
   }
   lql_json_spool_cleanup(&flat_spool);
   return 0;

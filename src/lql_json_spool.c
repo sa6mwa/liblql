@@ -223,6 +223,40 @@ lql_status lql_json_spool_byte_at(const lql_json_spool *spool, size_t offset,
   return LQL_STATUS_OK;
 }
 
+static int lql_json_spool_string_chunk_end(const unsigned char *data,
+                                           size_t len, int *escaped,
+                                           size_t *out) {
+  size_t offset;
+  if (data == NULL || escaped == NULL || out == NULL) {
+    return 0;
+  }
+  offset = 0u;
+  while (offset < len) {
+    const unsigned char *quote;
+    const unsigned char *slash;
+    size_t remaining;
+    if (*escaped) {
+      *escaped = 0;
+      ++offset;
+      continue;
+    }
+    remaining = len - offset;
+    quote = (const unsigned char *)memchr(data + offset, '"', remaining);
+    slash = (const unsigned char *)memchr(data + offset, '\\', remaining);
+    if (quote == NULL && slash == NULL) {
+      return 0;
+    }
+    if (slash != NULL && (quote == NULL || slash < quote)) {
+      offset = (size_t)(slash - data) + 1u;
+      *escaped = 1;
+      continue;
+    }
+    *out = (size_t)(quote - data) + 1u;
+    return 1;
+  }
+  return 0;
+}
+
 lql_status lql_json_spool_find_string_end(const lql_json_spool *spool,
                                           size_t offset, size_t end,
                                           size_t *out, lql_error *error) {
@@ -246,30 +280,33 @@ lql_status lql_json_spool_find_string_end(const lql_json_spool *spool,
   escaped = 0;
   if (spool->file == NULL) {
     while (pos < end) {
-      ch = spool->memory[pos++];
-      if (escaped) {
-        escaped = 0;
-      } else if (ch == (unsigned char)'\\') {
-        escaped = 1;
-      } else if (ch == (unsigned char)'"') {
-        *out = pos;
+      size_t found;
+      if (lql_json_spool_string_chunk_end(spool->memory + pos, end - pos,
+                                          &escaped, &found)) {
+        *out = pos + found;
         return LQL_STATUS_OK;
       }
+      pos = end;
     }
     lql_json_spool_error(error, LQL_STATUS_JSON_ERROR,
                          "unterminated JSON spool string");
     return LQL_STATUS_JSON_ERROR;
   }
   mutable_spool = (lql_json_spool *)spool;
+  if (fflush(spool->file) != 0 || pos > (size_t)LONG_MAX ||
+      fseek(spool->file, (long)pos, SEEK_SET) != 0) {
+    mutable_spool->read_cache_len = 0u;
+    lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
+                         "unable to scan JSON spool string");
+    return LQL_STATUS_IO_ERROR;
+  }
   while (pos < end) {
     size_t amount;
     size_t i;
     amount = end - pos;
     if (amount > sizeof(mutable_spool->read_cache))
       amount = sizeof(mutable_spool->read_cache);
-    if (fflush(spool->file) != 0 || pos > (size_t)LONG_MAX ||
-        fseek(spool->file, (long)pos, SEEK_SET) != 0 ||
-        fread(mutable_spool->read_cache, 1u, amount, spool->file) != amount) {
+    if (fread(mutable_spool->read_cache, 1u, amount, spool->file) != amount) {
       mutable_spool->read_cache_len = 0u;
       lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
                            "unable to scan JSON spool string");
@@ -277,16 +314,10 @@ lql_status lql_json_spool_find_string_end(const lql_json_spool *spool,
     }
     mutable_spool->read_cache_offset = pos;
     mutable_spool->read_cache_len = amount;
-    for (i = 0u; i < amount; ++i) {
-      ch = mutable_spool->read_cache[i];
-      if (escaped) {
-        escaped = 0;
-      } else if (ch == (unsigned char)'\\') {
-        escaped = 1;
-      } else if (ch == (unsigned char)'"') {
-        *out = pos + i + 1u;
-        return LQL_STATUS_OK;
-      }
+    if (lql_json_spool_string_chunk_end(mutable_spool->read_cache, amount,
+                                        &escaped, &i)) {
+      *out = pos + i;
+      return LQL_STATUS_OK;
     }
     pos += amount;
   }
