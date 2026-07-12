@@ -169,12 +169,17 @@ int main(void) {
        0ul, 0ul, 0ul, 0ul, 0ul, contains_failure}};
   lql_json_flat_eq_request flat_request;
   lql_json_spool flat_spool;
+  lql_json_spool_reader spool_reader;
   json_test_reader flat_reader;
   json_test_writer flat_writer;
   json_flat_result flat_result;
   lql_error flat_error;
   size_t flat_records;
   size_t flat_bytes;
+  unsigned char spool_bytes[3];
+  unsigned char spool_fill[1024];
+  size_t spool_len;
+  size_t spool_index;
   if (json_test_run(" { \"status\" : \"open\", \"nested\" : [ true, null, "
                     "-1.2e+3 ], \"face\" : \"\\uD83D\\uDE00\" }\n"
                     " \"scalar\\tvalue\" \n",
@@ -452,6 +457,52 @@ int main(void) {
              flat_writer.len) != 0) {
     lql_json_spool_cleanup(&flat_spool);
     return 22;
+  }
+  lql_json_spool_cleanup(&flat_spool);
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK ||
+      lql_json_spool_append(&flat_spool, "abc", 3u, &flat_error) !=
+          LQL_STATUS_OK) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 23;
+  }
+  lql_json_spool_reader_init(&spool_reader, &flat_spool);
+  if (lql_json_spool_read(&spool_reader, spool_bytes, 2u, &spool_len,
+                          &flat_error) != LQL_STATUS_OK ||
+      spool_len != 2u || memcmp(spool_bytes, "ab", 2u) != 0 ||
+      lql_json_spool_read(&spool_reader, spool_bytes, sizeof(spool_bytes),
+                          &spool_len, &flat_error) != LQL_STATUS_OK ||
+      spool_len != 1u || spool_bytes[0] != (unsigned char)'c' ||
+      lql_json_spool_read(&spool_reader, spool_bytes, sizeof(spool_bytes),
+                          &spool_len, &flat_error) != LQL_STATUS_OK ||
+      spool_len != 0u) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 24;
+  }
+  lql_json_spool_cleanup(&flat_spool);
+  memset(spool_fill, (int)'x', sizeof(spool_fill));
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
+    return 25;
+  }
+  for (spool_index = 0u; spool_index <= LQL_JSON_SPOOL_MEMORY_BYTES / sizeof(spool_fill);
+       ++spool_index) {
+    if (lql_json_spool_append(&flat_spool, spool_fill, sizeof(spool_fill),
+                              &flat_error) != LQL_STATUS_OK) {
+      lql_json_spool_cleanup(&flat_spool);
+      return 26;
+    }
+  }
+  lql_json_spool_reader_init(&spool_reader, &flat_spool);
+  if (flat_spool.file == NULL ||
+      lql_json_spool_read(&spool_reader, spool_bytes, sizeof(spool_bytes),
+                          &spool_len, &flat_error) != LQL_STATUS_OK ||
+      spool_len != sizeof(spool_bytes) ||
+      spool_bytes[0] != (unsigned char)'x' ||
+      spool_bytes[1] != (unsigned char)'x' ||
+      spool_bytes[2] != (unsigned char)'x') {
+    lql_json_spool_cleanup(&flat_spool);
+    return 27;
   }
   lql_json_spool_cleanup(&flat_spool);
   return 0;
