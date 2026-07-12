@@ -244,10 +244,14 @@ static lql_status bench_discard_write(void *user, const void *data, size_t len,
 static lql_stream_callback_result
 bench_value(void *user, const lql_stream_value *value, lql_error *error) {
   bench_writer *writer;
+  size_t size;
   writer = (bench_writer *)user;
   if (writer == NULL || value == NULL) return LQL_STREAM_CALLBACK_ERROR;
+  size = lql_stream_value_size(value);
+  if (size > (size_t)-1 - writer->bytes) return LQL_STREAM_CALLBACK_ERROR;
   ++writer->records;
-  return lql_stream_value_write_to(value, bench_write, writer, error) ==
+  writer->bytes += size;
+  return lql_stream_value_write_to(value, bench_discard_write, NULL, error) ==
                  LQL_STATUS_OK
              ? LQL_STREAM_CALLBACK_CONTINUE
              : LQL_STREAM_CALLBACK_ERROR;
