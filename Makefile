@@ -1,10 +1,11 @@
-.PHONY: help build-debug build-release test direct-reset direct-probe direct-bench direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help build-debug build-release test asan direct-reset direct-probe direct-bench direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
 	  'make build-debug   build the debug self-contained scanner foundation' \
 	  'make build-release build the optimized self-contained scanner foundation' \
 	  'make test          build and run the direct-stream test suite' \
+	  'make asan          build and run direct tests with ASan/UBSan' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
 	  'make direct-probe  build the optimized direct-execution probe' \
 	  'make direct-bench  build the optimized direct benchmark runner' \
@@ -27,6 +28,11 @@ test:
 	@cmake --preset debug-scanner
 	@cmake --build --preset debug-scanner
 	@ctest --test-dir build/debug-scanner --output-on-failure
+
+asan:
+	@cmake --preset asan-scanner
+	@cmake --build --preset asan-scanner
+	@ctest --test-dir build/asan-scanner --output-on-failure
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
