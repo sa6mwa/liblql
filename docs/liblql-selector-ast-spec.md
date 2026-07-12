@@ -214,32 +214,19 @@ Term `value` parsing must accept the Go-compatible scalar forms and convert
 them to selector strings. Term `any` parsing must accept both Go-compatible
 string forms and arrays where the Go library accepts them.
 
-## Lonejson Requirement
+## Self-contained JSON Requirement
 
-Selector AST JSON parsing and serialization must use lonejson `v0.41.0`.
-liblql must not implement bespoke JSON parsing or escaping for selector AST
-payloads.
+Selector AST JSON parsing and serialization are owned by liblql. They must not
+require a LoneJSON runtime or link dependency. The selector parser may use a
+small internal JSON scanner, provided it remains strict JSON, accepts ordinary
+whitespace, decodes string escapes including Unicode escapes, and emits directly
+into `lql_selector` without an intermediate private selector tree.
 
-Required lonejson usage:
-
-- use lonejson value visitors for recursive selector sum-type parsing and JSON
-  union points that fixed mappings cannot express directly;
-- use lonejson mapped structs where they improve fixed-shape term parsing, but
-  do not force recursive AST union handling through maps if a visitor is the
-  clearer lonejson-native surface;
-- use lonejson mapped serialization or `lonejson_writer` APIs for output;
-- route lonejson runtime allocation through the active `lql *` receiver
-  allocator bridge;
-- cleanup every mapped transport value through lonejson cleanup/reset APIs.
-
-Range bound and permissive scalar-to-string term conversion are the important
+Range bound and permissive scalar-to-string term conversion remain the important
 union points. The recursive selector node itself is also a union point:
 `and`/`or` carry arrays, `not` carries one child node, term operators carry
-operator-specific objects, and `exists` carries a string. The implementation may
-parse those shapes through lonejson visitors, `lonejson_json_value` visitors, or
-another lonejson-native adapter. The output of that parsing is `lql_selector`,
-not an intermediate private selector tree. It must not inspect raw JSON bytes
-with ad hoc token code.
+operator-specific objects, and `exists` carries a string. The output of that
+parsing is `lql_selector`, not an intermediate private selector tree.
 
 Manual JSON concatenation is not allowed, including for tests and small
 selector objects, unless the text is a fixed fixture that is not parsed or

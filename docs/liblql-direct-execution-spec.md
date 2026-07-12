@@ -113,17 +113,15 @@ spool only after the selector result is final. This replaces
 capture-then-reparse mutation execution; it is not permission to restore an
 input/result cache or a selector-aware transform layer in LoneJSON.
 
-For direct-object selector fields, liblql may use LoneJSON's public mapped
-candidate stream with fixed schema fields configured as `lonejson_json_value`
-parse visitors. This is still direct execution: LoneJSON schema-dispatches and
-validates only the named JSON members, while liblql owns every selector
-comparison, decision, limit, callback, and root-array policy. The mapped
-candidate stream must accept scalar roots as unmatched records without
-materializing them and expose array roots so liblql rejects them.
+This document describes the direct-execution reset baseline. The active
+self-contained cutover is specified in
+`docs/liblql-self-contained-execution-spec.md`: liblql owns JSON scanning and
+emission for direct execution and selector AST JSON, without a LoneJSON runtime
+or link dependency in the target architecture.
 
 liblql compiles selector, projection, and mutation input into immutable flat
-programs. A single direct stream executor consumes LoneJSON public events and
-owns, for one current record only:
+programs. A single direct stream executor consumes JSON events and owns, for one
+current record only:
 
 - path and container state;
 - selector truth and temporal comparison state;

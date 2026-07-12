@@ -246,6 +246,8 @@ static int run_selector_json_write(lql *ctx) {
                                  "\"value\":\"open\"}}";
   static const char escaped_expected[] =
       "{\"eq\":{\"field\":\"/msg\",\"value\":\"a\\\"b\\n\"}}";
+  static const char spaced_json[] = " \n { \"eq\" : { \"field\" : \"\\/status\" "
+                                    ", \"value\" : \"\\u006fpen\" } } \t";
   lql_selector *selector;
   lql_selector *roundtrip;
   lql_selector_string_term term;
@@ -317,6 +319,28 @@ static int run_selector_json_write(lql *ctx) {
   }
   fclose(file);
   ctx->selector_destroy(ctx, roundtrip);
+  ctx->selector_destroy(ctx, selector);
+  roundtrip = NULL;
+  selector = NULL;
+
+  if (ctx->selector_parse_json(ctx, spaced_json, sizeof(spaced_json) - 1u,
+                               &selector, &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  file = tmpfile();
+  if (file == NULL) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  if (ctx->selector_write_json(ctx, selector, file, &error) != LQL_STATUS_OK ||
+      read_tmpfile(file, buffer, sizeof(buffer), &len) ||
+      len != sizeof(expected) - 1u ||
+      memcmp(buffer, expected, sizeof(expected) - 1u) != 0) {
+    fclose(file);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  fclose(file);
   ctx->selector_destroy(ctx, selector);
   return 0;
 }

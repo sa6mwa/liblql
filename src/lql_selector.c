@@ -1,4 +1,4 @@
-#include "lql_lonejson_internal.h"
+#include "lql_internal.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -1406,39 +1406,15 @@ typedef struct selector_json_state {
   size_t text_cap;
 } selector_json_state;
 
-static void selector_json_set_lj_error(lonejson_error *error,
-                                       lonejson_status status,
-                                       const char *message) {
-  size_t len;
-  if (error == NULL) {
-    return;
-  }
-  error->code = status;
-  error->message[0] = '\0';
-  if (message == NULL) {
-    return;
-  }
-  len = strlen(message);
-  if (len >= sizeof(error->message)) {
-    len = sizeof(error->message) - 1u;
-  }
-  memcpy(error->message, message, len);
-  error->message[len] = '\0';
-}
-
-static lonejson_status selector_json_fail(selector_json_state *state,
-                                          lonejson_error *error,
-                                          lql_status status,
-                                          const char *message) {
-  lonejson_status lj_status;
+static lql_status selector_json_fail(selector_json_state *state,
+                                     lql_error *error, lql_status status,
+                                     const char *message) {
   if (state->status == LQL_STATUS_OK) {
     state->status = status;
     lql_set_error(state->error, status, message);
   }
-  lj_status = status == LQL_STATUS_NO_MEMORY ? LONEJSON_STATUS_ALLOCATION_FAILED
-                                             : LONEJSON_STATUS_CALLBACK_FAILED;
-  selector_json_set_lj_error(error, lj_status, message);
-  return lj_status;
+  lql_set_error(error, status, message);
+  return status;
 }
 
 static selector_json_frame *selector_json_top(selector_json_state *state) {
@@ -1690,9 +1666,9 @@ static lql_status selector_json_validate_predicate(selector_json_state *state,
   return LQL_STATUS_OK;
 }
 
-static lonejson_status selector_json_consume_key(selector_json_state *state,
+static lql_status selector_json_consume_key(selector_json_state *state,
                                                  selector_json_frame *frame,
-                                                 lonejson_error *error) {
+                                                 lql_error *error) {
   state->parser.allocator->destroy(state->parser.allocator, frame->pending_key);
   frame->pending_key =
       state->parser.allocator->strdup(state->parser.allocator, state->text);
@@ -1700,34 +1676,34 @@ static lonejson_status selector_json_consume_key(selector_json_state *state,
     return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                               "out of memory");
   }
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status selector_json_begin_key(void *user,
-                                               lonejson_error *error) {
+static lql_status selector_json_begin_key(void *user,
+                                               lql_error *error) {
   selector_json_state *state;
   state = (selector_json_state *)user;
   if (!selector_json_reset_text(state)) {
     return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                               "out of memory");
   }
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status selector_json_key_chunk(void *user, const char *data,
+static lql_status selector_json_key_chunk(void *user, const char *data,
                                                size_t len,
-                                               lonejson_error *error) {
+                                               lql_error *error) {
   selector_json_state *state;
   state = (selector_json_state *)user;
   if (!selector_json_append_text(state, data, len)) {
     return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                               "out of memory");
   }
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status selector_json_end_key(void *user,
-                                             lonejson_error *error) {
+static lql_status selector_json_end_key(void *user,
+                                             lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   lql_selector_kind kind;
@@ -1776,8 +1752,8 @@ static lql_selector *selector_json_append_child(selector_json_state *state,
   return &parent->children[parent->child_count - 1u];
 }
 
-static lonejson_status selector_json_object_begin(void *user,
-                                                  lonejson_error *error) {
+static lql_status selector_json_object_begin(void *user,
+                                                  lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   lql_selector *child;
@@ -1794,7 +1770,7 @@ static lonejson_status selector_json_object_begin(void *user,
       return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                                 "out of memory");
     }
-    return LONEJSON_STATUS_OK;
+    return LQL_STATUS_OK;
   }
   if (frame->kind == SELECTOR_JSON_FRAME_CHILD_ARRAY) {
     child = selector_json_append_child(state, frame->selector);
@@ -1806,7 +1782,7 @@ static lonejson_status selector_json_object_begin(void *user,
       return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                                 "out of memory");
     }
-    return LONEJSON_STATUS_OK;
+    return LQL_STATUS_OK;
   }
   if (frame->kind != SELECTOR_JSON_FRAME_SELECTOR ||
       frame->pending_key == NULL || frame->selector == NULL) {
@@ -1827,7 +1803,7 @@ static lonejson_status selector_json_object_begin(void *user,
       return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                                 "out of memory");
     }
-    return LONEJSON_STATUS_OK;
+    return LQL_STATUS_OK;
   }
   if (selector_is_predicate(frame->selector) &&
       kind != LQL_SELECTOR_KIND_EXISTS) {
@@ -1839,14 +1815,14 @@ static lonejson_status selector_json_object_begin(void *user,
       return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                                 "out of memory");
     }
-    return LONEJSON_STATUS_OK;
+    return LQL_STATUS_OK;
   }
   return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
                             "unexpected selector JSON object");
 }
 
-static lonejson_status selector_json_object_end(void *user,
-                                                lonejson_error *error) {
+static lql_status selector_json_object_end(void *user,
+                                                lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   lql_status st;
@@ -1887,11 +1863,11 @@ static lonejson_status selector_json_object_end(void *user,
     }
   }
   selector_json_pop_frame(state);
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status selector_json_array_begin(void *user,
-                                                 lonejson_error *error) {
+static lql_status selector_json_array_begin(void *user,
+                                                 lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   state = (selector_json_state *)user;
@@ -1911,7 +1887,7 @@ static lonejson_status selector_json_array_begin(void *user,
       return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                                 "out of memory");
     }
-    return LONEJSON_STATUS_OK;
+    return LQL_STATUS_OK;
   }
   if (frame->kind == SELECTOR_JSON_FRAME_PREDICATE &&
       key_is_any(frame->pending_key)) {
@@ -1923,14 +1899,14 @@ static lonejson_status selector_json_array_begin(void *user,
       return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                                 "out of memory");
     }
-    return LONEJSON_STATUS_OK;
+    return LQL_STATUS_OK;
   }
   return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
                             "unexpected selector JSON array");
 }
 
-static lonejson_status selector_json_array_end(void *user,
-                                               lonejson_error *error) {
+static lql_status selector_json_array_end(void *user,
+                                               lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   state = (selector_json_state *)user;
@@ -1941,36 +1917,36 @@ static lonejson_status selector_json_array_end(void *user,
                               "unexpected selector JSON array end");
   }
   selector_json_pop_frame(state);
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status selector_json_string_begin(void *user,
-                                                  lonejson_error *error) {
+static lql_status selector_json_string_begin(void *user,
+                                                  lql_error *error) {
   selector_json_state *state;
   state = (selector_json_state *)user;
   if (!selector_json_reset_text(state)) {
     return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                               "out of memory");
   }
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status selector_json_string_chunk(void *user, const char *data,
+static lql_status selector_json_string_chunk(void *user, const char *data,
                                                   size_t len,
-                                                  lonejson_error *error) {
+                                                  lql_error *error) {
   selector_json_state *state;
   state = (selector_json_state *)user;
   if (!selector_json_append_text(state, data, len)) {
     return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                               "out of memory");
   }
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status
+static lql_status
 selector_json_store_predicate_string(selector_json_state *state,
                                      selector_json_frame *frame,
-                                     lonejson_error *error) {
+                                     lql_error *error) {
   const char *key;
   lql_selector *selector;
   int ok;
@@ -2021,11 +1997,11 @@ selector_json_store_predicate_string(selector_json_state *state,
   }
   state->parser.allocator->destroy(state->parser.allocator, frame->pending_key);
   frame->pending_key = NULL;
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status selector_json_string_end(void *user,
-                                                lonejson_error *error) {
+static lql_status selector_json_string_end(void *user,
+                                                lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   state = (selector_json_state *)user;
@@ -2048,7 +2024,7 @@ static lonejson_status selector_json_string_end(void *user,
     state->parser.allocator->destroy(state->parser.allocator,
                                      frame->pending_key);
     frame->pending_key = NULL;
-    return LONEJSON_STATUS_OK;
+    return LQL_STATUS_OK;
   }
   if (frame->kind == SELECTOR_JSON_FRAME_PREDICATE &&
       frame->pending_key != NULL) {
@@ -2059,25 +2035,25 @@ static lonejson_status selector_json_string_end(void *user,
       return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                                 "out of memory");
     }
-    return LONEJSON_STATUS_OK;
+    return LQL_STATUS_OK;
   }
   return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
                             "unexpected selector JSON string");
 }
 
-static lonejson_status selector_json_number_begin(void *user,
-                                                  lonejson_error *error) {
+static lql_status selector_json_number_begin(void *user,
+                                                  lql_error *error) {
   return selector_json_string_begin(user, error);
 }
 
-static lonejson_status selector_json_number_chunk(void *user, const char *data,
+static lql_status selector_json_number_chunk(void *user, const char *data,
                                                   size_t len,
-                                                  lonejson_error *error) {
+                                                  lql_error *error) {
   return selector_json_string_chunk(user, data, len, error);
 }
 
-static lonejson_status selector_json_number_end(void *user,
-                                                lonejson_error *error) {
+static lql_status selector_json_number_end(void *user,
+                                                lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   int ok;
@@ -2104,11 +2080,11 @@ static lonejson_status selector_json_number_end(void *user,
   }
   state->parser.allocator->destroy(state->parser.allocator, frame->pending_key);
   frame->pending_key = NULL;
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status selector_json_boolean(void *user, int value,
-                                             lonejson_error *error) {
+static lql_status selector_json_boolean(void *user, int value,
+                                             lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   state = (selector_json_state *)user;
@@ -2122,10 +2098,10 @@ static lonejson_status selector_json_boolean(void *user, int value,
   frame->selector->ignore_case = value ? 1 : 0;
   state->parser.allocator->destroy(state->parser.allocator, frame->pending_key);
   frame->pending_key = NULL;
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status selector_json_null(void *user, lonejson_error *error) {
+static lql_status selector_json_null(void *user, lql_error *error) {
   selector_json_state *state;
   state = (selector_json_state *)user;
   return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
@@ -2149,33 +2125,452 @@ static void selector_json_state_cleanup(selector_json_state *state) {
   state->text_cap = 0u;
 }
 
-static void selector_json_visitor_init(lonejson_value_visitor *visitor) {
-  *visitor = lonejson_default_value_visitor();
-  visitor->object_begin = selector_json_object_begin;
-  visitor->object_end = selector_json_object_end;
-  visitor->object_key_begin = selector_json_begin_key;
-  visitor->object_key_chunk = selector_json_key_chunk;
-  visitor->object_key_end = selector_json_end_key;
-  visitor->array_begin = selector_json_array_begin;
-  visitor->array_end = selector_json_array_end;
-  visitor->string_begin = selector_json_string_begin;
-  visitor->string_chunk = selector_json_string_chunk;
-  visitor->string_end = selector_json_string_end;
-  visitor->number_begin = selector_json_number_begin;
-  visitor->number_chunk = selector_json_number_chunk;
-  visitor->number_end = selector_json_number_end;
-  visitor->boolean_value = selector_json_boolean;
-  visitor->null_value = selector_json_null;
+typedef struct selector_json_scanner {
+  const unsigned char *data;
+  size_t len;
+  size_t pos;
+  selector_json_state *state;
+  lql_error *error;
+} selector_json_scanner;
+
+static lql_status selector_json_scan_value(selector_json_scanner *scanner);
+
+static lql_status selector_json_scan_fail(selector_json_scanner *scanner,
+                                          const char *message) {
+  return selector_json_fail(scanner->state, scanner->error,
+                            LQL_STATUS_JSON_ERROR, message);
+}
+
+static void selector_json_scan_ws(selector_json_scanner *scanner) {
+  while (scanner->pos < scanner->len) {
+    switch (scanner->data[scanner->pos]) {
+    case ' ':
+    case '\t':
+    case '\r':
+    case '\n':
+      ++scanner->pos;
+      break;
+    default:
+      return;
+    }
+  }
+}
+
+static int selector_json_hex_value(unsigned char c) {
+  if (c >= (unsigned char)'0' && c <= (unsigned char)'9') {
+    return (int)(c - (unsigned char)'0');
+  }
+  if (c >= (unsigned char)'a' && c <= (unsigned char)'f') {
+    return (int)(c - (unsigned char)'a') + 10;
+  }
+  if (c >= (unsigned char)'A' && c <= (unsigned char)'F') {
+    return (int)(c - (unsigned char)'A') + 10;
+  }
+  return -1;
+}
+
+static int selector_json_scan_hex4(selector_json_scanner *scanner,
+                                   unsigned long *out) {
+  unsigned long value;
+  int digit;
+  size_t i;
+  if (scanner->pos + 4u > scanner->len) {
+    return 0;
+  }
+  value = 0u;
+  for (i = 0u; i < 4u; ++i) {
+    digit = selector_json_hex_value(scanner->data[scanner->pos + i]);
+    if (digit < 0) {
+      return 0;
+    }
+    value = (value << 4) | (unsigned long)digit;
+  }
+  scanner->pos += 4u;
+  *out = value;
+  return 1;
+}
+
+static size_t selector_json_utf8_encode(unsigned long cp, char out[4]) {
+  if (cp <= 0x7ful) {
+    out[0] = (char)cp;
+    return 1u;
+  }
+  if (cp <= 0x7fful) {
+    out[0] = (char)(0xc0u | (unsigned int)(cp >> 6));
+    out[1] = (char)(0x80u | (unsigned int)(cp & 0x3fu));
+    return 2u;
+  }
+  if (cp <= 0xfffful) {
+    out[0] = (char)(0xe0u | (unsigned int)(cp >> 12));
+    out[1] = (char)(0x80u | (unsigned int)((cp >> 6) & 0x3fu));
+    out[2] = (char)(0x80u | (unsigned int)(cp & 0x3fu));
+    return 3u;
+  }
+  out[0] = (char)(0xf0u | (unsigned int)(cp >> 18));
+  out[1] = (char)(0x80u | (unsigned int)((cp >> 12) & 0x3fu));
+  out[2] = (char)(0x80u | (unsigned int)((cp >> 6) & 0x3fu));
+  out[3] = (char)(0x80u | (unsigned int)(cp & 0x3fu));
+  return 4u;
+}
+
+static lql_status selector_json_emit_string_chunk(
+    selector_json_scanner *scanner, int key, const char *data, size_t len) {
+  if (len == 0u) {
+    return LQL_STATUS_OK;
+  }
+  if (key) {
+    return selector_json_key_chunk(scanner->state, data, len, scanner->error);
+  }
+  return selector_json_string_chunk(scanner->state, data, len, scanner->error);
+}
+
+static lql_status selector_json_scan_string(selector_json_scanner *scanner,
+                                            int key) {
+  unsigned char c;
+  unsigned long cp;
+  unsigned long low;
+  const unsigned char *chunk;
+  char out[4];
+  size_t chunk_start;
+  size_t out_len;
+  lql_status st;
+  if (scanner->pos >= scanner->len ||
+      scanner->data[scanner->pos] != (unsigned char)'"') {
+    return selector_json_scan_fail(scanner, "JSON string expected");
+  }
+  ++scanner->pos;
+  if (key) {
+    st = selector_json_begin_key(scanner->state, scanner->error);
+  } else {
+    st = selector_json_string_begin(scanner->state, scanner->error);
+  }
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  chunk_start = scanner->pos;
+  while (scanner->pos < scanner->len) {
+    c = scanner->data[scanner->pos];
+    if (c == (unsigned char)'"') {
+      st = selector_json_emit_string_chunk(
+          scanner, key, (const char *)&scanner->data[chunk_start],
+          scanner->pos - chunk_start);
+      if (st != LQL_STATUS_OK) {
+        return st;
+      }
+      ++scanner->pos;
+      return key ? selector_json_end_key(scanner->state, scanner->error)
+                 : selector_json_string_end(scanner->state, scanner->error);
+    }
+    if (c < 0x20u) {
+      return selector_json_scan_fail(scanner,
+                                     "JSON string contains control byte");
+    }
+    if (c != (unsigned char)'\\') {
+      ++scanner->pos;
+      continue;
+    }
+    st = selector_json_emit_string_chunk(
+        scanner, key, (const char *)&scanner->data[chunk_start],
+        scanner->pos - chunk_start);
+    if (st != LQL_STATUS_OK) {
+      return st;
+    }
+    ++scanner->pos;
+    if (scanner->pos >= scanner->len) {
+      return selector_json_scan_fail(scanner, "JSON string escape is truncated");
+    }
+    c = scanner->data[scanner->pos++];
+    switch (c) {
+    case '"':
+    case '\\':
+    case '/':
+      out[0] = (char)c;
+      out_len = 1u;
+      break;
+    case 'b':
+      out[0] = '\b';
+      out_len = 1u;
+      break;
+    case 'f':
+      out[0] = '\f';
+      out_len = 1u;
+      break;
+    case 'n':
+      out[0] = '\n';
+      out_len = 1u;
+      break;
+    case 'r':
+      out[0] = '\r';
+      out_len = 1u;
+      break;
+    case 't':
+      out[0] = '\t';
+      out_len = 1u;
+      break;
+    case 'u':
+      if (!selector_json_scan_hex4(scanner, &cp)) {
+        return selector_json_scan_fail(scanner, "invalid JSON unicode escape");
+      }
+      if (cp >= 0xd800ul && cp <= 0xdbfful) {
+        if (scanner->pos + 6u > scanner->len ||
+            scanner->data[scanner->pos] != (unsigned char)'\\' ||
+            scanner->data[scanner->pos + 1u] != (unsigned char)'u') {
+          return selector_json_scan_fail(scanner,
+                                         "JSON high surrogate is unpaired");
+        }
+        scanner->pos += 2u;
+        if (!selector_json_scan_hex4(scanner, &low) || low < 0xdc00ul ||
+            low > 0xdffful) {
+          return selector_json_scan_fail(scanner,
+                                         "JSON high surrogate is unpaired");
+        }
+        cp = 0x10000ul + (((cp - 0xd800ul) << 10) | (low - 0xdc00ul));
+      } else if (cp >= 0xdc00ul && cp <= 0xdffful) {
+        return selector_json_scan_fail(scanner,
+                                       "JSON low surrogate is unpaired");
+      }
+      out_len = selector_json_utf8_encode(cp, out);
+      break;
+    default:
+      return selector_json_scan_fail(scanner, "invalid JSON string escape");
+    }
+    st = selector_json_emit_string_chunk(scanner, key, out, out_len);
+    if (st != LQL_STATUS_OK) {
+      return st;
+    }
+    chunk = &scanner->data[scanner->pos];
+    chunk_start = (size_t)(chunk - scanner->data);
+  }
+  return selector_json_scan_fail(scanner, "unterminated JSON string");
+}
+
+static lql_status selector_json_scan_number(selector_json_scanner *scanner) {
+  size_t start;
+  lql_status st;
+  start = scanner->pos;
+  if (scanner->data[scanner->pos] == (unsigned char)'-') {
+    ++scanner->pos;
+    if (scanner->pos >= scanner->len) {
+      return selector_json_scan_fail(scanner, "invalid JSON number");
+    }
+  }
+  if (scanner->data[scanner->pos] == (unsigned char)'0') {
+    ++scanner->pos;
+  } else if (scanner->data[scanner->pos] >= (unsigned char)'1' &&
+             scanner->data[scanner->pos] <= (unsigned char)'9') {
+    do {
+      ++scanner->pos;
+    } while (scanner->pos < scanner->len &&
+             scanner->data[scanner->pos] >= (unsigned char)'0' &&
+             scanner->data[scanner->pos] <= (unsigned char)'9');
+  } else {
+    return selector_json_scan_fail(scanner, "invalid JSON number");
+  }
+  if (scanner->pos < scanner->len &&
+      scanner->data[scanner->pos] == (unsigned char)'.') {
+    ++scanner->pos;
+    if (scanner->pos >= scanner->len ||
+        scanner->data[scanner->pos] < (unsigned char)'0' ||
+        scanner->data[scanner->pos] > (unsigned char)'9') {
+      return selector_json_scan_fail(scanner, "invalid JSON number");
+    }
+    do {
+      ++scanner->pos;
+    } while (scanner->pos < scanner->len &&
+             scanner->data[scanner->pos] >= (unsigned char)'0' &&
+             scanner->data[scanner->pos] <= (unsigned char)'9');
+  }
+  if (scanner->pos < scanner->len &&
+      (scanner->data[scanner->pos] == (unsigned char)'e' ||
+       scanner->data[scanner->pos] == (unsigned char)'E')) {
+    ++scanner->pos;
+    if (scanner->pos < scanner->len &&
+        (scanner->data[scanner->pos] == (unsigned char)'+' ||
+         scanner->data[scanner->pos] == (unsigned char)'-')) {
+      ++scanner->pos;
+    }
+    if (scanner->pos >= scanner->len ||
+        scanner->data[scanner->pos] < (unsigned char)'0' ||
+        scanner->data[scanner->pos] > (unsigned char)'9') {
+      return selector_json_scan_fail(scanner, "invalid JSON number");
+    }
+    do {
+      ++scanner->pos;
+    } while (scanner->pos < scanner->len &&
+             scanner->data[scanner->pos] >= (unsigned char)'0' &&
+             scanner->data[scanner->pos] <= (unsigned char)'9');
+  }
+  st = selector_json_number_begin(scanner->state, scanner->error);
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  st = selector_json_number_chunk(
+      scanner->state, (const char *)&scanner->data[start],
+      scanner->pos - start, scanner->error);
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  return selector_json_number_end(scanner->state, scanner->error);
+}
+
+static int selector_json_match_literal(selector_json_scanner *scanner,
+                                       const char *literal) {
+  size_t len;
+  len = strlen(literal);
+  if (scanner->pos + len > scanner->len ||
+      memcmp(&scanner->data[scanner->pos], literal, len) != 0) {
+    return 0;
+  }
+  scanner->pos += len;
+  return 1;
+}
+
+static lql_status selector_json_scan_array(selector_json_scanner *scanner) {
+  lql_status st;
+  ++scanner->pos;
+  st = selector_json_array_begin(scanner->state, scanner->error);
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  selector_json_scan_ws(scanner);
+  if (scanner->pos < scanner->len &&
+      scanner->data[scanner->pos] == (unsigned char)']') {
+    ++scanner->pos;
+    return selector_json_array_end(scanner->state, scanner->error);
+  }
+  for (;;) {
+    st = selector_json_scan_value(scanner);
+    if (st != LQL_STATUS_OK) {
+      return st;
+    }
+    selector_json_scan_ws(scanner);
+    if (scanner->pos >= scanner->len) {
+      return selector_json_scan_fail(scanner, "unterminated JSON array");
+    }
+    if (scanner->data[scanner->pos] == (unsigned char)']') {
+      ++scanner->pos;
+      return selector_json_array_end(scanner->state, scanner->error);
+    }
+    if (scanner->data[scanner->pos] != (unsigned char)',') {
+      return selector_json_scan_fail(scanner, "JSON array comma expected");
+    }
+    ++scanner->pos;
+    selector_json_scan_ws(scanner);
+  }
+}
+
+static lql_status selector_json_scan_object(selector_json_scanner *scanner) {
+  lql_status st;
+  ++scanner->pos;
+  st = selector_json_object_begin(scanner->state, scanner->error);
+  if (st != LQL_STATUS_OK) {
+    return st;
+  }
+  selector_json_scan_ws(scanner);
+  if (scanner->pos < scanner->len &&
+      scanner->data[scanner->pos] == (unsigned char)'}') {
+    ++scanner->pos;
+    return selector_json_object_end(scanner->state, scanner->error);
+  }
+  for (;;) {
+    st = selector_json_scan_string(scanner, 1);
+    if (st != LQL_STATUS_OK) {
+      return st;
+    }
+    selector_json_scan_ws(scanner);
+    if (scanner->pos >= scanner->len ||
+        scanner->data[scanner->pos] != (unsigned char)':') {
+      return selector_json_scan_fail(scanner, "JSON object colon expected");
+    }
+    ++scanner->pos;
+    selector_json_scan_ws(scanner);
+    st = selector_json_scan_value(scanner);
+    if (st != LQL_STATUS_OK) {
+      return st;
+    }
+    selector_json_scan_ws(scanner);
+    if (scanner->pos >= scanner->len) {
+      return selector_json_scan_fail(scanner, "unterminated JSON object");
+    }
+    if (scanner->data[scanner->pos] == (unsigned char)'}') {
+      ++scanner->pos;
+      return selector_json_object_end(scanner->state, scanner->error);
+    }
+    if (scanner->data[scanner->pos] != (unsigned char)',') {
+      return selector_json_scan_fail(scanner, "JSON object comma expected");
+    }
+    ++scanner->pos;
+    selector_json_scan_ws(scanner);
+  }
+}
+
+static lql_status selector_json_scan_value(selector_json_scanner *scanner) {
+  selector_json_scan_ws(scanner);
+  if (scanner->pos >= scanner->len) {
+    return selector_json_scan_fail(scanner, "JSON value expected");
+  }
+  switch (scanner->data[scanner->pos]) {
+  case '{':
+    return selector_json_scan_object(scanner);
+  case '[':
+    return selector_json_scan_array(scanner);
+  case '"':
+    return selector_json_scan_string(scanner, 0);
+  case 't':
+    if (selector_json_match_literal(scanner, "true")) {
+      return selector_json_boolean(scanner->state, 1, scanner->error);
+    }
+    break;
+  case 'f':
+    if (selector_json_match_literal(scanner, "false")) {
+      return selector_json_boolean(scanner->state, 0, scanner->error);
+    }
+    break;
+  case 'n':
+    if (selector_json_match_literal(scanner, "null")) {
+      return selector_json_null(scanner->state, scanner->error);
+    }
+    break;
+  default:
+    if (scanner->data[scanner->pos] == (unsigned char)'-' ||
+        (scanner->data[scanner->pos] >= (unsigned char)'0' &&
+         scanner->data[scanner->pos] <= (unsigned char)'9')) {
+      return selector_json_scan_number(scanner);
+    }
+    break;
+  }
+  return selector_json_scan_fail(scanner, "invalid JSON value");
+}
+
+static lql_status selector_json_scan_document(selector_json_state *state,
+                                              const void *json,
+                                              size_t json_len,
+                                              lql_error *error) {
+  selector_json_scanner scanner;
+  memset(&scanner, 0, sizeof(scanner));
+  scanner.data = (const unsigned char *)json;
+  scanner.len = json_len;
+  scanner.state = state;
+  scanner.error = error;
+  selector_json_scan_ws(&scanner);
+  if (scanner.pos >= scanner.len) {
+    return selector_json_scan_fail(&scanner, "JSON value expected");
+  }
+  if (selector_json_scan_value(&scanner) != LQL_STATUS_OK) {
+    return state->status == LQL_STATUS_OK ? LQL_STATUS_JSON_ERROR
+                                          : state->status;
+  }
+  selector_json_scan_ws(&scanner);
+  if (scanner.pos != scanner.len) {
+    return selector_json_scan_fail(&scanner, "trailing data after JSON value");
+  }
+  return LQL_STATUS_OK;
 }
 
 LQL_INTERNAL_SYMBOL lql_status
 lql_parse_selector_json_internal(lql *self, const void *json, size_t json_len,
                                  lql_selector **out, lql_error *error) {
   lql_allocator *allocator;
-  lonejson *runtime;
-  lonejson_error lj_error;
-  lonejson_status lj_status;
-  lonejson_value_visitor visitor;
   selector_json_state state;
   lql_status st;
 
@@ -2205,23 +2600,10 @@ lql_parse_selector_json_internal(lql *self, const void *json, size_t json_len,
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
     return LQL_STATUS_NO_MEMORY;
   }
-  runtime = lql_lonejson_new(self, &lj_error);
-  if (runtime == NULL) {
-    allocator->destroy(allocator, state.selector);
-    lql_set_error(error, LQL_STATUS_NO_MEMORY, lj_error.message);
-    return LQL_STATUS_NO_MEMORY;
-  }
-  selector_json_visitor_init(&visitor);
-  lj_status = lonejson_visit_value_buffer(runtime, json, json_len, &visitor,
-                                          &state, &lj_error);
-  lonejson_free(runtime);
-  st = LQL_STATUS_OK;
-  if (lj_status != LONEJSON_STATUS_OK) {
-    st = state.status == LQL_STATUS_OK ? LQL_STATUS_JSON_ERROR : state.status;
+  st = selector_json_scan_document(&state, json, json_len, error);
+  if (st != LQL_STATUS_OK) {
     if (error != NULL && error->message[0] == '\0') {
-      lql_set_error(error, st,
-                    lj_error.message[0] == '\0' ? "selector JSON parse failed"
-                                                : lj_error.message);
+      lql_set_error(error, st, "selector JSON parse failed");
     }
   } else if (state.frame_count != 0u) {
     st = LQL_STATUS_PARSE_ERROR;
