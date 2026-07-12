@@ -3,7 +3,7 @@ set -eu
 
 . scripts/scanner_parity_common.sh
 
-scanner_parity_init 'scanner parity matrix' build/scanner-parity-matrix.jsonl 5
+scanner_parity_init 'scanner parity matrix' build/scanner-parity-matrix.jsonl 9
 
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' decision_only_selector /id
@@ -18,6 +18,10 @@ scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   iprefix_status_open 'iprefix{field=/status,value=OP}' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  contains_payload_cde 'contains{f=/payload,v=cde}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  icontains_payload_cde 'icontains{f=/payload,v=CDE}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   in_status_open_closed 'in{field=/status,any=open|closed}' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   in_status_open_pending 'in{field=/status,any=open|pending}' decision_only_selector /id
@@ -29,6 +33,10 @@ scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   prefix_status_open 'prefix{field=/status,value=op}' plus_value_source_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  contains_payload_cde 'contains{f=/payload,v=cde}' plus_value_source_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  icontains_payload_cde 'icontains{f=/payload,v=CDE}' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   in_status_open_pending 'in{field=/status,any=open|pending}' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \

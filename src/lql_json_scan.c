@@ -6,6 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(__GNUC__)
+#define LQL_JSON_INLINE static __inline__ __attribute__((always_inline))
+#else
+#define LQL_JSON_INLINE static
+#endif
+
 #define LQL_JSON_READ_BUFFER_SIZE 8192u
 #define LQL_JSON_EMIT_BUFFER_SIZE 8192u
 #define LQL_JSON_MAX_DEPTH 128u
@@ -635,6 +641,44 @@ static void lql_json_match_icontains_ascii_span(lql_json_scan *scan,
   }
 }
 
+static void lql_json_match_contains_ascii_span(lql_json_scan *scan,
+                                               unsigned long active,
+                                               const unsigned char *data,
+                                               size_t len) {
+  size_t i;
+  size_t offset;
+  if (scan == NULL || data == NULL || len == 0u || active == 0ul)
+    return;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    const lql_json_flat_eq_term *term;
+    unsigned long bit;
+    size_t pos;
+    bit = 1ul << i;
+    if ((active & bit) == 0ul || (scan->match_active & bit) == 0ul ||
+        (scan->match_failed & bit) != 0ul) {
+      continue;
+    }
+    term = &scan->flat_terms[i];
+    if (term->kind != LQL_JSON_FLAT_TERM_CONTAINS ||
+        term->contains_failure == NULL || term->value_len == 0u) {
+      scan->match_failed |= bit;
+      continue;
+    }
+    pos = scan->match_pos[i];
+    for (offset = 0u; offset < len; ++offset) {
+      while (pos != 0u && data[offset] != (unsigned char)term->value[pos])
+        pos = term->contains_failure[pos - 1u];
+      if (data[offset] == (unsigned char)term->value[pos])
+        ++pos;
+      if (pos == term->value_len) {
+        scan->match_contains |= bit;
+        pos = term->contains_failure[pos - 1u];
+      }
+    }
+    scan->match_pos[i] = pos;
+  }
+}
+
 static void lql_json_match_icontains_byte(lql_json_scan *scan,
                                           unsigned char value) {
   unsigned long rune;
@@ -730,6 +774,7 @@ static void lql_json_match_span(lql_json_scan *scan, const unsigned char *data,
                                 size_t len) {
   size_t i;
   unsigned long ascii_icontains;
+  unsigned long ascii_contains;
   if (len == 0u) {
     return;
   }
@@ -739,7 +784,27 @@ static void lql_json_match_span(lql_json_scan *scan, const unsigned char *data,
   }
   lql_json_temporal_range_bytes(scan, data, len);
   ascii_icontains = 0ul;
+  ascii_contains = 0ul;
   if (!scan->match_key) {
+    ascii_contains = scan->match_active & ~scan->match_icontains &
+                     ~scan->match_failed;
+    if (ascii_contains != 0ul) {
+      size_t term_index;
+      unsigned long contains_only;
+      contains_only = 0ul;
+      for (term_index = 0u; term_index < scan->flat_term_count;
+           ++term_index) {
+        unsigned long bit;
+        bit = 1ul << term_index;
+        if ((ascii_contains & bit) != 0ul &&
+            scan->flat_terms[term_index].kind ==
+                LQL_JSON_FLAT_TERM_CONTAINS)
+          contains_only |= bit;
+      }
+      ascii_contains = contains_only;
+      if (ascii_contains != 0ul)
+        lql_json_match_contains_ascii_span(scan, ascii_contains, data, len);
+    }
     ascii_icontains =
         scan->match_active & scan->match_icontains & ~scan->match_failed;
     if (ascii_icontains != 0ul) {
@@ -755,6 +820,9 @@ static void lql_json_match_span(lql_json_scan *scan, const unsigned char *data,
         continue;
       }
       if (!scan->match_key && (scan->match_icontains & bit) != 0ul) {
+        continue;
+      }
+      if (!scan->match_key && (ascii_contains & bit) != 0ul) {
         continue;
       }
       if (!lql_json_match_span_term(scan, &scan->flat_terms[i], i, data, len)) {
@@ -1182,7 +1250,7 @@ static size_t lql_json_consumed(const lql_json_scan *scan) {
   return scan->bytes_read - (scan->length - scan->offset);
 }
 
-static lql_status lql_json_peek(lql_json_scan *scan, int *out) {
+LQL_JSON_INLINE lql_status lql_json_peek(lql_json_scan *scan, int *out) {
   lql_status status;
   status = lql_json_refill(scan);
   if (status != LQL_STATUS_OK) {
@@ -1192,7 +1260,7 @@ static lql_status lql_json_peek(lql_json_scan *scan, int *out) {
   return LQL_STATUS_OK;
 }
 
-static lql_status lql_json_take(lql_json_scan *scan, int *out) {
+LQL_JSON_INLINE lql_status lql_json_take(lql_json_scan *scan, int *out) {
   lql_status status;
   status = lql_json_peek(scan, out);
   if (status != LQL_STATUS_OK) {
@@ -1206,7 +1274,8 @@ static lql_status lql_json_take(lql_json_scan *scan, int *out) {
   return LQL_STATUS_OK;
 }
 
-static lql_status lql_json_take_expected(lql_json_scan *scan, int expected) {
+LQL_JSON_INLINE lql_status lql_json_take_expected(lql_json_scan *scan,
+                                                  int expected) {
   int value;
   lql_status status;
   status = lql_json_take(scan, &value);
@@ -1220,7 +1289,7 @@ static lql_status lql_json_take_expected(lql_json_scan *scan, int expected) {
   return LQL_STATUS_OK;
 }
 
-static lql_status lql_json_skip_space(lql_json_scan *scan) {
+LQL_JSON_INLINE lql_status lql_json_skip_space(lql_json_scan *scan) {
   lql_status status;
   int skipped;
   skipped = 0;
@@ -1283,7 +1352,7 @@ static lql_status lql_json_take_hex4(lql_json_scan *scan, unsigned int *out,
   return LQL_STATUS_OK;
 }
 
-static lql_status lql_json_copy_byte(lql_json_scan *scan, int value) {
+LQL_JSON_INLINE lql_status lql_json_copy_byte(lql_json_scan *scan, int value) {
   if (scan->writer == NULL) {
     return LQL_STATUS_OK;
   }
