@@ -44,7 +44,7 @@ check_case() {
     "$dataset" "$mode" "$peak" "$limit_bytes"
 }
 
-for mode in decision_only_selector project_file_selector mutate_file_selector
+for mode in decision_only_selector plus_value_selector project_file_selector mutate_file_selector
 do
   check_case build/direct-probe/status-100k.ndjson status_100k "$mode"
   check_case build/direct-probe/large-4x25m.ndjson large_ndjson "$mode"

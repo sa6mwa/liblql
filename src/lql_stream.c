@@ -78,8 +78,6 @@ typedef struct lql_stream_state {
   const lonejson_path_value_visitor *projection_visitor;
   lonejson *runtime;
   lonejson_spooled mutation_spool;
-  lonejson_writer mutation_writer;
-  lonejson_writer_visitor mutation_writer_visitor;
   lonejson_value_rewriter mutation_rewriter;
   lonejson_object_rewriter mutation_object_rewriter;
   lonejson_value_visitor mutation_visitor;
@@ -960,19 +958,14 @@ stream_mutation_rewriter_open(lql_stream_state *state, lonejson_error *error) {
   lonejson_object_rewrite_options object_options;
   lonejson_sink_fn sink;
   void *sink_user;
-  lonejson_status status;
   if (state->selected_direct) {
-    lonejson_writer_cleanup(&state->mutation_writer);
-    lonejson_writer_visitor_cleanup(&state->mutation_writer_visitor);
-    status = lonejson_writer_init_sink(state->runtime, &state->mutation_writer,
-                                       stream_projection_spool_sink,
-                                       &state->mutation_spool, error);
-    if (status != LONEJSON_STATUS_OK) {
-      return status;
-    }
-    return lonejson_writer_visitor_open(
-        &state->mutation_writer_visitor, &state->mutation_writer,
-        &state->mutation_visitor, &state->mutation_visitor_user, error);
+    memset(&options, 0, sizeof(options));
+    options.action = LONEJSON_VALUE_REWRITE_KEEP;
+    state->mutation_object_direct = 0;
+    return lonejson_value_rewriter_open(
+        &state->mutation_rewriter, state->runtime, stream_projection_spool_sink,
+        &state->mutation_spool, &options, &state->mutation_visitor,
+        &state->mutation_visitor_user, error);
   }
   if (state->request->mutation == NULL ||
       state->request->mutation->action_count != 1u) {
@@ -1050,8 +1043,7 @@ stream_mutation_tape_flush(lql_stream_state *state, lonejson_error *error) {
   state->mutation_tape_ready = 0;
   if (status != LONEJSON_STATUS_OK) {
     if (state->selected_direct) {
-      lonejson_writer_visitor_cleanup(&state->mutation_writer_visitor);
-      lonejson_writer_cleanup(&state->mutation_writer);
+      lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
     } else if (state->mutation_object_direct) {
       lonejson_object_rewriter_cleanup(&state->mutation_object_rewriter);
     } else {
@@ -1158,8 +1150,7 @@ stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
     }
     if (status != LONEJSON_STATUS_OK) {
       if (state->selected_direct) {
-        lonejson_writer_visitor_cleanup(&state->mutation_writer_visitor);
-        lonejson_writer_cleanup(&state->mutation_writer);
+        lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
       } else if (state->mutation_object_direct) {
         lonejson_object_rewriter_cleanup(&state->mutation_object_rewriter);
       } else {
@@ -1198,12 +1189,7 @@ stream_candidate_end(void *user, const lonejson_candidate_info *candidate,
   if (state->mutation_ready) {
     lonejson_status status;
     if (state->selected_direct) {
-      status = lonejson_writer_visitor_close(&state->mutation_writer_visitor,
-                                             error);
-      if (status == LONEJSON_STATUS_OK) {
-        status = lonejson_writer_finish(&state->mutation_writer, error);
-      }
-      lonejson_writer_cleanup(&state->mutation_writer);
+      status = lonejson_value_rewriter_close(&state->mutation_rewriter, error);
     } else {
       status = state->mutation_object_direct
                    ? lonejson_object_rewriter_close(
@@ -2622,8 +2608,7 @@ static lonejson_status stream_flat_mutation_string_end(void *user,
     if ((state->hits & state->program->terms[0].bit) == 0ul) {
       if (state->mutation_ready) {
         if (state->selected_direct) {
-          lonejson_writer_visitor_cleanup(&state->mutation_writer_visitor);
-          lonejson_writer_cleanup(&state->mutation_writer);
+          lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
         } else if (state->mutation_object_direct) {
           lonejson_object_rewriter_cleanup(&state->mutation_object_rewriter);
         } else {
@@ -2998,7 +2983,6 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   if (state->mutation_direct) {
     lonejson_spooled_init_class(runtime, &state->mutation_spool,
                                 LONEJSON_SPOOL_CLASS_LARGE_TEXT);
-    lonejson_writer_visitor_init(&state->mutation_writer_visitor);
     lonejson_value_rewriter_init(&state->mutation_rewriter);
     lonejson_object_rewriter_init(&state->mutation_object_rewriter);
     lonejson_value_event_tape_init(&state->mutation_tape);
@@ -3114,8 +3098,6 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
                     &lonejson_error, error);
   lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
   lonejson_object_rewriter_cleanup(&state->mutation_object_rewriter);
-  lonejson_writer_visitor_cleanup(&state->mutation_writer_visitor);
-  lonejson_writer_cleanup(&state->mutation_writer);
   lonejson_value_event_tape_cleanup(&state->mutation_tape);
   if (state->mutation_direct) {
     lonejson_spooled_cleanup(&state->mutation_spool);
