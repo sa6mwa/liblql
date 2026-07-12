@@ -116,6 +116,10 @@ static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
     term = &scan->flat_terms[i];
     target = scan->match_key ? term->field : term->value;
     target_len = scan->match_key ? term->field_len : term->value_len;
+    if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_PREFIX &&
+        scan->match_pos[i] == target_len) {
+      continue;
+    }
     if (scan->match_pos[i] == target_len ||
         (unsigned char)target[scan->match_pos[i]] != value) {
       scan->match_failed |= bit;
@@ -140,7 +144,12 @@ static unsigned long lql_json_match_complete(const lql_json_scan *scan) {
     }
     term = &scan->flat_terms[i];
     target_len = scan->match_key ? term->field_len : term->value_len;
-    if (scan->match_pos[i] == target_len) {
+    if ((scan->match_key || term->kind != LQL_JSON_FLAT_TERM_PREFIX) &&
+        scan->match_pos[i] == target_len) {
+      matches |= bit;
+    }
+    if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_PREFIX &&
+        scan->match_pos[i] >= target_len) {
       matches |= bit;
     }
   }
@@ -572,7 +581,8 @@ static lql_status lql_json_object(lql_json_scan *scan) {
         unsigned long bit;
         bit = 1ul << i;
         if ((key_matches & bit) != 0ul &&
-            scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EQ) {
+            (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EQ ||
+             scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_PREFIX)) {
           eq_terms |= bit;
         }
       }

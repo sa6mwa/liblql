@@ -24,7 +24,8 @@ lql_status lql_json_normalize_ndjson(const lql_json_normalize_request *request,
 
 typedef enum lql_json_flat_term_kind {
   LQL_JSON_FLAT_TERM_EQ = 0,
-  LQL_JSON_FLAT_TERM_EXISTS = 1
+  LQL_JSON_FLAT_TERM_EXISTS = 1,
+  LQL_JSON_FLAT_TERM_PREFIX = 2
 } lql_json_flat_term_kind;
 
 typedef struct lql_json_flat_eq_term {

@@ -66,7 +66,8 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     return 1;
   }
   if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
-       selector->kind != LQL_SELECTOR_KIND_EXISTS) ||
+       selector->kind != LQL_SELECTOR_KIND_EXISTS &&
+       selector->kind != LQL_SELECTOR_KIND_PREFIX) ||
       selector->field == NULL ||
       program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
     return 0;
@@ -78,11 +79,14 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   term = &program->terms[program->term_count];
   term->field = field + 1;
   term->field_len = strlen(field + 1);
-  term->kind = selector->kind == LQL_SELECTOR_KIND_EXISTS
-                   ? LQL_JSON_FLAT_TERM_EXISTS
-                   : LQL_JSON_FLAT_TERM_EQ;
-  if (term->kind == LQL_JSON_FLAT_TERM_EQ) {
-    if (!selector->value_set || !selector->value_is_string ||
+  term->kind =
+      selector->kind == LQL_SELECTOR_KIND_EXISTS   ? LQL_JSON_FLAT_TERM_EXISTS
+      : selector->kind == LQL_SELECTOR_KIND_PREFIX ? LQL_JSON_FLAT_TERM_PREFIX
+                                                   : LQL_JSON_FLAT_TERM_EQ;
+  if (term->kind == LQL_JSON_FLAT_TERM_EQ ||
+      term->kind == LQL_JSON_FLAT_TERM_PREFIX) {
+    if (!selector->value_set ||
+        selector->value_kind != LQL_SELECTOR_LITERAL_STRING ||
         selector->value_is_temporal || selector->value == NULL) {
       return 0;
     }
