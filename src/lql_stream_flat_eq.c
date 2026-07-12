@@ -495,8 +495,22 @@ static lql_status lql_flat_eq_projection_emit(lql_flat_eq_state *state,
     key_len = strlen(key);
     if (lql_flat_eq_write(state, "\"", 1u, error) != LQL_STATUS_OK) return error->code;
     for (j = 0u; j < key_len; ++j) {
-      if (key[j] == '"' || key[j] == '\\') {
+      unsigned char ch;
+      ch = (unsigned char)key[j];
+      if (ch == (unsigned char)'"' || ch == (unsigned char)'\\') {
         if (lql_flat_eq_write(state, "\\", 1u, error) != LQL_STATUS_OK) return error->code;
+      } else if (ch < 0x20u) {
+        static const char hex[] = "0123456789abcdef";
+        char escaped[6];
+        escaped[0] = '\\';
+        escaped[1] = 'u';
+        escaped[2] = '0';
+        escaped[3] = '0';
+        escaped[4] = hex[ch >> 4u];
+        escaped[5] = hex[ch & 0x0fu];
+        if (lql_flat_eq_write(state, escaped, sizeof(escaped), error) !=
+            LQL_STATUS_OK) return error->code;
+        continue;
       }
       if (lql_flat_eq_write(state, key + j, 1u, error) != LQL_STATUS_OK) return error->code;
     }
