@@ -460,8 +460,15 @@ static int lql_json_term_array_index(const lql_json_flat_eq_term *term,
   size_t text_len;
   size_t i;
   size_t value;
-  if (out == NULL ||
-      !lql_json_term_path_segment(term, path_segment, &text, &text_len) ||
+  if (out == NULL || term == NULL) {
+    return 0;
+  }
+  if (path_segment < LQL_JSON_PATH_SEGMENT_CAPACITY &&
+      (term->path_array_index_cache & (1ul << path_segment)) != 0ul) {
+    *out = term->path_array_index_values[path_segment];
+    return 1;
+  }
+  if (!lql_json_term_path_segment(term, path_segment, &text, &text_len) ||
       text_len == 0u) {
     return 0;
   }
@@ -1385,6 +1392,18 @@ static lql_status
 lql_json_matched_scalar_value(lql_json_scan *scan, unsigned long matches,
                               size_t path_segment, int value) {
   lql_status status;
+  if (value != 'n') {
+    size_t i;
+    for (i = 0u; i < scan->flat_term_count; ++i) {
+      unsigned long bit;
+      bit = 1ul << i;
+      if ((matches & bit) != 0ul &&
+          lql_json_term_value_at(&scan->flat_terms[i], path_segment) &&
+          scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EXISTS) {
+        scan->flat_eq_hits |= bit;
+      }
+    }
+  }
   if (value == '"') {
     unsigned long eq_terms;
     unsigned long temporal_terms;
@@ -1407,6 +1426,8 @@ lql_json_matched_scalar_value(lql_json_scan *scan, unsigned long matches,
         }
       }
     }
+    if (eq_terms == 0ul && temporal_terms == 0ul)
+      return lql_json_string(scan);
     lql_json_match_start(scan, eq_terms, 0, 0u);
     lql_json_temporal_range_start(scan, temporal_terms);
     status = lql_json_string(scan);
@@ -1457,6 +1478,8 @@ lql_json_matched_scalar_value(lql_json_scan *scan, unsigned long matches,
         }
       }
     }
+    if (scalar_terms == 0ul && range_terms == 0ul)
+      return lql_json_value(scan);
     lql_json_match_start(scan, scalar_terms, 0, 0u);
     lql_json_number_range_start(scan, range_terms);
     status = lql_json_value(scan);

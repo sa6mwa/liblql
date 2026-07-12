@@ -201,6 +201,52 @@ static int lql_flat_eq_contains_failure(lql_flat_eq_program *program,
   return 1;
 }
 
+static int lql_flat_eq_path_segment_index(const char *path, size_t segment,
+                                          size_t *out) {
+  const char *start;
+  const char *end;
+  size_t i;
+  size_t value;
+  if (path == NULL || path[0] != '/' || out == NULL)
+    return 0;
+  start = path + 1;
+  for (i = 0u; i < segment; ++i) {
+    end = strchr(start, '/');
+    if (end == NULL)
+      return 0;
+    start = end + 1;
+  }
+  end = strchr(start, '/');
+  value = 0u;
+  for (; end == NULL ? *start != '\0' : start < end; ++start) {
+    size_t digit;
+    if (*start < '0' || *start > '9')
+      return 0;
+    digit = (size_t)(*start - '0');
+    if (value > ((size_t)-1 - digit) / 10u)
+      return 0;
+    value = value * 10u + digit;
+  }
+  *out = value;
+  return 1;
+}
+
+static void lql_flat_eq_cache_array_indexes(lql_json_flat_eq_term *term) {
+  size_t i;
+  if (term == NULL)
+    return;
+  term->path_array_index_cache = 0ul;
+  for (i = 0u; i < LQL_JSON_PATH_SEGMENT_CAPACITY; ++i) {
+    size_t value;
+    if ((term->path_array_segments & (1ul << i)) == 0ul)
+      continue;
+    if (lql_flat_eq_path_segment_index(term->path, i, &value)) {
+      term->path_array_index_values[i] = value;
+      term->path_array_index_cache |= 1ul << i;
+    }
+  }
+}
+
 static int lql_flat_eq_append_contains(
     lql_flat_eq_program *program, const lql_selector *selector,
     const char *field, size_t path_len, size_t path_segment_count,
@@ -270,6 +316,7 @@ static int lql_flat_eq_append_contains(
     if (!lql_flat_eq_contains_failure(program, term)) {
       return 0;
     }
+    lql_flat_eq_cache_array_indexes(term);
     program->selectors[program->term_count] = selector;
     ++program->term_count;
   }
@@ -342,6 +389,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       term->path_array_wildcards = path_array_wildcards;
       term->path_any_wildcards = path_any_wildcards;
       term->path_recursive_segments = path_recursive_segments;
+      lql_flat_eq_cache_array_indexes(term);
       program->selectors[program->term_count] = selector;
       ++program->term_count;
     }
@@ -409,6 +457,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     term->has_temporal_lt = selector->has_temporal_lt;
     term->has_temporal_lte = selector->has_temporal_lte;
     term->has_temporal_eq = selector->has_temporal_eq;
+    lql_flat_eq_cache_array_indexes(term);
     program->selectors[program->term_count] = selector;
     ++program->term_count;
     return 1;
@@ -466,6 +515,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       term->temporal_gte = time_bounds->yesterday;
       term->has_temporal_gte = 1;
     }
+    lql_flat_eq_cache_array_indexes(term);
     program->selectors[program->term_count] = selector;
     ++program->term_count;
     return 1;
@@ -540,6 +590,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       term->value_len = strlen(selector->value);
     }
   }
+  lql_flat_eq_cache_array_indexes(term);
   program->selectors[program->term_count] = selector;
   ++program->term_count;
   return 1;

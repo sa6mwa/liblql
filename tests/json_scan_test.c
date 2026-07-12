@@ -188,6 +188,13 @@ int main(void) {
   static const lql_json_flat_eq_term array_scalar_wildcard_terms[] = {
       {LQL_JSON_FLAT_TERM_EQ, "values", 6u, "B", 1u, "/values/[]", 10u, 2u,
        0ul, 0ul, 2ul}};
+  static const char indexed_exists_input[] =
+      "{\"values\":[null,\"B\"]}\n"
+      "{\"values\":[\"B\",null]}\n"
+      "{\"values\":[\"A\"]}\n";
+  static const lql_json_flat_eq_term indexed_exists_terms[] = {
+      {LQL_JSON_FLAT_TERM_EXISTS, "values", 6u, NULL, 0u, "/values/1", 9u, 2u,
+       2ul}};
   static const char *const indexed_capture_segments[] = {"items", "1", "sku"};
   static const lql_json_capture_key indexed_capture_keys[] = {
       {indexed_capture_segments, 3u}};
@@ -572,6 +579,38 @@ int main(void) {
              flat_writer.len) != 0) {
     lql_json_spool_cleanup(&flat_spool);
     return 35;
+  }
+  lql_json_spool_cleanup(&flat_spool);
+  memset(&flat_reader, 0, sizeof(flat_reader));
+  memset(&flat_writer, 0, sizeof(flat_writer));
+  memset(&flat_result, 0, sizeof(flat_result));
+  flat_reader.data = (const unsigned char *)indexed_exists_input;
+  flat_reader.len = sizeof(indexed_exists_input) - 1u;
+  flat_reader.chunk_size = 1u;
+  flat_result.writer = &flat_writer;
+  memset(&flat_request, 0, sizeof(flat_request));
+  flat_request.reader = json_test_read;
+  flat_request.reader_user = &flat_reader;
+  flat_request.terms = indexed_exists_terms;
+  flat_request.term_count =
+      sizeof(indexed_exists_terms) / sizeof(indexed_exists_terms[0]);
+  flat_request.spool = &flat_spool;
+  flat_request.capture = 1;
+  flat_request.record = json_flat_record;
+  flat_request.record_user = &flat_result;
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
+    return 36;
+  }
+  if (lql_json_scan_flat_eq_ndjson(&flat_request, &flat_records, &flat_bytes,
+                                   &flat_error) != LQL_STATUS_OK ||
+      flat_records != 3u || flat_bytes != flat_reader.len ||
+      flat_result.objects != 3u || flat_result.matches != 1u ||
+      flat_writer.len != strlen("{\"values\":[null,\"B\"]}\n") ||
+      memcmp(flat_writer.data, "{\"values\":[null,\"B\"]}\n",
+             flat_writer.len) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 37;
   }
   lql_json_spool_cleanup(&flat_spool);
   memset(&flat_reader, 0, sizeof(flat_reader));

@@ -3,6 +3,8 @@
 
 #include <lql/lql.h>
 
+#include <limits.h>
+
 #include "lql_json_spool.h"
 #include "lql_temporal_internal.h"
 
@@ -36,6 +38,8 @@ typedef enum lql_json_flat_term_kind {
   LQL_JSON_FLAT_TERM_NUMBER_RANGE = 9,
   LQL_JSON_FLAT_TERM_TEMPORAL_RANGE = 10
 } lql_json_flat_term_kind;
+
+#define LQL_JSON_PATH_SEGMENT_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
 
 typedef struct lql_json_flat_eq_term {
   lql_json_flat_term_kind kind;
@@ -72,6 +76,9 @@ typedef struct lql_json_flat_eq_term {
   int has_temporal_eq;
   /* Per-execution KMP table for streaming string contains matching. */
   size_t *contains_failure;
+  /* Optional cached numeric path segment indexes. */
+  unsigned long path_array_index_cache;
+  size_t path_array_index_values[LQL_JSON_PATH_SEGMENT_CAPACITY];
 } lql_json_flat_eq_term;
 
 typedef struct lql_json_capture_key {
