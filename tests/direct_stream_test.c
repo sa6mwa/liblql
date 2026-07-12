@@ -365,6 +365,15 @@ static int run_mapped_string_predicates(lql *ctx) {
   if (run_selection(ctx, "prefix{f=/service,v=Auth}", input, 3u, 2u)) {
     return 2;
   }
+  if (run_selection(ctx, "iprefix{f=/service,v=auth}", input, 3u, 2u)) {
+    return 103;
+  }
+  if (run_selection(ctx, "prefix{f=/service,v=\303\245,ic=true}",
+                    "{\"service\":\"\303\205ngstr\303\266m\"}\n"
+                    "{\"service\":\"other\"}\n",
+                    2u, 1u)) {
+    return 104;
+  }
   if (run_selection(ctx, "in{f=/env,a=prod|stage}", input, 3u, 2u)) {
     return 3;
   }

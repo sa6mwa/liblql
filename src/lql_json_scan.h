@@ -30,7 +30,8 @@ typedef enum lql_json_flat_term_kind {
   LQL_JSON_FLAT_TERM_BOOL_EQ = 4,
   LQL_JSON_FLAT_TERM_NULL_EQ = 5,
   LQL_JSON_FLAT_TERM_CONTAINS = 6,
-  LQL_JSON_FLAT_TERM_ICONTAINS = 7
+  LQL_JSON_FLAT_TERM_ICONTAINS = 7,
+  LQL_JSON_FLAT_TERM_IPREFIX = 8
 } lql_json_flat_term_kind;
 
 typedef struct lql_json_flat_eq_term {

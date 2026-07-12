@@ -335,7 +335,8 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   }
   if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
        selector->kind != LQL_SELECTOR_KIND_EXISTS &&
-       selector->kind != LQL_SELECTOR_KIND_PREFIX) ||
+       selector->kind != LQL_SELECTOR_KIND_PREFIX &&
+       selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
       selector->field == NULL ||
       program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
     return 0;
@@ -360,20 +361,35 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   term->path_recursive_segments = path_recursive_segments;
   if (selector->kind == LQL_SELECTOR_KIND_EXISTS) {
     term->kind = LQL_JSON_FLAT_TERM_EXISTS;
-  } else if (selector->kind == LQL_SELECTOR_KIND_PREFIX) {
-    term->kind = LQL_JSON_FLAT_TERM_PREFIX;
+  } else if (selector->kind == LQL_SELECTOR_KIND_PREFIX ||
+             selector->kind == LQL_SELECTOR_KIND_IPREFIX) {
+    term->kind = selector->kind == LQL_SELECTOR_KIND_IPREFIX ||
+                         selector->ignore_case
+                     ? LQL_JSON_FLAT_TERM_IPREFIX
+                     : LQL_JSON_FLAT_TERM_PREFIX;
   } else if (!lql_flat_eq_literal_kind(selector->value_kind, &term->kind)) {
     return 0;
   }
   if (term->kind != LQL_JSON_FLAT_TERM_EXISTS) {
     if (!selector->value_set || selector->value_is_temporal ||
         selector->value == NULL ||
-        (term->kind == LQL_JSON_FLAT_TERM_PREFIX &&
+        ((term->kind == LQL_JSON_FLAT_TERM_PREFIX ||
+          term->kind == LQL_JSON_FLAT_TERM_IPREFIX) &&
          selector->value_kind != LQL_SELECTOR_LITERAL_STRING)) {
       return 0;
     }
-    term->value = selector->value;
-    term->value_len = strlen(selector->value);
+    if (term->kind == LQL_JSON_FLAT_TERM_IPREFIX) {
+      if (!lql_unicode_utf8_lower(selector->value, strlen(selector->value),
+                                  program->icontains_needles[program->term_count],
+                                  LQL_FLAT_ICONTAINS_NEEDLE_MAX,
+                                  &term->value_len) || term->value_len == 0u) {
+        return 0;
+      }
+      term->value = program->icontains_needles[program->term_count];
+    } else {
+      term->value = selector->value;
+      term->value_len = strlen(selector->value);
+    }
   }
   program->selectors[program->term_count] = selector;
   ++program->term_count;
