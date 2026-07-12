@@ -232,9 +232,8 @@ static int lql_json_number_match_integer(const char *text, size_t len,
     value = value * 10ul + digit;
   }
   if (negative) {
-    *out = value == (unsigned long)LONG_MAX + 1ul
-               ? (double)LONG_MIN
-               : -(double)value;
+    *out = value == (unsigned long)LONG_MAX + 1ul ? (double)LONG_MIN
+                                                  : -(double)value;
   } else {
     *out = (double)value;
   }
@@ -251,12 +250,11 @@ static unsigned long lql_json_number_range_complete(lql_json_scan *scan) {
     return 0ul;
   }
   scan->number_match[scan->number_match_len] = '\0';
-  if (!lql_json_number_match_integer(scan->number_match,
-                                     scan->number_match_len, &value)) {
+  if (!lql_json_number_match_integer(scan->number_match, scan->number_match_len,
+                                     &value)) {
     errno = 0;
     value = strtod(scan->number_match, &end);
-    if (end != scan->number_match + scan->number_match_len ||
-        errno == ERANGE) {
+    if (end != scan->number_match + scan->number_match_len || errno == ERANGE) {
       return 0ul;
     }
   }
@@ -586,11 +584,10 @@ static void lql_json_match_icontains_ascii_span(lql_json_scan *scan,
       unsigned char value;
       value = data[offset];
       if (value >= (unsigned char)'A' && value <= (unsigned char)'Z')
-        value = (unsigned char)(value + ((unsigned char)'a' -
-                                         (unsigned char)'A'));
+        value =
+            (unsigned char)(value + ((unsigned char)'a' - (unsigned char)'A'));
       if (term->kind == LQL_JSON_FLAT_TERM_IPREFIX) {
-        if (pos < term->value_len &&
-            value != (unsigned char)term->value[pos])
+        if (pos < term->value_len && value != (unsigned char)term->value[pos])
           scan->match_failed |= bit;
         if (pos < term->value_len)
           ++pos;
@@ -667,9 +664,9 @@ static int lql_json_match_span_term(lql_json_scan *scan,
     if (scan->match_term_segment[term_index] == 0u) {
       target = term->field;
       target_len = term->field_len;
-    } else if (!lql_json_term_path_segment(
-                   term, scan->match_term_segment[term_index], &target,
-                   &target_len)) {
+    } else if (!lql_json_term_path_segment(term,
+                                           scan->match_term_segment[term_index],
+                                           &target, &target_len)) {
       scan->match_failed |= bit;
       return 1;
     }
@@ -690,8 +687,7 @@ static int lql_json_match_span_term(lql_json_scan *scan,
   if (remaining > len) {
     remaining = len;
   }
-  if (remaining != 0u &&
-      memcmp(target + pos, data, remaining) != 0) {
+  if (remaining != 0u && memcmp(target + pos, data, remaining) != 0) {
     scan->match_failed |= bit;
     return 1;
   }
@@ -705,8 +701,8 @@ static int lql_json_match_span_term(lql_json_scan *scan,
   return 1;
 }
 
-static void lql_json_match_span(lql_json_scan *scan,
-                                const unsigned char *data, size_t len) {
+static void lql_json_match_span(lql_json_scan *scan, const unsigned char *data,
+                                size_t len) {
   size_t i;
   unsigned long ascii_icontains;
   if (len == 0u) {
@@ -746,9 +742,8 @@ static void lql_json_match_span(lql_json_scan *scan,
         if (ascii_icontains != 0ul) {
           scan->match_icontains = 0ul;
         }
-        for (offset = 0u; offset < len &&
-                         (scan->match_active & bit) != 0ul &&
-                         (scan->match_failed & bit) == 0ul;
+        for (offset = 0u; offset < len && (scan->match_active & bit) != 0ul &&
+                          (scan->match_failed & bit) == 0ul;
              ++offset) {
           lql_json_match_byte(scan, data[offset]);
         }
@@ -768,8 +763,8 @@ static void lql_json_match_span(lql_json_scan *scan,
     scan->match_active = 0ul;
     scan->match_icontains = 0ul;
     scan->temporal_range_active = 0ul;
-    for (i = 0u; i < len &&
-                (scan->capture_active & ~scan->capture_failed) != 0ul;
+    for (i = 0u;
+         i < len && (scan->capture_active & ~scan->capture_failed) != 0ul;
          ++i) {
       lql_json_match_byte(scan, data[i]);
     }
@@ -808,9 +803,9 @@ static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
         if (scan->match_term_segment[i] == 0u) {
           target = term->field;
           target_len = term->field_len;
-        } else if (!lql_json_term_path_segment(
-                       term, scan->match_term_segment[i], &target,
-                       &target_len)) {
+        } else if (!lql_json_term_path_segment(term,
+                                               scan->match_term_segment[i],
+                                               &target, &target_len)) {
           scan->match_failed |= bit;
           continue;
         }
@@ -1282,6 +1277,240 @@ static lql_status lql_json_match_copy_byte(lql_json_scan *scan, int value) {
   return lql_json_copy_byte(scan, value);
 }
 
+static lql_status lql_json_literal(lql_json_scan *scan, const char *literal);
+static lql_status lql_json_number(lql_json_scan *scan);
+static lql_status lql_json_skip_value_fast(lql_json_scan *scan);
+
+static lql_status lql_json_skip_string_fast(lql_json_scan *scan) {
+  int value;
+  int next;
+  int remaining;
+  int continuation_min;
+  int continuation_max;
+  const unsigned char *span;
+  size_t span_len;
+  unsigned int unicode;
+  unsigned int low;
+  unsigned char raw[4];
+  lql_status status;
+
+  status = lql_json_take_expected(scan, '"');
+  if (status != LQL_STATUS_OK) {
+    return status;
+  }
+  for (;;) {
+    status = lql_json_refill(scan);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+    if (scan->offset == scan->length) {
+      lql_json_error(scan, "unterminated JSON string");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    span = scan->buffer + scan->offset;
+    span_len = lql_json_plain_ascii_span(span, scan->length - scan->offset);
+    if (span_len != 0u) {
+      scan->offset += span_len;
+      continue;
+    }
+    status = lql_json_take(scan, &value);
+    if (status != LQL_STATUS_OK) {
+      lql_json_error(scan, "unterminated JSON string");
+      return status == LQL_STATUS_OK ? LQL_STATUS_JSON_ERROR : status;
+    }
+    if (value == '"') {
+      return LQL_STATUS_OK;
+    }
+    if (value < 0x20) {
+      lql_json_error(scan, "unescaped control byte in JSON string");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    if (value == '\\') {
+      status = lql_json_take(scan, &next);
+      if (status != LQL_STATUS_OK) {
+        lql_json_error(scan, "unterminated JSON escape");
+        return status == LQL_STATUS_OK ? LQL_STATUS_JSON_ERROR : status;
+      }
+      if (next == '"' || next == '\\' || next == '/' || next == 'b' ||
+          next == 'f' || next == 'n' || next == 'r' || next == 't') {
+        continue;
+      }
+      if (next != 'u') {
+        lql_json_error(scan, "invalid JSON escape");
+        return LQL_STATUS_JSON_ERROR;
+      }
+      status = lql_json_take_hex4(scan, &unicode, raw);
+      if (status != LQL_STATUS_OK) {
+        return status;
+      }
+      if (unicode >= 0xdc00u && unicode <= 0xdfffu) {
+        lql_json_error(scan, "unpaired low surrogate in JSON string");
+        return LQL_STATUS_JSON_ERROR;
+      }
+      if (unicode < 0xd800u || unicode > 0xdbffu) {
+        continue;
+      }
+      status = lql_json_take_expected(scan, '\\');
+      if (status != LQL_STATUS_OK ||
+          (status = lql_json_take_expected(scan, 'u')) != LQL_STATUS_OK ||
+          (status = lql_json_take_hex4(scan, &low, raw)) != LQL_STATUS_OK) {
+        return status;
+      }
+      if (low < 0xdc00u || low > 0xdfffu) {
+        lql_json_error(scan, "unpaired high surrogate in JSON string");
+        return LQL_STATUS_JSON_ERROR;
+      }
+      continue;
+    }
+    if (value >= 0xc2 && value <= 0xdf) {
+      remaining = 1;
+      continuation_min = 0x80;
+      continuation_max = 0xbf;
+    } else if (value >= 0xe0 && value <= 0xef) {
+      remaining = 2;
+      continuation_min = value == 0xe0 ? 0xa0 : 0x80;
+      continuation_max = value == 0xed ? 0x9f : 0xbf;
+    } else if (value >= 0xf0 && value <= 0xf4) {
+      remaining = 3;
+      continuation_min = value == 0xf0 ? 0x90 : 0x80;
+      continuation_max = value == 0xf4 ? 0x8f : 0xbf;
+    } else {
+      lql_json_error(scan, "invalid UTF-8 in JSON string");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    while (remaining != 0) {
+      status = lql_json_take(scan, &next);
+      if (status != LQL_STATUS_OK || next < continuation_min ||
+          next > continuation_max) {
+        lql_json_error(scan, "invalid UTF-8 in JSON string");
+        return status == LQL_STATUS_OK ? LQL_STATUS_JSON_ERROR : status;
+      }
+      --remaining;
+      continuation_min = 0x80;
+      continuation_max = 0xbf;
+    }
+  }
+}
+
+static lql_status lql_json_skip_object_fast(lql_json_scan *scan) {
+  int value;
+  lql_status status;
+  if (scan->depth == LQL_JSON_MAX_DEPTH) {
+    lql_json_error(scan, "JSON nesting exceeds the scanner limit");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  ++scan->depth;
+  status = lql_json_take_expected(scan, '{');
+  if (status != LQL_STATUS_OK ||
+      (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
+      (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
+    return status;
+  }
+  if (value == '}') {
+    ++scan->offset;
+    --scan->depth;
+    return LQL_STATUS_OK;
+  }
+  for (;;) {
+    if (value != '"') {
+      lql_json_error(scan, "JSON object key must be a string");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    status = lql_json_skip_string_fast(scan);
+    if (status != LQL_STATUS_OK ||
+        (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
+        (status = lql_json_take_expected(scan, ':')) != LQL_STATUS_OK ||
+        (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
+        (status = lql_json_skip_value_fast(scan)) != LQL_STATUS_OK ||
+        (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
+        (status = lql_json_take(scan, &value)) != LQL_STATUS_OK) {
+      return status;
+    }
+    if (value == '}') {
+      --scan->depth;
+      return LQL_STATUS_OK;
+    }
+    if (value != ',') {
+      lql_json_error(scan, "JSON object member separator is missing");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    status = lql_json_skip_space(scan);
+    if (status != LQL_STATUS_OK ||
+        (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
+      return status;
+    }
+  }
+}
+
+static lql_status lql_json_skip_array_fast(lql_json_scan *scan) {
+  int value;
+  lql_status status;
+  if (scan->depth == LQL_JSON_MAX_DEPTH) {
+    lql_json_error(scan, "JSON nesting exceeds the scanner limit");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  ++scan->depth;
+  status = lql_json_take_expected(scan, '[');
+  if (status != LQL_STATUS_OK ||
+      (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
+      (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
+    return status;
+  }
+  if (value == ']') {
+    ++scan->offset;
+    --scan->depth;
+    return LQL_STATUS_OK;
+  }
+  for (;;) {
+    status = lql_json_skip_value_fast(scan);
+    if (status != LQL_STATUS_OK ||
+        (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
+        (status = lql_json_take(scan, &value)) != LQL_STATUS_OK) {
+      return status;
+    }
+    if (value == ']') {
+      --scan->depth;
+      return LQL_STATUS_OK;
+    }
+    if (value != ',') {
+      lql_json_error(scan, "JSON array separator is missing");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    status = lql_json_skip_space(scan);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+  }
+}
+
+static lql_status lql_json_skip_value_fast(lql_json_scan *scan) {
+  int value;
+  lql_status status;
+  status = lql_json_peek(scan, &value);
+  if (status != LQL_STATUS_OK) {
+    return status;
+  }
+  if (value == '{') {
+    return lql_json_skip_object_fast(scan);
+  }
+  if (value == '[') {
+    return lql_json_skip_array_fast(scan);
+  }
+  if (value == '"') {
+    return lql_json_skip_string_fast(scan);
+  }
+  if (value == 't') {
+    return lql_json_literal(scan, "true");
+  }
+  if (value == 'f') {
+    return lql_json_literal(scan, "false");
+  }
+  if (value == 'n') {
+    return lql_json_literal(scan, "null");
+  }
+  return lql_json_number(scan);
+}
+
 static lql_status lql_json_string(lql_json_scan *scan) {
   int value;
   int next;
@@ -1456,9 +1685,10 @@ static lql_status lql_json_string(lql_json_scan *scan) {
 
 static lql_status lql_json_value(lql_json_scan *scan);
 
-static lql_status
-lql_json_matched_scalar_value(lql_json_scan *scan, unsigned long matches,
-                              size_t path_segment, int value) {
+static lql_status lql_json_matched_scalar_value(lql_json_scan *scan,
+                                                unsigned long matches,
+                                                size_t path_segment,
+                                                int value) {
   lql_status status;
   if (value != 'n') {
     size_t i;
@@ -1602,6 +1832,34 @@ static lql_status lql_json_object(lql_json_scan *scan) {
     if (value != '"') {
       lql_json_error(scan, "JSON object key must be a string");
       return LQL_STATUS_JSON_ERROR;
+    }
+    if (scan->writer == NULL && scan->flat_eq_stop_on_hit &&
+        scan->flat_eq_hits != 0ul &&
+        scan->capture_path_active[object_depth] == 0ul) {
+      status = lql_json_skip_string_fast(scan);
+      if (status != LQL_STATUS_OK ||
+          (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
+          (status = lql_json_take_expected(scan, ':')) != LQL_STATUS_OK ||
+          (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
+          (status = lql_json_skip_value_fast(scan)) != LQL_STATUS_OK ||
+          (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
+          (status = lql_json_take(scan, &value)) != LQL_STATUS_OK) {
+        return status;
+      }
+      if (value == '}') {
+        --scan->depth;
+        return LQL_STATUS_OK;
+      }
+      if (value != ',') {
+        lql_json_error(scan, "JSON object member separator is missing");
+        return LQL_STATUS_JSON_ERROR;
+      }
+      status = lql_json_skip_space(scan);
+      if (status != LQL_STATUS_OK ||
+          (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
+        return status;
+      }
+      continue;
     }
     key_active = 0ul;
     inherited_recursive = 0ul;
@@ -1840,9 +2098,8 @@ static lql_status lql_json_array(lql_json_scan *scan) {
     if (element_active != 0ul) {
       status = lql_json_peek(scan, &value);
       if (status == LQL_STATUS_OK) {
-        status =
-            lql_json_matched_scalar_value(scan, element_active, array_segment,
-                                          value);
+        status = lql_json_matched_scalar_value(scan, element_active,
+                                               array_segment, value);
       }
     } else {
       status = lql_json_value(scan);

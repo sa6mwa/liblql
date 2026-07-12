@@ -206,6 +206,76 @@ static int run_status_selection(lql *ctx) {
   return 0;
 }
 
+static int run_post_hit_validation(lql *ctx) {
+  static const char malformed_array[] = "{\"status\":\"open\",\"bad\":[1,]}\n";
+  static const char malformed_string[] =
+      "{\"status\":\"open\",\"bad\":\"unterminated}\n";
+  static const char valid_nested[] =
+      "{\"status\":\"open\",\"bad\":[1,{\"x\":\"y\"}]}\n";
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_decisions decisions;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.selector = selector;
+  request.on_decision = test_decide;
+  request.decision_user = &decisions;
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)malformed_array;
+  reader.len = sizeof(malformed_array) - 1u;
+  reader.chunk_size = 2u;
+  memset(&decisions, 0, sizeof(decisions));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+          LQL_STATUS_JSON_ERROR ||
+      result.records_seen != 0u || result.records_matched != 0u ||
+      decisions.count != 0u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)malformed_string;
+  reader.len = sizeof(malformed_string) - 1u;
+  reader.chunk_size = 3u;
+  memset(&decisions, 0, sizeof(decisions));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+          LQL_STATUS_JSON_ERROR ||
+      result.records_seen != 0u || result.records_matched != 0u ||
+      decisions.count != 0u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)valid_nested;
+  reader.len = sizeof(valid_nested) - 1u;
+  reader.chunk_size = 1u;
+  memset(&decisions, 0, sizeof(decisions));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      decisions.count != 1u || decisions.matches != 1u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 static int run_projection_parse(lql *ctx) {
   static const char *const paths[] = {" /id ", "/meta/trace", "/id"};
   static const char *const conflict[] = {"/meta", "/meta/trace"};
@@ -246,8 +316,9 @@ static int run_selector_json_write(lql *ctx) {
                                  "\"value\":\"open\"}}";
   static const char escaped_expected[] =
       "{\"eq\":{\"field\":\"/msg\",\"value\":\"a\\\"b\\n\"}}";
-  static const char spaced_json[] = " \n { \"eq\" : { \"field\" : \"\\/status\" "
-                                    ", \"value\" : \"\\u006fpen\" } } \t";
+  static const char spaced_json[] =
+      " \n { \"eq\" : { \"field\" : \"\\/status\" "
+      ", \"value\" : \"\\u006fpen\" } } \t";
   lql_selector *selector;
   lql_selector *roundtrip;
   lql_selector_string_term term;
@@ -497,14 +568,12 @@ static int run_mapped_string_predicates(lql *ctx) {
       "{\"values\":[\"A\",\"B\"],\"codes\":[1,2]}\n"
       "{\"values\":[\"B\",\"A\"],\"codes\":[2,3]}\n"
       "{\"values\":[\"A\"],\"codes\":[1]}\n";
-  static const char array_scalar_exists_input[] =
-      "{\"values\":[null,\"B\"]}\n"
-      "{\"values\":[\"B\",null]}\n"
-      "{\"values\":[\"A\"]}\n";
-  static const char null_input[] =
-      "{\"empty\":null,\"code\":1}\n"
-      "{\"empty\":false,\"code\":2}\n"
-      "{\"empty\":\"null\",\"code\":3}\n";
+  static const char array_scalar_exists_input[] = "{\"values\":[null,\"B\"]}\n"
+                                                  "{\"values\":[\"B\",null]}\n"
+                                                  "{\"values\":[\"A\"]}\n";
+  static const char null_input[] = "{\"empty\":null,\"code\":1}\n"
+                                   "{\"empty\":false,\"code\":2}\n"
+                                   "{\"empty\":\"null\",\"code\":3}\n";
   static const char root_wildcard_input[] =
       "{\"alpha\":{\"state\":\"open\"},\"beta\":{\"state\":\"closed\"}}\n"
       "{\"alpha\":{\"state\":\"closed\"}}\n"
@@ -648,7 +717,7 @@ static int run_match_all(lql *ctx) {
   static const char selected_input[] = " { \"a\" : 1 }\n true\n";
   static const char selected_output[] = "{\"a\":1}\ntrue\n";
   static const char object_input[] = " { \"a\" : 1, \"b\" : 2 }\n"
-                                    "{\"a\":3,\"c\":4}\n";
+                                     "{\"a\":3,\"c\":4}\n";
   static const char projection_output[] = "{\"a\":1}\n{\"a\":3}\n";
   static const char mutation_output[] =
       "{\"a\":1,\"b\":2,\"t\":true}\n{\"a\":3,\"c\":4,\"t\":true}\n";
@@ -1280,11 +1349,13 @@ static int run_mutation_output(lql *ctx) {
       "\"bench\":true}}}}\n";
   static const char deep_set_missing_input[] = "{\"status\":\"open\"}\n";
   static const char deep_set_missing_output[] =
-      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"bench\":true}}}}\n";
+      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"bench\":true}}}}"
+      "\n";
   static const char deep_set_scalar_input[] =
       "{\"status\":\"open\",\"voucher\":{\"lines\":1}}\n";
   static const char deep_set_scalar_output[] =
-      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"bench\":true}}}}\n";
+      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"bench\":true}}}}"
+      "\n";
   static const char *const deep_remove[] = {"rm:/voucher/lines/10/bench"};
   static const char deep_remove_input[] =
       "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"old\":1,"
@@ -1302,8 +1373,7 @@ static int run_mutation_output(lql *ctx) {
   static const char *const top_set[] = {"/processed=true"};
   static const char top_set_output[] =
       "{\"status\":\"open\",\"n\":1,\"processed\":true}\n";
-  static const char *const top_set_multi[] = {"/status=ready",
-                                              "/status=done"};
+  static const char *const top_set_multi[] = {"/status=ready", "/status=done"};
   static const char top_set_multi_output[] = "{\"status\":\"done\",\"n\":1}\n";
   static const char *const top_set_multi_missing[] = {"/processed=true",
                                                       "/processed=false"};
@@ -1318,8 +1388,8 @@ static int run_mutation_output(lql *ctx) {
                                                    "/meta/bench=true"};
   static const char mixed_nested_multi_output[] =
       "{\"n\":3,\"meta\":{\"bench\":true}}\n";
-  static const char *const same_top_nested_multi[] = {
-      "/meta/bench=true", "/meta/state=done"};
+  static const char *const same_top_nested_multi[] = {"/meta/bench=true",
+                                                      "/meta/state=done"};
   static const char same_top_nested_multi_input[] =
       "{\"status\":\"open\",\"meta\":{\"old\":1}}\n";
   static const char same_top_nested_multi_output[] =
@@ -1335,8 +1405,8 @@ static int run_mutation_output(lql *ctx) {
       "{\"status\":\"open\",\"meta\":{\"old\":1}}\n";
   static const char same_top_ordered_output[] =
       "{\"status\":\"open\",\"meta\":{\"old\":1,\"state\":\"done\"}}\n";
-  static const char *const same_top_increment_multi[] = {
-      "/meta/count=+1", "/meta/state=done"};
+  static const char *const same_top_increment_multi[] = {"/meta/count=+1",
+                                                         "/meta/state=done"};
   static const char same_top_increment_multi_input[] =
       "{\"status\":\"open\",\"meta\":{\"count\":2}}\n";
   static const char same_top_increment_multi_output[] =
@@ -1569,8 +1639,8 @@ static int run_mutation_output(lql *ctx) {
   }
   ctx->mutation_destroy(ctx, mutation);
   mutation = NULL;
-  if (ctx->mutation_parse(ctx, top_set_multi_missing, 2u, &mutation,
-                          &error) != LQL_STATUS_OK ||
+  if (ctx->mutation_parse(ctx, top_set_multi_missing, 2u, &mutation, &error) !=
+          LQL_STATUS_OK ||
       ctx->mutation_count(ctx, mutation) != 2u) {
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
@@ -2220,8 +2290,7 @@ static int run_record_limit(lql *ctx) {
   memset(&decisions, 0, sizeof(decisions));
   request.reader_user = &reader;
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
-      result.stopped_early ||
-      result.stop_reason != LQL_STREAM_STOP_NONE ||
+      result.stopped_early || result.stop_reason != LQL_STREAM_STOP_NONE ||
       result.records_seen != 2u || result.records_matched != 1u ||
       decisions.count != 2u || decisions.matches != 1u) {
     ctx->selector_destroy(ctx, selector);
@@ -2323,13 +2392,13 @@ int main(void) {
   match_all_status = 0;
   if (run_projection_parse(ctx) || run_selector_json_write(ctx) ||
       run_status_selection(ctx) || run_conjunction_selection(ctx) ||
-      run_or_selection(ctx) ||
+      run_or_selection(ctx) || run_post_hit_validation(ctx) ||
       run_not_selection(ctx) || run_mapped_string_predicates(ctx) ||
       ((match_all_status = run_match_all(ctx)) != 0) ||
-      run_root_wildcard_array_error(ctx) ||
-      run_selected_record_output(ctx) || run_value_callback(ctx) ||
-      run_value_callback_control(ctx) || run_nested_projection_output(ctx) ||
-      run_mutation_output(ctx) || run_projection_then_mutation_output(ctx) ||
+      run_root_wildcard_array_error(ctx) || run_selected_record_output(ctx) ||
+      run_value_callback(ctx) || run_value_callback_control(ctx) ||
+      run_nested_projection_output(ctx) || run_mutation_output(ctx) ||
+      run_projection_then_mutation_output(ctx) ||
       run_stop_and_root_array(ctx) || run_record_limit(ctx) ||
       run_byte_limit(ctx)) {
     ctx->destroy(ctx);
