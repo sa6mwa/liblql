@@ -4,11 +4,25 @@ project(liblql VERSION 0.0.0 LANGUAGES C)
 
 include(CTest)
 
-if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-  # CMake has no C89 setting. This is intentionally directory-wide so tests
-  # and tools compile under the same language contract as the library.
-  add_compile_options($<$<COMPILE_LANGUAGE:C>:-std=c89>)
+if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
+  message(FATAL_ERROR
+    "liblql builds require GCC; Clang is not a supported build or performance compiler")
 endif()
+
+function(lql_configure_c89_target target)
+  target_compile_options(${target} PRIVATE
+    -std=c89
+    -Wall
+    -Wextra
+    -Wpedantic
+    -pedantic-errors
+    -Werror)
+endfunction()
+
+function(lql_allow_test_partial_initializers target)
+  target_compile_options(${target} PRIVATE
+    -Wno-missing-field-initializers)
+endfunction()
 
 option(LQL_BUILD_STATIC "Build static liblql" ON)
 option(LQL_BUILD_SHARED "Build shared liblql" ON)
@@ -24,11 +38,6 @@ include(LqlVersion)
 
 configure_file(cmake/lql_version.h.in
   "${CMAKE_CURRENT_BINARY_DIR}/generated/include/lql/version.h" @ONLY)
-
-# CMake has no C89 setting; GNU/Clang targets explicitly override it below.
-set(CMAKE_C_STANDARD 90)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
 
 add_library(lql_common OBJECT
   src/lql.c
@@ -46,11 +55,7 @@ set_target_properties(lql_common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(lql_common PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>")
-
-if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-  target_compile_options(lql_common PRIVATE
-    -Wall -Wextra -Wpedantic -Werror)
-endif()
+lql_configure_c89_target(lql_common)
 
 if(LQL_BUILD_STATIC)
   add_library(lql_static STATIC $<TARGET_OBJECTS:lql_common>)
@@ -75,9 +80,12 @@ if(BUILD_TESTING)
   target_include_directories(lql_json_scan_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
   target_link_libraries(lql_json_scan_test PRIVATE lql_static)
+  lql_configure_c89_target(lql_json_scan_test)
+  lql_allow_test_partial_initializers(lql_json_scan_test)
   add_test(NAME lql.json_scan COMMAND lql_json_scan_test)
   add_executable(lql_direct_stream_test tests/direct_stream_test.c)
   target_link_libraries(lql_direct_stream_test PRIVATE lql_static)
+  lql_configure_c89_target(lql_direct_stream_test)
   add_test(NAME lql.direct_stream COMMAND lql_direct_stream_test)
 endif()
 
@@ -85,7 +93,9 @@ if(LQL_BUILD_DIRECT_PROBE)
   add_executable(lql_direct_probe tests/lql_direct_probe.c)
   target_compile_definitions(lql_direct_probe PRIVATE _POSIX_C_SOURCE=200809L)
   target_link_libraries(lql_direct_probe PRIVATE lql_static)
+  lql_configure_c89_target(lql_direct_probe)
   add_executable(lql_direct_bench tools/lql_direct_bench.c)
   target_compile_definitions(lql_direct_bench PRIVATE _POSIX_C_SOURCE=200809L)
   target_link_libraries(lql_direct_bench PRIVATE lql_static)
+  lql_configure_c89_target(lql_direct_bench)
 endif()

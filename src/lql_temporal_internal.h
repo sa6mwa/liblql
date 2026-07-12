@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(__GNUC__)
 #define LQL_TEMPORAL_INTERNAL_SYMBOL __attribute__((visibility("hidden")))
 #else
 #define LQL_TEMPORAL_INTERNAL_SYMBOL
