@@ -10,6 +10,15 @@ typedef struct probe_reader {
   FILE *file;
 } probe_reader;
 
+static lql_status probe_discard_write(void *user, const void *data, size_t len,
+                                      lql_error *error) {
+  (void)user;
+  (void)data;
+  (void)len;
+  (void)error;
+  return LQL_STATUS_OK;
+}
+
 static lql_status probe_read(void *user, unsigned char *buffer, size_t capacity,
                              size_t *out_len, lql_error *error) {
   probe_reader *reader;
@@ -56,10 +65,12 @@ static long probe_elapsed_ns(const struct timespec *start,
 int main(int argc, char **argv) {
   const char *fixture;
   const char *expr;
+  const char *mutation_expr;
   FILE *file;
   probe_reader reader;
   lql *ctx;
   lql_selector *selector;
+  lql_mutation *mutation;
   lql_stream_request request;
   lql_stream_result result;
   lql_error error;
@@ -73,13 +84,18 @@ int main(int argc, char **argv) {
 
   fixture = NULL;
   expr = "/status=\"open\"";
+  mutation_expr = NULL;
   for (i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--fixture") == 0 && i + 1 < argc) {
       fixture = argv[++i];
     } else if (strcmp(argv[i], "--expr") == 0 && i + 1 < argc) {
       expr = argv[++i];
+    } else if (strcmp(argv[i], "--mutation") == 0 && i + 1 < argc) {
+      mutation_expr = argv[++i];
     } else {
-      fprintf(stderr, "usage: %s --fixture PATH [--expr SELECTOR]\n", argv[0]);
+      fprintf(stderr,
+              "usage: %s --fixture PATH [--expr SELECTOR] [--mutation ACTION]\n",
+              argv[0]);
       return 2;
     }
   }
@@ -94,10 +110,17 @@ int main(int argc, char **argv) {
   }
   ctx = NULL;
   selector = NULL;
+  mutation = NULL;
   lql_error_init(&error);
   if (lql_new(&ctx, &error) != LQL_STATUS_OK ||
-      ctx->selector_parse(ctx, expr, &selector, &error) != LQL_STATUS_OK) {
-    fprintf(stderr, "lql_direct_probe: selector setup failed: %s\n", error.message);
+      ctx->selector_parse(ctx, expr, &selector, &error) != LQL_STATUS_OK ||
+      (mutation_expr != NULL &&
+       ctx->mutation_parse(ctx, &mutation_expr, 1u, &mutation, &error) !=
+           LQL_STATUS_OK)) {
+    fprintf(stderr, "lql_direct_probe: setup failed: %s\n", error.message);
+    if (mutation != NULL) {
+      ctx->mutation_destroy(ctx, mutation);
+    }
     if (ctx != NULL) {
       ctx->destroy(ctx);
     }
@@ -110,8 +133,17 @@ int main(int argc, char **argv) {
   request.reader = probe_read;
   request.reader_user = &reader;
   request.selector = selector;
+  if (mutation != NULL) {
+    request.matched_only = 1;
+    request.writer = probe_discard_write;
+    request.mutation = mutation;
+    request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  }
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK) {
     fprintf(stderr, "lql_direct_probe: warmup failed: %s\n", error.message);
+    if (mutation != NULL) {
+      ctx->mutation_destroy(ctx, mutation);
+    }
     ctx->selector_destroy(ctx, selector);
     ctx->destroy(ctx);
     fclose(file);
@@ -122,6 +154,9 @@ int main(int argc, char **argv) {
   for (sample = 0; sample < samples; ++sample) {
     if (fseek(file, 0L, SEEK_SET) != 0) {
       fprintf(stderr, "lql_direct_probe: rewind fixture failed\n");
+      if (mutation != NULL) {
+        ctx->mutation_destroy(ctx, mutation);
+      }
       ctx->selector_destroy(ctx, selector);
       ctx->destroy(ctx);
       fclose(file);
@@ -131,6 +166,9 @@ int main(int argc, char **argv) {
         lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
         clock_gettime(CLOCK_MONOTONIC, &end) != 0) {
       fprintf(stderr, "lql_direct_probe: stream failed: %s\n", error.message);
+      if (mutation != NULL) {
+        ctx->mutation_destroy(ctx, mutation);
+      }
       ctx->selector_destroy(ctx, selector);
       ctx->destroy(ctx);
       fclose(file);
@@ -148,6 +186,9 @@ int main(int argc, char **argv) {
          (unsigned long)result.records_seen, (unsigned long)result.records_matched,
          best_ns);
   ctx->selector_destroy(ctx, selector);
+  if (mutation != NULL) {
+    ctx->mutation_destroy(ctx, mutation);
+  }
   ctx->destroy(ctx);
   fclose(file);
   return 0;
