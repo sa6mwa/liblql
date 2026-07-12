@@ -415,6 +415,8 @@ static int run_or_selection(lql *ctx) {
 static int run_not_selection(lql *ctx) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n42\n";
+  static const char inequality_input[] =
+      "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n{\"region\":\"eu\"}\n";
   lql_selector *selector;
   lql_stream_request request;
   lql_stream_result result;
@@ -438,6 +440,23 @@ static int run_not_selection(lql *ctx) {
       result.records_seen != 3u || result.records_matched != 2u) {
     ctx->selector_destroy(ctx, selector);
     return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  selector = NULL;
+  if (ctx->selector_parse(ctx, "/status!=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 2;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)inequality_input;
+  reader.len = sizeof(inequality_input) - 1u;
+  reader.chunk_size = 1u;
+  request.reader_user = &reader;
+  request.selector = selector;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 3u || result.records_matched != 2u) {
+    ctx->selector_destroy(ctx, selector);
+    return 3;
   }
   ctx->selector_destroy(ctx, selector);
   return 0;
