@@ -56,6 +56,9 @@ typedef struct lql_json_flat_eq_term {
   unsigned long path_array_wildcards;
   unsigned long path_any_wildcards;
   unsigned long path_recursive_segments;
+  const char *path_recursive_match;
+  size_t path_recursive_match_len;
+  size_t path_recursive_match_segment;
   double range_gt;
   double range_gte;
   double range_lt;

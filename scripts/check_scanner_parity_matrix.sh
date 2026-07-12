@@ -54,6 +54,8 @@ scanner_parity_run_row build/direct-probe/array-exists-100k.ndjson array_exists_
   array_exists_indexed 'exists{/values/1}' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/range-code-100k.ndjson range_code_100k \
   range_code 'range{field=/code,gte=10,lte=20}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/recursive-10k.ndjson recursive_10k \
+  recursive_eq '/.../sku="needle"' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/indexed-10k.ndjson indexed_10k \
   indexed_eq '/items/1/sku="B"' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/large-4x25m.ndjson large_4x25m \

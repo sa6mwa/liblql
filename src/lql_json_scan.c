@@ -420,6 +420,12 @@ static int lql_json_term_path_segment(const lql_json_flat_eq_term *term,
     *out_len = term->field_len;
     return 1;
   }
+  if (term->path_recursive_match != NULL &&
+      segment == term->path_recursive_match_segment) {
+    *out = term->path_recursive_match;
+    *out_len = term->path_recursive_match_len;
+    return 1;
+  }
   if (segment >= term->path_segment_count || term->path[0] != '/') {
     return 0;
   }

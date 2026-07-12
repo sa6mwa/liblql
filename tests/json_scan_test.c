@@ -159,7 +159,8 @@ int main(void) {
       "{\"code\":\"3\"}\n";
   static const lql_json_flat_eq_term range_flat_terms[] = {
       {LQL_JSON_FLAT_TERM_NUMBER_RANGE, "code", 4u, NULL, 0u, NULL, 0u, 0u,
-       0ul, 0ul, 0ul, 0ul, 0ul, 0.0, 2.0, 4.0, 0.0, 0, 1, 1, 0}};
+       0ul, 0ul, 0ul, 0ul, 0ul, NULL, 0u, 0u, 0.0, 2.0, 4.0, 0.0, 0, 1, 1,
+       0}};
   static const char temporal_flat_input[] =
       "{\"timestamp\":\"2026-03-05T10:28:20Z\"}\n"
       "{\"timestamp\":\"2026-03-05T10:28:21Z\"}\n"
@@ -218,7 +219,7 @@ int main(void) {
                                             "{\"msg\":\"xxa\\u0062a\"}\n";
   static const lql_json_flat_eq_term contains_flat_terms[] = {
       {LQL_JSON_FLAT_TERM_CONTAINS, "msg", 3u, "aba", 3u, NULL, 0u, 0u, 0ul,
-       0ul, 0ul, 0ul, 0ul, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0,
+       0ul, 0ul, 0ul, 0ul, NULL, 0u, 0u, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0,
        {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0},
        {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0}, 0, 0, 0, 0, 0,
        contains_failure}};
