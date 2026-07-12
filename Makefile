@@ -1,12 +1,14 @@
-.PHONY: help build-debug build-release test direct-probe direct-bench scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help build-debug build-release test direct-reset direct-probe direct-bench direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
-	  'make build-debug   build the selector-only reset foundation' \
-	  'make build-release build the optimized selector-only foundation' \
+	  'make build-debug   build the debug self-contained scanner foundation' \
+	  'make build-release build the optimized self-contained scanner foundation' \
 	  'make test          build and run the direct-stream test suite' \
+	  'make direct-reset  verify removed execution architecture stays removed' \
 	  'make direct-probe  build the optimized direct-execution probe' \
 	  'make direct-bench  build the optimized direct benchmark runner' \
+	  'make direct-live-heap  run Massif live-heap gate for direct execution' \
 	  'make scanner-parity-smoke  run GCC C-vs-Go scanner parity smoke' \
 	  'make scanner-parity-matrix  run broader GCC C-vs-Go scanner parity matrix' \
 	  'make scanner-profile-hotspots  profile tight GCC scanner rows with perf' \
@@ -26,6 +28,9 @@ test:
 	@cmake --build --preset debug-scanner
 	@ctest --test-dir build/debug-scanner --output-on-failure
 
+direct-reset:
+	@sh scripts/check_direct_execution_reset.sh
+
 direct-probe:
 	@cmake --preset release-scanner
 	@cmake --build --preset release-scanner --target lql_direct_probe
@@ -33,6 +38,9 @@ direct-probe:
 direct-bench:
 	@cmake --preset release-scanner
 	@cmake --build --preset release-scanner --target lql_direct_bench
+
+direct-live-heap: direct-bench
+	@LQL_DIRECT_BENCH_PATH=build/release-scanner/lql_direct_bench sh scripts/check_direct_live_heap.sh
 
 scanner-parity-smoke: direct-bench
 	@mkdir -p build

@@ -2,7 +2,7 @@
 set -eu
 
 limit_bytes=262144
-binary=${LQL_DIRECT_BENCH_PATH:-build/verify-gcc-path/lql_direct_bench}
+binary=${LQL_DIRECT_BENCH_PATH:-build/release-scanner/lql_direct_bench}
 massif_out=${TMPDIR:-/tmp}/liblql-direct-live-heap.$$
 
 cleanup() {
