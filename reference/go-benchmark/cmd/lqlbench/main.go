@@ -101,6 +101,8 @@ func benchmarkMutationsForSelector(selectorName string, expr string) []string {
 		return []string{"/bench/touched=true"}
 	case "eq_code_one_mixed_nested_multi":
 		return []string{"/enabled=false", "/code=+1", "rm:/payload", "/meta/bench=true"}
+	case "eq_status_open_nested_remove":
+		return []string{"rm:/meta/state"}
 	}
 	if strings.Contains(expr, "/voucher/lines/10/") {
 		return []string{"/voucher/lines/10/bench=true"}
