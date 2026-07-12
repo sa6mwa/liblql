@@ -5779,7 +5779,8 @@ typedef struct lonejson_value_rewrite_options {
 
 /** One scalar JSON replacement owned by the caller for the duration of a
  * top-level object rewrite. String data is decoded UTF-8; number data is one
- * complete JSON number token.
+ * complete valid JSON number token. Invalid number text is rejected when the
+ * rewriter opens.
  */
 typedef enum lonejson_object_rewrite_scalar_kind {
   LONEJSON_OBJECT_REWRITE_SCALAR_NONE = 0,
@@ -48365,6 +48366,20 @@ static lonejson_status lonejson__object_rewrite_validate_options(
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
                                0u, 0u,
                                "object rewrite scalar kind is invalid");
+  }
+  if (options->scalar.kind != LONEJSON_OBJECT_REWRITE_SCALAR_NONE &&
+      options->action != LONEJSON_VALUE_REWRITE_REPLACE) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u,
+                               "object rewrite scalar requires replacement");
+  }
+  if (options->scalar.kind == LONEJSON_OBJECT_REWRITE_SCALAR_NUMBER &&
+      (options->scalar.data == NULL || options->scalar.len == 0u ||
+       !lonejson__is_valid_json_number(options->scalar.data,
+                                       options->scalar.len))) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u,
+                               "object rewrite number must be valid JSON");
   }
   if (options->scalar.kind == LONEJSON_OBJECT_REWRITE_SCALAR_NONE &&
       options->action == LONEJSON_VALUE_REWRITE_REPLACE &&

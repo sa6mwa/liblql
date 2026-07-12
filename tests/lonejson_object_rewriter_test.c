@@ -127,6 +127,24 @@ static int object_run(lonejson *runtime, lonejson_object_rewrite_options *opts,
   return 1;
 }
 
+static int object_rejects_invalid_number(
+    lonejson *runtime, lonejson_object_rewrite_options *opts) {
+  lonejson_object_rewriter rewriter;
+  lonejson_value_visitor visitor;
+  void *user;
+  lonejson_error error;
+  object_sink sink;
+  lonejson_status status;
+
+  memset(&sink, 0, sizeof(sink));
+  lonejson_error_init(&error);
+  lonejson_object_rewriter_init(&rewriter);
+  status = lonejson_object_rewriter_open(&rewriter, runtime, object_sink_write,
+                                         &sink, opts, &visitor, &user, &error);
+  lonejson_object_rewriter_cleanup(&rewriter);
+  return status == LONEJSON_STATUS_INVALID_ARGUMENT;
+}
+
 int main(void) {
   lonejson *runtime;
   lonejson_object_rewrite_options options;
@@ -144,6 +162,36 @@ int main(void) {
   options.scalar.boolean_value = 1;
   if (!object_run(runtime, &options,
                   "{\"id\":7,\"status\":true,\"payload\":{\"name\":\"x\"}}")) {
+    lonejson_free(runtime);
+    return 1;
+  }
+  memset(&options, 0, sizeof(options));
+  options.member_key = "status";
+  options.action = LONEJSON_VALUE_REWRITE_REPLACE;
+  options.scalar.kind = LONEJSON_OBJECT_REWRITE_SCALAR_NUMBER;
+  options.scalar.data = "-12.5e+2";
+  options.scalar.len = 8u;
+  if (!object_run(runtime, &options,
+                  "{\"id\":7,\"status\":-12.5e+2,\"payload\":{\"name\":\"x\"}}")) {
+    lonejson_free(runtime);
+    return 1;
+  }
+  options.scalar.data = "01";
+  options.scalar.len = 2u;
+  if (!object_rejects_invalid_number(runtime, &options)) {
+    lonejson_free(runtime);
+    return 1;
+  }
+  options.scalar.data = "1e";
+  options.scalar.len = 2u;
+  if (!object_rejects_invalid_number(runtime, &options)) {
+    lonejson_free(runtime);
+    return 1;
+  }
+  options.scalar.kind = LONEJSON_OBJECT_REWRITE_SCALAR_BOOL;
+  options.scalar.boolean_value = 1;
+  options.action = LONEJSON_VALUE_REWRITE_DROP;
+  if (!object_rejects_invalid_number(runtime, &options)) {
     lonejson_free(runtime);
     return 1;
   }
