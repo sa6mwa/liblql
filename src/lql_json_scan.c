@@ -29,7 +29,9 @@ typedef struct lql_json_scan {
   unsigned long match_failed;
   size_t match_pos[LQL_JSON_FLAT_TERM_CAPACITY];
   int match_key;
+  size_t match_path_segment;
   unsigned long flat_eq_hits;
+  unsigned long path_active[LQL_JSON_MAX_DEPTH];
 } lql_json_scan;
 
 static void lql_json_error(lql_json_scan *scan, const char *message) {
@@ -87,16 +89,66 @@ static lql_status lql_json_flush(lql_json_scan *scan) {
 }
 
 static void lql_json_match_start(lql_json_scan *scan, unsigned long active,
-                                 int key) {
+                                 int key, size_t path_segment) {
   size_t i;
   scan->match_active = active;
   scan->match_failed = 0ul;
   scan->match_key = key;
+  scan->match_path_segment = path_segment;
   for (i = 0u; i < scan->flat_term_count; ++i) {
     if ((active & (1ul << i)) != 0ul) {
       scan->match_pos[i] = 0u;
     }
   }
+}
+
+static int lql_json_term_path_segment(const lql_json_flat_eq_term *term,
+                                      size_t segment, const char **out,
+                                      size_t *out_len) {
+  const char *start;
+  const char *end;
+  size_t i;
+  if (term == NULL || out == NULL || out_len == NULL) {
+    return 0;
+  }
+  if (term->path == NULL || term->path_segment_count == 0u) {
+    if (segment != 0u) {
+      return 0;
+    }
+    *out = term->field;
+    *out_len = term->field_len;
+    return 1;
+  }
+  if (segment >= term->path_segment_count || term->path[0] != '/') {
+    return 0;
+  }
+  if (segment == 0u) {
+    *out = term->field;
+    *out_len = term->field_len;
+    return 1;
+  }
+  start = term->path + 1;
+  for (i = 0u; i < segment; ++i) {
+    end = strchr(start, '/');
+    if (end == NULL) {
+      return 0;
+    }
+    start = end + 1;
+  }
+  end = strchr(start, '/');
+  *out = start;
+  *out_len = end == NULL ? strlen(start) : (size_t)(end - start);
+  return 1;
+}
+
+static int lql_json_term_value_at(const lql_json_flat_eq_term *term,
+                                  size_t path_segment) {
+  if (term == NULL) {
+    return 0;
+  }
+  return term->path_segment_count == 0u
+             ? path_segment == 0u
+             : term->path_segment_count == path_segment + 1u;
 }
 
 static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
@@ -115,8 +167,16 @@ static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
       continue;
     }
     term = &scan->flat_terms[i];
-    target = scan->match_key ? term->field : term->value;
-    target_len = scan->match_key ? term->field_len : term->value_len;
+    if (scan->match_key) {
+      if (!lql_json_term_path_segment(term, scan->match_path_segment, &target,
+                                      &target_len)) {
+        scan->match_failed |= bit;
+        continue;
+      }
+    } else {
+      target = term->value;
+      target_len = term->value_len;
+    }
     if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_PREFIX &&
         scan->match_pos[i] == target_len) {
       continue;
@@ -136,6 +196,7 @@ static unsigned long lql_json_match_complete(const lql_json_scan *scan) {
   matches = 0ul;
   for (i = 0u; i < scan->flat_term_count; ++i) {
     const lql_json_flat_eq_term *term;
+    const char *target;
     size_t target_len;
     unsigned long bit;
     bit = 1ul << i;
@@ -144,7 +205,14 @@ static unsigned long lql_json_match_complete(const lql_json_scan *scan) {
       continue;
     }
     term = &scan->flat_terms[i];
-    target_len = scan->match_key ? term->field_len : term->value_len;
+    if (scan->match_key) {
+      if (!lql_json_term_path_segment(term, scan->match_path_segment, &target,
+                                      &target_len)) {
+        continue;
+      }
+    } else {
+      target_len = term->value_len;
+    }
     if ((scan->match_key || term->kind != LQL_JSON_FLAT_TERM_PREFIX) &&
         scan->match_pos[i] == target_len) {
       matches |= bit;
@@ -158,7 +226,8 @@ static unsigned long lql_json_match_complete(const lql_json_scan *scan) {
 }
 
 static unsigned long lql_json_match_exists(const lql_json_scan *scan,
-                                           unsigned long keys) {
+                                           unsigned long keys,
+                                           size_t path_segment) {
   unsigned long hits;
   size_t i;
   hits = 0ul;
@@ -166,6 +235,7 @@ static unsigned long lql_json_match_exists(const lql_json_scan *scan,
     unsigned long bit;
     bit = 1ul << i;
     if ((keys & bit) != 0ul &&
+        lql_json_term_value_at(&scan->flat_terms[i], path_segment) &&
         scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EXISTS) {
       hits |= bit;
     }
@@ -173,16 +243,42 @@ static unsigned long lql_json_match_exists(const lql_json_scan *scan,
   return hits;
 }
 
-static unsigned long
-lql_json_match_terms_for_kind(const lql_json_scan *scan, unsigned long keys,
-                              lql_json_flat_term_kind kind) {
+static unsigned long lql_json_match_terms_for_kind(const lql_json_scan *scan,
+                                                   unsigned long keys,
+                                                   lql_json_flat_term_kind kind,
+                                                   size_t path_segment) {
   unsigned long active;
   size_t i;
   active = 0ul;
   for (i = 0u; i < scan->flat_term_count; ++i) {
     unsigned long bit;
     bit = 1ul << i;
-    if ((keys & bit) != 0ul && scan->flat_terms[i].kind == kind) {
+    if ((keys & bit) != 0ul &&
+        lql_json_term_value_at(&scan->flat_terms[i], path_segment) &&
+        scan->flat_terms[i].kind == kind) {
+      active |= bit;
+    }
+  }
+  return active;
+}
+
+static unsigned long lql_json_match_descendants(const lql_json_scan *scan,
+                                                unsigned long keys,
+                                                size_t path_segment) {
+  unsigned long active;
+  size_t i;
+  active = 0ul;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    const char *segment;
+    size_t segment_len;
+    unsigned long bit;
+    bit = 1ul << i;
+    if ((keys & bit) == 0ul ||
+        lql_json_term_value_at(&scan->flat_terms[i], path_segment)) {
+      continue;
+    }
+    if (lql_json_term_path_segment(&scan->flat_terms[i], path_segment + 1u,
+                                   &segment, &segment_len)) {
       active |= bit;
     }
   }
@@ -547,14 +643,16 @@ static lql_status lql_json_object(lql_json_scan *scan) {
   int value;
   unsigned long exists_terms;
   unsigned long key_matches;
-  int top_level;
+  unsigned long key_active;
+  unsigned long descendants;
+  size_t object_depth;
   lql_status status;
   if (scan->depth == LQL_JSON_MAX_DEPTH) {
     lql_json_error(scan, "JSON nesting exceeds the scanner limit");
     return LQL_STATUS_JSON_ERROR;
   }
+  object_depth = scan->depth;
   ++scan->depth;
-  top_level = scan->flat_eq_active && scan->depth == 1u;
   status = lql_json_take_expected(scan, '{');
   if (status != LQL_STATUS_OK ||
       (status = lql_json_copy_byte(scan, '{')) != LQL_STATUS_OK ||
@@ -573,20 +671,16 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       lql_json_error(scan, "JSON object key must be a string");
       return LQL_STATUS_JSON_ERROR;
     }
-    if (top_level &&
+    key_active = 0ul;
+    if (scan->flat_eq_active &&
         !(scan->flat_eq_stop_on_hit && scan->flat_eq_hits != 0ul)) {
-      unsigned long active;
-      active = scan->flat_term_count == LQL_JSON_FLAT_TERM_CAPACITY
-                   ? ~0ul
-                   : ((1ul << scan->flat_term_count) - 1ul);
-      lql_json_match_start(scan, active, 1);
-    } else {
-      lql_json_match_start(scan, 0ul, 0);
+      key_active = scan->path_active[object_depth];
     }
+    lql_json_match_start(scan, key_active, 1, object_depth);
     status = lql_json_string(scan);
-    key_matches = top_level ? lql_json_match_complete(scan) : 0ul;
-    exists_terms = lql_json_match_exists(scan, key_matches);
-    lql_json_match_start(scan, 0ul, 0);
+    key_matches = lql_json_match_complete(scan);
+    exists_terms = lql_json_match_exists(scan, key_matches, object_depth);
+    lql_json_match_start(scan, 0ul, 0, 0u);
     if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
         (status = lql_json_take_expected(scan, ':')) != LQL_STATUS_OK ||
@@ -598,6 +692,10 @@ static lql_status lql_json_object(lql_json_scan *scan) {
     if (value != 'n') {
       scan->flat_eq_hits |= exists_terms;
     }
+    descendants = lql_json_match_descendants(scan, key_matches, object_depth);
+    if (object_depth + 1u < LQL_JSON_MAX_DEPTH) {
+      scan->path_active[object_depth + 1u] = value == '{' ? descendants : 0ul;
+    }
     if (key_matches && value == '"') {
       unsigned long eq_terms;
       size_t i;
@@ -606,17 +704,18 @@ static lql_status lql_json_object(lql_json_scan *scan) {
         unsigned long bit;
         bit = 1ul << i;
         if ((key_matches & bit) != 0ul &&
+            lql_json_term_value_at(&scan->flat_terms[i], object_depth) &&
             (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EQ ||
              scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_PREFIX)) {
           eq_terms |= bit;
         }
       }
-      lql_json_match_start(scan, eq_terms, 0);
+      lql_json_match_start(scan, eq_terms, 0, 0u);
       status = lql_json_string(scan);
       if (status == LQL_STATUS_OK) {
         scan->flat_eq_hits |= lql_json_match_complete(scan);
       }
-      lql_json_match_start(scan, 0ul, 0);
+      lql_json_match_start(scan, 0ul, 0, 0u);
     } else if (key_matches) {
       lql_json_flat_term_kind scalar_kind;
       unsigned long scalar_terms;
@@ -627,16 +726,19 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       } else {
         scalar_kind = LQL_JSON_FLAT_TERM_NUMBER_EQ;
       }
-      scalar_terms =
-          lql_json_match_terms_for_kind(scan, key_matches, scalar_kind);
-      lql_json_match_start(scan, scalar_terms, 0);
+      scalar_terms = lql_json_match_terms_for_kind(scan, key_matches,
+                                                   scalar_kind, object_depth);
+      lql_json_match_start(scan, scalar_terms, 0, 0u);
       status = lql_json_value(scan);
       if (status == LQL_STATUS_OK) {
         scan->flat_eq_hits |= lql_json_match_complete(scan);
       }
-      lql_json_match_start(scan, 0ul, 0);
+      lql_json_match_start(scan, 0ul, 0, 0u);
     } else {
       status = lql_json_value(scan);
+    }
+    if (object_depth + 1u < LQL_JSON_MAX_DEPTH) {
+      scan->path_active[object_depth + 1u] = 0ul;
     }
     if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
@@ -667,6 +769,10 @@ static lql_status lql_json_array(lql_json_scan *scan) {
   if (scan->depth == LQL_JSON_MAX_DEPTH) {
     lql_json_error(scan, "JSON nesting exceeds the scanner limit");
     return LQL_STATUS_JSON_ERROR;
+  }
+  scan->path_active[scan->depth] = 0ul;
+  if (scan->depth + 1u < LQL_JSON_MAX_DEPTH) {
+    scan->path_active[scan->depth + 1u] = 0ul;
   }
   ++scan->depth;
   status = lql_json_take_expected(scan, '[');
@@ -989,7 +1095,10 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
     root_is_object = value == '{';
     scan.flat_eq_active = root_is_object;
     scan.flat_eq_hits = 0ul;
-    lql_json_match_start(&scan, 0ul, 0);
+    scan.path_active[0] = scan.flat_term_count == LQL_JSON_FLAT_TERM_CAPACITY
+                              ? ~0ul
+                              : ((1ul << scan.flat_term_count) - 1ul);
+    lql_json_match_start(&scan, 0ul, 0, 0u);
     status = lql_json_value(&scan);
     if (status != LQL_STATUS_OK) {
       break;

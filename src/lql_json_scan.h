@@ -37,6 +37,10 @@ typedef struct lql_json_flat_eq_term {
   size_t field_len;
   const char *value;
   size_t value_len;
+  /* Optional literal JSON Pointer metadata for nested object paths. */
+  const char *path;
+  size_t path_len;
+  size_t path_segment_count;
 } lql_json_flat_eq_term;
 
 typedef lql_status (*lql_json_flat_eq_record_fn)(
@@ -56,7 +60,7 @@ typedef struct lql_json_flat_eq_request {
 } lql_json_flat_eq_request;
 
 /*
- * Scans strict NDJSON for bounded top-level string equalities.  The current
+ * Scans strict NDJSON for bounded literal object-path predicates.  The current
  * root is compacted into `spool` and is callback-scoped.  A record callback
  * receives hit bits only after full validation; returning LQL_STATUS_STOP ends
  * cleanly.

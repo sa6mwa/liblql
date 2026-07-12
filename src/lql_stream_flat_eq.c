@@ -39,11 +39,64 @@ static int lql_flat_eq_literal_kind(lql_selector_literal_kind literal_kind,
   }
 }
 
+static int lql_flat_eq_literal_object_path(const char *path,
+                                           size_t *out_path_len,
+                                           size_t *out_segment_count,
+                                           size_t *out_first_segment_len) {
+  const char *segment;
+  const char *slash;
+  size_t path_len;
+  size_t segment_len;
+  size_t segment_count;
+  size_t i;
+  int numeric_segment;
+  if (path == NULL || path[0] != '/' || path[1] == '\0' ||
+      out_path_len == NULL || out_segment_count == NULL ||
+      out_first_segment_len == NULL) {
+    return 0;
+  }
+  path_len = strlen(path);
+  segment = path + 1;
+  segment_count = 0u;
+  for (;;) {
+    slash = strchr(segment, '/');
+    segment_len = slash == NULL ? strlen(segment) : (size_t)(slash - segment);
+    numeric_segment = segment_len != 0u;
+    for (i = 0u; i < segment_len; ++i) {
+      if (segment[i] < '0' || segment[i] > '9') {
+        numeric_segment = 0;
+        break;
+      }
+    }
+    if (segment_len == 0u || memchr(segment, '~', segment_len) != NULL ||
+        numeric_segment || (segment_len == 1u && segment[0] == '*') ||
+        (segment_len == 2u && segment[0] == '[' && segment[1] == ']') ||
+        (segment_len == 2u && segment[0] == '*' && segment[1] == '*') ||
+        (segment_len == 3u && memcmp(segment, "...", 3u) == 0)) {
+      return 0;
+    }
+    if (segment_count == 0u) {
+      *out_first_segment_len = segment_len;
+    }
+    ++segment_count;
+    if (slash == NULL) {
+      break;
+    }
+    segment = slash + 1;
+  }
+  *out_path_len = path_len;
+  *out_segment_count = segment_count;
+  return 1;
+}
+
 static int lql_flat_eq_append(lql_flat_eq_program *program,
                               const lql_selector *selector) {
   lql_json_flat_eq_term *term;
   lql_json_flat_term_kind term_kind;
   const char *field;
+  size_t path_len;
+  size_t path_segment_count;
+  size_t first_segment_len;
   size_t i;
   if (selector == NULL) {
     return 0;
@@ -68,7 +121,8 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       return 0;
     }
     field = selector->field;
-    if (field[0] != '/' || field[1] == '\0' || strchr(field + 1, '/') != NULL) {
+    if (!lql_flat_eq_literal_object_path(field, &path_len, &path_segment_count,
+                                         &first_segment_len)) {
       return 0;
     }
     for (i = 0u; i < selector->any_count; ++i) {
@@ -79,9 +133,12 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       term = &program->terms[program->term_count];
       term->kind = term_kind;
       term->field = field + 1;
-      term->field_len = strlen(field + 1);
+      term->field_len = first_segment_len;
       term->value = selector->any[i];
       term->value_len = selector->any_lens[i];
+      term->path = field;
+      term->path_len = path_len;
+      term->path_segment_count = path_segment_count;
       program->selectors[program->term_count] = selector;
       ++program->term_count;
     }
@@ -95,12 +152,16 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     return 0;
   }
   field = selector->field;
-  if (field[0] != '/' || field[1] == '\0' || strchr(field + 1, '/') != NULL) {
+  if (!lql_flat_eq_literal_object_path(field, &path_len, &path_segment_count,
+                                       &first_segment_len)) {
     return 0;
   }
   term = &program->terms[program->term_count];
   term->field = field + 1;
-  term->field_len = strlen(field + 1);
+  term->field_len = first_segment_len;
+  term->path = field;
+  term->path_len = path_len;
+  term->path_segment_count = path_segment_count;
   if (selector->kind == LQL_SELECTOR_KIND_EXISTS) {
     term->kind = LQL_JSON_FLAT_TERM_EXISTS;
   } else if (selector->kind == LQL_SELECTOR_KIND_PREFIX) {

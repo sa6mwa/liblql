@@ -343,6 +343,11 @@ static int run_mapped_string_predicates(lql *ctx) {
       "{\"alpha\":{\"state\":\"open\"},\"beta\":{\"state\":\"closed\"}}\n"
       "{\"alpha\":{\"state\":\"closed\"}}\n"
       "42\n";
+  static const char object_path_input[] =
+      "{\"me\\u0074a\":{\"sta\\u0074e\":\"open\",\"code\":1},\"ignored\":[1]}\n"
+      "{\"meta\":{\"state\":\"closed\",\"code\":2}}\n"
+      "{\"meta\":{\"state\":\"closed\",\"state\":\"open\",\"code\":1}}\n"
+      "{\"meta\":[{\"state\":\"open\"}]}\n";
   if (run_selection(ctx, "contains{f=/msg,a=Timeout|degraded}", input, 3u,
                     1u)) {
     return 1;
@@ -407,6 +412,11 @@ static int run_mapped_string_predicates(lql *ctx) {
       run_selection(ctx, "in{field=/code,any=1|2}", scalar_input, 4u, 3u) ||
       run_selection(ctx, "/enabled=true", scalar_input, 4u, 1u)) {
     return 16;
+  }
+  if (run_selection(ctx, "/meta/state=\"open\"", object_path_input, 4u, 2u) ||
+      run_selection(ctx, "/meta/code=1", object_path_input, 4u, 2u) ||
+      run_selection(ctx, "exists{/meta/state}", object_path_input, 4u, 3u)) {
+    return 18;
   }
   if (run_selection(ctx, "/*/state=\"open\"", root_wildcard_input, 3u, 1u)) {
     return 17;

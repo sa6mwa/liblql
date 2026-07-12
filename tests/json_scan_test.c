@@ -132,6 +132,12 @@ int main(void) {
       {LQL_JSON_FLAT_TERM_NUMBER_EQ, "code", 4u, "1", 1u},
       {LQL_JSON_FLAT_TERM_BOOL_EQ, "enabled", 7u, "true", 4u},
       {LQL_JSON_FLAT_TERM_NULL_EQ, "empty", 5u, "null", 4u}};
+  static const char nested_flat_input[] =
+      "{\"me\\u0074a\":{\"sta\\u0074e\":\"open\"},\"ignored\":[1]}\n"
+      "{\"meta\":{\"state\":\"closed\"}}\n"
+      "{\"meta\":{\"state\":\"closed\",\"state\":\"open\"}}\n";
+  static const lql_json_flat_eq_term nested_flat_terms[] = {
+      {LQL_JSON_FLAT_TERM_EQ, "meta", 4u, "open", 4u, "/meta/state", 11u, 2u}};
   lql_json_flat_eq_request flat_request;
   lql_json_spool flat_spool;
   json_test_reader flat_reader;
@@ -244,6 +250,42 @@ int main(void) {
              flat_writer.len) != 0) {
     lql_json_spool_cleanup(&flat_spool);
     return 12;
+  }
+  lql_json_spool_cleanup(&flat_spool);
+  memset(&flat_reader, 0, sizeof(flat_reader));
+  memset(&flat_writer, 0, sizeof(flat_writer));
+  memset(&flat_result, 0, sizeof(flat_result));
+  flat_reader.data = (const unsigned char *)nested_flat_input;
+  flat_reader.len = sizeof(nested_flat_input) - 1u;
+  flat_reader.chunk_size = 1u;
+  flat_result.writer = &flat_writer;
+  memset(&flat_request, 0, sizeof(flat_request));
+  flat_request.reader = json_test_read;
+  flat_request.reader_user = &flat_reader;
+  flat_request.terms = nested_flat_terms;
+  flat_request.term_count =
+      sizeof(nested_flat_terms) / sizeof(nested_flat_terms[0]);
+  flat_request.spool = &flat_spool;
+  flat_request.capture = 1;
+  flat_request.record = json_flat_record;
+  flat_request.record_user = &flat_result;
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
+    return 13;
+  }
+  if (lql_json_scan_flat_eq_ndjson(&flat_request, &flat_records, &flat_bytes,
+                                   &flat_error) != LQL_STATUS_OK ||
+      flat_records != 3u || flat_bytes != flat_reader.len ||
+      flat_result.objects != 3u || flat_result.matches != 2u ||
+      flat_writer.len !=
+          strlen("{\"me\\u0074a\":{\"sta\\u0074e\":\"open\"},\"ignored\":[1]}\n"
+                 "{\"meta\":{\"state\":\"closed\",\"state\":\"open\"}}\n") ||
+      memcmp(flat_writer.data,
+             "{\"me\\u0074a\":{\"sta\\u0074e\":\"open\"},\"ignored\":[1]}\n"
+             "{\"meta\":{\"state\":\"closed\",\"state\":\"open\"}}\n",
+             flat_writer.len) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 14;
   }
   lql_json_spool_cleanup(&flat_spool);
   return 0;
