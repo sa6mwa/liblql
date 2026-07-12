@@ -177,6 +177,27 @@ static void lql_json_temporal_range_byte(lql_json_scan *scan,
   scan->temporal_match[scan->temporal_match_len++] = (char)value;
 }
 
+static void lql_json_temporal_range_bytes(lql_json_scan *scan,
+                                          const unsigned char *data,
+                                          size_t len) {
+  unsigned long active;
+  size_t remaining;
+  if (scan->temporal_range_active == 0ul || len == 0u) {
+    return;
+  }
+  active = scan->temporal_range_active & ~scan->temporal_range_failed;
+  if (active == 0ul) {
+    return;
+  }
+  remaining = sizeof(scan->temporal_match) - scan->temporal_match_len;
+  if (len >= remaining) {
+    scan->temporal_range_failed |= active;
+    return;
+  }
+  memcpy(scan->temporal_match + scan->temporal_match_len, data, len);
+  scan->temporal_match_len += len;
+}
+
 static int lql_json_number_match_integer(const char *text, size_t len,
                                          double *out) {
   unsigned long value;
@@ -1079,6 +1100,11 @@ static lql_status lql_json_string(lql_json_scan *scan) {
       status = lql_json_write(scan, span, span_len);
       if (status != LQL_STATUS_OK) {
         return status;
+      }
+      if ((scan->match_active & ~scan->match_failed) == 0ul &&
+          (scan->capture_active & ~scan->capture_failed) == 0ul) {
+        lql_json_temporal_range_bytes(scan, span, span_len);
+        continue;
       }
       if ((scan->match_active & ~scan->match_failed) != 0ul ||
           (scan->capture_active & ~scan->capture_failed) != 0ul ||
