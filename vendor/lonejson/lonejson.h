@@ -2561,6 +2561,20 @@ typedef struct lonejson_value_rewriter {
   lonejson_error error;
 } lonejson_value_rewriter;
 
+/** Incremental top-level-object member transducer driven by structured events.
+ *
+ * This is deliberately narrower than `lonejson_value_rewriter`: it rewrites
+ * one decoded direct member while passing every other member through in source
+ * order. It is intended for bounded record transforms where the caller
+ * already owns parsing and delivers one balanced object event sequence.
+ */
+typedef struct lonejson_object_rewriter {
+  void *state;
+  lonejson_error error;
+} lonejson_object_rewriter;
+
+struct lonejson_object_rewrite_options;
+
 /** Bounded replayable prefix of structured JSON value events. */
 typedef struct lonejson_value_event_tape {
   void *state;
@@ -5302,6 +5316,25 @@ lonejson_status lonejson_value_rewriter_close(lonejson_value_rewriter *rewriter,
                                               lonejson_error *error);
 /** Releases all resources retained by a value rewriter. */
 void lonejson_value_rewriter_cleanup(lonejson_value_rewriter *rewriter);
+/** Initializes a reusable top-level object member transducer. */
+void lonejson_object_rewriter_init(lonejson_object_rewriter *rewriter);
+/** Opens one transducer for a balanced top-level object event sequence.
+ *
+ * The transducer compact-streams the resulting object to `sink`. `member_key`
+ * is matched as decoded UTF-8 text. `out_visitor` and `out_user` remain valid
+ * until close or cleanup. The input root must be an object.
+ */
+lonejson_status lonejson_object_rewriter_open(
+    lonejson_object_rewriter *rewriter, lonejson *runtime,
+    lonejson_sink_fn sink, void *sink_user,
+    const struct lonejson_object_rewrite_options *options,
+    lonejson_value_visitor *out_visitor, void **out_user,
+    lonejson_error *error);
+/** Finalizes one event-fed top-level object transform. */
+lonejson_status lonejson_object_rewriter_close(
+    lonejson_object_rewriter *rewriter, lonejson_error *error);
+/** Releases resources retained by a top-level object member transducer. */
+void lonejson_object_rewriter_cleanup(lonejson_object_rewriter *rewriter);
 /** Initializes a reusable bounded structured-event tape. */
 void lonejson_value_event_tape_init(lonejson_value_event_tape *tape);
 /** Opens a tape that records one prefix of JSON value events.
@@ -5743,6 +5776,50 @@ typedef struct lonejson_value_rewrite_options {
   /** Opaque user pointer passed to `replace`. */
   void *replace_user;
 } lonejson_value_rewrite_options;
+
+/** One scalar JSON replacement owned by the caller for the duration of a
+ * top-level object rewrite. String data is decoded UTF-8; number data is one
+ * complete JSON number token.
+ */
+typedef enum lonejson_object_rewrite_scalar_kind {
+  LONEJSON_OBJECT_REWRITE_SCALAR_NONE = 0,
+  LONEJSON_OBJECT_REWRITE_SCALAR_STRING,
+  LONEJSON_OBJECT_REWRITE_SCALAR_NUMBER,
+  LONEJSON_OBJECT_REWRITE_SCALAR_BOOL,
+  LONEJSON_OBJECT_REWRITE_SCALAR_NULL
+} lonejson_object_rewrite_scalar_kind;
+
+typedef struct lonejson_object_rewrite_scalar {
+  lonejson_object_rewrite_scalar_kind kind;
+  const char *data;
+  size_t len;
+  int boolean_value;
+} lonejson_object_rewrite_scalar;
+
+/** Options for rewriting one named member of a top-level JSON object while
+ * compact-streaming every other member to an output sink.
+ *
+ * `member_key` is decoded UTF-8 text, not a JSON Pointer. The operation is
+ * deliberately limited to one direct object member; callers that need an
+ * arbitrary nested-path rewrite use `lonejson_value_rewrite_*` instead.
+ */
+typedef struct lonejson_object_rewrite_options {
+  /** Top-level object member name to rewrite. */
+  const char *member_key;
+  /** Rewrite action applied when that member is present. */
+  lonejson_value_rewrite_action action;
+  /** Replacement value used by `LONEJSON_VALUE_REWRITE_REPLACE`. */
+  lonejson_value_rewrite_replacement replacement;
+  /** Optional writer-free scalar replacement. When configured, it takes
+   * precedence over `replacement` and keeps the transform on its bounded
+   * compact event path. */
+  lonejson_object_rewrite_scalar scalar;
+  /** When non-zero, append `member_key` with `replacement` after the source
+   * object if no matching source member was seen. This option is valid only
+   * with `LONEJSON_VALUE_REWRITE_REPLACE`.
+   */
+  int append_if_missing;
+} lonejson_object_rewrite_options;
 
 /** Mutable result initialized to `KEEP` before each item callback. */
 typedef struct lonejson_array_rewrite_result {
@@ -47482,6 +47559,927 @@ lonejson_status lonejson_value_rewriter_close(lonejson_value_rewriter *rewriter,
 
 void lonejson_value_rewriter_cleanup(lonejson_value_rewriter *rewriter) {
   lonejson__value_rewriter_destroy(rewriter);
+  if (rewriter != NULL) {
+    lonejson_error_init(&rewriter->error);
+  }
+}
+
+typedef struct lonejson__object_rewrite_frame {
+  int object;
+  int after_key;
+  size_t count;
+} lonejson__object_rewrite_frame;
+
+typedef struct lonejson__object_rewrite_state {
+  lonejson_allocator allocator;
+  lonejson_writer writer;
+  lonejson_sink_fn sink;
+  void *sink_user;
+  lonejson__object_rewrite_frame *frames;
+  size_t frame_count;
+  size_t frame_cap;
+  int direct_output;
+  lonejson_object_rewrite_options options;
+  char *key;
+  size_t key_len;
+  size_t key_cap;
+  size_t input_depth;
+  size_t skipped_depth;
+  int key_open;
+  int skip_next_value;
+  int skipped_scalar;
+  int found;
+  int root_complete;
+  int open;
+} lonejson__object_rewrite_state;
+
+static void lonejson__object_rewriter_destroy(
+    lonejson_object_rewriter *rewriter) {
+  lonejson__object_rewrite_state *state;
+  if (rewriter == NULL || rewriter->state == NULL) {
+    return;
+  }
+  state = (lonejson__object_rewrite_state *)rewriter->state;
+  lonejson_writer_cleanup(&state->writer);
+  lonejson__buffer_free(&state->allocator, state->frames,
+                        state->frame_cap * sizeof(*state->frames));
+  lonejson__buffer_free(&state->allocator, state->key, state->key_cap);
+  lonejson__buffer_free(&state->allocator, state, sizeof(*state));
+  rewriter->state = NULL;
+}
+
+static lonejson_status lonejson__object_rewrite_key_append(
+    lonejson__object_rewrite_state *state, const char *data, size_t len,
+    lonejson_error *error) {
+  char *next;
+  size_t next_cap;
+  if (len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->key_len > (size_t)-1 - len - 1u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_OVERFLOW, 0u, 0u, 0u,
+                               "object rewrite key is too large");
+  }
+  if (state->key_len + len + 1u > state->key_cap) {
+    next_cap = state->key_cap == 0u ? 32u : state->key_cap;
+    while (next_cap < state->key_len + len + 1u) {
+      if (next_cap > ((size_t)-1) / 2u) {
+        next_cap = state->key_len + len + 1u;
+        break;
+      }
+      next_cap *= 2u;
+    }
+    next = (char *)lonejson__buffer_realloc(&state->allocator, state->key,
+                                              state->key_cap, next_cap);
+    if (next == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to grow object rewrite key");
+    }
+    state->key = next;
+    state->key_cap = next_cap;
+  }
+  memcpy(state->key + state->key_len, data, len);
+  state->key_len += len;
+  state->key[state->key_len] = '\0';
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__object_rewrite_write(
+    lonejson__object_rewrite_state *state, const char *data, size_t len,
+    lonejson_error *error) {
+  if (len == 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  return state->sink(state->sink_user, data, len, error);
+}
+
+static lonejson_status lonejson__object_rewrite_write_string(
+    lonejson__object_rewrite_state *state, const char *data, size_t len,
+    lonejson_error *error) {
+  static const char hex[] = "0123456789abcdef";
+  size_t i;
+  size_t start;
+  lonejson_status status;
+  char escaped[6];
+  status = lonejson__object_rewrite_write(state, "\"", 1u, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  start = 0u;
+  for (i = 0u; i < len; ++i) {
+    unsigned char ch;
+    ch = (unsigned char)data[i];
+    if (ch != (unsigned char)'\"' && ch != (unsigned char)'\\' &&
+        ch >= 0x20u) {
+      continue;
+    }
+    status = lonejson__object_rewrite_write(state, data + start, i - start,
+                                             error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    if (ch == (unsigned char)'\"' || ch == (unsigned char)'\\') {
+      escaped[0] = '\\';
+      escaped[1] = (char)ch;
+      status = lonejson__object_rewrite_write(state, escaped, 2u, error);
+    } else {
+      escaped[0] = '\\';
+      escaped[1] = 'u';
+      escaped[2] = '0';
+      escaped[3] = '0';
+      escaped[4] = hex[ch >> 4u];
+      escaped[5] = hex[ch & 15u];
+      status = lonejson__object_rewrite_write(state, escaped, 6u, error);
+    }
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    start = i + 1u;
+  }
+  status = lonejson__object_rewrite_write(state, data + start, len - start,
+                                           error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return lonejson__object_rewrite_write(state, "\"", 1u, error);
+}
+
+static lonejson_status lonejson__object_rewrite_before_value(
+    lonejson__object_rewrite_state *state, lonejson_error *error) {
+  lonejson__object_rewrite_frame *frame;
+  lonejson_status status;
+  if (state->frame_count == 0u) {
+    return state->root_complete
+               ? lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                                    0u, 0u, "object rewrite has multiple roots")
+               : LONEJSON_STATUS_OK;
+  }
+  frame = &state->frames[state->frame_count - 1u];
+  if (frame->object) {
+    if (!frame->after_key) {
+      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                                 0u, "object rewrite value is missing a key");
+    }
+    frame->after_key = 0;
+  } else if (frame->count != 0u) {
+    status = lonejson__object_rewrite_write(state, ",", 1u, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  }
+  frame->count++;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__object_rewrite_push_frame(
+    lonejson__object_rewrite_state *state, int object, lonejson_error *error) {
+  lonejson__object_rewrite_frame *next;
+  size_t next_cap;
+  if (state->frame_count == state->frame_cap) {
+    next_cap = state->frame_cap == 0u ? 8u : state->frame_cap * 2u;
+    next = (lonejson__object_rewrite_frame *)lonejson__buffer_realloc(
+        &state->allocator, state->frames,
+        state->frame_cap * sizeof(*state->frames),
+        next_cap * sizeof(*state->frames));
+    if (next == NULL) {
+      return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                                 0u, 0u,
+                                 "failed to grow object rewrite stack");
+    }
+    state->frames = next;
+    state->frame_cap = next_cap;
+  }
+  memset(&state->frames[state->frame_count], 0,
+         sizeof(state->frames[state->frame_count]));
+  state->frames[state->frame_count].object = object;
+  state->frame_count++;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__object_rewrite_begin_container(
+    lonejson__object_rewrite_state *state, int object, lonejson_error *error) {
+  lonejson_status status;
+  if (!state->direct_output) {
+    return object ? lonejson_writer_begin_object(&state->writer, error)
+                  : lonejson_writer_begin_array(&state->writer, error);
+  }
+  status = lonejson__object_rewrite_before_value(state, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  status = lonejson__object_rewrite_write(state, object ? "{" : "[", 1u,
+                                           error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return lonejson__object_rewrite_push_frame(state, object, error);
+}
+
+static lonejson_status lonejson__object_rewrite_end_container(
+    lonejson__object_rewrite_state *state, int object, lonejson_error *error) {
+  lonejson__object_rewrite_frame *frame;
+  if (!state->direct_output) {
+    return object ? lonejson_writer_end_object(&state->writer, error)
+                  : lonejson_writer_end_array(&state->writer, error);
+  }
+  if (state->frame_count == 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite stack is empty");
+  }
+  frame = &state->frames[state->frame_count - 1u];
+  if (frame->object != object || frame->after_key) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite container is incomplete");
+  }
+  state->frame_count--;
+  return lonejson__object_rewrite_write(state, object ? "}" : "]", 1u,
+                                         error);
+}
+
+static lonejson_status lonejson__object_rewrite_write_key(
+    lonejson__object_rewrite_state *state, const char *key, size_t len,
+    lonejson_error *error) {
+  lonejson__object_rewrite_frame *frame;
+  lonejson_status status;
+  if (!state->direct_output) {
+    return lonejson_writer_key(&state->writer, key, len, error);
+  }
+  if (state->frame_count == 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite key has no object");
+  }
+  frame = &state->frames[state->frame_count - 1u];
+  if (!frame->object || frame->after_key) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite key is invalid");
+  }
+  if (frame->count != 0u) {
+    status = lonejson__object_rewrite_write(state, ",", 1u, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+  }
+  status = lonejson__object_rewrite_write_string(state, key, len, error);
+  if (status == LONEJSON_STATUS_OK) {
+    status = lonejson__object_rewrite_write(state, ":", 1u, error);
+  }
+  if (status == LONEJSON_STATUS_OK) {
+    frame->after_key = 1;
+  }
+  return status;
+}
+
+static lonejson_status lonejson__object_rewrite_write_scalar(
+    lonejson__object_rewrite_state *state,
+    const lonejson_object_rewrite_scalar *scalar, lonejson_error *error) {
+  lonejson_status status;
+  const char *literal;
+  size_t literal_len;
+  if (scalar == NULL || scalar->kind == LONEJSON_OBJECT_REWRITE_SCALAR_NONE) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u, "object rewrite scalar is required");
+  }
+  if (!state->direct_output) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INTERNAL_ERROR, 0u, 0u,
+                               0u, "object rewrite scalar path is unavailable");
+  }
+  status = lonejson__object_rewrite_before_value(state, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (scalar->kind == LONEJSON_OBJECT_REWRITE_SCALAR_STRING) {
+    if (scalar->data == NULL && scalar->len != 0u) {
+      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                                 0u, 0u,
+                                 "object rewrite string data is required");
+    }
+    return lonejson__object_rewrite_write_string(state, scalar->data,
+                                                  scalar->len, error);
+  }
+  if (scalar->kind == LONEJSON_OBJECT_REWRITE_SCALAR_NUMBER) {
+    if (scalar->data == NULL || scalar->len == 0u) {
+      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                                 0u, 0u,
+                                 "object rewrite number data is required");
+    }
+    return lonejson__object_rewrite_write(state, scalar->data, scalar->len,
+                                           error);
+  }
+  if (scalar->kind == LONEJSON_OBJECT_REWRITE_SCALAR_BOOL) {
+    literal = scalar->boolean_value ? "true" : "false";
+    literal_len = scalar->boolean_value ? 4u : 5u;
+    return lonejson__object_rewrite_write(state, literal, literal_len, error);
+  }
+  if (scalar->kind == LONEJSON_OBJECT_REWRITE_SCALAR_NULL) {
+    return lonejson__object_rewrite_write(state, "null", 4u, error);
+  }
+  return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
+                             0u, "object rewrite scalar kind is invalid");
+}
+
+static lonejson_status lonejson__object_rewrite_begin_scalar(
+    lonejson__object_rewrite_state *state, int string_value,
+    lonejson_error *error) {
+  lonejson_status status;
+  if (!state->direct_output) {
+    return string_value ? lonejson_writer_string_begin(&state->writer, error)
+                        : lonejson_writer_number_begin(&state->writer, error);
+  }
+  status = lonejson__object_rewrite_before_value(state, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return string_value ? lonejson__object_rewrite_write(state, "\"", 1u, error)
+                      : LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__object_rewrite_write_scalar_chunk(
+    lonejson__object_rewrite_state *state, int string_value,
+    const char *data, size_t len, lonejson_error *error) {
+  if (!state->direct_output) {
+    return string_value
+               ? lonejson_writer_string_chunk(&state->writer, data, len, error)
+               : lonejson_writer_number_chunk(&state->writer, data, len, error);
+  }
+  if (string_value) {
+    /* The surrounding quotes are emitted by begin/end; escape only content. */
+    static const char hex[] = "0123456789abcdef";
+    size_t i;
+    size_t start;
+    lonejson_status status;
+    char escaped[6];
+    start = 0u;
+    for (i = 0u; i < len; ++i) {
+      unsigned char ch;
+      ch = (unsigned char)data[i];
+      if (ch != (unsigned char)'\"' && ch != (unsigned char)'\\' &&
+          ch >= 0x20u) {
+        continue;
+      }
+      status = lonejson__object_rewrite_write(state, data + start, i - start,
+                                               error);
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+      if (ch == (unsigned char)'\"' || ch == (unsigned char)'\\') {
+        escaped[0] = '\\'; escaped[1] = (char)ch;
+        status = lonejson__object_rewrite_write(state, escaped, 2u, error);
+      } else {
+        escaped[0] = '\\'; escaped[1] = 'u'; escaped[2] = '0'; escaped[3] = '0';
+        escaped[4] = hex[ch >> 4u]; escaped[5] = hex[ch & 15u];
+        status = lonejson__object_rewrite_write(state, escaped, 6u, error);
+      }
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+      start = i + 1u;
+    }
+    return lonejson__object_rewrite_write(state, data + start, len - start,
+                                           error);
+  }
+  return lonejson__object_rewrite_write(state, data, len, error);
+}
+
+static lonejson_status lonejson__object_rewrite_end_scalar(
+    lonejson__object_rewrite_state *state, int string_value,
+    lonejson_error *error) {
+  if (!state->direct_output) {
+    return string_value ? lonejson_writer_string_end(&state->writer, error)
+                        : lonejson_writer_number_end(&state->writer, error);
+  }
+  return string_value ? lonejson__object_rewrite_write(state, "\"", 1u, error)
+                      : LONEJSON_STATUS_OK;
+}
+
+static int lonejson__object_rewrite_key_matches(
+    const lonejson__object_rewrite_state *state) {
+  size_t target_len;
+  if (state->options.member_key == NULL || state->key == NULL) {
+    return 0;
+  }
+  target_len = strlen(state->options.member_key);
+  return target_len == state->key_len &&
+         memcmp(state->key, state->options.member_key, target_len) == 0;
+}
+
+static lonejson_status lonejson__object_rewrite_emit_replacement(
+    lonejson__object_rewrite_state *state, lonejson_error *error) {
+  if (state->direct_output) {
+    return lonejson__object_rewrite_write_scalar(state, &state->options.scalar,
+                                                  error);
+  }
+  if (state->options.replacement.emit != NULL) {
+    return state->options.replacement.emit(
+        &state->writer, state->options.replacement.emit_user, error);
+  }
+  if (state->options.replacement.json != NULL) {
+    return lonejson_writer_json_value(&state->writer,
+                                      state->options.replacement.json, error);
+  }
+  return lonejson_writer_mapped(&state->writer, state->options.replacement.map,
+                                state->options.replacement.src, error);
+}
+
+static lonejson_status lonejson__object_rewrite_emit_pending(
+    lonejson__object_rewrite_state *state, lonejson_error *error) {
+  lonejson_status status;
+  state->skip_next_value = 0;
+  state->found = 1;
+  if (state->options.action == LONEJSON_VALUE_REWRITE_DROP) {
+    return LONEJSON_STATUS_OK;
+  }
+  status = lonejson__object_rewrite_write_key(
+      state, state->options.member_key, strlen(state->options.member_key),
+      error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  return lonejson__object_rewrite_emit_replacement(state, error);
+}
+
+static lonejson_status lonejson__object_rewrite_object_begin(
+    void *user, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  lonejson_status status;
+  state = (lonejson__object_rewrite_state *)user;
+  if (state == NULL || !state->open || state->root_complete) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite input is invalid");
+  }
+  if (state->input_depth == 0u) {
+    state->input_depth = 1u;
+    return lonejson__object_rewrite_begin_container(state, 1, error);
+  }
+  if (state->skip_next_value) {
+    status = lonejson__object_rewrite_emit_pending(state, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    state->skipped_depth = 1u;
+    state->input_depth++;
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->skipped_depth != 0u) {
+    state->skipped_depth++;
+    state->input_depth++;
+    return LONEJSON_STATUS_OK;
+  }
+  state->input_depth++;
+  return lonejson__object_rewrite_begin_container(state, 1, error);
+}
+
+static lonejson_status lonejson__object_rewrite_array_begin(
+    void *user, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  lonejson_status status;
+  state = (lonejson__object_rewrite_state *)user;
+  if (state == NULL || !state->open || state->input_depth == 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                               0u, "object rewrite input root must be object");
+  }
+  if (state->skip_next_value) {
+    status = lonejson__object_rewrite_emit_pending(state, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    state->skipped_depth = 1u;
+    state->input_depth++;
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->skipped_depth != 0u) {
+    state->skipped_depth++;
+    state->input_depth++;
+    return LONEJSON_STATUS_OK;
+  }
+  state->input_depth++;
+  return lonejson__object_rewrite_begin_container(state, 0, error);
+}
+
+static lonejson_status lonejson__object_rewrite_container_end(
+    lonejson__object_rewrite_state *state, int object, lonejson_error *error) {
+  lonejson_status status;
+  if (state == NULL || !state->open || state->input_depth == 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite container is invalid");
+  }
+  if (state->skipped_depth != 0u) {
+    state->skipped_depth--;
+    state->input_depth--;
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->input_depth == 1u) {
+    if (!object || state->key_open || state->skip_next_value ||
+        state->skipped_scalar) {
+      return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                                 0u, "object rewrite input is incomplete");
+    }
+    if (!state->found && state->options.append_if_missing) {
+      status = lonejson__object_rewrite_write_key(
+          state, state->options.member_key, strlen(state->options.member_key),
+          error);
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+      status = lonejson__object_rewrite_emit_replacement(state, error);
+      if (status != LONEJSON_STATUS_OK) {
+        return status;
+      }
+    }
+    status = lonejson__object_rewrite_end_container(state, 1, error);
+    if (status == LONEJSON_STATUS_OK) {
+      state->input_depth = 0u;
+      state->root_complete = 1;
+    }
+    return status;
+  }
+  state->input_depth--;
+  return lonejson__object_rewrite_end_container(state, object, error);
+}
+
+static lonejson_status lonejson__object_rewrite_object_end(
+    void *user, lonejson_error *error) {
+  return lonejson__object_rewrite_container_end(
+      (lonejson__object_rewrite_state *)user, 1, error);
+}
+
+static lonejson_status lonejson__object_rewrite_array_end(
+    void *user, lonejson_error *error) {
+  return lonejson__object_rewrite_container_end(
+      (lonejson__object_rewrite_state *)user, 0, error);
+}
+
+static lonejson_status lonejson__object_rewrite_key_begin(
+    void *user, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  state = (lonejson__object_rewrite_state *)user;
+  if (state == NULL || !state->open) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite key is invalid");
+  }
+  if (state->skipped_depth != 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->key_open || state->skip_next_value) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite key is incomplete");
+  }
+  state->key_open = 1;
+  state->key_len = 0u;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__object_rewrite_key_chunk(
+    void *user, const char *data, size_t len, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  state = (lonejson__object_rewrite_state *)user;
+  if (state == NULL || !state->open) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite key is invalid");
+  }
+  if (state->skipped_depth != 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (!state->key_open) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite key is incomplete");
+  }
+  return lonejson__object_rewrite_key_append(state, data, len, error);
+}
+
+static lonejson_status lonejson__object_rewrite_key_end(
+    void *user, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  lonejson_status status;
+  state = (lonejson__object_rewrite_state *)user;
+  if (state == NULL || !state->open) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite key is invalid");
+  }
+  if (state->skipped_depth != 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (!state->key_open) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite key is incomplete");
+  }
+  state->key_open = 0;
+  if (state->input_depth == 1u && lonejson__object_rewrite_key_matches(state) &&
+      state->options.action != LONEJSON_VALUE_REWRITE_KEEP) {
+    state->skip_next_value = 1;
+    return LONEJSON_STATUS_OK;
+  }
+  status = lonejson__object_rewrite_write_key(state, state->key, state->key_len,
+                                               error);
+  return status;
+}
+
+static lonejson_status lonejson__object_rewrite_scalar_begin(
+    lonejson__object_rewrite_state *state, int string_value,
+    lonejson_error *error) {
+  lonejson_status status;
+  if (state == NULL || !state->open || state->input_depth == 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                               0u, "object rewrite input root must be object");
+  }
+  if (state->skip_next_value) {
+    status = lonejson__object_rewrite_emit_pending(state, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    state->skipped_scalar = 1;
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->skipped_depth != 0u || state->skipped_scalar) {
+    return LONEJSON_STATUS_OK;
+  }
+  return lonejson__object_rewrite_begin_scalar(state, string_value, error);
+}
+
+static lonejson_status lonejson__object_rewrite_string_begin(
+    void *user, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  state = (lonejson__object_rewrite_state *)user;
+  return lonejson__object_rewrite_scalar_begin(state, 1, error);
+}
+
+static lonejson_status lonejson__object_rewrite_number_begin(
+    void *user, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  state = (lonejson__object_rewrite_state *)user;
+  return lonejson__object_rewrite_scalar_begin(state, 0, error);
+}
+
+static lonejson_status lonejson__object_rewrite_scalar_chunk(
+    lonejson__object_rewrite_state *state, int string_value,
+    const char *data, size_t len, lonejson_error *error) {
+  if (state == NULL || !state->open || state->input_depth == 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite scalar is invalid");
+  }
+  if (state->skipped_depth != 0u || state->skipped_scalar) {
+    return LONEJSON_STATUS_OK;
+  }
+  return lonejson__object_rewrite_write_scalar_chunk(state, string_value, data,
+                                                      len, error);
+}
+
+static lonejson_status lonejson__object_rewrite_string_chunk(
+    void *user, const char *data, size_t len, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  state = (lonejson__object_rewrite_state *)user;
+  return lonejson__object_rewrite_scalar_chunk(state, 1, data, len, error);
+}
+
+static lonejson_status lonejson__object_rewrite_number_chunk(
+    void *user, const char *data, size_t len, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  state = (lonejson__object_rewrite_state *)user;
+  return lonejson__object_rewrite_scalar_chunk(state, 0, data, len, error);
+}
+
+static lonejson_status lonejson__object_rewrite_scalar_end(
+    lonejson__object_rewrite_state *state, int string_value,
+    lonejson_error *error) {
+  if (state == NULL || !state->open || state->input_depth == 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                               0u, "object rewrite scalar is invalid");
+  }
+  if (state->skipped_scalar) {
+    state->skipped_scalar = 0;
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->skipped_depth != 0u) {
+    return LONEJSON_STATUS_OK;
+  }
+  return lonejson__object_rewrite_end_scalar(state, string_value, error);
+}
+
+static lonejson_status lonejson__object_rewrite_string_end(
+    void *user, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  state = (lonejson__object_rewrite_state *)user;
+  return lonejson__object_rewrite_scalar_end(state, 1, error);
+}
+
+static lonejson_status lonejson__object_rewrite_number_end(
+    void *user, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  state = (lonejson__object_rewrite_state *)user;
+  return lonejson__object_rewrite_scalar_end(state, 0, error);
+}
+
+static lonejson_status lonejson__object_rewrite_boolean(
+    void *user, int value, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  lonejson_status status;
+  state = (lonejson__object_rewrite_state *)user;
+  if (state == NULL || !state->open || state->input_depth == 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                               0u, "object rewrite input root must be object");
+  }
+  if (state->skip_next_value) {
+    return lonejson__object_rewrite_emit_pending(state, error);
+  }
+  if (state->skipped_depth != 0u || state->skipped_scalar) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->direct_output) {
+    lonejson_object_rewrite_scalar scalar;
+    memset(&scalar, 0, sizeof(scalar));
+    scalar.kind = LONEJSON_OBJECT_REWRITE_SCALAR_BOOL;
+    scalar.boolean_value = value;
+    status = lonejson__object_rewrite_write_scalar(state, &scalar, error);
+  } else {
+    status = lonejson_writer_bool(&state->writer, value, error);
+  }
+  return status;
+}
+
+static lonejson_status lonejson__object_rewrite_null(void *user,
+                                                      lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  lonejson_status status;
+  state = (lonejson__object_rewrite_state *)user;
+  if (state == NULL || !state->open || state->input_depth == 0u) {
+    return lonejson__set_error(error, LONEJSON_STATUS_TYPE_MISMATCH, 0u, 0u,
+                               0u, "object rewrite input root must be object");
+  }
+  if (state->skip_next_value) {
+    return lonejson__object_rewrite_emit_pending(state, error);
+  }
+  if (state->skipped_depth != 0u || state->skipped_scalar) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->direct_output) {
+    lonejson_object_rewrite_scalar scalar;
+    memset(&scalar, 0, sizeof(scalar));
+    scalar.kind = LONEJSON_OBJECT_REWRITE_SCALAR_NULL;
+    status = lonejson__object_rewrite_write_scalar(state, &scalar, error);
+  } else {
+    status = lonejson_writer_null(&state->writer, error);
+  }
+  return status;
+}
+
+static void lonejson__object_rewrite_assign_visitor(
+    lonejson_value_visitor *visitor) {
+  *visitor = lonejson_default_value_visitor();
+  visitor->object_begin = lonejson__object_rewrite_object_begin;
+  visitor->object_end = lonejson__object_rewrite_object_end;
+  visitor->object_key_begin = lonejson__object_rewrite_key_begin;
+  visitor->object_key_chunk = lonejson__object_rewrite_key_chunk;
+  visitor->object_key_end = lonejson__object_rewrite_key_end;
+  visitor->array_begin = lonejson__object_rewrite_array_begin;
+  visitor->array_end = lonejson__object_rewrite_array_end;
+  visitor->string_begin = lonejson__object_rewrite_string_begin;
+  visitor->string_chunk = lonejson__object_rewrite_string_chunk;
+  visitor->string_end = lonejson__object_rewrite_string_end;
+  visitor->number_begin = lonejson__object_rewrite_number_begin;
+  visitor->number_chunk = lonejson__object_rewrite_number_chunk;
+  visitor->number_end = lonejson__object_rewrite_number_end;
+  visitor->boolean_value = lonejson__object_rewrite_boolean;
+  visitor->null_value = lonejson__object_rewrite_null;
+}
+
+static lonejson_status lonejson__object_rewrite_validate_options(
+    const lonejson_object_rewrite_options *options, lonejson_error *error) {
+  if (options == NULL || options->member_key == NULL ||
+      options->member_key[0] == '\0') {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u,
+                               "object rewrite member key is required");
+  }
+  if (options->action != LONEJSON_VALUE_REWRITE_KEEP &&
+      options->action != LONEJSON_VALUE_REWRITE_DROP &&
+      options->action != LONEJSON_VALUE_REWRITE_REPLACE) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u,
+                               "object rewrite action is invalid");
+  }
+  if (options->scalar.kind != LONEJSON_OBJECT_REWRITE_SCALAR_NONE &&
+      options->scalar.kind != LONEJSON_OBJECT_REWRITE_SCALAR_STRING &&
+      options->scalar.kind != LONEJSON_OBJECT_REWRITE_SCALAR_NUMBER &&
+      options->scalar.kind != LONEJSON_OBJECT_REWRITE_SCALAR_BOOL &&
+      options->scalar.kind != LONEJSON_OBJECT_REWRITE_SCALAR_NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u,
+                               "object rewrite scalar kind is invalid");
+  }
+  if (options->scalar.kind == LONEJSON_OBJECT_REWRITE_SCALAR_NONE &&
+      options->action == LONEJSON_VALUE_REWRITE_REPLACE &&
+      !lonejson__value_rewrite_source_is_valid(&options->replacement)) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u,
+                               "object rewrite replacement source is invalid");
+  }
+  if (options->append_if_missing &&
+      options->action != LONEJSON_VALUE_REWRITE_REPLACE) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u,
+                               "object rewrite append requires replacement");
+  }
+  return LONEJSON_STATUS_OK;
+}
+
+void lonejson_object_rewriter_init(lonejson_object_rewriter *rewriter) {
+  if (rewriter != NULL) {
+    memset(rewriter, 0, sizeof(*rewriter));
+    lonejson_error_init(&rewriter->error);
+  }
+}
+
+lonejson_status lonejson_object_rewriter_open(
+    lonejson_object_rewriter *rewriter, lonejson *runtime,
+    lonejson_sink_fn sink, void *sink_user,
+    const lonejson_object_rewrite_options *options,
+    lonejson_value_visitor *out_visitor, void **out_user,
+    lonejson_error *error) {
+  lonejson__runtime_borrow borrow;
+  const lonejson_runtime *runtime_state;
+  lonejson__object_rewrite_state *state;
+  lonejson_status status;
+  if (rewriter == NULL || sink == NULL || out_visitor == NULL ||
+      out_user == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u,
+                               "object rewriter arguments are invalid");
+  }
+  status = lonejson__object_rewrite_validate_options(options, error);
+  if (status != LONEJSON_STATUS_OK) {
+    return status;
+  }
+  if (rewriter->state != NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u, "object rewriter is already open");
+  }
+  runtime_state = lonejson__require_runtime_borrow(runtime, &borrow, error);
+  if (runtime_state == NULL) {
+    return LONEJSON_STATUS_INVALID_ARGUMENT;
+  }
+  state = (lonejson__object_rewrite_state *)lonejson__buffer_alloc(
+      &runtime_state->allocator_storage, sizeof(*state));
+  if (state == NULL) {
+    lonejson__runtime_borrow_release(&borrow);
+    return lonejson__set_error(error, LONEJSON_STATUS_ALLOCATION_FAILED, 0u,
+                               0u, 0u,
+                               "failed to allocate object rewriter");
+  }
+  memset(state, 0, sizeof(*state));
+  state->allocator = runtime_state->allocator_storage;
+  state->options = *options;
+  state->sink = sink;
+  state->sink_user = sink_user;
+  state->direct_output = options->action == LONEJSON_VALUE_REWRITE_DROP ||
+                         options->scalar.kind !=
+                             LONEJSON_OBJECT_REWRITE_SCALAR_NONE;
+  lonejson__runtime_borrow_release(&borrow);
+  status = state->direct_output
+               ? LONEJSON_STATUS_OK
+               : lonejson_writer_init_sink(runtime, &state->writer, sink,
+                                           sink_user, error);
+  if (status != LONEJSON_STATUS_OK) {
+    lonejson_writer_cleanup(&state->writer);
+    lonejson__buffer_free(&state->allocator, state, sizeof(*state));
+    return status;
+  }
+  state->open = 1;
+  rewriter->state = state;
+  lonejson_error_init(&rewriter->error);
+  lonejson__object_rewrite_assign_visitor(out_visitor);
+  *out_user = state;
+  return LONEJSON_STATUS_OK;
+}
+
+lonejson_status lonejson_object_rewriter_close(
+    lonejson_object_rewriter *rewriter, lonejson_error *error) {
+  lonejson__object_rewrite_state *state;
+  lonejson_status status;
+  if (rewriter == NULL || rewriter->state == NULL) {
+    return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u,
+                               0u, 0u, "open object rewriter is required");
+  }
+  state = (lonejson__object_rewrite_state *)rewriter->state;
+  if (!state->open || !state->root_complete || state->input_depth != 0u ||
+      state->skipped_depth != 0u || state->skipped_scalar ||
+      state->skip_next_value || state->key_open) {
+    status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
+                                 0u, "object rewriter value is incomplete");
+  } else if (state->direct_output) {
+    status = state->frame_count == 0u ? LONEJSON_STATUS_OK
+                                      : lonejson__set_error(
+                                            error, LONEJSON_STATUS_INVALID_JSON,
+                                            0u, 0u, 0u,
+                                            "object rewriter value is incomplete");
+  } else {
+    status = lonejson_writer_finish(&state->writer, error);
+  }
+  lonejson__object_rewriter_destroy(rewriter);
+  return status;
+}
+
+void lonejson_object_rewriter_cleanup(lonejson_object_rewriter *rewriter) {
+  lonejson__object_rewriter_destroy(rewriter);
   if (rewriter != NULL) {
     lonejson_error_init(&rewriter->error);
   }
