@@ -1993,6 +1993,7 @@ static int lql_json_try_plain_key_match(lql_json_scan *scan,
       }
       term = &scan->flat_terms[i];
       if (term->field_len == key_len &&
+          (key_len == 0u || (unsigned char)term->field[0] == key[0]) &&
           (key_len == 0u || memcmp(term->field, key, key_len) == 0)) {
         scan->match_term_segment[i] = 0u;
         matches |= bit;
