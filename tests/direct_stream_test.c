@@ -927,6 +927,7 @@ static int run_selected_record_output(lql *ctx) {
   static const char input[] = "{ \"status\" : \"open\", \"n\" : 1 }\n"
                               "{\"status\":\"closed\",\"n\":2}\n";
   static const char matched_only[] = "{\"status\":\"open\",\"n\":1}\n";
+  static const char ne_matched_only[] = "{\"status\":\"closed\",\"n\":2}\n";
   static const char all_records[] = "{\"status\":\"open\",\"n\":1}\n"
                                     "{\"status\":\"closed\",\"n\":2}\n";
   static const char *const projection_paths[] = {"/n", "/status"};
@@ -976,11 +977,42 @@ static int run_selected_record_output(lql *ctx) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
+  ctx->selector_destroy(ctx, selector);
+  selector = NULL;
+  if (ctx->selector_parse(ctx, "/status!=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.writer_user = &writer;
+  request.selector = selector;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(ne_matched_only) - 1u ||
+      memcmp(writer.data, ne_matched_only, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  selector = NULL;
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
   memset(&reader, 0, sizeof(reader));
   reader.data = (const unsigned char *)input;
   reader.len = sizeof(input) - 1u;
   reader.chunk_size = 5u;
   memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.writer_user = &writer;
+  request.selector = selector;
   request.matched_only = 0;
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
       result.records_seen != 2u || result.records_matched != 1u ||

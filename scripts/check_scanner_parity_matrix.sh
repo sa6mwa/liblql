@@ -43,6 +43,8 @@ scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  ne_status_open '/status!="open"' plus_value_source_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   prefix_status_open 'prefix{field=/status,value=op}' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   contains_payload_cde 'contains{f=/payload,v=cde}' plus_value_source_selector /id

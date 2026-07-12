@@ -82,6 +82,10 @@ profile_row plus-value-source "$plus_value_source_samples" \
   build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' plus_value_source_selector
 
+profile_row ne-plus-value-source "$plus_value_source_samples" \
+  build/direct-probe/status-100k.ndjson status_100k \
+  ne_status_open '/status!="open"' plus_value_source_selector
+
 profile_row recursive-decision "$recursive_samples" \
   build/direct-probe/recursive-10k.ndjson recursive_10k \
   recursive_eq '/.../sku="needle"' decision_only_selector
