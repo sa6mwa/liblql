@@ -1408,6 +1408,9 @@ LQL_JSON_INLINE lql_status lql_json_match_copy_byte(lql_json_scan *scan,
 
 static lql_status lql_json_literal(lql_json_scan *scan, const char *literal);
 static lql_status lql_json_number(lql_json_scan *scan);
+static lql_status lql_json_skip_literal_fast(lql_json_scan *scan,
+                                             const char *literal);
+static lql_status lql_json_skip_number_fast(lql_json_scan *scan);
 static lql_status lql_json_skip_value_fast(lql_json_scan *scan);
 
 static lql_status lql_json_skip_string_fast(lql_json_scan *scan) {
@@ -1442,11 +1445,7 @@ static lql_status lql_json_skip_string_fast(lql_json_scan *scan) {
       scan->offset += span_len;
       continue;
     }
-    status = lql_json_take(scan, &value);
-    if (status != LQL_STATUS_OK) {
-      lql_json_error(scan, "unterminated JSON string");
-      return status == LQL_STATUS_OK ? LQL_STATUS_JSON_ERROR : status;
-    }
+    value = (int)scan->buffer[scan->offset++];
     if (value == '"') {
       return LQL_STATUS_OK;
     }
@@ -1629,15 +1628,15 @@ static lql_status lql_json_skip_value_fast(lql_json_scan *scan) {
     return lql_json_skip_string_fast(scan);
   }
   if (value == 't') {
-    return lql_json_literal(scan, "true");
+    return lql_json_skip_literal_fast(scan, "true");
   }
   if (value == 'f') {
-    return lql_json_literal(scan, "false");
+    return lql_json_skip_literal_fast(scan, "false");
   }
   if (value == 'n') {
-    return lql_json_literal(scan, "null");
+    return lql_json_skip_literal_fast(scan, "null");
   }
-  return lql_json_number(scan);
+  return lql_json_skip_number_fast(scan);
 }
 
 static lql_status lql_json_string(lql_json_scan *scan) {
@@ -1685,11 +1684,7 @@ static lql_status lql_json_string(lql_json_scan *scan) {
       }
       continue;
     }
-    status = lql_json_take(scan, &value);
-    if (status != LQL_STATUS_OK) {
-      lql_json_error(scan, "unterminated JSON string");
-      return status == LQL_STATUS_OK ? LQL_STATUS_JSON_ERROR : status;
-    }
+    value = (int)scan->buffer[scan->offset++];
     if (value == '"') {
       return lql_json_copy_byte(scan, value);
     }
@@ -2319,9 +2314,24 @@ static lql_status lql_json_literal(lql_json_scan *scan, const char *literal) {
   return LQL_STATUS_OK;
 }
 
+static lql_status lql_json_skip_literal_fast(lql_json_scan *scan,
+                                             const char *literal) {
+  size_t i;
+  lql_status status;
+  for (i = 0u; literal[i] != '\0'; ++i) {
+    status = lql_json_take_expected(scan, literal[i]);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+  }
+  return LQL_STATUS_OK;
+}
+
 static lql_status lql_json_number(lql_json_scan *scan) {
   int value;
+  int have_value;
   lql_status status;
+  have_value = 0;
   status = lql_json_peek(scan, &value);
   if (status != LQL_STATUS_OK) {
     return status;
@@ -2349,13 +2359,16 @@ static lql_status lql_json_number(lql_json_scan *scan) {
         return status;
       }
     } while (value >= '0' && value <= '9');
+    have_value = 1;
   } else {
     lql_json_error(scan, "invalid JSON number");
     return LQL_STATUS_JSON_ERROR;
   }
-  status = lql_json_peek(scan, &value);
-  if (status != LQL_STATUS_OK) {
-    return status;
+  if (!have_value) {
+    status = lql_json_peek(scan, &value);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
   }
   if (value == '.') {
     ++scan->offset;
@@ -2399,6 +2412,86 @@ static lql_status lql_json_number(lql_json_scan *scan) {
       status = lql_json_match_copy_byte(scan, value);
       if (status != LQL_STATUS_OK ||
           (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
+        return status;
+      }
+    } while (value >= '0' && value <= '9');
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status lql_json_skip_number_fast(lql_json_scan *scan) {
+  int value;
+  int have_value;
+  lql_status status;
+  have_value = 0;
+  status = lql_json_peek(scan, &value);
+  if (status != LQL_STATUS_OK) {
+    return status;
+  }
+  if (value == '-') {
+    ++scan->offset;
+    status = lql_json_peek(scan, &value);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+  }
+  if (value == '0') {
+    ++scan->offset;
+  } else if (value >= '1' && value <= '9') {
+    do {
+      ++scan->offset;
+      status = lql_json_peek(scan, &value);
+      if (status != LQL_STATUS_OK) {
+        return status;
+      }
+    } while (value >= '0' && value <= '9');
+    have_value = 1;
+  } else {
+    lql_json_error(scan, "invalid JSON number");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (!have_value) {
+    status = lql_json_peek(scan, &value);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+  }
+  if (value == '.') {
+    ++scan->offset;
+    status = lql_json_peek(scan, &value);
+    if (status != LQL_STATUS_OK || value < '0' || value > '9') {
+      lql_json_error(scan, "invalid JSON fraction");
+      return status == LQL_STATUS_OK ? LQL_STATUS_JSON_ERROR : status;
+    }
+    do {
+      ++scan->offset;
+      status = lql_json_peek(scan, &value);
+      if (status != LQL_STATUS_OK) {
+        return status;
+      }
+    } while (value >= '0' && value <= '9');
+  }
+  if (value == 'e' || value == 'E') {
+    ++scan->offset;
+    status = lql_json_peek(scan, &value);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+    if (value == '+' || value == '-') {
+      ++scan->offset;
+      status = lql_json_peek(scan, &value);
+      if (status != LQL_STATUS_OK) {
+        return status;
+      }
+    }
+    if (value < '0' || value > '9') {
+      lql_json_error(scan, "invalid JSON exponent");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    do {
+      ++scan->offset;
+      status = lql_json_peek(scan, &value);
+      if (status != LQL_STATUS_OK) {
         return status;
       }
     } while (value >= '0' && value <= '9');
