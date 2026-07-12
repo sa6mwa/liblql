@@ -570,83 +570,91 @@ static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
     return;
   }
   lql_json_temporal_range_byte(scan, value);
-  for (i = 0u; i < scan->flat_term_count; ++i) {
-    const lql_json_flat_eq_term *term;
-    const char *target;
-    size_t target_len;
-    unsigned long bit;
-    bit = 1ul << i;
-    if ((scan->match_active & bit) == 0ul ||
-        (scan->match_failed & bit) != 0ul) {
-      continue;
-    }
-    term = &scan->flat_terms[i];
-    if (!scan->match_key && (term->kind == LQL_JSON_FLAT_TERM_ICONTAINS ||
-                             term->kind == LQL_JSON_FLAT_TERM_IPREFIX))
-      continue;
-    if (scan->match_key) {
-      if (scan->match_term_segment[i] == 0u) {
-        target = term->field;
-        target_len = term->field_len;
-      } else if (!lql_json_term_path_segment(term, scan->match_term_segment[i],
-                                             &target, &target_len)) {
-        scan->match_failed |= bit;
+  if (scan->match_active == 0ul && scan->capture_active == 0ul) {
+    return;
+  }
+  if (scan->match_active != 0ul) {
+    for (i = 0u; i < scan->flat_term_count; ++i) {
+      const lql_json_flat_eq_term *term;
+      const char *target;
+      size_t target_len;
+      unsigned long bit;
+      bit = 1ul << i;
+      if ((scan->match_active & bit) == 0ul ||
+          (scan->match_failed & bit) != 0ul) {
         continue;
       }
-    } else {
-      target = term->value;
-      target_len = term->value_len;
-    }
-    if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_CONTAINS) {
-      size_t pos;
-      if (target_len == 0u || term->contains_failure == NULL) {
-        scan->match_failed |= bit;
+      term = &scan->flat_terms[i];
+      if (!scan->match_key && (term->kind == LQL_JSON_FLAT_TERM_ICONTAINS ||
+                               term->kind == LQL_JSON_FLAT_TERM_IPREFIX))
+        continue;
+      if (scan->match_key) {
+        if (scan->match_term_segment[i] == 0u) {
+          target = term->field;
+          target_len = term->field_len;
+        } else if (!lql_json_term_path_segment(
+                       term, scan->match_term_segment[i], &target,
+                       &target_len)) {
+          scan->match_failed |= bit;
+          continue;
+        }
+      } else {
+        target = term->value;
+        target_len = term->value_len;
+      }
+      if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_CONTAINS) {
+        size_t pos;
+        if (target_len == 0u || term->contains_failure == NULL) {
+          scan->match_failed |= bit;
+          continue;
+        }
+        pos = scan->match_pos[i];
+        while (pos != 0u && value != (unsigned char)target[pos]) {
+          pos = term->contains_failure[pos - 1u];
+        }
+        if (value == (unsigned char)target[pos]) {
+          ++pos;
+        }
+        if (pos == target_len) {
+          scan->match_contains |= bit;
+          pos = term->contains_failure[pos - 1u];
+        }
+        scan->match_pos[i] = pos;
         continue;
       }
-      pos = scan->match_pos[i];
-      while (pos != 0u && value != (unsigned char)target[pos]) {
-        pos = term->contains_failure[pos - 1u];
+      if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_PREFIX &&
+          scan->match_pos[i] == target_len) {
+        continue;
       }
-      if (value == (unsigned char)target[pos]) {
-        ++pos;
+      if (scan->match_pos[i] == target_len ||
+          (unsigned char)target[scan->match_pos[i]] != value) {
+        scan->match_failed |= bit;
+      } else {
+        ++scan->match_pos[i];
       }
-      if (pos == target_len) {
-        scan->match_contains |= bit;
-        pos = term->contains_failure[pos - 1u];
-      }
-      scan->match_pos[i] = pos;
-      continue;
-    }
-    if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_PREFIX &&
-        scan->match_pos[i] == target_len) {
-      continue;
-    }
-    if (scan->match_pos[i] == target_len ||
-        (unsigned char)target[scan->match_pos[i]] != value) {
-      scan->match_failed |= bit;
-    } else {
-      ++scan->match_pos[i];
     }
   }
-  for (i = 0u; i < scan->capture_key_count; ++i) {
-    unsigned long bit;
-    const char *target;
-    size_t target_len;
-    bit = 1ul << i;
-    if ((scan->capture_active & bit) == 0ul ||
-        (scan->capture_failed & bit) != 0ul)
-      continue;
-    if (scan->capture_segment[i] >= scan->capture_keys[i].segment_count) {
-      scan->capture_failed |= bit;
-      continue;
+  if (scan->capture_active != 0ul) {
+    for (i = 0u; i < scan->capture_key_count; ++i) {
+      unsigned long bit;
+      const char *target;
+      size_t target_len;
+      bit = 1ul << i;
+      if ((scan->capture_active & bit) == 0ul ||
+          (scan->capture_failed & bit) != 0ul)
+        continue;
+      if (scan->capture_segment[i] >= scan->capture_keys[i].segment_count) {
+        scan->capture_failed |= bit;
+        continue;
+      }
+      target = scan->capture_keys[i].segments[scan->capture_segment[i]];
+      target_len = strlen(target);
+      if (scan->capture_pos[i] == target_len ||
+          value != (unsigned char)target[scan->capture_pos[i]])
+        scan->capture_failed |= bit;
+      else
+        ++scan->capture_pos[i];
     }
-    target = scan->capture_keys[i].segments[scan->capture_segment[i]];
-    target_len = strlen(target);
-    if (scan->capture_pos[i] == target_len ||
-        value != (unsigned char)target[scan->capture_pos[i]])
-      scan->capture_failed |= bit;
-    else
-      ++scan->capture_pos[i];
   }
   if (scan->match_icontains != 0ul)
     lql_json_match_icontains_byte(scan, value);
