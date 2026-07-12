@@ -7,6 +7,7 @@ status_samples=${LQL_SCANNER_PROFILE_STATUS_SAMPLES:-120}
 scalar_samples=${LQL_SCANNER_PROFILE_SCALAR_SAMPLES:-120}
 plus_value_source_samples=${LQL_SCANNER_PROFILE_PLUS_VALUE_SOURCE_SAMPLES:-120}
 recursive_samples=${LQL_SCANNER_PROFILE_RECURSIVE_SAMPLES:-120}
+realworld_samples=${LQL_SCANNER_PROFILE_REALWORLD_SAMPLES:-80}
 large_samples=${LQL_SCANNER_PROFILE_LARGE_SAMPLES:-60}
 freq=${LQL_SCANNER_PROFILE_FREQ:-999}
 
@@ -20,6 +21,24 @@ if ! command -v perf >/dev/null 2>&1; then
 fi
 
 mkdir -p "$out_dir"
+
+ensure_fixture() {
+  fixture=$1
+  count=$2
+  payload_bytes=$3
+  shape=$4
+
+  if [ ! -f "$fixture" ]; then
+    sh scripts/generate_direct_probe_fixture.sh \
+      "$fixture" "$count" "$payload_bytes" "$shape"
+  fi
+}
+
+ensure_fixture build/direct-probe/status-100k.ndjson 100000 24 status
+ensure_fixture build/direct-probe/scalar-100k.ndjson 100000 24 scalar
+ensure_fixture build/direct-probe/recursive-10k.ndjson 10000 24 recursive
+ensure_fixture build/direct-probe/realworld-100k.ndjson 100000 64 realworld
+ensure_fixture build/direct-probe/large-4x25m.ndjson 4 25000000 status
 
 profile_row() {
   name=$1
@@ -89,6 +108,12 @@ profile_row ne-plus-value-source "$plus_value_source_samples" \
 profile_row recursive-decision "$recursive_samples" \
   build/direct-probe/recursive-10k.ndjson recursive_10k \
   recursive_eq '/.../sku="needle"' decision_only_selector
+
+profile_row realworld-multi-clause "$realworld_samples" \
+  build/direct-probe/realworld-100k.ndjson realworld_100k \
+  realworld_multi_clause_and \
+  '/component="edge",/event="session_sync",/active_idx=0,/tab_count=1,/code>=10' \
+  decision_only_selector
 
 profile_row large-mutation "$large_samples" \
   build/direct-probe/large-4x25m.ndjson large_4x25m \
