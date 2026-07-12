@@ -155,6 +155,11 @@ int main(void) {
   static const lql_json_flat_eq_term range_flat_terms[] = {
       {LQL_JSON_FLAT_TERM_NUMBER_RANGE, "code", 4u, NULL, 0u, NULL, 0u, 0u,
        0ul, 0ul, 0ul, 0ul, 0ul, 0.0, 2.0, 4.0, 0.0, 0, 1, 1, 0}};
+  static const char temporal_flat_input[] =
+      "{\"timestamp\":\"2026-03-05T10:28:20Z\"}\n"
+      "{\"timestamp\":\"2026-03-05T10:28:21Z\"}\n"
+      "{\"timestamp\":\"2026-03-05T10:29:21Z\"}\n"
+      "{\"timestamp\":\"not-a-date\"}\n";
   static const char nested_flat_input[] =
       "{\"me\\u0074a\":{\"sta\\u0074e\":\"open\"},\"ignored\":[1]}\n"
       "{\"meta\":{\"state\":\"closed\"}}\n"
@@ -192,7 +197,10 @@ int main(void) {
   static const lql_json_flat_eq_term contains_flat_terms[] = {
       {LQL_JSON_FLAT_TERM_CONTAINS, "msg", 3u, "aba", 3u, NULL, 0u, 0u, 0ul,
        0ul, 0ul, 0ul, 0ul, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0,
+       {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0},
+       {0, 0, 0, 0, 0, 0}, 0, 0, 0, 0,
        contains_failure}};
+  lql_json_flat_eq_term temporal_flat_terms[1];
   lql_json_flat_eq_request flat_request;
   lql_json_spool flat_spool;
   lql_json_spool_reader spool_reader;
@@ -319,6 +327,53 @@ int main(void) {
              flat_writer.len) != 0) {
     lql_json_spool_cleanup(&flat_spool);
     return 33;
+  }
+  lql_json_spool_cleanup(&flat_spool);
+  memset(&flat_reader, 0, sizeof(flat_reader));
+  memset(&flat_writer, 0, sizeof(flat_writer));
+  memset(&flat_result, 0, sizeof(flat_result));
+  memset(temporal_flat_terms, 0, sizeof(temporal_flat_terms));
+  temporal_flat_terms[0].kind = LQL_JSON_FLAT_TERM_TEMPORAL_RANGE;
+  temporal_flat_terms[0].field = "timestamp";
+  temporal_flat_terms[0].field_len = 9u;
+  temporal_flat_terms[0].path = NULL;
+  temporal_flat_terms[0].path_len = 0u;
+  temporal_flat_terms[0].path_segment_count = 0u;
+  temporal_flat_terms[0].has_temporal_gte = 1;
+  if (!lql_parse_temporal_literal("2026-03-05T10:28:21Z",
+                                  &temporal_flat_terms[0].temporal_gte)) {
+    return 34;
+  }
+  flat_reader.data = (const unsigned char *)temporal_flat_input;
+  flat_reader.len = sizeof(temporal_flat_input) - 1u;
+  flat_reader.chunk_size = 1u;
+  flat_result.writer = &flat_writer;
+  memset(&flat_request, 0, sizeof(flat_request));
+  flat_request.reader = json_test_read;
+  flat_request.reader_user = &flat_reader;
+  flat_request.terms = temporal_flat_terms;
+  flat_request.term_count = 1u;
+  flat_request.spool = &flat_spool;
+  flat_request.capture = 1;
+  flat_request.record = json_flat_record;
+  flat_request.record_user = &flat_result;
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
+    return 35;
+  }
+  if (lql_json_scan_flat_eq_ndjson(&flat_request, &flat_records, &flat_bytes,
+                                   &flat_error) != LQL_STATUS_OK ||
+      flat_records != 4u || flat_bytes != flat_reader.len ||
+      flat_result.objects != 4u || flat_result.matches != 2u ||
+      flat_writer.len !=
+          strlen("{\"timestamp\":\"2026-03-05T10:28:21Z\"}\n"
+                 "{\"timestamp\":\"2026-03-05T10:29:21Z\"}\n") ||
+      memcmp(flat_writer.data,
+             "{\"timestamp\":\"2026-03-05T10:28:21Z\"}\n"
+             "{\"timestamp\":\"2026-03-05T10:29:21Z\"}\n",
+             flat_writer.len) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 36;
   }
   lql_json_spool_cleanup(&flat_spool);
   memset(&flat_reader, 0, sizeof(flat_reader));

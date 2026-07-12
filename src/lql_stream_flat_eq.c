@@ -340,9 +340,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
         selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case);
   }
   if (selector->kind == LQL_SELECTOR_KIND_RANGE) {
-    if (selector->field == NULL || selector->range_is_temporal ||
-        selector->has_temporal_gt || selector->has_temporal_gte ||
-        selector->has_temporal_lt || selector->has_temporal_lte ||
+    if (selector->field == NULL ||
         program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
       return 0;
     }
@@ -354,7 +352,9 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       return 0;
     }
     term = &program->terms[program->term_count];
-    term->kind = LQL_JSON_FLAT_TERM_NUMBER_RANGE;
+    term->kind = selector->range_is_temporal
+                     ? LQL_JSON_FLAT_TERM_TEMPORAL_RANGE
+                     : LQL_JSON_FLAT_TERM_NUMBER_RANGE;
     term->field = field + 1;
     term->field_len = first_segment_len;
     term->path = field;
@@ -373,6 +373,14 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     term->has_range_gte = selector->has_range_gte;
     term->has_range_lt = selector->has_range_lt;
     term->has_range_lte = selector->has_range_lte;
+    term->temporal_gt = selector->temporal_gt;
+    term->temporal_gte = selector->temporal_gte;
+    term->temporal_lt = selector->temporal_lt;
+    term->temporal_lte = selector->temporal_lte;
+    term->has_temporal_gt = selector->has_temporal_gt;
+    term->has_temporal_gte = selector->has_temporal_gte;
+    term->has_temporal_lt = selector->has_temporal_lt;
+    term->has_temporal_lte = selector->has_temporal_lte;
     program->selectors[program->term_count] = selector;
     ++program->term_count;
     return 1;

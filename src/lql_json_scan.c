@@ -52,6 +52,10 @@ typedef struct lql_json_scan {
   unsigned long number_range_failed;
   char number_match[LQL_JSON_NUMBER_MATCH_BYTES];
   size_t number_match_len;
+  unsigned long temporal_range_active;
+  unsigned long temporal_range_failed;
+  char temporal_match[LQL_JSON_NUMBER_MATCH_BYTES];
+  size_t temporal_match_len;
   int match_key;
   size_t match_path_segment;
   unsigned long flat_eq_hits;
@@ -154,6 +158,25 @@ static void lql_json_number_range_byte(lql_json_scan *scan,
   scan->number_match[scan->number_match_len++] = (char)value;
 }
 
+static void lql_json_temporal_range_start(lql_json_scan *scan,
+                                          unsigned long active) {
+  scan->temporal_range_active = active;
+  scan->temporal_range_failed = 0ul;
+  scan->temporal_match_len = 0u;
+}
+
+static void lql_json_temporal_range_byte(lql_json_scan *scan,
+                                         unsigned char value) {
+  if (scan->temporal_range_active == 0ul) {
+    return;
+  }
+  if (scan->temporal_match_len + 1u >= sizeof(scan->temporal_match)) {
+    scan->temporal_range_failed |= scan->temporal_range_active;
+    return;
+  }
+  scan->temporal_match[scan->temporal_match_len++] = (char)value;
+}
+
 static int lql_json_number_match_integer(const char *text, size_t len,
                                          double *out) {
   unsigned long value;
@@ -237,6 +260,52 @@ static unsigned long lql_json_number_range_complete(lql_json_scan *scan) {
       continue;
     }
     if (term->has_range_lte && value > term->range_lte) {
+      continue;
+    }
+    hits |= bit;
+  }
+  return hits;
+}
+
+static unsigned long lql_json_temporal_range_complete(lql_json_scan *scan) {
+  lql_temporal value;
+  unsigned long hits;
+  size_t i;
+  if (scan->temporal_range_active == 0ul ||
+      scan->temporal_match_len >= sizeof(scan->temporal_match)) {
+    return 0ul;
+  }
+  scan->temporal_match[scan->temporal_match_len] = '\0';
+  if (!lql_parse_temporal_literal(scan->temporal_match, &value)) {
+    return 0ul;
+  }
+  hits = 0ul;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    const lql_json_flat_eq_term *term;
+    unsigned long bit;
+    bit = 1ul << i;
+    if ((scan->temporal_range_active & bit) == 0ul ||
+        (scan->temporal_range_failed & bit) != 0ul) {
+      continue;
+    }
+    term = &scan->flat_terms[i];
+    if (term->kind != LQL_JSON_FLAT_TERM_TEMPORAL_RANGE) {
+      continue;
+    }
+    if (term->has_temporal_gt &&
+        lql_temporal_compare(&value, &term->temporal_gt) <= 0) {
+      continue;
+    }
+    if (term->has_temporal_gte &&
+        lql_temporal_compare(&value, &term->temporal_gte) < 0) {
+      continue;
+    }
+    if (term->has_temporal_lt &&
+        lql_temporal_compare(&value, &term->temporal_lt) >= 0) {
+      continue;
+    }
+    if (term->has_temporal_lte &&
+        lql_temporal_compare(&value, &term->temporal_lte) > 0) {
       continue;
     }
     hits |= bit;
@@ -492,9 +561,11 @@ static void lql_json_match_icontains_byte(lql_json_scan *scan,
 
 static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
   size_t i;
-  if (scan->match_active == 0ul && scan->capture_active == 0ul) {
+  if (scan->match_active == 0ul && scan->capture_active == 0ul &&
+      scan->temporal_range_active == 0ul) {
     return;
   }
+  lql_json_temporal_range_byte(scan, value);
   for (i = 0u; i < scan->flat_term_count; ++i) {
     const lql_json_flat_eq_term *term;
     const char *target;
@@ -952,7 +1023,8 @@ static lql_status lql_json_copy_byte(lql_json_scan *scan, int value) {
 
 static lql_status lql_json_match_copy_byte(lql_json_scan *scan, int value) {
   if ((scan->match_active & ~scan->match_failed) != 0ul ||
-      (scan->capture_active & ~scan->capture_failed) != 0ul) {
+      (scan->capture_active & ~scan->capture_failed) != 0ul ||
+      (scan->temporal_range_active & ~scan->temporal_range_failed) != 0ul) {
     lql_json_match_byte(scan, (unsigned char)value);
   }
   lql_json_number_range_byte(scan, (unsigned char)value);
@@ -997,10 +1069,13 @@ static lql_status lql_json_string(lql_json_scan *scan) {
         return status;
       }
       if ((scan->match_active & ~scan->match_failed) != 0ul ||
-          (scan->capture_active & ~scan->capture_failed) != 0ul) {
+          (scan->capture_active & ~scan->capture_failed) != 0ul ||
+          (scan->temporal_range_active & ~scan->temporal_range_failed) != 0ul) {
         for (i = 0u; i < span_len &&
                      ((scan->match_active & ~scan->match_failed) != 0ul ||
-                      (scan->capture_active & ~scan->capture_failed) != 0ul);
+                      (scan->capture_active & ~scan->capture_failed) != 0ul ||
+                      (scan->temporal_range_active &
+                       ~scan->temporal_range_failed) != 0ul);
              ++i) {
           lql_json_match_byte(scan, span[i]);
         }
@@ -1251,27 +1326,35 @@ static lql_status lql_json_object(lql_json_scan *scan) {
     }
     if (key_matches && value == '"') {
       unsigned long eq_terms;
+      unsigned long temporal_terms;
       size_t i;
       eq_terms = 0ul;
+      temporal_terms = 0ul;
       for (i = 0u; i < scan->flat_term_count; ++i) {
         unsigned long bit;
         bit = 1ul << i;
         if ((key_matches & bit) != 0ul &&
             lql_json_term_value_at(&scan->flat_terms[i],
-                                   scan->key_term_segment[i]) &&
-            (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EQ ||
-             scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_PREFIX ||
-             scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_CONTAINS ||
-             scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_ICONTAINS ||
-             scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_IPREFIX)) {
-          eq_terms |= bit;
+                                   scan->key_term_segment[i])) {
+          if (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_TEMPORAL_RANGE) {
+            temporal_terms |= bit;
+          } else if (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EQ ||
+                     scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_PREFIX ||
+                     scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_CONTAINS ||
+                     scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_ICONTAINS ||
+                     scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_IPREFIX) {
+            eq_terms |= bit;
+          }
         }
       }
       lql_json_match_start(scan, eq_terms, 0, 0u);
+      lql_json_temporal_range_start(scan, temporal_terms);
       status = lql_json_string(scan);
       if (status == LQL_STATUS_OK) {
         scan->flat_eq_hits |= lql_json_match_complete(scan);
+        scan->flat_eq_hits |= lql_json_temporal_range_complete(scan);
       }
+      lql_json_temporal_range_start(scan, 0ul);
       lql_json_match_start(scan, 0ul, 0, 0u);
     } else if (key_matches) {
       lql_json_flat_term_kind scalar_kind;

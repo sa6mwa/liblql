@@ -4,6 +4,7 @@
 #include <lql/lql.h>
 
 #include "lql_json_spool.h"
+#include "lql_temporal_internal.h"
 
 /*
  * Normalizes strict NDJSON through a bounded reader.  Each accepted root is
@@ -32,7 +33,8 @@ typedef enum lql_json_flat_term_kind {
   LQL_JSON_FLAT_TERM_CONTAINS = 6,
   LQL_JSON_FLAT_TERM_ICONTAINS = 7,
   LQL_JSON_FLAT_TERM_IPREFIX = 8,
-  LQL_JSON_FLAT_TERM_NUMBER_RANGE = 9
+  LQL_JSON_FLAT_TERM_NUMBER_RANGE = 9,
+  LQL_JSON_FLAT_TERM_TEMPORAL_RANGE = 10
 } lql_json_flat_term_kind;
 
 typedef struct lql_json_flat_eq_term {
@@ -58,6 +60,14 @@ typedef struct lql_json_flat_eq_term {
   int has_range_gte;
   int has_range_lt;
   int has_range_lte;
+  lql_temporal temporal_gt;
+  lql_temporal temporal_gte;
+  lql_temporal temporal_lt;
+  lql_temporal temporal_lte;
+  int has_temporal_gt;
+  int has_temporal_gte;
+  int has_temporal_lt;
+  int has_temporal_lte;
   /* Per-execution KMP table for streaming string contains matching. */
   size_t *contains_failure;
 } lql_json_flat_eq_term;

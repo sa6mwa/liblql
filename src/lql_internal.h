@@ -2,6 +2,7 @@
 #define LQL_INTERNAL_H
 
 #include "lql/lql.h"
+#include "lql_temporal_internal.h"
 
 #include <lonejson.h>
 
@@ -77,17 +78,6 @@ typedef enum lql_selector_literal_kind {
   LQL_SELECTOR_LITERAL_BOOL = 2,
   LQL_SELECTOR_LITERAL_NULL = 3
 } lql_selector_literal_kind;
-
-__extension__ typedef signed long long lql_int64;
-
-typedef struct lql_temporal {
-  lql_int64 seconds;
-  int nanoseconds;
-  int year;
-  int month;
-  int day;
-  int date_only;
-} lql_temporal;
 
 typedef enum lql_since_macro {
   LQL_SINCE_NONE = 0,
@@ -250,18 +240,6 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_in_internal(
     const lql_string_view *any_values, lql_selector **out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_exists_internal(
     lql *self, lql_string_view path, lql_selector **out, lql_error *error);
-LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
-                                                   lql_temporal *out);
-LQL_INTERNAL_SYMBOL int lql_temporal_compare(const lql_temporal *left,
-                                             const lql_temporal *right);
-LQL_INTERNAL_SYMBOL int lql_temporal_equal(const lql_temporal *left,
-                                           const lql_temporal *right);
-LQL_INTERNAL_SYMBOL int
-lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
-                                 size_t buf_len);
-LQL_INTERNAL_SYMBOL int lql_temporal_now(lql_temporal *out);
-LQL_INTERNAL_SYMBOL int lql_temporal_today(lql_temporal *out);
-LQL_INTERNAL_SYMBOL int lql_temporal_yesterday(lql_temporal *out);
 LQL_INTERNAL_SYMBOL void lql_stream_program_destroy(lql *self,
                                                     lql_selector *selector);
 LQL_INTERNAL_SYMBOL lql_status lql_stream_execute_flat_eq(
