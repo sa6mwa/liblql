@@ -138,6 +138,13 @@ int main(void) {
       "{\"meta\":{\"state\":\"closed\",\"state\":\"open\"}}\n";
   static const lql_json_flat_eq_term nested_flat_terms[] = {
       {LQL_JSON_FLAT_TERM_EQ, "meta", 4u, "open", 4u, "/meta/state", 11u, 2u}};
+  static const char indexed_flat_input[] =
+      "{\"items\":[{\"sku\":\"A\"},{\"sku\":\"B\"}]}\n"
+      "{\"items\":[{\"sku\":\"B\"}]}\n"
+      "{\"items\":[]}\n";
+  static const lql_json_flat_eq_term indexed_flat_terms[] = {
+      {LQL_JSON_FLAT_TERM_EQ, "items", 5u, "B", 1u, "/items/1/sku", 12u, 3u,
+       2ul}};
   lql_json_flat_eq_request flat_request;
   lql_json_spool flat_spool;
   json_test_reader flat_reader;
@@ -286,6 +293,40 @@ int main(void) {
              flat_writer.len) != 0) {
     lql_json_spool_cleanup(&flat_spool);
     return 14;
+  }
+  lql_json_spool_cleanup(&flat_spool);
+  memset(&flat_reader, 0, sizeof(flat_reader));
+  memset(&flat_writer, 0, sizeof(flat_writer));
+  memset(&flat_result, 0, sizeof(flat_result));
+  flat_reader.data = (const unsigned char *)indexed_flat_input;
+  flat_reader.len = sizeof(indexed_flat_input) - 1u;
+  flat_reader.chunk_size = 1u;
+  flat_result.writer = &flat_writer;
+  memset(&flat_request, 0, sizeof(flat_request));
+  flat_request.reader = json_test_read;
+  flat_request.reader_user = &flat_reader;
+  flat_request.terms = indexed_flat_terms;
+  flat_request.term_count =
+      sizeof(indexed_flat_terms) / sizeof(indexed_flat_terms[0]);
+  flat_request.spool = &flat_spool;
+  flat_request.capture = 1;
+  flat_request.record = json_flat_record;
+  flat_request.record_user = &flat_result;
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
+    return 15;
+  }
+  if (lql_json_scan_flat_eq_ndjson(&flat_request, &flat_records, &flat_bytes,
+                                   &flat_error) != LQL_STATUS_OK ||
+      flat_records != 3u || flat_bytes != flat_reader.len ||
+      flat_result.objects != 3u || flat_result.matches != 1u ||
+      flat_writer.len !=
+          strlen("{\"items\":[{\"sku\":\"A\"},{\"sku\":\"B\"}]}\n") ||
+      memcmp(flat_writer.data,
+             "{\"items\":[{\"sku\":\"A\"},{\"sku\":\"B\"}]}\n",
+             flat_writer.len) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 16;
   }
   lql_json_spool_cleanup(&flat_spool);
   return 0;

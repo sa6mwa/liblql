@@ -41,6 +41,7 @@ typedef struct lql_json_flat_eq_term {
   const char *path;
   size_t path_len;
   size_t path_segment_count;
+  unsigned long path_array_segments;
 } lql_json_flat_eq_term;
 
 typedef lql_status (*lql_json_flat_eq_record_fn)(
