@@ -4,6 +4,7 @@ set -eu
 c_bench=${LQL_DIRECT_BENCH_PATH:-build/release-scanner/lql_direct_bench}
 out_dir=${LQL_SCANNER_PROFILE_DIR:-build/scanner-profiles}
 status_samples=${LQL_SCANNER_PROFILE_STATUS_SAMPLES:-120}
+plus_value_source_samples=${LQL_SCANNER_PROFILE_PLUS_VALUE_SOURCE_SAMPLES:-120}
 large_samples=${LQL_SCANNER_PROFILE_LARGE_SAMPLES:-60}
 freq=${LQL_SCANNER_PROFILE_FREQ:-999}
 
@@ -53,6 +54,10 @@ profile_row() {
 profile_row status-decision "$status_samples" \
   build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' decision_only_selector
+
+profile_row plus-value-source "$plus_value_source_samples" \
+  build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open '/status="open"' plus_value_source_selector
 
 profile_row large-mutation "$large_samples" \
   build/direct-probe/large-4x25m.ndjson large_4x25m \
