@@ -20,6 +20,11 @@ typedef struct test_writer {
   size_t len;
 } test_writer;
 
+typedef struct test_value_sink {
+  test_writer *writer;
+  size_t count;
+} test_value_sink;
+
 static lql_status test_read(void *user, unsigned char *buffer, size_t capacity,
                             size_t *out_len, lql_error *error) {
   test_reader *reader;
@@ -77,6 +82,18 @@ static lql_stream_callback_result test_decide(void *user,
   return decisions->stop_after_first && decisions->count == 1u
              ? LQL_STREAM_CALLBACK_STOP
              : LQL_STREAM_CALLBACK_CONTINUE;
+}
+
+static lql_stream_callback_result test_value(void *user,
+                                             const lql_stream_value *value,
+                                             lql_error *error) {
+  test_value_sink *sink;
+  sink = (test_value_sink *)user;
+  if (sink == NULL || sink->writer == NULL ||
+      lql_stream_value_write_to(value, test_write, sink->writer, error) !=
+          LQL_STATUS_OK) return LQL_STREAM_CALLBACK_ERROR;
+  ++sink->count;
+  return LQL_STREAM_CALLBACK_CONTINUE;
 }
 
 static int run_selection(lql *ctx, const char *expr, const char *input,
@@ -542,6 +559,45 @@ static int run_selected_record_output(lql *ctx) {
   return 0;
 }
 
+static int run_value_callback(lql *ctx) {
+  static const char input[] = "{\"status\":\"open\",\"n\":1}\n"
+                              "{\"status\":\"closed\",\"n\":2}\n";
+  static const char expected[] = "{\"status\":\"open\",\"n\":1}";
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+  test_value_sink sink;
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) return 1;
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&sink, 0, sizeof(sink));
+  sink.writer = &writer;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  request.on_value = test_value;
+  request.value_user = &sink;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      sink.count != 1u || writer.len != sizeof(expected) - 1u ||
+      memcmp(writer.data, expected, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 static int run_nested_projection_output(lql *ctx) {
   static const char input[] =
       "{\"id\":\"x\",\"meta\":{\"trace\":9,\"ignore\":1},"
@@ -875,6 +931,7 @@ int main(void) {
       run_mapped_string_predicates(ctx) || run_match_all(ctx) ||
       run_root_wildcard_array_error(ctx) ||
       run_selected_record_output(ctx) ||
+      run_value_callback(ctx) ||
       run_nested_projection_output(ctx) ||
       run_mutation_output(ctx) ||
       run_projection_then_mutation_output(ctx) ||

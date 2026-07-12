@@ -29,6 +29,7 @@ typedef struct lql_selector lql_selector;
 typedef struct lql lql;
 typedef struct lql_projection lql_projection;
 typedef struct lql_mutation lql_mutation;
+typedef struct lql_stream_value lql_stream_value;
 
 typedef struct lql_capabilities {
   int selector_parse;
@@ -95,6 +96,10 @@ typedef struct lql_stream_decision {
 typedef lql_stream_callback_result (*lql_stream_decision_fn)(
     void *user, const lql_stream_decision *decision, lql_error *error);
 
+/** Receives one completed matched record. The value is callback-scoped. */
+typedef lql_stream_callback_result (*lql_stream_value_fn)(
+    void *user, const lql_stream_value *value, lql_error *error);
+
 typedef struct lql_stream_limits {
   size_t max_records;
   size_t max_matches;
@@ -114,6 +119,8 @@ typedef struct lql_stream_request {
   lql_stream_limits limits;
   lql_stream_decision_fn on_decision;
   void *decision_user;
+  lql_stream_value_fn on_value;
+  void *value_user;
 } lql_stream_request;
 
 typedef struct lql_stream_result {
@@ -304,6 +311,13 @@ const char *lql_status_string(lql_status status);
  */
 lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
                               lql_stream_result *result, lql_error *error);
+
+/** Returns the compact JSON size of one callback-scoped value. */
+size_t lql_stream_value_size(const lql_stream_value *value);
+/** Streams one callback-scoped value through a caller writer. */
+lql_status lql_stream_value_write_to(const lql_stream_value *value,
+                                     lql_stream_writer_fn writer,
+                                     void *writer_user, lql_error *error);
 
 #ifdef __cplusplus
 }

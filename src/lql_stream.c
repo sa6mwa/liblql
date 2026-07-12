@@ -26,6 +26,16 @@ typedef struct lql_stream_field {
 typedef struct lql_stream_member_context lql_stream_member_context;
 typedef struct lql_mapped_projection_field lql_mapped_projection_field;
 
+struct lql_stream_value {
+  const lonejson_spooled *spool;
+};
+
+typedef struct lql_stream_value_sink_state {
+  lql_stream_writer_fn writer;
+  void *writer_user;
+  lql_error *error;
+} lql_stream_value_sink_state;
+
 struct lql_stream_program {
   lql_stream_term terms[sizeof(unsigned long) * CHAR_BIT];
   size_t term_count;
@@ -68,6 +78,8 @@ typedef struct lql_stream_state {
   const lonejson_path_value_visitor *projection_visitor;
   lonejson *runtime;
   lonejson_spooled mutation_spool;
+  lonejson_writer mutation_writer;
+  lonejson_writer_visitor mutation_writer_visitor;
   lonejson_value_rewriter mutation_rewriter;
   lonejson_object_rewriter mutation_object_rewriter;
   lonejson_value_visitor mutation_visitor;
@@ -76,6 +88,7 @@ typedef struct lql_stream_state {
   lonejson_value_visitor mutation_tape_visitor;
   void *mutation_tape_visitor_user;
   int mutation_direct;
+  int selected_direct;
   int mutation_object_direct;
   int mutation_output_direct;
   int mutation_ready;
@@ -679,6 +692,85 @@ static lonejson_status stream_payload_sink(void *user, const void *data,
   return LONEJSON_STATUS_OK;
 }
 
+static lonejson_status stream_value_sink(void *user, const void *data,
+                                         size_t len, lonejson_error *error) {
+  lql_stream_value_sink_state *state;
+  lql_status status;
+  state = (lql_stream_value_sink_state *)user;
+  status = state->writer(state->writer_user, data, len, state->error);
+  if (status == LQL_STATUS_OK) {
+    return LONEJSON_STATUS_OK;
+  }
+  if (state->error != NULL && state->error->code == LQL_STATUS_OK) {
+    lql_set_error(state->error, status, "stream value writer failed");
+  }
+  stream_lonejson_error(error, state->error == NULL ? "stream value writer failed"
+                                                     : state->error->message);
+  return LONEJSON_STATUS_CALLBACK_FAILED;
+}
+
+size_t lql_stream_value_size(const lql_stream_value *value) {
+  return value == NULL || value->spool == NULL ? 0u
+                                                : lonejson_spooled_size(value->spool);
+}
+
+lql_status lql_stream_value_write_to(const lql_stream_value *value,
+                                     lql_stream_writer_fn writer,
+                                     void *writer_user, lql_error *error) {
+  lql_stream_value_sink_state state;
+  lonejson_error lonejson_error;
+  lonejson_status status;
+  lql_error_init(error);
+  if (value == NULL || value->spool == NULL || writer == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "stream value and writer are required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  state.writer = writer;
+  state.writer_user = writer_user;
+  state.error = error;
+  lonejson_error_init(&lonejson_error);
+  status = lonejson_spooled_write_to_sink(value->spool, stream_value_sink,
+                                          &state, &lonejson_error);
+  if (status == LONEJSON_STATUS_OK) return LQL_STATUS_OK;
+  if (status == LONEJSON_STATUS_CALLBACK_FAILED && error != NULL &&
+      error->code != LQL_STATUS_OK) return error->code;
+  lql_set_error(error, status == LONEJSON_STATUS_ALLOCATION_FAILED
+                           ? LQL_STATUS_NO_MEMORY
+                           : LQL_STATUS_JSON_ERROR,
+                lonejson_error.message[0] == '\0' ? "stream value read failed"
+                                                    : lonejson_error.message);
+  return error == NULL ? LQL_STATUS_JSON_ERROR : error->code;
+}
+
+static lonejson_candidate_callback_result stream_value_callback(
+    lql_stream_state *state, const lonejson_candidate_info *candidate,
+    lonejson_error *error) {
+  lql_stream_value value;
+  lql_stream_callback_result result;
+  if (state->request->on_value == NULL) return LONEJSON_CANDIDATE_CONTINUE;
+  value.spool = state->selected_direct ? &state->mutation_spool
+                                       : (candidate == NULL ? NULL
+                                                            : candidate->payload_spool);
+  if (value.spool == NULL) {
+    stream_fail(state, LQL_STATUS_CALLBACK_ERROR, "matched value capture is unavailable");
+    stream_lonejson_error(error, state->failure.message);
+    return LONEJSON_CANDIDATE_ERROR;
+  }
+  result = state->request->on_value(state->request->value_user, &value,
+                                    &state->failure);
+  if (result == LQL_STREAM_CALLBACK_CONTINUE) return LONEJSON_CANDIDATE_CONTINUE;
+  if (result == LQL_STREAM_CALLBACK_STOP) {
+    state->result->stopped_early = 1;
+    state->result->stop_reason = LQL_STREAM_STOP_CALLBACK;
+    return LONEJSON_CANDIDATE_STOP;
+  }
+  if (state->failure.code == LQL_STATUS_OK)
+    stream_fail(state, LQL_STATUS_CALLBACK_ERROR, "stream value callback failed");
+  stream_lonejson_error(error, state->failure.message);
+  return LONEJSON_CANDIDATE_ERROR;
+}
+
 static lonejson_status
 stream_emit_selected(lql_stream_state *state,
                      const lonejson_candidate_info *candidate,
@@ -868,6 +960,20 @@ stream_mutation_rewriter_open(lql_stream_state *state, lonejson_error *error) {
   lonejson_object_rewrite_options object_options;
   lonejson_sink_fn sink;
   void *sink_user;
+  lonejson_status status;
+  if (state->selected_direct) {
+    lonejson_writer_cleanup(&state->mutation_writer);
+    lonejson_writer_visitor_cleanup(&state->mutation_writer_visitor);
+    status = lonejson_writer_init_sink(state->runtime, &state->mutation_writer,
+                                       stream_projection_spool_sink,
+                                       &state->mutation_spool, error);
+    if (status != LONEJSON_STATUS_OK) {
+      return status;
+    }
+    return lonejson_writer_visitor_open(
+        &state->mutation_writer_visitor, &state->mutation_writer,
+        &state->mutation_visitor, &state->mutation_visitor_user, error);
+  }
   if (state->request->mutation == NULL ||
       state->request->mutation->action_count != 1u) {
     return LONEJSON_STATUS_INVALID_ARGUMENT;
@@ -943,7 +1049,10 @@ stream_mutation_tape_flush(lql_stream_state *state, lonejson_error *error) {
   lonejson_value_event_tape_reset(&state->mutation_tape);
   state->mutation_tape_ready = 0;
   if (status != LONEJSON_STATUS_OK) {
-    if (state->mutation_object_direct) {
+    if (state->selected_direct) {
+      lonejson_writer_visitor_cleanup(&state->mutation_writer_visitor);
+      lonejson_writer_cleanup(&state->mutation_writer);
+    } else if (state->mutation_object_direct) {
       lonejson_object_rewriter_cleanup(&state->mutation_object_rewriter);
     } else {
       lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
@@ -1048,7 +1157,10 @@ stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
       }
     }
     if (status != LONEJSON_STATUS_OK) {
-      if (state->mutation_object_direct) {
+      if (state->selected_direct) {
+        lonejson_writer_visitor_cleanup(&state->mutation_writer_visitor);
+        lonejson_writer_cleanup(&state->mutation_writer);
+      } else if (state->mutation_object_direct) {
         lonejson_object_rewriter_cleanup(&state->mutation_object_rewriter);
       } else {
         lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
@@ -1080,15 +1192,25 @@ stream_candidate_end(void *user, const lonejson_candidate_info *candidate,
   lql_stream_state *state;
   lql_stream_decision decision;
   lql_stream_callback_result callback_result;
+  lonejson_candidate_callback_result value_result;
   int matched;
   state = (lql_stream_state *)user;
   if (state->mutation_ready) {
     lonejson_status status;
-    status = state->mutation_object_direct
-                 ? lonejson_object_rewriter_close(&state->mutation_object_rewriter,
-                                                   error)
-                 : lonejson_value_rewriter_close(&state->mutation_rewriter,
-                                                 error);
+    if (state->selected_direct) {
+      status = lonejson_writer_visitor_close(&state->mutation_writer_visitor,
+                                             error);
+      if (status == LONEJSON_STATUS_OK) {
+        status = lonejson_writer_finish(&state->mutation_writer, error);
+      }
+      lonejson_writer_cleanup(&state->mutation_writer);
+    } else {
+      status = state->mutation_object_direct
+                   ? lonejson_object_rewriter_close(
+                         &state->mutation_object_rewriter, error)
+                   : lonejson_value_rewriter_close(&state->mutation_rewriter,
+                                                   error);
+    }
     if (status != LONEJSON_STATUS_OK) {
       state->mutation_ready = 0;
       stream_fail(state, status == LONEJSON_STATUS_ALLOCATION_FAILED
@@ -1129,9 +1251,16 @@ stream_candidate_end(void *user, const lonejson_candidate_info *candidate,
       return LONEJSON_CANDIDATE_STOP;
     }
   }
+  if (matched) {
+    value_result = stream_value_callback(state, candidate, error);
+    if (value_result != LONEJSON_CANDIDATE_CONTINUE) return value_result;
+  }
   if (state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD &&
       (matched || !state->request->matched_only)) {
-    if (stream_emit_selected(state, candidate, error) != LONEJSON_STATUS_OK) {
+    if ((state->selected_direct
+             ? stream_emit_mutation(state, candidate, error)
+             : stream_emit_selected(state, candidate, error)) !=
+        LONEJSON_STATUS_OK) {
       return LONEJSON_CANDIDATE_ERROR;
     }
   }
@@ -2492,7 +2621,10 @@ static lonejson_status stream_flat_mutation_string_end(void *user,
   if (selector_value) {
     if ((state->hits & state->program->terms[0].bit) == 0ul) {
       if (state->mutation_ready) {
-        if (state->mutation_object_direct) {
+        if (state->selected_direct) {
+          lonejson_writer_visitor_cleanup(&state->mutation_writer_visitor);
+          lonejson_writer_cleanup(&state->mutation_writer);
+        } else if (state->mutation_object_direct) {
           lonejson_object_rewriter_cleanup(&state->mutation_object_rewriter);
         } else {
           lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
@@ -2507,7 +2639,9 @@ static lonejson_status stream_flat_mutation_string_end(void *user,
       return LONEJSON_STATUS_OK;
     }
     if (state->mutation_tape_ready) {
-      state->mutation_output_direct = 1;
+      if (!state->selected_direct) {
+        state->mutation_output_direct = 1;
+      }
       status = stream_mutation_tape_flush(state, error);
       if (status != LONEJSON_STATUS_OK) {
         return status;
@@ -2851,15 +2985,20 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   state->projection_capture = NULL;
   state->projection_visitor = NULL;
   state->runtime = runtime;
+  state->selected_direct =
+      (state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD &&
+       state->request->matched_only) || state->request->on_value != NULL;
   state->mutation_direct =
-      state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION &&
-      state->request->matched_only &&
-      stream_mutation_direct_eligible(state->request->mutation);
+      state->selected_direct ||
+      (state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION &&
+       state->request->matched_only &&
+       stream_mutation_direct_eligible(state->request->mutation));
   state->mutation_ready = 0;
   state->mutation_tape_ready = 0;
   if (state->mutation_direct) {
     lonejson_spooled_init_class(runtime, &state->mutation_spool,
                                 LONEJSON_SPOOL_CLASS_LARGE_TEXT);
+    lonejson_writer_visitor_init(&state->mutation_writer_visitor);
     lonejson_value_rewriter_init(&state->mutation_rewriter);
     lonejson_object_rewriter_init(&state->mutation_object_rewriter);
     lonejson_value_event_tape_init(&state->mutation_tape);
@@ -2902,7 +3041,8 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   options = lonejson_default_candidate_stream_options();
   options.framing = LONEJSON_CANDIDATE_FRAMING_NDJSON;
   options.capture_mode =
-      (state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
+      ((state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD &&
+        !state->selected_direct) ||
        (state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION &&
         !state->mutation_direct) ||
        state->request->output_mode ==
@@ -2974,11 +3114,14 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
                     &lonejson_error, error);
   lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
   lonejson_object_rewriter_cleanup(&state->mutation_object_rewriter);
+  lonejson_writer_visitor_cleanup(&state->mutation_writer_visitor);
+  lonejson_writer_cleanup(&state->mutation_writer);
   lonejson_value_event_tape_cleanup(&state->mutation_tape);
   if (state->mutation_direct) {
     lonejson_spooled_cleanup(&state->mutation_spool);
   }
   state->mutation_direct = 0;
+  state->selected_direct = 0;
   state->mutation_ready = 0;
   lql_projection_capture_destroy(state->projection_capture);
   state->projection_capture = NULL;
@@ -3086,6 +3229,7 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
     return LQL_STATUS_NO_MEMORY;
   }
   if ((state.program != NULL && state.program->requires_generic_path) ||
+      request->on_value != NULL ||
       request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
       (request->output_mode == LQL_STREAM_OUTPUT_PROJECTION &&
        !mapped_projection) ||

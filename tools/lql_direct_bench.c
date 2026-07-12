@@ -241,6 +241,18 @@ static lql_status bench_discard_write(void *user, const void *data, size_t len,
   return LQL_STATUS_OK;
 }
 
+static lql_stream_callback_result
+bench_value(void *user, const lql_stream_value *value, lql_error *error) {
+  bench_writer *writer;
+  writer = (bench_writer *)user;
+  if (writer == NULL || value == NULL) return LQL_STREAM_CALLBACK_ERROR;
+  ++writer->records;
+  return lql_stream_value_write_to(value, bench_write, writer, error) ==
+                 LQL_STATUS_OK
+             ? LQL_STREAM_CALLBACK_CONTINUE
+             : LQL_STREAM_CALLBACK_ERROR;
+}
+
 static int mode_is_decision(const char *mode) {
   return strcmp(mode, "decision_only_selector") == 0 ||
          strcmp(mode, "decision_only_plan") == 0 ||
@@ -273,6 +285,9 @@ static int mode_is_supported(const char *mode) {
          strcmp(mode, "reuse_selector") == 0 ||
          strcmp(mode, "reparse_selector_each_run") == 0 ||
          strcmp(mode, "decision_only_source_selector") == 0 ||
+         strcmp(mode, "plus_value_selector") == 0 ||
+         strcmp(mode, "plus_value_source_selector") == 0 ||
+         strcmp(mode, "plus_value_openjson_selector") == 0 ||
          mode_is_projection(mode) ||
          strcmp(mode, "mutate_file_selector") == 0 ||
          strcmp(mode, "mutate_source_selector") == 0;
@@ -450,7 +465,8 @@ static int run_once(FILE *file, lql *ctx, lql_selector *selector,
     }
   }
   if (mode_is_selected(mode)) {
-    request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+    request.on_value = bench_value;
+    request.value_user = writer;
   } else if (mode_is_projection(mode)) {
     request.projection = projection;
     request.output_mode = LQL_STREAM_OUTPUT_PROJECTION;
@@ -537,13 +553,8 @@ int main(int argc, char **argv) {
   }
   unsupported = 0;
   unsupported_reason = "";
-  if (mode_is_selected(mode)) {
-    /* Do not mislabel an internal candidate spool as a public payload source.
-     */
-    unsupported = 1;
-    unsupported_reason =
-        "selected-value payload source is not yet exposed by the public ABI";
-  } else if (!(mode_is_decision(mode) || mode_is_projection(mode) ||
+  if (!(mode_is_decision(mode) || mode_is_selected(mode) ||
+               mode_is_projection(mode) ||
                mode_is_mutation(mode))) {
     unsupported = 1;
     unsupported_reason =
@@ -631,7 +642,8 @@ int main(int argc, char **argv) {
           mode_is_selected(mode) || mode_is_projection(mode)
               ? benchmark_payload_bytes(mode, &writer)
               : 0ul);
-  json_string(mode_is_projection(mode) ? "projection" : "none");
+  json_string(mode_is_selected(mode) ? "callback_payload"
+                                      : (mode_is_projection(mode) ? "projection" : "none"));
   fputs(",\"fixture_sha256\":", stdout);
   json_string(fixture_hash);
   if (unsupported) {
