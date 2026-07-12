@@ -47,8 +47,8 @@ execution design must be valid without cross-library IPO/LTO and without
 assuming a particular compiler for LoneJSON. Use only public `lonejson.h`;
 make vendored changes generic and upstreamable.
 
-GCC is the authoritative performance-gate compiler. A row that wins under
-Clang but loses to Go under GCC is not accepted.
+GCC is the only performance-gate compiler. A row is accepted only when GCC C
+meets or beats the pinned Go reference.
 
 ## First Actions
 

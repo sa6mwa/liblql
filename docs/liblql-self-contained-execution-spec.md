@@ -120,8 +120,8 @@ MiB spill case.
    input forms, strings/escapes, numbers, nesting, duplicate keys, fragmented
    input, scalar roots, root-array errors, and malformed-input offsets.
 2. Implement the Go-inspired fast top-level object equality scanner with
-   matched-only callback capture. Run focused GCC/Clang/Go benchmarks and a
-   leaf-function profile before extending it.
+   matched-only callback capture. Run focused GCC/Go benchmarks and a
+   C leaf-function profile before extending it.
 3. Move decision-only direct selectors onto the scanner, then add path-aware
    selector observation for nested, wildcard, recursive, numeric, and temporal
    terms.
@@ -141,7 +141,7 @@ fallback path.
 
 The required proof is cumulative:
 
-- direct reset gate and strict C89 warning-clean GCC/Clang builds;
+- direct reset gate and strict C89 warning-clean GCC builds;
 - scanner behavior tests and public receiver tests;
 - Go/C output parity and paired counters;
 - GCC focused benchmark gate for every accepted row, then the full matrix;
