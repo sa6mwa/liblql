@@ -479,6 +479,13 @@ int main(void) {
     lql_json_spool_cleanup(&flat_spool);
     return 24;
   }
+  memset(&flat_writer, 0, sizeof(flat_writer));
+  if (lql_json_spool_write_slice(&flat_spool, 1u, 2u, json_test_write,
+                                 &flat_writer, &flat_error) != LQL_STATUS_OK ||
+      flat_writer.len != 2u || memcmp(flat_writer.data, "bc", 2u) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 28;
+  }
   lql_json_spool_cleanup(&flat_spool);
   memset(spool_fill, (int)'x', sizeof(spool_fill));
   lql_error_init(&flat_error);
@@ -503,6 +510,17 @@ int main(void) {
       spool_bytes[2] != (unsigned char)'x') {
     lql_json_spool_cleanup(&flat_spool);
     return 27;
+  }
+  memset(&flat_writer, 0, sizeof(flat_writer));
+  if (lql_json_spool_write_slice(&flat_spool, 1024u, sizeof(spool_bytes),
+                                 json_test_write, &flat_writer,
+                                 &flat_error) != LQL_STATUS_OK ||
+      flat_writer.len != sizeof(spool_bytes) ||
+      flat_writer.data[0] != (unsigned char)'x' ||
+      flat_writer.data[1] != (unsigned char)'x' ||
+      flat_writer.data[2] != (unsigned char)'x') {
+    lql_json_spool_cleanup(&flat_spool);
+    return 29;
   }
   lql_json_spool_cleanup(&flat_spool);
   return 0;

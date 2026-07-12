@@ -1,5 +1,6 @@
 #include "lql_json_spool.h"
 
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -139,6 +140,42 @@ lql_status lql_json_spool_write_to(const lql_json_spool *spool,
     lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
                          "unable to read JSON spool file");
     return LQL_STATUS_IO_ERROR;
+  }
+  return LQL_STATUS_OK;
+}
+
+lql_status lql_json_spool_write_slice(const lql_json_spool *spool,
+                                      size_t offset, size_t len,
+                                      lql_stream_writer_fn writer,
+                                      void *writer_user, lql_error *error) {
+  unsigned char buffer[8192];
+  lql_status status;
+  if (spool == NULL || spool->memory == NULL || writer == NULL ||
+      offset > spool->size || len > spool->size - offset) {
+    lql_json_spool_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                         "JSON spool slice arguments are invalid");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (spool->file == NULL) {
+    return writer(writer_user, spool->memory + offset, len, error);
+  }
+  if (fflush(spool->file) != 0 || offset > (size_t)LONG_MAX ||
+      fseek(spool->file, (long)offset, SEEK_SET) != 0) {
+    lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
+                         "unable to seek JSON spool slice");
+    return LQL_STATUS_IO_ERROR;
+  }
+  while (len != 0u) {
+    size_t amount;
+    amount = len > sizeof(buffer) ? sizeof(buffer) : len;
+    if (fread(buffer, 1u, amount, spool->file) != amount) {
+      lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
+                           "unable to read JSON spool slice");
+      return LQL_STATUS_IO_ERROR;
+    }
+    status = writer(writer_user, buffer, amount, error);
+    if (status != LQL_STATUS_OK) return status;
+    len -= amount;
   }
   return LQL_STATUS_OK;
 }
