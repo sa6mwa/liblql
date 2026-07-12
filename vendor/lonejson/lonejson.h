@@ -46217,6 +46217,7 @@ typedef struct lonejson__value_rewrite_state {
   size_t frame_count;
   size_t frame_cap;
   lonejson__byte_buffer number;
+  lonejson__byte_buffer key;
   size_t number_limit;
   int found;
   int current_emit;
@@ -46226,6 +46227,8 @@ typedef struct lonejson__value_rewrite_state {
   int skipping;
   size_t skip_depth;
   lonejson *runtime_handle;
+  int keep_root;
+  int key_open;
   int event_open;
 } lonejson__value_rewrite_state;
 
@@ -47251,6 +47254,158 @@ static lonejson_status lonejson__value_rewrite_null(void *user,
   return lonejson_writer_null(&state->writer, state->error);
 }
 
+/* An empty KEEP path is a compacting pass-through, not a path rewrite. Keep
+ * it on the writer's direct event path so callers do not pay for target-path
+ * frames or retain every object key merely to prove that the root matches.
+ */
+static lonejson_status lonejson__value_rewrite_keep_object_begin(
+    void *user, lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  state->found = 1;
+  return lonejson_writer_begin_object(&state->writer, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_object_end(
+    void *user, lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  return lonejson_writer_end_object(&state->writer, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_key_begin(void *user,
+                                                               lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  if (state->key_open) {
+    return lonejson__set_error(state->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                               0u, 0u, "value rewrite key is already open");
+  }
+  lonejson__byte_reset(&state->key);
+  state->key_open = 1;
+  return LONEJSON_STATUS_OK;
+}
+
+static lonejson_status lonejson__value_rewrite_keep_key_chunk(
+    void *user, const char *data, size_t len, lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  if (!state->key_open) {
+    return lonejson__set_error(state->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                               0u, 0u, "value rewrite key is not open");
+  }
+  return lonejson__byte_append(&state->key, data, len, SIZE_MAX - 1u,
+                                &state->allocator, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_key_end(void *user,
+                                                             lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  lonejson_status status;
+  (void)e;
+  if (!state->key_open) {
+    return lonejson__set_error(state->error, LONEJSON_STATUS_INVALID_JSON, 0u,
+                               0u, 0u, "value rewrite key is not open");
+  }
+  status = lonejson_writer_key(&state->writer, state->key.data, state->key.len,
+                                state->error);
+  if (status == LONEJSON_STATUS_OK) {
+    state->key_open = 0;
+  }
+  return status;
+}
+
+static lonejson_status lonejson__value_rewrite_keep_array_begin(
+    void *user, lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  state->found = 1;
+  return lonejson_writer_begin_array(&state->writer, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_array_end(
+    void *user, lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  return lonejson_writer_end_array(&state->writer, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_string_begin(
+    void *user, lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  state->found = 1;
+  return lonejson_writer_string_begin(&state->writer, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_string_chunk(
+    void *user, const char *data, size_t len, lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  return lonejson_writer_string_chunk(&state->writer, data, len, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_string_end(
+    void *user, lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  return lonejson_writer_string_end(&state->writer, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_number_begin(
+    void *user, lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  state->found = 1;
+  return lonejson_writer_number_begin(&state->writer, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_number_chunk(
+    void *user, const char *data, size_t len, lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  return lonejson_writer_number_chunk(&state->writer, data, len, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_number_end(
+    void *user, lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  return lonejson_writer_number_end(&state->writer, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_boolean(void *user,
+                                                            int value,
+                                                            lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  state->found = 1;
+  return lonejson_writer_bool(&state->writer, value, state->error);
+}
+
+static lonejson_status lonejson__value_rewrite_keep_null(void *user,
+                                                         lonejson_error *e) {
+  lonejson__value_rewrite_state *state =
+      (lonejson__value_rewrite_state *)user;
+  (void)e;
+  state->found = 1;
+  return lonejson_writer_null(&state->writer, state->error);
+}
+
 static void
 lonejson__value_rewrite_cleanup(lonejson__value_rewrite_state *state) {
   size_t i;
@@ -47263,6 +47418,7 @@ lonejson__value_rewrite_cleanup(lonejson__value_rewrite_state *state) {
   lonejson__buffer_free(&state->allocator, state->frames,
                         state->frame_cap * sizeof(*state->frames));
   lonejson__byte_free(&state->number, &state->allocator);
+  lonejson__byte_free(&state->key, &state->allocator);
 }
 
 static void
@@ -47396,8 +47552,26 @@ static lonejson_status lonejson__value_rewrite_reader_with_options(
 }
 
 static void lonejson__value_rewrite_assign_visitor(
-    lonejson_value_visitor *visitor) {
+    lonejson__value_rewrite_state *state, lonejson_value_visitor *visitor) {
   *visitor = lonejson_default_value_visitor();
+  if (state->keep_root) {
+    visitor->object_begin = lonejson__value_rewrite_keep_object_begin;
+    visitor->object_end = lonejson__value_rewrite_keep_object_end;
+    visitor->object_key_begin = lonejson__value_rewrite_keep_key_begin;
+    visitor->object_key_chunk = lonejson__value_rewrite_keep_key_chunk;
+    visitor->object_key_end = lonejson__value_rewrite_keep_key_end;
+    visitor->array_begin = lonejson__value_rewrite_keep_array_begin;
+    visitor->array_end = lonejson__value_rewrite_keep_array_end;
+    visitor->string_begin = lonejson__value_rewrite_keep_string_begin;
+    visitor->string_chunk = lonejson__value_rewrite_keep_string_chunk;
+    visitor->string_end = lonejson__value_rewrite_keep_string_end;
+    visitor->number_begin = lonejson__value_rewrite_keep_number_begin;
+    visitor->number_chunk = lonejson__value_rewrite_keep_number_chunk;
+    visitor->number_end = lonejson__value_rewrite_keep_number_end;
+    visitor->boolean_value = lonejson__value_rewrite_keep_boolean;
+    visitor->null_value = lonejson__value_rewrite_keep_null;
+    return;
+  }
   visitor->object_begin = lonejson__value_rewrite_object_begin;
   visitor->object_end = lonejson__value_rewrite_object_end;
   visitor->object_key_begin = lonejson__value_rewrite_key_begin;
@@ -47520,12 +47694,16 @@ lonejson_status lonejson_value_rewriter_open(
   state->replace_depth = 0u;
   state->skipping = 0;
   state->skip_depth = 0u;
+  state->keep_root = options->action == LONEJSON_VALUE_REWRITE_KEEP &&
+                     options->target_segment_count == 0u;
+  lonejson__byte_reset(&state->key);
+  state->key_open = 0;
   state->event_open = 1;
   lonejson__clear_error(error);
   lonejson__value_rewrite_resolve_limits(&state->parse_options, runtime_state,
                                          &limits);
   state->number_limit = limits.max_number_bytes;
-  lonejson__value_rewrite_assign_visitor(out_visitor);
+  lonejson__value_rewrite_assign_visitor(state, out_visitor);
   *out_user = state;
   lonejson_error_init(&rewriter->error);
   return LONEJSON_STATUS_OK;
@@ -47546,8 +47724,10 @@ lonejson_status lonejson_value_rewriter_close(lonejson_value_rewriter *rewriter,
                                0u, 0u, "open value rewriter is required");
   }
   state->error = error;
-  if (state->frame_count != 0u || state->replacing || state->skipping ||
-      state->current_replace || state->number.len != 0u) {
+  if ((state->keep_root && state->key_open) ||
+      (!state->keep_root &&
+       (state->frame_count != 0u || state->replacing || state->skipping ||
+        state->current_replace || state->number.len != 0u))) {
     status = lonejson__set_error(error, LONEJSON_STATUS_INVALID_JSON, 0u, 0u,
                                  0u, "value rewriter value is incomplete");
   } else if (!state->found &&
