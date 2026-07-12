@@ -129,6 +129,41 @@ static void lql_json_match_unicode(lql_json_scan *scan, unsigned int value) {
   }
 }
 
+static int lql_json_word_has_zero_byte(unsigned long value) {
+  unsigned long ones;
+  unsigned long high;
+  ones = ~0ul / 255ul;
+  high = ones * 128ul;
+  return ((value - ones) & ~value & high) != 0ul;
+}
+
+static size_t lql_json_plain_ascii_span(const unsigned char *data, size_t len) {
+  unsigned long word;
+  unsigned long ones;
+  unsigned long high;
+  unsigned long control_offset;
+  size_t offset;
+  offset = 0u;
+  ones = ~0ul / 255ul;
+  high = ones * 128ul;
+  control_offset = ones * 96ul;
+  while (len - offset >= sizeof(word)) {
+    memcpy(&word, data + offset, sizeof(word));
+    if ((word & high) != 0ul || (~(word + control_offset) & high) != 0ul ||
+        lql_json_word_has_zero_byte(word ^ (ones * (unsigned long)'"')) ||
+        lql_json_word_has_zero_byte(word ^ (ones * (unsigned long)'\\'))) {
+      break;
+    }
+    offset += sizeof(word);
+  }
+  while (offset < len && data[offset] != (unsigned char)'"' &&
+         data[offset] != (unsigned char)'\\' && data[offset] >= 0x20u &&
+         data[offset] < 0x80u) {
+    ++offset;
+  }
+  return offset;
+}
+
 static lql_status lql_json_refill(lql_json_scan *scan) {
   size_t amount;
   lql_status status;
@@ -277,22 +312,17 @@ static lql_status lql_json_string(lql_json_scan *scan) {
       return LQL_STATUS_JSON_ERROR;
     }
     span = scan->buffer + scan->offset;
-    span_len = 0u;
-    while (scan->offset + span_len < scan->length) {
-      value = (int)span[span_len];
-      if (value == '"' || value == '\\' || value < 0x20 || value >= 0x80) {
-        break;
-      }
-      ++span_len;
-    }
+    span_len = lql_json_plain_ascii_span(span, scan->length - scan->offset);
     if (span_len != 0u) {
       scan->offset += span_len;
       status = lql_json_write(scan, span, span_len);
       if (status != LQL_STATUS_OK) {
         return status;
       }
-      for (i = 0u; i < span_len; ++i) {
-        lql_json_match_byte(scan, span[i]);
+      if (scan->match_target != NULL && !scan->match_failed) {
+        for (i = 0u; i < span_len && !scan->match_failed; ++i) {
+          lql_json_match_byte(scan, span[i]);
+        }
       }
       continue;
     }

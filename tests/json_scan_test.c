@@ -157,6 +157,14 @@ int main(void) {
                     LQL_STATUS_JSON_ERROR, 0u)) {
     return 6;
   }
+  if (json_test_run("{\"text\":\"\303\245\"}\n", 1u,
+                    "{\"text\":\"\303\245\"}\n", LQL_STATUS_OK, 1u)) {
+    return 7;
+  }
+  if (json_test_run("{\"text\":\"\300\200\"}\n", 1u, NULL,
+                    LQL_STATUS_JSON_ERROR, 0u)) {
+    return 8;
+  }
   memset(&flat_reader, 0, sizeof(flat_reader));
   memset(&flat_writer, 0, sizeof(flat_writer));
   memset(&flat_result, 0, sizeof(flat_result));
@@ -177,7 +185,7 @@ int main(void) {
   flat_request.record_user = &flat_result;
   lql_error_init(&flat_error);
   if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
-    return 7;
+    return 9;
   }
   if (lql_json_scan_flat_eq_ndjson(&flat_request, &flat_records, &flat_bytes,
                                    &flat_error) != LQL_STATUS_OK ||
@@ -191,7 +199,7 @@ int main(void) {
              "{\"status\":\"closed\",\"status\":\"open\"}\n",
              flat_writer.len) != 0) {
     lql_json_spool_cleanup(&flat_spool);
-    return 8;
+    return 10;
   }
   lql_json_spool_cleanup(&flat_spool);
   return 0;
