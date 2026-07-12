@@ -22,6 +22,7 @@ fi
 check_case() {
   fixture=$1
   dataset=$2
+  mode=$3
   if [ ! -f "$fixture" ]; then
     printf 'SKIP: fixture is unavailable: %s\n' "$fixture"
     return 0
@@ -30,18 +31,21 @@ check_case() {
     --massif-out-file="$massif_out" "$binary" \
     --fixture "$fixture" --dataset "$dataset" \
     --selector-name eq_status_open --expr '/status="open"' \
-    --mode mutate_file_selector --submode steady_state >/dev/null
+    --mode "$mode" --submode steady_state >/dev/null
 
   peak=$(awk -F= '/^mem_heap_B=/{ if ($2 > peak) peak=$2 } END { print peak+0 }' \
     "$massif_out")
   if [ "$peak" -gt "$limit_bytes" ]; then
-    printf 'direct live heap exceeded for %s: %s bytes (limit %s bytes)\n' \
-      "$dataset" "$peak" "$limit_bytes" >&2
+    printf 'direct live heap exceeded for %s/%s: %s bytes (limit %s bytes)\n' \
+      "$dataset" "$mode" "$peak" "$limit_bytes" >&2
     exit 1
   fi
-  printf 'direct live heap %s: %s bytes (limit %s bytes)\n' \
-    "$dataset" "$peak" "$limit_bytes"
+  printf 'direct live heap %s/%s: %s bytes (limit %s bytes)\n' \
+    "$dataset" "$mode" "$peak" "$limit_bytes"
 }
 
-check_case build/direct-probe/status-100k.ndjson status_100k
-check_case build/direct-probe/large-4x25m.ndjson large_ndjson
+for mode in decision_only_selector project_file_selector mutate_file_selector
+do
+  check_case build/direct-probe/status-100k.ndjson status_100k "$mode"
+  check_case build/direct-probe/large-4x25m.ndjson large_ndjson "$mode"
+done
