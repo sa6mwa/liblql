@@ -29,6 +29,15 @@ typedef struct lql_flat_eq_program {
   size_t direct_mutation_action_count;
 } lql_flat_eq_program;
 
+typedef struct lql_flat_eq_time_bounds {
+  lql_temporal now;
+  lql_temporal today;
+  lql_temporal yesterday;
+  int now_ready;
+  int today_ready;
+  int yesterday_ready;
+} lql_flat_eq_time_bounds;
+
 typedef struct lql_flat_eq_state {
   const lql_stream_request *request;
   lql_stream_result *result;
@@ -36,6 +45,23 @@ typedef struct lql_flat_eq_state {
   lql_stream_writer_fn writer;
   void *writer_user;
 } lql_flat_eq_state;
+
+static int lql_flat_eq_selector_needs_time(const lql_selector *selector) {
+  size_t i;
+  if (selector == NULL) {
+    return 0;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_DATE &&
+      selector->since_macro != LQL_SINCE_NONE) {
+    return 1;
+  }
+  for (i = 0u; i < selector->child_count; ++i) {
+    if (lql_flat_eq_selector_needs_time(&selector->children[i])) {
+      return 1;
+    }
+  }
+  return 0;
+}
 
 static int lql_flat_eq_literal_kind(lql_selector_literal_kind literal_kind,
                                     lql_json_flat_term_kind *out) {
@@ -255,7 +281,8 @@ static int lql_flat_eq_append_contains(
 }
 
 static int lql_flat_eq_append(lql_flat_eq_program *program,
-                              const lql_selector *selector) {
+                              const lql_selector *selector,
+                              const lql_flat_eq_time_bounds *time_bounds) {
   lql_json_flat_eq_term *term;
   lql_json_flat_term_kind term_kind;
   const char *field;
@@ -278,7 +305,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       selector->kind == LQL_SELECTOR_KIND_OR ||
       selector->kind == LQL_SELECTOR_KIND_NOT) {
     for (i = 0u; i < selector->child_count; ++i) {
-      if (!lql_flat_eq_append(program, &selector->children[i])) {
+      if (!lql_flat_eq_append(program, &selector->children[i], time_bounds)) {
         return 0;
       }
     }
@@ -388,7 +415,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     return 1;
   }
   if (selector->kind == LQL_SELECTOR_KIND_DATE) {
-    if (selector->field == NULL || selector->since_macro != LQL_SINCE_NONE ||
+    if (selector->field == NULL ||
         program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
       return 0;
     }
@@ -421,6 +448,25 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     term->has_temporal_lt = selector->has_temporal_lt;
     term->has_temporal_lte = selector->has_temporal_lte;
     term->has_temporal_eq = selector->has_temporal_eq;
+    if (selector->since_macro == LQL_SINCE_NOW) {
+      if (time_bounds == NULL || !time_bounds->now_ready) {
+        return 0;
+      }
+      term->temporal_gte = time_bounds->now;
+      term->has_temporal_gte = 1;
+    } else if (selector->since_macro == LQL_SINCE_TODAY) {
+      if (time_bounds == NULL || !time_bounds->today_ready) {
+        return 0;
+      }
+      term->temporal_gte = time_bounds->today;
+      term->has_temporal_gte = 1;
+    } else if (selector->since_macro == LQL_SINCE_YESTERDAY) {
+      if (time_bounds == NULL || !time_bounds->yesterday_ready) {
+        return 0;
+      }
+      term->temporal_gte = time_bounds->yesterday;
+      term->has_temporal_gte = 1;
+    }
     program->selectors[program->term_count] = selector;
     ++program->term_count;
     return 1;
@@ -1756,6 +1802,8 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   lql_flat_eq_state state;
   lql_flat_eq_program program;
   lql_status status;
+  lql_flat_eq_time_bounds time_bounds;
+  lql_flat_eq_time_bounds *time_bounds_ptr;
   size_t records;
   size_t bytes_read;
   int capture;
@@ -1770,7 +1818,16 @@ lql_status lql_stream_execute_flat_eq(lql *self,
     return LQL_STATUS_OK;
   }
   memset(&program, 0, sizeof(program));
-  if (!lql_flat_eq_append(&program, request->selector)) {
+  time_bounds_ptr = NULL;
+  if (lql_flat_eq_selector_needs_time(request->selector)) {
+    memset(&time_bounds, 0, sizeof(time_bounds));
+    time_bounds.now_ready = lql_temporal_now(&time_bounds.now);
+    time_bounds.today_ready = lql_temporal_today(&time_bounds.today);
+    time_bounds.yesterday_ready =
+        lql_temporal_yesterday(&time_bounds.yesterday);
+    time_bounds_ptr = &time_bounds;
+  }
+  if (!lql_flat_eq_append(&program, request->selector, time_bounds_ptr)) {
     return LQL_STATUS_OK;
   }
   if ((request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||

@@ -415,6 +415,12 @@ static int run_mapped_string_predicates(lql *ctx) {
                     temporal_input, 3u, 1u)) {
     return 12;
   }
+  if (run_selection(ctx, "date{f=/timestamp,since=yesterday}",
+                    "{\"timestamp\":\"2999-01-01T00:00:00Z\"}\n"
+                    "{\"timestamp\":\"2000-01-01T00:00:00Z\"}\n",
+                    2u, 1u)) {
+    return 105;
+  }
   if (run_selection(ctx, "/items[]/sku=\"B\"", wildcard_input, 3u, 2u)) {
     return 13;
   }
