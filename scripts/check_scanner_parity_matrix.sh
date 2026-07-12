@@ -3,7 +3,7 @@ set -eu
 
 . scripts/scanner_parity_common.sh
 
-scanner_parity_init 'scanner parity matrix' build/scanner-parity-matrix.jsonl 9
+scanner_parity_init 'scanner parity matrix' build/scanner-parity-matrix.jsonl 15
 
 sh scripts/generate_direct_probe_fixture.sh \
   build/direct-probe/status-whitespace-100k.ndjson 100000 24 statusws

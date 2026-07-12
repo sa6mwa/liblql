@@ -23,11 +23,12 @@ check_case() {
   fixture=$1
   dataset=$2
   mode=$3
+  samples=${4:-2}
   if [ ! -f "$fixture" ]; then
     printf 'SKIP: fixture is unavailable: %s\n' "$fixture"
     return 0
   fi
-  LQL_BENCH_SAMPLES=2 valgrind --tool=massif --stacks=no --time-unit=B \
+  LQL_BENCH_SAMPLES=$samples valgrind --tool=massif --stacks=no --time-unit=B \
     --massif-out-file="$massif_out" "$binary" \
     --fixture "$fixture" --dataset "$dataset" \
     --selector-name eq_status_open --expr '/status="open"' \
@@ -36,12 +37,12 @@ check_case() {
   peak=$(awk -F= '/^mem_heap_B=/{ if ($2 > peak) peak=$2 } END { print peak+0 }' \
     "$massif_out")
   if [ "$peak" -gt "$limit_bytes" ]; then
-    printf 'direct live heap exceeded for %s/%s: %s bytes (limit %s bytes)\n' \
-      "$dataset" "$mode" "$peak" "$limit_bytes" >&2
+    printf 'direct live heap exceeded for %s/%s samples=%s: %s bytes (limit %s bytes)\n' \
+      "$dataset" "$mode" "$samples" "$peak" "$limit_bytes" >&2
     exit 1
   fi
-  printf 'direct live heap %s/%s: %s bytes (limit %s bytes)\n' \
-    "$dataset" "$mode" "$peak" "$limit_bytes"
+  printf 'direct live heap %s/%s samples=%s: %s bytes (limit %s bytes)\n' \
+    "$dataset" "$mode" "$samples" "$peak" "$limit_bytes"
 }
 
 for mode in decision_only_selector plus_value_selector project_file_selector mutate_file_selector
@@ -51,3 +52,5 @@ do
 done
 
 check_case build/direct-probe/large-100m.ndjson large_100m plus_value_selector
+check_case build/direct-probe/status-100k.ndjson status_100k_repeated \
+  decision_only_selector 8
