@@ -7,6 +7,8 @@ scanner_parity_init 'scanner parity matrix' build/scanner-parity-matrix.jsonl 15
 
 sh scripts/generate_direct_probe_fixture.sh \
   build/direct-probe/status-whitespace-100k.ndjson 100000 24 statusws
+sh scripts/generate_direct_probe_fixture.sh \
+  build/direct-probe/realworld-100k.ndjson 100000 64 realworld
 
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' decision_only_selector /id
@@ -106,6 +108,16 @@ scanner_parity_run_row build/direct-probe/recursive-10k.ndjson recursive_10k \
   recursive_eq '/.../sku="needle"' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/indexed-10k.ndjson indexed_10k \
   indexed_eq '/items/1/sku="B"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
+  realworld_eq_sparse '/event="session_sync"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
+  realworld_eq_dense '/component="edge"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
+  realworld_nested_eq_sparse '/query/hash="c5d2460186f7233c927e7db2dcc703c0a3a8e0d5f0d8a3c5b4f1e2d3c4b5a697"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
+  realworld_contains_event_sparse 'contains{field=/event,value=sync}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
+  realworld_multi_clause_and '/component="edge",/event="session_sync",/active_idx=0,/tab_count=1,/code>=10' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' mutate_file_selector /id
 

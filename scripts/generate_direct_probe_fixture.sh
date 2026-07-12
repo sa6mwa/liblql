@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -ne 2 ] && [ "$#" -ne 3 ] && [ "$#" -ne 4 ]; then
-  printf '%s\n' "usage: $0 OUTPUT_PATH RECORD_COUNT [PAYLOAD_BYTES] [status|statusws|scalar]" >&2
+  printf '%s\n' "usage: $0 OUTPUT_PATH RECORD_COUNT [PAYLOAD_BYTES] [status|statusws|scalar|realworld]" >&2
   exit 2
 fi
 
@@ -29,10 +29,10 @@ case "$payload_bytes" in
 esac
 
 case "$shape" in
-  status|statusws|scalar|nested|nestedprojection|indexed|recursive)
+  status|statusws|scalar|nested|nestedprojection|indexed|recursive|realworld)
     ;;
   *)
-    printf '%s\n' 'fixture shape must be status, statusws, scalar, nested, nestedprojection, indexed, or recursive' >&2
+    printf '%s\n' 'fixture shape must be status, statusws, scalar, nested, nestedprojection, indexed, recursive, or realworld' >&2
     exit 2
     ;;
 esac
@@ -60,6 +60,15 @@ awk -v count="$2" -v payload_bytes="$payload_bytes" -v shape="$shape" 'BEGIN {
     } else if (shape == "recursive") {
       sku = (i % 4 == 0) ? "needle" : "other"
       printf "{\"id\":\"id-%d\",\"tree\":{\"branch\":{\"deep\":{\"sku\":\"%s\"}}},\"payload\":\"", i, sku
+    } else if (shape == "realworld") {
+      event = (i % 16 == 0) ? "session_sync" : ((i % 3 == 0) ? "tabs_update" : "heartbeat")
+      component = (i % 2 == 0) ? "edge" : "core"
+      active_idx = (i % 16 == 0) ? 0 : 1
+      tab_count = (i % 16 == 0) ? 1 : 3
+      code = (i % 16 == 0) ? 11 : (i % 9)
+      hash = (i % 16 == 0) ? "c5d2460186f7233c927e7db2dcc703c0a3a8e0d5f0d8a3c5b4f1e2d3c4b5a697" : "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      target_sid = (i % 16 == 0) ? "sid-0a3f-target" : "sid-other"
+      printf "{\"id\":\"id-%d\",\"event\":\"%s\",\"component\":\"%s\",\"active_idx\":%d,\"tab_count\":%d,\"code\":%d,\"query\":{\"hash\":\"%s\",\"nested\":{\"event\":\"%s\"}},\"session_ids\":[\"sid-%d\",\"%s\"],\"payload\":\"", i, event, component, active_idx, tab_count, code, hash, event, i, target_sid
     } else if (shape == "statusws") {
       printf " { \"id\" : \"id-%d\" , \"status\" : \"%s\" , \"region\" : \"%s\" , \"payload\" : \"", i, status, region
     } else {
