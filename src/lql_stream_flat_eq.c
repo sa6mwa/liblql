@@ -21,7 +21,7 @@ typedef struct lql_flat_eq_program {
                         [LQL_FLAT_ICONTAINS_NEEDLE_MAX];
   size_t term_count;
   int stop_matching_on_hit;
-  const lql_mutation_action *direct_set_action;
+  const lql_mutation_action *direct_mutation_action;
 } lql_flat_eq_program;
 
 typedef struct lql_flat_eq_state {
@@ -802,7 +802,7 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
   int first;
   unsigned char ch;
   lql_status status;
-  action = state->program->direct_set_action;
+  action = state->program->direct_mutation_action;
   if (action == NULL || spool == NULL)
     return LQL_STATUS_INVALID_ARGUMENT;
   size = lql_json_spool_size(spool);
@@ -845,17 +845,33 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
     status = lql_flat_eq_skip_value(spool, &value_end, size, error);
     if (status != LQL_STATUS_OK)
       return status;
-    if (!first &&
-        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
-      return status;
     if (same_key) {
+      found = 1;
+      if (action->kind == LQL_MUTATION_REMOVE) {
+        pos = value_end;
+        status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+        if (ch == (unsigned char)',') {
+          ++pos;
+          status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+          if (status != LQL_STATUS_OK)
+            return status;
+        }
+        continue;
+      }
+      if (!first &&
+          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+        return status;
       status = lql_json_spool_write_slice(
           spool, key_start, key_end - key_start + 1u, state->request->writer,
           state->request->writer_user, error);
       if (status == LQL_STATUS_OK)
         status = lql_flat_eq_mutation_value(state, action, error);
-      found = 1;
     } else {
+      if (!first &&
+          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+        return status;
       status = lql_json_spool_write_slice(
           spool, key_start, value_end - key_start, state->request->writer,
           state->request->writer_user, error);
@@ -874,7 +890,7 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
         return status;
     }
   }
-  if (!found) {
+  if (!found && action->kind != LQL_MUTATION_REMOVE) {
     if (!first &&
         (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
       return status;
@@ -1214,11 +1230,13 @@ static int lql_flat_eq_mutation_append(lql_flat_eq_program *program,
   if (program == NULL || mutation == NULL || mutation->action_count != 1u)
     return 0;
   action = &mutation->actions[0];
-  if (action->kind != LQL_MUTATION_SET || action->segment_count != 1u ||
-      action->segments == NULL || action->segments[0] == NULL ||
-      action->value == NULL)
+  if ((action->kind != LQL_MUTATION_SET &&
+       action->kind != LQL_MUTATION_REMOVE) ||
+      action->segment_count != 1u || action->segments == NULL ||
+      action->segments[0] == NULL ||
+      (action->kind == LQL_MUTATION_SET && action->value == NULL))
     return 0;
-  program->direct_set_action = action;
+  program->direct_mutation_action = action;
   return 1;
 }
 

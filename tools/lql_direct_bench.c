@@ -424,6 +424,10 @@ static const char *const *mutations_for(const char *selector_name,
     *count = 1u;
     return processed;
   }
+  if (strcmp(selector_name, "eq_status_open_top_remove") == 0) {
+    *count = 1u;
+    return remove;
+  }
   if (strstr(expr, "/voucher/lines/10/") != NULL) {
     static const char *const voucher[] = {"/voucher/lines/10/bench=true"};
     *count = 1u;
