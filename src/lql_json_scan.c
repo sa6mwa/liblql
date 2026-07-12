@@ -22,6 +22,7 @@ typedef struct lql_json_scan {
   size_t depth;
   lql_error *error;
   int flat_eq_active;
+  int flat_eq_stop_on_hit;
   const lql_json_flat_eq_term *flat_terms;
   size_t flat_term_count;
   unsigned long match_active;
@@ -572,7 +573,8 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       lql_json_error(scan, "JSON object key must be a string");
       return LQL_STATUS_JSON_ERROR;
     }
-    if (top_level) {
+    if (top_level &&
+        !(scan->flat_eq_stop_on_hit && scan->flat_eq_hits != 0ul)) {
       unsigned long active;
       active = scan->flat_term_count == LQL_JSON_FLAT_TERM_CAPACITY
                    ? ~0ul
@@ -964,6 +966,7 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   scan.error = error;
   scan.flat_terms = request->terms;
   scan.flat_term_count = request->term_count;
+  scan.flat_eq_stop_on_hit = request->stop_matching_on_hit;
   records = 0u;
   for (;;) {
     status = lql_json_skip_space(&scan);

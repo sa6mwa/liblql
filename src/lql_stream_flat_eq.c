@@ -10,6 +10,7 @@ typedef struct lql_flat_eq_program {
   lql_json_flat_eq_term terms[LQL_FLAT_EQ_TERM_CAPACITY];
   const lql_selector *selectors[LQL_FLAT_EQ_TERM_CAPACITY];
   size_t term_count;
+  int stop_matching_on_hit;
 } lql_flat_eq_program;
 
 typedef struct lql_flat_eq_state {
@@ -306,6 +307,9 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   if (!lql_flat_eq_append(&program, request->selector)) {
     return LQL_STATUS_OK;
   }
+  program.stop_matching_on_hit =
+      request->selector->kind == LQL_SELECTOR_KIND_EQ &&
+      program.term_count == 1u;
   *out_handled = 1;
   capture = request->on_value != NULL ||
             request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD;
@@ -327,6 +331,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   scan_request.term_count = program.term_count;
   scan_request.spool = capture ? &spool : NULL;
   scan_request.capture = capture;
+  scan_request.stop_matching_on_hit = program.stop_matching_on_hit;
   scan_request.record = lql_flat_eq_record;
   scan_request.record_user = &state;
   status =

@@ -50,6 +50,7 @@ typedef struct lql_json_flat_eq_request {
   size_t term_count;
   lql_json_spool *spool;
   int capture;
+  int stop_matching_on_hit;
   lql_json_flat_eq_record_fn record;
   void *record_user;
 } lql_json_flat_eq_request;
