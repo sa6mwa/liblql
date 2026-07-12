@@ -1,12 +1,13 @@
-.PHONY: help build-debug build-release test asan test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help build-debug build-release test valgrind asan test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
 	  'make build-debug   build the debug self-contained scanner foundation' \
 	  'make build-release build the optimized self-contained scanner foundation' \
 	  'make test          build and run the direct-stream test suite' \
+	  'make valgrind      run native Valgrind Memcheck gate' \
 	  'make asan          build and run direct tests with ASan/UBSan' \
-	  'make test-all      run reset, dependency, test, sanitizer, parity, and heap gates' \
+	  'make test-all      run reset, dependency, test, memcheck, sanitizer, parity, and heap gates' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
 	  'make direct-no-lonejson  verify liblql has no LoneJSON runtime dependency' \
 	  'make direct-probe  build the optimized direct-execution probe' \
@@ -36,7 +37,10 @@ asan:
 	@cmake --build --preset asan-scanner
 	@ctest --test-dir build/asan-scanner --output-on-failure
 
-test-all: direct-reset direct-no-lonejson test asan scanner-parity-matrix direct-live-heap
+valgrind: build-debug
+	@sh scripts/check_valgrind.sh
+
+test-all: direct-reset direct-no-lonejson test valgrind asan scanner-parity-matrix direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
