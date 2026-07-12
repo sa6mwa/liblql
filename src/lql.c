@@ -40,8 +40,7 @@ static lql_status projection_path_method(const lql *self,
 static lql_status mutation_parse_method(lql *self,
                                         const char *const *expressions,
                                         size_t expression_count,
-                                        lql_mutation **out,
-                                        lql_error *error);
+                                        lql_mutation **out, lql_error *error);
 static void mutation_destroy_method(lql *self, lql_mutation *mutation);
 static size_t mutation_count_method(const lql *self,
                                     const lql_mutation *mutation);
@@ -275,6 +274,7 @@ LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
   }
   allocator->destroy(allocator, selector->any);
   allocator->destroy(allocator, selector->any_lens);
+  allocator->destroy(allocator, selector->any_kinds);
   allocator->destroy(allocator, selector->range_gt_text);
   allocator->destroy(allocator, selector->range_gte_text);
   allocator->destroy(allocator, selector->range_lt_text);
@@ -361,8 +361,7 @@ static lql_status projection_path_method(const lql *self,
 static lql_status mutation_parse_method(lql *self,
                                         const char *const *expressions,
                                         size_t expression_count,
-                                        lql_mutation **out,
-                                        lql_error *error) {
+                                        lql_mutation **out, lql_error *error) {
   return lql_mutation_parse_internal(self, expressions, expression_count, out,
                                      error);
 }

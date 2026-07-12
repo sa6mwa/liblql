@@ -71,6 +71,13 @@ typedef enum lql_selector_kind {
   LQL_SELECTOR_KIND_EXISTS
 } lql_selector_kind;
 
+typedef enum lql_selector_literal_kind {
+  LQL_SELECTOR_LITERAL_STRING = 0,
+  LQL_SELECTOR_LITERAL_NUMBER = 1,
+  LQL_SELECTOR_LITERAL_BOOL = 2,
+  LQL_SELECTOR_LITERAL_NULL = 3
+} lql_selector_literal_kind;
+
 __extension__ typedef signed long long lql_int64;
 
 typedef struct lql_temporal {
@@ -95,10 +102,12 @@ struct lql_selector {
   char *value;
   int value_set;
   int value_is_string;
+  lql_selector_literal_kind value_kind;
   int value_is_temporal;
   int ignore_case;
   char **any;
   size_t *any_lens;
+  lql_selector_literal_kind *any_kinds;
   size_t any_count;
   char *range_gt_text;
   char *range_gte_text;

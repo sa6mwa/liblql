@@ -40,6 +40,31 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     return selector->kind != LQL_SELECTOR_KIND_NOT ||
            selector->child_count == 1u;
   }
+  if (selector->kind == LQL_SELECTOR_KIND_IN) {
+    if (selector->field == NULL || selector->any_count == 0u ||
+        selector->any_kinds == NULL) {
+      return 0;
+    }
+    field = selector->field;
+    if (field[0] != '/' || field[1] == '\0' || strchr(field + 1, '/') != NULL) {
+      return 0;
+    }
+    for (i = 0u; i < selector->any_count; ++i) {
+      if (selector->any_kinds[i] != LQL_SELECTOR_LITERAL_STRING ||
+          program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
+        return 0;
+      }
+      term = &program->terms[program->term_count];
+      term->kind = LQL_JSON_FLAT_TERM_EQ;
+      term->field = field + 1;
+      term->field_len = strlen(field + 1);
+      term->value = selector->any[i];
+      term->value_len = selector->any_lens[i];
+      program->selectors[program->term_count] = selector;
+      ++program->term_count;
+    }
+    return 1;
+  }
   if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
        selector->kind != LQL_SELECTOR_KIND_EXISTS) ||
       selector->field == NULL ||
@@ -101,7 +126,9 @@ static int lql_flat_eq_matches(const lql_flat_eq_program *program,
   }
   for (i = 0u; i < program->term_count; ++i) {
     if (program->selectors[i] == selector) {
-      return (hits & (1ul << i)) != 0ul;
+      if ((hits & (1ul << i)) != 0ul) {
+        return 1;
+      }
     }
   }
   return 0;
