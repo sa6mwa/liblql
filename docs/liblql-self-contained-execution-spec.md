@@ -151,6 +151,13 @@ Each completed slab is committed only after observable tests and its targeted
 benchmark proof pass. A slower proof is reverted; it is not carried as a
 fallback path.
 
+Rejected proof paths are part of the performance record. In particular,
+direct numeric-lexeme equality collection and raw bool/null literal copying
+looked plausible from focused scalar profiles, but both pushed another
+accepted matrix row below 1.0x under GCC. Do not reintroduce those
+micro-optimizations unless the design changes enough to preserve the full
+accepted-row matrix, not just the focused scalar row.
+
 ## Verification
 
 The required proof is cumulative:
