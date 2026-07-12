@@ -123,6 +123,7 @@ func main() {
 	var mode string
 	var submode string
 	var projectionPath string
+	var maxRecords int64
 	flag.StringVar(&fixture, "fixture", "", "JSON fixture path")
 	flag.StringVar(&dataset, "dataset", "large_ndjson", "dataset name")
 	flag.StringVar(&selectorName, "selector-name", "eq_status_open", "selector name")
@@ -130,6 +131,7 @@ func main() {
 	flag.StringVar(&mode, "mode", "decision_only_selector", "benchmark mode")
 	flag.StringVar(&submode, "submode", "steady_state", "benchmark submode")
 	flag.StringVar(&projectionPath, "projection-path", "/id", "JSON Pointer projection path")
+	flag.Int64Var(&maxRecords, "max-records", 0, "maximum records/candidates to scan")
 	flag.Parse()
 
 	if fixture == "" {
@@ -179,7 +181,7 @@ func main() {
 		bytesPerIter += int64(len(bytes.Repeat([]byte{0x00, 0x01, 0x02, 0x03}, 2048)))
 	}
 	if submode == "steady_state" {
-		if _, _, _, err := runBenchmark(file, sel, selectorName, expr, mode, projectionPath); err != nil {
+		if _, _, _, err := runBenchmark(file, sel, selectorName, expr, mode, projectionPath, maxRecords); err != nil {
 			fmt.Fprintf(os.Stderr, "lqlbench: warmup stream: %v\n", err)
 			os.Exit(1)
 		}
@@ -190,7 +192,7 @@ func main() {
 	var nsPerOp int64
 	for sample := 0; sample < benchSampleCount(submode); sample++ {
 		start := time.Now()
-		sampleResult, samplePayloads, samplePayloadBytes, err := runBenchmark(file, sel, selectorName, expr, mode, projectionPath)
+		sampleResult, samplePayloads, samplePayloadBytes, err := runBenchmark(file, sel, selectorName, expr, mode, projectionPath, maxRecords)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "lqlbench: stream: %v\n", err)
 			os.Exit(1)
@@ -246,7 +248,7 @@ func benchSampleCount(submode string) int {
 	return value
 }
 
-func runBenchmark(file *os.File, sel lql.Selector, selectorName string, expr string, mode string, projectionPath string) (lql.QueryStreamResult, int64, int64, error) {
+func runBenchmark(file *os.File, sel lql.Selector, selectorName string, expr string, mode string, projectionPath string, maxRecords int64) (lql.QueryStreamResult, int64, int64, error) {
 	if isProjectMutationMode(mode) {
 		return runProjectMutation(file, sel, selectorName, expr, projectionPath)
 	}
@@ -256,7 +258,7 @@ func runBenchmark(file *os.File, sel lql.Selector, selectorName string, expr str
 	if isProjectionMode(mode) {
 		return runProjection(file, sel, mode, projectionPath)
 	}
-	return runQuery(file, sel, expr, mode)
+	return runQuery(file, sel, expr, mode, maxRecords)
 }
 
 func peakRSSBytes() *int64 {
@@ -487,7 +489,7 @@ func runProjection(file *os.File, sel lql.Selector, mode string, projectionPath 
 	return result, payloads, payloadBytes, err
 }
 
-func runQuery(file *os.File, sel lql.Selector, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
+func runQuery(file *os.File, sel lql.Selector, expr string, mode string, maxRecords int64) (lql.QueryStreamResult, int64, int64, error) {
 	if _, err := file.Seek(0, 0); err != nil {
 		return lql.QueryStreamResult{}, 0, 0, err
 	}
@@ -501,9 +503,10 @@ func runQuery(file *os.File, sel lql.Selector, expr string, mode string) (lql.Qu
 	payloads := int64(0)
 	payloadBytes := int64(0)
 	request := lql.QueryStreamRequest{
-		Ctx:      context.Background(),
-		Reader:   file,
-		Selector: sel,
+		Ctx:           context.Background(),
+		Reader:        file,
+		Selector:      sel,
+		MaxCandidates: maxRecords,
 	}
 	if isSourceMode(mode) {
 		request.Reader = readerOnly{reader: file}

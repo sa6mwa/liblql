@@ -1722,7 +1722,6 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
 
 static int lql_flat_eq_eligible(const lql_stream_request *request) {
   if (request == NULL || request->selector == NULL ||
-      request->limits.max_records != 0u ||
       (request->output_mode != LQL_STREAM_OUTPUT_DECISION_ONLY &&
        request->output_mode != LQL_STREAM_OUTPUT_SELECTED_RECORD &&
        request->output_mode != LQL_STREAM_OUTPUT_PROJECTION &&
@@ -1880,6 +1879,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   scan_request.capture_keys = program.capture_keys;
   scan_request.capture_key_count = program.capture_key_count;
   scan_request.capture_spans = program.capture_spans;
+  scan_request.max_records = request->limits.max_records;
   scan_request.record = lql_flat_eq_record;
   scan_request.record_user = &state;
   status =
@@ -1887,6 +1887,12 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   result->bytes_consumed = bytes_read;
   if (capture) {
     lql_json_spool_cleanup(&spool);
+  }
+  if (status == LQL_STATUS_STOP && !result->stopped_early &&
+      request->limits.max_records != 0u &&
+      result->records_seen >= request->limits.max_records) {
+    result->stopped_early = 1;
+    result->stop_reason = LQL_STREAM_STOP_RECORD_LIMIT;
   }
   if (status == LQL_STATUS_STOP) {
     return LQL_STATUS_OK;

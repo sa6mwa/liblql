@@ -1850,6 +1850,10 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
       status = LQL_STATUS_OK;
       break;
     }
+    if (request->max_records != 0u && records >= request->max_records) {
+      status = LQL_STATUS_STOP;
+      break;
+    }
     if (value == '[') {
       lql_json_error(&scan, "root JSON arrays are not valid NDJSON records");
       status = LQL_STATUS_JSON_ERROR;

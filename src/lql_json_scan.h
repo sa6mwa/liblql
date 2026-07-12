@@ -100,6 +100,7 @@ typedef struct lql_json_flat_eq_request {
   const lql_json_capture_key *capture_keys;
   size_t capture_key_count;
   lql_json_capture_span *capture_spans;
+  size_t max_records;
   lql_json_flat_eq_record_fn record;
   void *record_user;
 } lql_json_flat_eq_request;
