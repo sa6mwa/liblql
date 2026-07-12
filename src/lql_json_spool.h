@@ -30,10 +30,12 @@ lql_status lql_json_spool_write_slice(const lql_json_spool *spool,
                                       size_t offset, size_t len,
                                       lql_stream_writer_fn writer,
                                       void *writer_user, lql_error *error);
+lql_status lql_json_spool_byte_at(const lql_json_spool *spool, size_t offset,
+                                  unsigned char *out, lql_error *error);
 void lql_json_spool_reader_init(lql_json_spool_reader *reader,
                                 const lql_json_spool *spool);
 lql_status lql_json_spool_read(void *user, unsigned char *buffer,
-                                size_t capacity, size_t *out_len,
-                                lql_error *error);
+                               size_t capacity, size_t *out_len,
+                               lql_error *error);
 
 #endif

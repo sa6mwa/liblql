@@ -529,8 +529,8 @@ static int run_selected_record_output(lql *ctx) {
       "\"id\":\"x\",\"status\":\"open\",\"unused\":true}\n";
   static const char nested_output[] =
       "{\"id\":\"x\",\"meta\":{\"trace\":10,\"type\":\"log\"}}\n";
-  static const char *const nested_paths[] = {
-      "/meta/type", "/id", "/meta/trace"};
+  static const char *const nested_paths[] = {"/meta/type", "/id",
+                                             "/meta/trace"};
   lql_selector *selector;
   lql_projection *projection;
   lql_stream_request request;
@@ -605,7 +605,7 @@ static int run_selected_record_output(lql *ctx) {
   reader.chunk_size = 1u;
   memset(&writer, 0, sizeof(writer));
   if (ctx->projection_parse(ctx, quote_paths, 1u, &projection, &error) !=
-          LQL_STATUS_OK) {
+      LQL_STATUS_OK) {
     ctx->selector_destroy(ctx, selector);
     return 2;
   }
@@ -627,7 +627,7 @@ static int run_selected_record_output(lql *ctx) {
   reader.chunk_size = 2u;
   memset(&writer, 0, sizeof(writer));
   if (ctx->projection_parse(ctx, nested_paths, 3u, &projection, &error) !=
-          LQL_STATUS_OK) {
+      LQL_STATUS_OK) {
     ctx->selector_destroy(ctx, selector);
     return 4;
   }
@@ -853,6 +853,9 @@ static int run_mutation_output(lql *ctx) {
   static const char *const direct_set[] = {"/bench/touched=true"};
   static const char direct_set_output[] =
       "{\"status\":\"open\",\"n\":1,\"bench\":{\"touched\":true}}\n";
+  static const char *const top_set[] = {"/processed=true"};
+  static const char top_set_output[] =
+      "{\"status\":\"open\",\"n\":1,\"processed\":true}\n";
   static const char *const ordered[] = {"/status=ready", "rm:/n",
                                         "/meta/a~1b=true"};
   static const char ordered_output[] =
@@ -916,6 +919,27 @@ static int run_mutation_output(lql *ctx) {
       result.records_seen != 2u || result.records_matched != 1u ||
       writer.len != sizeof(increment_all_output) - 1u ||
       memcmp(writer.data, increment_all_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, top_set, 1u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  reader.offset = 0u;
+  memset(&writer, 0, sizeof(writer));
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(top_set_output) - 1u ||
+      memcmp(writer.data, top_set_output, writer.len) != 0) {
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
     return 1;

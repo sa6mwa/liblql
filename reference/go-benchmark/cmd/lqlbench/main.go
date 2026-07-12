@@ -89,6 +89,8 @@ func benchmarkMutationsForSelector(selectorName string, expr string) []string {
 		return []string{"/meta/bench=true"}
 	case "realworld_multi_clause_and":
 		return []string{"/component=lql", "/event=session_sync", "/code=+1", "rm:/payload", "/meta/bench=true"}
+	case "eq_status_open_top_set":
+		return []string{"/processed=true"}
 	}
 	if strings.Contains(expr, "/voucher/lines/10/") {
 		return []string{"/voucher/lines/10/bench=true"}
