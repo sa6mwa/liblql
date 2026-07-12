@@ -3,7 +3,7 @@ set -eu
 
 . scripts/scanner_parity_common.sh
 
-scanner_parity_init 'scanner parity smoke' build/scanner-parity-smoke.jsonl 3
+scanner_parity_init 'scanner parity smoke' build/scanner-parity-smoke.jsonl 5
 
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' decision_only_selector /id

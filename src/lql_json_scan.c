@@ -173,8 +173,8 @@ static void lql_json_number_range_start(lql_json_scan *scan,
   scan->number_match_len = 0u;
 }
 
-static void lql_json_number_range_byte(lql_json_scan *scan,
-                                       unsigned char value) {
+LQL_JSON_INLINE void lql_json_number_range_byte(lql_json_scan *scan,
+                                                unsigned char value) {
   if (scan->number_range_active == 0ul) {
     return;
   }
@@ -192,8 +192,8 @@ static void lql_json_temporal_range_start(lql_json_scan *scan,
   scan->temporal_match_len = 0u;
 }
 
-static void lql_json_temporal_range_byte(lql_json_scan *scan,
-                                         unsigned char value) {
+LQL_JSON_INLINE void lql_json_temporal_range_byte(lql_json_scan *scan,
+                                                  unsigned char value) {
   if (scan->temporal_range_active == 0ul) {
     return;
   }
@@ -1359,7 +1359,8 @@ LQL_JSON_INLINE lql_status lql_json_copy_byte(lql_json_scan *scan, int value) {
   return lql_json_write_byte(scan, (unsigned char)value);
 }
 
-static lql_status lql_json_match_copy_byte(lql_json_scan *scan, int value) {
+LQL_JSON_INLINE lql_status lql_json_match_copy_byte(lql_json_scan *scan,
+                                                    int value) {
   if ((scan->match_active & ~scan->match_failed) != 0ul ||
       (scan->capture_active & ~scan->capture_failed) != 0ul ||
       (scan->temporal_range_active & ~scan->temporal_range_failed) != 0ul) {
