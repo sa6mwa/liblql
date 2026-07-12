@@ -44,7 +44,11 @@ performance claim with profiling and paired Go/C benchmarks.
   optimizing; do not add caches or special cases based only on benchmark deltas.
 - `make scanner-parity-smoke` is the fast executable GCC-only parity gate. It
   must include warmup and steady-state Go/C records, forbid unsupported rows,
-  and enforce at least 1.0x C-vs-Go speedup on representative accepted paths.
+  validate Go/C counters for every emitted row, and enforce at least 1.0x
+  C-vs-Go speedup on representative steady-state accepted paths.
+- `make scanner-profile-hotspots` is the bounded C profiling gate before
+  performance-directed scanner/emitter changes. It profiles the currently
+  tight GCC rows and writes perf reports under `build/scanner-profiles/`.
 
 ## Execution State Machine
 

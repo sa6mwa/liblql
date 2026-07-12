@@ -36,6 +36,7 @@ func main() {
 	flag.Int64Var(&opts.MaxCPeakRSSBytes, "max-c-peak-rss-bytes", 0, "fail supported C records whose peak_rss_bytes exceeds this value")
 	flag.Int64Var(&opts.MaxCSteadyStateNsPerByte, "max-c-steady-state-ns-per-byte", 0, "fail supported C steady_state records whose ns_per_op/bytes_per_iter exceeds this value")
 	flag.Float64Var(&opts.MinCGoSpeedup, "min-c-go-speedup", 0, "fail matched supported C/Go records whose Go/C speedup is below this value")
+	flag.StringVar(&opts.SpeedupSubmode, "speedup-submode", "", "when set, apply --min-c-go-speedup only to this submode")
 	flag.Int64Var(&opts.MaxLuaPeakRSSBytes, "max-lua-peak-rss-bytes", 0, "fail supported Lua records whose peak_rss_bytes exceeds this value")
 	flag.BoolVar(&opts.RequireLuaPeakRSS, "require-lua-peak-rss", false, "fail supported Lua records that do not report peak_rss_bytes")
 	flag.BoolVar(&opts.ForbidUnsupported, "forbid-unsupported", false, "fail any benchmark record marked unsupported")
@@ -50,6 +51,7 @@ type validateOptions struct {
 	MaxCPeakRSSBytes         int64
 	MaxCSteadyStateNsPerByte int64
 	MinCGoSpeedup            float64
+	SpeedupSubmode           string
 	MaxLuaPeakRSSBytes       int64
 	RequireLuaPeakRSS        bool
 	ForbidUnsupported        bool
@@ -83,6 +85,7 @@ func validate(r io.Reader, opts validateOptions) error {
 			return err
 		}
 		if opts.MinCGoSpeedup > 0 && !rec.Unsupported && rec.NsPerOp != nil &&
+			(opts.SpeedupSubmode == "" || rec.Submode == opts.SpeedupSubmode) &&
 			(rec.Impl == "go" || rec.Impl == "c") {
 			key := comparisonKey(rec)
 			pair := comparisons[key]

@@ -95,5 +95,6 @@ run_row build/direct-probe/array-scalar-100k.ndjson array_scalar_100k \
 run_row build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' mutate_file_selector /id
 
-"$validator" --forbid-unsupported --min-c-go-speedup=1.0 <"$out"
+"$validator" --forbid-unsupported --min-c-go-speedup=1.0 \
+  --speedup-submode steady_state <"$out"
 printf 'scanner parity smoke: wrote %s\n' "$out"

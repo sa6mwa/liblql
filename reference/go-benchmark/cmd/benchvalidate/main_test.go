@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -56,5 +57,49 @@ func TestValidateComparisonRejectsFixtureMismatch(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "fixture_sha256 differs") {
 		t.Fatalf("validateComparison() error = %v, want fixture mismatch", err)
+	}
+}
+
+func benchmarkRecordLine(t *testing.T, rec record) string {
+	t.Helper()
+	data, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	return string(data)
+}
+
+func completeComparisonRecord(impl string, submode string, ns int64) record {
+	rec := comparisonTestRecord()
+	rss := int64(1)
+	rec.Impl = impl
+	rec.Submode = submode
+	rec.PayloadSourceType = "none"
+	rec.NsPerOp = &ns
+	rec.PeakRSSBytes = &rss
+	rec.AllocsPerOp = nil
+	rec.Unsupported = false
+	rec.UnsupportedReason = ""
+	return rec
+}
+
+func TestValidateSpeedupSubmodeIgnoresWarmupSpeed(t *testing.T) {
+	goWarmup := completeComparisonRecord("go", "warmup_included", 10)
+	cWarmup := completeComparisonRecord("c", "warmup_included", 20)
+	goSteady := completeComparisonRecord("go", "steady_state", 20)
+	cSteady := completeComparisonRecord("c", "steady_state", 10)
+	input := strings.Join([]string{
+		benchmarkRecordLine(t, goWarmup),
+		benchmarkRecordLine(t, cWarmup),
+		benchmarkRecordLine(t, goSteady),
+		benchmarkRecordLine(t, cSteady),
+	}, "\n") + "\n"
+	err := validate(strings.NewReader(input), validateOptions{
+		MinCGoSpeedup:     1.0,
+		SpeedupSubmode:    "steady_state",
+		ForbidUnsupported: true,
+	})
+	if err != nil {
+		t.Fatalf("validate() error = %v", err)
 	}
 }
