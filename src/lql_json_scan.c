@@ -158,6 +158,34 @@ static unsigned long lql_json_capture_complete(const lql_json_scan *scan) {
   return matches;
 }
 
+static int lql_json_capture_array_index(const lql_json_scan *scan, size_t key,
+                                        size_t segment, size_t index) {
+  const char *text;
+  size_t i;
+  size_t value;
+  if (scan == NULL || key >= scan->capture_key_count ||
+      segment >= scan->capture_keys[key].segment_count) {
+    return 0;
+  }
+  text = scan->capture_keys[key].segments[segment];
+  if (text == NULL || text[0] == '\0') {
+    return 0;
+  }
+  value = 0u;
+  for (i = 0u; text[i] != '\0'; ++i) {
+    size_t digit;
+    if (text[i] < '0' || text[i] > '9') {
+      return 0;
+    }
+    digit = (size_t)(text[i] - '0');
+    if (value > ((size_t)-1 - digit) / 10u) {
+      return 0;
+    }
+    value = value * 10u + digit;
+  }
+  return value == index;
+}
+
 static size_t lql_json_output_offset(const lql_json_scan *scan) {
   if (scan->writer_user == NULL)
     return 0u;
@@ -1192,8 +1220,12 @@ static lql_status lql_json_object(lql_json_scan *scan) {
 static lql_status lql_json_array(lql_json_scan *scan) {
   int value;
   unsigned long active;
+  unsigned long capture_active;
+  unsigned long capture_descendants;
+  unsigned long capture_values;
   unsigned long element_active;
   unsigned long recursive_terms;
+  size_t capture_start;
   size_t array_segment;
   size_t index;
   lql_status status;
@@ -1203,11 +1235,13 @@ static lql_status lql_json_array(lql_json_scan *scan) {
   }
   array_segment = scan->depth;
   active = scan->path_active[array_segment];
+  capture_active = scan->capture_path_active[array_segment];
   recursive_terms =
       lql_json_match_recursive_terms(scan, active, array_segment) |
       scan->recursive_active[array_segment];
   if (scan->depth + 1u < LQL_JSON_MAX_DEPTH) {
     scan->path_active[scan->depth + 1u] = 0ul;
+    scan->capture_path_active[scan->depth + 1u] = 0ul;
   }
   ++scan->depth;
   status = lql_json_take_expected(scan, '[');
@@ -1225,13 +1259,41 @@ static lql_status lql_json_array(lql_json_scan *scan) {
   }
   index = 0u;
   for (;;) {
+    size_t i;
     element_active =
         lql_json_match_array_index(scan, active, array_segment, index);
     scan->path_active[scan->depth] = element_active;
     scan->recursive_active[scan->depth] = recursive_terms;
+    capture_values = 0ul;
+    capture_descendants = 0ul;
+    for (i = 0u; i < scan->capture_key_count; ++i) {
+      unsigned long bit;
+      bit = 1ul << i;
+      if ((capture_active & bit) == 0ul ||
+          !lql_json_capture_array_index(scan, i, array_segment, index))
+        continue;
+      if (scan->capture_keys[i].segment_count == array_segment + 1u)
+        capture_values |= bit;
+      else
+        capture_descendants |= bit;
+    }
+    capture_start = capture_values == 0ul ? 0u : lql_json_output_offset(scan);
+    scan->capture_path_active[scan->depth] = capture_descendants;
     status = lql_json_value(scan);
+    if (capture_values != 0ul && status == LQL_STATUS_OK) {
+      size_t capture_end;
+      capture_end = lql_json_output_offset(scan);
+      for (i = 0u; i < scan->capture_key_count; ++i) {
+        if ((capture_values & (1ul << i)) != 0ul) {
+          scan->capture_spans[i].offset = capture_start;
+          scan->capture_spans[i].len = capture_end - capture_start;
+          scan->capture_spans[i].found = 1;
+        }
+      }
+    }
     scan->path_active[scan->depth] = 0ul;
     scan->recursive_active[scan->depth] = 0ul;
+    scan->capture_path_active[scan->depth] = 0ul;
     if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
         (status = lql_json_take(scan, &value)) != LQL_STATUS_OK) {

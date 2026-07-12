@@ -82,7 +82,8 @@ static lql_status json_flat_record(void *user, size_t record_index,
     if (lql_json_spool_write_slice(spool, result->capture_spans[0].offset,
                                    result->capture_spans[0].len,
                                    json_test_write, result->capture_writer,
-                                   error) != LQL_STATUS_OK) return LQL_STATUS_CALLBACK_ERROR;
+                                   error) != LQL_STATUS_OK)
+      return LQL_STATUS_CALLBACK_ERROR;
     ++result->captures;
   }
   if (hits == 0ul) {
@@ -158,6 +159,9 @@ int main(void) {
   static const lql_json_flat_eq_term indexed_flat_terms[] = {
       {LQL_JSON_FLAT_TERM_EQ, "items", 5u, "B", 1u, "/items/1/sku", 12u, 3u,
        2ul}};
+  static const char *const indexed_capture_segments[] = {"items", "1", "sku"};
+  static const lql_json_capture_key indexed_capture_keys[] = {
+      {indexed_capture_segments, 3u}};
   static const char array_wildcard_input[] =
       "{\"array\":[{\"state\":\"closed\"},{\"state\":\"open\"}]}\n"
       "{\"array\":[{\"state\":\"closed\"}]}\n"
@@ -173,13 +177,12 @@ int main(void) {
       {LQL_JSON_FLAT_TERM_EQ, "tree", 4u, "needle", 6u, "/tree/.../sku", 13u,
        3u, 0ul, 0ul, 0ul, 0ul, 2ul}};
   static size_t contains_failure[] = {0u, 0u, 1u};
-  static const char contains_flat_input[] =
-      "{\"msg\":\"xxababa\"}\n"
-      "{\"msg\":\"xxabb\"}\n"
-      "{\"msg\":\"xxa\\u0062a\"}\n";
+  static const char contains_flat_input[] = "{\"msg\":\"xxababa\"}\n"
+                                            "{\"msg\":\"xxabb\"}\n"
+                                            "{\"msg\":\"xxa\\u0062a\"}\n";
   static const lql_json_flat_eq_term contains_flat_terms[] = {
-      {LQL_JSON_FLAT_TERM_CONTAINS, "msg", 3u, "aba", 3u, NULL, 0u, 0u,
-       0ul, 0ul, 0ul, 0ul, 0ul, contains_failure}};
+      {LQL_JSON_FLAT_TERM_CONTAINS, "msg", 3u, "aba", 3u, NULL, 0u, 0u, 0ul,
+       0ul, 0ul, 0ul, 0ul, contains_failure}};
   lql_json_flat_eq_request flat_request;
   lql_json_spool flat_spool;
   lql_json_spool_reader spool_reader;
@@ -350,11 +353,14 @@ int main(void) {
   lql_json_spool_cleanup(&flat_spool);
   memset(&flat_reader, 0, sizeof(flat_reader));
   memset(&flat_writer, 0, sizeof(flat_writer));
+  memset(&capture_writer, 0, sizeof(capture_writer));
   memset(&flat_result, 0, sizeof(flat_result));
   flat_reader.data = (const unsigned char *)indexed_flat_input;
   flat_reader.len = sizeof(indexed_flat_input) - 1u;
   flat_reader.chunk_size = 1u;
   flat_result.writer = &flat_writer;
+  flat_result.capture_writer = &capture_writer;
+  flat_result.capture_spans = capture_spans;
   memset(&flat_request, 0, sizeof(flat_request));
   flat_request.reader = json_test_read;
   flat_request.reader_user = &flat_reader;
@@ -363,6 +369,9 @@ int main(void) {
       sizeof(indexed_flat_terms) / sizeof(indexed_flat_terms[0]);
   flat_request.spool = &flat_spool;
   flat_request.capture = 1;
+  flat_request.capture_keys = indexed_capture_keys;
+  flat_request.capture_key_count = 1u;
+  flat_request.capture_spans = capture_spans;
   flat_request.record = json_flat_record;
   flat_request.record_user = &flat_result;
   lql_error_init(&flat_error);
@@ -380,6 +389,11 @@ int main(void) {
              flat_writer.len) != 0) {
     lql_json_spool_cleanup(&flat_spool);
     return 16;
+  }
+  if (flat_result.captures != 1u || capture_writer.len != 3u ||
+      memcmp(capture_writer.data, "\"B\"", 3u) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 31;
   }
   lql_json_spool_cleanup(&flat_spool);
   memset(&flat_reader, 0, sizeof(flat_reader));
@@ -518,7 +532,8 @@ int main(void) {
   if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
     return 25;
   }
-  for (spool_index = 0u; spool_index <= LQL_JSON_SPOOL_MEMORY_BYTES / sizeof(spool_fill);
+  for (spool_index = 0u;
+       spool_index <= LQL_JSON_SPOOL_MEMORY_BYTES / sizeof(spool_fill);
        ++spool_index) {
     if (lql_json_spool_append(&flat_spool, spool_fill, sizeof(spool_fill),
                               &flat_error) != LQL_STATUS_OK) {

@@ -497,6 +497,41 @@ lql_flat_eq_projection_group_found(const lql_flat_eq_program *program,
   return 0;
 }
 
+static int lql_flat_eq_projection_segment_index(const char *segment,
+                                                size_t *out) {
+  size_t i;
+  size_t value;
+  if (segment == NULL || segment[0] == '\0' || out == NULL)
+    return 0;
+  value = 0u;
+  for (i = 0u; segment[i] != '\0'; ++i) {
+    size_t digit;
+    if (segment[i] < '0' || segment[i] > '9')
+      return 0;
+    digit = (size_t)(segment[i] - '0');
+    if (value > ((size_t)-1 - digit) / 10u)
+      return 0;
+    value = value * 10u + digit;
+  }
+  *out = value;
+  return 1;
+}
+
+static int
+lql_flat_eq_projection_child_array(const lql_flat_eq_program *program,
+                                   size_t anchor, size_t depth) {
+  size_t i;
+  size_t index;
+  for (i = 0u; i < program->capture_key_count; ++i) {
+    if (program->capture_spans[i].found &&
+        program->capture_keys[i].segment_count > depth &&
+        lql_flat_eq_projection_prefix(program, anchor, i, depth))
+      return lql_flat_eq_projection_segment_index(
+          program->capture_keys[i].segments[depth], &index);
+  }
+  return 0;
+}
+
 static lql_status lql_flat_eq_projection_key(lql_flat_eq_state *state,
                                              const char *key,
                                              lql_error *error) {
@@ -531,6 +566,11 @@ static lql_status lql_flat_eq_projection_key(lql_flat_eq_state *state,
   }
   return lql_flat_eq_write(state, "\":", 2u, error);
 }
+
+static lql_status lql_flat_eq_projection_node(lql_flat_eq_state *state,
+                                              const lql_json_spool *spool,
+                                              size_t anchor, size_t depth,
+                                              lql_error *error);
 
 static lql_status lql_flat_eq_projection_object(lql_flat_eq_state *state,
                                                 const lql_json_spool *spool,
@@ -580,8 +620,8 @@ static lql_status lql_flat_eq_projection_object(lql_flat_eq_state *state,
           state->program->capture_spans[selected].len, state->request->writer,
           state->request->writer_user, error);
     } else {
-      status = lql_flat_eq_projection_object(state, spool, selected, depth + 1u,
-                                             error);
+      status = lql_flat_eq_projection_node(state, spool, selected, depth + 1u,
+                                           error);
     }
     if (status != LQL_STATUS_OK)
       return status;
@@ -590,6 +630,83 @@ static lql_status lql_flat_eq_projection_object(lql_flat_eq_state *state,
     have_previous = 1;
   }
   return lql_flat_eq_write(state, "}", 1u, error);
+}
+
+static lql_status lql_flat_eq_projection_array(lql_flat_eq_state *state,
+                                               const lql_json_spool *spool,
+                                               size_t anchor, size_t depth,
+                                               lql_error *error) {
+  size_t i;
+  size_t next_index;
+  size_t selected;
+  int first;
+  lql_status status;
+  status = lql_flat_eq_write(state, "[", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  first = 1;
+  next_index = 0u;
+  for (;;) {
+    size_t selected_index;
+    selected = state->program->capture_key_count;
+    selected_index = 0u;
+    for (i = 0u; i < state->program->capture_key_count; ++i) {
+      const lql_json_capture_key *candidate;
+      size_t candidate_index;
+      candidate = &state->program->capture_keys[i];
+      if (candidate->segment_count <= depth ||
+          !lql_flat_eq_projection_prefix(state->program, anchor, i, depth) ||
+          !lql_flat_eq_projection_group_found(state->program, anchor, depth,
+                                              i) ||
+          !lql_flat_eq_projection_segment_index(candidate->segments[depth],
+                                                &candidate_index) ||
+          candidate_index < next_index)
+        continue;
+      if (selected == state->program->capture_key_count ||
+          candidate_index < selected_index) {
+        selected = i;
+        selected_index = candidate_index;
+      }
+    }
+    if (selected == state->program->capture_key_count)
+      break;
+    while (next_index < selected_index) {
+      if (!first &&
+          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+        return status;
+      status = lql_flat_eq_write(state, "null", 4u, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      first = 0;
+      ++next_index;
+    }
+    if (!first &&
+        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+      return status;
+    if (state->program->capture_keys[selected].segment_count == depth + 1u) {
+      status = lql_json_spool_write_slice(
+          spool, state->program->capture_spans[selected].offset,
+          state->program->capture_spans[selected].len, state->request->writer,
+          state->request->writer_user, error);
+    } else {
+      status = lql_flat_eq_projection_node(state, spool, selected, depth + 1u,
+                                           error);
+    }
+    if (status != LQL_STATUS_OK)
+      return status;
+    first = 0;
+    next_index = selected_index + 1u;
+  }
+  return lql_flat_eq_write(state, "]", 1u, error);
+}
+
+static lql_status lql_flat_eq_projection_node(lql_flat_eq_state *state,
+                                              const lql_json_spool *spool,
+                                              size_t anchor, size_t depth,
+                                              lql_error *error) {
+  if (lql_flat_eq_projection_child_array(state->program, anchor, depth))
+    return lql_flat_eq_projection_array(state, spool, anchor, depth, error);
+  return lql_flat_eq_projection_object(state, spool, anchor, depth, error);
 }
 
 static lql_status lql_flat_eq_projection_emit(lql_flat_eq_state *state,
@@ -608,6 +725,43 @@ static lql_status lql_flat_eq_projection_emit(lql_flat_eq_state *state,
   if (status != LQL_STATUS_OK)
     return status;
   return lql_flat_eq_write(state, "\n", 1u, error);
+}
+
+static int
+lql_flat_eq_projection_paths_compatible(const lql_projection *projection) {
+  size_t i;
+  size_t j;
+  if (projection == NULL)
+    return 0;
+  for (i = 0u; i < projection->path_count; ++i) {
+    const lql_projection_path *left;
+    left = &projection->compiled_paths[i];
+    for (j = i + 1u; j < projection->path_count; ++j) {
+      const lql_projection_path *right;
+      size_t depth;
+      right = &projection->compiled_paths[j];
+      depth = 0u;
+      while (depth < left->segment_count && depth < right->segment_count &&
+             strcmp(left->segments[depth], right->segments[depth]) == 0)
+        ++depth;
+      if (depth < left->segment_count && depth < right->segment_count) {
+        size_t left_index;
+        size_t right_index;
+        int left_array;
+        int right_array;
+        left_array = lql_flat_eq_projection_segment_index(left->segments[depth],
+                                                          &left_index);
+        right_array = lql_flat_eq_projection_segment_index(
+            right->segments[depth], &right_index);
+        if (left_array != right_array)
+          return 0;
+        if (left_array && left_index == right_index &&
+            strcmp(left->segments[depth], right->segments[depth]) != 0)
+          return 0;
+      }
+    }
+  }
+  return 1;
 }
 
 static lql_status lql_flat_eq_record(void *user, size_t record_index,
@@ -687,6 +841,11 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
   }
   if (state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION &&
       (matched || !state->request->matched_only)) {
+    if (!root_is_object) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "projection input must be a JSON object");
+      return LQL_STATUS_JSON_ERROR;
+    }
     status = lql_flat_eq_projection_emit(state, spool, error);
     if (status != LQL_STATUS_OK)
       return status;
@@ -716,26 +875,13 @@ static int lql_flat_eq_projection_append(lql_flat_eq_program *program,
                                          const lql_projection *projection) {
   size_t i;
   if (projection == NULL || projection->path_count == 0u ||
-      projection->path_count > LQL_FLAT_EQ_TERM_CAPACITY)
+      projection->path_count > LQL_FLAT_EQ_TERM_CAPACITY ||
+      !lql_flat_eq_projection_paths_compatible(projection))
     return 0;
   for (i = 0u; i < projection->path_count; ++i) {
     const lql_projection_path *path = &projection->compiled_paths[i];
-    size_t j;
     if (path->segment_count == 0u || path->segments[0] == NULL)
       return 0;
-    for (j = 0u; j < path->segment_count; ++j) {
-      const char *segment;
-      int numeric;
-      segment = path->segments[j];
-      numeric = segment[0] != '\0';
-      while (*segment != '\0') {
-        if (*segment < '0' || *segment > '9')
-          numeric = 0;
-        ++segment;
-      }
-      if (numeric)
-        return 0;
-    }
     program->capture_keys[i].segments = (const char *const *)path->segments;
     program->capture_keys[i].segment_count = path->segment_count;
   }
