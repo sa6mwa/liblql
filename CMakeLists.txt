@@ -35,6 +35,7 @@ add_library(lql_common OBJECT
   src/lql.c
   src/lql_allocator.c
   src/lql_direct_actions.c
+  src/lql_json_scan.c
   src/lql_projection.c
   src/lql_selector.c
   src/lql_stream.c
@@ -71,6 +72,11 @@ if(LQL_BUILD_SHARED)
 endif()
 
 if(BUILD_TESTING)
+  add_executable(lql_json_scan_test tests/json_scan_test.c)
+  target_include_directories(lql_json_scan_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(lql_json_scan_test PRIVATE lql_static)
+  add_test(NAME lql.json_scan COMMAND lql_json_scan_test)
   add_executable(lql_direct_stream_test tests/direct_stream_test.c)
   target_link_libraries(lql_direct_stream_test PRIVATE lql_static)
   add_test(NAME lql.direct_stream COMMAND lql_direct_stream_test)
