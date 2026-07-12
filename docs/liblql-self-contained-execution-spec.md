@@ -42,6 +42,9 @@ performance claim with profiling and paired Go/C benchmarks.
   file-backed spill.
 - GCC Go/C speedup is at least 1.0x on every accepted row. Profile before
   optimizing; do not add caches or special cases based only on benchmark deltas.
+- `make scanner-parity-smoke` is the fast executable GCC-only parity gate. It
+  must include warmup and steady-state Go/C records, forbid unsupported rows,
+  and enforce at least 1.0x C-vs-Go speedup on representative accepted paths.
 
 ## Execution State Machine
 
