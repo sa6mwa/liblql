@@ -1,4 +1,4 @@
-.PHONY: help build-debug build-release test valgrind asan test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help build-debug build-release test valgrind asan test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -12,6 +12,7 @@ help:
 	  'make direct-no-lonejson  verify liblql has no LoneJSON runtime dependency' \
 	  'make direct-probe  build the optimized direct-execution probe' \
 	  'make direct-bench  build the optimized direct benchmark runner' \
+	  'make direct-callback-whitespace  verify whitespace callback capture uses compact spool' \
 	  'make direct-live-heap  run Massif live-heap gate for direct execution' \
 	  'make scanner-parity-smoke  run GCC C-vs-Go scanner parity smoke' \
 	  'make scanner-parity-matrix  run broader GCC C-vs-Go scanner parity matrix' \
@@ -40,7 +41,7 @@ asan:
 valgrind: build-debug
 	@sh scripts/check_valgrind.sh
 
-test-all: direct-reset direct-no-lonejson test valgrind asan scanner-parity-matrix direct-live-heap
+test-all: direct-reset direct-no-lonejson test valgrind asan scanner-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
@@ -55,6 +56,9 @@ direct-probe:
 direct-bench:
 	@cmake --preset release-scanner
 	@cmake --build --preset release-scanner --target lql_direct_bench
+
+direct-callback-whitespace: direct-bench
+	@LQL_DIRECT_BENCH_PATH=build/release-scanner/lql_direct_bench sh scripts/check_direct_callback_whitespace.sh
 
 direct-live-heap: direct-bench
 	@LQL_DIRECT_BENCH_PATH=build/release-scanner/lql_direct_bench sh scripts/check_direct_live_heap.sh

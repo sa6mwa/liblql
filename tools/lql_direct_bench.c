@@ -20,6 +20,7 @@ typedef struct bench_writer {
   size_t bytes;
   size_t records;
   int copy_values;
+  int source_range_values;
 } bench_writer;
 
 typedef struct sha256_state {
@@ -334,6 +335,10 @@ static int mode_is_source(const char *mode) {
          strcmp(mode, "project_source_selector") == 0;
 }
 
+static int dataset_input_is_compact(const char *dataset) {
+  return dataset == NULL || strstr(dataset, "whitespace") == NULL;
+}
+
 static int mode_is_projection(const char *mode) {
   return strcmp(mode, "project_file_selector") == 0 ||
          strcmp(mode, "project_source_selector") == 0;
@@ -567,6 +572,7 @@ static const char *const *mutations_for(const char *selector_name,
 
 static int run_once(FILE *file, lql *ctx, lql_selector *selector,
                     const char *expr, int reparse, const char *mode,
+                    int input_is_compact,
                     lql_projection *projection, lql_mutation *mutation,
                     size_t max_records, size_t max_bytes,
                     lql_stream_result *result, bench_writer *writer,
@@ -588,13 +594,15 @@ static int run_once(FILE *file, lql *ctx, lql_selector *selector,
   memset(writer, 0, sizeof(*writer));
   writer->copy_values =
       !(mode_is_selected(mode) && !mode_is_source(mode));
+  writer->source_range_values =
+      mode_is_selected(mode) && !mode_is_source(mode) && input_is_compact;
   memset(&request, 0, sizeof(request));
   request.reader = bench_read;
   request.reader_user = &reader;
   if (mode_is_selected(mode) && !mode_is_source(mode)) {
     request.range_writer = bench_range_write;
     request.range_user = &reader;
-    request.input_is_compact = 1;
+    request.input_is_compact = input_is_compact;
   }
   request.selector = temporary != NULL ? temporary : selector;
   request.matched_only = 1;
@@ -782,8 +790,10 @@ int main(int argc, char **argv) {
   }
   reparse = strcmp(mode, "reparse_selector_each_run") == 0;
   if (!unsupported && strcmp(submode, "steady_state") == 0 &&
-      !run_once(file, ctx, selector, expr, reparse, mode, projection, mutation,
-                max_records, max_bytes, &result, &writer, &error)) {
+      !run_once(file, ctx, selector, expr, reparse, mode,
+                dataset_input_is_compact(dataset), projection, mutation,
+                max_records, max_bytes,
+                &result, &writer, &error)) {
     fprintf(stderr, "lql_direct_bench: warmup failed: %s\n", error.message);
     return 1;
   }
@@ -795,9 +805,10 @@ int main(int argc, char **argv) {
     lql_stream_result candidate_result;
     bench_writer candidate_writer;
     if (clock_gettime(CLOCK_MONOTONIC, &start) != 0 ||
-        !run_once(file, ctx, selector, expr, reparse, mode, projection,
-                  mutation, max_records, max_bytes, &candidate_result,
-                  &candidate_writer, &error) ||
+        !run_once(file, ctx, selector, expr, reparse, mode,
+                  dataset_input_is_compact(dataset), projection, mutation,
+                  max_records, max_bytes, &candidate_result, &candidate_writer,
+                  &error) ||
         clock_gettime(CLOCK_MONOTONIC, &end) != 0) {
       fprintf(stderr, "lql_direct_bench: stream failed: %s\n", error.message);
       return 1;
@@ -834,7 +845,7 @@ int main(int argc, char **argv) {
               ? benchmark_payload_bytes(mode, &writer)
               : 0ul);
   json_string(mode_is_selected(mode)
-                  ? (mode_is_source(mode) ? "spooled" : "seekable_range")
+                  ? (writer.source_range_values ? "seekable_range" : "spooled")
                   : ((mode_is_projection(mode) || mode_is_project_mutation(mode))
                          ? "projection"
                          : "none"));
