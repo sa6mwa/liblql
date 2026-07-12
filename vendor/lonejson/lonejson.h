@@ -14238,6 +14238,13 @@ lonejson_status lonejson_spooled_write_to_sink(const lonejson_spooled *value,
     return lonejson__set_error(error, LONEJSON_STATUS_INVALID_ARGUMENT, 0u, 0u,
                                0u, "spooled value and sink are required");
   }
+  if (value->spill_fp == NULL && value->memory_len == value->size) {
+    if (value->size == 0u) {
+      return LONEJSON_STATUS_OK;
+    }
+    status = sink(user, value->memory, value->size, error);
+    return status == LONEJSON_STATUS_TRUNCATED ? LONEJSON_STATUS_OK : status;
+  }
   cursor = *value;
   status = lonejson_spooled_rewind(&cursor, error);
   if (status != LONEJSON_STATUS_OK) {

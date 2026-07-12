@@ -52,6 +52,7 @@ int main(void) {
   lonejson *runtime;
   lonejson_value_event_tape tape;
   lonejson_value_rewriter rewriter;
+  lonejson_spooled spool;
   lonejson_value_rewrite_options options;
   lonejson_value_visitor tape_visitor;
   lonejson_value_visitor rewriter_visitor;
@@ -116,6 +117,18 @@ int main(void) {
   }
   lonejson_value_rewriter_cleanup(&rewriter);
   lonejson_value_event_tape_cleanup(&tape);
+  lonejson_spooled_init(runtime, &spool);
+  memset(&sink, 0, sizeof(sink));
+  if (lonejson_spooled_append(&spool, "direct", 6u, &error) !=
+          LONEJSON_STATUS_OK ||
+      lonejson_spooled_write_to_sink(&spool, tape_sink_write, &sink, &error) !=
+          LONEJSON_STATUS_OK ||
+      sink.len != 6u || memcmp(sink.data, "direct", sink.len) != 0) {
+    lonejson_spooled_cleanup(&spool);
+    lonejson_free(runtime);
+    return 1;
+  }
+  lonejson_spooled_cleanup(&spool);
   lonejson_free(runtime);
   return 0;
 }
