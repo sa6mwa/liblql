@@ -146,6 +146,15 @@ int main(void) {
       {LQL_JSON_FLAT_TERM_NUMBER_EQ, "code", 4u, "1", 1u},
       {LQL_JSON_FLAT_TERM_BOOL_EQ, "enabled", 7u, "true", 4u},
       {LQL_JSON_FLAT_TERM_NULL_EQ, "empty", 5u, "null", 4u}};
+  static const char range_flat_input[] =
+      "{\"code\":1}\n"
+      "{\"code\":2}\n"
+      "{\"code\":3.5}\n"
+      "{\"code\":4}\n"
+      "{\"code\":\"3\"}\n";
+  static const lql_json_flat_eq_term range_flat_terms[] = {
+      {LQL_JSON_FLAT_TERM_NUMBER_RANGE, "code", 4u, NULL, 0u, NULL, 0u, 0u,
+       0ul, 0ul, 0ul, 0ul, 0ul, 0.0, 2.0, 4.0, 0.0, 0, 1, 1, 0}};
   static const char nested_flat_input[] =
       "{\"me\\u0074a\":{\"sta\\u0074e\":\"open\"},\"ignored\":[1]}\n"
       "{\"meta\":{\"state\":\"closed\"}}\n"
@@ -182,7 +191,8 @@ int main(void) {
                                             "{\"msg\":\"xxa\\u0062a\"}\n";
   static const lql_json_flat_eq_term contains_flat_terms[] = {
       {LQL_JSON_FLAT_TERM_CONTAINS, "msg", 3u, "aba", 3u, NULL, 0u, 0u, 0ul,
-       0ul, 0ul, 0ul, 0ul, contains_failure}};
+       0ul, 0ul, 0ul, 0ul, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0,
+       contains_failure}};
   lql_json_flat_eq_request flat_request;
   lql_json_spool flat_spool;
   lql_json_spool_reader spool_reader;
@@ -277,6 +287,38 @@ int main(void) {
       memcmp(capture_writer.data, "\"op\\u0065n\"\"open\"", 17u) != 0) {
     lql_json_spool_cleanup(&flat_spool);
     return 30;
+  }
+  lql_json_spool_cleanup(&flat_spool);
+  memset(&flat_reader, 0, sizeof(flat_reader));
+  memset(&flat_writer, 0, sizeof(flat_writer));
+  memset(&flat_result, 0, sizeof(flat_result));
+  flat_reader.data = (const unsigned char *)range_flat_input;
+  flat_reader.len = sizeof(range_flat_input) - 1u;
+  flat_reader.chunk_size = 1u;
+  flat_result.writer = &flat_writer;
+  memset(&flat_request, 0, sizeof(flat_request));
+  flat_request.reader = json_test_read;
+  flat_request.reader_user = &flat_reader;
+  flat_request.terms = range_flat_terms;
+  flat_request.term_count =
+      sizeof(range_flat_terms) / sizeof(range_flat_terms[0]);
+  flat_request.spool = &flat_spool;
+  flat_request.capture = 1;
+  flat_request.record = json_flat_record;
+  flat_request.record_user = &flat_result;
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
+    return 32;
+  }
+  if (lql_json_scan_flat_eq_ndjson(&flat_request, &flat_records, &flat_bytes,
+                                   &flat_error) != LQL_STATUS_OK ||
+      flat_records != 5u || flat_bytes != flat_reader.len ||
+      flat_result.objects != 5u || flat_result.matches != 2u ||
+      flat_writer.len != strlen("{\"code\":2}\n{\"code\":3.5}\n") ||
+      memcmp(flat_writer.data, "{\"code\":2}\n{\"code\":3.5}\n",
+             flat_writer.len) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 33;
   }
   lql_json_spool_cleanup(&flat_spool);
   memset(&flat_reader, 0, sizeof(flat_reader));

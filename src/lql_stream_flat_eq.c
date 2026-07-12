@@ -339,6 +339,44 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
         path_array_wildcards, path_any_wildcards, path_recursive_segments,
         selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case);
   }
+  if (selector->kind == LQL_SELECTOR_KIND_RANGE) {
+    if (selector->field == NULL || selector->range_is_temporal ||
+        selector->has_temporal_gt || selector->has_temporal_gte ||
+        selector->has_temporal_lt || selector->has_temporal_lte ||
+        program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
+      return 0;
+    }
+    field = selector->field;
+    if (!lql_flat_eq_literal_object_path(
+            field, &path_len, &path_segment_count, &first_segment_len,
+            &path_array_segments, &path_object_wildcards, &path_array_wildcards,
+            &path_any_wildcards, &path_recursive_segments)) {
+      return 0;
+    }
+    term = &program->terms[program->term_count];
+    term->kind = LQL_JSON_FLAT_TERM_NUMBER_RANGE;
+    term->field = field + 1;
+    term->field_len = first_segment_len;
+    term->path = field;
+    term->path_len = path_len;
+    term->path_segment_count = path_segment_count;
+    term->path_array_segments = path_array_segments;
+    term->path_object_wildcards = path_object_wildcards;
+    term->path_array_wildcards = path_array_wildcards;
+    term->path_any_wildcards = path_any_wildcards;
+    term->path_recursive_segments = path_recursive_segments;
+    term->range_gt = selector->range_gt;
+    term->range_gte = selector->range_gte;
+    term->range_lt = selector->range_lt;
+    term->range_lte = selector->range_lte;
+    term->has_range_gt = selector->has_range_gt;
+    term->has_range_gte = selector->has_range_gte;
+    term->has_range_lt = selector->has_range_lt;
+    term->has_range_lte = selector->has_range_lte;
+    program->selectors[program->term_count] = selector;
+    ++program->term_count;
+    return 1;
+  }
   if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
        selector->kind != LQL_SELECTOR_KIND_EXISTS &&
        selector->kind != LQL_SELECTOR_KIND_PREFIX &&
