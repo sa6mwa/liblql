@@ -959,6 +959,14 @@ static lql_status lql_json_refill(lql_json_scan *scan) {
   return LQL_STATUS_OK;
 }
 
+static size_t lql_json_consumed(const lql_json_scan *scan) {
+  if (scan == NULL || scan->length < scan->offset ||
+      scan->bytes_read < scan->length - scan->offset) {
+    return 0u;
+  }
+  return scan->bytes_read - (scan->length - scan->offset);
+}
+
 static lql_status lql_json_peek(lql_json_scan *scan, int *out) {
   lql_status status;
   status = lql_json_refill(scan);
@@ -1895,12 +1903,17 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
     if (status != LQL_STATUS_OK) {
       break;
     }
+    if (request->max_bytes != 0u &&
+        lql_json_consumed(&scan) >= request->max_bytes) {
+      status = LQL_STATUS_STOP;
+      break;
+    }
   }
   if (out_records != NULL) {
     *out_records = records;
   }
   if (out_bytes_read != NULL) {
-    *out_bytes_read = scan.bytes_read;
+    *out_bytes_read = lql_json_consumed(&scan);
   }
   return status;
 }

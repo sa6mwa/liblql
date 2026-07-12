@@ -475,7 +475,7 @@ static const char *const *mutations_for(const char *selector_name,
 static int run_once(FILE *file, lql *ctx, lql_selector *selector,
                     const char *expr, int reparse, const char *mode,
                     lql_projection *projection, lql_mutation *mutation,
-                    size_t max_records,
+                    size_t max_records, size_t max_bytes,
                     lql_stream_result *result, bench_writer *writer,
                     lql_error *error) {
   bench_reader reader;
@@ -499,6 +499,7 @@ static int run_once(FILE *file, lql *ctx, lql_selector *selector,
   request.selector = temporary != NULL ? temporary : selector;
   request.matched_only = 1;
   request.limits.max_records = max_records;
+  request.limits.max_bytes = max_bytes;
   if (!mode_is_decision(mode)) {
     if (mode_is_mutation(mode)) {
       request.writer = bench_discard_write;
@@ -541,6 +542,10 @@ int main(int argc, char **argv) {
   char *max_records_end;
   unsigned long max_records_value;
   size_t max_records;
+  const char *max_bytes_text;
+  char *max_bytes_end;
+  unsigned long max_bytes_value;
+  size_t max_bytes;
   FILE *file;
   long fixture_bytes;
   char fixture_hash[65];
@@ -571,6 +576,7 @@ int main(int argc, char **argv) {
   submode = "steady_state";
   projection_path = "/id";
   max_records = 0u;
+  max_bytes = 0u;
   for (i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--fixture") == 0 && i + 1 < argc) {
       fixture = argv[++i];
@@ -597,11 +603,23 @@ int main(int argc, char **argv) {
         return 2;
       }
       max_records = (size_t)max_records_value;
+    } else if (strcmp(argv[i], "--max-bytes") == 0 && i + 1 < argc) {
+      max_bytes_text = argv[++i];
+      errno = 0;
+      max_bytes_value = strtoul(max_bytes_text, &max_bytes_end, 10);
+      if (errno != 0 || max_bytes_end == max_bytes_text ||
+          *max_bytes_end != '\0' ||
+          max_bytes_value > (unsigned long)((size_t)-1)) {
+        fprintf(stderr, "lql_direct_bench: invalid --max-bytes\n");
+        return 2;
+      }
+      max_bytes = (size_t)max_bytes_value;
     } else {
       fprintf(stderr,
               "usage: %s --fixture PATH [--dataset NAME] [--selector-name "
               "NAME] [--expr SELECTOR] [--mode MODE] [--submode MODE] "
-              "[--projection-path JSON_POINTER] [--max-records N]\n",
+              "[--projection-path JSON_POINTER] [--max-records N] "
+              "[--max-bytes N]\n",
               argv[0]);
       return 2;
     }
@@ -665,7 +683,7 @@ int main(int argc, char **argv) {
   reparse = strcmp(mode, "reparse_selector_each_run") == 0;
   if (!unsupported && strcmp(submode, "steady_state") == 0 &&
       !run_once(file, ctx, selector, expr, reparse, mode, projection, mutation,
-                max_records, &result, &writer, &error)) {
+                max_records, max_bytes, &result, &writer, &error)) {
     fprintf(stderr, "lql_direct_bench: warmup failed: %s\n", error.message);
     return 1;
   }
@@ -678,8 +696,8 @@ int main(int argc, char **argv) {
     bench_writer candidate_writer;
     if (clock_gettime(CLOCK_MONOTONIC, &start) != 0 ||
         !run_once(file, ctx, selector, expr, reparse, mode, projection,
-                  mutation, max_records, &candidate_result, &candidate_writer,
-                  &error) ||
+                  mutation, max_records, max_bytes, &candidate_result,
+                  &candidate_writer, &error) ||
         clock_gettime(CLOCK_MONOTONIC, &end) != 0) {
       fprintf(stderr, "lql_direct_bench: stream failed: %s\n", error.message);
       return 1;

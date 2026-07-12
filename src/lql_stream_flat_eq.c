@@ -1880,6 +1880,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   scan_request.capture_key_count = program.capture_key_count;
   scan_request.capture_spans = program.capture_spans;
   scan_request.max_records = request->limits.max_records;
+  scan_request.max_bytes = request->limits.max_bytes;
   scan_request.record = lql_flat_eq_record;
   scan_request.record_user = &state;
   status =
@@ -1893,6 +1894,12 @@ lql_status lql_stream_execute_flat_eq(lql *self,
       result->records_seen >= request->limits.max_records) {
     result->stopped_early = 1;
     result->stop_reason = LQL_STREAM_STOP_RECORD_LIMIT;
+  }
+  if (status == LQL_STATUS_STOP && !result->stopped_early &&
+      request->limits.max_bytes != 0u &&
+      result->bytes_consumed >= request->limits.max_bytes) {
+    result->stopped_early = 1;
+    result->stop_reason = LQL_STREAM_STOP_BYTE_LIMIT;
   }
   if (status == LQL_STATUS_STOP) {
     return LQL_STATUS_OK;

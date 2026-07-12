@@ -3200,15 +3200,16 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
                   "combined output requires projection and mutation handles");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  if (request->limits.max_bytes != 0u) {
-    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                  "direct stream probe does not yet support byte limits");
-    return LQL_STATUS_UNSUPPORTED;
-  }
   status = lql_stream_execute_flat_eq(self, request, result, error,
                                       &flat_eq_handled);
   if (flat_eq_handled) {
     return status;
+  }
+  if (request->limits.max_bytes != 0u) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "direct stream probe does not yet support byte limits for "
+                  "this selector");
+    return LQL_STATUS_UNSUPPORTED;
   }
   memset(&state, 0, sizeof(state));
   state.receiver = self;
