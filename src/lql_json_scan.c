@@ -29,10 +29,13 @@ typedef struct lql_json_scan {
   unsigned long match_active;
   unsigned long match_failed;
   size_t match_pos[LQL_JSON_FLAT_TERM_CAPACITY];
+  size_t match_term_segment[LQL_JSON_FLAT_TERM_CAPACITY];
+  size_t key_term_segment[LQL_JSON_FLAT_TERM_CAPACITY];
   int match_key;
   size_t match_path_segment;
   unsigned long flat_eq_hits;
   unsigned long path_active[LQL_JSON_MAX_DEPTH];
+  unsigned long recursive_active[LQL_JSON_MAX_DEPTH];
 } lql_json_scan;
 
 static void lql_json_error(lql_json_scan *scan, const char *message) {
@@ -99,6 +102,7 @@ static void lql_json_match_start(lql_json_scan *scan, unsigned long active,
   for (i = 0u; i < scan->flat_term_count; ++i) {
     if ((active & (1ul << i)) != 0ul) {
       scan->match_pos[i] = 0u;
+      scan->match_term_segment[i] = path_segment;
     }
   }
 }
@@ -179,6 +183,39 @@ static int lql_json_term_array_index(const lql_json_flat_eq_term *term,
   return 1;
 }
 
+static int lql_json_term_recursive_segment(const lql_json_flat_eq_term *term,
+                                           size_t *out) {
+  size_t i;
+  if (term == NULL || out == NULL || term->path_recursive_segments == 0ul) {
+    return 0;
+  }
+  for (i = 0u; i < sizeof(unsigned long) * CHAR_BIT; ++i) {
+    if ((term->path_recursive_segments & (1ul << i)) != 0ul) {
+      *out = i;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static void lql_json_match_start_key(lql_json_scan *scan,
+                                     unsigned long ordinary,
+                                     unsigned long recursive,
+                                     size_t path_segment) {
+  size_t i;
+  lql_json_match_start(scan, ordinary | recursive, 1, path_segment);
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    unsigned long bit;
+    size_t recursive_segment;
+    bit = 1ul << i;
+    if ((recursive & bit) != 0ul &&
+        lql_json_term_recursive_segment(&scan->flat_terms[i],
+                                        &recursive_segment)) {
+      scan->match_term_segment[i] = recursive_segment + 1u;
+    }
+  }
+}
+
 static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
   size_t i;
   if (scan->match_active == 0ul) {
@@ -196,10 +233,10 @@ static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
     }
     term = &scan->flat_terms[i];
     if (scan->match_key) {
-      if (scan->match_path_segment == 0u) {
+      if (scan->match_term_segment[i] == 0u) {
         target = term->field;
         target_len = term->field_len;
-      } else if (!lql_json_term_path_segment(term, scan->match_path_segment,
+      } else if (!lql_json_term_path_segment(term, scan->match_term_segment[i],
                                              &target, &target_len)) {
         scan->match_failed |= bit;
         continue;
@@ -237,9 +274,9 @@ static unsigned long lql_json_match_complete(const lql_json_scan *scan) {
     }
     term = &scan->flat_terms[i];
     if (scan->match_key) {
-      if (scan->match_path_segment == 0u) {
+      if (scan->match_term_segment[i] == 0u) {
         target_len = term->field_len;
-      } else if (!lql_json_term_path_segment(term, scan->match_path_segment,
+      } else if (!lql_json_term_path_segment(term, scan->match_term_segment[i],
                                              &target, &target_len)) {
         continue;
       }
@@ -259,8 +296,7 @@ static unsigned long lql_json_match_complete(const lql_json_scan *scan) {
 }
 
 static unsigned long lql_json_match_exists(const lql_json_scan *scan,
-                                           unsigned long keys,
-                                           size_t path_segment) {
+                                           unsigned long keys) {
   unsigned long hits;
   size_t i;
   hits = 0ul;
@@ -268,7 +304,8 @@ static unsigned long lql_json_match_exists(const lql_json_scan *scan,
     unsigned long bit;
     bit = 1ul << i;
     if ((keys & bit) != 0ul &&
-        lql_json_term_value_at(&scan->flat_terms[i], path_segment) &&
+        lql_json_term_value_at(&scan->flat_terms[i],
+                               scan->key_term_segment[i]) &&
         scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EXISTS) {
       hits |= bit;
     }
@@ -276,10 +313,9 @@ static unsigned long lql_json_match_exists(const lql_json_scan *scan,
   return hits;
 }
 
-static unsigned long lql_json_match_terms_for_kind(const lql_json_scan *scan,
-                                                   unsigned long keys,
-                                                   lql_json_flat_term_kind kind,
-                                                   size_t path_segment) {
+static unsigned long
+lql_json_match_terms_for_kind(const lql_json_scan *scan, unsigned long keys,
+                              lql_json_flat_term_kind kind) {
   unsigned long active;
   size_t i;
   active = 0ul;
@@ -287,7 +323,8 @@ static unsigned long lql_json_match_terms_for_kind(const lql_json_scan *scan,
     unsigned long bit;
     bit = 1ul << i;
     if ((keys & bit) != 0ul &&
-        lql_json_term_value_at(&scan->flat_terms[i], path_segment) &&
+        lql_json_term_value_at(&scan->flat_terms[i],
+                               scan->key_term_segment[i]) &&
         scan->flat_terms[i].kind == kind) {
       active |= bit;
     }
@@ -296,8 +333,7 @@ static unsigned long lql_json_match_terms_for_kind(const lql_json_scan *scan,
 }
 
 static unsigned long lql_json_match_descendants(const lql_json_scan *scan,
-                                                unsigned long keys,
-                                                size_t path_segment) {
+                                                unsigned long keys) {
   unsigned long active;
   size_t i;
   active = 0ul;
@@ -307,11 +343,13 @@ static unsigned long lql_json_match_descendants(const lql_json_scan *scan,
     unsigned long bit;
     bit = 1ul << i;
     if ((keys & bit) == 0ul ||
-        lql_json_term_value_at(&scan->flat_terms[i], path_segment)) {
+        lql_json_term_value_at(&scan->flat_terms[i],
+                               scan->key_term_segment[i])) {
       continue;
     }
-    if (lql_json_term_path_segment(&scan->flat_terms[i], path_segment + 1u,
-                                   &segment, &segment_len)) {
+    if (lql_json_term_path_segment(&scan->flat_terms[i],
+                                   scan->key_term_segment[i] + 1u, &segment,
+                                   &segment_len)) {
       active |= bit;
     }
   }
@@ -332,8 +370,29 @@ static unsigned long lql_json_match_object_terms(const lql_json_scan *scan,
          ((scan->flat_terms[i].path_array_segments |
            scan->flat_terms[i].path_object_wildcards |
            scan->flat_terms[i].path_array_wildcards |
-           scan->flat_terms[i].path_any_wildcards) &
+           scan->flat_terms[i].path_any_wildcards |
+           scan->flat_terms[i].path_recursive_segments) &
           (1ul << path_segment)) == 0ul)) {
+      matches |= bit;
+    }
+  }
+  return matches;
+}
+
+static unsigned long lql_json_match_recursive_terms(const lql_json_scan *scan,
+                                                    unsigned long active,
+                                                    size_t path_segment) {
+  unsigned long matches;
+  size_t i;
+  matches = 0ul;
+  if (path_segment >= sizeof(unsigned long) * CHAR_BIT) {
+    return matches;
+  }
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    unsigned long bit;
+    bit = 1ul << i;
+    if ((active & bit) != 0ul && (scan->flat_terms[i].path_recursive_segments &
+                                  (1ul << path_segment)) != 0ul) {
       matches |= bit;
     }
   }
@@ -749,7 +808,10 @@ static lql_status lql_json_object(lql_json_scan *scan) {
   unsigned long exists_terms;
   unsigned long key_matches;
   unsigned long key_active;
+  unsigned long key_source;
   unsigned long key_wildcards;
+  unsigned long recursive_terms;
+  unsigned long inherited_recursive;
   unsigned long descendants;
   size_t object_depth;
   lql_status status;
@@ -778,19 +840,37 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       return LQL_STATUS_JSON_ERROR;
     }
     key_active = 0ul;
+    inherited_recursive = 0ul;
     if (scan->flat_eq_active &&
         !(scan->flat_eq_stop_on_hit && scan->flat_eq_hits != 0ul)) {
       key_active = scan->path_active[object_depth];
+      inherited_recursive = scan->recursive_active[object_depth];
     }
+    key_source = key_active;
+    recursive_terms =
+        lql_json_match_recursive_terms(scan, key_source, object_depth) |
+        inherited_recursive;
     if (scan->flat_eq_has_array_terms) {
       key_active = lql_json_match_object_terms(scan, key_active, object_depth);
     }
-    key_wildcards = lql_json_match_object_wildcards(
-        scan, scan->path_active[object_depth], object_depth);
-    lql_json_match_start(scan, key_active, 1, object_depth);
+    key_wildcards =
+        lql_json_match_object_wildcards(scan, key_source, object_depth);
+    lql_json_match_start_key(scan, key_active, recursive_terms, object_depth);
     status = lql_json_string(scan);
     key_matches = lql_json_match_complete(scan) | key_wildcards;
-    exists_terms = lql_json_match_exists(scan, key_matches, object_depth);
+    {
+      size_t i;
+      for (i = 0u; i < scan->flat_term_count; ++i) {
+        unsigned long bit;
+        bit = 1ul << i;
+        if ((key_matches & bit) != 0ul) {
+          scan->key_term_segment[i] = (key_wildcards & bit) != 0ul
+                                          ? object_depth
+                                          : scan->match_term_segment[i];
+        }
+      }
+    }
+    exists_terms = lql_json_match_exists(scan, key_matches);
     lql_json_match_start(scan, 0ul, 0, 0u);
     if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
@@ -803,10 +883,12 @@ static lql_status lql_json_object(lql_json_scan *scan) {
     if (value != 'n') {
       scan->flat_eq_hits |= exists_terms;
     }
-    descendants = lql_json_match_descendants(scan, key_matches, object_depth);
+    descendants = lql_json_match_descendants(scan, key_matches);
     if (object_depth + 1u < LQL_JSON_MAX_DEPTH) {
       scan->path_active[object_depth + 1u] =
           (value == '{' || value == '[') ? descendants : 0ul;
+      scan->recursive_active[object_depth + 1u] =
+          (value == '{' || value == '[') ? recursive_terms : 0ul;
     }
     if (key_matches && value == '"') {
       unsigned long eq_terms;
@@ -816,7 +898,8 @@ static lql_status lql_json_object(lql_json_scan *scan) {
         unsigned long bit;
         bit = 1ul << i;
         if ((key_matches & bit) != 0ul &&
-            lql_json_term_value_at(&scan->flat_terms[i], object_depth) &&
+            lql_json_term_value_at(&scan->flat_terms[i],
+                                   scan->key_term_segment[i]) &&
             (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EQ ||
              scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_PREFIX)) {
           eq_terms |= bit;
@@ -838,8 +921,8 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       } else {
         scalar_kind = LQL_JSON_FLAT_TERM_NUMBER_EQ;
       }
-      scalar_terms = lql_json_match_terms_for_kind(scan, key_matches,
-                                                   scalar_kind, object_depth);
+      scalar_terms =
+          lql_json_match_terms_for_kind(scan, key_matches, scalar_kind);
       lql_json_match_start(scan, scalar_terms, 0, 0u);
       status = lql_json_value(scan);
       if (status == LQL_STATUS_OK) {
@@ -851,6 +934,7 @@ static lql_status lql_json_object(lql_json_scan *scan) {
     }
     if (object_depth + 1u < LQL_JSON_MAX_DEPTH) {
       scan->path_active[object_depth + 1u] = 0ul;
+      scan->recursive_active[object_depth + 1u] = 0ul;
     }
     if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
@@ -879,6 +963,7 @@ static lql_status lql_json_array(lql_json_scan *scan) {
   int value;
   unsigned long active;
   unsigned long element_active;
+  unsigned long recursive_terms;
   size_t array_segment;
   size_t index;
   lql_status status;
@@ -888,6 +973,9 @@ static lql_status lql_json_array(lql_json_scan *scan) {
   }
   array_segment = scan->depth;
   active = scan->path_active[array_segment];
+  recursive_terms =
+      lql_json_match_recursive_terms(scan, active, array_segment) |
+      scan->recursive_active[array_segment];
   if (scan->depth + 1u < LQL_JSON_MAX_DEPTH) {
     scan->path_active[scan->depth + 1u] = 0ul;
   }
@@ -910,8 +998,10 @@ static lql_status lql_json_array(lql_json_scan *scan) {
     element_active =
         lql_json_match_array_index(scan, active, array_segment, index);
     scan->path_active[scan->depth] = element_active;
+    scan->recursive_active[scan->depth] = recursive_terms;
     status = lql_json_value(scan);
     scan->path_active[scan->depth] = 0ul;
+    scan->recursive_active[scan->depth] = 0ul;
     if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
         (status = lql_json_take(scan, &value)) != LQL_STATUS_OK) {
@@ -1200,7 +1290,8 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
     if (scan.flat_terms[records].path_array_segments != 0ul ||
         scan.flat_terms[records].path_object_wildcards != 0ul ||
         scan.flat_terms[records].path_array_wildcards != 0ul ||
-        scan.flat_terms[records].path_any_wildcards != 0ul) {
+        scan.flat_terms[records].path_any_wildcards != 0ul ||
+        scan.flat_terms[records].path_recursive_segments != 0ul) {
       scan.flat_eq_has_array_terms = 1;
       break;
     }

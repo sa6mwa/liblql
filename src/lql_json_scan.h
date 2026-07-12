@@ -45,6 +45,7 @@ typedef struct lql_json_flat_eq_term {
   unsigned long path_object_wildcards;
   unsigned long path_array_wildcards;
   unsigned long path_any_wildcards;
+  unsigned long path_recursive_segments;
 } lql_json_flat_eq_term;
 
 typedef lql_status (*lql_json_flat_eq_record_fn)(

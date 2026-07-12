@@ -43,7 +43,7 @@ static int lql_flat_eq_literal_object_path(
     const char *path, size_t *out_path_len, size_t *out_segment_count,
     size_t *out_first_segment_len, unsigned long *out_array_segments,
     unsigned long *out_object_wildcards, unsigned long *out_array_wildcards,
-    unsigned long *out_any_wildcards) {
+    unsigned long *out_any_wildcards, unsigned long *out_recursive_segments) {
   const char *segment;
   const char *slash;
   size_t path_len;
@@ -54,12 +54,13 @@ static int lql_flat_eq_literal_object_path(
   unsigned long object_wildcards;
   unsigned long array_wildcards;
   unsigned long any_wildcards;
+  unsigned long recursive_segments;
   int numeric_segment;
   if (path == NULL || path[0] != '/' || path[1] == '\0' ||
       out_path_len == NULL || out_segment_count == NULL ||
       out_first_segment_len == NULL || out_array_segments == NULL ||
       out_object_wildcards == NULL || out_array_wildcards == NULL ||
-      out_any_wildcards == NULL) {
+      out_any_wildcards == NULL || out_recursive_segments == NULL) {
     return 0;
   }
   path_len = strlen(path);
@@ -69,6 +70,7 @@ static int lql_flat_eq_literal_object_path(
   object_wildcards = 0ul;
   array_wildcards = 0ul;
   any_wildcards = 0ul;
+  recursive_segments = 0ul;
   for (;;) {
     slash = strchr(segment, '/');
     segment_len = slash == NULL ? strlen(segment) : (size_t)(slash - segment);
@@ -87,7 +89,8 @@ static int lql_flat_eq_literal_object_path(
          slash == NULL) ||
         ((segment_len == 2u && segment[0] == '*' && segment[1] == '*') &&
          slash == NULL) ||
-        (segment_len == 3u && memcmp(segment, "...", 3u) == 0)) {
+        ((segment_len == 3u && memcmp(segment, "...", 3u) == 0) &&
+         slash == NULL)) {
       return 0;
     }
     if (segment_count == 0u) {
@@ -101,6 +104,8 @@ static int lql_flat_eq_literal_object_path(
       array_wildcards |= 1ul << segment_count;
     } else if (segment_len == 2u && segment[0] == '*' && segment[1] == '*') {
       any_wildcards |= 1ul << segment_count;
+    } else if (segment_len == 3u && memcmp(segment, "...", 3u) == 0) {
+      recursive_segments |= 1ul << segment_count;
     }
     ++segment_count;
     if (slash == NULL) {
@@ -114,6 +119,20 @@ static int lql_flat_eq_literal_object_path(
   *out_object_wildcards = object_wildcards;
   *out_array_wildcards = array_wildcards;
   *out_any_wildcards = any_wildcards;
+  if (recursive_segments != 0ul) {
+    size_t recursive_index;
+    recursive_index = 0u;
+    while ((recursive_segments & (1ul << recursive_index)) == 0ul) {
+      ++recursive_index;
+    }
+    if ((recursive_segments & (recursive_segments - 1ul)) != 0ul ||
+        array_segments != 0ul || object_wildcards != 0ul ||
+        array_wildcards != 0ul || any_wildcards != 0ul ||
+        recursive_index + 2u != segment_count) {
+      return 0;
+    }
+  }
+  *out_recursive_segments = recursive_segments;
   return 1;
 }
 
@@ -129,6 +148,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   unsigned long path_object_wildcards;
   unsigned long path_array_wildcards;
   unsigned long path_any_wildcards;
+  unsigned long path_recursive_segments;
   size_t i;
   if (selector == NULL) {
     return 0;
@@ -156,7 +176,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     if (!lql_flat_eq_literal_object_path(
             field, &path_len, &path_segment_count, &first_segment_len,
             &path_array_segments, &path_object_wildcards, &path_array_wildcards,
-            &path_any_wildcards)) {
+            &path_any_wildcards, &path_recursive_segments)) {
       return 0;
     }
     for (i = 0u; i < selector->any_count; ++i) {
@@ -177,6 +197,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       term->path_object_wildcards = path_object_wildcards;
       term->path_array_wildcards = path_array_wildcards;
       term->path_any_wildcards = path_any_wildcards;
+      term->path_recursive_segments = path_recursive_segments;
       program->selectors[program->term_count] = selector;
       ++program->term_count;
     }
@@ -193,7 +214,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   if (!lql_flat_eq_literal_object_path(
           field, &path_len, &path_segment_count, &first_segment_len,
           &path_array_segments, &path_object_wildcards, &path_array_wildcards,
-          &path_any_wildcards)) {
+          &path_any_wildcards, &path_recursive_segments)) {
     return 0;
   }
   term = &program->terms[program->term_count];
@@ -206,6 +227,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   term->path_object_wildcards = path_object_wildcards;
   term->path_array_wildcards = path_array_wildcards;
   term->path_any_wildcards = path_any_wildcards;
+  term->path_recursive_segments = path_recursive_segments;
   if (selector->kind == LQL_SELECTOR_KIND_EXISTS) {
     term->kind = LQL_JSON_FLAT_TERM_EXISTS;
   } else if (selector->kind == LQL_SELECTOR_KIND_PREFIX) {

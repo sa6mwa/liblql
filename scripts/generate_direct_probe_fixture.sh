@@ -29,10 +29,10 @@ case "$payload_bytes" in
 esac
 
 case "$shape" in
-  status|scalar|nested|indexed)
+  status|scalar|nested|indexed|recursive)
     ;;
   *)
-    printf '%s\n' 'fixture shape must be status, scalar, nested, or indexed' >&2
+    printf '%s\n' 'fixture shape must be status, scalar, nested, indexed, or recursive' >&2
     exit 2
     ;;
 esac
@@ -53,6 +53,9 @@ awk -v count="$2" -v payload_bytes="$payload_bytes" -v shape="$shape" 'BEGIN {
     } else if (shape == "indexed") {
       sku = (i % 4 == 0) ? "B" : "A"
       printf "{\"id\":\"id-%d\",\"items\":[{\"sku\":\"A\"},{\"sku\":\"%s\"}],\"payload\":\"", i, sku
+    } else if (shape == "recursive") {
+      sku = (i % 4 == 0) ? "needle" : "other"
+      printf "{\"id\":\"id-%d\",\"tree\":{\"branch\":{\"deep\":{\"sku\":\"%s\"}}},\"payload\":\"", i, sku
     } else {
       printf "{\"id\":\"id-%d\",\"status\":\"%s\",\"region\":\"%s\",\"payload\":\"", i, status, region
     }
