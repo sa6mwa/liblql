@@ -93,6 +93,8 @@ func benchmarkMutationsForSelector(selectorName string, expr string) []string {
 		return []string{"/processed=true"}
 	case "eq_status_open_top_remove":
 		return []string{"rm:/payload"}
+	case "eq_code_one_top_increment":
+		return []string{"/code=+1"}
 	}
 	if strings.Contains(expr, "/voucher/lines/10/") {
 		return []string{"/voucher/lines/10/bench=true"}

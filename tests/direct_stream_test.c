@@ -850,6 +850,9 @@ static int run_mutation_output(lql *ctx) {
   static const char increment_all_output[] =
       "{\"status\":\"open\",\"n\":3}\n"
       "{\"status\":\"closed\",\"n\":2}\n";
+  static const char *const increment_missing[] = {"/count=+2"};
+  static const char increment_missing_output[] =
+      "{\"status\":\"open\",\"n\":1,\"count\":2}\n";
   static const char *const direct_set[] = {"/bench/touched=true"};
   static const char direct_set_output[] =
       "{\"status\":\"open\",\"n\":1,\"bench\":{\"touched\":true}}\n";
@@ -924,6 +927,27 @@ static int run_mutation_output(lql *ctx) {
       result.records_seen != 2u || result.records_matched != 1u ||
       writer.len != sizeof(increment_all_output) - 1u ||
       memcmp(writer.data, increment_all_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, increment_missing, 1u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  reader.offset = 0u;
+  memset(&writer, 0, sizeof(writer));
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(increment_missing_output) - 1u ||
+      memcmp(writer.data, increment_missing_output, writer.len) != 0) {
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
     return 1;

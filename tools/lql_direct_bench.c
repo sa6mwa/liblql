@@ -428,6 +428,10 @@ static const char *const *mutations_for(const char *selector_name,
     *count = 1u;
     return remove;
   }
+  if (strcmp(selector_name, "eq_code_one_top_increment") == 0) {
+    *count = 1u;
+    return range;
+  }
   if (strstr(expr, "/voucher/lines/10/") != NULL) {
     static const char *const voucher[] = {"/voucher/lines/10/bench=true"};
     *count = 1u;

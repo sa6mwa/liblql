@@ -2,7 +2,11 @@
 #include "lql_json_scan.h"
 #include "lql_unicode_lower.h"
 
+#include <errno.h>
 #include <limits.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define LQL_FLAT_EQ_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
@@ -779,6 +783,69 @@ static lql_status lql_flat_eq_mutation_value(lql_flat_eq_state *state,
   return LQL_STATUS_INVALID_ARGUMENT;
 }
 
+static lql_status lql_flat_eq_mutation_number(lql_flat_eq_state *state,
+                                              double value, lql_error *error) {
+  char buffer[64];
+  int len;
+  if (value != value || value == HUGE_VAL || value == -HUGE_VAL) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "increment result is not finite");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  len = sprintf(buffer, "%.17g", value);
+  if (len <= 0 || (size_t)len >= sizeof(buffer)) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "increment result could not be emitted");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  return lql_flat_eq_write(state, buffer, (size_t)len, error);
+}
+
+static lql_status lql_flat_eq_mutation_increment(lql_flat_eq_state *state,
+                                                 const lql_json_spool *spool,
+                                                 size_t value_start,
+                                                 size_t value_end, int present,
+                                                 lql_error *error) {
+  const lql_mutation_action *action;
+  char number[128];
+  char *end;
+  double current;
+  double next;
+  size_t len;
+  action = state->program->direct_mutation_action;
+  if (action == NULL || action->kind != LQL_MUTATION_INCREMENT)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  if (!present)
+    return lql_flat_eq_mutation_number(state, action->delta, error);
+  len = value_end - value_start;
+  if (len == 0u || len >= sizeof(number)) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "increment target number is invalid");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  {
+    size_t i;
+    lql_status copy_status;
+    unsigned char ch;
+    for (i = 0u; i < len; ++i) {
+      copy_status = lql_flat_eq_spool_byte(spool, value_start + i, &ch, error);
+      if (copy_status != LQL_STATUS_OK)
+        return copy_status;
+      number[i] = (char)ch;
+    }
+  }
+  number[len] = '\0';
+  errno = 0;
+  current = strtod(number, &end);
+  if (end != number + len || errno == ERANGE) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "increment target number is invalid");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  next = current + action->delta;
+  return lql_flat_eq_mutation_number(state, next, error);
+}
+
 static lql_status
 lql_flat_eq_mutation_key_value(lql_flat_eq_state *state,
                                const lql_mutation_action *action,
@@ -789,6 +856,8 @@ lql_flat_eq_mutation_key_value(lql_flat_eq_state *state,
     if (status != LQL_STATUS_OK)
       return status;
   }
+  if (action->kind == LQL_MUTATION_INCREMENT)
+    return lql_flat_eq_mutation_increment(state, NULL, 0u, 0u, 0, error);
   return lql_flat_eq_mutation_value(state, action, error);
 }
 
@@ -866,8 +935,14 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
       status = lql_json_spool_write_slice(
           spool, key_start, key_end - key_start + 1u, state->request->writer,
           state->request->writer_user, error);
-      if (status == LQL_STATUS_OK)
-        status = lql_flat_eq_mutation_value(state, action, error);
+      if (status == LQL_STATUS_OK) {
+        if (action->kind == LQL_MUTATION_INCREMENT) {
+          status = lql_flat_eq_mutation_increment(state, spool, key_end + 1u,
+                                                  value_end, 1, error);
+        } else {
+          status = lql_flat_eq_mutation_value(state, action, error);
+        }
+      }
     } else {
       if (!first &&
           (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
@@ -1185,14 +1260,23 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
     if (status != LQL_STATUS_OK)
       return status;
   }
-  if (state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION &&
-      (matched || !state->request->matched_only)) {
+  if (state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION && matched) {
     if (!root_is_object) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR,
                     "mutation input must be a JSON object");
       return LQL_STATUS_JSON_ERROR;
     }
     status = lql_flat_eq_mutation_emit(state, spool, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+  } else if (state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION &&
+             !state->request->matched_only) {
+    if (spool == NULL) {
+      lql_set_error(error, LQL_STATUS_CALLBACK_ERROR,
+                    "mutation passthrough capture is unavailable");
+      return LQL_STATUS_CALLBACK_ERROR;
+    }
+    status = lql_flat_eq_emit(state, spool, error);
     if (status != LQL_STATUS_OK)
       return status;
   }
@@ -1231,7 +1315,8 @@ static int lql_flat_eq_mutation_append(lql_flat_eq_program *program,
     return 0;
   action = &mutation->actions[0];
   if ((action->kind != LQL_MUTATION_SET &&
-       action->kind != LQL_MUTATION_REMOVE) ||
+       action->kind != LQL_MUTATION_REMOVE &&
+       action->kind != LQL_MUTATION_INCREMENT) ||
       action->segment_count != 1u || action->segments == NULL ||
       action->segments[0] == NULL ||
       (action->kind == LQL_MUTATION_SET && action->value == NULL))
