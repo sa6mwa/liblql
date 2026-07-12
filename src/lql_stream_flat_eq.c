@@ -12,6 +12,9 @@
 typedef struct lql_flat_eq_program {
   lql_json_flat_eq_term terms[LQL_FLAT_EQ_TERM_CAPACITY];
   const lql_selector *selectors[LQL_FLAT_EQ_TERM_CAPACITY];
+  lql_json_capture_key capture_keys[LQL_FLAT_EQ_TERM_CAPACITY];
+  lql_json_capture_span capture_spans[LQL_FLAT_EQ_TERM_CAPACITY];
+  size_t capture_key_count;
   size_t contains_failures[LQL_FLAT_EQ_TERM_CAPACITY]
                           [LQL_FLAT_ICONTAINS_NEEDLE_MAX];
   char icontains_needles[LQL_FLAT_EQ_TERM_CAPACITY]
@@ -458,6 +461,55 @@ static lql_status lql_flat_eq_emit(lql_flat_eq_state *state,
   return status;
 }
 
+static lql_status lql_flat_eq_write(lql_flat_eq_state *state, const void *data,
+                                    size_t len, lql_error *error) {
+  lql_status status;
+  status = state->request->writer(state->request->writer_user, data, len, error);
+  if (status != LQL_STATUS_OK && error != NULL && error->code == LQL_STATUS_OK)
+    lql_set_error(error, status, "stream writer failed");
+  return status;
+}
+
+static lql_status lql_flat_eq_projection_emit(lql_flat_eq_state *state,
+                                              const lql_json_spool *spool,
+                                              lql_error *error) {
+  size_t i;
+  size_t count;
+  static const char open[] = "{";
+  static const char close[] = "}\n";
+  if (state->request->projection == NULL || spool == NULL) return LQL_STATUS_OK;
+  count = 0u;
+  for (i = 0u; i < state->program->capture_key_count; ++i)
+    if (state->program->capture_spans[i].found) ++count;
+  if (count == 0u) return LQL_STATUS_OK;
+  if (lql_flat_eq_write(state, open, 1u, error) != LQL_STATUS_OK) return error->code;
+  count = 0u;
+  for (i = 0u; i < state->program->capture_key_count; ++i) {
+    const char *key;
+    size_t key_len;
+    size_t j;
+    if (!state->program->capture_spans[i].found) continue;
+    if (count != 0u && lql_flat_eq_write(state, ",", 1u, error) != LQL_STATUS_OK)
+      return error->code;
+    key = state->request->projection->compiled_paths[i].segments[0];
+    key_len = strlen(key);
+    if (lql_flat_eq_write(state, "\"", 1u, error) != LQL_STATUS_OK) return error->code;
+    for (j = 0u; j < key_len; ++j) {
+      if (key[j] == '"' || key[j] == '\\') {
+        if (lql_flat_eq_write(state, "\\", 1u, error) != LQL_STATUS_OK) return error->code;
+      }
+      if (lql_flat_eq_write(state, key + j, 1u, error) != LQL_STATUS_OK) return error->code;
+    }
+    if (lql_flat_eq_write(state, "\":", 2u, error) != LQL_STATUS_OK ||
+        lql_json_spool_write_slice(spool, state->program->capture_spans[i].offset,
+                                   state->program->capture_spans[i].len,
+                                   state->request->writer, state->request->writer_user,
+                                   error) != LQL_STATUS_OK) return error->code;
+    ++count;
+  }
+  return lql_flat_eq_write(state, close, sizeof(close) - 1u, error);
+}
+
 static lql_status lql_flat_eq_record(void *user, size_t record_index,
                                      int root_is_object, unsigned long hits,
                                      const lql_json_spool *spool,
@@ -533,6 +585,11 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
       return status;
     }
   }
+  if (state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION &&
+      (matched || !state->request->matched_only)) {
+    status = lql_flat_eq_projection_emit(state, spool, error);
+    if (status != LQL_STATUS_OK) return status;
+  }
   if (matched && state->request->limits.max_matches != 0u &&
       state->result->records_matched >= state->request->limits.max_matches) {
     state->result->stopped_early = 1;
@@ -545,12 +602,28 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
 
 static int lql_flat_eq_eligible(const lql_stream_request *request) {
   if (request == NULL || request->selector == NULL ||
-      request->limits.max_records != 0u || request->projection != NULL ||
+      request->limits.max_records != 0u ||
       request->mutation != NULL ||
       (request->output_mode != LQL_STREAM_OUTPUT_DECISION_ONLY &&
-       request->output_mode != LQL_STREAM_OUTPUT_SELECTED_RECORD)) {
+       request->output_mode != LQL_STREAM_OUTPUT_SELECTED_RECORD &&
+       request->output_mode != LQL_STREAM_OUTPUT_PROJECTION)) {
     return 0;
   }
+  return 1;
+}
+
+static int lql_flat_eq_projection_append(lql_flat_eq_program *program,
+                                         const lql_projection *projection) {
+  size_t i;
+  if (projection == NULL || projection->path_count == 0u ||
+      projection->path_count > LQL_FLAT_EQ_TERM_CAPACITY) return 0;
+  for (i = 0u; i < projection->path_count; ++i) {
+    const lql_projection_path *path = &projection->compiled_paths[i];
+    if (path->segment_count != 1u || path->segments[0] == NULL) return 0;
+    program->capture_keys[i].field = path->segments[0];
+    program->capture_keys[i].field_len = strlen(path->segments[0]);
+  }
+  program->capture_key_count = projection->path_count;
   return 1;
 }
 
@@ -580,12 +653,17 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   if (!lql_flat_eq_append(&program, request->selector)) {
     return LQL_STATUS_OK;
   }
+  if (request->output_mode == LQL_STREAM_OUTPUT_PROJECTION &&
+      !lql_flat_eq_projection_append(&program, request->projection)) {
+    return LQL_STATUS_OK;
+  }
   program.stop_matching_on_hit =
       request->selector->kind == LQL_SELECTOR_KIND_EQ &&
       program.term_count == 1u;
   *out_handled = 1;
   capture = request->on_value != NULL ||
-            request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD;
+            request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
+            request->output_mode == LQL_STREAM_OUTPUT_PROJECTION;
   memset(&spool, 0, sizeof(spool));
   if (capture) {
     status = lql_json_spool_init(&spool, error);
@@ -605,6 +683,9 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   scan_request.spool = capture ? &spool : NULL;
   scan_request.capture = capture;
   scan_request.stop_matching_on_hit = program.stop_matching_on_hit;
+  scan_request.capture_keys = program.capture_keys;
+  scan_request.capture_key_count = program.capture_key_count;
+  scan_request.capture_spans = program.capture_spans;
   scan_request.record = lql_flat_eq_record;
   scan_request.record_user = &state;
   status =
