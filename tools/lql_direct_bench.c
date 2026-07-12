@@ -5,6 +5,7 @@
 #include <lql/lql.h>
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,7 @@ typedef struct bench_reader {
 typedef struct bench_writer {
   size_t bytes;
   size_t records;
+  int copy_values;
 } bench_writer;
 
 typedef struct sha256_state {
@@ -239,6 +241,58 @@ static lql_status bench_discard_write(void *user, const void *data, size_t len,
   return LQL_STATUS_OK;
 }
 
+static lql_status bench_range_write(void *user, size_t offset, size_t len,
+                                    lql_stream_writer_fn writer,
+                                    void *writer_user, lql_error *error) {
+  bench_reader *reader;
+  unsigned char buffer[8192];
+  long saved;
+  lql_status status;
+  reader = (bench_reader *)user;
+  if (reader == NULL || reader->file == NULL || writer == NULL ||
+      offset > (size_t)LONG_MAX) {
+    if (error != NULL) {
+      error->code = LQL_STATUS_INVALID_ARGUMENT;
+      strcpy(error->message, "benchmark source range is invalid");
+    }
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  saved = ftell(reader->file);
+  if (saved < 0L || fseek(reader->file, (long)offset, SEEK_SET) != 0) {
+    if (error != NULL) {
+      error->code = LQL_STATUS_IO_ERROR;
+      strcpy(error->message, "benchmark source range seek failed");
+    }
+    return LQL_STATUS_IO_ERROR;
+  }
+  while (len != 0u) {
+    size_t amount;
+    amount = len > sizeof(buffer) ? sizeof(buffer) : len;
+    if (fread(buffer, 1u, amount, reader->file) != amount) {
+      if (error != NULL) {
+        error->code = LQL_STATUS_IO_ERROR;
+        strcpy(error->message, "benchmark source range read failed");
+      }
+      fseek(reader->file, saved, SEEK_SET);
+      return LQL_STATUS_IO_ERROR;
+    }
+    status = writer(writer_user, buffer, amount, error);
+    if (status != LQL_STATUS_OK) {
+      fseek(reader->file, saved, SEEK_SET);
+      return status;
+    }
+    len -= amount;
+  }
+  if (fseek(reader->file, saved, SEEK_SET) != 0) {
+    if (error != NULL) {
+      error->code = LQL_STATUS_IO_ERROR;
+      strcpy(error->message, "benchmark source range restore failed");
+    }
+    return LQL_STATUS_IO_ERROR;
+  }
+  return LQL_STATUS_OK;
+}
+
 static lql_stream_callback_result
 bench_value(void *user, const lql_stream_value *value, lql_error *error) {
   bench_writer *writer;
@@ -251,6 +305,9 @@ bench_value(void *user, const lql_stream_value *value, lql_error *error) {
     return LQL_STREAM_CALLBACK_ERROR;
   ++writer->records;
   writer->bytes += size;
+  if (!writer->copy_values) {
+    return LQL_STREAM_CALLBACK_CONTINUE;
+  }
   return lql_stream_value_write_to(value, bench_discard_write, NULL, error) ==
                  LQL_STATUS_OK
              ? LQL_STREAM_CALLBACK_CONTINUE
@@ -271,6 +328,13 @@ static int mode_is_selected(const char *mode) {
          strcmp(mode, "plus_value_source_selector") == 0 ||
          strcmp(mode, "plus_value_openjson_selector") == 0 ||
          strcmp(mode, "plus_value_openjson_plan") == 0;
+}
+
+static int mode_is_source(const char *mode) {
+  return strcmp(mode, "decision_only_source_selector") == 0 ||
+         strcmp(mode, "plus_value_source_selector") == 0 ||
+         strcmp(mode, "mutate_source_selector") == 0 ||
+         strcmp(mode, "project_source_selector") == 0;
 }
 
 static int mode_is_projection(const char *mode) {
@@ -295,6 +359,7 @@ static int mode_is_supported(const char *mode) {
          strcmp(mode, "reparse_selector_each_run") == 0 ||
          strcmp(mode, "decision_only_source_selector") == 0 ||
          strcmp(mode, "plus_value_selector") == 0 ||
+         strcmp(mode, "plus_value_plan") == 0 ||
          strcmp(mode, "plus_value_source_selector") == 0 ||
          strcmp(mode, "plus_value_openjson_selector") == 0 ||
          mode_is_projection(mode) || mode_is_project_mutation(mode) ||
@@ -494,9 +559,16 @@ static int run_once(FILE *file, lql *ctx, lql_selector *selector,
   memset(&reader, 0, sizeof(reader));
   reader.file = file;
   memset(writer, 0, sizeof(*writer));
+  writer->copy_values =
+      !(mode_is_selected(mode) && !mode_is_source(mode));
   memset(&request, 0, sizeof(request));
   request.reader = bench_read;
   request.reader_user = &reader;
+  if (mode_is_selected(mode) && !mode_is_source(mode)) {
+    request.range_writer = bench_range_write;
+    request.range_user = &reader;
+    request.input_is_compact = 1;
+  }
   request.selector = temporary != NULL ? temporary : selector;
   request.matched_only = 1;
   request.limits.max_records = max_records;
@@ -734,11 +806,11 @@ int main(int argc, char **argv) {
                   mode_is_project_mutation(mode)
               ? benchmark_payload_bytes(mode, &writer)
               : 0ul);
-  json_string(mode_is_selected(mode) ? "callback_payload"
-                                     : ((mode_is_projection(mode) ||
-                                         mode_is_project_mutation(mode))
-                                            ? "projection"
-                                            : "none"));
+  json_string(mode_is_selected(mode)
+                  ? (mode_is_source(mode) ? "spooled" : "seekable_range")
+                  : ((mode_is_projection(mode) || mode_is_project_mutation(mode))
+                         ? "projection"
+                         : "none"));
   fputs(",\"fixture_sha256\":", stdout);
   json_string(fixture_hash);
   if (unsupported) {

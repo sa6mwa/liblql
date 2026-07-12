@@ -61,6 +61,8 @@ typedef struct lql_json_scan {
   unsigned long flat_eq_hits;
   unsigned long path_active[LQL_JSON_MAX_DEPTH];
   unsigned long recursive_active[LQL_JSON_MAX_DEPTH];
+  int compact_range_active;
+  int compact_range_ok;
 } lql_json_scan;
 
 static void lql_json_error(lql_json_scan *scan, const char *message) {
@@ -1125,6 +1127,8 @@ static lql_status lql_json_take_expected(lql_json_scan *scan, int expected) {
 
 static lql_status lql_json_skip_space(lql_json_scan *scan) {
   lql_status status;
+  int skipped;
+  skipped = 0;
   for (;;) {
     unsigned char value;
     if (scan->offset == scan->length) {
@@ -1136,8 +1140,12 @@ static lql_status lql_json_skip_space(lql_json_scan *scan) {
     value = scan->buffer[scan->offset];
     if (value != (unsigned char)' ' && value != (unsigned char)'\t' &&
         value != (unsigned char)'\r' && value != (unsigned char)'\n') {
+      if (skipped && scan->compact_range_active) {
+        scan->compact_range_ok = 0;
+      }
       return LQL_STATUS_OK;
     }
+    skipped = 1;
     ++scan->offset;
   }
 }
@@ -1921,7 +1929,10 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   lql_status status;
   int value;
   int root_is_object;
+  int source_compact;
   size_t records;
+  size_t record_start;
+  size_t record_end;
   if (out_records != NULL) {
     *out_records = 0u;
   }
@@ -1986,9 +1997,12 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
     if (request->capture) {
       lql_json_spool_reset(request->spool);
     }
+    record_start = lql_json_consumed(&scan);
     root_is_object = value == '{';
     scan.flat_eq_active = root_is_object;
     scan.flat_eq_hits = 0ul;
+    scan.compact_range_active = 1;
+    scan.compact_range_ok = 1;
     if (scan.capture_spans != NULL)
       memset(scan.capture_spans, 0,
              scan.capture_key_count * sizeof(*scan.capture_spans));
@@ -2001,6 +2015,9 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
             : ((1ul << scan.capture_key_count) - 1ul);
     lql_json_match_start(&scan, 0ul, 0, 0u);
     status = lql_json_value(&scan);
+    record_end = lql_json_consumed(&scan);
+    source_compact = scan.compact_range_ok;
+    scan.compact_range_active = 0;
     if (status != LQL_STATUS_OK) {
       break;
     }
@@ -2014,7 +2031,8 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
     }
     status = request->record(request->record_user, records, root_is_object,
                              root_is_object ? scan.flat_eq_hits : 0ul,
-                             request->spool, error);
+                             request->spool, record_start,
+                             record_end - record_start, source_compact, error);
     ++records;
     if (status != LQL_STATUS_OK) {
       break;

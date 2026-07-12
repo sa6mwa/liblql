@@ -7,6 +7,7 @@ typedef struct test_reader {
   size_t len;
   size_t offset;
   size_t chunk_size;
+  size_t range_writes;
 } test_reader;
 
 typedef struct test_decisions {
@@ -67,6 +68,19 @@ static lql_status test_write(void *user, const void *data, size_t len,
   memcpy(writer->data + writer->len, data, len);
   writer->len += len;
   return LQL_STATUS_OK;
+}
+
+static lql_status test_range_write(void *user, size_t offset, size_t len,
+                                   lql_stream_writer_fn writer,
+                                   void *writer_user, lql_error *error) {
+  test_reader *reader;
+  reader = (test_reader *)user;
+  if (reader == NULL || writer == NULL || offset > reader->len ||
+      len > reader->len - offset) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  ++reader->range_writes;
+  return writer(writer_user, reader->data + offset, len, error);
 }
 
 static lql_stream_callback_result
@@ -675,6 +689,8 @@ static int run_value_callback(lql *ctx) {
   static const char malformed[] = "{\"status\":\"open\",\"n\":1}\n"
                                   "{\"status\":}\n";
   static const char expected[] = "{\"status\":\"open\",\"n\":1}";
+  static const char whitespace[] = "{ \"status\" : \"open\", \"n\" : 1 }\n";
+  static const char compacted[] = "{\"status\":\"open\",\"n\":1}";
   lql_selector *selector;
   lql_stream_request request;
   lql_stream_result result;
@@ -707,6 +723,42 @@ static int run_value_callback(lql *ctx) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
+  reader.offset = 0u;
+  reader.range_writes = 0u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&sink, 0, sizeof(sink));
+  sink.writer = &writer;
+  request.range_writer = test_range_write;
+  request.range_user = &reader;
+  request.input_is_compact = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      sink.count != 1u || reader.range_writes != 1u ||
+      writer.len != sizeof(expected) - 1u ||
+      memcmp(writer.data, expected, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)whitespace;
+  reader.len = sizeof(whitespace) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&sink, 0, sizeof(sink));
+  sink.writer = &writer;
+  request.reader_user = &reader;
+  request.range_user = &reader;
+  request.input_is_compact = 0;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      sink.count != 1u || reader.range_writes != 0u ||
+      writer.len != sizeof(compacted) - 1u ||
+      memcmp(writer.data, compacted, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  request.range_writer = NULL;
+  request.range_user = NULL;
   reader.offset = 0u;
   reader.data = (const unsigned char *)malformed;
   reader.len = sizeof(malformed) - 1u;

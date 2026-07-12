@@ -1589,6 +1589,8 @@ lql_flat_eq_projection_paths_compatible(const lql_projection *projection) {
 static lql_status lql_flat_eq_record(void *user, size_t record_index,
                                      int root_is_object, unsigned long hits,
                                      const lql_json_spool *spool,
+                                     size_t source_offset, size_t source_len,
+                                     int source_compact,
                                      lql_error *error) {
   lql_flat_eq_state *state;
   lql_stream_decision decision;
@@ -1626,14 +1628,23 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
     }
   }
   if (matched && state->request->on_value != NULL) {
-    if (spool == NULL) {
+    if (spool == NULL && (!source_compact ||
+                          state->request->range_writer == NULL)) {
       lql_set_error(error, LQL_STATUS_CALLBACK_ERROR,
                     "matched value capture is unavailable");
       return LQL_STATUS_CALLBACK_ERROR;
     }
     memset(&value, 0, sizeof(value));
-    value.storage_kind = LQL_STREAM_VALUE_JSON_SPOOL;
-    value.spool = spool;
+    if (source_compact && state->request->range_writer != NULL) {
+      value.storage_kind = LQL_STREAM_VALUE_SOURCE_RANGE;
+      value.range_writer = state->request->range_writer;
+      value.range_user = state->request->range_user;
+      value.range_offset = source_offset;
+      value.range_len = source_len;
+    } else {
+      value.storage_kind = LQL_STREAM_VALUE_JSON_SPOOL;
+      value.spool = spool;
+    }
     callback_result =
         state->request->on_value(state->request->value_user, &value, error);
     if (callback_result == LQL_STREAM_CALLBACK_ERROR) {
@@ -1819,6 +1830,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   size_t records;
   size_t bytes_read;
   int capture;
+  int range_only_value;
   (void)self;
   if (out_handled == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -1856,7 +1868,11 @@ lql_status lql_stream_execute_flat_eq(lql *self,
       request->selector->kind == LQL_SELECTOR_KIND_EQ &&
       program.term_count == 1u;
   *out_handled = 1;
-  capture = request->on_value != NULL ||
+  range_only_value = request->on_value != NULL &&
+                     request->range_writer != NULL &&
+                     request->input_is_compact &&
+                     request->output_mode == LQL_STREAM_OUTPUT_DECISION_ONLY;
+  capture = (request->on_value != NULL && !range_only_value) ||
             request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
             request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
             request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||

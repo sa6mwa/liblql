@@ -65,6 +65,16 @@ typedef lql_status (*lql_stream_reader_fn)(void *user, unsigned char *buffer,
 typedef lql_status (*lql_stream_writer_fn)(void *user, const void *data,
                                            size_t len, lql_error *error);
 
+/**
+ * Writes a source-backed byte range through `writer`.  This optional adapter is
+ * used only when the executor can prove the source range is already
+ * compact-JSON equivalent; otherwise values use the normal compact capture
+ * path.
+ */
+typedef lql_status (*lql_stream_range_writer_fn)(
+    void *user, size_t offset, size_t len, lql_stream_writer_fn writer,
+    void *writer_user, lql_error *error);
+
 typedef enum lql_stream_callback_result {
   LQL_STREAM_CALLBACK_CONTINUE = 0,
   LQL_STREAM_CALLBACK_STOP = 1,
@@ -109,6 +119,10 @@ typedef struct lql_stream_limits {
 typedef struct lql_stream_request {
   lql_stream_reader_fn reader;
   void *reader_user;
+  lql_stream_range_writer_fn range_writer;
+  void *range_user;
+  /* Non-zero only when the input records are already compact JSON. */
+  int input_is_compact;
   lql_stream_writer_fn writer;
   void *writer_user;
   const lql_selector *selector;

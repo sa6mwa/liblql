@@ -19,10 +19,15 @@ typedef struct lql_projection_capture lql_projection_capture;
 
 #define LQL_STREAM_VALUE_LONEJSON_SPOOL 1
 #define LQL_STREAM_VALUE_JSON_SPOOL 2
+#define LQL_STREAM_VALUE_SOURCE_RANGE 3
 
 struct lql_stream_value {
   int storage_kind;
   const void *spool;
+  lql_stream_range_writer_fn range_writer;
+  void *range_user;
+  size_t range_offset;
+  size_t range_len;
 };
 
 struct lql_allocator {

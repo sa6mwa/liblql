@@ -706,7 +706,13 @@ static lonejson_status stream_value_sink(void *user, const void *data,
 }
 
 size_t lql_stream_value_size(const lql_stream_value *value) {
-  if (value == NULL || value->spool == NULL) {
+  if (value == NULL) {
+    return 0u;
+  }
+  if (value->storage_kind == LQL_STREAM_VALUE_SOURCE_RANGE) {
+    return value->range_len;
+  }
+  if (value->spool == NULL) {
     return 0u;
   }
   if (value->storage_kind == LQL_STREAM_VALUE_JSON_SPOOL) {
@@ -724,10 +730,21 @@ lql_status lql_stream_value_write_to(const lql_stream_value *value,
   lonejson_error lonejson_error;
   lonejson_status status;
   lql_error_init(error);
-  if (value == NULL || value->spool == NULL || writer == NULL) {
+  if (value == NULL || writer == NULL ||
+      (value->storage_kind != LQL_STREAM_VALUE_SOURCE_RANGE &&
+       value->spool == NULL)) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "stream value and writer are required");
     return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (value->storage_kind == LQL_STREAM_VALUE_SOURCE_RANGE) {
+    if (value->range_writer == NULL) {
+      lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                    "stream value source range is unavailable");
+      return LQL_STATUS_INVALID_ARGUMENT;
+    }
+    return value->range_writer(value->range_user, value->range_offset,
+                               value->range_len, writer, writer_user, error);
   }
   if (value->storage_kind == LQL_STREAM_VALUE_JSON_SPOOL) {
     return lql_json_spool_write_to((const lql_json_spool *)value->spool, writer,

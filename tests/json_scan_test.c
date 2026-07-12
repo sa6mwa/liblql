@@ -67,9 +67,14 @@ static lql_status json_test_write(void *user, const void *data, size_t len,
 static lql_status json_flat_record(void *user, size_t record_index,
                                    int root_is_object, unsigned long hits,
                                    const lql_json_spool *spool,
+                                   size_t source_offset, size_t source_len,
+                                   int source_compact,
                                    lql_error *error) {
   json_flat_result *result;
   (void)record_index;
+  (void)source_offset;
+  (void)source_len;
+  (void)source_compact;
   result = (json_flat_result *)user;
   if (result == NULL || spool == NULL) {
     return LQL_STATUS_CALLBACK_ERROR;

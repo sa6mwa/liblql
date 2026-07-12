@@ -87,7 +87,8 @@ typedef struct lql_json_capture_span {
 
 typedef lql_status (*lql_json_flat_eq_record_fn)(
     void *user, size_t record_index, int root_is_object, unsigned long hits,
-    const lql_json_spool *spool, lql_error *error);
+    const lql_json_spool *spool, size_t source_offset, size_t source_len,
+    int source_compact, lql_error *error);
 
 typedef struct lql_json_flat_eq_request {
   lql_stream_reader_fn reader;
