@@ -324,6 +324,9 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       return 0;
     }
     for (i = 0u; i < selector->any_count; ++i) {
+      if (selector->any_kinds[i] == LQL_SELECTOR_LITERAL_NULL) {
+        continue;
+      }
       if (!lql_flat_eq_literal_kind(selector->any_kinds[i], &term_kind) ||
           program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
         return 0;
@@ -484,6 +487,10 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
           &path_array_segments, &path_object_wildcards, &path_array_wildcards,
           &path_any_wildcards, &path_recursive_segments)) {
     return 0;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_EQ &&
+      selector->value_kind == LQL_SELECTOR_LITERAL_NULL) {
+    return 1;
   }
   term = &program->terms[program->term_count];
   term->field = field + 1;

@@ -339,6 +339,10 @@ static int run_mapped_string_predicates(lql *ctx) {
       "{\"code\":2,\"enabled\":false}\n"
       "{\"code\":1.0,\"enabled\":false}\n"
       "{\"code\":1,\"code\":2,\"enabled\":false}\n";
+  static const char null_input[] =
+      "{\"empty\":null,\"code\":1}\n"
+      "{\"empty\":false,\"code\":2}\n"
+      "{\"empty\":\"null\",\"code\":3}\n";
   static const char root_wildcard_input[] =
       "{\"alpha\":{\"state\":\"open\"},\"beta\":{\"state\":\"closed\"}}\n"
       "{\"alpha\":{\"state\":\"closed\"}}\n"
@@ -442,6 +446,11 @@ static int run_mapped_string_predicates(lql *ctx) {
       run_selection(ctx, "in{field=/code,any=1|2}", scalar_input, 4u, 3u) ||
       run_selection(ctx, "/enabled=true", scalar_input, 4u, 1u)) {
     return 16;
+  }
+  if (run_selection(ctx, "/empty=null", null_input, 3u, 0u) ||
+      run_selection(ctx, "in{field=/empty,any=null|false}", null_input, 3u,
+                    1u)) {
+    return 107;
   }
   if (run_selection(ctx, "/meta/state=\"open\"", object_path_input, 4u, 2u) ||
       run_selection(ctx, "/meta/code=1", object_path_input, 4u, 2u) ||
