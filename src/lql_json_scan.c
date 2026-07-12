@@ -2122,7 +2122,7 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       key_matches = lql_json_match_complete(scan) | key_wildcards;
       key_captures = lql_json_capture_complete(scan);
     }
-    {
+    if (key_matches != 0ul) {
       size_t i;
       for (i = 0u; i < scan->flat_term_count; ++i) {
         unsigned long bit;
@@ -2134,7 +2134,8 @@ static lql_status lql_json_object(lql_json_scan *scan) {
         }
       }
     }
-    exists_terms = lql_json_match_exists(scan, key_matches);
+    exists_terms =
+        key_matches == 0ul ? 0ul : lql_json_match_exists(scan, key_matches);
     lql_json_match_start(scan, 0ul, 0, 0u);
     if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
@@ -2147,7 +2148,9 @@ static lql_status lql_json_object(lql_json_scan *scan) {
     if (value != 'n') {
       scan->flat_eq_hits |= exists_terms;
     }
-    descendants = lql_json_match_descendants(scan, key_matches);
+    descendants = key_matches == 0ul
+                      ? 0ul
+                      : lql_json_match_descendants(scan, key_matches);
     capture_values = 0ul;
     capture_descendants = 0ul;
     {
