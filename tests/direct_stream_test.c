@@ -28,6 +28,23 @@ typedef struct test_value_sink {
   int fail_after_first;
 } test_value_sink;
 
+static int read_tmpfile(FILE *file, char *buffer, size_t capacity,
+                        size_t *out_len) {
+  long len;
+  if (file == NULL || buffer == NULL || capacity == 0u || out_len == NULL ||
+      fflush(file) != 0 || (len = ftell(file)) < 0L ||
+      (unsigned long)len >= (unsigned long)capacity ||
+      fseek(file, 0L, SEEK_SET) != 0) {
+    return 1;
+  }
+  *out_len = fread(buffer, 1u, (size_t)len, file);
+  if (*out_len != (size_t)len || ferror(file)) {
+    return 1;
+  }
+  buffer[*out_len] = '\0';
+  return 0;
+}
+
 static lql_status test_read(void *user, unsigned char *buffer, size_t capacity,
                             size_t *out_len, lql_error *error) {
   test_reader *reader;
@@ -221,6 +238,86 @@ static int run_projection_parse(lql *ctx) {
       projection != NULL) {
     return 1;
   }
+  return 0;
+}
+
+static int run_selector_json_write(lql *ctx) {
+  static const char expected[] = "{\"eq\":{\"field\":\"/status\","
+                                 "\"value\":\"open\"}}";
+  static const char escaped_expected[] =
+      "{\"eq\":{\"field\":\"/msg\",\"value\":\"a\\\"b\\n\"}}";
+  lql_selector *selector;
+  lql_selector *roundtrip;
+  lql_selector_string_term term;
+  lql_string_view escaped_value;
+  lql_error error;
+  FILE *file;
+  char buffer[512];
+  size_t len;
+
+  selector = NULL;
+  roundtrip = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  file = tmpfile();
+  if (file == NULL) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  if (ctx->selector_write_json(ctx, selector, file, &error) != LQL_STATUS_OK ||
+      read_tmpfile(file, buffer, sizeof(buffer), &len) ||
+      len != sizeof(expected) - 1u ||
+      memcmp(buffer, expected, sizeof(expected) - 1u) != 0 ||
+      ctx->selector_parse_json(ctx, buffer, len, &roundtrip, &error) !=
+          LQL_STATUS_OK) {
+    fclose(file);
+    if (roundtrip != NULL) {
+      ctx->selector_destroy(ctx, roundtrip);
+    }
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  fclose(file);
+  ctx->selector_destroy(ctx, roundtrip);
+  roundtrip = NULL;
+  ctx->selector_destroy(ctx, selector);
+  selector = NULL;
+
+  memset(&term, 0, sizeof(term));
+  term.field.data = "/msg";
+  term.field.len = 4u;
+  escaped_value.data = "a\"b\n";
+  escaped_value.len = 4u;
+  term.value = escaped_value;
+  term.value_present = 1;
+  if (ctx->selector_build_string(ctx, LQL_SELECTOR_NODE_EQ, &term, NULL,
+                                 &selector, &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  file = tmpfile();
+  if (file == NULL) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  if (ctx->selector_write_json(ctx, selector, file, &error) != LQL_STATUS_OK ||
+      read_tmpfile(file, buffer, sizeof(buffer), &len) ||
+      len != sizeof(escaped_expected) - 1u ||
+      memcmp(buffer, escaped_expected, sizeof(escaped_expected) - 1u) != 0 ||
+      ctx->selector_parse_json(ctx, buffer, len, &roundtrip, &error) !=
+          LQL_STATUS_OK) {
+    fclose(file);
+    if (roundtrip != NULL) {
+      ctx->selector_destroy(ctx, roundtrip);
+    }
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  fclose(file);
+  ctx->selector_destroy(ctx, roundtrip);
+  ctx->selector_destroy(ctx, selector);
   return 0;
 }
 
@@ -1576,8 +1673,9 @@ int main(void) {
   if (lql_new(&ctx, &error) != LQL_STATUS_OK) {
     return 1;
   }
-  if (run_projection_parse(ctx) || run_status_selection(ctx) ||
-      run_conjunction_selection(ctx) || run_or_selection(ctx) ||
+  if (run_projection_parse(ctx) || run_selector_json_write(ctx) ||
+      run_status_selection(ctx) || run_conjunction_selection(ctx) ||
+      run_or_selection(ctx) ||
       run_not_selection(ctx) || run_mapped_string_predicates(ctx) ||
       run_match_all(ctx) || run_root_wildcard_array_error(ctx) ||
       run_selected_record_output(ctx) || run_value_callback(ctx) ||

@@ -757,116 +757,221 @@ static lql_status selector_node_exists_path_method(const lql *self,
   return LQL_STATUS_OK;
 }
 
-static lonejson_status selector_file_sink(void *user, const void *data,
-                                          size_t len, lonejson_error *error) {
-  FILE *out;
-  out = (FILE *)user;
+static lql_status selector_json_write(FILE *out, const void *data, size_t len,
+                                      lql_error *error) {
   if (len == 0u) {
-    return LONEJSON_STATUS_OK;
+    return LQL_STATUS_OK;
   }
-  if (out == NULL || fwrite(data, 1u, len, out) != len) {
-    if (error != NULL) {
-      error->code = LONEJSON_STATUS_IO_ERROR;
-      error->message[0] = '\0';
-    }
-    return LONEJSON_STATUS_IO_ERROR;
+  if (out == NULL || data == NULL || fwrite(data, 1u, len, out) != len) {
+    lql_set_error(error, LQL_STATUS_IO_ERROR, "selector JSON write failed");
+    return LQL_STATUS_IO_ERROR;
   }
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status writer_key(lonejson_writer *writer, const char *key,
-                                  lonejson_error *error) {
-  return lonejson_writer_key(writer, key, strlen(key), error);
+static lql_status selector_json_putc(FILE *out, int ch, lql_error *error) {
+  unsigned char byte;
+  byte = (unsigned char)ch;
+  return selector_json_write(out, &byte, 1u, error);
 }
 
-static lonejson_status writer_string_view(lonejson_writer *writer,
-                                          lql_string_view value,
-                                          lonejson_error *error) {
-  return lonejson_writer_string(writer, value.data == NULL ? "" : value.data,
-                                value.len, error);
+static lql_status selector_json_literal(FILE *out, const char *text,
+                                        lql_error *error) {
+  return selector_json_write(out, text, strlen(text), error);
 }
 
-static lonejson_status write_selector_json(lonejson_writer *writer,
-                                           const lql_selector *selector,
-                                           lonejson_error *error);
-
-static lonejson_status write_string_predicate_json(lonejson_writer *writer,
-                                                   const lql_selector *selector,
-                                                   lonejson_error *error) {
+static lql_status selector_json_string(FILE *out, const char *data, size_t len,
+                                       lql_error *error) {
   size_t i;
-  if (lonejson_writer_begin_object(writer, error) != LONEJSON_STATUS_OK ||
-      writer_key(writer, "field", error) != LONEJSON_STATUS_OK ||
-      lonejson_writer_string(writer, selector->field, strlen(selector->field),
-                             error) != LONEJSON_STATUS_OK) {
-    return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+  lql_status status;
+  status = selector_json_putc(out, '"', error);
+  if (status != LQL_STATUS_OK) {
+    return status;
+  }
+  if (data == NULL) {
+    data = "";
+    len = 0u;
+  }
+  for (i = 0u; i < len; ++i) {
+    unsigned char ch;
+    ch = (unsigned char)data[i];
+    switch (ch) {
+    case '"':
+      status = selector_json_literal(out, "\\\"", error);
+      break;
+    case '\\':
+      status = selector_json_literal(out, "\\\\", error);
+      break;
+    case '\b':
+      status = selector_json_literal(out, "\\b", error);
+      break;
+    case '\f':
+      status = selector_json_literal(out, "\\f", error);
+      break;
+    case '\n':
+      status = selector_json_literal(out, "\\n", error);
+      break;
+    case '\r':
+      status = selector_json_literal(out, "\\r", error);
+      break;
+    case '\t':
+      status = selector_json_literal(out, "\\t", error);
+      break;
+    default:
+      if (ch < 0x20u) {
+        if (fprintf(out, "\\u%04x", (unsigned int)ch) < 0) {
+          lql_set_error(error, LQL_STATUS_IO_ERROR,
+                        "selector JSON write failed");
+          return LQL_STATUS_IO_ERROR;
+        }
+        status = LQL_STATUS_OK;
+      } else {
+        status = selector_json_putc(out, (int)ch, error);
+      }
+      break;
+    }
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+  }
+  return selector_json_putc(out, '"', error);
+}
+
+static lql_status selector_json_key(FILE *out, const char *key,
+                                    lql_error *error) {
+  lql_status status;
+  status = selector_json_string(out, key, strlen(key), error);
+  if (status != LQL_STATUS_OK) {
+    return status;
+  }
+  return selector_json_putc(out, ':', error);
+}
+
+static lql_status selector_json_comma(FILE *out, int *first,
+                                      lql_error *error) {
+  if (first == NULL) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (*first) {
+    *first = 0;
+    return LQL_STATUS_OK;
+  }
+  return selector_json_putc(out, ',', error);
+}
+
+static lql_status selector_json_number(FILE *out, double value,
+                                       lql_error *error) {
+  if (fprintf(out, "%.17g", value) < 0) {
+    lql_set_error(error, LQL_STATUS_IO_ERROR, "selector JSON write failed");
+    return LQL_STATUS_IO_ERROR;
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status write_selector_json(FILE *out, const lql_selector *selector,
+                                      lql_error *error);
+
+static lql_status write_string_predicate_json(FILE *out,
+                                              const lql_selector *selector,
+                                              lql_error *error) {
+  size_t i;
+  int first;
+  lql_status status;
+  first = 1;
+  status = selector_json_putc(out, '{', error);
+  if (status != LQL_STATUS_OK ||
+      (status = selector_json_comma(out, &first, error)) != LQL_STATUS_OK ||
+      (status = selector_json_key(out, "field", error)) != LQL_STATUS_OK ||
+      (status = selector_json_string(out, selector->field,
+                                     strlen(selector->field), error)) !=
+          LQL_STATUS_OK) {
+    return status;
   }
   if (selector->value_set ||
       (selector->value != NULL && selector->value[0] != '\0')) {
-    if (writer_key(writer, "value", error) != LONEJSON_STATUS_OK ||
-        lonejson_writer_string(
-            writer, selector->value == NULL ? "" : selector->value,
-            selector->value == NULL ? 0u : strlen(selector->value),
-            error) != LONEJSON_STATUS_OK) {
-      return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+    status = selector_json_comma(out, &first, error);
+    if (status != LQL_STATUS_OK ||
+        (status = selector_json_key(out, "value", error)) != LQL_STATUS_OK ||
+        (status = selector_json_string(
+             out, selector->value == NULL ? "" : selector->value,
+             selector->value == NULL ? 0u : strlen(selector->value), error)) !=
+            LQL_STATUS_OK) {
+      return status;
     }
   }
   if (selector->any_count != 0u) {
-    if (writer_key(writer, "any", error) != LONEJSON_STATUS_OK ||
-        lonejson_writer_begin_array(writer, error) != LONEJSON_STATUS_OK) {
-      return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+    status = selector_json_comma(out, &first, error);
+    if (status != LQL_STATUS_OK ||
+        (status = selector_json_key(out, "any", error)) != LQL_STATUS_OK ||
+        (status = selector_json_putc(out, '[', error)) != LQL_STATUS_OK) {
+      return status;
     }
     for (i = 0u; i < selector->any_count; ++i) {
-      if (lonejson_writer_string(writer, selector->any[i],
-                                 selector->any_lens[i],
-                                 error) != LONEJSON_STATUS_OK) {
-        return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+      if (i != 0u &&
+          (status = selector_json_putc(out, ',', error)) != LQL_STATUS_OK) {
+        return status;
+      }
+      status =
+          selector_json_string(out, selector->any[i], selector->any_lens[i],
+                               error);
+      if (status != LQL_STATUS_OK) {
+        return status;
       }
     }
-    if (lonejson_writer_end_array(writer, error) != LONEJSON_STATUS_OK) {
-      return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+    status = selector_json_putc(out, ']', error);
+    if (status != LQL_STATUS_OK) {
+      return status;
     }
   }
   if (selector->ignore_case) {
-    if (writer_key(writer, "ignoreCase", error) != LONEJSON_STATUS_OK ||
-        lonejson_writer_bool(writer, 1, error) != LONEJSON_STATUS_OK) {
-      return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+    status = selector_json_comma(out, &first, error);
+    if (status != LQL_STATUS_OK ||
+        (status = selector_json_key(out, "ignoreCase", error)) !=
+            LQL_STATUS_OK ||
+        (status = selector_json_literal(out, "true", error)) !=
+            LQL_STATUS_OK) {
+      return status;
     }
   }
-  return lonejson_writer_end_object(writer, error);
+  return selector_json_putc(out, '}', error);
 }
 
-static lonejson_status write_range_bound_json(lonejson_writer *writer,
-                                              const lql_selector_range_bound *b,
-                                              lonejson_error *error) {
+static lql_status write_range_bound_json(FILE *out,
+                                         const lql_selector_range_bound *b,
+                                         lql_error *error) {
   if (b->kind == LQL_SELECTOR_BOUND_NUMBER) {
-    return lonejson_writer_f64(writer, b->number, error);
+    return selector_json_number(out, b->number, error);
   }
   if (b->kind == LQL_SELECTOR_BOUND_DATETIME) {
-    return writer_string_view(writer, b->datetime, error);
+    return selector_json_string(out, b->datetime.data, b->datetime.len, error);
   }
-  return LONEJSON_STATUS_OK;
+  return LQL_STATUS_OK;
 }
 
-static lonejson_status write_range_bound_member(lonejson_writer *writer,
-                                                const char *key,
-                                                lql_selector_range_bound bound,
-                                                lonejson_error *error) {
+static lql_status write_range_bound_member(FILE *out, const char *key,
+                                           lql_selector_range_bound bound,
+                                           int *first, lql_error *error) {
+  lql_status status;
   if (bound.kind == LQL_SELECTOR_BOUND_ABSENT) {
-    return LONEJSON_STATUS_OK;
+    return LQL_STATUS_OK;
   }
-  if (writer_key(writer, key, error) != LONEJSON_STATUS_OK) {
-    return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+  status = selector_json_comma(out, first, error);
+  if (status != LQL_STATUS_OK ||
+      (status = selector_json_key(out, key, error)) != LQL_STATUS_OK) {
+    return status;
   }
-  return write_range_bound_json(writer, &bound, error);
+  return write_range_bound_json(out, &bound, error);
 }
 
-static lonejson_status write_range_predicate_json(lonejson_writer *writer,
-                                                  const lql_selector *selector,
-                                                  lonejson_error *error) {
+static lql_status write_range_predicate_json(FILE *out,
+                                             const lql_selector *selector,
+                                             lql_error *error) {
   lql_selector_range_bound gt;
   lql_selector_range_bound gte;
   lql_selector_range_bound lt;
   lql_selector_range_bound lte;
+  int first;
+  lql_status status;
 
   memset(&gt, 0, sizeof(gt));
   memset(&gte, 0, sizeof(gte));
@@ -893,121 +998,142 @@ static lonejson_status write_range_predicate_json(lonejson_writer *writer,
     lte = range_number_bound(selector->range_lte);
   }
 
-  if (lonejson_writer_begin_object(writer, error) != LONEJSON_STATUS_OK ||
-      writer_key(writer, "field", error) != LONEJSON_STATUS_OK ||
-      lonejson_writer_string(writer, selector->field, strlen(selector->field),
-                             error) != LONEJSON_STATUS_OK ||
-      write_range_bound_member(writer, "gt", gt, error) != LONEJSON_STATUS_OK ||
-      write_range_bound_member(writer, "gte", gte, error) !=
-          LONEJSON_STATUS_OK ||
-      write_range_bound_member(writer, "lt", lt, error) != LONEJSON_STATUS_OK ||
-      write_range_bound_member(writer, "lte", lte, error) !=
-          LONEJSON_STATUS_OK ||
-      lonejson_writer_end_object(writer, error) != LONEJSON_STATUS_OK) {
-    return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+  first = 1;
+  status = selector_json_putc(out, '{', error);
+  if (status != LQL_STATUS_OK ||
+      (status = selector_json_comma(out, &first, error)) != LQL_STATUS_OK ||
+      (status = selector_json_key(out, "field", error)) != LQL_STATUS_OK ||
+      (status = selector_json_string(out, selector->field,
+                                     strlen(selector->field), error)) !=
+          LQL_STATUS_OK ||
+      (status = write_range_bound_member(out, "gt", gt, &first, error)) !=
+          LQL_STATUS_OK ||
+      (status = write_range_bound_member(out, "gte", gte, &first, error)) !=
+          LQL_STATUS_OK ||
+      (status = write_range_bound_member(out, "lt", lt, &first, error)) !=
+          LQL_STATUS_OK ||
+      (status = write_range_bound_member(out, "lte", lte, &first, error)) !=
+          LQL_STATUS_OK) {
+    return status;
   }
-  return LONEJSON_STATUS_OK;
+  return selector_json_putc(out, '}', error);
 }
 
-static lonejson_status write_optional_string_member(lonejson_writer *writer,
-                                                    const char *key,
-                                                    lql_string_view value,
-                                                    lonejson_error *error) {
+static lql_status write_optional_string_member(FILE *out, const char *key,
+                                               lql_string_view value,
+                                               int *first, lql_error *error) {
+  lql_status status;
   if (value.data == NULL) {
-    return LONEJSON_STATUS_OK;
+    return LQL_STATUS_OK;
   }
-  if (writer_key(writer, key, error) != LONEJSON_STATUS_OK ||
-      writer_string_view(writer, value, error) != LONEJSON_STATUS_OK) {
-    return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+  status = selector_json_comma(out, first, error);
+  if (status != LQL_STATUS_OK ||
+      (status = selector_json_key(out, key, error)) != LQL_STATUS_OK) {
+    return status;
   }
-  return LONEJSON_STATUS_OK;
+  return selector_json_string(out, value.data, value.len, error);
 }
 
-static lonejson_status write_date_predicate_json(lonejson_writer *writer,
-                                                 const lql_selector *selector,
-                                                 lonejson_error *error) {
-  if (lonejson_writer_begin_object(writer, error) != LONEJSON_STATUS_OK ||
-      writer_key(writer, "field", error) != LONEJSON_STATUS_OK ||
-      lonejson_writer_string(writer, selector->field, strlen(selector->field),
-                             error) != LONEJSON_STATUS_OK ||
-      write_optional_string_member(writer, "value",
-                                   lql_view_cstr(selector->date_value_text),
-                                   error) != LONEJSON_STATUS_OK ||
-      write_optional_string_member(writer, "since",
-                                   lql_view_cstr(selector->date_since_text),
-                                   error) != LONEJSON_STATUS_OK ||
-      write_optional_string_member(writer, "after",
-                                   lql_view_cstr(selector->date_after_text),
-                                   error) != LONEJSON_STATUS_OK ||
-      write_optional_string_member(writer, "before",
-                                   lql_view_cstr(selector->date_before_text),
-                                   error) != LONEJSON_STATUS_OK ||
-      write_optional_string_member(writer, "gte",
-                                   lql_view_cstr(selector->date_gte_text),
-                                   error) != LONEJSON_STATUS_OK ||
-      write_optional_string_member(writer, "gt",
-                                   lql_view_cstr(selector->date_gt_text),
-                                   error) != LONEJSON_STATUS_OK ||
-      write_optional_string_member(writer, "lte",
-                                   lql_view_cstr(selector->date_lte_text),
-                                   error) != LONEJSON_STATUS_OK ||
-      write_optional_string_member(writer, "lt",
-                                   lql_view_cstr(selector->date_lt_text),
-                                   error) != LONEJSON_STATUS_OK ||
-      lonejson_writer_end_object(writer, error) != LONEJSON_STATUS_OK) {
-    return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+static lql_status write_date_predicate_json(FILE *out,
+                                            const lql_selector *selector,
+                                            lql_error *error) {
+  int first;
+  lql_status status;
+  first = 1;
+  status = selector_json_putc(out, '{', error);
+  if (status != LQL_STATUS_OK ||
+      (status = selector_json_comma(out, &first, error)) != LQL_STATUS_OK ||
+      (status = selector_json_key(out, "field", error)) != LQL_STATUS_OK ||
+      (status = selector_json_string(out, selector->field,
+                                     strlen(selector->field), error)) !=
+          LQL_STATUS_OK ||
+      (status = write_optional_string_member(
+           out, "value", lql_view_cstr(selector->date_value_text), &first,
+           error)) != LQL_STATUS_OK ||
+      (status = write_optional_string_member(
+           out, "since", lql_view_cstr(selector->date_since_text), &first,
+           error)) != LQL_STATUS_OK ||
+      (status = write_optional_string_member(
+           out, "after", lql_view_cstr(selector->date_after_text), &first,
+           error)) != LQL_STATUS_OK ||
+      (status = write_optional_string_member(
+           out, "before", lql_view_cstr(selector->date_before_text), &first,
+           error)) != LQL_STATUS_OK ||
+      (status = write_optional_string_member(
+           out, "gte", lql_view_cstr(selector->date_gte_text), &first,
+           error)) != LQL_STATUS_OK ||
+      (status = write_optional_string_member(
+           out, "gt", lql_view_cstr(selector->date_gt_text), &first, error)) !=
+          LQL_STATUS_OK ||
+      (status = write_optional_string_member(
+           out, "lte", lql_view_cstr(selector->date_lte_text), &first,
+           error)) != LQL_STATUS_OK ||
+      (status = write_optional_string_member(
+           out, "lt", lql_view_cstr(selector->date_lt_text), &first, error)) !=
+          LQL_STATUS_OK) {
+    return status;
   }
-  return LONEJSON_STATUS_OK;
+  return selector_json_putc(out, '}', error);
 }
 
-static lonejson_status write_in_predicate_json(lonejson_writer *writer,
-                                               const lql_selector *selector,
-                                               lonejson_error *error) {
+static lql_status write_in_predicate_json(FILE *out,
+                                          const lql_selector *selector,
+                                          lql_error *error) {
   size_t i;
-  if (lonejson_writer_begin_object(writer, error) != LONEJSON_STATUS_OK ||
-      writer_key(writer, "field", error) != LONEJSON_STATUS_OK ||
-      lonejson_writer_string(writer, selector->field, strlen(selector->field),
-                             error) != LONEJSON_STATUS_OK ||
-      writer_key(writer, "any", error) != LONEJSON_STATUS_OK ||
-      lonejson_writer_begin_array(writer, error) != LONEJSON_STATUS_OK) {
-    return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+  lql_status status;
+  status = selector_json_literal(out, "{\"field\":", error);
+  if (status != LQL_STATUS_OK ||
+      (status = selector_json_string(out, selector->field,
+                                     strlen(selector->field), error)) !=
+          LQL_STATUS_OK ||
+      (status = selector_json_literal(out, ",\"any\":[", error)) !=
+          LQL_STATUS_OK) {
+    return status;
   }
   for (i = 0u; i < selector->any_count; ++i) {
-    if (lonejson_writer_string(writer, selector->any[i], selector->any_lens[i],
-                               error) != LONEJSON_STATUS_OK) {
-      return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+    if (i != 0u &&
+        (status = selector_json_putc(out, ',', error)) != LQL_STATUS_OK) {
+      return status;
+    }
+    status =
+        selector_json_string(out, selector->any[i], selector->any_lens[i],
+                             error);
+    if (status != LQL_STATUS_OK) {
+      return status;
     }
   }
-  if (lonejson_writer_end_array(writer, error) != LONEJSON_STATUS_OK ||
-      lonejson_writer_end_object(writer, error) != LONEJSON_STATUS_OK) {
-    return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
-  }
-  return LONEJSON_STATUS_OK;
+  return selector_json_literal(out, "]}", error);
 }
 
-static lonejson_status
-write_selector_children_json(lonejson_writer *writer,
-                             const lql_selector *selector,
-                             lonejson_error *error) {
+static lql_status write_selector_children_json(FILE *out,
+                                               const lql_selector *selector,
+                                               lql_error *error) {
   size_t i;
-  if (lonejson_writer_begin_array(writer, error) != LONEJSON_STATUS_OK) {
-    return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+  lql_status status;
+  status = selector_json_putc(out, '[', error);
+  if (status != LQL_STATUS_OK) {
+    return status;
   }
   for (i = 0u; i < selector->child_count; ++i) {
-    if (write_selector_json(writer, &selector->children[i], error) !=
-        LONEJSON_STATUS_OK) {
-      return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+    if (i != 0u &&
+        (status = selector_json_putc(out, ',', error)) != LQL_STATUS_OK) {
+      return status;
+    }
+    status = write_selector_json(out, &selector->children[i], error);
+    if (status != LQL_STATUS_OK) {
+      return status;
     }
   }
-  return lonejson_writer_end_array(writer, error);
+  return selector_json_putc(out, ']', error);
 }
 
-static lonejson_status write_selector_json(lonejson_writer *writer,
-                                           const lql_selector *selector,
-                                           lonejson_error *error) {
+static lql_status write_selector_json(FILE *out, const lql_selector *selector,
+                                      lql_error *error) {
   const char *key;
-  if (lonejson_writer_begin_object(writer, error) != LONEJSON_STATUS_OK) {
-    return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+  lql_status status;
+  status = selector_json_putc(out, '{', error);
+  if (status != LQL_STATUS_OK) {
+    return status;
   }
   if (selector != NULL) {
     key = NULL;
@@ -1053,25 +1179,26 @@ static lonejson_status write_selector_json(lonejson_writer *writer,
       break;
     }
     if (key != NULL) {
-      if (writer_key(writer, key, error) != LONEJSON_STATUS_OK) {
-        return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+      status = selector_json_key(out, key, error);
+      if (status != LQL_STATUS_OK) {
+        return status;
       }
       switch (selector->kind) {
       case LQL_SELECTOR_KIND_AND:
       case LQL_SELECTOR_KIND_OR:
-        if (write_selector_children_json(writer, selector, error) !=
-            LONEJSON_STATUS_OK) {
-          return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+        status = write_selector_children_json(out, selector, error);
+        if (status != LQL_STATUS_OK) {
+          return status;
         }
         break;
       case LQL_SELECTOR_KIND_NOT:
         if (selector->child_count == 0u) {
-          if (write_selector_json(writer, NULL, error) != LONEJSON_STATUS_OK) {
-            return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
-          }
-        } else if (write_selector_json(writer, &selector->children[0], error) !=
-                   LONEJSON_STATUS_OK) {
-          return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+          status = write_selector_json(out, NULL, error);
+        } else {
+          status = write_selector_json(out, &selector->children[0], error);
+        }
+        if (status != LQL_STATUS_OK) {
+          return status;
         }
         break;
       case LQL_SELECTOR_KIND_EQ:
@@ -1080,34 +1207,34 @@ static lonejson_status write_selector_json(lonejson_writer *writer,
       case LQL_SELECTOR_KIND_ICONTAINS:
       case LQL_SELECTOR_KIND_PREFIX:
       case LQL_SELECTOR_KIND_IPREFIX:
-        if (write_string_predicate_json(writer, selector, error) !=
-            LONEJSON_STATUS_OK) {
-          return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+        status = write_string_predicate_json(out, selector, error);
+        if (status != LQL_STATUS_OK) {
+          return status;
         }
         break;
       case LQL_SELECTOR_KIND_RANGE:
-        if (write_range_predicate_json(writer, selector, error) !=
-            LONEJSON_STATUS_OK) {
-          return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+        status = write_range_predicate_json(out, selector, error);
+        if (status != LQL_STATUS_OK) {
+          return status;
         }
         break;
       case LQL_SELECTOR_KIND_DATE:
-        if (write_date_predicate_json(writer, selector, error) !=
-            LONEJSON_STATUS_OK) {
-          return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+        status = write_date_predicate_json(out, selector, error);
+        if (status != LQL_STATUS_OK) {
+          return status;
         }
         break;
       case LQL_SELECTOR_KIND_IN:
-        if (write_in_predicate_json(writer, selector, error) !=
-            LONEJSON_STATUS_OK) {
-          return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+        status = write_in_predicate_json(out, selector, error);
+        if (status != LQL_STATUS_OK) {
+          return status;
         }
         break;
       case LQL_SELECTOR_KIND_EXISTS:
-        if (lonejson_writer_string(writer, selector->field,
-                                   strlen(selector->field),
-                                   error) != LONEJSON_STATUS_OK) {
-          return error == NULL ? LONEJSON_STATUS_INTERNAL_ERROR : error->code;
+        status = selector_json_string(out, selector->field,
+                                      strlen(selector->field), error);
+        if (status != LQL_STATUS_OK) {
+          return status;
         }
         break;
       case LQL_SELECTOR_KIND_ALL:
@@ -1115,46 +1242,25 @@ static lonejson_status write_selector_json(lonejson_writer *writer,
       }
     }
   }
-  return lonejson_writer_end_object(writer, error);
+  return selector_json_putc(out, '}', error);
 }
 
 static lql_status selector_write_json_method(lql *self,
                                              const lql_selector *selector,
                                              FILE *out, lql_error *error) {
-  lonejson *runtime;
-  lonejson_error lj_error;
-  lonejson_writer writer;
-  lonejson_status st;
-  int writer_ready;
+  lql_status status;
+  (void)self;
   if (out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "output file required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  runtime = lql_lonejson_new(self, &lj_error);
-  if (runtime == NULL) {
-    lql_set_error(error, LQL_STATUS_NO_MEMORY, lj_error.message);
-    return LQL_STATUS_NO_MEMORY;
+  status = write_selector_json(out, selector == NULL ? NULL : selector, error);
+  if (status != LQL_STATUS_OK) {
+    return status;
   }
-  writer_ready = 0;
-  st = lonejson_writer_init_sink(runtime, &writer, selector_file_sink, out,
-                                 &lj_error);
-  if (st == LONEJSON_STATUS_OK) {
-    writer_ready = 1;
-    st = write_selector_json(&writer, selector == NULL ? NULL : selector,
-                             &lj_error);
-  }
-  if (st == LONEJSON_STATUS_OK) {
-    st = lonejson_writer_finish(&writer, &lj_error);
-  }
-  if (writer_ready) {
-    lonejson_writer_cleanup(&writer);
-  }
-  lonejson_free(runtime);
-  if (st != LONEJSON_STATUS_OK) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR,
-                  lj_error.message[0] == '\0' ? "selector JSON write failed"
-                                              : lj_error.message);
-    return LQL_STATUS_JSON_ERROR;
+  if (fflush(out) != 0) {
+    lql_set_error(error, LQL_STATUS_IO_ERROR, "selector JSON write failed");
+    return LQL_STATUS_IO_ERROR;
   }
   return LQL_STATUS_OK;
 }
