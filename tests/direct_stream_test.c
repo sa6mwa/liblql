@@ -856,6 +856,18 @@ static int run_mutation_output(lql *ctx) {
   static const char *const direct_set[] = {"/bench/touched=true"};
   static const char direct_set_output[] =
       "{\"status\":\"open\",\"n\":1,\"bench\":{\"touched\":true}}\n";
+  static const char nested_set_input[] =
+      "{\"status\":\"open\",\"bench\":{\"old\":1}}\n";
+  static const char nested_set_output[] =
+      "{\"status\":\"open\",\"bench\":{\"old\":1,\"touched\":true}}\n";
+  static const char nested_replace_input[] =
+      "{\"status\":\"open\",\"bench\":{\"touched\":false,\"old\":1}}\n";
+  static const char nested_replace_output[] =
+      "{\"status\":\"open\",\"bench\":{\"touched\":true,\"old\":1}}\n";
+  static const char nested_scalar_input[] =
+      "{\"status\":\"open\",\"bench\":1}\n";
+  static const char nested_scalar_output[] =
+      "{\"status\":\"open\",\"bench\":{\"touched\":true}}\n";
   static const char *const top_set[] = {"/processed=true"};
   static const char top_set_output[] =
       "{\"status\":\"open\",\"n\":1,\"processed\":true}\n";
@@ -1069,6 +1081,53 @@ static int run_mutation_output(lql *ctx) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)nested_set_input;
+  reader.len = sizeof(nested_set_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(nested_set_output) - 1u ||
+      memcmp(writer.data, nested_set_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)nested_replace_input;
+  reader.len = sizeof(nested_replace_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(nested_replace_output) - 1u ||
+      memcmp(writer.data, nested_replace_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)nested_scalar_input;
+  reader.len = sizeof(nested_scalar_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(nested_scalar_output) - 1u ||
+      memcmp(writer.data, nested_scalar_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  request.reader_user = &reader;
   ctx->mutation_destroy(ctx, mutation);
   mutation = NULL;
   if (ctx->mutation_parse(ctx, ordered, 3u, &mutation, &error) !=

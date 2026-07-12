@@ -438,6 +438,10 @@ static const char *const *mutations_for(const char *selector_name,
     *count = 3u;
     return top_multi;
   }
+  if (strcmp(selector_name, "eq_status_open_nested_set") == 0) {
+    *count = 1u;
+    return fallback;
+  }
   if (strstr(expr, "/voucher/lines/10/") != NULL) {
     static const char *const voucher[] = {"/voucher/lines/10/bench=true"};
     *count = 1u;
