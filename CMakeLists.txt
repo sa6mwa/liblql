@@ -41,7 +41,8 @@ add_library(lql_common OBJECT
   src/lql_selector.c
   src/lql_stream.c
   src/lql_stream_flat_eq.c
-  src/lql_temporal.c)
+  src/lql_temporal.c
+  src/lql_unicode_lower.c)
 set_target_properties(lql_common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(lql_common PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"

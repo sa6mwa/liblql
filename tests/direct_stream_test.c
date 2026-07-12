@@ -352,6 +352,16 @@ static int run_mapped_string_predicates(lql *ctx) {
                     1u)) {
     return 1;
   }
+  if (run_selection(ctx, "icontains{f=/msg,v=\303\245}",
+                    "{\"msg\":\"\303\205ngstr\303\266m\"}\n"
+                    "{\"msg\":\"other\"}\n",
+                    2u, 1u)) {
+    return 101;
+  }
+  if (run_selection(ctx, "icontains{f=/msg,v=k}",
+                    "{\"msg\":\"\342\204\252ey\"}\n", 1u, 1u)) {
+    return 102;
+  }
   if (run_selection(ctx, "prefix{f=/service,v=Auth}", input, 3u, 2u)) {
     return 2;
   }

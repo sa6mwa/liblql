@@ -1,17 +1,21 @@
 #include "lql_internal.h"
 #include "lql_json_scan.h"
+#include "lql_unicode_lower.h"
 
 #include <limits.h>
 #include <string.h>
 
 #define LQL_FLAT_EQ_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
 #define LQL_FLAT_CONTAINS_NEEDLE_MAX 256u
+#define LQL_FLAT_ICONTAINS_NEEDLE_MAX (LQL_FLAT_CONTAINS_NEEDLE_MAX * 2u)
 
 typedef struct lql_flat_eq_program {
   lql_json_flat_eq_term terms[LQL_FLAT_EQ_TERM_CAPACITY];
   const lql_selector *selectors[LQL_FLAT_EQ_TERM_CAPACITY];
   size_t contains_failures[LQL_FLAT_EQ_TERM_CAPACITY]
-                          [LQL_FLAT_CONTAINS_NEEDLE_MAX];
+                          [LQL_FLAT_ICONTAINS_NEEDLE_MAX];
+  char icontains_needles[LQL_FLAT_EQ_TERM_CAPACITY]
+                        [LQL_FLAT_ICONTAINS_NEEDLE_MAX];
   size_t term_count;
   int stop_matching_on_hit;
 } lql_flat_eq_program;
@@ -144,7 +148,8 @@ static int lql_flat_eq_contains_failure(lql_flat_eq_program *program,
   size_t i;
   size_t matched;
   if (program == NULL || term == NULL || term->value == NULL ||
-      term->value_len == 0u || term->value_len > LQL_FLAT_CONTAINS_NEEDLE_MAX ||
+      term->value_len == 0u ||
+      term->value_len > LQL_FLAT_ICONTAINS_NEEDLE_MAX ||
       program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
     return 0;
   }
@@ -172,7 +177,8 @@ static int lql_flat_eq_append_contains(lql_flat_eq_program *program,
                                        unsigned long path_object_wildcards,
                                        unsigned long path_array_wildcards,
                                        unsigned long path_any_wildcards,
-                                       unsigned long path_recursive_segments) {
+                                       unsigned long path_recursive_segments,
+                                       int ignore_case) {
   size_t count;
   size_t i;
   if (program == NULL || selector == NULL || field == NULL) {
@@ -208,11 +214,22 @@ static int lql_flat_eq_append_contains(lql_flat_eq_program *program,
       return 0;
     }
     term = &program->terms[program->term_count];
-    term->kind = LQL_JSON_FLAT_TERM_CONTAINS;
+    term->kind = ignore_case ? LQL_JSON_FLAT_TERM_ICONTAINS
+                             : LQL_JSON_FLAT_TERM_CONTAINS;
     term->field = field + 1;
     term->field_len = first_segment_len;
-    term->value = value;
-    term->value_len = value_len;
+    if (ignore_case) {
+      if (!lql_unicode_utf8_lower(
+              value, value_len, program->icontains_needles[program->term_count],
+              LQL_FLAT_ICONTAINS_NEEDLE_MAX, &term->value_len) ||
+          term->value_len == 0u) {
+        return 0;
+      }
+      term->value = program->icontains_needles[program->term_count];
+    } else {
+      term->value = value;
+      term->value_len = value_len;
+    }
     term->path = field;
     term->path_len = path_len;
     term->path_segment_count = path_segment_count;
@@ -297,7 +314,8 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     }
     return 1;
   }
-  if (selector->kind == LQL_SELECTOR_KIND_CONTAINS) {
+  if (selector->kind == LQL_SELECTOR_KIND_CONTAINS ||
+      selector->kind == LQL_SELECTOR_KIND_ICONTAINS) {
     if (selector->field == NULL) {
       return 0;
     }
@@ -312,7 +330,8 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     return lql_flat_eq_append_contains(
         program, selector, field, path_len, path_segment_count,
         first_segment_len, path_array_segments, path_object_wildcards,
-        path_array_wildcards, path_any_wildcards, path_recursive_segments);
+        path_array_wildcards, path_any_wildcards, path_recursive_segments,
+        selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case);
   }
   if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
        selector->kind != LQL_SELECTOR_KIND_EXISTS &&

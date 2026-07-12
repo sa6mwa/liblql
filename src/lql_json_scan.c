@@ -1,4 +1,5 @@
 #include "lql_json_scan.h"
+#include "lql_unicode_lower.h"
 
 #include <limits.h>
 #include <string.h>
@@ -29,6 +30,10 @@ typedef struct lql_json_scan {
   unsigned long match_active;
   unsigned long match_failed;
   unsigned long match_contains;
+  unsigned long match_icontains;
+  unsigned char match_case_bytes[4];
+  size_t match_case_len;
+  size_t match_case_need;
   size_t match_pos[LQL_JSON_FLAT_TERM_CAPACITY];
   size_t match_term_segment[LQL_JSON_FLAT_TERM_CAPACITY];
   size_t key_term_segment[LQL_JSON_FLAT_TERM_CAPACITY];
@@ -99,12 +104,17 @@ static void lql_json_match_start(lql_json_scan *scan, unsigned long active,
   scan->match_active = active;
   scan->match_failed = 0ul;
   scan->match_contains = 0ul;
+  scan->match_icontains = 0ul;
+  scan->match_case_len = 0u;
+  scan->match_case_need = 0u;
   scan->match_key = key;
   scan->match_path_segment = path_segment;
   for (i = 0u; i < scan->flat_term_count; ++i) {
     if ((active & (1ul << i)) != 0ul) {
       scan->match_pos[i] = 0u;
       scan->match_term_segment[i] = path_segment;
+      if (!key && scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_ICONTAINS)
+        scan->match_icontains |= 1ul << i;
     }
   }
 }
@@ -218,6 +228,60 @@ static void lql_json_match_start_key(lql_json_scan *scan,
   }
 }
 
+static void lql_json_match_icontains_bytes(lql_json_scan *scan,
+                                           const unsigned char *data,
+                                           size_t len) {
+  size_t i;
+  size_t offset;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    const lql_json_flat_eq_term *term;
+    unsigned long bit;
+    size_t pos;
+    bit = 1ul << i;
+    term = &scan->flat_terms[i];
+    if ((scan->match_active & bit) == 0ul || scan->match_key ||
+        term->kind != LQL_JSON_FLAT_TERM_ICONTAINS ||
+        term->contains_failure == NULL) continue;
+    pos = scan->match_pos[i];
+    for (offset = 0u; offset < len; ++offset) {
+      while (pos != 0u && data[offset] != (unsigned char)term->value[pos])
+        pos = term->contains_failure[pos - 1u];
+      if (data[offset] == (unsigned char)term->value[pos]) ++pos;
+      if (pos == term->value_len) {
+        scan->match_contains |= bit;
+        pos = term->contains_failure[pos - 1u];
+      }
+    }
+    scan->match_pos[i] = pos;
+  }
+}
+
+static void lql_json_match_icontains_byte(lql_json_scan *scan,
+                                          unsigned char value) {
+  unsigned long rune;
+  unsigned char lower[4];
+  size_t len;
+  if (scan->match_case_need == 0u) {
+    scan->match_case_need = value < 0x80u ? 1u :
+                            value < 0xe0u ? 2u : value < 0xf0u ? 3u : 4u;
+    scan->match_case_len = 0u;
+  }
+  scan->match_case_bytes[scan->match_case_len++] = value;
+  if (scan->match_case_len != scan->match_case_need) return;
+  if (lql_unicode_utf8_decode_one(scan->match_case_bytes, scan->match_case_len,
+                                  &rune)) {
+    if (rune >= (unsigned long)'A' && rune <= (unsigned long)'Z') {
+      rune += (unsigned long)'a' - (unsigned long)'A';
+    } else if (rune >= 0x80ul) {
+      rune = lql_unicode_simple_lower(rune);
+    }
+    len = lql_unicode_utf8_encode(rune, lower);
+    if (len != 0u) lql_json_match_icontains_bytes(scan, lower, len);
+  }
+  scan->match_case_len = 0u;
+  scan->match_case_need = 0u;
+}
+
 static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
   size_t i;
   if (scan->match_active == 0ul) {
@@ -234,6 +298,7 @@ static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
       continue;
     }
     term = &scan->flat_terms[i];
+    if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_ICONTAINS) continue;
     if (scan->match_key) {
       if (scan->match_term_segment[i] == 0u) {
         target = term->field;
@@ -278,6 +343,7 @@ static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
       ++scan->match_pos[i];
     }
   }
+  if (scan->match_icontains != 0ul) lql_json_match_icontains_byte(scan, value);
 }
 
 static unsigned long lql_json_match_complete(const lql_json_scan *scan) {
@@ -305,7 +371,9 @@ static unsigned long lql_json_match_complete(const lql_json_scan *scan) {
     } else {
       target_len = term->value_len;
     }
-    if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_CONTAINS &&
+    if (!scan->match_key &&
+        (term->kind == LQL_JSON_FLAT_TERM_CONTAINS ||
+         term->kind == LQL_JSON_FLAT_TERM_ICONTAINS) &&
         (scan->match_contains & bit) != 0ul) {
       matches |= bit;
       continue;
@@ -929,7 +997,8 @@ static lql_status lql_json_object(lql_json_scan *scan) {
                                    scan->key_term_segment[i]) &&
             (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EQ ||
              scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_PREFIX ||
-             scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_CONTAINS)) {
+             scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_CONTAINS ||
+             scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_ICONTAINS)) {
           eq_terms |= bit;
         }
       }
