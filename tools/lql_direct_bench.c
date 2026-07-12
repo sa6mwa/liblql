@@ -284,6 +284,10 @@ static int mode_is_mutation(const char *mode) {
          strcmp(mode, "mutate_source_selector") == 0;
 }
 
+static int mode_is_project_mutation(const char *mode) {
+  return strcmp(mode, "project_mutate_file_selector") == 0;
+}
+
 static int mode_is_supported(const char *mode) {
   return strcmp(mode, "decision_only_selector") == 0 ||
          strcmp(mode, "reuse_selector") == 0 ||
@@ -292,14 +296,14 @@ static int mode_is_supported(const char *mode) {
          strcmp(mode, "plus_value_selector") == 0 ||
          strcmp(mode, "plus_value_source_selector") == 0 ||
          strcmp(mode, "plus_value_openjson_selector") == 0 ||
-         mode_is_projection(mode) ||
+         mode_is_projection(mode) || mode_is_project_mutation(mode) ||
          strcmp(mode, "mutate_file_selector") == 0 ||
          strcmp(mode, "mutate_source_selector") == 0;
 }
 
 static unsigned long benchmark_payload_bytes(const char *mode,
                                              const bench_writer *writer) {
-  if (mode_is_projection(mode)) {
+  if (mode_is_projection(mode) || mode_is_project_mutation(mode)) {
     /*
      * The direct writer emits NDJSON.  The Go oracle's projection counter is
      * ProjectFields' JSON value size, before its enclosing stream delimiter.
@@ -510,6 +514,10 @@ static int run_once(FILE *file, lql *ctx, lql_selector *selector,
   } else if (mode_is_mutation(mode)) {
     request.mutation = mutation;
     request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  } else if (mode_is_project_mutation(mode)) {
+    request.projection = projection;
+    request.mutation = mutation;
+    request.output_mode = LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION;
   }
   status = lql_stream_execute(ctx, &request, result, error);
   if (temporary != NULL) {
@@ -597,7 +605,8 @@ int main(int argc, char **argv) {
   unsupported = 0;
   unsupported_reason = "";
   if (!(mode_is_decision(mode) || mode_is_selected(mode) ||
-        mode_is_projection(mode) || mode_is_mutation(mode))) {
+        mode_is_projection(mode) || mode_is_mutation(mode) ||
+        mode_is_project_mutation(mode))) {
     unsupported = 1;
     unsupported_reason =
         "mode is not implemented by the direct benchmark runner";
@@ -616,10 +625,10 @@ int main(int argc, char **argv) {
       (lql_new(&ctx, &error) != LQL_STATUS_OK ||
        (strcmp(mode, "reparse_selector_each_run") != 0 &&
         ctx->selector_parse(ctx, expr, &selector, &error) != LQL_STATUS_OK) ||
-       (mode_is_projection(mode) &&
+       ((mode_is_projection(mode) || mode_is_project_mutation(mode)) &&
         ctx->projection_parse(ctx, projection_paths, 1u, &projection, &error) !=
             LQL_STATUS_OK) ||
-       (mode_is_mutation(mode) &&
+       ((mode_is_mutation(mode) || mode_is_project_mutation(mode)) &&
         ((mutations = mutations_for(selector_name, expr, &mutation_count)),
          ctx->mutation_parse(ctx, mutations, mutation_count, &mutation,
                              &error) != LQL_STATUS_OK)))) {
@@ -679,15 +688,19 @@ int main(int argc, char **argv) {
           (unsigned long)result.records_matched);
   fprintf(stdout,
           ",\"payloads\":%lu,\"payload_bytes\":%lu,\"payload_source_type\":",
-          mode_is_selected(mode) || mode_is_projection(mode)
+          mode_is_selected(mode) || mode_is_projection(mode) ||
+                  mode_is_project_mutation(mode)
               ? (unsigned long)writer.records
               : 0ul,
-          mode_is_selected(mode) || mode_is_projection(mode)
+          mode_is_selected(mode) || mode_is_projection(mode) ||
+                  mode_is_project_mutation(mode)
               ? benchmark_payload_bytes(mode, &writer)
               : 0ul);
-  json_string(mode_is_selected(mode)
-                  ? "callback_payload"
-                  : (mode_is_projection(mode) ? "projection" : "none"));
+  json_string(mode_is_selected(mode) ? "callback_payload"
+                                     : ((mode_is_projection(mode) ||
+                                         mode_is_project_mutation(mode))
+                                            ? "projection"
+                                            : "none"));
   fputs(",\"fixture_sha256\":", stdout);
   json_string(fixture_hash);
   if (unsupported) {

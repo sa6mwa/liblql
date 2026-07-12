@@ -33,6 +33,8 @@ typedef struct lql_flat_eq_state {
   const lql_stream_request *request;
   lql_stream_result *result;
   const lql_flat_eq_program *program;
+  lql_stream_writer_fn writer;
+  void *writer_user;
 } lql_flat_eq_state;
 
 static int lql_flat_eq_literal_kind(lql_selector_literal_kind literal_kind,
@@ -446,16 +448,16 @@ static lql_status lql_flat_eq_emit(lql_flat_eq_state *state,
                                    lql_error *error) {
   lql_status status;
   static const char newline[] = "\n";
-  status = lql_json_spool_write_to(spool, state->request->writer,
-                                   state->request->writer_user, error);
+  status =
+      lql_json_spool_write_to(spool, state->writer, state->writer_user, error);
   if (status != LQL_STATUS_OK) {
     if (error != NULL && error->code == LQL_STATUS_OK) {
       lql_set_error(error, status, "stream writer failed");
     }
     return status;
   }
-  status = state->request->writer(state->request->writer_user, newline,
-                                  sizeof(newline) - 1u, error);
+  status =
+      state->writer(state->writer_user, newline, sizeof(newline) - 1u, error);
   if (status != LQL_STATUS_OK && error != NULL &&
       error->code == LQL_STATUS_OK) {
     lql_set_error(error, status, "stream writer failed");
@@ -466,8 +468,7 @@ static lql_status lql_flat_eq_emit(lql_flat_eq_state *state,
 static lql_status lql_flat_eq_write(lql_flat_eq_state *state, const void *data,
                                     size_t len, lql_error *error) {
   lql_status status;
-  status =
-      state->request->writer(state->request->writer_user, data, len, error);
+  status = state->writer(state->writer_user, data, len, error);
   if (status != LQL_STATUS_OK && error != NULL && error->code == LQL_STATUS_OK)
     lql_set_error(error, status, "stream writer failed");
   return status;
@@ -586,6 +587,11 @@ static lql_status lql_flat_eq_spool_byte(const lql_json_spool *spool,
                                          size_t offset, unsigned char *out,
                                          lql_error *error) {
   return lql_json_spool_byte_at(spool, offset, out, error);
+}
+
+static lql_status lql_flat_eq_spool_writer(void *user, const void *data,
+                                           size_t len, lql_error *error) {
+  return lql_json_spool_append((lql_json_spool *)user, data, len, error);
 }
 
 static lql_status lql_flat_eq_skip_string(const lql_json_spool *spool,
@@ -916,16 +922,16 @@ lql_flat_eq_mutation_nested_set(lql_flat_eq_state *state,
         (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
       return status;
     if (same_key) {
-      status = lql_json_spool_write_slice(
-          spool, key_start, key_end - key_start + 1u, state->request->writer,
-          state->request->writer_user, error);
+      status =
+          lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
+                                     state->writer, state->writer_user, error);
       if (status == LQL_STATUS_OK)
         status = lql_flat_eq_mutation_value(state, action, error);
       found = 1;
     } else {
       status = lql_json_spool_write_slice(
-          spool, key_start, child_value_end - key_start, state->request->writer,
-          state->request->writer_user, error);
+          spool, key_start, child_value_end - key_start, state->writer,
+          state->writer_user, error);
     }
     if (status != LQL_STATUS_OK)
       return status;
@@ -970,9 +976,9 @@ static lql_status lql_flat_eq_mutation_nested_remove(
   if (status != LQL_STATUS_OK)
     return status;
   if (ch != (unsigned char)'{') {
-    return lql_json_spool_write_slice(
-        spool, value_start, value_end - value_start, state->request->writer,
-        state->request->writer_user, error);
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
   }
   status = lql_flat_eq_write(state, "{", 1u, error);
   if (status != LQL_STATUS_OK)
@@ -1010,8 +1016,8 @@ static lql_status lql_flat_eq_mutation_nested_remove(
           (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
         return status;
       status = lql_json_spool_write_slice(
-          spool, key_start, child_value_end - key_start, state->request->writer,
-          state->request->writer_user, error);
+          spool, key_start, child_value_end - key_start, state->writer,
+          state->writer_user, error);
       if (status != LQL_STATUS_OK)
         return status;
       first = 0;
@@ -1150,9 +1156,9 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
       if (!first &&
           (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
         return status;
-      status = lql_json_spool_write_slice(
-          spool, key_start, key_end - key_start + 1u, state->request->writer,
-          state->request->writer_user, error);
+      status =
+          lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
+                                     state->writer, state->writer_user, error);
       if (status == LQL_STATUS_OK) {
         if (action->kind == LQL_MUTATION_INCREMENT) {
           status = lql_flat_eq_mutation_increment(
@@ -1173,9 +1179,9 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
       if (!first &&
           (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
         return status;
-      status = lql_json_spool_write_slice(
-          spool, key_start, value_end - key_start, state->request->writer,
-          state->request->writer_user, error);
+      status =
+          lql_json_spool_write_slice(spool, key_start, value_end - key_start,
+                                     state->writer, state->writer_user, error);
     }
     if (status != LQL_STATUS_OK)
       return status;
@@ -1261,8 +1267,8 @@ static lql_status lql_flat_eq_projection_object(lql_flat_eq_state *state,
     if (key->segment_count == depth + 1u) {
       status = lql_json_spool_write_slice(
           spool, state->program->capture_spans[selected].offset,
-          state->program->capture_spans[selected].len, state->request->writer,
-          state->request->writer_user, error);
+          state->program->capture_spans[selected].len, state->writer,
+          state->writer_user, error);
     } else {
       status = lql_flat_eq_projection_node(state, spool, selected, depth + 1u,
                                            error);
@@ -1330,8 +1336,8 @@ static lql_status lql_flat_eq_projection_array(lql_flat_eq_state *state,
     if (state->program->capture_keys[selected].segment_count == depth + 1u) {
       status = lql_json_spool_write_slice(
           spool, state->program->capture_spans[selected].offset,
-          state->program->capture_spans[selected].len, state->request->writer,
-          state->request->writer_user, error);
+          state->program->capture_spans[selected].len, state->writer,
+          state->writer_user, error);
     } else {
       status = lql_flat_eq_projection_node(state, spool, selected, depth + 1u,
                                            error);
@@ -1356,19 +1362,46 @@ static lql_status lql_flat_eq_projection_node(lql_flat_eq_state *state,
 static lql_status lql_flat_eq_projection_emit(lql_flat_eq_state *state,
                                               const lql_json_spool *spool,
                                               lql_error *error) {
-  size_t i;
   lql_status status;
-  if (state->request->projection == NULL || spool == NULL)
-    return LQL_STATUS_OK;
-  for (i = 0u; i < state->program->capture_key_count; ++i)
-    if (state->program->capture_spans[i].found)
-      break;
-  if (i == state->program->capture_key_count)
-    return LQL_STATUS_OK;
   status = lql_flat_eq_projection_object(state, spool, 0u, 0u, error);
   if (status != LQL_STATUS_OK)
     return status;
   return lql_flat_eq_write(state, "\n", 1u, error);
+}
+
+static int lql_flat_eq_projection_found(const lql_flat_eq_state *state,
+                                        const lql_json_spool *spool) {
+  size_t i;
+  if (state == NULL || state->request->projection == NULL || spool == NULL)
+    return 0;
+  for (i = 0u; i < state->program->capture_key_count; ++i)
+    if (state->program->capture_spans[i].found)
+      return 1;
+  return 0;
+}
+
+static lql_status lql_flat_eq_projection_then_mutation_emit(
+    lql_flat_eq_state *state, const lql_json_spool *spool, lql_error *error) {
+  lql_json_spool projected;
+  lql_stream_writer_fn saved_writer;
+  void *saved_writer_user;
+  lql_status status;
+  if (!lql_flat_eq_projection_found(state, spool))
+    return LQL_STATUS_OK;
+  status = lql_json_spool_init(&projected, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  saved_writer = state->writer;
+  saved_writer_user = state->writer_user;
+  state->writer = lql_flat_eq_spool_writer;
+  state->writer_user = &projected;
+  status = lql_flat_eq_projection_object(state, spool, 0u, 0u, error);
+  state->writer = saved_writer;
+  state->writer_user = saved_writer_user;
+  if (status == LQL_STATUS_OK)
+    status = lql_flat_eq_mutation_emit(state, &projected, error);
+  lql_json_spool_cleanup(&projected);
+  return status;
 }
 
 static int
@@ -1490,9 +1523,11 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
                     "projection input must be a JSON object");
       return LQL_STATUS_JSON_ERROR;
     }
-    status = lql_flat_eq_projection_emit(state, spool, error);
-    if (status != LQL_STATUS_OK)
-      return status;
+    if (lql_flat_eq_projection_found(state, spool)) {
+      status = lql_flat_eq_projection_emit(state, spool, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
   }
   if (state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION && matched) {
     if (!root_is_object) {
@@ -1508,6 +1543,28 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
     if (spool == NULL) {
       lql_set_error(error, LQL_STATUS_CALLBACK_ERROR,
                     "mutation passthrough capture is unavailable");
+      return LQL_STATUS_CALLBACK_ERROR;
+    }
+    status = lql_flat_eq_emit(state, spool, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+  } else if (state->request->output_mode ==
+                 LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION &&
+             matched) {
+    if (!root_is_object) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "combined input must be a JSON object");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    status = lql_flat_eq_projection_then_mutation_emit(state, spool, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+  } else if (state->request->output_mode ==
+                 LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION &&
+             !state->request->matched_only) {
+    if (spool == NULL) {
+      lql_set_error(error, LQL_STATUS_CALLBACK_ERROR,
+                    "combined passthrough capture is unavailable");
       return LQL_STATUS_CALLBACK_ERROR;
     }
     status = lql_flat_eq_emit(state, spool, error);
@@ -1530,14 +1587,19 @@ static int lql_flat_eq_eligible(const lql_stream_request *request) {
       (request->output_mode != LQL_STREAM_OUTPUT_DECISION_ONLY &&
        request->output_mode != LQL_STREAM_OUTPUT_SELECTED_RECORD &&
        request->output_mode != LQL_STREAM_OUTPUT_PROJECTION &&
-       request->output_mode != LQL_STREAM_OUTPUT_MUTATION)) {
+       request->output_mode != LQL_STREAM_OUTPUT_MUTATION &&
+       request->output_mode != LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION)) {
     return 0;
   }
   if (request->output_mode != LQL_STREAM_OUTPUT_MUTATION &&
+      request->output_mode != LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION &&
       request->mutation != NULL)
     return 0;
   if (request->output_mode == LQL_STREAM_OUTPUT_MUTATION &&
       request->projection != NULL)
+    return 0;
+  if (request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION &&
+      (request->projection == NULL || request->mutation == NULL))
     return 0;
   return 1;
 }
@@ -1625,11 +1687,13 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   if (!lql_flat_eq_append(&program, request->selector)) {
     return LQL_STATUS_OK;
   }
-  if (request->output_mode == LQL_STREAM_OUTPUT_PROJECTION &&
+  if ((request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
+       request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION) &&
       !lql_flat_eq_projection_append(&program, request->projection)) {
     return LQL_STATUS_OK;
   }
-  if (request->output_mode == LQL_STREAM_OUTPUT_MUTATION &&
+  if ((request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
+       request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION) &&
       !lql_flat_eq_mutation_append(&program, request->mutation)) {
     return LQL_STATUS_OK;
   }
@@ -1640,7 +1704,8 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   capture = request->on_value != NULL ||
             request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
             request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
-            request->output_mode == LQL_STREAM_OUTPUT_MUTATION;
+            request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
+            request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION;
   memset(&spool, 0, sizeof(spool));
   if (capture) {
     status = lql_json_spool_init(&spool, error);
@@ -1652,6 +1717,8 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   state.request = request;
   state.result = result;
   state.program = &program;
+  state.writer = request->writer;
+  state.writer_user = request->writer_user;
   memset(&scan_request, 0, sizeof(scan_request));
   scan_request.reader = request->reader;
   scan_request.reader_user = request->reader_user;

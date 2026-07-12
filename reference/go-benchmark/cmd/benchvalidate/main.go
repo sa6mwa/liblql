@@ -216,7 +216,8 @@ func validateRecord(line int, rec record, opts validateOptions) error {
 		"plus_value_openjson_plan", "mutate_file_selector",
 		"mutate_file_plan", "mutate_source_selector",
 		"mutate_file_backed_text", "mutate_file_backed_base64",
-		"project_file_selector", "project_source_selector":
+		"project_file_selector", "project_source_selector",
+		"project_mutate_file_selector":
 	default:
 		return fmt.Errorf("line %d: unsupported mode %q", line, rec.Mode)
 	}

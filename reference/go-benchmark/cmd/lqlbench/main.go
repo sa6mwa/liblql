@@ -169,7 +169,7 @@ func main() {
 	payloadSourceType := "none"
 	if isPlusValueMode(mode) {
 		payloadSourceType = "callback_payload"
-	} else if isProjectionMode(mode) {
+	} else if isProjectionMode(mode) || isProjectMutationMode(mode) {
 		payloadSourceType = "projection"
 	}
 	bytesPerIter := info.Size()
@@ -247,6 +247,9 @@ func benchSampleCount(submode string) int {
 }
 
 func runBenchmark(file *os.File, sel lql.Selector, selectorName string, expr string, mode string, projectionPath string) (lql.QueryStreamResult, int64, int64, error) {
+	if isProjectMutationMode(mode) {
+		return runProjectMutation(file, sel, selectorName, expr, projectionPath)
+	}
 	if isMutationMode(mode) {
 		return runMutation(file, sel, selectorName, expr, mode)
 	}
@@ -314,6 +317,84 @@ func runMutation(file *os.File, sel lql.Selector, selectorName string, expr stri
 		return lql.QueryStreamResult{}, 0, 0, err
 	}
 	return result.Query, 0, 0, nil
+}
+
+func runProjectMutation(file *os.File, sel lql.Selector, selectorName string, expr string, projectionPath string) (lql.QueryStreamResult, int64, int64, error) {
+	if _, err := file.Seek(0, 0); err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	paths, err := lql.ParseProjectionPaths([]string{projectionPath})
+	if err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	plan, err := lql.NewProjectionPlan(paths)
+	if err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	parsed, err := lql.ParseMutations(benchmarkMutationsForSelector(selectorName, expr), time.Unix(1700000000, 0))
+	if err != nil {
+		return lql.QueryStreamResult{}, 0, 0, err
+	}
+	payloads := int64(0)
+	payloadBytes := int64(0)
+	request := lql.QueryStreamRequest{
+		Ctx:           context.Background(),
+		Reader:        file,
+		Selector:      sel,
+		Mode:          lql.QueryDecisionPlusValue,
+		MatchedOnly:   true,
+		CapturePolicy: lql.QueryCaptureMatchesOnlyBestEffort,
+		OnValue: func(value lql.QueryStreamValue) error {
+			var reader io.Reader
+			var closer io.Closer
+			var projected bytes.Buffer
+			var mutated bytes.Buffer
+			if value.JSON != nil {
+				reader = bytes.NewReader(value.JSON)
+			} else if value.OpenJSON != nil {
+				rc, err := value.OpenJSON()
+				if err != nil {
+					return err
+				}
+				reader = rc
+				closer = rc
+			} else {
+				return fmt.Errorf("missing projection payload reader")
+			}
+			if closer != nil {
+				defer closer.Close()
+			}
+			result, err := lql.ProjectFields(lql.ProjectFieldsRequest{
+				Reader: reader,
+				Writer: &projected,
+				Plan:   plan,
+			})
+			if err != nil || !result.Found {
+				return err
+			}
+			mutatedResult, err := lql.QueryMutateStreamWithResult(lql.QueryMutateStreamRequest{
+				Ctx:        context.Background(),
+				Reader:     bytes.NewReader(projected.Bytes()),
+				Writer:     &mutated,
+				Mutations:  parsed,
+				MutateMode: lql.MutateModeAuto,
+			})
+			if err != nil {
+				return err
+			}
+			payloads += mutatedResult.Query.CandidatesMatched
+			if mutated.Len() != 0 {
+				size := int64(mutated.Len())
+				if bytes.HasSuffix(mutated.Bytes(), []byte{'\n'}) {
+					size--
+				}
+				payloadBytes += size
+			}
+			return nil
+		},
+	}
+	result, err := lql.QueryStreamWithResult(request)
+	return result, payloads, payloadBytes, err
 }
 
 func runFileBackedMutation(file *os.File, sel lql.Selector, mode string) (lql.QueryStreamResult, int64, int64, error) {
@@ -483,7 +564,8 @@ func isSupportedMode(mode string) bool {
 		mode == "mutate_file_backed_text" ||
 		mode == "mutate_file_backed_base64" ||
 		mode == "project_file_selector" ||
-		mode == "project_source_selector"
+		mode == "project_source_selector" ||
+		mode == "project_mutate_file_selector"
 }
 
 func isPlanMode(mode string) bool {
@@ -502,6 +584,10 @@ func isMutationMode(mode string) bool {
 func isProjectionMode(mode string) bool {
 	return mode == "project_file_selector" ||
 		mode == "project_source_selector"
+}
+
+func isProjectMutationMode(mode string) bool {
+	return mode == "project_mutate_file_selector"
 }
 
 func isPlusValueMode(mode string) bool {
