@@ -1234,6 +1234,15 @@ static size_t lql_json_plain_ascii_span(const unsigned char *data, size_t len) {
   unsigned long high;
   unsigned long control_offset;
   size_t offset;
+  if (len < sizeof(word)) {
+    offset = 0u;
+    while (offset < len && data[offset] != (unsigned char)'"' &&
+           data[offset] != (unsigned char)'\\' && data[offset] >= 0x20u &&
+           data[offset] < 0x80u) {
+      ++offset;
+    }
+    return offset;
+  }
   offset = 0u;
   ones = ~0ul / 255ul;
   high = ones * 128ul;
