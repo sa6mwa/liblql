@@ -1,0 +1,62 @@
+#!/bin/sh
+set -eu
+
+. scripts/scanner_parity_common.sh
+
+scanner_parity_init 'scanner parity matrix' build/scanner-parity-matrix.jsonl 3
+
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open '/status="open"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open '/status="open"' decision_only_source_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open '/status="open"' plus_value_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open '/status="open"' plus_value_source_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open '/status="open"' project_file_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open_top_set '/status="open"' mutate_file_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open_top_set '/status="open"' mutate_source_selector /id
+
+scanner_parity_run_row build/direct-probe/top-set-status-100k.ndjson top_set_status_100k \
+  eq_status_open_top_set_multi '/status="open"' mutate_file_selector /id
+scanner_parity_run_row build/direct-probe/top-remove-status-100k.ndjson top_remove_status_100k \
+  eq_status_open_top_remove '/status="open"' mutate_file_selector /id
+scanner_parity_run_row build/direct-probe/top-increment-code-100k.ndjson top_increment_code_100k \
+  eq_code_one_top_increment '/code=1' mutate_source_selector /id
+scanner_parity_run_row build/direct-probe/top-increment-code-100k.ndjson top_increment_code_100k \
+  eq_code_one_top_increment_multi '/code=1' mutate_file_selector /id
+scanner_parity_run_row build/direct-probe/top-multi-code-100k.ndjson top_multi_code_100k \
+  eq_code_one_top_multi '/code=1' mutate_file_selector /id
+
+scanner_parity_run_row build/direct-probe/nested-set-status-100k.ndjson nested_set_status_100k \
+  eq_status_open_nested_set '/status="open"' mutate_file_selector /id
+scanner_parity_run_row build/direct-probe/nested-increment-100k.ndjson nested_increment_100k \
+  eq_status_open_nested_increment '/status="open"' mutate_file_selector /id
+scanner_parity_run_row build/direct-probe/nested-remove-status-100k.ndjson nested_remove_status_100k \
+  eq_status_open_nested_remove '/status="open"' mutate_file_selector /id
+scanner_parity_run_row build/direct-probe/same-top-nested-increment-100k.ndjson same_top_nested_increment_100k \
+  eq_status_open_same_top_nested_increment '/status="open"' mutate_file_selector /id
+scanner_parity_run_row build/direct-probe/mixed-nested-code-100k.ndjson mixed_nested_code_100k \
+  eq_code_one_mixed_nested_multi '/code=1' mutate_file_selector /id
+
+scanner_parity_run_row build/direct-probe/project-mutate-status-100k.ndjson project_mutate_status_100k \
+  project_mutation_status '/status="open"' project_mutate_file_selector /id
+scanner_parity_run_row build/direct-probe/temporal-100k.ndjson temporal_100k \
+  date_window 'date{field=/timestamp,after=2026-03-05T10:28:21Z,before=2026-03-05T10:30:00Z}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/array-scalar-100k.ndjson array_scalar_100k \
+  array_scalar_indexed_eq '/values/1="B"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/array-scalar-100k.ndjson array_scalar_100k \
+  array_scalar_wildcard_eq '/values/[]="B"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/array-exists-100k.ndjson array_exists_100k \
+  array_exists_indexed 'exists{/values/1}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/range-code-100k.ndjson range_code_100k \
+  range_code 'range{field=/code,gte=10,lte=20}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/indexed-10k.ndjson indexed_10k \
+  indexed_eq '/items/1/sku="B"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/large-4x25m.ndjson large_4x25m \
+  eq_status_open_top_set '/status="open"' mutate_file_selector /id
+
+scanner_parity_validate

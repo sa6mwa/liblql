@@ -46,6 +46,11 @@ performance claim with profiling and paired Go/C benchmarks.
   must include warmup and steady-state Go/C records, forbid unsupported rows,
   validate Go/C counters for every emitted row, and enforce at least 1.0x
   C-vs-Go speedup on representative steady-state accepted paths.
+- `make scanner-parity-matrix` is the broader GCC-only accepted-row gate. It
+  extends smoke coverage across source/file callbacks, projection, mutation
+  families, temporal, array, range, indexed, and large-record cases. Rows that
+  are unsupported or below 1.0x are not accepted rows; profile and optimize
+  them before adding them to this gate.
 - `make scanner-profile-hotspots` is the bounded C profiling gate before
   performance-directed scanner/emitter changes. It profiles the currently
   tight GCC rows and writes perf reports under `build/scanner-profiles/`.
@@ -153,7 +158,8 @@ The required proof is cumulative:
 - direct reset gate and strict C89 warning-clean GCC builds;
 - scanner behavior tests and public receiver tests;
 - Go/C output parity and paired counters;
-- GCC focused benchmark gate for every accepted row, then the full matrix;
+- GCC focused benchmark gate for every accepted row, then the accepted-row
+  matrix;
 - Callgrind or equivalent leaf attribution for any hot-path optimization;
 - Massif live-heap gate for decision, callback capture, projection, mutation,
   sparse matches, 100 MiB records, and repeated execution;
