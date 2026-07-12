@@ -9,6 +9,8 @@ sh scripts/generate_direct_probe_fixture.sh \
   build/direct-probe/status-whitespace-100k.ndjson 100000 24 statusws
 sh scripts/generate_direct_probe_fixture.sh \
   build/direct-probe/realworld-100k.ndjson 100000 64 realworld
+sh scripts/generate_direct_probe_fixture.sh \
+  build/direct-probe/lockd-100k.ndjson 100000 64 lockd
 
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' decision_only_selector /id
@@ -118,6 +120,12 @@ scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
   realworld_contains_event_sparse 'contains{field=/event,value=sync}' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
   realworld_multi_clause_and '/component="edge",/event="session_sync",/active_idx=0,/tab_count=1,/code>=10' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/lockd-100k.ndjson lockd_100k \
+  lockd_session_sync '/event="session_sync"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/lockd-100k.ndjson lockd_100k \
+  lockd_tabs_update '/event="tabs_update"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/lockd-100k.ndjson lockd_100k \
+  lockd_write_event '/op="write"' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' mutate_file_selector /id
 
