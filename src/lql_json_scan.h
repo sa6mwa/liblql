@@ -28,7 +28,8 @@ typedef enum lql_json_flat_term_kind {
   LQL_JSON_FLAT_TERM_PREFIX = 2,
   LQL_JSON_FLAT_TERM_NUMBER_EQ = 3,
   LQL_JSON_FLAT_TERM_BOOL_EQ = 4,
-  LQL_JSON_FLAT_TERM_NULL_EQ = 5
+  LQL_JSON_FLAT_TERM_NULL_EQ = 5,
+  LQL_JSON_FLAT_TERM_CONTAINS = 6
 } lql_json_flat_term_kind;
 
 typedef struct lql_json_flat_eq_term {
@@ -46,6 +47,8 @@ typedef struct lql_json_flat_eq_term {
   unsigned long path_array_wildcards;
   unsigned long path_any_wildcards;
   unsigned long path_recursive_segments;
+  /* Per-execution KMP table for streaming string contains matching. */
+  size_t *contains_failure;
 } lql_json_flat_eq_term;
 
 typedef lql_status (*lql_json_flat_eq_record_fn)(

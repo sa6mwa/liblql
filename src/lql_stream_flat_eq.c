@@ -5,10 +5,13 @@
 #include <string.h>
 
 #define LQL_FLAT_EQ_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
+#define LQL_FLAT_CONTAINS_NEEDLE_MAX 256u
 
 typedef struct lql_flat_eq_program {
   lql_json_flat_eq_term terms[LQL_FLAT_EQ_TERM_CAPACITY];
   const lql_selector *selectors[LQL_FLAT_EQ_TERM_CAPACITY];
+  size_t contains_failures[LQL_FLAT_EQ_TERM_CAPACITY]
+                          [LQL_FLAT_CONTAINS_NEEDLE_MAX];
   size_t term_count;
   int stop_matching_on_hit;
 } lql_flat_eq_program;
@@ -136,6 +139,97 @@ static int lql_flat_eq_literal_object_path(
   return 1;
 }
 
+static int lql_flat_eq_contains_failure(lql_flat_eq_program *program,
+                                        lql_json_flat_eq_term *term) {
+  size_t i;
+  size_t matched;
+  if (program == NULL || term == NULL || term->value == NULL ||
+      term->value_len == 0u || term->value_len > LQL_FLAT_CONTAINS_NEEDLE_MAX ||
+      program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
+    return 0;
+  }
+  term->contains_failure = program->contains_failures[program->term_count];
+  term->contains_failure[0] = 0u;
+  matched = 0u;
+  for (i = 1u; i < term->value_len; ++i) {
+    while (matched != 0u && term->value[i] != term->value[matched]) {
+      matched = term->contains_failure[matched - 1u];
+    }
+    if (term->value[i] == term->value[matched]) {
+      ++matched;
+    }
+    term->contains_failure[i] = matched;
+  }
+  return 1;
+}
+
+static int lql_flat_eq_append_contains(lql_flat_eq_program *program,
+                                       const lql_selector *selector,
+                                       const char *field, size_t path_len,
+                                       size_t path_segment_count,
+                                       size_t first_segment_len,
+                                       unsigned long path_array_segments,
+                                       unsigned long path_object_wildcards,
+                                       unsigned long path_array_wildcards,
+                                       unsigned long path_any_wildcards,
+                                       unsigned long path_recursive_segments) {
+  size_t count;
+  size_t i;
+  if (program == NULL || selector == NULL || field == NULL) {
+    return 0;
+  }
+  count = selector->any_count == 0u ? 1u : selector->any_count;
+  if (count > LQL_FLAT_EQ_TERM_CAPACITY - program->term_count ||
+      (selector->any_count != 0u &&
+       (selector->any == NULL || selector->any_lens == NULL ||
+        selector->any_kinds == NULL)) ||
+      (selector->any_count == 0u &&
+       (!selector->value_set || selector->value_is_temporal ||
+        selector->value_kind != LQL_SELECTOR_LITERAL_STRING ||
+        selector->value == NULL))) {
+    return 0;
+  }
+  for (i = 0u; i < count; ++i) {
+    lql_json_flat_eq_term *term;
+    const char *value;
+    size_t value_len;
+    if (selector->any_count != 0u) {
+      if (selector->any_kinds[i] != LQL_SELECTOR_LITERAL_STRING) {
+        return 0;
+      }
+      value = selector->any[i];
+      value_len = selector->any_lens[i];
+    } else {
+      value = selector->value;
+      value_len = strlen(value);
+    }
+    if (value == NULL || value_len == 0u ||
+        value_len > LQL_FLAT_CONTAINS_NEEDLE_MAX) {
+      return 0;
+    }
+    term = &program->terms[program->term_count];
+    term->kind = LQL_JSON_FLAT_TERM_CONTAINS;
+    term->field = field + 1;
+    term->field_len = first_segment_len;
+    term->value = value;
+    term->value_len = value_len;
+    term->path = field;
+    term->path_len = path_len;
+    term->path_segment_count = path_segment_count;
+    term->path_array_segments = path_array_segments;
+    term->path_object_wildcards = path_object_wildcards;
+    term->path_array_wildcards = path_array_wildcards;
+    term->path_any_wildcards = path_any_wildcards;
+    term->path_recursive_segments = path_recursive_segments;
+    if (!lql_flat_eq_contains_failure(program, term)) {
+      return 0;
+    }
+    program->selectors[program->term_count] = selector;
+    ++program->term_count;
+  }
+  return 1;
+}
+
 static int lql_flat_eq_append(lql_flat_eq_program *program,
                               const lql_selector *selector) {
   lql_json_flat_eq_term *term;
@@ -202,6 +296,23 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       ++program->term_count;
     }
     return 1;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_CONTAINS) {
+    if (selector->field == NULL) {
+      return 0;
+    }
+    field = selector->field;
+    if (!lql_flat_eq_literal_object_path(
+            field, &path_len, &path_segment_count, &first_segment_len,
+            &path_array_segments, &path_object_wildcards,
+            &path_array_wildcards, &path_any_wildcards,
+            &path_recursive_segments)) {
+      return 0;
+    }
+    return lql_flat_eq_append_contains(
+        program, selector, field, path_len, path_segment_count,
+        first_segment_len, path_array_segments, path_object_wildcards,
+        path_array_wildcards, path_any_wildcards, path_recursive_segments);
   }
   if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
        selector->kind != LQL_SELECTOR_KIND_EXISTS &&
