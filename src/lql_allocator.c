@@ -1,4 +1,4 @@
-#include "lql_internal.h"
+#include "lql_lonejson_internal.h"
 
 #include <stdlib.h>
 #include <string.h>

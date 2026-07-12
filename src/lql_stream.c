@@ -1,5 +1,6 @@
 #include "lql_internal.h"
 #include "lql_json_spool.h"
+#include "lql_lonejson_internal.h"
 
 #include <errno.h>
 #include <limits.h>
