@@ -15,7 +15,6 @@ typedef struct lql_impl lql_impl;
 typedef struct lql_stream_program lql_stream_program;
 typedef struct lql_projection_capture lql_projection_capture;
 
-#define LQL_STREAM_VALUE_LONEJSON_SPOOL 1
 #define LQL_STREAM_VALUE_JSON_SPOOL 2
 #define LQL_STREAM_VALUE_SOURCE_RANGE 3
 

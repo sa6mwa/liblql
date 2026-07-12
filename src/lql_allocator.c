@@ -1,4 +1,4 @@
-#include "lql_lonejson_internal.h"
+#include "lql_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -103,66 +103,4 @@ LQL_INTERNAL_SYMBOL void lql_receiver_destroy(lql *self, void *ptr) {
   if (allocator != NULL) {
     allocator->destroy(allocator, ptr);
   }
-}
-
-static void *lonejson_lql_malloc(void *ctx, size_t size) {
-  lql_allocator *allocator;
-  allocator = (lql_allocator *)ctx;
-  return allocator->alloc(allocator, size);
-}
-
-static void *lonejson_lql_realloc(void *ctx, void *ptr, size_t size) {
-  lql_allocator *allocator;
-  allocator = (lql_allocator *)ctx;
-  return allocator->realloc(allocator, ptr, size);
-}
-
-static void lonejson_lql_release(void *ctx, void *ptr) {
-  lql_allocator *allocator;
-  allocator = (lql_allocator *)ctx;
-  allocator->destroy(allocator, ptr);
-}
-
-static lonejson *lql_lonejson_new_with_stream_mode(lql *self,
-                                                    int mapped_stream,
-                                                    lonejson_error *error) {
-  lonejson_config config;
-  lonejson_allocator allocator;
-  lql_allocator *lql_alloc;
-
-  lql_alloc = lql_allocator_from_receiver(self);
-  if (lql_alloc == NULL) {
-    if (error != NULL) {
-      error->code = LONEJSON_STATUS_INVALID_ARGUMENT;
-      strcpy(error->message, "lql receiver allocator required");
-    }
-    return NULL;
-  }
-
-  config = lonejson_default_config();
-  config.candidate_read_buffer_size = 64u * 1024u;
-  config.json_value_max_string_bytes = (size_t)-1;
-  config.json_value_max_number_bytes = 4096u;
-  config.spool_large_text.max_bytes = (size_t)-1;
-  if (mapped_stream) {
-    config.clear_destination_by_default = 0;
-  }
-  allocator = lonejson_default_allocator();
-  allocator.malloc_fn = lonejson_lql_malloc;
-  allocator.realloc_fn = lonejson_lql_realloc;
-  allocator.free_fn = lonejson_lql_release;
-  allocator.ctx = lql_alloc;
-  allocator.stats = NULL;
-  config.allocator = &allocator;
-  return lonejson_new(&config, error);
-}
-
-LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new(lql *self,
-                                               lonejson_error *error) {
-  return lql_lonejson_new_with_stream_mode(self, 0, error);
-}
-
-LQL_INTERNAL_SYMBOL lonejson *lql_lonejson_new_mapped_stream(
-    lql *self, lonejson_error *error) {
-  return lql_lonejson_new_with_stream_mode(self, 1, error);
 }

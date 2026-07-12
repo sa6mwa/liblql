@@ -790,38 +790,11 @@ static lql_status lql_flat_eq_spool_writer(void *user, const void *data,
 static lql_status lql_flat_eq_skip_string(const lql_json_spool *spool,
                                           size_t *offset, size_t end,
                                           lql_error *error) {
-  unsigned char ch;
   lql_status status;
   if (offset == NULL || *offset >= end)
     return LQL_STATUS_JSON_ERROR;
-  status = lql_flat_eq_spool_byte(spool, *offset, &ch, error);
-  if (status != LQL_STATUS_OK)
-    return status;
-  if (ch != (unsigned char)'"')
-    return LQL_STATUS_JSON_ERROR;
-  ++*offset;
-  while (*offset < end) {
-    status = lql_flat_eq_spool_byte(spool, *offset, &ch, error);
-    if (status != LQL_STATUS_OK)
-      return status;
-    ++*offset;
-    if (ch == (unsigned char)'"')
-      return LQL_STATUS_OK;
-    if (ch == (unsigned char)'\\') {
-      if (*offset >= end)
-        return LQL_STATUS_JSON_ERROR;
-      status = lql_flat_eq_spool_byte(spool, *offset, &ch, error);
-      if (status != LQL_STATUS_OK)
-        return status;
-      ++*offset;
-      if (ch == (unsigned char)'u') {
-        if (end - *offset < 4u)
-          return LQL_STATUS_JSON_ERROR;
-        *offset += 4u;
-      }
-    }
-  }
-  return LQL_STATUS_JSON_ERROR;
+  status = lql_json_spool_find_string_end(spool, *offset, end, offset, error);
+  return status;
 }
 
 static lql_status lql_flat_eq_skip_value(const lql_json_spool *spool,

@@ -11,14 +11,14 @@
       }
     },
     {
-      "name": "debug-vendored-lonejson",
+      "name": "debug-scanner",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
     },
     {
-      "name": "release-vendored-lonejson",
+      "name": "release-scanner",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
@@ -27,12 +27,12 @@
   ],
   "buildPresets": [
     {
-      "name": "debug-vendored-lonejson",
-      "configurePreset": "debug-vendored-lonejson"
+      "name": "debug-scanner",
+      "configurePreset": "debug-scanner"
     },
     {
-      "name": "release-vendored-lonejson",
-      "configurePreset": "release-vendored-lonejson"
+      "name": "release-scanner",
+      "configurePreset": "release-scanner"
     }
   ]
 }

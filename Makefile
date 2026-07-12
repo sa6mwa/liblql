@@ -11,25 +11,25 @@ help:
 	  'make clean         remove generated build output'
 
 build-debug:
-	@cmake --preset debug-vendored-lonejson
-	@cmake --build --preset debug-vendored-lonejson
+	@cmake --preset debug-scanner
+	@cmake --build --preset debug-scanner
 
 build-release:
-	@cmake --preset release-vendored-lonejson
-	@cmake --build --preset release-vendored-lonejson
+	@cmake --preset release-scanner
+	@cmake --build --preset release-scanner
 
 test:
-	@cmake --preset debug-vendored-lonejson
-	@cmake --build --preset debug-vendored-lonejson
-	@ctest --test-dir build/debug-vendored-lonejson --output-on-failure
+	@cmake --preset debug-scanner
+	@cmake --build --preset debug-scanner
+	@ctest --test-dir build/debug-scanner --output-on-failure
 
 direct-probe:
-	@cmake --preset release-vendored-lonejson
-	@cmake --build --preset release-vendored-lonejson --target lql_direct_probe
+	@cmake --preset release-scanner
+	@cmake --build --preset release-scanner --target lql_direct_probe
 
 direct-bench:
-	@cmake --preset release-vendored-lonejson
-	@cmake --build --preset release-vendored-lonejson --target lql_direct_bench
+	@cmake --preset release-scanner
+	@cmake --build --preset release-scanner --target lql_direct_bench
 
 format:
 	@clang-format -i include/lql/*.h src/*.c src/*.h tests/header_smoke.c tests/header_smoke.cpp tools/lql_direct_bench.c

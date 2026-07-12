@@ -10,6 +10,9 @@ typedef struct lql_json_spool {
   size_t memory_len;
   size_t size;
   FILE *file;
+  unsigned char read_cache[4096];
+  size_t read_cache_offset;
+  size_t read_cache_len;
 } lql_json_spool;
 
 typedef struct lql_json_spool_reader {
@@ -32,6 +35,9 @@ lql_status lql_json_spool_write_slice(const lql_json_spool *spool,
                                       void *writer_user, lql_error *error);
 lql_status lql_json_spool_byte_at(const lql_json_spool *spool, size_t offset,
                                   unsigned char *out, lql_error *error);
+lql_status lql_json_spool_find_string_end(const lql_json_spool *spool,
+                                          size_t offset, size_t end,
+                                          size_t *out, lql_error *error);
 void lql_json_spool_reader_init(lql_json_spool_reader *reader,
                                 const lql_json_spool *spool);
 lql_status lql_json_spool_read(void *user, unsigned char *buffer,

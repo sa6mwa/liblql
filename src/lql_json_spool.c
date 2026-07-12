@@ -38,6 +38,8 @@ void lql_json_spool_reset(lql_json_spool *spool) {
   }
   spool->memory_len = 0u;
   spool->size = 0u;
+  spool->read_cache_offset = 0u;
+  spool->read_cache_len = 0u;
 }
 
 void lql_json_spool_cleanup(lql_json_spool *spool) {
@@ -97,6 +99,7 @@ lql_status lql_json_spool_append(lql_json_spool *spool, const void *data,
         return status;
       }
     }
+    spool->read_cache_len = 0u;
     if (len != 0u && fwrite(bytes, 1u, len, spool->file) != len) {
       lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
                            "unable to write JSON spool file");
@@ -183,6 +186,8 @@ lql_status lql_json_spool_write_slice(const lql_json_spool *spool,
 
 lql_status lql_json_spool_byte_at(const lql_json_spool *spool, size_t offset,
                                   unsigned char *out, lql_error *error) {
+  lql_json_spool *mutable_spool;
+  size_t amount;
   if (spool == NULL || spool->memory == NULL || out == NULL ||
       offset >= spool->size) {
     lql_json_spool_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -193,14 +198,101 @@ lql_status lql_json_spool_byte_at(const lql_json_spool *spool, size_t offset,
     *out = spool->memory[offset];
     return LQL_STATUS_OK;
   }
+  mutable_spool = (lql_json_spool *)spool;
+  if (offset >= mutable_spool->read_cache_offset &&
+      offset < mutable_spool->read_cache_offset +
+                   mutable_spool->read_cache_len) {
+    *out = mutable_spool
+               ->read_cache[offset - mutable_spool->read_cache_offset];
+    return LQL_STATUS_OK;
+  }
+  amount = spool->size - offset;
+  if (amount > sizeof(mutable_spool->read_cache))
+    amount = sizeof(mutable_spool->read_cache);
   if (fflush(spool->file) != 0 || offset > (size_t)LONG_MAX ||
       fseek(spool->file, (long)offset, SEEK_SET) != 0 ||
-      fread(out, 1u, 1u, spool->file) != 1u) {
+      fread(mutable_spool->read_cache, 1u, amount, spool->file) != amount) {
+    mutable_spool->read_cache_len = 0u;
     lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
                          "unable to read JSON spool byte");
     return LQL_STATUS_IO_ERROR;
   }
+  mutable_spool->read_cache_offset = offset;
+  mutable_spool->read_cache_len = amount;
+  *out = mutable_spool->read_cache[0];
   return LQL_STATUS_OK;
+}
+
+lql_status lql_json_spool_find_string_end(const lql_json_spool *spool,
+                                          size_t offset, size_t end,
+                                          size_t *out, lql_error *error) {
+  lql_json_spool *mutable_spool;
+  unsigned char ch;
+  size_t pos;
+  int escaped;
+  if (spool == NULL || out == NULL || offset >= end || end > spool->size) {
+    lql_json_spool_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                         "JSON spool string scan arguments are invalid");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (lql_json_spool_byte_at(spool, offset, &ch, error) != LQL_STATUS_OK)
+    return error == NULL ? LQL_STATUS_IO_ERROR : error->code;
+  if (ch != (unsigned char)'"') {
+    lql_json_spool_error(error, LQL_STATUS_JSON_ERROR,
+                         "JSON spool string scan expected quote");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  pos = offset + 1u;
+  escaped = 0;
+  if (spool->file == NULL) {
+    while (pos < end) {
+      ch = spool->memory[pos++];
+      if (escaped) {
+        escaped = 0;
+      } else if (ch == (unsigned char)'\\') {
+        escaped = 1;
+      } else if (ch == (unsigned char)'"') {
+        *out = pos;
+        return LQL_STATUS_OK;
+      }
+    }
+    lql_json_spool_error(error, LQL_STATUS_JSON_ERROR,
+                         "unterminated JSON spool string");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  mutable_spool = (lql_json_spool *)spool;
+  while (pos < end) {
+    size_t amount;
+    size_t i;
+    amount = end - pos;
+    if (amount > sizeof(mutable_spool->read_cache))
+      amount = sizeof(mutable_spool->read_cache);
+    if (fflush(spool->file) != 0 || pos > (size_t)LONG_MAX ||
+        fseek(spool->file, (long)pos, SEEK_SET) != 0 ||
+        fread(mutable_spool->read_cache, 1u, amount, spool->file) != amount) {
+      mutable_spool->read_cache_len = 0u;
+      lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
+                           "unable to scan JSON spool string");
+      return LQL_STATUS_IO_ERROR;
+    }
+    mutable_spool->read_cache_offset = pos;
+    mutable_spool->read_cache_len = amount;
+    for (i = 0u; i < amount; ++i) {
+      ch = mutable_spool->read_cache[i];
+      if (escaped) {
+        escaped = 0;
+      } else if (ch == (unsigned char)'\\') {
+        escaped = 1;
+      } else if (ch == (unsigned char)'"') {
+        *out = pos + i + 1u;
+        return LQL_STATUS_OK;
+      }
+    }
+    pos += amount;
+  }
+  lql_json_spool_error(error, LQL_STATUS_JSON_ERROR,
+                       "unterminated JSON spool string");
+  return LQL_STATUS_JSON_ERROR;
 }
 
 void lql_json_spool_reader_init(lql_json_spool_reader *reader,
