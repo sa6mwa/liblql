@@ -1983,6 +1983,25 @@ static int lql_json_try_plain_key_match(lql_json_scan *scan,
   key = scan->buffer + key_start;
   active = ordinary_terms | recursive_terms;
   matches = 0ul;
+  if (recursive_terms == 0ul && object_depth == 0u) {
+    for (i = 0u; i < scan->flat_term_count; ++i) {
+      const lql_json_flat_eq_term *term;
+      unsigned long bit;
+      bit = 1ul << i;
+      if ((active & bit) == 0ul) {
+        continue;
+      }
+      term = &scan->flat_terms[i];
+      if (term->field_len == key_len &&
+          (key_len == 0u || memcmp(term->field, key, key_len) == 0)) {
+        scan->match_term_segment[i] = 0u;
+        matches |= bit;
+      }
+    }
+    scan->offset = key_end + 1u;
+    *out_matches = matches;
+    return 1;
+  }
   for (i = 0u; i < scan->flat_term_count; ++i) {
     const lql_json_flat_eq_term *term;
     const char *target;
