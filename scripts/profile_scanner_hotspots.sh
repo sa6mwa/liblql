@@ -57,6 +57,11 @@ profile_row status-decision "$status_samples" \
   build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' decision_only_selector
 
+profile_row status-and-decision "$status_samples" \
+  build/direct-probe/status-100k.ndjson status_100k \
+  and_status_open_region_west '/status="open",/region="us-west"' \
+  decision_only_selector
+
 profile_row scalar-bool-decision "$scalar_samples" \
   build/direct-probe/scalar-100k.ndjson scalar_100k \
   bool_enabled_true '/enabled=true' decision_only_selector
