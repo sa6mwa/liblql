@@ -64,10 +64,12 @@ typedef struct lql_json_flat_eq_term {
   lql_temporal temporal_gte;
   lql_temporal temporal_lt;
   lql_temporal temporal_lte;
+  lql_temporal temporal_eq;
   int has_temporal_gt;
   int has_temporal_gte;
   int has_temporal_lt;
   int has_temporal_lte;
+  int has_temporal_eq;
   /* Per-execution KMP table for streaming string contains matching. */
   size_t *contains_failure;
 } lql_json_flat_eq_term;

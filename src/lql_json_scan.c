@@ -292,6 +292,10 @@ static unsigned long lql_json_temporal_range_complete(lql_json_scan *scan) {
     if (term->kind != LQL_JSON_FLAT_TERM_TEMPORAL_RANGE) {
       continue;
     }
+    if (term->has_temporal_eq &&
+        !lql_temporal_equal(&value, &term->temporal_eq)) {
+      continue;
+    }
     if (term->has_temporal_gt &&
         lql_temporal_compare(&value, &term->temporal_gt) <= 0) {
       continue;

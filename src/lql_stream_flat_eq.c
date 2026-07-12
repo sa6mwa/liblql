@@ -377,10 +377,50 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     term->temporal_gte = selector->temporal_gte;
     term->temporal_lt = selector->temporal_lt;
     term->temporal_lte = selector->temporal_lte;
+    term->temporal_eq = selector->temporal_eq;
     term->has_temporal_gt = selector->has_temporal_gt;
     term->has_temporal_gte = selector->has_temporal_gte;
     term->has_temporal_lt = selector->has_temporal_lt;
     term->has_temporal_lte = selector->has_temporal_lte;
+    term->has_temporal_eq = selector->has_temporal_eq;
+    program->selectors[program->term_count] = selector;
+    ++program->term_count;
+    return 1;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_DATE) {
+    if (selector->field == NULL || selector->since_macro != LQL_SINCE_NONE ||
+        program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
+      return 0;
+    }
+    field = selector->field;
+    if (!lql_flat_eq_literal_object_path(
+            field, &path_len, &path_segment_count, &first_segment_len,
+            &path_array_segments, &path_object_wildcards, &path_array_wildcards,
+            &path_any_wildcards, &path_recursive_segments)) {
+      return 0;
+    }
+    term = &program->terms[program->term_count];
+    term->kind = LQL_JSON_FLAT_TERM_TEMPORAL_RANGE;
+    term->field = field + 1;
+    term->field_len = first_segment_len;
+    term->path = field;
+    term->path_len = path_len;
+    term->path_segment_count = path_segment_count;
+    term->path_array_segments = path_array_segments;
+    term->path_object_wildcards = path_object_wildcards;
+    term->path_array_wildcards = path_array_wildcards;
+    term->path_any_wildcards = path_any_wildcards;
+    term->path_recursive_segments = path_recursive_segments;
+    term->temporal_gt = selector->temporal_gt;
+    term->temporal_gte = selector->temporal_gte;
+    term->temporal_lt = selector->temporal_lt;
+    term->temporal_lte = selector->temporal_lte;
+    term->temporal_eq = selector->temporal_eq;
+    term->has_temporal_gt = selector->has_temporal_gt;
+    term->has_temporal_gte = selector->has_temporal_gte;
+    term->has_temporal_lt = selector->has_temporal_lt;
+    term->has_temporal_lte = selector->has_temporal_lte;
+    term->has_temporal_eq = selector->has_temporal_eq;
     program->selectors[program->term_count] = selector;
     ++program->term_count;
     return 1;

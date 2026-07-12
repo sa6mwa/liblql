@@ -198,7 +198,7 @@ int main(void) {
       {LQL_JSON_FLAT_TERM_CONTAINS, "msg", 3u, "aba", 3u, NULL, 0u, 0u, 0ul,
        0ul, 0ul, 0ul, 0ul, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0,
        {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0},
-       {0, 0, 0, 0, 0, 0}, 0, 0, 0, 0,
+       {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0}, 0, 0, 0, 0, 0,
        contains_failure}};
   lql_json_flat_eq_term temporal_flat_terms[1];
   lql_json_flat_eq_request flat_request;
