@@ -1178,6 +1178,15 @@ static int run_mutation_output(lql *ctx) {
   static const char *const increment_missing[] = {"/count=+2"};
   static const char increment_missing_output[] =
       "{\"status\":\"open\",\"n\":1,\"count\":2}\n";
+  static const char *const nested_increment[] = {"/meta/count=+1"};
+  static const char nested_increment_input[] =
+      "{\"status\":\"open\",\"meta\":{\"count\":2}}\n"
+      "{\"status\":\"open\",\"meta\":{\"count\":4}}\n";
+  static const char nested_increment_output[] =
+      "{\"status\":\"open\",\"meta\":{\"count\":3}}\n"
+      "{\"status\":\"open\",\"meta\":{\"count\":5}}\n";
+  static const char nested_increment_missing_input[] =
+      "{\"status\":\"open\",\"meta\":{}}\n";
   static const char *const direct_set[] = {"/bench/touched=true"};
   static const char direct_set_output[] =
       "{\"status\":\"open\",\"n\":1,\"bench\":{\"touched\":true}}\n";
@@ -1355,6 +1364,49 @@ static int run_mutation_output(lql *ctx) {
   }
   ctx->mutation_destroy(ctx, mutation);
   mutation = NULL;
+  if (ctx->mutation_parse(ctx, nested_increment, 1u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)nested_increment_input;
+  reader.len = sizeof(nested_increment_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 2u ||
+      writer.len != sizeof(nested_increment_output) - 1u ||
+      memcmp(writer.data, nested_increment_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)nested_increment_missing_input;
+  reader.len = sizeof(nested_increment_missing_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+      LQL_STATUS_JSON_ERROR) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  lql_error_init(&error);
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  request.reader_user = &reader;
   if (ctx->mutation_parse(ctx, top_set, 1u, &mutation, &error) !=
           LQL_STATUS_OK ||
       ctx->mutation_count(ctx, mutation) != 1u) {
