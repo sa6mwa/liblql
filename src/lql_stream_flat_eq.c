@@ -475,6 +475,7 @@ static lql_status lql_flat_eq_projection_emit(lql_flat_eq_state *state,
                                               lql_error *error) {
   size_t i;
   size_t count;
+  lql_status status;
   static const char open[] = "{";
   static const char close[] = "}\n";
   if (state->request->projection == NULL || spool == NULL) return LQL_STATUS_OK;
@@ -482,23 +483,27 @@ static lql_status lql_flat_eq_projection_emit(lql_flat_eq_state *state,
   for (i = 0u; i < state->program->capture_key_count; ++i)
     if (state->program->capture_spans[i].found) ++count;
   if (count == 0u) return LQL_STATUS_OK;
-  if (lql_flat_eq_write(state, open, 1u, error) != LQL_STATUS_OK) return error->code;
+  status = lql_flat_eq_write(state, open, 1u, error);
+  if (status != LQL_STATUS_OK) return status;
   count = 0u;
   for (i = 0u; i < state->program->capture_key_count; ++i) {
     const char *key;
     size_t key_len;
     size_t j;
     if (!state->program->capture_spans[i].found) continue;
-    if (count != 0u && lql_flat_eq_write(state, ",", 1u, error) != LQL_STATUS_OK)
-      return error->code;
+    if (count != 0u &&
+        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+      return status;
     key = state->request->projection->compiled_paths[i].segments[0];
     key_len = strlen(key);
-    if (lql_flat_eq_write(state, "\"", 1u, error) != LQL_STATUS_OK) return error->code;
+    status = lql_flat_eq_write(state, "\"", 1u, error);
+    if (status != LQL_STATUS_OK) return status;
     for (j = 0u; j < key_len; ++j) {
       unsigned char ch;
       ch = (unsigned char)key[j];
       if (ch == (unsigned char)'"' || ch == (unsigned char)'\\') {
-        if (lql_flat_eq_write(state, "\\", 1u, error) != LQL_STATUS_OK) return error->code;
+        status = lql_flat_eq_write(state, "\\", 1u, error);
+        if (status != LQL_STATUS_OK) return status;
       } else if (ch < 0x20u) {
         static const char hex[] = "0123456789abcdef";
         char escaped[6];
@@ -508,17 +513,20 @@ static lql_status lql_flat_eq_projection_emit(lql_flat_eq_state *state,
         escaped[3] = '0';
         escaped[4] = hex[ch >> 4u];
         escaped[5] = hex[ch & 0x0fu];
-        if (lql_flat_eq_write(state, escaped, sizeof(escaped), error) !=
-            LQL_STATUS_OK) return error->code;
+        status = lql_flat_eq_write(state, escaped, sizeof(escaped), error);
+        if (status != LQL_STATUS_OK) return status;
         continue;
       }
-      if (lql_flat_eq_write(state, key + j, 1u, error) != LQL_STATUS_OK) return error->code;
+      status = lql_flat_eq_write(state, key + j, 1u, error);
+      if (status != LQL_STATUS_OK) return status;
     }
-    if (lql_flat_eq_write(state, "\":", 2u, error) != LQL_STATUS_OK ||
-        lql_json_spool_write_slice(spool, state->program->capture_spans[i].offset,
-                                   state->program->capture_spans[i].len,
-                                   state->request->writer, state->request->writer_user,
-                                   error) != LQL_STATUS_OK) return error->code;
+    status = lql_flat_eq_write(state, "\":", 2u, error);
+    if (status != LQL_STATUS_OK) return status;
+    status = lql_json_spool_write_slice(
+        spool, state->program->capture_spans[i].offset,
+        state->program->capture_spans[i].len, state->request->writer,
+        state->request->writer_user, error);
+    if (status != LQL_STATUS_OK) return status;
     ++count;
   }
   return lql_flat_eq_write(state, close, sizeof(close) - 1u, error);
