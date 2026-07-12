@@ -54,8 +54,8 @@ typedef struct lql_json_flat_eq_term {
 } lql_json_flat_eq_term;
 
 typedef struct lql_json_capture_key {
-  const char *field;
-  size_t field_len;
+  const char *const *segments;
+  size_t segment_count;
 } lql_json_capture_key;
 
 typedef struct lql_json_capture_span {

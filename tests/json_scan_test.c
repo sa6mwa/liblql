@@ -135,7 +135,8 @@ int main(void) {
       " \"open\"\n";
   static const lql_json_flat_eq_term flat_terms[] = {
       {LQL_JSON_FLAT_TERM_EQ, "status", 6u, "open", 4u}};
-  static const lql_json_capture_key capture_keys[] = {{"status", 6u}};
+  static const char *const capture_segments[] = {"status"};
+  static const lql_json_capture_key capture_keys[] = {{capture_segments, 1u}};
   static const char scalar_flat_input[] =
       "{\"code\":1,\"enabled\":true,\"empty\":null}\n"
       "{\"code\":1.0,\"enabled\":false,\"empty\":\"null\"}\n"

@@ -171,17 +171,13 @@ static int lql_flat_eq_contains_failure(lql_flat_eq_program *program,
   return 1;
 }
 
-static int lql_flat_eq_append_contains(lql_flat_eq_program *program,
-                                       const lql_selector *selector,
-                                       const char *field, size_t path_len,
-                                       size_t path_segment_count,
-                                       size_t first_segment_len,
-                                       unsigned long path_array_segments,
-                                       unsigned long path_object_wildcards,
-                                       unsigned long path_array_wildcards,
-                                       unsigned long path_any_wildcards,
-                                       unsigned long path_recursive_segments,
-                                       int ignore_case) {
+static int lql_flat_eq_append_contains(
+    lql_flat_eq_program *program, const lql_selector *selector,
+    const char *field, size_t path_len, size_t path_segment_count,
+    size_t first_segment_len, unsigned long path_array_segments,
+    unsigned long path_object_wildcards, unsigned long path_array_wildcards,
+    unsigned long path_any_wildcards, unsigned long path_recursive_segments,
+    int ignore_case) {
   size_t count;
   size_t i;
   if (program == NULL || selector == NULL || field == NULL) {
@@ -325,9 +321,8 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     field = selector->field;
     if (!lql_flat_eq_literal_object_path(
             field, &path_len, &path_segment_count, &first_segment_len,
-            &path_array_segments, &path_object_wildcards,
-            &path_array_wildcards, &path_any_wildcards,
-            &path_recursive_segments)) {
+            &path_array_segments, &path_object_wildcards, &path_array_wildcards,
+            &path_any_wildcards, &path_recursive_segments)) {
       return 0;
     }
     return lql_flat_eq_append_contains(
@@ -366,10 +361,10 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     term->kind = LQL_JSON_FLAT_TERM_EXISTS;
   } else if (selector->kind == LQL_SELECTOR_KIND_PREFIX ||
              selector->kind == LQL_SELECTOR_KIND_IPREFIX) {
-    term->kind = selector->kind == LQL_SELECTOR_KIND_IPREFIX ||
-                         selector->ignore_case
-                     ? LQL_JSON_FLAT_TERM_IPREFIX
-                     : LQL_JSON_FLAT_TERM_PREFIX;
+    term->kind =
+        selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case
+            ? LQL_JSON_FLAT_TERM_IPREFIX
+            : LQL_JSON_FLAT_TERM_PREFIX;
   } else if (!lql_flat_eq_literal_kind(selector->value_kind, &term->kind)) {
     return 0;
   }
@@ -382,10 +377,11 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       return 0;
     }
     if (term->kind == LQL_JSON_FLAT_TERM_IPREFIX) {
-      if (!lql_unicode_utf8_lower(selector->value, strlen(selector->value),
-                                  program->icontains_needles[program->term_count],
-                                  LQL_FLAT_ICONTAINS_NEEDLE_MAX,
-                                  &term->value_len) || term->value_len == 0u) {
+      if (!lql_unicode_utf8_lower(
+              selector->value, strlen(selector->value),
+              program->icontains_needles[program->term_count],
+              LQL_FLAT_ICONTAINS_NEEDLE_MAX, &term->value_len) ||
+          term->value_len == 0u) {
         return 0;
       }
       term->value = program->icontains_needles[program->term_count];
@@ -464,72 +460,154 @@ static lql_status lql_flat_eq_emit(lql_flat_eq_state *state,
 static lql_status lql_flat_eq_write(lql_flat_eq_state *state, const void *data,
                                     size_t len, lql_error *error) {
   lql_status status;
-  status = state->request->writer(state->request->writer_user, data, len, error);
+  status =
+      state->request->writer(state->request->writer_user, data, len, error);
   if (status != LQL_STATUS_OK && error != NULL && error->code == LQL_STATUS_OK)
     lql_set_error(error, status, "stream writer failed");
   return status;
+}
+
+static int lql_flat_eq_projection_prefix(const lql_flat_eq_program *program,
+                                         size_t left, size_t right,
+                                         size_t depth) {
+  size_t i;
+  if (depth == 0u)
+    return 1;
+  for (i = 0u; i < depth; ++i) {
+    if (strcmp(program->capture_keys[left].segments[i],
+               program->capture_keys[right].segments[i]) != 0)
+      return 0;
+  }
+  return 1;
+}
+
+static int
+lql_flat_eq_projection_group_found(const lql_flat_eq_program *program,
+                                   size_t anchor, size_t depth, size_t member) {
+  size_t i;
+  const char *segment;
+  segment = program->capture_keys[member].segments[depth];
+  for (i = 0u; i < program->capture_key_count; ++i) {
+    if (program->capture_spans[i].found &&
+        program->capture_keys[i].segment_count > depth &&
+        lql_flat_eq_projection_prefix(program, anchor, i, depth) &&
+        strcmp(program->capture_keys[i].segments[depth], segment) == 0)
+      return 1;
+  }
+  return 0;
+}
+
+static lql_status lql_flat_eq_projection_key(lql_flat_eq_state *state,
+                                             const char *key,
+                                             lql_error *error) {
+  size_t i;
+  lql_status status;
+  status = lql_flat_eq_write(state, "\"", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  for (i = 0u; key[i] != '\0'; ++i) {
+    unsigned char ch;
+    ch = (unsigned char)key[i];
+    if (ch == (unsigned char)'"' || ch == (unsigned char)'\\') {
+      status = lql_flat_eq_write(state, "\\", 1u, error);
+      if (status == LQL_STATUS_OK) {
+        status = lql_flat_eq_write(state, key + i, 1u, error);
+      }
+    } else if (ch < 0x20u) {
+      static const char hex[] = "0123456789abcdef";
+      char escaped[6];
+      escaped[0] = '\\';
+      escaped[1] = 'u';
+      escaped[2] = '0';
+      escaped[3] = '0';
+      escaped[4] = hex[ch >> 4u];
+      escaped[5] = hex[ch & 0x0fu];
+      status = lql_flat_eq_write(state, escaped, sizeof(escaped), error);
+    } else {
+      status = lql_flat_eq_write(state, key + i, 1u, error);
+    }
+    if (status != LQL_STATUS_OK)
+      return status;
+  }
+  return lql_flat_eq_write(state, "\":", 2u, error);
+}
+
+static lql_status lql_flat_eq_projection_object(lql_flat_eq_state *state,
+                                                const lql_json_spool *spool,
+                                                size_t anchor, size_t depth,
+                                                lql_error *error) {
+  size_t i;
+  size_t selected;
+  int first;
+  int have_previous;
+  const char *previous;
+  lql_status status;
+  status = lql_flat_eq_write(state, "{", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  first = 1;
+  have_previous = 0;
+  previous = NULL;
+  for (;;) {
+    const lql_json_capture_key *key;
+    selected = state->program->capture_key_count;
+    for (i = 0u; i < state->program->capture_key_count; ++i) {
+      const lql_json_capture_key *candidate;
+      candidate = &state->program->capture_keys[i];
+      if (candidate->segment_count <= depth ||
+          !lql_flat_eq_projection_prefix(state->program, anchor, i, depth) ||
+          !lql_flat_eq_projection_group_found(state->program, anchor, depth,
+                                              i) ||
+          (have_previous && strcmp(candidate->segments[depth], previous) <= 0))
+        continue;
+      if (selected == state->program->capture_key_count ||
+          strcmp(candidate->segments[depth],
+                 state->program->capture_keys[selected].segments[depth]) < 0)
+        selected = i;
+    }
+    if (selected == state->program->capture_key_count)
+      break;
+    key = &state->program->capture_keys[selected];
+    if (!first &&
+        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+      return status;
+    status = lql_flat_eq_projection_key(state, key->segments[depth], error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (key->segment_count == depth + 1u) {
+      status = lql_json_spool_write_slice(
+          spool, state->program->capture_spans[selected].offset,
+          state->program->capture_spans[selected].len, state->request->writer,
+          state->request->writer_user, error);
+    } else {
+      status = lql_flat_eq_projection_object(state, spool, selected, depth + 1u,
+                                             error);
+    }
+    if (status != LQL_STATUS_OK)
+      return status;
+    first = 0;
+    previous = key->segments[depth];
+    have_previous = 1;
+  }
+  return lql_flat_eq_write(state, "}", 1u, error);
 }
 
 static lql_status lql_flat_eq_projection_emit(lql_flat_eq_state *state,
                                               const lql_json_spool *spool,
                                               lql_error *error) {
   size_t i;
-  size_t count;
   lql_status status;
-  static const char open[] = "{";
-  static const char close[] = "}\n";
-  if (state->request->projection == NULL || spool == NULL) return LQL_STATUS_OK;
-  count = 0u;
+  if (state->request->projection == NULL || spool == NULL)
+    return LQL_STATUS_OK;
   for (i = 0u; i < state->program->capture_key_count; ++i)
-    if (state->program->capture_spans[i].found) ++count;
-  if (count == 0u) return LQL_STATUS_OK;
-  status = lql_flat_eq_write(state, open, 1u, error);
-  if (status != LQL_STATUS_OK) return status;
-  count = 0u;
-  for (i = 0u; i < state->program->capture_key_count; ++i) {
-    const char *key;
-    size_t key_len;
-    size_t j;
-    if (!state->program->capture_spans[i].found) continue;
-    if (count != 0u &&
-        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
-      return status;
-    key = state->request->projection->compiled_paths[i].segments[0];
-    key_len = strlen(key);
-    status = lql_flat_eq_write(state, "\"", 1u, error);
-    if (status != LQL_STATUS_OK) return status;
-    for (j = 0u; j < key_len; ++j) {
-      unsigned char ch;
-      ch = (unsigned char)key[j];
-      if (ch == (unsigned char)'"' || ch == (unsigned char)'\\') {
-        status = lql_flat_eq_write(state, "\\", 1u, error);
-        if (status != LQL_STATUS_OK) return status;
-      } else if (ch < 0x20u) {
-        static const char hex[] = "0123456789abcdef";
-        char escaped[6];
-        escaped[0] = '\\';
-        escaped[1] = 'u';
-        escaped[2] = '0';
-        escaped[3] = '0';
-        escaped[4] = hex[ch >> 4u];
-        escaped[5] = hex[ch & 0x0fu];
-        status = lql_flat_eq_write(state, escaped, sizeof(escaped), error);
-        if (status != LQL_STATUS_OK) return status;
-        continue;
-      }
-      status = lql_flat_eq_write(state, key + j, 1u, error);
-      if (status != LQL_STATUS_OK) return status;
-    }
-    status = lql_flat_eq_write(state, "\":", 2u, error);
-    if (status != LQL_STATUS_OK) return status;
-    status = lql_json_spool_write_slice(
-        spool, state->program->capture_spans[i].offset,
-        state->program->capture_spans[i].len, state->request->writer,
-        state->request->writer_user, error);
-    if (status != LQL_STATUS_OK) return status;
-    ++count;
-  }
-  return lql_flat_eq_write(state, close, sizeof(close) - 1u, error);
+    if (state->program->capture_spans[i].found)
+      break;
+  if (i == state->program->capture_key_count)
+    return LQL_STATUS_OK;
+  status = lql_flat_eq_projection_object(state, spool, 0u, 0u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  return lql_flat_eq_write(state, "\n", 1u, error);
 }
 
 static lql_status lql_flat_eq_record(void *user, size_t record_index,
@@ -610,7 +688,8 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
   if (state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION &&
       (matched || !state->request->matched_only)) {
     status = lql_flat_eq_projection_emit(state, spool, error);
-    if (status != LQL_STATUS_OK) return status;
+    if (status != LQL_STATUS_OK)
+      return status;
   }
   if (matched && state->request->limits.max_matches != 0u &&
       state->result->records_matched >= state->request->limits.max_matches) {
@@ -624,8 +703,7 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
 
 static int lql_flat_eq_eligible(const lql_stream_request *request) {
   if (request == NULL || request->selector == NULL ||
-      request->limits.max_records != 0u ||
-      request->mutation != NULL ||
+      request->limits.max_records != 0u || request->mutation != NULL ||
       (request->output_mode != LQL_STREAM_OUTPUT_DECISION_ONLY &&
        request->output_mode != LQL_STREAM_OUTPUT_SELECTED_RECORD &&
        request->output_mode != LQL_STREAM_OUTPUT_PROJECTION)) {
@@ -638,12 +716,28 @@ static int lql_flat_eq_projection_append(lql_flat_eq_program *program,
                                          const lql_projection *projection) {
   size_t i;
   if (projection == NULL || projection->path_count == 0u ||
-      projection->path_count > LQL_FLAT_EQ_TERM_CAPACITY) return 0;
+      projection->path_count > LQL_FLAT_EQ_TERM_CAPACITY)
+    return 0;
   for (i = 0u; i < projection->path_count; ++i) {
     const lql_projection_path *path = &projection->compiled_paths[i];
-    if (path->segment_count != 1u || path->segments[0] == NULL) return 0;
-    program->capture_keys[i].field = path->segments[0];
-    program->capture_keys[i].field_len = strlen(path->segments[0]);
+    size_t j;
+    if (path->segment_count == 0u || path->segments[0] == NULL)
+      return 0;
+    for (j = 0u; j < path->segment_count; ++j) {
+      const char *segment;
+      int numeric;
+      segment = path->segments[j];
+      numeric = segment[0] != '\0';
+      while (*segment != '\0') {
+        if (*segment < '0' || *segment > '9')
+          numeric = 0;
+        ++segment;
+      }
+      if (numeric)
+        return 0;
+    }
+    program->capture_keys[i].segments = (const char *const *)path->segments;
+    program->capture_keys[i].segment_count = path->segment_count;
   }
   program->capture_key_count = projection->path_count;
   return 1;

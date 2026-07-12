@@ -524,6 +524,13 @@ static int run_selected_record_output(lql *ctx) {
   static const char quote_input[] = "{\"status\":\"open\",\"a\\\"b\":1}\n";
   static const char quote_output[] = "{\"a\\\"b\":1}\n";
   static const char *const quote_paths[] = {"/a\"b"};
+  static const char nested_input[] =
+      "{\"meta\":{\"type\":\"log\",\"trace\":9,\"trace\":10},"
+      "\"id\":\"x\",\"status\":\"open\",\"unused\":true}\n";
+  static const char nested_output[] =
+      "{\"id\":\"x\",\"meta\":{\"trace\":10,\"type\":\"log\"}}\n";
+  static const char *const nested_paths[] = {
+      "/meta/type", "/id", "/meta/trace"};
   lql_selector *selector;
   lql_projection *projection;
   lql_stream_request request;
@@ -611,6 +618,28 @@ static int run_selected_record_output(lql *ctx) {
     ctx->projection_destroy(ctx, projection);
     ctx->selector_destroy(ctx, selector);
     return 3;
+  }
+  ctx->projection_destroy(ctx, projection);
+  projection = NULL;
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)nested_input;
+  reader.len = sizeof(nested_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  if (ctx->projection_parse(ctx, nested_paths, 3u, &projection, &error) !=
+          LQL_STATUS_OK) {
+    ctx->selector_destroy(ctx, selector);
+    return 4;
+  }
+  request.reader_user = &reader;
+  request.projection = projection;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(nested_output) - 1u ||
+      memcmp(writer.data, nested_output, writer.len) != 0) {
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 5;
   }
   ctx->projection_destroy(ctx, projection);
   ctx->selector_destroy(ctx, selector);

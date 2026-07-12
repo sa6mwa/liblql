@@ -108,12 +108,14 @@ func main() {
 	var expr string
 	var mode string
 	var submode string
+	var projectionPath string
 	flag.StringVar(&fixture, "fixture", "", "JSON fixture path")
 	flag.StringVar(&dataset, "dataset", "large_ndjson", "dataset name")
 	flag.StringVar(&selectorName, "selector-name", "eq_status_open", "selector name")
 	flag.StringVar(&expr, "expr", `/status="open"`, "LQL selector expression")
 	flag.StringVar(&mode, "mode", "decision_only_selector", "benchmark mode")
 	flag.StringVar(&submode, "submode", "steady_state", "benchmark submode")
+	flag.StringVar(&projectionPath, "projection-path", "/id", "JSON Pointer projection path")
 	flag.Parse()
 
 	if fixture == "" {
@@ -163,7 +165,7 @@ func main() {
 		bytesPerIter += int64(len(bytes.Repeat([]byte{0x00, 0x01, 0x02, 0x03}, 2048)))
 	}
 	if submode == "steady_state" {
-		if _, _, _, err := runBenchmark(file, sel, selectorName, expr, mode); err != nil {
+		if _, _, _, err := runBenchmark(file, sel, selectorName, expr, mode, projectionPath); err != nil {
 			fmt.Fprintf(os.Stderr, "lqlbench: warmup stream: %v\n", err)
 			os.Exit(1)
 		}
@@ -174,7 +176,7 @@ func main() {
 	var nsPerOp int64
 	for sample := 0; sample < benchSampleCount(submode); sample++ {
 		start := time.Now()
-		sampleResult, samplePayloads, samplePayloadBytes, err := runBenchmark(file, sel, selectorName, expr, mode)
+		sampleResult, samplePayloads, samplePayloadBytes, err := runBenchmark(file, sel, selectorName, expr, mode, projectionPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "lqlbench: stream: %v\n", err)
 			os.Exit(1)
@@ -230,12 +232,12 @@ func benchSampleCount(submode string) int {
 	return value
 }
 
-func runBenchmark(file *os.File, sel lql.Selector, selectorName string, expr string, mode string) (lql.QueryStreamResult, int64, int64, error) {
+func runBenchmark(file *os.File, sel lql.Selector, selectorName string, expr string, mode string, projectionPath string) (lql.QueryStreamResult, int64, int64, error) {
 	if isMutationMode(mode) {
 		return runMutation(file, sel, selectorName, expr, mode)
 	}
 	if isProjectionMode(mode) {
-		return runProjection(file, sel, mode)
+		return runProjection(file, sel, mode, projectionPath)
 	}
 	return runQuery(file, sel, expr, mode)
 }
@@ -329,11 +331,11 @@ func runFileBackedMutation(file *os.File, sel lql.Selector, mode string) (lql.Qu
 	return result.Query, 0, 0, nil
 }
 
-func runProjection(file *os.File, sel lql.Selector, mode string) (lql.QueryStreamResult, int64, int64, error) {
+func runProjection(file *os.File, sel lql.Selector, mode string, projectionPath string) (lql.QueryStreamResult, int64, int64, error) {
 	if _, err := file.Seek(0, 0); err != nil {
 		return lql.QueryStreamResult{}, 0, 0, err
 	}
-	paths, err := lql.ParseProjectionPaths([]string{"/id"})
+	paths, err := lql.ParseProjectionPaths([]string{projectionPath})
 	if err != nil {
 		return lql.QueryStreamResult{}, 0, 0, err
 	}

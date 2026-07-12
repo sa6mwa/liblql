@@ -27,8 +27,6 @@ typedef struct sha256_state {
   unsigned long byte_len;
 } sha256_state;
 
-static const char *const projection_id_path[] = {"/id"};
-
 static unsigned int sha256_rotr(unsigned int value, unsigned int shift) {
   return (value >> shift) | (value << (32u - shift));
 }
@@ -246,9 +244,11 @@ bench_value(void *user, const lql_stream_value *value, lql_error *error) {
   bench_writer *writer;
   size_t size;
   writer = (bench_writer *)user;
-  if (writer == NULL || value == NULL) return LQL_STREAM_CALLBACK_ERROR;
+  if (writer == NULL || value == NULL)
+    return LQL_STREAM_CALLBACK_ERROR;
   size = lql_stream_value_size(value);
-  if (size > (size_t)-1 - writer->bytes) return LQL_STREAM_CALLBACK_ERROR;
+  if (size > (size_t)-1 - writer->bytes)
+    return LQL_STREAM_CALLBACK_ERROR;
   ++writer->records;
   writer->bytes += size;
   return lql_stream_value_write_to(value, bench_discard_write, NULL, error) ==
@@ -492,6 +492,8 @@ int main(int argc, char **argv) {
   const char *expr;
   const char *mode;
   const char *submode;
+  const char *projection_path;
+  const char *projection_paths[1];
   FILE *file;
   long fixture_bytes;
   char fixture_hash[65];
@@ -520,6 +522,7 @@ int main(int argc, char **argv) {
   expr = "/status=\"open\"";
   mode = "decision_only_selector";
   submode = "steady_state";
+  projection_path = "/id";
   for (i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--fixture") == 0 && i + 1 < argc) {
       fixture = argv[++i];
@@ -533,10 +536,13 @@ int main(int argc, char **argv) {
       mode = argv[++i];
     } else if (strcmp(argv[i], "--submode") == 0 && i + 1 < argc) {
       submode = argv[++i];
+    } else if (strcmp(argv[i], "--projection-path") == 0 && i + 1 < argc) {
+      projection_path = argv[++i];
     } else {
       fprintf(stderr,
               "usage: %s --fixture PATH [--dataset NAME] [--selector-name "
-              "NAME] [--expr SELECTOR] [--mode MODE] [--submode MODE]\n",
+              "NAME] [--expr SELECTOR] [--mode MODE] [--submode MODE] "
+              "[--projection-path JSON_POINTER]\n",
               argv[0]);
       return 2;
     }
@@ -558,8 +564,7 @@ int main(int argc, char **argv) {
   unsupported = 0;
   unsupported_reason = "";
   if (!(mode_is_decision(mode) || mode_is_selected(mode) ||
-               mode_is_projection(mode) ||
-               mode_is_mutation(mode))) {
+        mode_is_projection(mode) || mode_is_mutation(mode))) {
     unsupported = 1;
     unsupported_reason =
         "mode is not implemented by the direct benchmark runner";
@@ -573,13 +578,14 @@ int main(int argc, char **argv) {
   projection = NULL;
   mutation = NULL;
   lql_error_init(&error);
+  projection_paths[0] = projection_path;
   if (!unsupported &&
       (lql_new(&ctx, &error) != LQL_STATUS_OK ||
        (strcmp(mode, "reparse_selector_each_run") != 0 &&
         ctx->selector_parse(ctx, expr, &selector, &error) != LQL_STATUS_OK) ||
        (mode_is_projection(mode) &&
-        ctx->projection_parse(ctx, projection_id_path, 1u, &projection,
-                              &error) != LQL_STATUS_OK) ||
+        ctx->projection_parse(ctx, projection_paths, 1u, &projection, &error) !=
+            LQL_STATUS_OK) ||
        (mode_is_mutation(mode) &&
         ((mutations = mutations_for(selector_name, expr, &mutation_count)),
          ctx->mutation_parse(ctx, mutations, mutation_count, &mutation,
@@ -646,8 +652,9 @@ int main(int argc, char **argv) {
           mode_is_selected(mode) || mode_is_projection(mode)
               ? benchmark_payload_bytes(mode, &writer)
               : 0ul);
-  json_string(mode_is_selected(mode) ? "callback_payload"
-                                      : (mode_is_projection(mode) ? "projection" : "none"));
+  json_string(mode_is_selected(mode)
+                  ? "callback_payload"
+                  : (mode_is_projection(mode) ? "projection" : "none"));
   fputs(",\"fixture_sha256\":", stdout);
   json_string(fixture_hash);
   if (unsupported) {
