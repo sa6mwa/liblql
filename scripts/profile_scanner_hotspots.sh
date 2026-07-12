@@ -57,6 +57,10 @@ profile_row status-decision "$status_samples" \
   build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' decision_only_selector
 
+profile_row status-ne-decision "$status_samples" \
+  build/direct-probe/status-100k.ndjson status_100k \
+  ne_status_open '/status!="open"' decision_only_selector
+
 profile_row status-reuse "$status_samples" \
   build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' reuse_selector

@@ -704,6 +704,9 @@ static int run_mapped_string_predicates(lql *ctx) {
       run_selection(ctx, "/tree/.../sku=\"needle\"", wildcard_input, 3u, 1u)) {
     return 15;
   }
+  if (run_selection(ctx, "/status!=\"open\"", input, 3u, 2u)) {
+    return 110;
+  }
   if (run_selection(ctx, "/code=1", scalar_input, 4u, 2u) ||
       run_selection(ctx, "in{field=/code,any=1|2}", scalar_input, 4u, 3u) ||
       run_selection(ctx, "/enabled=true", scalar_input, 4u, 1u)) {
