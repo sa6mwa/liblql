@@ -22,7 +22,13 @@ lql_status lql_json_normalize_ndjson(const lql_json_normalize_request *request,
                                      size_t *out_records,
                                      size_t *out_bytes_read, lql_error *error);
 
+typedef enum lql_json_flat_term_kind {
+  LQL_JSON_FLAT_TERM_EQ = 0,
+  LQL_JSON_FLAT_TERM_EXISTS = 1
+} lql_json_flat_term_kind;
+
 typedef struct lql_json_flat_eq_term {
+  lql_json_flat_term_kind kind;
   const char *field;
   size_t field_len;
   const char *value;

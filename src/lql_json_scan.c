@@ -147,6 +147,22 @@ static unsigned long lql_json_match_complete(const lql_json_scan *scan) {
   return matches;
 }
 
+static unsigned long lql_json_match_exists(const lql_json_scan *scan,
+                                           unsigned long keys) {
+  unsigned long hits;
+  size_t i;
+  hits = 0ul;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    unsigned long bit;
+    bit = 1ul << i;
+    if ((keys & bit) != 0ul &&
+        scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EXISTS) {
+      hits |= bit;
+    }
+  }
+  return hits;
+}
+
 static void lql_json_match_unicode(lql_json_scan *scan, unsigned int value) {
   if (value <= 0x7fu) {
     lql_json_match_byte(scan, (unsigned char)value);
@@ -496,6 +512,7 @@ static lql_status lql_json_value(lql_json_scan *scan);
 
 static lql_status lql_json_object(lql_json_scan *scan) {
   int value;
+  unsigned long exists_terms;
   unsigned long key_matches;
   int top_level;
   lql_status status;
@@ -534,6 +551,7 @@ static lql_status lql_json_object(lql_json_scan *scan) {
     }
     status = lql_json_string(scan);
     key_matches = top_level ? lql_json_match_complete(scan) : 0ul;
+    exists_terms = lql_json_match_exists(scan, key_matches);
     lql_json_match_start(scan, 0ul, 0);
     if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
@@ -543,8 +561,22 @@ static lql_status lql_json_object(lql_json_scan *scan) {
         (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
       return status;
     }
+    if (value != 'n') {
+      scan->flat_eq_hits |= exists_terms;
+    }
     if (key_matches && value == '"') {
-      lql_json_match_start(scan, key_matches, 0);
+      unsigned long eq_terms;
+      size_t i;
+      eq_terms = 0ul;
+      for (i = 0u; i < scan->flat_term_count; ++i) {
+        unsigned long bit;
+        bit = 1ul << i;
+        if ((key_matches & bit) != 0ul &&
+            scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EQ) {
+          eq_terms |= bit;
+        }
+      }
+      lql_json_match_start(scan, eq_terms, 0);
       status = lql_json_string(scan);
       if (status == LQL_STATUS_OK) {
         scan->flat_eq_hits |= lql_json_match_complete(scan);

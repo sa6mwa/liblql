@@ -123,7 +123,7 @@ int main(void) {
       " { \"status\" : \"closed\", \"status\" : \"open\" }\n"
       " \"open\"\n";
   static const lql_json_flat_eq_term flat_terms[] = {
-      {"status", 6u, "open", 4u}};
+      {LQL_JSON_FLAT_TERM_EQ, "status", 6u, "open", 4u}};
   lql_json_flat_eq_request flat_request;
   lql_json_spool flat_spool;
   json_test_reader flat_reader;
