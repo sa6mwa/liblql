@@ -1469,28 +1469,25 @@ static int lql_flat_eq_mutation_append(lql_flat_eq_program *program,
   if (program == NULL || mutation == NULL || mutation->action_count == 0u ||
       mutation->action_count > LQL_FLAT_EQ_TERM_CAPACITY)
     return 0;
-  if (mutation->action_count == 1u) {
-    const lql_mutation_action *action;
-    action = &mutation->actions[0];
-    if (action->kind == LQL_MUTATION_SET && action->segment_count == 2u &&
-        action->segments != NULL && action->segments[0] != NULL &&
-        action->segments[1] != NULL && action->value != NULL) {
-      program->direct_mutation_actions[0] = action;
-      program->direct_mutation_action_count = 1u;
-      return 1;
-    }
-  }
   for (i = 0u; i < mutation->action_count; ++i) {
     const lql_mutation_action *action;
     size_t j;
     action = &mutation->actions[i];
-    if ((action->kind != LQL_MUTATION_SET &&
-         action->kind != LQL_MUTATION_REMOVE &&
-         action->kind != LQL_MUTATION_INCREMENT) ||
-        action->segment_count != 1u || action->segments == NULL ||
-        action->segments[0] == NULL ||
-        (action->kind == LQL_MUTATION_SET && action->value == NULL))
+    if (action->segments == NULL || action->segments[0] == NULL)
       return 0;
+    if (action->kind == LQL_MUTATION_SET) {
+      if ((action->segment_count != 1u && action->segment_count != 2u) ||
+          action->value == NULL)
+        return 0;
+      if (action->segment_count == 2u && action->segments[1] == NULL)
+        return 0;
+    } else if (action->kind == LQL_MUTATION_REMOVE ||
+               action->kind == LQL_MUTATION_INCREMENT) {
+      if (action->segment_count != 1u)
+        return 0;
+    } else {
+      return 0;
+    }
     for (j = 0u; j < i; ++j) {
       if (strcmp(mutation->actions[j].segments[0], action->segments[0]) == 0)
         return 0;

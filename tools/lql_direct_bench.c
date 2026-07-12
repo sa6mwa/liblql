@@ -393,6 +393,8 @@ static const char *const *mutations_for(const char *selector_name,
   static const char *const processed[] = {"/processed=true"};
   static const char *const top_multi[] = {"/enabled=false", "/code=+1",
                                           "rm:/payload"};
+  static const char *const mixed_nested_multi[] = {
+      "/enabled=false", "/code=+1", "rm:/payload", "/meta/bench=true"};
   static const char *const fallback[] = {"/bench/touched=true"};
   if (strcmp(selector_name, "realworld_eq_sparse") == 0) {
     *count = 1u;
@@ -441,6 +443,10 @@ static const char *const *mutations_for(const char *selector_name,
   if (strcmp(selector_name, "eq_status_open_nested_set") == 0) {
     *count = 1u;
     return fallback;
+  }
+  if (strcmp(selector_name, "eq_code_one_mixed_nested_multi") == 0) {
+    *count = 4u;
+    return mixed_nested_multi;
   }
   if (strstr(expr, "/voucher/lines/10/") != NULL) {
     static const char *const voucher[] = {"/voucher/lines/10/bench=true"};
