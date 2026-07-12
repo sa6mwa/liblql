@@ -216,7 +216,7 @@ is applied before mutation, mutation is applied only when selection and output
 policy require it, and unmatched-record preservation follows the explicit
 matched-only setting. This ordering is a behavior gate, not an optimization.
 
-## Streaming And RSS Invariants
+## Streaming And Memory Invariants
 
 Streaming means direct producer-to-consumer flow. The implementation must not
 hide full-record, full-input, or all-result materialization behind a streaming
@@ -229,14 +229,18 @@ API.
   released before processing the next record.
 - Compiled selector/projection/mutation programs and bounded parser/writer
   stacks are allowed. They are not input/result caches.
-- RSS must be independent of total input bytes, record count, match count, and
-  result count. It may scale only with program size, nesting depth, bounded
-  transport buffers, and one explicitly allowed current-record payload.
-- The 100 MiB large-JSON scenario must remain below 128 MiB peak RSS. A second
-  gate processes multiple large records and proves the peak does not grow with
-  record count or retained spools.
-- The RSS gates run with selection, projection, mutation, and sparse-match
-  cases. A one-record-only measurement is insufficient.
+- Live heap is the primary embedded-memory invariant. Peak live heap must stay
+  at or below 256 KiB and remain independent of total input bytes, record
+  count, match count, result count, and repeated executions in one process.
+  It may scale only with program size, nesting depth, and bounded transport
+  buffers.
+- The live-heap gate covers selection, projection, mutation, sparse matching,
+  a 100 MiB JSON record, and repeated large records. It must prove that no
+  temporary full-record allocation or retained spool grows across executions.
+- RSS is a diagnostic deployment warning, not the primary release invariant:
+  fresh-process RSS above 8 MiB requires investigation, but platform loader,
+  libc, code-page, and TLS residency do not by themselves fail the memory
+  contract.
 
 ## Performance Contract
 
