@@ -1209,6 +1209,7 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
     }
     out->field = normalize_field_path(ctx, raw_field);
     out->value = unquote(ctx, raw_value);
+    out->value_is_string = raw_value[0] == '"';
     ctx->allocator->destroy(ctx->allocator, raw_field);
     ctx->allocator->destroy(ctx->allocator, raw_value);
     out->value_set = 1;
@@ -1565,6 +1566,7 @@ static int selector_json_store_value(selector_json_state *state,
   state->parser.allocator->destroy(state->parser.allocator, selector->value);
   selector->value = copy;
   selector->value_set = 1;
+  selector->value_is_string = 1;
   return 1;
 }
 
@@ -2683,6 +2685,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
       return LQL_STATUS_PARSE_ERROR;
     }
     selector.value_set = term->value_present ? 1 : 0;
+    selector.value_is_string = 1;
   }
   selector.ignore_case = term->ignore_case ? 1 : 0;
   prepare_selector_value_temporal(&selector);

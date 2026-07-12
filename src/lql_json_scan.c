@@ -3,16 +3,32 @@
 #include <string.h>
 
 #define LQL_JSON_READ_BUFFER_SIZE 8192u
+#define LQL_JSON_EMIT_BUFFER_SIZE 8192u
 #define LQL_JSON_MAX_DEPTH 128u
 
 typedef struct lql_json_scan {
-  const lql_json_normalize_request *request;
+  lql_stream_reader_fn reader;
+  void *reader_user;
+  lql_stream_writer_fn writer;
+  void *writer_user;
   unsigned char buffer[LQL_JSON_READ_BUFFER_SIZE];
+  unsigned char emit_buffer[LQL_JSON_EMIT_BUFFER_SIZE];
+  size_t emit_len;
   size_t offset;
   size_t length;
   size_t bytes_read;
   size_t depth;
   lql_error *error;
+  int flat_eq_active;
+  const char *flat_field;
+  size_t flat_field_len;
+  const char *flat_value;
+  size_t flat_value_len;
+  const char *match_target;
+  size_t match_target_len;
+  size_t match_pos;
+  int match_failed;
+  int flat_eq_matched;
 } lql_json_scan;
 
 static void lql_json_error(lql_json_scan *scan, const char *message) {
@@ -25,14 +41,92 @@ static void lql_json_error(lql_json_scan *scan, const char *message) {
 
 static lql_status lql_json_write(lql_json_scan *scan, const void *data,
                                  size_t len) {
-  if (len == 0u) {
+  const unsigned char *bytes;
+  lql_status status;
+  if (scan->writer == NULL) {
     return LQL_STATUS_OK;
   }
-  if (scan->request->writer == NULL) {
+  bytes = (const unsigned char *)data;
+  while (len != 0u) {
+    size_t amount;
+    if (scan->emit_len == sizeof(scan->emit_buffer)) {
+      status = scan->writer == NULL
+                   ? LQL_STATUS_OK
+                   : scan->writer(scan->writer_user, scan->emit_buffer,
+                                  scan->emit_len, scan->error);
+      if (status != LQL_STATUS_OK) {
+        return status;
+      }
+      scan->emit_len = 0u;
+    }
+    amount = sizeof(scan->emit_buffer) - scan->emit_len;
+    if (amount > len) {
+      amount = len;
+    }
+    memcpy(scan->emit_buffer + scan->emit_len, bytes, amount);
+    scan->emit_len += amount;
+    bytes += amount;
+    len -= amount;
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status lql_json_flush(lql_json_scan *scan) {
+  lql_status status;
+  if (scan->emit_len == 0u || scan->writer == NULL) {
+    scan->emit_len = 0u;
     return LQL_STATUS_OK;
   }
-  return scan->request->writer(scan->request->writer_user, data, len,
-                               scan->error);
+  status = scan->writer(scan->writer_user, scan->emit_buffer, scan->emit_len,
+                        scan->error);
+  if (status == LQL_STATUS_OK) {
+    scan->emit_len = 0u;
+  }
+  return status;
+}
+
+static void lql_json_match_start(lql_json_scan *scan, const char *target,
+                                 size_t target_len) {
+  scan->match_target = target;
+  scan->match_target_len = target_len;
+  scan->match_pos = 0u;
+  scan->match_failed = 0;
+}
+
+static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
+  if (scan->match_target == NULL || scan->match_failed) {
+    return;
+  }
+  if (scan->match_pos == scan->match_target_len ||
+      (unsigned char)scan->match_target[scan->match_pos] != value) {
+    scan->match_failed = 1;
+    return;
+  }
+  ++scan->match_pos;
+}
+
+static int lql_json_match_complete(const lql_json_scan *scan) {
+  return scan->match_target != NULL && !scan->match_failed &&
+         scan->match_pos == scan->match_target_len;
+}
+
+static void lql_json_match_unicode(lql_json_scan *scan, unsigned int value) {
+  if (value <= 0x7fu) {
+    lql_json_match_byte(scan, (unsigned char)value);
+  } else if (value <= 0x7ffu) {
+    lql_json_match_byte(scan, (unsigned char)(0xc0u | (value >> 6u)));
+    lql_json_match_byte(scan, (unsigned char)(0x80u | (value & 0x3fu)));
+  } else if (value <= 0xffffu) {
+    lql_json_match_byte(scan, (unsigned char)(0xe0u | (value >> 12u)));
+    lql_json_match_byte(scan, (unsigned char)(0x80u | ((value >> 6u) & 0x3fu)));
+    lql_json_match_byte(scan, (unsigned char)(0x80u | (value & 0x3fu)));
+  } else {
+    lql_json_match_byte(scan, (unsigned char)(0xf0u | (value >> 18u)));
+    lql_json_match_byte(scan,
+                        (unsigned char)(0x80u | ((value >> 12u) & 0x3fu)));
+    lql_json_match_byte(scan, (unsigned char)(0x80u | ((value >> 6u) & 0x3fu)));
+    lql_json_match_byte(scan, (unsigned char)(0x80u | (value & 0x3fu)));
+  }
 }
 
 static lql_status lql_json_refill(lql_json_scan *scan) {
@@ -44,8 +138,8 @@ static lql_status lql_json_refill(lql_json_scan *scan) {
   scan->offset = 0u;
   scan->length = 0u;
   amount = 0u;
-  status = scan->request->reader(scan->request->reader_user, scan->buffer,
-                                 sizeof(scan->buffer), &amount, scan->error);
+  status = scan->reader(scan->reader_user, scan->buffer, sizeof(scan->buffer),
+                        &amount, scan->error);
   if (status != LQL_STATUS_OK) {
     return status;
   }
@@ -159,6 +253,9 @@ static lql_status lql_json_string(lql_json_scan *scan) {
   int remaining;
   int continuation_min;
   int continuation_max;
+  const unsigned char *span;
+  size_t span_len;
+  size_t i;
   unsigned int unicode;
   unsigned int low;
   unsigned char raw[4];
@@ -171,6 +268,34 @@ static lql_status lql_json_string(lql_json_scan *scan) {
     return status;
   }
   for (;;) {
+    status = lql_json_refill(scan);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+    if (scan->offset == scan->length) {
+      lql_json_error(scan, "unterminated JSON string");
+      return LQL_STATUS_JSON_ERROR;
+    }
+    span = scan->buffer + scan->offset;
+    span_len = 0u;
+    while (scan->offset + span_len < scan->length) {
+      value = (int)span[span_len];
+      if (value == '"' || value == '\\' || value < 0x20 || value >= 0x80) {
+        break;
+      }
+      ++span_len;
+    }
+    if (span_len != 0u) {
+      scan->offset += span_len;
+      status = lql_json_write(scan, span, span_len);
+      if (status != LQL_STATUS_OK) {
+        return status;
+      }
+      for (i = 0u; i < span_len; ++i) {
+        lql_json_match_byte(scan, span[i]);
+      }
+      continue;
+    }
     status = lql_json_take(scan, &value);
     if (status != LQL_STATUS_OK) {
       lql_json_error(scan, "unterminated JSON string");
@@ -195,6 +320,19 @@ static lql_status lql_json_string(lql_json_scan *scan) {
       }
       if (next == '"' || next == '\\' || next == '/' || next == 'b' ||
           next == 'f' || next == 'n' || next == 'r' || next == 't') {
+        if (next == 'b') {
+          lql_json_match_byte(scan, '\b');
+        } else if (next == 'f') {
+          lql_json_match_byte(scan, '\f');
+        } else if (next == 'n') {
+          lql_json_match_byte(scan, '\n');
+        } else if (next == 'r') {
+          lql_json_match_byte(scan, '\r');
+        } else if (next == 't') {
+          lql_json_match_byte(scan, '\t');
+        } else {
+          lql_json_match_byte(scan, (unsigned char)next);
+        }
         status = lql_json_copy_byte(scan, next);
         if (status != LQL_STATUS_OK) {
           return status;
@@ -216,6 +354,7 @@ static lql_status lql_json_string(lql_json_scan *scan) {
         return LQL_STATUS_JSON_ERROR;
       }
       if (unicode < 0xd800u || unicode > 0xdbffu) {
+        lql_json_match_unicode(scan, unicode);
         continue;
       }
       status = lql_json_take_expected(scan, '\\');
@@ -232,9 +371,12 @@ static lql_status lql_json_string(lql_json_scan *scan) {
         lql_json_error(scan, "unpaired high surrogate in JSON string");
         return LQL_STATUS_JSON_ERROR;
       }
+      lql_json_match_unicode(scan, 0x10000u + ((unicode - 0xd800u) << 10u) +
+                                       (low - 0xdc00u));
       continue;
     }
     if (value < 0x80) {
+      lql_json_match_byte(scan, (unsigned char)value);
       status = lql_json_copy_byte(scan, value);
       if (status != LQL_STATUS_OK) {
         return status;
@@ -261,6 +403,7 @@ static lql_status lql_json_string(lql_json_scan *scan) {
     if (status != LQL_STATUS_OK) {
       return status;
     }
+    lql_json_match_byte(scan, (unsigned char)value);
     while (remaining != 0) {
       status = lql_json_take(scan, &next);
       if (status != LQL_STATUS_OK || next < continuation_min ||
@@ -272,6 +415,7 @@ static lql_status lql_json_string(lql_json_scan *scan) {
       if (status != LQL_STATUS_OK) {
         return status;
       }
+      lql_json_match_byte(scan, (unsigned char)next);
       --remaining;
       continuation_min = 0x80;
       continuation_max = 0xbf;
@@ -283,12 +427,15 @@ static lql_status lql_json_value(lql_json_scan *scan);
 
 static lql_status lql_json_object(lql_json_scan *scan) {
   int value;
+  int key_matches;
+  int top_level;
   lql_status status;
   if (scan->depth == LQL_JSON_MAX_DEPTH) {
     lql_json_error(scan, "JSON nesting exceeds the scanner limit");
     return LQL_STATUS_JSON_ERROR;
   }
   ++scan->depth;
+  top_level = scan->flat_eq_active && scan->depth == 1u;
   status = lql_json_take_expected(scan, '{');
   if (status != LQL_STATUS_OK ||
       (status = lql_json_copy_byte(scan, '{')) != LQL_STATUS_OK ||
@@ -307,13 +454,33 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       lql_json_error(scan, "JSON object key must be a string");
       return LQL_STATUS_JSON_ERROR;
     }
+    if (top_level) {
+      lql_json_match_start(scan, scan->flat_field, scan->flat_field_len);
+    } else {
+      lql_json_match_start(scan, NULL, 0u);
+    }
     status = lql_json_string(scan);
+    key_matches = top_level && lql_json_match_complete(scan);
+    lql_json_match_start(scan, NULL, 0u);
     if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
         (status = lql_json_take_expected(scan, ':')) != LQL_STATUS_OK ||
         (status = lql_json_copy_byte(scan, ':')) != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
-        (status = lql_json_value(scan)) != LQL_STATUS_OK ||
+        (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
+      return status;
+    }
+    if (key_matches && value == '"') {
+      lql_json_match_start(scan, scan->flat_value, scan->flat_value_len);
+      status = lql_json_string(scan);
+      if (status == LQL_STATUS_OK && lql_json_match_complete(scan)) {
+        scan->flat_eq_matched = 1;
+      }
+      lql_json_match_start(scan, NULL, 0u);
+    } else {
+      status = lql_json_value(scan);
+    }
+    if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
         (status = lql_json_take(scan, &value)) != LQL_STATUS_OK) {
       return status;
@@ -556,7 +723,10 @@ lql_status lql_json_normalize_ndjson(const lql_json_normalize_request *request,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   memset(&scan, 0, sizeof(scan));
-  scan.request = request;
+  scan.reader = request->reader;
+  scan.reader_user = request->reader_user;
+  scan.writer = request->writer;
+  scan.writer_user = request->writer_user;
   scan.error = error;
   records = 0u;
   for (;;) {
@@ -583,10 +753,104 @@ lql_status lql_json_normalize_ndjson(const lql_json_normalize_request *request,
       break;
     }
     status = lql_json_write(&scan, "\n", 1u);
+    if (status == LQL_STATUS_OK) {
+      status = lql_json_flush(&scan);
+    }
     if (status != LQL_STATUS_OK) {
       break;
     }
     ++records;
+  }
+  if (out_records != NULL) {
+    *out_records = records;
+  }
+  if (out_bytes_read != NULL) {
+    *out_bytes_read = scan.bytes_read;
+  }
+  return status;
+}
+
+static lql_status lql_json_spool_write(void *user, const void *data, size_t len,
+                                       lql_error *error) {
+  return lql_json_spool_append((lql_json_spool *)user, data, len, error);
+}
+
+lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
+                                        size_t *out_records,
+                                        size_t *out_bytes_read,
+                                        lql_error *error) {
+  lql_json_scan scan;
+  lql_status status;
+  int value;
+  int root_is_object;
+  size_t records;
+  if (out_records != NULL) {
+    *out_records = 0u;
+  }
+  if (out_bytes_read != NULL) {
+    *out_bytes_read = 0u;
+  }
+  if (request == NULL || request->reader == NULL || request->field == NULL ||
+      request->value == NULL || request->record == NULL ||
+      (request->capture && request->spool == NULL)) {
+    if (error != NULL) {
+      error->code = LQL_STATUS_INVALID_ARGUMENT;
+      strcpy(error->message, "flat JSON equality scanner is not configured");
+    }
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  memset(&scan, 0, sizeof(scan));
+  scan.reader = request->reader;
+  scan.reader_user = request->reader_user;
+  scan.writer = request->capture ? lql_json_spool_write : NULL;
+  scan.writer_user = request->spool;
+  scan.error = error;
+  scan.flat_field = request->field;
+  scan.flat_field_len = request->field_len;
+  scan.flat_value = request->value;
+  scan.flat_value_len = request->value_len;
+  records = 0u;
+  for (;;) {
+    status = lql_json_skip_space(&scan);
+    if (status != LQL_STATUS_OK ||
+        (status = lql_json_peek(&scan, &value)) != LQL_STATUS_OK) {
+      break;
+    }
+    if (value < 0) {
+      status = LQL_STATUS_OK;
+      break;
+    }
+    if (value == '[') {
+      lql_json_error(&scan, "root JSON arrays are not valid NDJSON records");
+      status = LQL_STATUS_JSON_ERROR;
+      break;
+    }
+    if (request->capture) {
+      lql_json_spool_reset(request->spool);
+    }
+    root_is_object = value == '{';
+    scan.flat_eq_active = root_is_object;
+    scan.flat_eq_matched = 0;
+    lql_json_match_start(&scan, NULL, 0u);
+    status = lql_json_value(&scan);
+    if (status != LQL_STATUS_OK) {
+      break;
+    }
+    status = lql_json_record_separator(&scan);
+    if (status != LQL_STATUS_OK) {
+      break;
+    }
+    status = lql_json_flush(&scan);
+    if (status != LQL_STATUS_OK) {
+      break;
+    }
+    status = request->record(request->record_user, records, root_is_object,
+                             root_is_object && scan.flat_eq_matched,
+                             request->spool, error);
+    ++records;
+    if (status != LQL_STATUS_OK) {
+      break;
+    }
   }
   if (out_records != NULL) {
     *out_records = records;

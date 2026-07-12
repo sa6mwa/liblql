@@ -14,6 +14,12 @@ typedef struct json_test_writer {
   size_t len;
 } json_test_writer;
 
+typedef struct json_flat_result {
+  json_test_writer *writer;
+  size_t objects;
+  size_t matches;
+} json_flat_result;
+
 static lql_status json_test_read(void *user, unsigned char *buffer,
                                  size_t capacity, size_t *out_len,
                                  lql_error *error) {
@@ -55,6 +61,31 @@ static lql_status json_test_write(void *user, const void *data, size_t len,
   return LQL_STATUS_OK;
 }
 
+static lql_status json_flat_record(void *user, size_t record_index,
+                                   int root_is_object, int matched,
+                                   const lql_json_spool *spool,
+                                   lql_error *error) {
+  json_flat_result *result;
+  (void)record_index;
+  result = (json_flat_result *)user;
+  if (result == NULL || spool == NULL) {
+    return LQL_STATUS_CALLBACK_ERROR;
+  }
+  if (root_is_object) {
+    ++result->objects;
+  }
+  if (!matched) {
+    return LQL_STATUS_OK;
+  }
+  ++result->matches;
+  if (lql_json_spool_write_to(spool, json_test_write, result->writer, error) !=
+          LQL_STATUS_OK ||
+      json_test_write(result->writer, "\n", 1u, error) != LQL_STATUS_OK) {
+    return LQL_STATUS_CALLBACK_ERROR;
+  }
+  return LQL_STATUS_OK;
+}
+
 static int json_test_run(const char *input, size_t chunk_size,
                          const char *expected, lql_status expected_status,
                          size_t expected_records) {
@@ -87,6 +118,18 @@ static int json_test_run(const char *input, size_t chunk_size,
 }
 
 int main(void) {
+  static const char flat_input[] =
+      " { \"sta\\u0074us\" : \"op\\u0065n\", \"id\" : 1 }\n"
+      " { \"status\" : \"closed\", \"status\" : \"open\" }\n"
+      " \"open\"\n";
+  lql_json_flat_eq_request flat_request;
+  lql_json_spool flat_spool;
+  json_test_reader flat_reader;
+  json_test_writer flat_writer;
+  json_flat_result flat_result;
+  lql_error flat_error;
+  size_t flat_records;
+  size_t flat_bytes;
   if (json_test_run(" { \"status\" : \"open\", \"nested\" : [ true, null, "
                     "-1.2e+3 ], \"face\" : \"\\uD83D\\uDE00\" }\n"
                     " \"scalar\\tvalue\" \n",
@@ -114,5 +157,42 @@ int main(void) {
                     LQL_STATUS_JSON_ERROR, 0u)) {
     return 6;
   }
+  memset(&flat_reader, 0, sizeof(flat_reader));
+  memset(&flat_writer, 0, sizeof(flat_writer));
+  memset(&flat_result, 0, sizeof(flat_result));
+  flat_reader.data = (const unsigned char *)flat_input;
+  flat_reader.len = sizeof(flat_input) - 1u;
+  flat_reader.chunk_size = 1u;
+  flat_result.writer = &flat_writer;
+  memset(&flat_request, 0, sizeof(flat_request));
+  flat_request.reader = json_test_read;
+  flat_request.reader_user = &flat_reader;
+  flat_request.field = "status";
+  flat_request.field_len = 6u;
+  flat_request.value = "open";
+  flat_request.value_len = 4u;
+  flat_request.spool = &flat_spool;
+  flat_request.capture = 1;
+  flat_request.record = json_flat_record;
+  flat_request.record_user = &flat_result;
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
+    return 7;
+  }
+  if (lql_json_scan_flat_eq_ndjson(&flat_request, &flat_records, &flat_bytes,
+                                   &flat_error) != LQL_STATUS_OK ||
+      flat_records != 3u || flat_bytes != flat_reader.len ||
+      flat_result.objects != 2u || flat_result.matches != 2u ||
+      flat_writer.len !=
+          strlen("{\"sta\\u0074us\":\"op\\u0065n\",\"id\":1}\n"
+                 "{\"status\":\"closed\",\"status\":\"open\"}\n") ||
+      memcmp(flat_writer.data,
+             "{\"sta\\u0074us\":\"op\\u0065n\",\"id\":1}\n"
+             "{\"status\":\"closed\",\"status\":\"open\"}\n",
+             flat_writer.len) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 8;
+  }
+  lql_json_spool_cleanup(&flat_spool);
   return 0;
 }

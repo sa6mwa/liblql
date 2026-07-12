@@ -36,9 +36,11 @@ add_library(lql_common OBJECT
   src/lql_allocator.c
   src/lql_direct_actions.c
   src/lql_json_scan.c
+  src/lql_json_spool.c
   src/lql_projection.c
   src/lql_selector.c
   src/lql_stream.c
+  src/lql_stream_flat_eq.c
   src/lql_temporal.c)
 set_target_properties(lql_common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(lql_common PUBLIC

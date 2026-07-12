@@ -16,6 +16,14 @@ typedef struct lql_impl lql_impl;
 typedef struct lql_stream_program lql_stream_program;
 typedef struct lql_projection_capture lql_projection_capture;
 
+#define LQL_STREAM_VALUE_LONEJSON_SPOOL 1
+#define LQL_STREAM_VALUE_JSON_SPOOL 2
+
+struct lql_stream_value {
+  int storage_kind;
+  const void *spool;
+};
+
 struct lql_allocator {
   void *impl;
   void *(*alloc)(lql_allocator *self, size_t size);
@@ -86,6 +94,7 @@ struct lql_selector {
   char *field;
   char *value;
   int value_set;
+  int value_is_string;
   int value_is_temporal;
   int ignore_case;
   char **any;
@@ -246,5 +255,8 @@ LQL_INTERNAL_SYMBOL int lql_temporal_today(lql_temporal *out);
 LQL_INTERNAL_SYMBOL int lql_temporal_yesterday(lql_temporal *out);
 LQL_INTERNAL_SYMBOL void lql_stream_program_destroy(lql *self,
                                                     lql_selector *selector);
+LQL_INTERNAL_SYMBOL lql_status lql_stream_execute_flat_eq(
+    lql *self, const lql_stream_request *request, lql_stream_result *result,
+    lql_error *error, int *out_handled);
 
 #endif

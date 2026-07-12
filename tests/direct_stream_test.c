@@ -23,6 +23,8 @@ typedef struct test_writer {
 typedef struct test_value_sink {
   test_writer *writer;
   size_t count;
+  int stop_after_first;
+  int fail_after_first;
 } test_value_sink;
 
 static lql_status test_read(void *user, unsigned char *buffer, size_t capacity,
@@ -58,7 +60,8 @@ static lql_status test_write(void *user, const void *data, size_t len,
   test_writer *writer;
   (void)error;
   writer = (test_writer *)user;
-  if (writer == NULL || data == NULL || len > sizeof(writer->data) - writer->len) {
+  if (writer == NULL || data == NULL ||
+      len > sizeof(writer->data) - writer->len) {
     return LQL_STATUS_CALLBACK_ERROR;
   }
   memcpy(writer->data + writer->len, data, len);
@@ -66,9 +69,8 @@ static lql_status test_write(void *user, const void *data, size_t len,
   return LQL_STATUS_OK;
 }
 
-static lql_stream_callback_result test_decide(void *user,
-                                               const lql_stream_decision *value,
-                                               lql_error *error) {
+static lql_stream_callback_result
+test_decide(void *user, const lql_stream_decision *value, lql_error *error) {
   test_decisions *decisions;
   (void)error;
   decisions = (test_decisions *)user;
@@ -84,15 +86,21 @@ static lql_stream_callback_result test_decide(void *user,
              : LQL_STREAM_CALLBACK_CONTINUE;
 }
 
-static lql_stream_callback_result test_value(void *user,
-                                             const lql_stream_value *value,
-                                             lql_error *error) {
+static lql_stream_callback_result
+test_value(void *user, const lql_stream_value *value, lql_error *error) {
   test_value_sink *sink;
   sink = (test_value_sink *)user;
   if (sink == NULL || sink->writer == NULL ||
       lql_stream_value_write_to(value, test_write, sink->writer, error) !=
-          LQL_STATUS_OK) return LQL_STREAM_CALLBACK_ERROR;
+          LQL_STATUS_OK)
+    return LQL_STREAM_CALLBACK_ERROR;
   ++sink->count;
+  if (sink->fail_after_first && sink->count == 1u) {
+    return LQL_STREAM_CALLBACK_ERROR;
+  }
+  if (sink->stop_after_first && sink->count == 1u) {
+    return LQL_STREAM_CALLBACK_STOP;
+  }
   return LQL_STREAM_CALLBACK_CONTINUE;
 }
 
@@ -326,10 +334,9 @@ static int run_mapped_string_predicates(lql *ctx) {
       "\"tree\":{\"branch\":{\"sku\":\"other\"}}}\n"
       "{\"items\":[{\"sku\":\"C\"}],\"object\":{},\"array\":[],"
       "\"tree\":{}}\n";
-  static const char scalar_input[] =
-      "{\"code\":1,\"enabled\":true}\n"
-      "{\"code\":2,\"enabled\":false}\n"
-      "{\"code\":1.0,\"enabled\":false}\n";
+  static const char scalar_input[] = "{\"code\":1,\"enabled\":true}\n"
+                                     "{\"code\":2,\"enabled\":false}\n"
+                                     "{\"code\":1.0,\"enabled\":false}\n";
   static const char root_wildcard_input[] =
       "{\"alpha\":{\"state\":\"open\"},\"beta\":{\"state\":\"closed\"}}\n"
       "{\"alpha\":{\"state\":\"closed\"}}\n"
@@ -347,13 +354,15 @@ static int run_mapped_string_predicates(lql *ctx) {
   if (run_selection(ctx, "exists{/a}", input, 3u, 2u)) {
     return 4;
   }
-  if (run_selection(ctx, "contains{f=/msg,a=Timeout|degraded},"
+  if (run_selection(ctx,
+                    "contains{f=/msg,a=Timeout|degraded},"
                     "prefix{f=/service,v=Auth},in{f=/env,a=prod|stage},"
-                    "exists{/a}", input, 3u, 1u)) {
+                    "exists{/a}",
+                    input, 3u, 1u)) {
     return 5;
   }
-  if (run_selection(ctx, "or./status=\"open\",or./status=\"pending\"",
-                    input, 3u, 2u)) {
+  if (run_selection(ctx, "or./status=\"open\",or./status=\"pending\"", input,
+                    3u, 2u)) {
     return 6;
   }
   if (run_selection(ctx, "/items/1/sku=\"B\"", nested_input, 3u, 1u)) {
@@ -362,40 +371,34 @@ static int run_mapped_string_predicates(lql *ctx) {
   if (run_selection(ctx, "exists{/meta/etag}", nested_input, 3u, 1u)) {
     return 8;
   }
-  if (run_selection(ctx, "range{field=/items/1/price,gte=20}", nested_input,
-                    3u, 1u)) {
+  if (run_selection(ctx, "range{field=/items/1/price,gte=20}", nested_input, 3u,
+                    1u)) {
     return 9;
   }
-  if (run_selection(ctx, "/timestamp=\"2026-03-05T09:29:00Z\"",
-                    temporal_input, 3u, 2u)) {
+  if (run_selection(ctx, "/timestamp=\"2026-03-05T09:29:00Z\"", temporal_input,
+                    3u, 2u)) {
     return 10;
   }
-  if (run_selection(ctx,
-                    "range{field=/timestamp,gte=2026-03-05T10:28:21Z}",
+  if (run_selection(ctx, "range{field=/timestamp,gte=2026-03-05T10:28:21Z}",
                     temporal_input, 3u, 1u)) {
     return 11;
   }
   if (run_selection(ctx,
                     "date{field=/timestamp,after=2026-03-05T10:28:21Z,"
-                    "before=2026-03-05T10:30:00Z}", temporal_input, 3u,
-                    1u)) {
+                    "before=2026-03-05T10:30:00Z}",
+                    temporal_input, 3u, 1u)) {
     return 12;
   }
   if (run_selection(ctx, "/items[]/sku=\"B\"", wildcard_input, 3u, 2u)) {
     return 13;
   }
-  if (run_selection(ctx, "/object/*/state=\"open\"", wildcard_input, 3u,
-                    1u) ||
-      run_selection(ctx, "/array/*/state=\"open\"", wildcard_input, 3u,
-                    0u) ||
-      run_selection(ctx, "/array/[]/state=\"open\"", wildcard_input, 3u,
-                    1u)) {
+  if (run_selection(ctx, "/object/*/state=\"open\"", wildcard_input, 3u, 1u) ||
+      run_selection(ctx, "/array/*/state=\"open\"", wildcard_input, 3u, 0u) ||
+      run_selection(ctx, "/array/[]/state=\"open\"", wildcard_input, 3u, 1u)) {
     return 14;
   }
-  if (run_selection(ctx, "/tree/**/sku=\"other\"", wildcard_input, 3u,
-                    1u) ||
-      run_selection(ctx, "/tree/.../sku=\"needle\"", wildcard_input, 3u,
-                    1u)) {
+  if (run_selection(ctx, "/tree/**/sku=\"other\"", wildcard_input, 3u, 1u) ||
+      run_selection(ctx, "/tree/.../sku=\"needle\"", wildcard_input, 3u, 1u)) {
     return 15;
   }
   if (run_selection(ctx, "/code=1", scalar_input, 3u, 1u) ||
@@ -403,8 +406,7 @@ static int run_mapped_string_predicates(lql *ctx) {
       run_selection(ctx, "/enabled=true", scalar_input, 3u, 1u)) {
     return 16;
   }
-  if (run_selection(ctx, "/*/state=\"open\"", root_wildcard_input, 3u,
-                    1u)) {
+  if (run_selection(ctx, "/*/state=\"open\"", root_wildcard_input, 3u, 1u)) {
     return 17;
   }
   return 0;
@@ -441,7 +443,8 @@ static int run_match_all(lql *ctx) {
   reader.data = (const unsigned char *)root_array;
   reader.len = sizeof(root_array) - 1u;
   request.reader_user = &reader;
-  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_JSON_ERROR) {
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+      LQL_STATUS_JSON_ERROR) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
@@ -470,7 +473,8 @@ static int run_root_wildcard_array_error(lql *ctx) {
   request.reader = test_read;
   request.reader_user = &reader;
   request.selector = selector;
-  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_JSON_ERROR) {
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+      LQL_STATUS_JSON_ERROR) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
@@ -479,13 +483,11 @@ static int run_root_wildcard_array_error(lql *ctx) {
 }
 
 static int run_selected_record_output(lql *ctx) {
-  static const char input[] =
-      "{ \"status\" : \"open\", \"n\" : 1 }\n"
-      "{\"status\":\"closed\",\"n\":2}\n";
+  static const char input[] = "{ \"status\" : \"open\", \"n\" : 1 }\n"
+                              "{\"status\":\"closed\",\"n\":2}\n";
   static const char matched_only[] = "{\"status\":\"open\",\"n\":1}\n";
-  static const char all_records[] =
-      "{\"status\":\"open\",\"n\":1}\n"
-      "{\"status\":\"closed\",\"n\":2}\n";
+  static const char all_records[] = "{\"status\":\"open\",\"n\":1}\n"
+                                    "{\"status\":\"closed\",\"n\":2}\n";
   static const char *const projection_paths[] = {"/n", "/status"};
   static const char projection_output[] = "{\"n\":1,\"status\":\"open\"}\n";
   lql_selector *selector;
@@ -562,6 +564,8 @@ static int run_selected_record_output(lql *ctx) {
 static int run_value_callback(lql *ctx) {
   static const char input[] = "{\"status\":\"open\",\"n\":1}\n"
                               "{\"status\":\"closed\",\"n\":2}\n";
+  static const char malformed[] = "{\"status\":\"open\",\"n\":1}\n"
+                                  "{\"status\":}\n";
   static const char expected[] = "{\"status\":\"open\",\"n\":1}";
   lql_selector *selector;
   lql_stream_request request;
@@ -573,7 +577,8 @@ static int run_value_callback(lql *ctx) {
   selector = NULL;
   lql_error_init(&error);
   if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
-      LQL_STATUS_OK) return 1;
+      LQL_STATUS_OK)
+    return 1;
   memset(&reader, 0, sizeof(reader));
   reader.data = (const unsigned char *)input;
   reader.len = sizeof(input) - 1u;
@@ -594,6 +599,74 @@ static int run_value_callback(lql *ctx) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
+  reader.offset = 0u;
+  reader.data = (const unsigned char *)malformed;
+  reader.len = sizeof(malformed) - 1u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&sink, 0, sizeof(sink));
+  sink.writer = &writer;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+          LQL_STATUS_JSON_ERROR ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      sink.count != 1u || writer.len != sizeof(expected) - 1u ||
+      memcmp(writer.data, expected, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
+static int run_value_callback_control(lql *ctx) {
+  static const char input[] = "{\"status\":\"open\"}\n"
+                              "{\"status\":\"open\"}\n";
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+  test_value_sink sink;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 1u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&sink, 0, sizeof(sink));
+  sink.writer = &writer;
+  sink.stop_after_first = 1;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  request.on_value = test_value;
+  request.value_user = &sink;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      !result.stopped_early || result.stop_reason != LQL_STREAM_STOP_CALLBACK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      sink.count != 1u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  reader.offset = 0u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&sink, 0, sizeof(sink));
+  sink.writer = &writer;
+  sink.fail_after_first = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+          LQL_STATUS_CALLBACK_ERROR ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      sink.count != 1u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
   ctx->selector_destroy(ctx, selector);
   return 0;
 }
@@ -603,11 +676,10 @@ static int run_nested_projection_output(lql *ctx) {
       "{\"id\":\"x\",\"meta\":{\"trace\":9,\"ignore\":1},"
       "\"items\":[{\"sku\":\"A\"},{\"sku\":\"B\"}],"
       "\"slash/key\":true}\n";
-  static const char *const paths[] = {
-      "/meta/trace", "/items/1/sku", "/id", "/slash~1key"};
-  static const char output[] =
-      "{\"id\":\"x\",\"items\":[null,{\"sku\":\"B\"}],"
-      "\"meta\":{\"trace\":9},\"slash/key\":true}\n";
+  static const char *const paths[] = {"/meta/trace", "/items/1/sku", "/id",
+                                      "/slash~1key"};
+  static const char output[] = "{\"id\":\"x\",\"items\":[null,{\"sku\":\"B\"}],"
+                               "\"meta\":{\"trace\":9},\"slash/key\":true}\n";
   static const char *const missing_paths[] = {"/missing"};
   static const char scalar[] = "1\n";
   lql_selector *selector;
@@ -686,9 +758,8 @@ static int run_nested_projection_output(lql *ctx) {
 }
 
 static int run_mutation_output(lql *ctx) {
-  static const char input[] =
-      "{\"status\":\"open\",\"n\":1}\n"
-      "{\"status\":\"closed\",\"n\":2}\n";
+  static const char input[] = "{\"status\":\"open\",\"n\":1}\n"
+                              "{\"status\":\"closed\",\"n\":2}\n";
   static const char *const increment[] = {"/n=+2"};
   static const char increment_output[] = "{\"status\":\"open\",\"n\":3}\n";
   static const char increment_all_output[] =
@@ -697,8 +768,8 @@ static int run_mutation_output(lql *ctx) {
   static const char *const direct_set[] = {"/bench/touched=true"};
   static const char direct_set_output[] =
       "{\"status\":\"open\",\"n\":1,\"bench\":{\"touched\":true}}\n";
-  static const char *const ordered[] = {
-      "/status=ready", "rm:/n", "/meta/a~1b=true"};
+  static const char *const ordered[] = {"/status=ready", "rm:/n",
+                                        "/meta/a~1b=true"};
   static const char ordered_output[] =
       "{\"status\":\"ready\",\"meta\":{\"a/b\":true}}\n";
   static const char *const invalid_root[] = {"/=value"};
@@ -815,8 +886,7 @@ static int run_projection_then_mutation_output(lql *ctx) {
   static const char input[] = "{\"status\":\"open\",\"n\":1,\"drop\":9}\n";
   static const char *const projection_paths[] = {"/status", "/n"};
   static const char *const mutations[] = {"/n=+2", "/added=true"};
-  static const char output[] =
-      "{\"n\":3,\"status\":\"open\",\"added\":true}\n";
+  static const char output[] = "{\"n\":3,\"status\":\"open\",\"added\":true}\n";
   lql_selector *selector;
   lql_projection *projection;
   lql_mutation *mutation;
@@ -872,8 +942,7 @@ static int run_projection_then_mutation_output(lql *ctx) {
 }
 
 static int run_stop_and_root_array(lql *ctx) {
-  static const char input[] =
-      "{\"status\":\"open\"}\n{\"status\":\"open\"}\n";
+  static const char input[] = "{\"status\":\"open\"}\n{\"status\":\"open\"}\n";
   static const char root_array[] = "[{\"status\":\"open\"}]\n";
   lql_selector *selector;
   lql_stream_request request;
@@ -910,7 +979,8 @@ static int run_stop_and_root_array(lql *ctx) {
   reader.len = sizeof(root_array) - 1u;
   request.reader_user = &reader;
   request.on_decision = NULL;
-  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_JSON_ERROR) {
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+      LQL_STATUS_JSON_ERROR) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
@@ -926,15 +996,13 @@ int main(void) {
   if (lql_new(&ctx, &error) != LQL_STATUS_OK) {
     return 1;
   }
-  if (run_projection_parse(ctx) || run_status_selection(ctx) || run_conjunction_selection(ctx) ||
-      run_or_selection(ctx) || run_not_selection(ctx) ||
-      run_mapped_string_predicates(ctx) || run_match_all(ctx) ||
-      run_root_wildcard_array_error(ctx) ||
-      run_selected_record_output(ctx) ||
-      run_value_callback(ctx) ||
-      run_nested_projection_output(ctx) ||
-      run_mutation_output(ctx) ||
-      run_projection_then_mutation_output(ctx) ||
+  if (run_projection_parse(ctx) || run_status_selection(ctx) ||
+      run_conjunction_selection(ctx) || run_or_selection(ctx) ||
+      run_not_selection(ctx) || run_mapped_string_predicates(ctx) ||
+      run_match_all(ctx) || run_root_wildcard_array_error(ctx) ||
+      run_selected_record_output(ctx) || run_value_callback(ctx) ||
+      run_value_callback_control(ctx) || run_nested_projection_output(ctx) ||
+      run_mutation_output(ctx) || run_projection_then_mutation_output(ctx) ||
       run_stop_and_root_array(ctx)) {
     ctx->destroy(ctx);
     return 1;
