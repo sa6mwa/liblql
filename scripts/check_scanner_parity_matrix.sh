@@ -62,6 +62,8 @@ scanner_parity_run_row build/direct-probe/scalar-100k.ndjson scalar_100k \
   bool_enabled_true '/enabled=true' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' project_file_selector /id
+scanner_parity_run_row build/direct-probe/status-whitespace-100k.ndjson status_whitespace_100k \
+  eq_status_open '/status="open"' project_file_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' project_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
