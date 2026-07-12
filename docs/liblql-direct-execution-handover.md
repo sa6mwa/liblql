@@ -1,4 +1,8 @@
-# Direct Execution Handover
+# Historical LoneJSON-Backed Direct Execution Handover
+
+This handover applies only to the rejected LoneJSON-backed design. The active
+architecture is
+[`liblql-self-contained-execution-spec.md`](liblql-self-contained-execution-spec.md).
 
 ## Starting Point
 
@@ -48,7 +52,7 @@ Clang but loses to Go under GCC is not accepted.
 
 ## First Actions
 
-1. Read `docs/liblql-direct-execution-spec.md` completely.
+1. Read `docs/liblql-self-contained-execution-spec.md` completely.
 2. Fetch and inspect the exact Go source when needed:
 
    ```sh

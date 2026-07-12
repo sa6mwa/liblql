@@ -77,7 +77,7 @@ The selector AST is retained as an independent foundation during the direct
 execution reset. It owns selector text/JSON parsing, traversal, serialization,
 and construction. It does not provide query, projection, or mutation execution
 until the new direct executor is implemented under
-`docs/liblql-direct-execution-spec.md`.
+`docs/liblql-self-contained-execution-spec.md`.
 
 ## Public Model
 

@@ -1,4 +1,10 @@
-# liblql Direct Execution Rewrite Specification
+# Superseded: LoneJSON-Backed Direct Execution Specification
+
+This document records the rejected LoneJSON-backed design. The governing v0
+architecture is now
+[`liblql-self-contained-execution-spec.md`](liblql-self-contained-execution-spec.md).
+
+# Historical liblql Direct Execution Rewrite Specification
 
 ## Authority And Status
 
