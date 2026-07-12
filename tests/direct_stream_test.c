@@ -343,6 +343,11 @@ static int run_mapped_string_predicates(lql *ctx) {
       "{\"alpha\":{\"state\":\"open\"},\"beta\":{\"state\":\"closed\"}}\n"
       "{\"alpha\":{\"state\":\"closed\"}}\n"
       "42\n";
+  static const char terminal_wildcard_input[] =
+      "{\"status\":\"open\",\"region\":\"us-west\"}\n"
+      "{\"status\":\"closed\",\"region\":\"open\"}\n"
+      "{\"status\":\"closed\",\"region\":\"eu-north\"}\n"
+      "42\n";
   static const char object_path_input[] =
       "{\"me\\u0074a\":{\"sta\\u0074e\":\"open\",\"code\":1},\"ignored\":[1]}\n"
       "{\"meta\":{\"state\":\"closed\",\"code\":2}}\n"
@@ -445,6 +450,9 @@ static int run_mapped_string_predicates(lql *ctx) {
   }
   if (run_selection(ctx, "/*/state=\"open\"", root_wildcard_input, 3u, 1u)) {
     return 17;
+  }
+  if (run_selection(ctx, "/*=\"open\"", terminal_wildcard_input, 4u, 2u)) {
+    return 106;
   }
   return 0;
 }
