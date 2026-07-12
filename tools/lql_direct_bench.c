@@ -457,6 +457,8 @@ static const char *const *mutations_for(const char *selector_name,
   static const char *const nested[] = {"/query/hash=ff"};
   static const char *const range[] = {"/code=+1"};
   static const char *const top_increment_multi[] = {"/code=+1", "/code=+2"};
+  static const char *const top_set_multi[] = {"/processed=true",
+                                              "/processed=false"};
   static const char *const nested_increment[] = {"/meta/count=+1"};
   static const char *const same_top_nested_increment[] = {"/meta/count=+1",
                                                           "/meta/state=done"};
@@ -506,6 +508,10 @@ static const char *const *mutations_for(const char *selector_name,
   if (strcmp(selector_name, "eq_status_open_top_set") == 0) {
     *count = 1u;
     return processed;
+  }
+  if (strcmp(selector_name, "eq_status_open_top_set_multi") == 0) {
+    *count = 2u;
+    return top_set_multi;
   }
   if (strcmp(selector_name, "eq_status_open_top_remove") == 0) {
     *count = 1u;

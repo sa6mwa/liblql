@@ -91,6 +91,8 @@ func benchmarkMutationsForSelector(selectorName string, expr string) []string {
 		return []string{"/component=lql", "/event=session_sync", "/code=+1", "rm:/payload", "/meta/bench=true"}
 	case "eq_status_open_top_set":
 		return []string{"/processed=true"}
+	case "eq_status_open_top_set_multi":
+		return []string{"/processed=true", "/processed=false"}
 	case "eq_status_open_top_remove":
 		return []string{"rm:/payload"}
 	case "eq_code_one_top_increment":
