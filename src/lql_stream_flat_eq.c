@@ -295,7 +295,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   unsigned long path_recursive_segments;
   size_t i;
   if (selector == NULL) {
-    return 0;
+    return 1;
   }
   if (selector->kind == LQL_SELECTOR_KIND_ALL) {
     return 1;
@@ -553,7 +553,7 @@ static int lql_flat_eq_matches(const lql_flat_eq_program *program,
                                unsigned long hits) {
   size_t i;
   if (selector == NULL) {
-    return 0;
+    return 1;
   }
   if (selector->kind == LQL_SELECTOR_KIND_ALL) {
     return 1;
@@ -1738,7 +1738,7 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
 }
 
 static int lql_flat_eq_eligible(const lql_stream_request *request) {
-  if (request == NULL || request->selector == NULL ||
+  if (request == NULL ||
       (request->output_mode != LQL_STREAM_OUTPUT_DECISION_ONLY &&
        request->output_mode != LQL_STREAM_OUTPUT_SELECTED_RECORD &&
        request->output_mode != LQL_STREAM_OUTPUT_PROJECTION &&
@@ -1851,7 +1851,8 @@ lql_status lql_stream_execute_flat_eq(lql *self,
         lql_temporal_yesterday(&time_bounds.yesterday);
     time_bounds_ptr = &time_bounds;
   }
-  if (!lql_flat_eq_append(&program, request->selector, time_bounds_ptr)) {
+  if (request->selector != NULL &&
+      !lql_flat_eq_append(&program, request->selector, time_bounds_ptr)) {
     return LQL_STATUS_OK;
   }
   if ((request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
@@ -1865,6 +1866,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
     return LQL_STATUS_OK;
   }
   program.stop_matching_on_hit =
+      request->selector != NULL &&
       request->selector->kind == LQL_SELECTOR_KIND_EQ &&
       program.term_count == 1u;
   *out_handled = 1;

@@ -603,12 +603,15 @@ static int run_mapped_string_predicates(lql *ctx) {
 
 static int run_match_all(lql *ctx) {
   static const char input[] = "{\"ignored\":[1,2]}\n42\n";
+  static const char selected_input[] = " { \"a\" : 1 }\n true\n";
+  static const char selected_output[] = "{\"a\":1}\ntrue\n";
   static const char root_array[] = "[1]\n";
   lql_selector *selector;
   lql_stream_request request;
   lql_stream_result result;
   lql_error error;
   test_reader reader;
+  test_writer writer;
 
   selector = NULL;
   lql_error_init(&error);
@@ -629,13 +632,51 @@ static int run_match_all(lql *ctx) {
     return 1;
   }
   memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 1u;
+  request.reader_user = &reader;
+  request.selector = NULL;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK) {
+    ctx->selector_destroy(ctx, selector);
+    return 20;
+  }
+  if (result.records_seen != 2u) {
+    ctx->selector_destroy(ctx, selector);
+    return 21;
+  }
+  if (result.records_matched != 2u) {
+    ctx->selector_destroy(ctx, selector);
+    return 22;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)selected_input;
+  reader.len = sizeof(selected_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 2u ||
+      writer.len != sizeof(selected_output) - 1u ||
+      memcmp(writer.data, selected_output, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    return 3;
+  }
+  memset(&request, 0, sizeof(request));
+  memset(&reader, 0, sizeof(reader));
   reader.data = (const unsigned char *)root_array;
   reader.len = sizeof(root_array) - 1u;
+  request.reader = test_read;
   request.reader_user = &reader;
+  request.selector = NULL;
   if (lql_stream_execute(ctx, &request, &result, &error) !=
       LQL_STATUS_JSON_ERROR) {
     ctx->selector_destroy(ctx, selector);
-    return 1;
+    return 4;
   }
   ctx->selector_destroy(ctx, selector);
   return 0;
@@ -1692,23 +1733,26 @@ static int run_byte_limit(lql *ctx) {
 int main(void) {
   lql *ctx;
   lql_error error;
+  int match_all_status;
 
   lql_error_init(&error);
   if (lql_new(&ctx, &error) != LQL_STATUS_OK) {
     return 1;
   }
+  match_all_status = 0;
   if (run_projection_parse(ctx) || run_selector_json_write(ctx) ||
       run_status_selection(ctx) || run_conjunction_selection(ctx) ||
       run_or_selection(ctx) ||
       run_not_selection(ctx) || run_mapped_string_predicates(ctx) ||
-      run_match_all(ctx) || run_root_wildcard_array_error(ctx) ||
+      ((match_all_status = run_match_all(ctx)) != 0) ||
+      run_root_wildcard_array_error(ctx) ||
       run_selected_record_output(ctx) || run_value_callback(ctx) ||
       run_value_callback_control(ctx) || run_nested_projection_output(ctx) ||
       run_mutation_output(ctx) || run_projection_then_mutation_output(ctx) ||
       run_stop_and_root_array(ctx) || run_record_limit(ctx) ||
       run_byte_limit(ctx)) {
     ctx->destroy(ctx);
-    return 1;
+    return match_all_status != 0 ? match_all_status : 1;
   }
   ctx->destroy(ctx);
   return 0;
