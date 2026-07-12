@@ -563,6 +563,56 @@ static void lql_json_match_icontains_bytes(lql_json_scan *scan,
   }
 }
 
+static void lql_json_match_icontains_ascii_span(lql_json_scan *scan,
+                                                const unsigned char *data,
+                                                size_t len) {
+  size_t i;
+  size_t offset;
+  if (scan == NULL || data == NULL || len == 0u || scan->match_icontains == 0ul)
+    return;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    const lql_json_flat_eq_term *term;
+    unsigned long bit;
+    size_t pos;
+    bit = 1ul << i;
+    if ((scan->match_icontains & bit) == 0ul ||
+        (scan->match_active & bit) == 0ul ||
+        (scan->match_failed & bit) != 0ul) {
+      continue;
+    }
+    term = &scan->flat_terms[i];
+    pos = scan->match_pos[i];
+    for (offset = 0u; offset < len; ++offset) {
+      unsigned char value;
+      value = data[offset];
+      if (value >= (unsigned char)'A' && value <= (unsigned char)'Z')
+        value = (unsigned char)(value + ((unsigned char)'a' -
+                                         (unsigned char)'A'));
+      if (term->kind == LQL_JSON_FLAT_TERM_IPREFIX) {
+        if (pos < term->value_len &&
+            value != (unsigned char)term->value[pos])
+          scan->match_failed |= bit;
+        if (pos < term->value_len)
+          ++pos;
+        continue;
+      }
+      if (term->contains_failure == NULL) {
+        scan->match_failed |= bit;
+        break;
+      }
+      while (pos != 0u && value != (unsigned char)term->value[pos])
+        pos = term->contains_failure[pos - 1u];
+      if (value == (unsigned char)term->value[pos])
+        ++pos;
+      if (pos == term->value_len) {
+        scan->match_contains |= bit;
+        pos = term->contains_failure[pos - 1u];
+      }
+    }
+    scan->match_pos[i] = pos;
+  }
+}
+
 static void lql_json_match_icontains_byte(lql_json_scan *scan,
                                           unsigned char value) {
   unsigned long rune;
@@ -658,6 +708,7 @@ static int lql_json_match_span_term(lql_json_scan *scan,
 static void lql_json_match_span(lql_json_scan *scan,
                                 const unsigned char *data, size_t len) {
   size_t i;
+  unsigned long ascii_icontains;
   if (len == 0u) {
     return;
   }
@@ -666,6 +717,14 @@ static void lql_json_match_span(lql_json_scan *scan,
     return;
   }
   lql_json_temporal_range_bytes(scan, data, len);
+  ascii_icontains = 0ul;
+  if (!scan->match_key) {
+    ascii_icontains =
+        scan->match_active & scan->match_icontains & ~scan->match_failed;
+    if (ascii_icontains != 0ul) {
+      lql_json_match_icontains_ascii_span(scan, data, len);
+    }
+  }
   if (scan->match_active != 0ul) {
     for (i = 0u; i < scan->flat_term_count; ++i) {
       unsigned long bit;
@@ -674,17 +733,26 @@ static void lql_json_match_span(lql_json_scan *scan,
           (scan->match_failed & bit) != 0ul) {
         continue;
       }
+      if (!scan->match_key && (scan->match_icontains & bit) != 0ul) {
+        continue;
+      }
       if (!lql_json_match_span_term(scan, &scan->flat_terms[i], i, data, len)) {
         unsigned long saved_temporal_active;
+        unsigned long saved_match_icontains;
         size_t offset;
         saved_temporal_active = scan->temporal_range_active;
+        saved_match_icontains = scan->match_icontains;
         scan->temporal_range_active = 0ul;
+        if (ascii_icontains != 0ul) {
+          scan->match_icontains = 0ul;
+        }
         for (offset = 0u; offset < len &&
                          (scan->match_active & bit) != 0ul &&
                          (scan->match_failed & bit) == 0ul;
              ++offset) {
           lql_json_match_byte(scan, data[offset]);
         }
+        scan->match_icontains = saved_match_icontains;
         scan->temporal_range_active = saved_temporal_active;
         return;
       }

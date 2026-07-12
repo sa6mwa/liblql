@@ -523,6 +523,9 @@ static int run_mapped_string_predicates(lql *ctx) {
                     1u)) {
     return 1;
   }
+  if (run_selection(ctx, "icontains{f=/msg,v=TIME}", input, 3u, 2u)) {
+    return 100;
+  }
   if (run_selection(ctx, "icontains{f=/msg,v=\303\245}",
                     "{\"msg\":\"\303\205ngstr\303\266m\"}\n"
                     "{\"msg\":\"other\"}\n",
