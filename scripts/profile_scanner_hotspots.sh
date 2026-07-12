@@ -4,6 +4,7 @@ set -eu
 c_bench=${LQL_DIRECT_BENCH_PATH:-build/release-scanner/lql_direct_bench}
 out_dir=${LQL_SCANNER_PROFILE_DIR:-build/scanner-profiles}
 status_samples=${LQL_SCANNER_PROFILE_STATUS_SAMPLES:-120}
+scalar_samples=${LQL_SCANNER_PROFILE_SCALAR_SAMPLES:-120}
 plus_value_source_samples=${LQL_SCANNER_PROFILE_PLUS_VALUE_SOURCE_SAMPLES:-120}
 recursive_samples=${LQL_SCANNER_PROFILE_RECURSIVE_SAMPLES:-120}
 large_samples=${LQL_SCANNER_PROFILE_LARGE_SAMPLES:-60}
@@ -55,6 +56,14 @@ profile_row() {
 profile_row status-decision "$status_samples" \
   build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' decision_only_selector
+
+profile_row scalar-bool-decision "$scalar_samples" \
+  build/direct-probe/scalar-100k.ndjson scalar_100k \
+  bool_enabled_true '/enabled=true' decision_only_selector
+
+profile_row scalar-number-decision "$scalar_samples" \
+  build/direct-probe/scalar-100k.ndjson scalar_100k \
+  code_eq_one '/code=1' decision_only_selector
 
 profile_row plus-value-source "$plus_value_source_samples" \
   build/direct-probe/status-100k.ndjson status_100k \

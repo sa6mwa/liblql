@@ -1048,6 +1048,29 @@ lql_json_match_terms_for_kind(const lql_json_scan *scan, unsigned long keys,
   return active;
 }
 
+static unsigned long lql_json_scalar_literal_hits(const lql_json_scan *scan,
+                                                  unsigned long terms,
+                                                  const char *literal,
+                                                  size_t literal_len) {
+  unsigned long hits;
+  size_t i;
+  hits = 0ul;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    const lql_json_flat_eq_term *term;
+    unsigned long bit;
+    bit = 1ul << i;
+    if ((terms & bit) == 0ul) {
+      continue;
+    }
+    term = &scan->flat_terms[i];
+    if (term->value_len == literal_len &&
+        memcmp(term->value, literal, literal_len) == 0) {
+      hits |= bit;
+    }
+  }
+  return hits;
+}
+
 static unsigned long lql_json_match_descendants(const lql_json_scan *scan,
                                                 unsigned long keys) {
   unsigned long active;
@@ -1834,12 +1857,20 @@ static lql_status lql_json_matched_scalar_value(lql_json_scan *scan,
     lql_json_flat_term_kind scalar_kind;
     unsigned long scalar_terms;
     unsigned long range_terms;
+    const char *literal;
+    size_t literal_len;
+    literal = NULL;
+    literal_len = 0u;
     if (value == 't' || value == 'f') {
       scalar_kind = LQL_JSON_FLAT_TERM_BOOL_EQ;
       range_terms = 0ul;
+      literal = value == 't' ? "true" : "false";
+      literal_len = value == 't' ? 4u : 5u;
     } else if (value == 'n') {
       scalar_kind = LQL_JSON_FLAT_TERM_NULL_EQ;
       range_terms = 0ul;
+      literal = "null";
+      literal_len = 4u;
     } else {
       scalar_kind = LQL_JSON_FLAT_TERM_NUMBER_EQ;
       range_terms = 0ul;
@@ -1871,6 +1902,15 @@ static lql_status lql_json_matched_scalar_value(lql_json_scan *scan,
     }
     if (scalar_terms == 0ul && range_terms == 0ul)
       return lql_json_value(scan);
+    if (literal != NULL && range_terms == 0ul) {
+      status = lql_json_literal(scan, literal);
+      if (status == LQL_STATUS_OK) {
+        scan->flat_eq_hits |=
+            lql_json_scalar_literal_hits(scan, scalar_terms, literal,
+                                         literal_len);
+      }
+      return status;
+    }
     lql_json_match_start(scan, scalar_terms, 0, 0u);
     lql_json_number_range_start(scan, range_terms);
     status = lql_json_value(scan);
@@ -2062,11 +2102,19 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       lql_json_flat_term_kind scalar_kind;
       unsigned long scalar_terms;
       unsigned long range_terms;
+      const char *literal;
+      size_t literal_len;
       range_terms = 0ul;
+      literal = NULL;
+      literal_len = 0u;
       if (value == 't' || value == 'f') {
         scalar_kind = LQL_JSON_FLAT_TERM_BOOL_EQ;
+        literal = value == 't' ? "true" : "false";
+        literal_len = value == 't' ? 4u : 5u;
       } else if (value == 'n') {
         scalar_kind = LQL_JSON_FLAT_TERM_NULL_EQ;
+        literal = "null";
+        literal_len = 4u;
       } else {
         scalar_kind = LQL_JSON_FLAT_TERM_NUMBER_EQ;
         range_terms = lql_json_match_terms_for_kind(
@@ -2074,15 +2122,24 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       }
       scalar_terms =
           lql_json_match_terms_for_kind(scan, key_matches, scalar_kind);
-      lql_json_match_start(scan, scalar_terms, 0, 0u);
-      lql_json_number_range_start(scan, range_terms);
-      status = lql_json_value(scan);
-      if (status == LQL_STATUS_OK) {
-        scan->flat_eq_hits |= lql_json_match_complete(scan);
-        scan->flat_eq_hits |= lql_json_number_range_complete(scan);
+      if (literal != NULL && range_terms == 0ul) {
+        status = lql_json_literal(scan, literal);
+        if (status == LQL_STATUS_OK) {
+          scan->flat_eq_hits |=
+              lql_json_scalar_literal_hits(scan, scalar_terms, literal,
+                                           literal_len);
+        }
+      } else {
+        lql_json_match_start(scan, scalar_terms, 0, 0u);
+        lql_json_number_range_start(scan, range_terms);
+        status = lql_json_value(scan);
+        if (status == LQL_STATUS_OK) {
+          scan->flat_eq_hits |= lql_json_match_complete(scan);
+          scan->flat_eq_hits |= lql_json_number_range_complete(scan);
+        }
+        lql_json_number_range_start(scan, 0ul);
+        lql_json_match_start(scan, 0ul, 0, 0u);
       }
-      lql_json_number_range_start(scan, 0ul);
-      lql_json_match_start(scan, 0ul, 0, 0u);
     } else if (scan->writer == NULL && key_matches == 0ul &&
                descendants == 0ul && recursive_terms == 0ul &&
                capture_values == 0ul && capture_descendants == 0ul) {
