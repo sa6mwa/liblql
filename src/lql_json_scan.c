@@ -1,10 +1,12 @@
 #include "lql_json_scan.h"
 
+#include <limits.h>
 #include <string.h>
 
 #define LQL_JSON_READ_BUFFER_SIZE 8192u
 #define LQL_JSON_EMIT_BUFFER_SIZE 8192u
 #define LQL_JSON_MAX_DEPTH 128u
+#define LQL_JSON_FLAT_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
 
 typedef struct lql_json_scan {
   lql_stream_reader_fn reader;
@@ -20,15 +22,13 @@ typedef struct lql_json_scan {
   size_t depth;
   lql_error *error;
   int flat_eq_active;
-  const char *flat_field;
-  size_t flat_field_len;
-  const char *flat_value;
-  size_t flat_value_len;
-  const char *match_target;
-  size_t match_target_len;
-  size_t match_pos;
-  int match_failed;
-  int flat_eq_matched;
+  const lql_json_flat_eq_term *flat_terms;
+  size_t flat_term_count;
+  unsigned long match_active;
+  unsigned long match_failed;
+  size_t match_pos[LQL_JSON_FLAT_TERM_CAPACITY];
+  int match_key;
+  unsigned long flat_eq_hits;
 } lql_json_scan;
 
 static void lql_json_error(lql_json_scan *scan, const char *message) {
@@ -85,29 +85,66 @@ static lql_status lql_json_flush(lql_json_scan *scan) {
   return status;
 }
 
-static void lql_json_match_start(lql_json_scan *scan, const char *target,
-                                 size_t target_len) {
-  scan->match_target = target;
-  scan->match_target_len = target_len;
-  scan->match_pos = 0u;
-  scan->match_failed = 0;
+static void lql_json_match_start(lql_json_scan *scan, unsigned long active,
+                                 int key) {
+  size_t i;
+  scan->match_active = active;
+  scan->match_failed = 0ul;
+  scan->match_key = key;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    if ((active & (1ul << i)) != 0ul) {
+      scan->match_pos[i] = 0u;
+    }
+  }
 }
 
 static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
-  if (scan->match_target == NULL || scan->match_failed) {
+  size_t i;
+  if (scan->match_active == 0ul) {
     return;
   }
-  if (scan->match_pos == scan->match_target_len ||
-      (unsigned char)scan->match_target[scan->match_pos] != value) {
-    scan->match_failed = 1;
-    return;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    const lql_json_flat_eq_term *term;
+    const char *target;
+    size_t target_len;
+    unsigned long bit;
+    bit = 1ul << i;
+    if ((scan->match_active & bit) == 0ul ||
+        (scan->match_failed & bit) != 0ul) {
+      continue;
+    }
+    term = &scan->flat_terms[i];
+    target = scan->match_key ? term->field : term->value;
+    target_len = scan->match_key ? term->field_len : term->value_len;
+    if (scan->match_pos[i] == target_len ||
+        (unsigned char)target[scan->match_pos[i]] != value) {
+      scan->match_failed |= bit;
+    } else {
+      ++scan->match_pos[i];
+    }
   }
-  ++scan->match_pos;
 }
 
-static int lql_json_match_complete(const lql_json_scan *scan) {
-  return scan->match_target != NULL && !scan->match_failed &&
-         scan->match_pos == scan->match_target_len;
+static unsigned long lql_json_match_complete(const lql_json_scan *scan) {
+  unsigned long matches;
+  size_t i;
+  matches = 0ul;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    const lql_json_flat_eq_term *term;
+    size_t target_len;
+    unsigned long bit;
+    bit = 1ul << i;
+    if ((scan->match_active & bit) == 0ul ||
+        (scan->match_failed & bit) != 0ul) {
+      continue;
+    }
+    term = &scan->flat_terms[i];
+    target_len = scan->match_key ? term->field_len : term->value_len;
+    if (scan->match_pos[i] == target_len) {
+      matches |= bit;
+    }
+  }
+  return matches;
 }
 
 static void lql_json_match_unicode(lql_json_scan *scan, unsigned int value) {
@@ -319,8 +356,10 @@ static lql_status lql_json_string(lql_json_scan *scan) {
       if (status != LQL_STATUS_OK) {
         return status;
       }
-      if (scan->match_target != NULL && !scan->match_failed) {
-        for (i = 0u; i < span_len && !scan->match_failed; ++i) {
+      if ((scan->match_active & ~scan->match_failed) != 0ul) {
+        for (i = 0u;
+             i < span_len && (scan->match_active & ~scan->match_failed) != 0ul;
+             ++i) {
           lql_json_match_byte(scan, span[i]);
         }
       }
@@ -457,7 +496,7 @@ static lql_status lql_json_value(lql_json_scan *scan);
 
 static lql_status lql_json_object(lql_json_scan *scan) {
   int value;
-  int key_matches;
+  unsigned long key_matches;
   int top_level;
   lql_status status;
   if (scan->depth == LQL_JSON_MAX_DEPTH) {
@@ -485,13 +524,17 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       return LQL_STATUS_JSON_ERROR;
     }
     if (top_level) {
-      lql_json_match_start(scan, scan->flat_field, scan->flat_field_len);
+      unsigned long active;
+      active = scan->flat_term_count == LQL_JSON_FLAT_TERM_CAPACITY
+                   ? ~0ul
+                   : ((1ul << scan->flat_term_count) - 1ul);
+      lql_json_match_start(scan, active, 1);
     } else {
-      lql_json_match_start(scan, NULL, 0u);
+      lql_json_match_start(scan, 0ul, 0);
     }
     status = lql_json_string(scan);
-    key_matches = top_level && lql_json_match_complete(scan);
-    lql_json_match_start(scan, NULL, 0u);
+    key_matches = top_level ? lql_json_match_complete(scan) : 0ul;
+    lql_json_match_start(scan, 0ul, 0);
     if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
         (status = lql_json_take_expected(scan, ':')) != LQL_STATUS_OK ||
@@ -501,12 +544,12 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       return status;
     }
     if (key_matches && value == '"') {
-      lql_json_match_start(scan, scan->flat_value, scan->flat_value_len);
+      lql_json_match_start(scan, key_matches, 0);
       status = lql_json_string(scan);
-      if (status == LQL_STATUS_OK && lql_json_match_complete(scan)) {
-        scan->flat_eq_matched = 1;
+      if (status == LQL_STATUS_OK) {
+        scan->flat_eq_hits |= lql_json_match_complete(scan);
       }
-      lql_json_match_start(scan, NULL, 0u);
+      lql_json_match_start(scan, 0ul, 0);
     } else {
       status = lql_json_value(scan);
     }
@@ -820,9 +863,10 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   if (out_bytes_read != NULL) {
     *out_bytes_read = 0u;
   }
-  if (request == NULL || request->reader == NULL || request->field == NULL ||
-      request->value == NULL || request->record == NULL ||
-      (request->capture && request->spool == NULL)) {
+  if (request == NULL || request->reader == NULL || request->terms == NULL ||
+      request->term_count == 0u ||
+      request->term_count > LQL_JSON_FLAT_TERM_CAPACITY ||
+      request->record == NULL || (request->capture && request->spool == NULL)) {
     if (error != NULL) {
       error->code = LQL_STATUS_INVALID_ARGUMENT;
       strcpy(error->message, "flat JSON equality scanner is not configured");
@@ -835,10 +879,8 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   scan.writer = request->capture ? lql_json_spool_write : NULL;
   scan.writer_user = request->spool;
   scan.error = error;
-  scan.flat_field = request->field;
-  scan.flat_field_len = request->field_len;
-  scan.flat_value = request->value;
-  scan.flat_value_len = request->value_len;
+  scan.flat_terms = request->terms;
+  scan.flat_term_count = request->term_count;
   records = 0u;
   for (;;) {
     status = lql_json_skip_space(&scan);
@@ -860,8 +902,8 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
     }
     root_is_object = value == '{';
     scan.flat_eq_active = root_is_object;
-    scan.flat_eq_matched = 0;
-    lql_json_match_start(&scan, NULL, 0u);
+    scan.flat_eq_hits = 0ul;
+    lql_json_match_start(&scan, 0ul, 0);
     status = lql_json_value(&scan);
     if (status != LQL_STATUS_OK) {
       break;
@@ -875,7 +917,7 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
       break;
     }
     status = request->record(request->record_user, records, root_is_object,
-                             root_is_object && scan.flat_eq_matched,
+                             root_is_object ? scan.flat_eq_hits : 0ul,
                              request->spool, error);
     ++records;
     if (status != LQL_STATUS_OK) {

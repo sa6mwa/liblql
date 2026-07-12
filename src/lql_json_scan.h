@@ -22,17 +22,22 @@ lql_status lql_json_normalize_ndjson(const lql_json_normalize_request *request,
                                      size_t *out_records,
                                      size_t *out_bytes_read, lql_error *error);
 
+typedef struct lql_json_flat_eq_term {
+  const char *field;
+  size_t field_len;
+  const char *value;
+  size_t value_len;
+} lql_json_flat_eq_term;
+
 typedef lql_status (*lql_json_flat_eq_record_fn)(
-    void *user, size_t record_index, int root_is_object, int matched,
+    void *user, size_t record_index, int root_is_object, unsigned long hits,
     const lql_json_spool *spool, lql_error *error);
 
 typedef struct lql_json_flat_eq_request {
   lql_stream_reader_fn reader;
   void *reader_user;
-  const char *field;
-  size_t field_len;
-  const char *value;
-  size_t value_len;
+  const lql_json_flat_eq_term *terms;
+  size_t term_count;
   lql_json_spool *spool;
   int capture;
   lql_json_flat_eq_record_fn record;
@@ -40,9 +45,10 @@ typedef struct lql_json_flat_eq_request {
 } lql_json_flat_eq_request;
 
 /*
- * Scans strict NDJSON for a top-level string equality.  The current root is
- * compacted into `spool` and is callback-scoped.  A record callback receives
- * only fully validated roots; returning LQL_STATUS_STOP ends cleanly.
+ * Scans strict NDJSON for bounded top-level string equalities.  The current
+ * root is compacted into `spool` and is callback-scoped.  A record callback
+ * receives hit bits only after full validation; returning LQL_STATUS_STOP ends
+ * cleanly.
  */
 lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
                                         size_t *out_records,

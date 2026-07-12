@@ -62,7 +62,7 @@ static lql_status json_test_write(void *user, const void *data, size_t len,
 }
 
 static lql_status json_flat_record(void *user, size_t record_index,
-                                   int root_is_object, int matched,
+                                   int root_is_object, unsigned long hits,
                                    const lql_json_spool *spool,
                                    lql_error *error) {
   json_flat_result *result;
@@ -74,7 +74,7 @@ static lql_status json_flat_record(void *user, size_t record_index,
   if (root_is_object) {
     ++result->objects;
   }
-  if (!matched) {
+  if (hits == 0ul) {
     return LQL_STATUS_OK;
   }
   ++result->matches;
@@ -122,6 +122,8 @@ int main(void) {
       " { \"sta\\u0074us\" : \"op\\u0065n\", \"id\" : 1 }\n"
       " { \"status\" : \"closed\", \"status\" : \"open\" }\n"
       " \"open\"\n";
+  static const lql_json_flat_eq_term flat_terms[] = {
+      {"status", 6u, "open", 4u}};
   lql_json_flat_eq_request flat_request;
   lql_json_spool flat_spool;
   json_test_reader flat_reader;
@@ -175,10 +177,8 @@ int main(void) {
   memset(&flat_request, 0, sizeof(flat_request));
   flat_request.reader = json_test_read;
   flat_request.reader_user = &flat_reader;
-  flat_request.field = "status";
-  flat_request.field_len = 6u;
-  flat_request.value = "open";
-  flat_request.value_len = 4u;
+  flat_request.terms = flat_terms;
+  flat_request.term_count = 1u;
   flat_request.spool = &flat_spool;
   flat_request.capture = 1;
   flat_request.record = json_flat_record;
