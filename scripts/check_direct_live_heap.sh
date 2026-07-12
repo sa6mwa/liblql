@@ -3,7 +3,6 @@ set -eu
 
 limit_bytes=262144
 binary=${LQL_DIRECT_BENCH_PATH:-build/verify-gcc-path/lql_direct_bench}
-fixture=${LQL_DIRECT_HEAP_FIXTURE:-build/direct-probe/status-100k.ndjson}
 massif_out=${TMPDIR:-/tmp}/liblql-direct-live-heap.$$
 
 cleanup() {
@@ -15,22 +14,34 @@ if ! command -v valgrind >/dev/null 2>&1; then
   printf '%s\n' 'SKIP: valgrind is required for the direct live-heap gate'
   exit 0
 fi
-if [ ! -x "$binary" ] || [ ! -f "$fixture" ]; then
-  printf '%s\n' 'SKIP: direct benchmark binary or status fixture is unavailable'
+if [ ! -x "$binary" ]; then
+  printf '%s\n' 'SKIP: direct benchmark binary is unavailable'
   exit 0
 fi
 
-LQL_BENCH_SAMPLES=1 valgrind --tool=massif --stacks=no --time-unit=B \
-  --massif-out-file="$massif_out" "$binary" \
-  --fixture "$fixture" --dataset status_100k \
-  --selector-name eq_status_open --expr '/status="open"' \
-  --mode mutate_file_selector --submode steady_state >/dev/null
+check_case() {
+  fixture=$1
+  dataset=$2
+  if [ ! -f "$fixture" ]; then
+    printf 'SKIP: fixture is unavailable: %s\n' "$fixture"
+    return 0
+  fi
+  LQL_BENCH_SAMPLES=2 valgrind --tool=massif --stacks=no --time-unit=B \
+    --massif-out-file="$massif_out" "$binary" \
+    --fixture "$fixture" --dataset "$dataset" \
+    --selector-name eq_status_open --expr '/status="open"' \
+    --mode mutate_file_selector --submode steady_state >/dev/null
 
-peak=$(awk -F= '/^mem_heap_B=/{ if ($2 > peak) peak=$2 } END { print peak+0 }' \
-  "$massif_out")
-if [ "$peak" -gt "$limit_bytes" ]; then
-  printf 'direct live heap exceeded: %s bytes (limit %s bytes)\n' \
-    "$peak" "$limit_bytes" >&2
-  exit 1
-fi
-printf 'direct live heap: %s bytes (limit %s bytes)\n' "$peak" "$limit_bytes"
+  peak=$(awk -F= '/^mem_heap_B=/{ if ($2 > peak) peak=$2 } END { print peak+0 }' \
+    "$massif_out")
+  if [ "$peak" -gt "$limit_bytes" ]; then
+    printf 'direct live heap exceeded for %s: %s bytes (limit %s bytes)\n' \
+      "$dataset" "$peak" "$limit_bytes" >&2
+    exit 1
+  fi
+  printf 'direct live heap %s: %s bytes (limit %s bytes)\n' \
+    "$dataset" "$peak" "$limit_bytes"
+}
+
+check_case build/direct-probe/status-100k.ndjson status_100k
+check_case build/direct-probe/large-4x25m.ndjson large_ndjson
