@@ -1058,6 +1058,9 @@ static lql_status lql_json_take_hex4(lql_json_scan *scan, unsigned int *out,
 
 static lql_status lql_json_copy_byte(lql_json_scan *scan, int value) {
   unsigned char byte;
+  if (scan->writer == NULL) {
+    return LQL_STATUS_OK;
+  }
   byte = (unsigned char)value;
   return lql_json_write(scan, &byte, 1u);
 }
@@ -1105,9 +1108,11 @@ static lql_status lql_json_string(lql_json_scan *scan) {
     span_len = lql_json_plain_ascii_span(span, scan->length - scan->offset);
     if (span_len != 0u) {
       scan->offset += span_len;
-      status = lql_json_write(scan, span, span_len);
-      if (status != LQL_STATUS_OK) {
-        return status;
+      if (scan->writer != NULL) {
+        status = lql_json_write(scan, span, span_len);
+        if (status != LQL_STATUS_OK) {
+          return status;
+        }
       }
       if ((scan->match_active & ~scan->match_failed) == 0ul &&
           (scan->capture_active & ~scan->capture_failed) == 0ul) {
