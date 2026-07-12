@@ -2549,12 +2549,6 @@ typedef struct lonejson_value_visitor {
   lonejson_value_event_fn null_value;
 } lonejson_value_visitor;
 
-/** Forwards one structured JSON value into an already-open writer. */
-typedef struct lonejson_writer_visitor {
-  void *state;
-  lonejson_error error;
-} lonejson_writer_visitor;
-
 /** Incremental generic JSON value rewriter driven by structured events. */
 typedef struct lonejson_value_rewriter {
   void *state;
@@ -5287,14 +5281,6 @@ lonejson_buffer_reader_read(void *user, unsigned char *buffer, size_t capacity);
 lonejson_value_visitor lonejson_default_value_visitor(void);
 /** Returns a zeroed path-aware arbitrary JSON value visitor. */
 lonejson_path_value_visitor lonejson_default_path_value_visitor(void);
-void lonejson_writer_visitor_init(lonejson_writer_visitor *visitor);
-lonejson_status lonejson_writer_visitor_open(
-    lonejson_writer_visitor *visitor, lonejson_writer *writer,
-    lonejson_value_visitor *out_visitor, void **out_user,
-    lonejson_error *error);
-lonejson_status lonejson_writer_visitor_close(lonejson_writer_visitor *visitor,
-                                              lonejson_error *error);
-void lonejson_writer_visitor_cleanup(lonejson_writer_visitor *visitor);
 /** Initializes a reusable structured-event JSON value rewriter. */
 void lonejson_value_rewriter_init(lonejson_value_rewriter *rewriter);
 /** Opens one rewriter that receives a balanced JSON value event sequence.
@@ -9189,7 +9175,6 @@ typedef lonejson_json_value_parse_mode lj_json_value_parse_mode;
  */
 typedef lonejson_value_visitor lj_value_visitor;
 /** Structured JSON writer visitor adapter. */
-typedef lonejson_writer_visitor lj_writer_visitor;
 /** Incremental generic structured-event JSON rewriter. */
 typedef lonejson_value_rewriter lj_value_rewriter;
 /** Bounded replayable prefix of structured JSON value events. */
@@ -9670,24 +9655,6 @@ lj_buffer_reader_read(void *user, unsigned char *buffer, size_t capacity) {
 /** Returns the empty visitor with all callbacks set to `NULL`. */
 LONEJSON_SHORT_ALIAS_INLINE lj_value_visitor lj_default_value_visitor(void) {
   return lonejson_default_value_visitor();
-}
-LONEJSON_SHORT_ALIAS_INLINE void
-lj_writer_visitor_init(lj_writer_visitor *visitor) {
-  lonejson_writer_visitor_init(visitor);
-}
-LONEJSON_SHORT_ALIAS_INLINE lj_status lj_writer_visitor_open(
-    lj_writer_visitor *visitor, lj_writer *writer, lj_value_visitor *out_visitor,
-    void **out_user, lj_error *error) {
-  return lonejson_writer_visitor_open(visitor, writer, out_visitor, out_user,
-                                      error);
-}
-LONEJSON_SHORT_ALIAS_INLINE lj_status
-lj_writer_visitor_close(lj_writer_visitor *visitor, lj_error *error) {
-  return lonejson_writer_visitor_close(visitor, error);
-}
-LONEJSON_SHORT_ALIAS_INLINE void
-lj_writer_visitor_cleanup(lj_writer_visitor *visitor) {
-  lonejson_writer_visitor_cleanup(visitor);
 }
 LONEJSON_SHORT_ALIAS_INLINE void
 lj_value_rewriter_init(lj_value_rewriter *rewriter) {
@@ -45148,117 +45115,6 @@ void lonejson_writer_value_stream_init(lonejson_writer_value_stream *stream) {
   memset(stream, 0, sizeof(*stream));
   lonejson__writer_value_stream_assign_methods(stream);
   lonejson__clear_error(&stream->error);
-}
-
-static void lonejson__writer_visitor_destroy(
-    lonejson_writer_visitor *visitor, int poison) {
-  lonejson__writer_value_stream_state *state;
-  if (visitor == NULL || visitor->state == NULL) {
-    return;
-  }
-  state = (lonejson__writer_value_stream_state *)visitor->state;
-  if (poison && state->writer_state != NULL && !state->closed) {
-    state->writer_state->failed = 1;
-  }
-  lonejson__buffer_free(&state->allocator, state->frames,
-                        state->frame_capacity * sizeof(*state->frames));
-  lonejson__buffer_free(&state->allocator, state, sizeof(*state));
-  visitor->state = NULL;
-}
-
-void lonejson_writer_visitor_init(lonejson_writer_visitor *visitor) {
-  if (visitor != NULL) {
-    memset(visitor, 0, sizeof(*visitor));
-    lonejson_error_init(&visitor->error);
-  }
-}
-
-lonejson_status lonejson_writer_visitor_open(
-    lonejson_writer_visitor *visitor, lonejson_writer *writer,
-    lonejson_value_visitor *out_visitor, void **out_user,
-    lonejson_error *error) {
-  lonejson__writer_value_stream_state *state;
-  lonejson__writer_state *writer_state;
-  lonejson_status status;
-  if (visitor == NULL || writer == NULL || out_visitor == NULL ||
-      out_user == NULL || visitor->state != NULL) {
-    if (error != NULL) {
-      lonejson_error_init(error);
-      error->code = LONEJSON_STATUS_INVALID_ARGUMENT;
-      strcpy(error->message, "writer visitor arguments are invalid");
-    }
-    return LONEJSON_STATUS_INVALID_ARGUMENT;
-  }
-  status = lonejson__writer_json_value_preflight(writer, error);
-  if (status != LONEJSON_STATUS_OK) {
-    return status;
-  }
-  writer_state = (lonejson__writer_state *)writer->state;
-  state = (lonejson__writer_value_stream_state *)lonejson__buffer_alloc(
-      &writer_state->allocator, sizeof(*state));
-  if (state == NULL) {
-    return lonejson__writer_set_error(writer, error,
-                                      LONEJSON_STATUS_ALLOCATION_FAILED,
-                                      "failed to allocate writer visitor");
-  }
-  memset(state, 0, sizeof(*state));
-  state->writer = writer;
-  state->writer_state = writer_state;
-  state->allocator = writer_state->allocator;
-  state->visitor.object_begin = lonejson__writer_value_object_begin;
-  state->visitor.object_end = lonejson__writer_value_object_end;
-  state->visitor.object_key_begin = lonejson__writer_value_key_begin;
-  state->visitor.object_key_chunk = lonejson__writer_value_string_chunk;
-  state->visitor.object_key_end = lonejson__writer_value_key_end;
-  state->visitor.array_begin = lonejson__writer_value_array_begin;
-  state->visitor.array_end = lonejson__writer_value_array_end;
-  state->visitor.string_begin = lonejson__writer_value_string_begin;
-  state->visitor.string_chunk = lonejson__writer_value_string_chunk;
-  state->visitor.string_end = lonejson__writer_value_string_end;
-  state->visitor.number_begin = lonejson__writer_value_number_begin;
-  state->visitor.number_chunk = lonejson__writer_value_number_chunk;
-  state->visitor.number_end = lonejson__writer_value_number_end;
-  state->visitor.boolean_value = lonejson__writer_value_bool;
-  state->visitor.null_value = lonejson__writer_value_null;
-  status = lonejson__writer_before_value(writer, error);
-  if (status != LONEJSON_STATUS_OK) {
-    lonejson__buffer_free(&state->allocator, state, sizeof(*state));
-    return status;
-  }
-  visitor->state = state;
-  lonejson_error_init(&visitor->error);
-  *out_visitor = state->visitor;
-  *out_user = state;
-  return LONEJSON_STATUS_OK;
-}
-
-lonejson_status lonejson_writer_visitor_close(lonejson_writer_visitor *visitor,
-                                              lonejson_error *error) {
-  lonejson__writer_value_stream_state *state;
-  if (visitor == NULL || visitor->state == NULL) {
-    return LONEJSON_STATUS_INVALID_ARGUMENT;
-  }
-  state = (lonejson__writer_value_stream_state *)visitor->state;
-  if (!state->root_written || state->frame_count != 0u || state->string_open ||
-      state->number_open) {
-    if (error != NULL) {
-      lonejson_error_init(error);
-      error->code = LONEJSON_STATUS_INVALID_JSON;
-      strcpy(error->message, "writer visitor value is incomplete");
-    }
-    lonejson__writer_visitor_destroy(visitor, 1);
-    return LONEJSON_STATUS_INVALID_JSON;
-  }
-  state->closed = 1;
-  lonejson__writer_visitor_destroy(visitor, 0);
-  return LONEJSON_STATUS_OK;
-}
-
-void lonejson_writer_visitor_cleanup(lonejson_writer_visitor *visitor) {
-  lonejson__writer_visitor_destroy(visitor, 1);
-  if (visitor != NULL) {
-    lonejson_error_init(&visitor->error);
-  }
 }
 
 lonejson_status
