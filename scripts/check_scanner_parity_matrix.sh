@@ -66,6 +66,8 @@ scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' project_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open_top_set '/status="open"' mutate_file_selector /id
+scanner_parity_run_row build/direct-probe/status-whitespace-100k.ndjson status_whitespace_100k \
+  eq_status_open_top_set '/status="open"' mutate_file_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open_top_set '/status="open"' mutate_source_selector /id
 
