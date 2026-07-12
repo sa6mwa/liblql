@@ -499,6 +499,11 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   term->path_recursive_segments = path_recursive_segments;
   if (selector->kind == LQL_SELECTOR_KIND_EXISTS) {
     term->kind = LQL_JSON_FLAT_TERM_EXISTS;
+  } else if (selector->kind == LQL_SELECTOR_KIND_EQ &&
+             selector->value_is_temporal) {
+    term->kind = LQL_JSON_FLAT_TERM_TEMPORAL_RANGE;
+    term->temporal_eq = selector->temporal_eq;
+    term->has_temporal_eq = 1;
   } else if (selector->kind == LQL_SELECTOR_KIND_PREFIX ||
              selector->kind == LQL_SELECTOR_KIND_IPREFIX) {
     term->kind =
@@ -509,7 +514,9 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     return 0;
   }
   if (term->kind != LQL_JSON_FLAT_TERM_EXISTS) {
-    if (!selector->value_set || selector->value_is_temporal ||
+    if (!selector->value_set ||
+        (selector->value_is_temporal &&
+         term->kind != LQL_JSON_FLAT_TERM_TEMPORAL_RANGE) ||
         selector->value == NULL ||
         ((term->kind == LQL_JSON_FLAT_TERM_PREFIX ||
           term->kind == LQL_JSON_FLAT_TERM_IPREFIX) &&
