@@ -1,21 +1,24 @@
 # liblql
 
-`liblql` is a C implementation of LQL using LoneJSON for JSON parsing and
-writing. The current vendored LoneJSON source is a rewrite-time iteration
-harness; the v0 deliverable will link the upstream LoneJSON binary ABI so it
-can be shared with other consumers.
+`liblql` is a C implementation of LQL. The active v0 rewrite executes compiled
+LQL directly over a self-contained C89 JSON scanner/emitter in liblql. Direct
+execution does not include `lonejson.h`, link `liblonejson`, or use LoneJSON at
+runtime.
 
 ## Reset State
 
-The previous execution architecture is being removed before its replacement is
-written. This branch is intentionally not releasable during that deletion
-phase. The governing contract and completion gates are in
+The previous LoneJSON-backed execution architecture has been removed. This
+branch is rebuilding direct execution around one scanner state that performs
+strict NDJSON framing, JSON validation, selector observation, compact payload
+emission, projection, and mutation without a parser/writer event boundary in
+the hot path. The governing contract and completion gates are in
 [`docs/liblql-self-contained-execution-spec.md`](docs/liblql-self-contained-execution-spec.md).
 
-The replacement will execute compiled LQL directly in liblql over LoneJSON's
-public `lonejson.h` API. Streaming inputs are strict NDJSON; root arrays are
-errors and are never flattened.
+Streaming inputs are strict NDJSON. Root arrays are hard errors and are never
+flattened. Input may contain ordinary JSON whitespace; emitted records are
+compact JSON plus one newline.
 
-The final implementation must prove Go behavioral parity, bounded RSS below
-128 MiB on the 100 MiB large-JSON gate, and at least 1.0x C/Go performance on
-each accepted benchmark row.
+The implementation must prove Go behavioral parity and at least 1.0x GCC C/Go
+performance on every accepted benchmark row. Live heap, not RSS, is the primary
+embedded-memory invariant and must remain at or below 256 KiB, including the
+100 MiB current-record gate.

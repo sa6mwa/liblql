@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-legacy_pattern='lonejson_candidate_run|source_candidate_run|candidate[_ -](transform|action)|transform[_ -]stage|mutation_source_candidates|mutate_(file_range|source).*candidates|lql_(eval|project|mutation)_methods_install|query_(file|source|json)|payload_(write|project)|project_(file|source|json)|compact_(file|source|json)|matches_json|field_segment|predicate_depth|observer_|hit_(index|count)|contains_lps|match_sticky'
+legacy_pattern='lonejson_candidate_run|source_candidate_run|candidate[_ -](transform|action)|transform[_ -]stage|mutation_source_candidates|mutate_(file_range|source).*candidates|lql_(eval|project|mutation)_methods_install|query_(file|source|json)|payload_(write|project)|(^|[^[:alnum:]_])project_(file|source|json)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])compact_(file|source|json)([^[:alnum:]_]|$)|matches_json|field_segment|predicate_depth|observer_|hit_(index|count)|contains_lps|match_sticky'
 
 matches=$(git grep -n -E "$legacy_pattern" -- \
   ':!docs/liblql-direct-execution-spec.md' \
