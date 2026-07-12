@@ -16,8 +16,11 @@ typedef struct json_test_writer {
 
 typedef struct json_flat_result {
   json_test_writer *writer;
+  json_test_writer *capture_writer;
+  lql_json_capture_span *capture_spans;
   size_t objects;
   size_t matches;
+  size_t captures;
 } json_flat_result;
 
 static lql_status json_test_read(void *user, unsigned char *buffer,
@@ -74,6 +77,14 @@ static lql_status json_flat_record(void *user, size_t record_index,
   if (root_is_object) {
     ++result->objects;
   }
+  if (result->capture_writer != NULL && result->capture_spans != NULL &&
+      result->capture_spans[0].found) {
+    if (lql_json_spool_write_slice(spool, result->capture_spans[0].offset,
+                                   result->capture_spans[0].len,
+                                   json_test_write, result->capture_writer,
+                                   error) != LQL_STATUS_OK) return LQL_STATUS_CALLBACK_ERROR;
+    ++result->captures;
+  }
   if (hits == 0ul) {
     return LQL_STATUS_OK;
   }
@@ -124,6 +135,7 @@ int main(void) {
       " \"open\"\n";
   static const lql_json_flat_eq_term flat_terms[] = {
       {LQL_JSON_FLAT_TERM_EQ, "status", 6u, "open", 4u}};
+  static const lql_json_capture_key capture_keys[] = {{"status", 6u}};
   static const char scalar_flat_input[] =
       "{\"code\":1,\"enabled\":true,\"empty\":null}\n"
       "{\"code\":1.0,\"enabled\":false,\"empty\":\"null\"}\n"
@@ -170,8 +182,10 @@ int main(void) {
   lql_json_flat_eq_request flat_request;
   lql_json_spool flat_spool;
   lql_json_spool_reader spool_reader;
+  lql_json_capture_span capture_spans[1];
   json_test_reader flat_reader;
   json_test_writer flat_writer;
+  json_test_writer capture_writer;
   json_flat_result flat_result;
   lql_error flat_error;
   size_t flat_records;
@@ -217,11 +231,14 @@ int main(void) {
   }
   memset(&flat_reader, 0, sizeof(flat_reader));
   memset(&flat_writer, 0, sizeof(flat_writer));
+  memset(&capture_writer, 0, sizeof(capture_writer));
   memset(&flat_result, 0, sizeof(flat_result));
   flat_reader.data = (const unsigned char *)flat_input;
   flat_reader.len = sizeof(flat_input) - 1u;
   flat_reader.chunk_size = 1u;
   flat_result.writer = &flat_writer;
+  flat_result.capture_writer = &capture_writer;
+  flat_result.capture_spans = capture_spans;
   memset(&flat_request, 0, sizeof(flat_request));
   flat_request.reader = json_test_read;
   flat_request.reader_user = &flat_reader;
@@ -229,6 +246,9 @@ int main(void) {
   flat_request.term_count = 1u;
   flat_request.spool = &flat_spool;
   flat_request.capture = 1;
+  flat_request.capture_keys = capture_keys;
+  flat_request.capture_key_count = 1u;
+  flat_request.capture_spans = capture_spans;
   flat_request.record = json_flat_record;
   flat_request.record_user = &flat_result;
   lql_error_init(&flat_error);
@@ -248,6 +268,11 @@ int main(void) {
              flat_writer.len) != 0) {
     lql_json_spool_cleanup(&flat_spool);
     return 10;
+  }
+  if (flat_result.captures != 2u || capture_writer.len != 17u ||
+      memcmp(capture_writer.data, "\"op\\u0065n\"\"open\"", 17u) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 30;
   }
   lql_json_spool_cleanup(&flat_spool);
   memset(&flat_reader, 0, sizeof(flat_reader));

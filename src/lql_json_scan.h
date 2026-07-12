@@ -53,6 +53,17 @@ typedef struct lql_json_flat_eq_term {
   size_t *contains_failure;
 } lql_json_flat_eq_term;
 
+typedef struct lql_json_capture_key {
+  const char *field;
+  size_t field_len;
+} lql_json_capture_key;
+
+typedef struct lql_json_capture_span {
+  size_t offset;
+  size_t len;
+  int found;
+} lql_json_capture_span;
+
 typedef lql_status (*lql_json_flat_eq_record_fn)(
     void *user, size_t record_index, int root_is_object, unsigned long hits,
     const lql_json_spool *spool, lql_error *error);
@@ -65,6 +76,9 @@ typedef struct lql_json_flat_eq_request {
   lql_json_spool *spool;
   int capture;
   int stop_matching_on_hit;
+  const lql_json_capture_key *capture_keys;
+  size_t capture_key_count;
+  lql_json_capture_span *capture_spans;
   lql_json_flat_eq_record_fn record;
   void *record_user;
 } lql_json_flat_eq_request;
