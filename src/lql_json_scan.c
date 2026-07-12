@@ -172,6 +172,22 @@ static unsigned long lql_json_match_exists(const lql_json_scan *scan,
   return hits;
 }
 
+static unsigned long
+lql_json_match_terms_for_kind(const lql_json_scan *scan, unsigned long keys,
+                              lql_json_flat_term_kind kind) {
+  unsigned long active;
+  size_t i;
+  active = 0ul;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    unsigned long bit;
+    bit = 1ul << i;
+    if ((keys & bit) != 0ul && scan->flat_terms[i].kind == kind) {
+      active |= bit;
+    }
+  }
+  return active;
+}
+
 static void lql_json_match_unicode(lql_json_scan *scan, unsigned int value) {
   if (value <= 0x7fu) {
     lql_json_match_byte(scan, (unsigned char)value);
@@ -342,6 +358,13 @@ static lql_status lql_json_copy_byte(lql_json_scan *scan, int value) {
   unsigned char byte;
   byte = (unsigned char)value;
   return lql_json_write(scan, &byte, 1u);
+}
+
+static lql_status lql_json_match_copy_byte(lql_json_scan *scan, int value) {
+  if ((scan->match_active & ~scan->match_failed) != 0ul) {
+    lql_json_match_byte(scan, (unsigned char)value);
+  }
+  return lql_json_copy_byte(scan, value);
 }
 
 static lql_status lql_json_string(lql_json_scan *scan) {
@@ -592,6 +615,24 @@ static lql_status lql_json_object(lql_json_scan *scan) {
         scan->flat_eq_hits |= lql_json_match_complete(scan);
       }
       lql_json_match_start(scan, 0ul, 0);
+    } else if (key_matches) {
+      lql_json_flat_term_kind scalar_kind;
+      unsigned long scalar_terms;
+      if (value == 't' || value == 'f') {
+        scalar_kind = LQL_JSON_FLAT_TERM_BOOL_EQ;
+      } else if (value == 'n') {
+        scalar_kind = LQL_JSON_FLAT_TERM_NULL_EQ;
+      } else {
+        scalar_kind = LQL_JSON_FLAT_TERM_NUMBER_EQ;
+      }
+      scalar_terms =
+          lql_json_match_terms_for_kind(scan, key_matches, scalar_kind);
+      lql_json_match_start(scan, scalar_terms, 0);
+      status = lql_json_value(scan);
+      if (status == LQL_STATUS_OK) {
+        scan->flat_eq_hits |= lql_json_match_complete(scan);
+      }
+      lql_json_match_start(scan, 0ul, 0);
     } else {
       status = lql_json_value(scan);
     }
@@ -668,8 +709,8 @@ static lql_status lql_json_literal(lql_json_scan *scan, const char *literal) {
   lql_status status;
   for (i = 0u; literal[i] != '\0'; ++i) {
     status = lql_json_take_expected(scan, literal[i]);
-    if (status != LQL_STATUS_OK ||
-        (status = lql_json_copy_byte(scan, literal[i])) != LQL_STATUS_OK) {
+    if (status != LQL_STATUS_OK || (status = lql_json_match_copy_byte(
+                                        scan, literal[i])) != LQL_STATUS_OK) {
       return status;
     }
   }
@@ -685,7 +726,7 @@ static lql_status lql_json_number(lql_json_scan *scan) {
   }
   if (value == '-') {
     ++scan->offset;
-    status = lql_json_copy_byte(scan, '-');
+    status = lql_json_match_copy_byte(scan, '-');
     if (status != LQL_STATUS_OK ||
         (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
       return status;
@@ -693,14 +734,14 @@ static lql_status lql_json_number(lql_json_scan *scan) {
   }
   if (value == '0') {
     ++scan->offset;
-    status = lql_json_copy_byte(scan, value);
+    status = lql_json_match_copy_byte(scan, value);
     if (status != LQL_STATUS_OK) {
       return status;
     }
   } else if (value >= '1' && value <= '9') {
     do {
       ++scan->offset;
-      status = lql_json_copy_byte(scan, value);
+      status = lql_json_match_copy_byte(scan, value);
       if (status != LQL_STATUS_OK ||
           (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
         return status;
@@ -716,7 +757,7 @@ static lql_status lql_json_number(lql_json_scan *scan) {
   }
   if (value == '.') {
     ++scan->offset;
-    status = lql_json_copy_byte(scan, '.');
+    status = lql_json_match_copy_byte(scan, '.');
     if (status != LQL_STATUS_OK ||
         (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK ||
         value < '0' || value > '9') {
@@ -725,7 +766,7 @@ static lql_status lql_json_number(lql_json_scan *scan) {
     }
     do {
       ++scan->offset;
-      status = lql_json_copy_byte(scan, value);
+      status = lql_json_match_copy_byte(scan, value);
       if (status != LQL_STATUS_OK ||
           (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
         return status;
@@ -734,14 +775,14 @@ static lql_status lql_json_number(lql_json_scan *scan) {
   }
   if (value == 'e' || value == 'E') {
     ++scan->offset;
-    status = lql_json_copy_byte(scan, value);
+    status = lql_json_match_copy_byte(scan, value);
     if (status != LQL_STATUS_OK ||
         (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
       return status;
     }
     if (value == '+' || value == '-') {
       ++scan->offset;
-      status = lql_json_copy_byte(scan, value);
+      status = lql_json_match_copy_byte(scan, value);
       if (status != LQL_STATUS_OK ||
           (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
         return status;
@@ -753,7 +794,7 @@ static lql_status lql_json_number(lql_json_scan *scan) {
     }
     do {
       ++scan->offset;
-      status = lql_json_copy_byte(scan, value);
+      status = lql_json_match_copy_byte(scan, value);
       if (status != LQL_STATUS_OK ||
           (status = lql_json_peek(scan, &value)) != LQL_STATUS_OK) {
         return status;

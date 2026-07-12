@@ -18,9 +18,30 @@ typedef struct lql_flat_eq_state {
   const lql_flat_eq_program *program;
 } lql_flat_eq_state;
 
+static int lql_flat_eq_literal_kind(lql_selector_literal_kind literal_kind,
+                                    lql_json_flat_term_kind *out) {
+  if (out == NULL) {
+    return 0;
+  }
+  switch (literal_kind) {
+  case LQL_SELECTOR_LITERAL_STRING:
+    *out = LQL_JSON_FLAT_TERM_EQ;
+    return 1;
+  case LQL_SELECTOR_LITERAL_NUMBER:
+    *out = LQL_JSON_FLAT_TERM_NUMBER_EQ;
+    return 1;
+  case LQL_SELECTOR_LITERAL_BOOL:
+    *out = LQL_JSON_FLAT_TERM_BOOL_EQ;
+    return 1;
+  default:
+    return 0;
+  }
+}
+
 static int lql_flat_eq_append(lql_flat_eq_program *program,
                               const lql_selector *selector) {
   lql_json_flat_eq_term *term;
+  lql_json_flat_term_kind term_kind;
   const char *field;
   size_t i;
   if (selector == NULL) {
@@ -50,12 +71,12 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       return 0;
     }
     for (i = 0u; i < selector->any_count; ++i) {
-      if (selector->any_kinds[i] != LQL_SELECTOR_LITERAL_STRING ||
+      if (!lql_flat_eq_literal_kind(selector->any_kinds[i], &term_kind) ||
           program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
         return 0;
       }
       term = &program->terms[program->term_count];
-      term->kind = LQL_JSON_FLAT_TERM_EQ;
+      term->kind = term_kind;
       term->field = field + 1;
       term->field_len = strlen(field + 1);
       term->value = selector->any[i];
@@ -79,15 +100,18 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   term = &program->terms[program->term_count];
   term->field = field + 1;
   term->field_len = strlen(field + 1);
-  term->kind =
-      selector->kind == LQL_SELECTOR_KIND_EXISTS   ? LQL_JSON_FLAT_TERM_EXISTS
-      : selector->kind == LQL_SELECTOR_KIND_PREFIX ? LQL_JSON_FLAT_TERM_PREFIX
-                                                   : LQL_JSON_FLAT_TERM_EQ;
-  if (term->kind == LQL_JSON_FLAT_TERM_EQ ||
-      term->kind == LQL_JSON_FLAT_TERM_PREFIX) {
-    if (!selector->value_set ||
-        selector->value_kind != LQL_SELECTOR_LITERAL_STRING ||
-        selector->value_is_temporal || selector->value == NULL) {
+  if (selector->kind == LQL_SELECTOR_KIND_EXISTS) {
+    term->kind = LQL_JSON_FLAT_TERM_EXISTS;
+  } else if (selector->kind == LQL_SELECTOR_KIND_PREFIX) {
+    term->kind = LQL_JSON_FLAT_TERM_PREFIX;
+  } else if (!lql_flat_eq_literal_kind(selector->value_kind, &term->kind)) {
+    return 0;
+  }
+  if (term->kind != LQL_JSON_FLAT_TERM_EXISTS) {
+    if (!selector->value_set || selector->value_is_temporal ||
+        selector->value == NULL ||
+        (term->kind == LQL_JSON_FLAT_TERM_PREFIX &&
+         selector->value_kind != LQL_SELECTOR_LITERAL_STRING)) {
       return 0;
     }
     term->value = selector->value;
