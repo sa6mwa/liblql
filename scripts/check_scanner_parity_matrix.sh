@@ -10,9 +10,15 @@ scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' decision_only_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  prefix_status_open 'prefix{field=/status,value=op}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  iprefix_status_open 'iprefix{field=/status,value=OP}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' plus_value_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' plus_value_source_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  prefix_status_open 'prefix{field=/status,value=op}' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' project_file_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
@@ -52,6 +58,9 @@ scanner_parity_run_row build/direct-probe/array-scalar-100k.ndjson array_scalar_
   array_scalar_wildcard_eq '/values/[]="B"' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/array-exists-100k.ndjson array_exists_100k \
   array_exists_indexed 'exists{/values/1}' decision_only_selector /id
+# Do not add exists{/values/[]} here until the Go long-stream oracle anomaly is
+# resolved. C and Go agree on isolated wildcard-exists fixtures, but the pinned
+# Go benchmark reports one fewer match on array-exists-100k.ndjson.
 scanner_parity_run_row build/direct-probe/range-code-100k.ndjson range_code_100k \
   range_code 'range{field=/code,gte=10,lte=20}' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/recursive-10k.ndjson recursive_10k \
