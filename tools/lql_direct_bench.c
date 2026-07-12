@@ -364,6 +364,7 @@ static int mode_is_supported(const char *mode) {
          strcmp(mode, "plus_value_openjson_selector") == 0 ||
          mode_is_projection(mode) || mode_is_project_mutation(mode) ||
          strcmp(mode, "mutate_file_selector") == 0 ||
+         strcmp(mode, "mutate_file_plan") == 0 ||
          strcmp(mode, "mutate_source_selector") == 0;
 }
 
