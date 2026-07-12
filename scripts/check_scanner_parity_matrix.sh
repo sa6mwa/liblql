@@ -14,11 +14,19 @@ scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   iprefix_status_open 'iprefix{field=/status,value=OP}' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  in_status_open_closed 'in{field=/status,any=open|closed}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  in_status_open_pending 'in{field=/status,any=open|pending}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  and_status_open_region_west '/status="open",/region="us-west"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' plus_value_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   prefix_status_open 'prefix{field=/status,value=op}' plus_value_source_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  in_status_open_pending 'in{field=/status,any=open|pending}' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' project_file_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
