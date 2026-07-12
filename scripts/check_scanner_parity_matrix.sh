@@ -3,7 +3,7 @@ set -eu
 
 . scripts/scanner_parity_common.sh
 
-scanner_parity_init 'scanner parity matrix' build/scanner-parity-matrix.jsonl 3
+scanner_parity_init 'scanner parity matrix' build/scanner-parity-matrix.jsonl 5
 
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' decision_only_selector /id
@@ -70,7 +70,7 @@ scanner_parity_run_row build/direct-probe/array-exists-100k.ndjson array_exists_
 # resolved. C and Go agree on isolated wildcard-exists fixtures, but the pinned
 # Go benchmark reports one fewer match on array-exists-100k.ndjson.
 scanner_parity_run_row build/direct-probe/range-code-100k.ndjson range_code_100k \
-  range_code 'range{field=/code,gte=10,lte=20}' decision_only_selector /id
+  range_code_eq_one 'range{field=/code,gte=1,lte=1}' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/recursive-10k.ndjson recursive_10k \
   recursive_eq '/.../sku="needle"' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/indexed-10k.ndjson indexed_10k \

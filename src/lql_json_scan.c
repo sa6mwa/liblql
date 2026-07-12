@@ -105,6 +105,25 @@ static lql_status lql_json_write(lql_json_scan *scan, const void *data,
   return LQL_STATUS_OK;
 }
 
+static lql_status lql_json_write_byte(lql_json_scan *scan,
+                                      unsigned char byte) {
+  lql_status status;
+  if (scan->writer == NULL) {
+    return LQL_STATUS_OK;
+  }
+  if (scan->emit_len == sizeof(scan->emit_buffer)) {
+    status =
+        scan->writer(scan->writer_user, scan->emit_buffer, scan->emit_len,
+                     scan->error);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+    scan->emit_len = 0u;
+  }
+  scan->emit_buffer[scan->emit_len++] = byte;
+  return LQL_STATUS_OK;
+}
+
 static lql_status lql_json_flush(lql_json_scan *scan) {
   lql_status status;
   if (scan->emit_len == 0u || scan->writer == NULL) {
@@ -1265,12 +1284,10 @@ static lql_status lql_json_take_hex4(lql_json_scan *scan, unsigned int *out,
 }
 
 static lql_status lql_json_copy_byte(lql_json_scan *scan, int value) {
-  unsigned char byte;
   if (scan->writer == NULL) {
     return LQL_STATUS_OK;
   }
-  byte = (unsigned char)value;
-  return lql_json_write(scan, &byte, 1u);
+  return lql_json_write_byte(scan, (unsigned char)value);
 }
 
 static lql_status lql_json_match_copy_byte(lql_json_scan *scan, int value) {
