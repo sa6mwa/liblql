@@ -23,6 +23,8 @@ performance claim with profiling and paired Go/C benchmarks.
 ## Non-Negotiable Contract
 
 - ANSI C89, with GCC as the authoritative performance compiler.
+- GCC-only performance evidence. Do not run or maintain Clang comparison rows
+  for this rewrite; upstream release toolchains are Bootlin GCC.
 - One public execution entry point: `lql_stream_execute`.
 - Strict NDJSON only. Root arrays are hard errors. Scalar roots are validated
   records and do not match a non-empty selector.
