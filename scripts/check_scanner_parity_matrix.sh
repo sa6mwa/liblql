@@ -5,7 +5,12 @@ set -eu
 
 scanner_parity_init 'scanner parity matrix' build/scanner-parity-matrix.jsonl 9
 
+sh scripts/generate_direct_probe_fixture.sh \
+  build/direct-probe/status-whitespace-100k.ndjson 100000 24 statusws
+
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open '/status="open"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/status-whitespace-100k.ndjson status_whitespace_100k \
   eq_status_open '/status="open"' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' reuse_selector /id

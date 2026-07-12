@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -ne 2 ] && [ "$#" -ne 3 ] && [ "$#" -ne 4 ]; then
-  printf '%s\n' "usage: $0 OUTPUT_PATH RECORD_COUNT [PAYLOAD_BYTES] [status|scalar]" >&2
+  printf '%s\n' "usage: $0 OUTPUT_PATH RECORD_COUNT [PAYLOAD_BYTES] [status|statusws|scalar]" >&2
   exit 2
 fi
 
@@ -29,10 +29,10 @@ case "$payload_bytes" in
 esac
 
 case "$shape" in
-  status|scalar|nested|nestedprojection|indexed|recursive)
+  status|statusws|scalar|nested|nestedprojection|indexed|recursive)
     ;;
   *)
-    printf '%s\n' 'fixture shape must be status, scalar, nested, nestedprojection, indexed, or recursive' >&2
+    printf '%s\n' 'fixture shape must be status, statusws, scalar, nested, nestedprojection, indexed, or recursive' >&2
     exit 2
     ;;
 esac
@@ -60,12 +60,18 @@ awk -v count="$2" -v payload_bytes="$payload_bytes" -v shape="$shape" 'BEGIN {
     } else if (shape == "recursive") {
       sku = (i % 4 == 0) ? "needle" : "other"
       printf "{\"id\":\"id-%d\",\"tree\":{\"branch\":{\"deep\":{\"sku\":\"%s\"}}},\"payload\":\"", i, sku
+    } else if (shape == "statusws") {
+      printf " { \"id\" : \"id-%d\" , \"status\" : \"%s\" , \"region\" : \"%s\" , \"payload\" : \"", i, status, region
     } else {
       printf "{\"id\":\"id-%d\",\"status\":\"%s\",\"region\":\"%s\",\"payload\":\"", i, status, region
     }
     for (j = 0; j < payload_bytes; ++j) {
       printf "x"
     }
-    printf "\"}\n"
+    if (shape == "statusws") {
+      printf "\" }\n"
+    } else {
+      printf "\"}\n"
+    }
   }
 }' > "$1"
