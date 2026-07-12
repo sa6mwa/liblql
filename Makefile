@@ -1,4 +1,4 @@
-.PHONY: help build-debug build-release test asan direct-reset direct-probe direct-bench direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help build-debug build-release test asan direct-reset direct-no-lonejson direct-probe direct-bench direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -7,6 +7,7 @@ help:
 	  'make test          build and run the direct-stream test suite' \
 	  'make asan          build and run direct tests with ASan/UBSan' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
+	  'make direct-no-lonejson  verify liblql has no LoneJSON runtime dependency' \
 	  'make direct-probe  build the optimized direct-execution probe' \
 	  'make direct-bench  build the optimized direct benchmark runner' \
 	  'make direct-live-heap  run Massif live-heap gate for direct execution' \
@@ -36,6 +37,9 @@ asan:
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
+
+direct-no-lonejson: build-debug
+	@sh scripts/check_no_lonejson_dependency.sh
 
 direct-probe:
 	@cmake --preset release-scanner
