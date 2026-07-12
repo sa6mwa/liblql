@@ -88,6 +88,22 @@ int main(void) {
     return 1;
   }
   lonejson_value_event_tape_reset(&tape);
+  memset(&sink, 0, sizeof(sink));
+  if (tape_emit_input(&tape_visitor, tape_user, &error) != LONEJSON_STATUS_OK ||
+      lonejson_value_rewriter_open(&rewriter, runtime, tape_sink_write, &sink,
+                                   &options, &rewriter_visitor, &rewriter_user,
+                                   &error) != LONEJSON_STATUS_OK ||
+      lonejson_value_event_tape_replay(&tape, &rewriter_visitor, rewriter_user,
+                                       &error) != LONEJSON_STATUS_OK ||
+      lonejson_value_rewriter_close(&rewriter, &error) != LONEJSON_STATUS_OK ||
+      sink.len != strlen("{\"status\":\"open\"}") ||
+      memcmp(sink.data, "{\"status\":\"open\"}", sink.len) != 0) {
+    lonejson_value_rewriter_cleanup(&rewriter);
+    lonejson_value_event_tape_cleanup(&tape);
+    lonejson_free(runtime);
+    return 1;
+  }
+  lonejson_value_event_tape_reset(&tape);
   status = lonejson_value_event_tape_open(&tape, runtime, 1u, &tape_visitor,
                                           &tape_user, &error);
   if (status != LONEJSON_STATUS_OK ||

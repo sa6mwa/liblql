@@ -991,13 +991,9 @@ stream_candidate_begin(void *user, const lonejson_candidate_info *candidate,
     state->mutation_tape_ready = 0;
     state->mutation_abandoned = 0;
     if (state->mutation_deferred) {
-      status = lonejson_value_event_tape_open(
-          &state->mutation_tape, state->runtime,
-          LQL_STREAM_MUTATION_TAPE_MAX_BYTES, &state->mutation_tape_visitor,
-          &state->mutation_tape_visitor_user, error);
-      if (status == LONEJSON_STATUS_OK) {
-        state->mutation_tape_ready = 1;
-      }
+      lonejson_value_event_tape_reset(&state->mutation_tape);
+      state->mutation_tape_ready = 1;
+      status = LONEJSON_STATUS_OK;
     } else {
       status = stream_mutation_rewriter_open(state, error);
       if (status == LONEJSON_STATUS_OK) {
@@ -2776,6 +2772,7 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   lonejson_path_value_visitor visitor;
   lonejson_path_value_visitor projection_visitor;
   lonejson_error lonejson_error;
+  lonejson_status tape_status;
   lql_status status;
   const lql_stream_program *saved_program;
   lql_stream_program match_all_program;
@@ -2808,6 +2805,21 @@ static lql_status stream_execute_generic_path(lql_stream_state *state,
   }
   flat_mutation_selector = stream_mutation_flat_selector_eligible(state);
   state->mutation_deferred = flat_mutation_selector;
+  if (state->mutation_deferred) {
+    tape_status = lonejson_value_event_tape_open(
+        &state->mutation_tape, runtime, LQL_STREAM_MUTATION_TAPE_MAX_BYTES,
+        &state->mutation_tape_visitor, &state->mutation_tape_visitor_user,
+        &lonejson_error);
+    if (tape_status != LONEJSON_STATUS_OK) {
+      lonejson_value_event_tape_cleanup(&state->mutation_tape);
+      lonejson_value_rewriter_cleanup(&state->mutation_rewriter);
+      lonejson_spooled_cleanup(&state->mutation_spool);
+      state->mutation_direct = 0;
+      state->generic_member = NULL;
+      state->program = saved_program;
+      return stream_status(state, tape_status, &lonejson_error, error);
+    }
+  }
   if (state->request->output_mode == LQL_STREAM_OUTPUT_PROJECTION) {
     status = lql_projection_capture_create(state->receiver,
                                            state->request->projection, runtime,

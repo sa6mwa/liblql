@@ -5309,7 +5309,7 @@ void lonejson_value_event_tape_init(lonejson_value_event_tape *tape);
  * `max_bytes` bounds retained event metadata and decoded chunk data. A zero
  * limit permits unbounded retention. When the next event would exceed the
  * limit, its callback returns `LONEJSON_STATUS_OVERFLOW` without recording
- * that event. `out_visitor` and `out_user` remain valid until reset or cleanup.
+ * that event. `out_visitor` and `out_user` remain valid until cleanup.
  */
 lonejson_status lonejson_value_event_tape_open(
     lonejson_value_event_tape *tape, lonejson *runtime, size_t max_bytes,
@@ -5319,7 +5319,8 @@ lonejson_status lonejson_value_event_tape_open(
 lonejson_status lonejson_value_event_tape_replay(
     const lonejson_value_event_tape *tape,
     const lonejson_value_visitor *visitor, void *user, lonejson_error *error);
-/** Clears retained events while preserving reusable allocations. */
+/** Clears retained events while preserving reusable allocations and the open
+ * event visitor. */
 void lonejson_value_event_tape_reset(lonejson_value_event_tape *tape);
 /** Releases all resources retained by an event tape. */
 void lonejson_value_event_tape_cleanup(lonejson_value_event_tape *tape);
@@ -47785,7 +47786,6 @@ void lonejson_value_event_tape_reset(lonejson_value_event_tape *tape) {
   }
   state = (lonejson__value_event_tape_state *)tape->state;
   state->data_len = 0u;
-  state->open = 0;
   lonejson_error_init(&tape->error);
 }
 
