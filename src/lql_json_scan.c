@@ -1264,6 +1264,17 @@ static size_t lql_json_plain_ascii_span(const unsigned char *data, size_t len) {
   return offset;
 }
 
+static size_t lql_json_plain_key_span(const unsigned char *data, size_t len) {
+  size_t offset;
+  offset = 0u;
+  while (offset < len && data[offset] != (unsigned char)'"' &&
+         data[offset] != (unsigned char)'\\' && data[offset] >= 0x20u &&
+         data[offset] < 0x80u) {
+    ++offset;
+  }
+  return offset;
+}
+
 static lql_status lql_json_refill(lql_json_scan *scan) {
   size_t amount;
   lql_status status;
@@ -1960,8 +1971,8 @@ static int lql_json_try_plain_key_match(lql_json_scan *scan,
     return 0;
   }
   key_start = scan->offset + 1u;
-  key_len = lql_json_plain_ascii_span(scan->buffer + key_start,
-                                      scan->length - key_start);
+  key_len = lql_json_plain_key_span(scan->buffer + key_start,
+                                    scan->length - key_start);
   key_end = key_start + key_len;
   if (key_end >= scan->length ||
       scan->buffer[key_end] != (unsigned char)'"') {
