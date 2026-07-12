@@ -26,6 +26,8 @@ performance claim with profiling and paired Go/C benchmarks.
 - One public execution entry point: `lql_stream_execute`.
 - Strict NDJSON only. Root arrays are hard errors. Scalar roots are validated
   records and do not match a non-empty selector.
+- Input records may use any JSON-permitted whitespace around structural tokens;
+  compact JSON is an output normalization, never an input precondition.
 - Every emitted record is compact JSON plus one newline.
 - Earlier completed records remain observable if a later record is malformed.
 - Duplicate object keys are observed in source order.
@@ -53,9 +55,10 @@ reader → bounded byte buffer → strict JSON scanner
 ```
 
 The scanner is not a general DOM parser. It is a pull scanner with bounded
-input and token scratch storage. It recognizes and validates JSON structure,
-strings, escapes, Unicode surrogate pairs, literals, and numbers while the
-candidate state owns LQL decisions.
+input and token scratch storage. It consumes JSON-permitted whitespace at every
+grammar boundary, then recognizes and validates JSON structure, strings,
+escapes, Unicode surrogate pairs, literals, and numbers while the candidate
+state owns LQL decisions.
 
 For every token, the direct hot path performs only the work required by the
 compiled program:
@@ -112,10 +115,10 @@ MiB spill case.
 
 ## Cutover Sequence
 
-1. Add scanner unit tests that establish strict JSON and compact-emission
-   behavior independently of selectors. Include strings/escapes, numbers,
-   nesting, duplicate keys, fragmented input, scalar roots, root-array errors,
-   and malformed-input offsets.
+1. Add scanner unit tests that establish strict JSON acceptance and compact
+   emission independently of selectors. Include whitespace-heavy and compact
+   input forms, strings/escapes, numbers, nesting, duplicate keys, fragmented
+   input, scalar roots, root-array errors, and malformed-input offsets.
 2. Implement the Go-inspired fast top-level object equality scanner with
    matched-only callback capture. Run focused GCC/Clang/Go benchmarks and a
    leaf-function profile before extending it.
