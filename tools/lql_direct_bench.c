@@ -468,6 +468,8 @@ static const char *const *mutations_for(const char *selector_name,
       "/enabled=false", "/code=+1", "rm:/payload", "/meta/bench=true"};
   static const char *const nested_remove[] = {"rm:/meta/state"};
   static const char *const deep_set[] = {"/voucher/lines/10/bench=true"};
+  static const char *const same_top_nested_multi[] = {"/meta/bench=true",
+                                                      "/meta/state=done"};
   static const char *const fallback[] = {"/bench/touched=true"};
   if (strcmp(selector_name, "realworld_eq_sparse") == 0) {
     *count = 1u;
@@ -520,6 +522,10 @@ static const char *const *mutations_for(const char *selector_name,
   if (strcmp(selector_name, "eq_status_open_deep_set") == 0) {
     *count = 1u;
     return deep_set;
+  }
+  if (strcmp(selector_name, "eq_status_open_same_top_nested_multi") == 0) {
+    *count = 2u;
+    return same_top_nested_multi;
   }
   if (strcmp(selector_name, "eq_code_one_mixed_nested_multi") == 0) {
     *count = 4u;
