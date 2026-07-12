@@ -120,6 +120,14 @@ scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
   realworld_contains_event_sparse 'contains{field=/event,value=sync}' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
   realworld_multi_clause_and '/component="edge",/event="session_sync",/active_idx=0,/tab_count=1,/code>=10' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
+  realworld_array_eq_sparse '/session_ids[]="sid-0a3f-target"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
+  realworld_recursive_nested_eq_sparse '/.../hash="c5d2460186f7233c927e7db2dcc703c0a3a8e0d5f0d8a3c5b4f1e2d3c4b5a697"' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
+  realworld_icontains_component_dense 'icontains{field=/component,value=EDGE}' decision_only_selector /id
+scanner_parity_run_row build/direct-probe/realworld-100k.ndjson realworld_100k \
+  realworld_contains_any_event_sparse 'contains{field=/event,any=sync|__nope__}' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/lockd-100k.ndjson lockd_100k \
   lockd_session_sync '/event="session_sync"' decision_only_selector /id
 scanner_parity_run_row build/direct-probe/lockd-100k.ndjson lockd_100k \
