@@ -1206,6 +1206,33 @@ static int run_mutation_output(lql *ctx) {
       "{\"status\":\"open\",\"bench\":1}\n";
   static const char nested_remove_scalar_output[] =
       "{\"status\":\"open\",\"bench\":1}\n";
+  static const char *const deep_set[] = {"/voucher/lines/10/bench=true"};
+  static const char deep_set_input[] =
+      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"old\":1}}}}\n";
+  static const char deep_set_output[] =
+      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"old\":1,"
+      "\"bench\":true}}}}\n";
+  static const char deep_set_missing_input[] = "{\"status\":\"open\"}\n";
+  static const char deep_set_missing_output[] =
+      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"bench\":true}}}}\n";
+  static const char deep_set_scalar_input[] =
+      "{\"status\":\"open\",\"voucher\":{\"lines\":1}}\n";
+  static const char deep_set_scalar_output[] =
+      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"bench\":true}}}}\n";
+  static const char *const deep_remove[] = {"rm:/voucher/lines/10/bench"};
+  static const char deep_remove_input[] =
+      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"old\":1,"
+      "\"bench\":true}}}}\n";
+  static const char deep_remove_output[] =
+      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"old\":1}}}}\n";
+  static const char deep_remove_missing_input[] =
+      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"old\":1}}}}\n";
+  static const char deep_remove_missing_output[] =
+      "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"old\":1}}}}\n";
+  static const char deep_remove_scalar_input[] =
+      "{\"status\":\"open\",\"voucher\":{\"lines\":1}}\n";
+  static const char deep_remove_scalar_output[] =
+      "{\"status\":\"open\",\"voucher\":{\"lines\":1}}\n";
   static const char *const top_set[] = {"/processed=true"};
   static const char top_set_output[] =
       "{\"status\":\"open\",\"n\":1,\"processed\":true}\n";
@@ -1551,6 +1578,116 @@ static int run_mutation_output(lql *ctx) {
   request.reader_user = &reader;
   ctx->mutation_destroy(ctx, mutation);
   mutation = NULL;
+  if (ctx->mutation_parse(ctx, deep_set, 1u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)deep_set_input;
+  reader.len = sizeof(deep_set_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(deep_set_output) - 1u ||
+      memcmp(writer.data, deep_set_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)deep_set_missing_input;
+  reader.len = sizeof(deep_set_missing_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(deep_set_missing_output) - 1u ||
+      memcmp(writer.data, deep_set_missing_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)deep_set_scalar_input;
+  reader.len = sizeof(deep_set_scalar_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(deep_set_scalar_output) - 1u ||
+      memcmp(writer.data, deep_set_scalar_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, deep_remove, 1u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)deep_remove_input;
+  reader.len = sizeof(deep_remove_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.mutation = mutation;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(deep_remove_output) - 1u ||
+      memcmp(writer.data, deep_remove_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)deep_remove_missing_input;
+  reader.len = sizeof(deep_remove_missing_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(deep_remove_missing_output) - 1u ||
+      memcmp(writer.data, deep_remove_missing_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)deep_remove_scalar_input;
+  reader.len = sizeof(deep_remove_scalar_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(deep_remove_scalar_output) - 1u ||
+      memcmp(writer.data, deep_remove_scalar_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  request.reader_user = &reader;
   if (ctx->mutation_parse(ctx, ordered, 3u, &mutation, &error) !=
           LQL_STATUS_OK ||
       ctx->mutation_count(ctx, mutation) != 3u) {

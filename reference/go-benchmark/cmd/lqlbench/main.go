@@ -99,6 +99,8 @@ func benchmarkMutationsForSelector(selectorName string, expr string) []string {
 		return []string{"/enabled=false", "/code=+1", "rm:/payload"}
 	case "eq_status_open_nested_set":
 		return []string{"/bench/touched=true"}
+	case "eq_status_open_deep_set":
+		return []string{"/voucher/lines/10/bench=true"}
 	case "eq_code_one_mixed_nested_multi":
 		return []string{"/enabled=false", "/code=+1", "rm:/payload", "/meta/bench=true"}
 	case "eq_status_open_nested_remove":
