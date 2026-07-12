@@ -8,6 +8,7 @@ matches=$(git grep -n -E "$legacy_pattern" -- \
   ':!docs/liblql-direct-execution-handover.md' \
   ':!reference/**' \
   ':!scripts/check_direct_execution_reset.sh' \
+  ':!scripts/check_direct_live_heap.sh' \
   ':!tools/lql_direct_bench.c' || true)
 if [ -n "$matches" ]; then
   printf '%s\n' 'removed execution architecture remains:' >&2
