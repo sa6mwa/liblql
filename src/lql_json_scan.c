@@ -1381,6 +1381,96 @@ static lql_status lql_json_string(lql_json_scan *scan) {
 
 static lql_status lql_json_value(lql_json_scan *scan);
 
+static lql_status
+lql_json_matched_scalar_value(lql_json_scan *scan, unsigned long matches,
+                              size_t path_segment, int value) {
+  lql_status status;
+  if (value == '"') {
+    unsigned long eq_terms;
+    unsigned long temporal_terms;
+    size_t i;
+    eq_terms = 0ul;
+    temporal_terms = 0ul;
+    for (i = 0u; i < scan->flat_term_count; ++i) {
+      unsigned long bit;
+      bit = 1ul << i;
+      if ((matches & bit) != 0ul &&
+          lql_json_term_value_at(&scan->flat_terms[i], path_segment)) {
+        if (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_TEMPORAL_RANGE) {
+          temporal_terms |= bit;
+        } else if (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EQ ||
+                   scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_PREFIX ||
+                   scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_CONTAINS ||
+                   scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_ICONTAINS ||
+                   scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_IPREFIX) {
+          eq_terms |= bit;
+        }
+      }
+    }
+    lql_json_match_start(scan, eq_terms, 0, 0u);
+    lql_json_temporal_range_start(scan, temporal_terms);
+    status = lql_json_string(scan);
+    if (status == LQL_STATUS_OK) {
+      scan->flat_eq_hits |= lql_json_match_complete(scan);
+      scan->flat_eq_hits |= lql_json_temporal_range_complete(scan);
+    }
+    lql_json_temporal_range_start(scan, 0ul);
+    lql_json_match_start(scan, 0ul, 0, 0u);
+    return status;
+  }
+  if (value != '{' && value != '[') {
+    lql_json_flat_term_kind scalar_kind;
+    unsigned long scalar_terms;
+    unsigned long range_terms;
+    if (value == 't' || value == 'f') {
+      scalar_kind = LQL_JSON_FLAT_TERM_BOOL_EQ;
+      range_terms = 0ul;
+    } else if (value == 'n') {
+      scalar_kind = LQL_JSON_FLAT_TERM_NULL_EQ;
+      range_terms = 0ul;
+    } else {
+      scalar_kind = LQL_JSON_FLAT_TERM_NUMBER_EQ;
+      range_terms = 0ul;
+      {
+        size_t i;
+        for (i = 0u; i < scan->flat_term_count; ++i) {
+          unsigned long bit;
+          bit = 1ul << i;
+          if ((matches & bit) != 0ul &&
+              lql_json_term_value_at(&scan->flat_terms[i], path_segment) &&
+              scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_NUMBER_RANGE) {
+            range_terms |= bit;
+          }
+        }
+      }
+    }
+    scalar_terms = 0ul;
+    {
+      size_t i;
+      for (i = 0u; i < scan->flat_term_count; ++i) {
+        unsigned long bit;
+        bit = 1ul << i;
+        if ((matches & bit) != 0ul &&
+            lql_json_term_value_at(&scan->flat_terms[i], path_segment) &&
+            scan->flat_terms[i].kind == scalar_kind) {
+          scalar_terms |= bit;
+        }
+      }
+    }
+    lql_json_match_start(scan, scalar_terms, 0, 0u);
+    lql_json_number_range_start(scan, range_terms);
+    status = lql_json_value(scan);
+    if (status == LQL_STATUS_OK) {
+      scan->flat_eq_hits |= lql_json_match_complete(scan);
+      scan->flat_eq_hits |= lql_json_number_range_complete(scan);
+    }
+    lql_json_number_range_start(scan, 0ul);
+    lql_json_match_start(scan, 0ul, 0, 0u);
+    return status;
+  }
+  return lql_json_value(scan);
+}
+
 static lql_status lql_json_object(lql_json_scan *scan) {
   int value;
   unsigned long exists_terms;
@@ -1656,7 +1746,16 @@ static lql_status lql_json_array(lql_json_scan *scan) {
     }
     capture_start = capture_values == 0ul ? 0u : lql_json_output_offset(scan);
     scan->capture_path_active[scan->depth] = capture_descendants;
-    status = lql_json_value(scan);
+    if (element_active != 0ul) {
+      status = lql_json_peek(scan, &value);
+      if (status == LQL_STATUS_OK) {
+        status =
+            lql_json_matched_scalar_value(scan, element_active, array_segment,
+                                          value);
+      }
+    } else {
+      status = lql_json_value(scan);
+    }
     if (capture_values != 0ul && status == LQL_STATUS_OK) {
       size_t capture_end;
       capture_end = lql_json_output_offset(scan);

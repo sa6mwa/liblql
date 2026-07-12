@@ -178,6 +178,16 @@ int main(void) {
   static const lql_json_flat_eq_term indexed_flat_terms[] = {
       {LQL_JSON_FLAT_TERM_EQ, "items", 5u, "B", 1u, "/items/1/sku", 12u, 3u,
        2ul}};
+  static const char indexed_scalar_input[] =
+      "{\"values\":[\"A\",\"B\"]}\n"
+      "{\"values\":[\"B\",\"A\"]}\n"
+      "{\"values\":[\"A\"]}\n";
+  static const lql_json_flat_eq_term indexed_scalar_terms[] = {
+      {LQL_JSON_FLAT_TERM_EQ, "values", 6u, "B", 1u, "/values/1", 9u, 2u,
+       2ul}};
+  static const lql_json_flat_eq_term array_scalar_wildcard_terms[] = {
+      {LQL_JSON_FLAT_TERM_EQ, "values", 6u, "B", 1u, "/values/[]", 10u, 2u,
+       0ul, 0ul, 2ul}};
   static const char *const indexed_capture_segments[] = {"items", "1", "sku"};
   static const lql_json_capture_key indexed_capture_keys[] = {
       {indexed_capture_segments, 3u}};
@@ -496,6 +506,72 @@ int main(void) {
       memcmp(capture_writer.data, "\"B\"", 3u) != 0) {
     lql_json_spool_cleanup(&flat_spool);
     return 31;
+  }
+  lql_json_spool_cleanup(&flat_spool);
+  memset(&flat_reader, 0, sizeof(flat_reader));
+  memset(&flat_writer, 0, sizeof(flat_writer));
+  memset(&flat_result, 0, sizeof(flat_result));
+  flat_reader.data = (const unsigned char *)indexed_scalar_input;
+  flat_reader.len = sizeof(indexed_scalar_input) - 1u;
+  flat_reader.chunk_size = 1u;
+  flat_result.writer = &flat_writer;
+  memset(&flat_request, 0, sizeof(flat_request));
+  flat_request.reader = json_test_read;
+  flat_request.reader_user = &flat_reader;
+  flat_request.terms = indexed_scalar_terms;
+  flat_request.term_count =
+      sizeof(indexed_scalar_terms) / sizeof(indexed_scalar_terms[0]);
+  flat_request.spool = &flat_spool;
+  flat_request.capture = 1;
+  flat_request.record = json_flat_record;
+  flat_request.record_user = &flat_result;
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
+    return 32;
+  }
+  if (lql_json_scan_flat_eq_ndjson(&flat_request, &flat_records, &flat_bytes,
+                                   &flat_error) != LQL_STATUS_OK ||
+      flat_records != 3u || flat_bytes != flat_reader.len ||
+      flat_result.objects != 3u || flat_result.matches != 1u ||
+      flat_writer.len != strlen("{\"values\":[\"A\",\"B\"]}\n") ||
+      memcmp(flat_writer.data, "{\"values\":[\"A\",\"B\"]}\n",
+             flat_writer.len) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 33;
+  }
+  lql_json_spool_cleanup(&flat_spool);
+  memset(&flat_reader, 0, sizeof(flat_reader));
+  memset(&flat_writer, 0, sizeof(flat_writer));
+  memset(&flat_result, 0, sizeof(flat_result));
+  flat_reader.data = (const unsigned char *)indexed_scalar_input;
+  flat_reader.len = sizeof(indexed_scalar_input) - 1u;
+  flat_reader.chunk_size = 1u;
+  flat_result.writer = &flat_writer;
+  memset(&flat_request, 0, sizeof(flat_request));
+  flat_request.reader = json_test_read;
+  flat_request.reader_user = &flat_reader;
+  flat_request.terms = array_scalar_wildcard_terms;
+  flat_request.term_count = sizeof(array_scalar_wildcard_terms) /
+                            sizeof(array_scalar_wildcard_terms[0]);
+  flat_request.spool = &flat_spool;
+  flat_request.capture = 1;
+  flat_request.record = json_flat_record;
+  flat_request.record_user = &flat_result;
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
+    return 34;
+  }
+  if (lql_json_scan_flat_eq_ndjson(&flat_request, &flat_records, &flat_bytes,
+                                   &flat_error) != LQL_STATUS_OK ||
+      flat_records != 3u || flat_bytes != flat_reader.len ||
+      flat_result.objects != 3u || flat_result.matches != 2u ||
+      flat_writer.len != strlen("{\"values\":[\"A\",\"B\"]}\n"
+                                "{\"values\":[\"B\",\"A\"]}\n") ||
+      memcmp(flat_writer.data,
+             "{\"values\":[\"A\",\"B\"]}\n{\"values\":[\"B\",\"A\"]}\n",
+             flat_writer.len) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 35;
   }
   lql_json_spool_cleanup(&flat_spool);
   memset(&flat_reader, 0, sizeof(flat_reader));

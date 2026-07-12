@@ -493,6 +493,10 @@ static int run_mapped_string_predicates(lql *ctx) {
       "{\"code\":2,\"enabled\":false}\n"
       "{\"code\":1.0,\"enabled\":false}\n"
       "{\"code\":1,\"code\":2,\"enabled\":false}\n";
+  static const char array_scalar_input[] =
+      "{\"values\":[\"A\",\"B\"],\"codes\":[1,2]}\n"
+      "{\"values\":[\"B\",\"A\"],\"codes\":[2,3]}\n"
+      "{\"values\":[\"A\"],\"codes\":[1]}\n";
   static const char null_input[] =
       "{\"empty\":null,\"code\":1}\n"
       "{\"empty\":false,\"code\":2}\n"
@@ -600,6 +604,12 @@ static int run_mapped_string_predicates(lql *ctx) {
       run_selection(ctx, "in{field=/code,any=1|2}", scalar_input, 4u, 3u) ||
       run_selection(ctx, "/enabled=true", scalar_input, 4u, 1u)) {
     return 16;
+  }
+  if (run_selection(ctx, "/values/1=\"B\"", array_scalar_input, 3u, 1u) ||
+      run_selection(ctx, "/values/[]=\"B\"", array_scalar_input, 3u, 2u) ||
+      run_selection(ctx, "range{field=/codes/1,gte=2}", array_scalar_input, 3u,
+                    2u)) {
+    return 108;
   }
   if (run_selection(ctx, "/empty=null", null_input, 3u, 0u) ||
       run_selection(ctx, "in{field=/empty,any=null|false}", null_input, 3u,
