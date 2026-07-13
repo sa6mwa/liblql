@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 typedef struct clql_reader {
   FILE *file;
@@ -13,12 +14,23 @@ typedef struct clql_writer {
 } clql_writer;
 
 static void usage(FILE *file) {
-  fputs("usage: clql [--count] <selector> [file|-]\n"
-        "       clql --help\n"
-        "       clql --version\n"
-        "\n"
-        "Reads strict NDJSON from file or stdin and writes compact matching\n"
-        "records to stdout, one JSON value per line. Root arrays are errors.\n",
+  fputs("usage: clql [flags] selector... [data.json]\n", file);
+  fputs("   or: clql selector... < data.json\n", file);
+  fputs("   or: cat data.json | clql selector...\n\n", file);
+  fputs("Selection flags:\n", file);
+  fputs("  -c, --compact        compact output (currently always compact)\n",
+        file);
+  fputs("  -O, --or             combine selector arguments with OR\n", file);
+  fputs("  -M, --matches-only   output only selector matches\n", file);
+  fputs("      --count          output only the number of matches\n", file);
+  fputs("  -h, --help           show help\n", file);
+  fputs("  -v, --version        show version\n\n", file);
+  fputs("Unsupported Go lql flags fail explicitly until supported:\n", file);
+  fputs("  -m/--mutate, -f/--field, -t/--theme,\n", file);
+  fputs("  -i/--inline, -w/--write, -F/--enable-file-mutations.\n\n", file);
+  fputs("Reads strict NDJSON from file or stdin and writes compact matching\n",
+        file);
+  fputs("records to stdout, one JSON value per line. Root arrays are errors.\n",
         file);
 }
 
@@ -49,8 +61,7 @@ static lql_status clql_write(void *user, const void *data, size_t len,
   clql_writer *writer;
   (void)error;
   writer = (clql_writer *)user;
-  if (writer == NULL || writer->file == NULL ||
-      (len != 0u && data == NULL)) {
+  if (writer == NULL || writer->file == NULL || (len != 0u && data == NULL)) {
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   if (len != 0u && fwrite(data, 1u, len, writer->file) != len) {
@@ -69,11 +80,69 @@ static int print_error(const char *context, lql_status status,
   return 1;
 }
 
+static int file_exists(const char *path) {
+  struct stat st;
+  return path != NULL && stat(path, &st) == 0 && !S_ISDIR(st.st_mode);
+}
+
+static int is_unsupported_flag_with_value(const char *arg) {
+  return strcmp(arg, "-m") == 0 || strcmp(arg, "--mutate") == 0 ||
+         strncmp(arg, "--mutate=", 9u) == 0 || strcmp(arg, "-f") == 0 ||
+         strcmp(arg, "--field") == 0 || strncmp(arg, "--field=", 8u) == 0 ||
+         strcmp(arg, "-t") == 0 || strcmp(arg, "--theme") == 0 ||
+         strncmp(arg, "--theme=", 8u) == 0;
+}
+
+static int is_unsupported_flag_no_value(const char *arg) {
+  return strcmp(arg, "-i") == 0 || strcmp(arg, "--inline") == 0 ||
+         strcmp(arg, "-w") == 0 || strcmp(arg, "--write") == 0 ||
+         strcmp(arg, "-F") == 0 || strcmp(arg, "--enable-file-mutations") == 0;
+}
+
+static char *join_selectors(char **argv, int first, int count,
+                            const char *separator) {
+  size_t len;
+  size_t sep_len;
+  int i;
+  char *out;
+  char *cursor;
+
+  len = 1u;
+  sep_len = strlen(separator);
+  for (i = 0; i < count; ++i) {
+    len += strlen(argv[first + i]);
+    if (i + 1 < count) {
+      len += sep_len;
+    }
+  }
+  out = (char *)malloc(len);
+  if (out == NULL) {
+    return NULL;
+  }
+  cursor = out;
+  for (i = 0; i < count; ++i) {
+    size_t part_len;
+    if (i > 0) {
+      memcpy(cursor, separator, sep_len);
+      cursor += sep_len;
+    }
+    part_len = strlen(argv[first + i]);
+    memcpy(cursor, argv[first + i], part_len);
+    cursor += part_len;
+  }
+  *cursor = '\0';
+  return out;
+}
+
 int main(int argc, char **argv) {
   const char *expr;
   const char *path;
   int count_only;
+  int or_mode;
   int arg;
+  int selector_first;
+  int selector_count;
+  int remaining;
   FILE *input;
   lql *ctx;
   lql_selector *selector;
@@ -85,31 +154,82 @@ int main(int argc, char **argv) {
   clql_writer writer;
 
   count_only = 0;
+  or_mode = 0;
   arg = 1;
-  if (argc == 2 && strcmp(argv[1], "--help") == 0) {
-    usage(stdout);
-    return 0;
+
+  while (arg < argc) {
+    if (strcmp(argv[arg], "--") == 0) {
+      ++arg;
+      break;
+    }
+    if (strcmp(argv[arg], "-h") == 0 || strcmp(argv[arg], "--help") == 0) {
+      usage(stdout);
+      return 0;
+    }
+    if (strcmp(argv[arg], "-v") == 0 || strcmp(argv[arg], "--version") == 0) {
+      puts(LQL_VERSION);
+      return 0;
+    }
+    if (strcmp(argv[arg], "--count") == 0) {
+      count_only = 1;
+      ++arg;
+      continue;
+    }
+    if (strcmp(argv[arg], "-O") == 0 || strcmp(argv[arg], "--or") == 0) {
+      or_mode = 1;
+      ++arg;
+      continue;
+    }
+    if (strcmp(argv[arg], "-c") == 0 || strcmp(argv[arg], "--compact") == 0 ||
+        strcmp(argv[arg], "-M") == 0 ||
+        strcmp(argv[arg], "--matches-only") == 0) {
+      ++arg;
+      continue;
+    }
+    if (is_unsupported_flag_no_value(argv[arg]) ||
+        is_unsupported_flag_with_value(argv[arg])) {
+      fprintf(stderr, "clql: unsupported Go lql flag in current engine: %s\n",
+              argv[arg]);
+      return 2;
+    }
+    if (argv[arg][0] == '-') {
+      fprintf(stderr, "clql: unknown flag: %s\n", argv[arg]);
+      usage(stderr);
+      return 2;
+    }
+    break;
   }
-  if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-    puts(LQL_VERSION);
-    return 0;
+
+  selector_first = arg;
+  remaining = argc - selector_first;
+  if (remaining < 1) {
+    usage(stderr);
+    return 2;
   }
-  if (arg < argc && strcmp(argv[arg], "--count") == 0) {
-    count_only = 1;
-    ++arg;
+  path = "-";
+  selector_count = remaining;
+  if (strcmp(argv[argc - 1], "-") == 0 || file_exists(argv[argc - 1])) {
+    path = argv[argc - 1];
+    selector_count = remaining - 1;
   }
-  if (argc - arg < 1 || argc - arg > 2) {
+  if (selector_count < 1) {
     usage(stderr);
     return 2;
   }
 
-  expr = argv[arg++];
-  path = arg < argc ? argv[arg] : "-";
+  expr = join_selectors(argv, selector_first, selector_count,
+                        or_mode ? "," : "\n");
+  if (expr == NULL) {
+    fputs("clql: out of memory\n", stderr);
+    return 1;
+  }
+
   input = stdin;
   if (strcmp(path, "-") != 0) {
     input = fopen(path, "rb");
     if (input == NULL) {
       fprintf(stderr, "clql: unable to open input: %s\n", path);
+      free((void *)expr);
       return 1;
     }
   }
@@ -122,9 +242,15 @@ int main(int argc, char **argv) {
     if (input != stdin) {
       fclose(input);
     }
+    free((void *)expr);
     return print_error("create context", status, &error);
   }
-  status = ctx->selector_parse(ctx, expr, &selector, &error);
+  if (or_mode) {
+    status = ctx->selector_parse_or(ctx, expr, &selector, &error);
+  } else {
+    status = ctx->selector_parse(ctx, expr, &selector, &error);
+  }
+  free((void *)expr);
   if (status != LQL_STATUS_OK) {
     ctx->destroy(ctx);
     if (input != stdin) {
