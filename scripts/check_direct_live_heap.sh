@@ -64,13 +64,24 @@ check_case() {
     "$dataset" "$selector_name" "$mode" "$samples" "$peak" "$limit_bytes"
 }
 
-for mode in decision_only_selector plus_value_selector project_file_selector mutate_file_selector
+for mode in \
+  decision_only_selector \
+  plus_value_selector \
+  plus_value_source_selector \
+  project_file_selector \
+  project_source_selector \
+  mutate_file_selector \
+  mutate_source_selector
 do
   check_case build/direct-probe/status-100k.ndjson status_100k \
     eq_status_open '/status="open"' "$mode"
   check_case build/direct-probe/large-4x25m.ndjson large_ndjson \
     eq_status_open '/status="open"' "$mode"
 done
+
+check_case build/direct-probe/project-mutate-status-100k.ndjson \
+  project_mutate_status_100k project_mutation_status '/status="open"' \
+  project_mutate_file_selector
 
 check_case build/direct-probe/realworld-100k.ndjson realworld_sparse \
   realworld_eq_sparse '/event="session_sync"' decision_only_selector
