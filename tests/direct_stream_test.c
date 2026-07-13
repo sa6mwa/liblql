@@ -2386,6 +2386,70 @@ static int run_output_modes_preserve_completed_before_malformed(lql *ctx) {
   return 0;
 }
 
+static int run_completed_record_before_root_array_error(lql *ctx) {
+  static const char input[] = "{\"status\":\"open\",\"n\":1}\n"
+                              "[{\"status\":\"open\"}]\n";
+  static const char selected_output[] = "{\"status\":\"open\",\"n\":1}\n";
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+  test_decisions decisions;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&decisions, 0, sizeof(decisions));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  request.on_decision = test_decide;
+  request.decision_user = &decisions;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+          LQL_STATUS_JSON_ERROR ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      decisions.count != 1u || decisions.matches != 1u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = selector;
+  request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+          LQL_STATUS_JSON_ERROR ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(selected_output) - 1u ||
+      memcmp(writer.data, selected_output, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 static int run_stop_and_root_array(lql *ctx) {
   static const char input[] = "{\"status\":\"open\"}\n{\"status\":\"open\"}\n";
   static const char root_array[] = "[{\"status\":\"open\"}]\n";
@@ -2589,6 +2653,7 @@ int main(void) {
       run_nested_projection_output(ctx) || run_mutation_output(ctx) ||
       run_projection_then_mutation_output(ctx) ||
       run_output_modes_preserve_completed_before_malformed(ctx) ||
+      run_completed_record_before_root_array_error(ctx) ||
       run_stop_and_root_array(ctx) || run_record_limit(ctx) ||
       run_byte_limit(ctx)) {
     ctx->destroy(ctx);
