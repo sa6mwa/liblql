@@ -28,6 +28,7 @@ endfunction()
 
 option(LQL_BUILD_STATIC "Build static liblql" ON)
 option(LQL_BUILD_SHARED "Build shared liblql" ON)
+option(LQL_BUILD_BINARY "Build clql command-line tool" ON)
 option(LQL_BUILD_DIRECT_PROBE "Build the direct-execution architecture probe" ON)
 option(LQL_BUILD_FUZZERS "Build AFL++ fuzz targets" OFF)
 option(LQL_INSTALL "Install liblql SDK artifacts" ON)
@@ -115,6 +116,12 @@ if(LQL_BUILD_DIRECT_PROBE)
   lql_configure_c89_target(lql_direct_bench)
 endif()
 
+if(LQL_BUILD_BINARY)
+  add_executable(clql tools/clql.c)
+  target_link_libraries(clql PRIVATE lql_static)
+  lql_configure_c89_target(clql)
+endif()
+
 if(LQL_BUILD_FUZZERS)
   add_executable(lql_json_fuzz fuzz/json_fuzz.c)
   target_link_libraries(lql_json_fuzz PRIVATE lql_static)
@@ -143,6 +150,10 @@ if(LQL_INSTALL)
     install(TARGETS lql_shared
             EXPORT liblqlTargets
             LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+  endif()
+  if(LQL_BUILD_BINARY)
+    install(TARGETS clql
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
   endif()
   install(EXPORT liblqlTargets

@@ -9,7 +9,8 @@ prefix_abs=$(CDPATH= cd -- "$prefix" && pwd -P)
 if [ ! -f "$prefix/include/lql/lql.h" ] ||
    [ ! -f "$prefix/include/lql/version.h" ] ||
    [ ! -f "$prefix/lib/cmake/liblql/liblqlConfig.cmake" ] ||
-   [ ! -f "$prefix/lib/pkgconfig/liblql.pc" ]; then
+   [ ! -f "$prefix/lib/pkgconfig/liblql.pc" ] ||
+   [ ! -x "$prefix/bin/clql" ]; then
   printf 'install-tree check: incomplete install prefix: %s\n' "$prefix" >&2
   exit 1
 fi
@@ -62,5 +63,10 @@ PKG_CONFIG_PATH="$prefix_abs/lib/pkgconfig" pkg-config --exists liblql
 cflags=$(PKG_CONFIG_PATH="$prefix_abs/lib/pkgconfig" pkg-config --cflags liblql)
 libs=$(PKG_CONFIG_PATH="$prefix_abs/lib/pkgconfig" pkg-config --libs liblql)
 "$cc" $cflags "$work/smoke.c" $libs -o "$work/pkgconfig/consumer"
+
+LD_LIBRARY_PATH="$prefix_abs/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  "$prefix_abs/bin/clql" --count '/status="open"' examples/status.ndjson \
+  >"$work/clql-count.out"
+printf '2\n' | cmp -s - "$work/clql-count.out"
 
 printf 'install-tree check: CMake and pkg-config consumers built from %s\n' "$prefix_abs"

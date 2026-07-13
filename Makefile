@@ -1,4 +1,4 @@
-.PHONY: help deps toolchain-check lifecycle-check build build-debug build-release test valgrind fuzz-smoke fuzz install-smoke test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check lifecycle-check build build-debug build-release test valgrind fuzz-smoke fuzz install-smoke clql-smoke test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -13,6 +13,7 @@ help:
 	  'make fuzz-smoke    build AFL++ target and verify instrumentation' \
 	  'make fuzz          run the standard bounded AFL++ smoke gate' \
 	  'make install-smoke install SDK and build CMake/pkg-config consumers' \
+	  'make clql-smoke    build clql and run CLI smoke tests' \
 	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
 	  'make direct-no-lonejson  verify liblql has no LoneJSON runtime dependency' \
@@ -70,7 +71,10 @@ install-smoke: build-release
 	@cmake --install build/release --prefix build/install-smoke
 	@sh scripts/check_install_tree.sh
 
-test-all: lifecycle-check direct-reset direct-no-lonejson test valgrind fuzz-smoke install-smoke scanner-parity-matrix direct-callback-whitespace direct-live-heap
+clql-smoke: build-release
+	@sh scripts/check_clql_smoke.sh
+
+test-all: lifecycle-check direct-reset direct-no-lonejson test valgrind fuzz-smoke install-smoke clql-smoke scanner-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
@@ -108,7 +112,7 @@ scanner-profile-hotspots: direct-bench
 	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench sh scripts/profile_scanner_hotspots.sh
 
 format:
-	@clang-format -i include/lql/*.h src/*.c src/*.h tests/header_smoke.c tests/header_smoke.cpp tools/lql_direct_bench.c
+	@clang-format -i include/lql/*.h src/*.c src/*.h tests/header_smoke.c tests/header_smoke.cpp tools/lql_direct_bench.c tools/clql.c fuzz/json_fuzz.c
 
 clean:
 	@./scripts/clean.sh

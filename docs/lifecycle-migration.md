@@ -37,7 +37,7 @@ release documentation after the migration is complete.
 | scanner-specific Make targets | standard lifecycle Make surface | Direct reset, no-LoneJSON, parity, profile, live heap | `make test-all`, `make prerelease` |
 | no package surface | install-tree SDK metadata | static/shared liblql SDK | `make install-smoke` |
 | no release matrix | `release-matrix` and `release` | local release proof | checksum/privacy/relocatability gates |
-| no CLI | `clql` example/binary | thin `lql_stream_execute` adapter | CLI smoke/parity tests |
+| no CLI | `clql` example/binary | thin `lql_stream_execute` adapter | `make clql-smoke` |
 | no Lua surface | Lua facade/source rock | Lua module parity with current expectations | `make lua-test`, Lua artifact verification |
 | no fuzz surface | AFL++ fuzz target and corpus | parser/stream robustness | `make fuzz-smoke` |
 
@@ -49,7 +49,9 @@ release documentation after the migration is complete.
 3. Replace ASan lifecycle target with AFL++ fuzzing. Done for the first JSON
    stream harness and smoke instrumentation gate; add more harnesses as the
    CLI/Lua/package surfaces return.
-4. Restore `clql` and executable examples.
+4. Restore `clql` and executable examples. First thin selected-output/count
+   CLI and fixture smoke are in place; Go CLI near-parity still needs option
+   expansion.
 5. Restore Lua facade, development rock, Lua tests, and release Lua artifacts.
 6. Add install rules, CMake package config, pkg-config metadata, and extracted
    SDK consumer tests. Done for the install-tree smoke; release archive
