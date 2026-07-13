@@ -19,6 +19,16 @@ find_manifest() {
 
 manifest=$(find_manifest)
 version=$(basename "$manifest" | sed "s/^$project-//;s/-CHECKSUMS\$//")
+repo=$(pwd -P)
+home=${HOME:-}
+
+if grep -a -n -F "$repo" "$manifest" >/dev/null ||
+  { [ -n "$home" ] && grep -a -n -F "$home" "$manifest" >/dev/null; } ||
+  grep -a -n -E 'file://|/tmp/|/var/tmp/' "$manifest" >/dev/null; then
+  printf 'package verify: local path leaked into checksum manifest: %s\n' \
+    "$manifest" >&2
+  exit 1
+fi
 
 (
   cd "$dist_dir"
@@ -271,6 +281,18 @@ verify_source_archive() {
   if ! grep '^VERSION$' "$prefix/RELEASE_MANIFEST" >/dev/null ||
     ! grep '^RELEASE_MANIFEST$' "$prefix/RELEASE_MANIFEST" >/dev/null; then
     printf 'package verify: source RELEASE_MANIFEST omits injected files\n' >&2
+    exit 1
+  fi
+  actual_manifest=$work/source-actual-manifest.txt
+  expected_manifest=$work/source-release-manifest.txt
+  (
+    cd "$prefix"
+    find . -type f | sed 's#^\./##' | sort
+  ) >"$actual_manifest"
+  sort "$prefix/RELEASE_MANIFEST" >"$expected_manifest"
+  if ! cmp -s "$expected_manifest" "$actual_manifest"; then
+    printf 'package verify: source archive payload differs from RELEASE_MANIFEST\n' >&2
+    diff -u "$expected_manifest" "$actual_manifest" >&2 || true
     exit 1
   fi
   verify_source_privacy "$archive" "$prefix"

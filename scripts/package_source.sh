@@ -41,7 +41,7 @@ if [ "$checksum_mode" != "append" ]; then
     "$dist_dir"/$project-*-CHECKSUMS
 fi
 
-git ls-files --cached --modified --others --exclude-standard |
+git ls-files --cached --modified |
   sed '/^dist\//d;/^build\//d;/^VERSION$/d;/^RELEASE_MANIFEST$/d' |
   sort -u >"$manifest_tmp"
 

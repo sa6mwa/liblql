@@ -47,6 +47,7 @@ REQUIRED_MAKE_TARGETS = {
     "package",
     "package-source",
     "package-source-smoke",
+    "source-manifest-exactness",
     "package-checksums",
     "package-verify",
     "verify-release-archives",
@@ -56,6 +57,7 @@ REQUIRED_MAKE_TARGETS = {
     "prerelease-hardening",
     "prerelease-live",
     "release",
+    "print-release-version",
     "direct-parity-smoke",
     "direct-parity-matrix",
     "direct-profile-hotspots",
@@ -69,6 +71,8 @@ REQUIRED_SCRIPT_SURFACES = {
     "scripts/render_release_rockspec.sh",
     "scripts/stage_lua_rock_sources.sh",
     "scripts/package-verify.sh",
+    "scripts/print_release_version.sh",
+    "scripts/check_source_manifest_exactness.sh",
 }
 OLD_PHASE = "scanner"
 FORBIDDEN_PUBLIC_TERMS = {
@@ -162,12 +166,17 @@ def main() -> None:
         fail("debug-lua preset does not enable LQL_BUILD_LUA")
 
     for preset_name, target_id in LINUX_RELEASE_TARGETS.items():
-        if cache_vars(configure[preset_name]).get("LQL_TARGET_ID") != target_id:
+        release_vars = cache_vars(configure[preset_name])
+        if release_vars.get("LQL_TARGET_ID") != target_id:
             fail(f"{preset_name} does not set LQL_TARGET_ID={target_id}")
+        if release_vars.get("LQL_DIST_DIR") != "${sourceDir}/dist":
+            fail(f"{preset_name} does not set LQL_DIST_DIR=${{sourceDir}}/dist")
 
     darwin_vars = cache_vars(configure["arm64-apple-darwin-release"])
     if darwin_vars.get("LQL_TARGET_ID") != "arm64-apple-darwin":
         fail("arm64 Darwin release preset does not set LQL_TARGET_ID=arm64-apple-darwin")
+    if darwin_vars.get("LQL_DIST_DIR") != "${sourceDir}/dist":
+        fail("arm64 Darwin release preset does not set LQL_DIST_DIR=${sourceDir}/dist")
 
     print("lifecycle preset check passed")
 

@@ -31,7 +31,8 @@
       "name": "release",
       "inherits": "base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "LQL_DIST_DIR": "${sourceDir}/dist"
       }
     },
     {
@@ -56,6 +57,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "LQL_DIST_DIR": "${sourceDir}/dist",
         "LQL_TARGET_ID": "x86_64-linux-gnu"
       }
     },
@@ -64,6 +66,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "LQL_DIST_DIR": "${sourceDir}/dist",
         "LQL_TARGET_ID": "x86_64-linux-musl"
       }
     },
@@ -72,6 +75,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "LQL_DIST_DIR": "${sourceDir}/dist",
         "LQL_TARGET_ID": "aarch64-linux-gnu"
       }
     },
@@ -80,6 +84,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "LQL_DIST_DIR": "${sourceDir}/dist",
         "LQL_TARGET_ID": "aarch64-linux-musl"
       }
     },
@@ -88,6 +93,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "LQL_DIST_DIR": "${sourceDir}/dist",
         "LQL_TARGET_ID": "armhf-linux-gnu"
       }
     },
@@ -96,6 +102,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "LQL_DIST_DIR": "${sourceDir}/dist",
         "LQL_TARGET_ID": "armhf-linux-musl"
       }
     },
@@ -104,6 +111,7 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "LQL_DIST_DIR": "${sourceDir}/dist",
         "LQL_TARGET_ID": "arm64-apple-darwin"
       }
     }

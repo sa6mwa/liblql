@@ -35,6 +35,7 @@ option(LQL_BUILD_LUA "Build Lua 5.5 facade module" OFF)
 option(LQL_INSTALL "Install liblql SDK artifacts" ON)
 set(LQL_LUA_SDK_PREFIX "" CACHE PATH "Installed liblql SDK prefix used to build the Lua module")
 set(LQL_VERSION_OVERRIDE "" CACHE STRING "Version override")
+set(LQL_DIST_DIR "dist" CACHE PATH "Release artifact output directory")
 
 if(NOT LQL_BUILD_STATIC AND NOT LQL_BUILD_SHARED)
   message(FATAL_ERROR "Enable LQL_BUILD_STATIC or LQL_BUILD_SHARED")

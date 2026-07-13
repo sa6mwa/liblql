@@ -1,4 +1,4 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -29,8 +29,9 @@ help:
 	  'make package       build host binary SDK and checksum manifest' \
 	  'make package-source build source archive and append checksum manifest' \
 	  'make package-source-smoke verify source archive from checksum manifest' \
+	  'make source-manifest-exactness verify source archive payload matches RELEASE_MANIFEST' \
 	  'make package-checksums verify the release checksum manifest' \
-	  'make package-verify verify host binary SDK package' \
+	  'make package-verify verify checksum-listed host package artifacts' \
 	  'make verify-release-archives verify checksum-listed release archives' \
 	  'make verify-release-privacy verify release artifact privacy/relocatability' \
 	  'make release-matrix build and verify all available SDK target packages' \
@@ -38,6 +39,7 @@ help:
 	  'make prerelease-hardening alias for prerelease until extra hardening exists' \
 	  'make prerelease-live fail-closed placeholder for opt-in live checks' \
 	  'make release       clean, then run the full release proof graph' \
+	  'make print-release-version print the version used by package/release targets' \
 	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
 	  'make direct-no-lonejson  verify liblql has no LoneJSON runtime dependency' \
@@ -160,11 +162,14 @@ package-source:
 package-source-smoke: package-source
 	@sh scripts/package-verify.sh source
 
+source-manifest-exactness: package-source
+	@sh scripts/check_source_manifest_exactness.sh
+
 package-checksums:
 	@sh scripts/package-verify.sh checksums
 
 package-verify: package
-	@sh scripts/package-verify.sh x86_64-linux-gnu
+	@sh scripts/package-verify.sh all
 
 verify-release-archives:
 	@sh scripts/package-verify.sh archives
@@ -187,6 +192,9 @@ prerelease-live:
 release:
 	@$(MAKE) clean
 	@$(MAKE) release-pipeline
+
+print-release-version:
+	@sh scripts/print_release_version.sh
 
 test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test lua-cli-smoke lua-artifact-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
 
