@@ -118,3 +118,11 @@ profile_row realworld-multi-clause "$realworld_samples" \
 profile_row large-mutation "$large_samples" \
   build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' mutate_file_selector
+
+profile_row large-mutation-source "$large_samples" \
+  build/direct-probe/large-4x25m.ndjson large_4x25m \
+  eq_status_open_top_set '/status="open"' mutate_source_selector
+
+profile_row large-projection-source "$large_samples" \
+  build/direct-probe/large-4x25m.ndjson large_4x25m \
+  eq_status_open '/status="open"' project_source_selector
