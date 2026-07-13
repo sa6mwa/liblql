@@ -1,9 +1,11 @@
-.PHONY: help build-debug build-release test valgrind asan test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check build-debug build-release test valgrind asan test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
 	  'make build-debug   build the debug self-contained scanner foundation' \
 	  'make build-release build the optimized self-contained scanner foundation' \
+	  'make deps          ensure cached Bootlin GCC and AFL++ lifecycle tools' \
+	  'make toolchain-check  run resolver syntax and unit checks' \
 	  'make test          build and run the direct-stream test suite' \
 	  'make valgrind      run native Valgrind Memcheck gate' \
 	  'make asan          build and run direct tests with ASan/UBSan' \
@@ -19,6 +21,18 @@ help:
 	  'make scanner-profile-hotspots  profile tight GCC scanner rows with perf' \
 	  'make format        format retained C sources' \
 	  'make clean         remove generated build output'
+
+deps:
+	@bash scripts/cpkt-toolchains.sh ensure all
+	@bash scripts/cpkt-aflpp.sh ensure
+
+toolchain-check:
+	@bash -n scripts/cpkt-toolchains.sh
+	@bash -n scripts/cpkt-aflpp.sh
+	@bash -n scripts/test-cpkt-toolchain-resolvers.sh
+	@bash -n scripts/test-cpkt-aflpp-resolver.sh
+	@bash scripts/test-cpkt-toolchain-resolvers.sh
+	@bash scripts/test-cpkt-aflpp-resolver.sh
 
 build-debug:
 	@cmake --preset debug-scanner
