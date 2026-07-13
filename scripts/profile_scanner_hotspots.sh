@@ -10,6 +10,8 @@ recursive_samples=${LQL_SCANNER_PROFILE_RECURSIVE_SAMPLES:-120}
 realworld_samples=${LQL_SCANNER_PROFILE_REALWORLD_SAMPLES:-80}
 large_samples=${LQL_SCANNER_PROFILE_LARGE_SAMPLES:-60}
 freq=${LQL_SCANNER_PROFILE_FREQ:-999}
+expected_profiles=14
+profile_count=0
 
 if [ ! -x "$c_bench" ]; then
   printf 'scanner profile: missing C benchmark binary: %s\n' "$c_bench" >&2
@@ -71,6 +73,7 @@ profile_row() {
     --sort=dso,symbol --percent-limit 1 -i "$data" >"$report"
   printf 'scanner profile: wrote %s\n' "$report"
   sed -n '1,80p' "$report"
+  profile_count=$((profile_count + 1))
 }
 
 profile_row status-decision "$status_samples" \
@@ -131,3 +134,9 @@ profile_row large-projection-source "$large_samples" \
 profile_row large-project-mutation "$large_samples" \
   build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' project_mutate_file_selector
+
+if [ "$profile_count" -ne "$expected_profiles" ]; then
+  printf 'scanner profile: expected %s profiles, wrote %s profiles\n' \
+    "$expected_profiles" "$profile_count" >&2
+  exit 1
+fi

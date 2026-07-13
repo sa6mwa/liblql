@@ -2,6 +2,8 @@
 set -eu
 
 limit_bytes=262144
+expected_cases=20
+checked_cases=0
 binary=${LQL_DIRECT_BENCH_PATH:-build/release-scanner/lql_direct_bench}
 massif_out=${TMPDIR:-/tmp}/liblql-direct-live-heap.$$
 
@@ -62,6 +64,7 @@ check_case() {
   fi
   printf 'direct live heap %s/%s/%s samples=%s: %s bytes (limit %s bytes)\n' \
     "$dataset" "$selector_name" "$mode" "$samples" "$peak" "$limit_bytes"
+  checked_cases=$((checked_cases + 1))
 }
 
 for mode in \
@@ -93,3 +96,9 @@ check_case build/direct-probe/large-100m.ndjson large_100m \
   eq_status_open '/status="open"' plus_value_selector
 check_case build/direct-probe/status-100k.ndjson status_100k_repeated \
   eq_status_open '/status="open"' decision_only_selector 8
+
+if [ "$checked_cases" -ne "$expected_cases" ]; then
+  printf 'direct live heap expected %s cases, checked %s cases\n' \
+    "$expected_cases" "$checked_cases" >&2
+  exit 1
+fi
