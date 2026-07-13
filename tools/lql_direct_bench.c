@@ -674,6 +674,7 @@ int main(int argc, char **argv) {
   const char *unsupported_reason;
   size_t mutation_count;
   const char *const *mutations;
+  int skip_fixture_hash;
   int i;
 
   fixture = NULL;
@@ -685,6 +686,7 @@ int main(int argc, char **argv) {
   projection_path = "/id";
   max_records = 0u;
   max_bytes = 0u;
+  skip_fixture_hash = 0;
   for (i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--fixture") == 0 && i + 1 < argc) {
       fixture = argv[++i];
@@ -700,6 +702,8 @@ int main(int argc, char **argv) {
       submode = argv[++i];
     } else if (strcmp(argv[i], "--projection-path") == 0 && i + 1 < argc) {
       projection_path = argv[++i];
+    } else if (strcmp(argv[i], "--skip-fixture-hash") == 0) {
+      skip_fixture_hash = 1;
     } else if (strcmp(argv[i], "--max-records") == 0 && i + 1 < argc) {
       max_records_text = argv[++i];
       errno = 0;
@@ -726,8 +730,8 @@ int main(int argc, char **argv) {
       fprintf(stderr,
               "usage: %s --fixture PATH [--dataset NAME] [--selector-name "
               "NAME] [--expr SELECTOR] [--mode MODE] [--submode MODE] "
-              "[--projection-path JSON_POINTER] [--max-records N] "
-              "[--max-bytes N]\n",
+              "[--projection-path JSON_POINTER] [--skip-fixture-hash] "
+              "[--max-records N] [--max-bytes N]\n",
               argv[0]);
       return 2;
     }
@@ -738,12 +742,24 @@ int main(int argc, char **argv) {
   }
   file = fopen(fixture, "rb");
   if (file == NULL || fseek(file, 0L, SEEK_END) != 0 ||
-      (fixture_bytes = ftell(file)) < 0L ||
-      !fixture_sha256(file, fixture_hash)) {
+      (fixture_bytes = ftell(file)) < 0L) {
     fprintf(stderr, "lql_direct_bench: fixture setup failed\n");
     if (file != NULL) {
       fclose(file);
     }
+    return 1;
+  }
+  if (skip_fixture_hash) {
+    memset(fixture_hash, '0', 64u);
+    fixture_hash[64] = '\0';
+    if (fseek(file, 0L, SEEK_SET) != 0) {
+      fprintf(stderr, "lql_direct_bench: fixture setup failed\n");
+      fclose(file);
+      return 1;
+    }
+  } else if (!fixture_sha256(file, fixture_hash)) {
+    fprintf(stderr, "lql_direct_bench: fixture setup failed\n");
+    fclose(file);
     return 1;
   }
   unsupported = 0;

@@ -64,6 +64,7 @@ profile_row() {
     --selector-name "$selector" \
     --expr "$expr" \
     --mode "$mode" \
+    --skip-fixture-hash \
     --submode steady_state >/dev/null
 
   perf report --stdio --no-children --call-graph=none \
