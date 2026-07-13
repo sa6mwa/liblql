@@ -58,8 +58,7 @@ help:
 	  'make clean         remove generated build and release output'
 
 deps:
-	@bash scripts/cpkt-toolchains.sh ensure all
-	@bash scripts/cpkt-aflpp.sh ensure
+	@sh scripts/deps.sh
 
 deps-debug:
 	@bash scripts/cpkt-toolchains.sh ensure x86_64-linux-gnu
@@ -90,8 +89,7 @@ target-tool-check:
 build: build-debug
 
 build-debug:
-	@cmake --preset debug
-	@cmake --build --preset debug
+	@sh scripts/build.sh
 
 build-release:
 	@cmake --preset release
@@ -106,9 +104,7 @@ build-debug-lua:
 	@cmake --build --preset debug-lua --target lql_lua_core
 
 test:
-	@cmake --preset debug
-	@cmake --build --preset debug
-	@ctest --preset debug
+	@sh scripts/test.sh
 
 test-debug: test
 
@@ -140,9 +136,7 @@ valgrind: build-debug
 	@sh scripts/check_valgrind.sh
 
 fuzz-smoke:
-	@cmake --preset fuzz
-	@cmake --build --preset fuzz --target lql_json_fuzz
-	@LQL_JSON_FUZZ_PATH=build/fuzz/lql_json_fuzz sh scripts/check_fuzz_smoke.sh
+	@sh scripts/fuzz.sh
 
 fuzz: fuzz-smoke
 
@@ -157,10 +151,10 @@ package:
 	@sh scripts/package.sh x86_64-linux-gnu
 
 package-source:
-	@sh scripts/package_source.sh
+	@sh scripts/stage_release_sources.sh
 
-package-source-smoke: package-source
-	@sh scripts/package-verify.sh source
+package-source-smoke:
+	@sh scripts/test_release_from_source.sh
 
 source-manifest-exactness: package-source
 	@sh scripts/check_source_manifest_exactness.sh
@@ -172,13 +166,13 @@ package-verify: package
 	@sh scripts/package-verify.sh all
 
 verify-release-archives:
-	@sh scripts/package-verify.sh archives
+	@sh scripts/verify_release_artifacts.sh
 
 verify-release-privacy:
-	@sh scripts/package-verify.sh privacy
+	@sh scripts/verify_release_privacy.sh
 
 release-matrix:
-	@sh scripts/package_matrix.sh
+	@sh scripts/run_linux_release_matrix.sh
 
 release-pipeline: test-all release-matrix
 
@@ -194,7 +188,7 @@ release:
 	@$(MAKE) release-pipeline
 
 print-release-version:
-	@sh scripts/print_release_version.sh
+	@sh scripts/release_version.sh
 
 test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test lua-cli-smoke lua-artifact-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
 

@@ -67,9 +67,21 @@ REQUIRED_MAKE_TARGETS = {
     "clean-dist",
 }
 REQUIRED_SCRIPT_SURFACES = {
+    "scripts/deps.sh",
+    "scripts/build.sh",
+    "scripts/test.sh",
+    "scripts/host_test.sh",
+    "scripts/fuzz.sh",
+    "scripts/run_linux_release_matrix.sh",
+    "scripts/release_version.sh",
+    "scripts/stage_release_sources.sh",
+    "scripts/test_release_from_source.sh",
+    "scripts/verify_release_artifacts.sh",
+    "scripts/verify_release_privacy.sh",
     "scripts/build_lua_rock.sh",
     "scripts/render_release_rockspec.sh",
     "scripts/stage_lua_rock_sources.sh",
+    "scripts/validate_luarocks.sh",
     "scripts/package-verify.sh",
     "scripts/print_release_version.sh",
     "scripts/check_source_manifest_exactness.sh",
@@ -126,6 +138,8 @@ def main() -> None:
     for word in forbidden:
         if word in text.lower():
             fail(f"forbidden sanitizer/libFuzzer lifecycle reference remains: {word}")
+    if "-fuse-ld=" in text:
+        fail("Darwin lifecycle linker must use --ld-path, not -fuse-ld=/path")
     for word in FORBIDDEN_PUBLIC_TERMS:
         if word in text:
             fail(f"legacy public lifecycle reference remains: {word}")
