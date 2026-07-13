@@ -8,6 +8,7 @@ build_dir=${LQL_LUA_PACKAGE_BUILD_DIR:-build/package-lua}
 version_build=build/package-lua-version
 version_header=$version_build/generated/include/lql/version.h
 
+rm -rf "$version_build"
 cmake -S . -B "$version_build" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE=cmake/cpkt-toolchain.cmake \
   -DLQL_TARGET_ID=x86_64-linux-gnu \
@@ -33,7 +34,7 @@ src_rock=$dist_dir/$project-$version-1.src.rock
 checksums=$dist_dir/$project-$version-CHECKSUMS
 
 rm -rf "$stage" "$build_dir/rockpack"
-mkdir -p "$stage/lua/lql" "$stage/include/lql" "$stage/scripts" "$dist_dir"
+mkdir -p "$stage/lua/bin" "$stage/lua/lql" "$stage/include/lql" "$stage/scripts" "$dist_dir"
 if [ "$checksum_mode" != "append" ]; then
   rm -f "$dist_dir"/$project-*.tar.gz \
     "$dist_dir"/$project-*-1.rockspec \
@@ -43,7 +44,9 @@ fi
 
 cp LICENSE README.md "$stage/"
 cp lua/lql_core.c "$stage/lua/"
+cp lua/bin/lql.lua "$stage/lua/bin/"
 cp lua/lql/init.lua "$stage/lua/lql/"
+cp lua/lql/cli.lua "$stage/lua/lql/"
 cp include/lql/lql.h "$stage/include/lql/"
 cp "$version_header" "$stage/include/lql/version.h"
 cp scripts/run_lua_tests.sh "$stage/scripts/"
@@ -56,6 +59,8 @@ printf '%s\n' "$version" >"$stage/VERSION"
     RELEASE_MANIFEST \
     include/lql/lql.h \
     include/lql/version.h \
+    lua/bin/lql.lua \
+    lua/lql/cli.lua \
     lua/lql_core.c \
     lua/lql/init.lua \
     scripts/run_lua_tests.sh

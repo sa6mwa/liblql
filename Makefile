@@ -1,4 +1,4 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug lua-test lua-rock lua-env release-lua-artifacts lua-artifact-smoke valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -17,6 +17,7 @@ help:
 	  'make test-debug    alias for make test' \
 	  'make lua-test      build and run Lua 5.5 facade smoke tests' \
 	  'make lua-rock      install Lua facade into repo-local LuaRocks tree' \
+	  'make lua-cli-smoke run installed lql.lua CLI smoke tests' \
 	  'make lua-env       print environment for repo-local LuaRocks tree' \
 	  'make lua-artifact-smoke verify Lua release artifacts' \
 	  'make valgrind      run native Valgrind Memcheck gate' \
@@ -94,6 +95,10 @@ build-release:
 	@cmake --build --preset release
 
 build-debug-lua:
+	@cmake --preset release
+	@cmake --build --preset release
+	@rm -rf build/lua-sdk
+	@cmake --install build/release --prefix build/lua-sdk
 	@cmake --preset debug-lua
 	@cmake --build --preset debug-lua --target lql_lua_core
 
@@ -110,6 +115,9 @@ lua-test: build-debug-lua
 lua-rock:
 	@sh scripts/build_lua_rock.sh
 	@sh scripts/check_lua_rock.sh
+
+lua-cli-smoke: lua-rock
+	@sh scripts/check_lua_cli_smoke.sh
 
 lua-env:
 	@printf 'export LUA_PATH=%s/share/lua/5.5/?.lua;%s/share/lua/5.5/?/init.lua;;\n' "$$(pwd -P)/build/luarocks" "$$(pwd -P)/build/luarocks"
@@ -176,7 +184,7 @@ release:
 	@$(MAKE) clean
 	@$(MAKE) release-pipeline
 
-test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
+test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test lua-cli-smoke valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh

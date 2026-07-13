@@ -240,6 +240,8 @@ verify_source_archive() {
     cmake/LqlVersion.cmake \
     scripts/cpkt-toolchains.sh \
     scripts/package_source.sh \
+    lua/bin/lql.lua \
+    lua/lql/cli.lua \
     lua/lql_core.c \
     lua/lql/init.lua
   do
@@ -306,6 +308,8 @@ verify_lua_source_archive() {
     RELEASE_MANIFEST \
     include/lql/lql.h \
     include/lql/version.h \
+    lua/bin/lql.lua \
+    lua/lql/cli.lua \
     lua/lql_core.c \
     lua/lql/init.lua \
     scripts/run_lua_tests.sh \
@@ -382,6 +386,14 @@ verify_lua_src_rock() {
       printf 'package verify: source rock Lua source archive differs from dist archive\n' >&2
       exit 1
     }
+  nested="$extract_dir/nested"
+  mkdir -p "$nested"
+  tar -xzf "$extract_dir/$project-lua-$version.tar.gz" -C "$nested"
+  if [ ! -f "$nested/$project-lua-$version/lua/bin/lql.lua" ] ||
+    [ ! -f "$nested/$project-lua-$version/lua/lql/cli.lua" ]; then
+    printf 'package verify: source rock nested Lua source package omits lql.lua CLI\n' >&2
+    exit 1
+  fi
   if grep -R -a -n -F "$(pwd -P)" "$extract_dir" >/dev/null ||
     { [ -n "${HOME:-}" ] && grep -R -a -n -F "$HOME" "$extract_dir" >/dev/null; } ||
     grep -R -a -n -E 'file://|/tmp/|/var/tmp/' "$extract_dir" >/dev/null; then

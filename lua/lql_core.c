@@ -10,6 +10,7 @@
 #include <lauxlib.h>
 #include <lua.h>
 
+#include <stdio.h>
 #include <string.h>
 
 #if LUA_VERSION_NUM != 505
@@ -33,6 +34,14 @@ typedef struct lua_lql_string_reader {
   size_t len;
   size_t offset;
 } lua_lql_string_reader;
+
+typedef struct lua_lql_file_reader {
+  FILE *file;
+} lua_lql_file_reader;
+
+typedef struct lua_lql_file_writer {
+  FILE *file;
+} lua_lql_file_writer;
 
 typedef struct lua_lql_buffer {
   lua_State *lua;
@@ -119,6 +128,43 @@ static lql_status lua_lql_string_read(void *user, unsigned char *buffer,
   memcpy(buffer, reader->data + reader->offset, len);
   reader->offset += len;
   *out_len = len;
+  return LQL_STATUS_OK;
+}
+
+static lql_status lua_lql_file_read(void *user, unsigned char *buffer,
+                                    size_t capacity, size_t *out_len,
+                                    lql_error *error) {
+  lua_lql_file_reader *reader;
+  size_t amount;
+  (void)error;
+  reader = (lua_lql_file_reader *)user;
+  if (reader == NULL || reader->file == NULL || buffer == NULL ||
+      out_len == NULL) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  *out_len = 0u;
+  if (capacity == 0u) {
+    return LQL_STATUS_OK;
+  }
+  amount = fread(buffer, 1u, capacity, reader->file);
+  if (amount == 0u && ferror(reader->file)) {
+    return LQL_STATUS_IO_ERROR;
+  }
+  *out_len = amount;
+  return LQL_STATUS_OK;
+}
+
+static lql_status lua_lql_file_write(void *user, const void *data, size_t len,
+                                     lql_error *error) {
+  lua_lql_file_writer *writer;
+  (void)error;
+  writer = (lua_lql_file_writer *)user;
+  if (writer == NULL || writer->file == NULL || (len != 0u && data == NULL)) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (len != 0u && fwrite(data, 1u, len, writer->file) != len) {
+    return LQL_STATUS_IO_ERROR;
+  }
   return LQL_STATUS_OK;
 }
 
@@ -456,6 +502,108 @@ static int lua_lql_execute_string(lua_State *lua) {
   return 1;
 }
 
+static int lua_lql_execute_file(lua_State *lua) {
+  lua_lql_client *client;
+  lql_selector *selector;
+  int owned;
+  const char *path;
+  int count_only;
+  int stdout_output;
+  FILE *input;
+  lql_error error;
+  lql_status status;
+  lql_stream_request request;
+  lql_stream_result result;
+  lua_lql_file_reader reader;
+  lua_lql_file_writer file_writer;
+  lua_lql_buffer output;
+
+  client = lua_lql_check_client(lua, 1);
+  lql_error_init(&error);
+  status = lua_lql_selector_arg(lua, client, 2, &selector, &owned, &error);
+  if (status != LQL_STATUS_OK) {
+    return lua_lql_return_error(lua, &error, status);
+  }
+  path = luaL_checkstring(lua, 3);
+  count_only = 0;
+  stdout_output = 0;
+  if (lua_istable(lua, 4)) {
+    lua_getfield(lua, 4, "count");
+    count_only = lua_toboolean(lua, -1);
+    lua_pop(lua, 1);
+    lua_getfield(lua, 4, "stdout");
+    stdout_output = lua_toboolean(lua, -1);
+    lua_pop(lua, 1);
+  }
+
+  input = stdin;
+  if (strcmp(path, "-") != 0) {
+    input = fopen(path, "rb");
+    if (input == NULL) {
+      if (owned) {
+        client->ctx->selector_destroy(client->ctx, selector);
+      }
+      error.code = LQL_STATUS_IO_ERROR;
+      strcpy(error.message, "unable to open input file");
+      return lua_lql_return_error(lua, &error, LQL_STATUS_IO_ERROR);
+    }
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.file = input;
+  memset(&file_writer, 0, sizeof(file_writer));
+  file_writer.file = stdout;
+  lua_lql_buffer_init(&output, lua);
+  memset(&request, 0, sizeof(request));
+  request.reader = lua_lql_file_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  request.matched_only = 1;
+  if (!count_only) {
+    request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+    if (stdout_output) {
+      request.writer = lua_lql_file_write;
+      request.writer_user = &file_writer;
+    } else {
+      request.writer = lua_lql_buffer_write;
+      request.writer_user = &output;
+    }
+  }
+  memset(&result, 0, sizeof(result));
+  status = lql_stream_execute(client->ctx, &request, &result, &error);
+  if (owned) {
+    client->ctx->selector_destroy(client->ctx, selector);
+  }
+  if (input != stdin) {
+    fclose(input);
+  }
+  if (status == LQL_STATUS_OK && stdout_output && fflush(stdout) != 0) {
+    status = LQL_STATUS_IO_ERROR;
+    error.code = LQL_STATUS_IO_ERROR;
+    strcpy(error.message, "unable to flush stdout");
+  }
+  if (status != LQL_STATUS_OK) {
+    lua_lql_buffer_dispose(&output);
+    return lua_lql_return_error(lua, &error, status);
+  }
+
+  lua_newtable(lua);
+  lua_pushinteger(lua, (lua_Integer)result.records_seen);
+  lua_setfield(lua, -2, "records_seen");
+  lua_pushinteger(lua, (lua_Integer)result.records_matched);
+  lua_setfield(lua, -2, "records_matched");
+  lua_pushinteger(lua, (lua_Integer)result.bytes_consumed);
+  lua_setfield(lua, -2, "bytes_consumed");
+  lua_pushboolean(lua, result.stopped_early);
+  lua_setfield(lua, -2, "stopped_early");
+  if (!count_only && !stdout_output) {
+    lua_pushlstring(lua, output.data != NULL ? output.data : "", output.len);
+    lua_setfield(lua, -2, "output");
+  }
+  lua_lql_buffer_dispose(&output);
+  return 1;
+}
+
 static int lua_lql_core_version(lua_State *lua) {
   lua_pushstring(lua, LQL_VERSION);
   return 1;
@@ -476,6 +624,7 @@ static const luaL_Reg lua_lql_client_methods[] = {
     {"selector_parse_json", lua_lql_client_selector_parse_json},
     {"selector_capabilities", lua_lql_client_selector_capabilities},
     {"execute_string", lua_lql_execute_string},
+    {"execute_file", lua_lql_execute_file},
     {NULL, NULL}};
 
 static const luaL_Reg lua_lql_selector_methods[] = {

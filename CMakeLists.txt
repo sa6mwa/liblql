@@ -33,6 +33,7 @@ option(LQL_BUILD_DIRECT_PROBE "Build the direct-execution architecture probe" ON
 option(LQL_BUILD_FUZZERS "Build AFL++ fuzz targets" OFF)
 option(LQL_BUILD_LUA "Build Lua 5.5 facade module" OFF)
 option(LQL_INSTALL "Install liblql SDK artifacts" ON)
+set(LQL_LUA_SDK_PREFIX "" CACHE PATH "Installed liblql SDK prefix used to build the Lua module")
 set(LQL_VERSION_OVERRIDE "" CACHE STRING "Version override")
 
 if(NOT LQL_BUILD_STATIC AND NOT LQL_BUILD_SHARED)
@@ -134,7 +135,12 @@ endif()
 
 if(LQL_BUILD_LUA)
   find_package(PkgConfig REQUIRED)
+  if(LQL_LUA_SDK_PREFIX)
+    set(ENV{PKG_CONFIG_PATH}
+        "${LQL_LUA_SDK_PREFIX}/${CMAKE_INSTALL_LIBDIR}/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+  endif()
   pkg_check_modules(LUA55 REQUIRED lua5.5)
+  pkg_check_modules(LIBLQL REQUIRED liblql)
   if(NOT LUA55_INCLUDE_DIRS)
     message(FATAL_ERROR "lua5.5 pkg-config did not report include directories")
   endif()
@@ -157,10 +163,13 @@ if(LQL_BUILD_LUA)
   set_target_properties(lql_lua_core PROPERTIES
     PREFIX ""
     OUTPUT_NAME core
+    SKIP_BUILD_RPATH TRUE
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lua/lql")
-  target_link_libraries(lql_lua_core PRIVATE lql_static)
+  target_link_directories(lql_lua_core PRIVATE ${LIBLQL_LIBRARY_DIRS})
+  target_link_libraries(lql_lua_core PRIVATE ${LIBLQL_LIBRARIES})
   target_include_directories(lql_lua_core SYSTEM PRIVATE
     "${LQL_LUA_STAGED_INCLUDE}/lua5.5")
+  target_include_directories(lql_lua_core PRIVATE ${LIBLQL_INCLUDE_DIRS})
   lql_configure_c89_target(lql_lua_core)
 endif()
 

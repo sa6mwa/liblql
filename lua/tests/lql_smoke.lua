@@ -64,6 +64,20 @@ assert_equal(count.records_seen, 2, "count records seen")
 assert_equal(count.records_matched, 1, "count records matched")
 assert_equal(count.output, nil, "count has no output")
 
+local fixture = os.tmpname()
+local f = assert(io.open(fixture, "wb"))
+f:write('{"status":"closed","id":1}\n{"status":"open","id":2}\n')
+f:close()
+local streamed = assert_no_error(
+  client:execute_file('/status="open"', fixture),
+  nil,
+  "execute file")
+assert_equal(streamed.records_seen, 2, "file records seen")
+assert_equal(streamed.records_matched, 1, "file records matched")
+assert_equal(streamed.output, '{"status":"open","id":2}\n',
+             "file selected output")
+os.remove(fixture)
+
 local invalid_selector, invalid_err = client:selector_parse('eq{bad')
 if invalid_selector ~= nil or not invalid_err or invalid_err.status == 0 then
   fail("expected structured selector parse error")

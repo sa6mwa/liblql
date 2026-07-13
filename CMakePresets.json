@@ -23,7 +23,8 @@
       "name": "debug-lua",
       "inherits": "debug",
       "cacheVariables": {
-        "LQL_BUILD_LUA": "ON"
+        "LQL_BUILD_LUA": "ON",
+        "LQL_LUA_SDK_PREFIX": "${sourceDir}/build/lua-sdk"
       }
     },
     {

@@ -8,6 +8,7 @@ build_dir=${LQL_SOURCE_PACKAGE_BUILD_DIR:-build/package-source}
 version_build=build/package-source-version
 version_header=$version_build/generated/include/lql/version.h
 
+rm -rf "$version_build"
 cmake -S . -B "$version_build" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE=cmake/cpkt-toolchain.cmake \
   -DLQL_TARGET_ID=x86_64-linux-gnu \

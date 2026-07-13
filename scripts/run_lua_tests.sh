@@ -10,6 +10,7 @@ else
   lua_bin=lua
 fi
 lua_module_dir=${LQL_LUA_MODULE_DIR:-$root/build/debug-lua/lua}
+sdk_prefix=${LQL_LUA_SDK_PREFIX:-$root/build/lua-sdk}
 
 if ! command -v "$lua_bin" >/dev/null 2>&1; then
   printf 'lua-test: lua executable not found: %s\n' "$lua_bin" >&2
@@ -28,5 +29,5 @@ fi
 
 LUA_PATH="$root/lua/?.lua;$root/lua/?/init.lua;;" \
 LUA_CPATH="$lua_module_dir/?.so;$lua_module_dir/?/core.so;;" \
-LD_LIBRARY_PATH="$root/build/debug-lua:${LD_LIBRARY_PATH:-}" \
+LD_LIBRARY_PATH="$sdk_prefix/lib:${LD_LIBRARY_PATH:-}" \
   "$lua_bin" "$root/lua/tests/lql_smoke.lua"
