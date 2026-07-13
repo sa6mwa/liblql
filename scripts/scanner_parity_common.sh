@@ -89,3 +89,13 @@ scanner_parity_validate() {
     --speedup-submode steady_state <"$out"
   printf '%s: wrote %s\n' "$scanner_parity_name" "$out"
 }
+
+scanner_parity_expect_records() {
+  expected=$1
+  actual=$(wc -l <"$out" | tr -d ' ')
+  if [ "$actual" != "$expected" ]; then
+    printf '%s: expected %s benchmark records, got %s in %s\n' \
+      "$scanner_parity_name" "$expected" "$actual" "$out" >&2
+    exit 1
+  fi
+}

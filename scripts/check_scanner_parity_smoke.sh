@@ -27,3 +27,4 @@ scanner_parity_run_row build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' mutate_file_selector /id
 
 scanner_parity_validate
+scanner_parity_expect_records 40
