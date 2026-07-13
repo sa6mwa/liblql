@@ -8,4 +8,4 @@ case "$root" in
     exit 1
     ;;
 esac
-rm -rf "$root/build"
+rm -rf "$root/build" "$root/dist"

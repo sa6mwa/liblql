@@ -24,23 +24,7 @@ fi
 
 mkdir -p "$out_dir"
 
-ensure_fixture() {
-  fixture=$1
-  count=$2
-  payload_bytes=$3
-  shape=$4
-
-  if [ ! -f "$fixture" ]; then
-    sh scripts/generate_direct_probe_fixture.sh \
-      "$fixture" "$count" "$payload_bytes" "$shape"
-  fi
-}
-
-ensure_fixture build/direct-probe/status-100k.ndjson 100000 24 status
-ensure_fixture build/direct-probe/scalar-100k.ndjson 100000 24 scalar
-ensure_fixture build/direct-probe/recursive-10k.ndjson 10000 24 recursive
-ensure_fixture build/direct-probe/realworld-100k.ndjson 100000 64 realworld
-ensure_fixture build/direct-probe/large-4x25m.ndjson 4 25000000 status
+sh scripts/ensure_scanner_parity_fixtures.sh
 
 profile_row() {
   name=$1

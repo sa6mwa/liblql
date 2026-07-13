@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -ne 2 ] && [ "$#" -ne 3 ] && [ "$#" -ne 4 ]; then
-  printf '%s\n' "usage: $0 OUTPUT_PATH RECORD_COUNT [PAYLOAD_BYTES] [status|statusws|scalar|realworld|lockd]" >&2
+  printf '%s\n' "usage: $0 OUTPUT_PATH RECORD_COUNT [PAYLOAD_BYTES] [SHAPE]" >&2
   exit 2
 fi
 
@@ -29,10 +29,10 @@ case "$payload_bytes" in
 esac
 
 case "$shape" in
-  status|statusws|scalar|nested|nestedprojection|indexed|recursive|realworld|lockd)
+  status|statusws|scalar|nested|nestedprojection|indexed|recursive|temporal|arrayscalar|arrayexists|rangecode|realworld|lockd)
     ;;
   *)
-    printf '%s\n' 'fixture shape must be status, statusws, scalar, nested, nestedprojection, indexed, recursive, realworld, or lockd' >&2
+    printf '%s\n' 'fixture shape must be status, statusws, scalar, nested, nestedprojection, indexed, recursive, temporal, arrayscalar, arrayexists, rangecode, realworld, or lockd' >&2
     exit 2
     ;;
 esac
@@ -53,13 +53,28 @@ awk -v count="$2" -v payload_bytes="$payload_bytes" -v shape="$shape" 'BEGIN {
     } else if (shape == "nestedprojection") {
       status = (i % 4 == 0) ? "open" : "closed"
       state = (i % 3 == 0) ? "active" : "idle"
-      printf "{\"id\":\"id-%d\",\"status\":\"%s\",\"meta\":{\"state\":\"%s\",\"code\":%d},\"payload\":\"", i, status, state, i % 8
+      printf "{\"id\":\"id-%d\",\"status\":\"%s\",\"meta\":{\"state\":\"%s\",\"code\":%d,\"count\":%d},\"payload\":\"", i, status, state, i % 8, i % 16
     } else if (shape == "indexed") {
       sku = (i % 4 == 0) ? "B" : "A"
       printf "{\"id\":\"id-%d\",\"items\":[{\"sku\":\"A\"},{\"sku\":\"%s\"}],\"payload\":\"", i, sku
     } else if (shape == "recursive") {
       sku = (i % 4 == 0) ? "needle" : "other"
       printf "{\"id\":\"id-%d\",\"tree\":{\"branch\":{\"deep\":{\"sku\":\"%s\"}}},\"payload\":\"", i, sku
+    } else if (shape == "temporal") {
+      timestamp = (i % 4 == 0) ? "2026-03-05T10:29:00Z" : "2026-03-05T11:28:21Z"
+      printf "{\"id\":\"id-%d\",\"timestamp\":\"%s\",\"payload\":\"", i, timestamp
+    } else if (shape == "arrayscalar") {
+      value = (i % 4 == 0) ? "B" : "C"
+      printf "{\"id\":\"id-%d\",\"values\":[\"A\",\"%s\"],\"payload\":\"", i, value
+    } else if (shape == "arrayexists") {
+      if (i % 4 == 0) {
+        printf "{\"id\":\"id-%d\",\"values\":[\"A\",\"B\"],\"payload\":\"", i
+      } else {
+        printf "{\"id\":\"id-%d\",\"values\":[\"A\"],\"payload\":\"", i
+      }
+    } else if (shape == "rangecode") {
+      code = (i % 4 == 0) ? 1 : ((i % 4 == 1) ? 0 : 2)
+      printf "{\"id\":\"id-%d\",\"code\":%d,\"payload\":\"", i, code
     } else if (shape == "realworld") {
       event = (i % 16 == 0) ? "session_sync" : ((i % 3 == 0) ? "tabs_update" : "heartbeat")
       component = (i % 2 == 0) ? "edge" : "core"

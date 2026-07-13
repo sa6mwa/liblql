@@ -5,12 +5,7 @@ set -eu
 
 scanner_parity_init 'scanner parity matrix' build/scanner-parity-matrix.jsonl 15
 
-sh scripts/generate_direct_probe_fixture.sh \
-  build/direct-probe/status-whitespace-100k.ndjson 100000 24 statusws
-sh scripts/generate_direct_probe_fixture.sh \
-  build/direct-probe/realworld-100k.ndjson 100000 64 realworld
-sh scripts/generate_direct_probe_fixture.sh \
-  build/direct-probe/lockd-100k.ndjson 100000 64 lockd
+sh scripts/ensure_scanner_parity_fixtures.sh
 
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' decision_only_selector /id
