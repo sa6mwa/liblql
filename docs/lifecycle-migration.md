@@ -35,7 +35,7 @@ release documentation after the migration is complete.
 | `asan-scanner` preset | removed | None; superseded by AFL++ | `make fuzz-smoke`, `make fuzz` |
 | host compiler discovery | Bootlin resolver | GCC C89 warning-clean builds | resolver tests, CMake cache inspection |
 | scanner-specific Make targets | standard lifecycle Make surface | Direct reset, no-LoneJSON, parity, profile, live heap | `make test-all`, `make prerelease` |
-| no package surface | install-tree SDK metadata | static/shared liblql SDK | `make install-smoke` |
+| no package surface | host binary SDK archive | static/shared liblql SDK | `make package-verify` |
 | no target tool helper | `scripts/discover_target_tools.sh` | package verification uses configured target tools | `make target-tool-check` |
 | no release matrix | `release-matrix` and `release` | local release proof | checksum/privacy/relocatability gates |
 | no CLI | `clql` example/binary | thin `lql_stream_execute` adapter | `make clql-smoke` |
@@ -55,13 +55,15 @@ release documentation after the migration is complete.
    expansion.
 5. Restore Lua facade, development rock, Lua tests, and release Lua artifacts.
 6. Add install rules, CMake package config, pkg-config metadata, and extracted
-   SDK consumer tests. Done for the install-tree smoke; release archive
-   packaging and checksum verification remain.
+   SDK consumer tests. Done for install-tree smoke and initial host binary SDK
+   archive verification; full release matrix remains.
 7. Add target-tool discovery for package generation and verification. Done for
    configured CMake cache values, compiler sibling tools, PATH fallback, and
    target mismatch checks; package verification still needs to consume it.
 8. Add package generation, checksum manifest generation, privacy scans,
-   relocatability checks, and release matrix.
+   relocatability checks, and release matrix. Initial host package, checksum,
+   layout, runtime-path, privacy, and extracted-consumer verification are in
+   place; cross-target and Darwin matrix coverage remain.
 9. Make `prerelease` and `release` share the release pipeline, with `release`
    cleaning first.
 10. Remove this ledger or convert it into permanent lifecycle documentation once

@@ -1,4 +1,4 @@
-.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release test valgrind fuzz-smoke fuzz install-smoke clql-smoke test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release test valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-verify test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -15,6 +15,8 @@ help:
 	  'make fuzz          run the standard bounded AFL++ smoke gate' \
 	  'make install-smoke install SDK and build CMake/pkg-config consumers' \
 	  'make clql-smoke    build clql and run CLI smoke tests' \
+	  'make package       build host binary SDK and checksum manifest' \
+	  'make package-verify verify host binary SDK package' \
 	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
 	  'make direct-no-lonejson  verify liblql has no LoneJSON runtime dependency' \
@@ -79,7 +81,13 @@ install-smoke: build-release
 clql-smoke: build-release
 	@sh scripts/check_clql_smoke.sh
 
-test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test valgrind fuzz-smoke install-smoke clql-smoke scanner-parity-matrix direct-callback-whitespace direct-live-heap
+package:
+	@sh scripts/package.sh x86_64-linux-gnu
+
+package-verify: package
+	@sh scripts/package_verify.sh x86_64-linux-gnu
+
+test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test valgrind fuzz-smoke install-smoke clql-smoke package-verify scanner-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
