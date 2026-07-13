@@ -26,5 +26,5 @@ run_memcheck() {
     "$test_binary"
 }
 
-run_memcheck build/debug-scanner/lql_json_scan_test
-run_memcheck build/debug-scanner/lql_direct_stream_test
+run_memcheck build/debug/lql_json_scan_test
+run_memcheck build/debug/lql_direct_stream_test

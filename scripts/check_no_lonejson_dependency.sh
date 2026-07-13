@@ -53,6 +53,6 @@ if [ "${LQL_SHARED_PATH+x}" = x ] || [ "${LQL_STATIC_PATH+x}" = x ]; then
   fi
   check_pair "$LQL_SHARED_PATH" "$LQL_STATIC_PATH"
 else
-  check_pair build/debug-scanner/liblql.so.0 build/debug-scanner/liblql.a
-  check_pair build/release-scanner/liblql.so.0 build/release-scanner/liblql.a
+  check_pair build/debug/liblql.so.0 build/debug/liblql.a
+  check_pair build/release/liblql.so.0 build/release/liblql.a
 fi

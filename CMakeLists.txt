@@ -4,9 +4,9 @@ project(liblql VERSION 0.0.0 LANGUAGES C)
 
 include(CTest)
 
-if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
   message(FATAL_ERROR
-    "liblql builds require GCC; Clang is not a supported build or performance compiler")
+    "liblql Linux builds require lifecycle GCC; Clang is not a supported build or performance compiler")
 endif()
 
 function(lql_configure_c89_target target)

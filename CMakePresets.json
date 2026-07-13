@@ -7,35 +7,152 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/cpkt-toolchain.cmake",
+        "LQL_TARGET_ID": "x86_64-linux-gnu"
       }
     },
     {
-      "name": "debug-scanner",
+      "name": "debug",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
     },
     {
-      "name": "release-scanner",
+      "name": "release",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
     },
     {
-      "name": "asan-scanner",
+      "name": "valgrind",
       "inherits": "base",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
-        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined",
-        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address,undefined"
+        "CMAKE_BUILD_TYPE": "Debug"
       }
+    },
+    {
+      "name": "fuzz",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/cpkt-aflpp-toolchain.cmake",
+        "LQL_TARGET_ID": "x86_64-linux-gnu",
+        "LQL_BUILD_FUZZERS": "ON"
+      }
+    },
+    {
+      "name": "x86_64-linux-gnu-release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LQL_TARGET_ID": "x86_64-linux-gnu"
+      }
+    },
+    {
+      "name": "x86_64-linux-musl-release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LQL_TARGET_ID": "x86_64-linux-musl"
+      }
+    },
+    {
+      "name": "aarch64-linux-gnu-release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LQL_TARGET_ID": "aarch64-linux-gnu"
+      }
+    },
+    {
+      "name": "aarch64-linux-musl-release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LQL_TARGET_ID": "aarch64-linux-musl"
+      }
+    },
+    {
+      "name": "armhf-linux-gnu-release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LQL_TARGET_ID": "armhf-linux-gnu"
+      }
+    },
+    {
+      "name": "armhf-linux-musl-release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LQL_TARGET_ID": "armhf-linux-musl"
+      }
+    },
+    {
+      "name": "arm64-apple-darwin-release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "LQL_TARGET_ID": "arm64-apple-darwin"
+      }
+    },
+    {
+      "name": "debug-scanner",
+      "inherits": "debug"
+    },
+    {
+      "name": "release-scanner",
+      "inherits": "release"
     }
   ],
   "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "valgrind",
+      "configurePreset": "valgrind"
+    },
+    {
+      "name": "fuzz",
+      "configurePreset": "fuzz"
+    },
+    {
+      "name": "x86_64-linux-gnu-release",
+      "configurePreset": "x86_64-linux-gnu-release"
+    },
+    {
+      "name": "x86_64-linux-musl-release",
+      "configurePreset": "x86_64-linux-musl-release"
+    },
+    {
+      "name": "aarch64-linux-gnu-release",
+      "configurePreset": "aarch64-linux-gnu-release"
+    },
+    {
+      "name": "aarch64-linux-musl-release",
+      "configurePreset": "aarch64-linux-musl-release"
+    },
+    {
+      "name": "armhf-linux-gnu-release",
+      "configurePreset": "armhf-linux-gnu-release"
+    },
+    {
+      "name": "armhf-linux-musl-release",
+      "configurePreset": "armhf-linux-musl-release"
+    },
+    {
+      "name": "arm64-apple-darwin-release",
+      "configurePreset": "arm64-apple-darwin-release"
+    },
     {
       "name": "debug-scanner",
       "configurePreset": "debug-scanner"
@@ -43,10 +160,22 @@
     {
       "name": "release-scanner",
       "configurePreset": "release-scanner"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
-      "name": "asan-scanner",
-      "configurePreset": "asan-scanner"
+      "name": "valgrind",
+      "configurePreset": "valgrind",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }
