@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.20)
 project(liblql VERSION 0.0.0 LANGUAGES C)
 
 include(CTest)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
   message(FATAL_ERROR
@@ -28,6 +30,7 @@ option(LQL_BUILD_STATIC "Build static liblql" ON)
 option(LQL_BUILD_SHARED "Build shared liblql" ON)
 option(LQL_BUILD_DIRECT_PROBE "Build the direct-execution architecture probe" ON)
 option(LQL_BUILD_FUZZERS "Build AFL++ fuzz targets" OFF)
+option(LQL_INSTALL "Install liblql SDK artifacts" ON)
 set(LQL_VERSION_OVERRIDE "" CACHE STRING "Version override")
 
 if(NOT LQL_BUILD_STATIC AND NOT LQL_BUILD_SHARED)
@@ -39,6 +42,15 @@ include(LqlVersion)
 
 configure_file(cmake/lql_version.h.in
   "${CMAKE_CURRENT_BINARY_DIR}/generated/include/lql/version.h" @ONLY)
+configure_file(cmake/liblql.pc.in
+  "${CMAKE_CURRENT_BINARY_DIR}/liblql.pc" @ONLY)
+configure_package_config_file(cmake/liblqlConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/liblqlConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/liblql")
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/liblqlConfigVersion.cmake"
+  VERSION "${LQL_RESOLVED_VERSION}"
+  COMPATIBILITY SameMajorVersion)
 
 add_library(lql_common OBJECT
   src/lql.c
@@ -64,7 +76,8 @@ if(LQL_BUILD_STATIC)
   set_target_properties(lql_static PROPERTIES OUTPUT_NAME lql)
   target_include_directories(lql_static PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>")
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 endif()
 
 if(LQL_BUILD_SHARED)
@@ -73,7 +86,8 @@ if(LQL_BUILD_SHARED)
   set_target_properties(lql_shared PROPERTIES OUTPUT_NAME lql SOVERSION 0)
   target_include_directories(lql_shared PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>")
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 endif()
 
 if(BUILD_TESTING)
@@ -105,4 +119,33 @@ if(LQL_BUILD_FUZZERS)
   add_executable(lql_json_fuzz fuzz/json_fuzz.c)
   target_link_libraries(lql_json_fuzz PRIVATE lql_static)
   lql_configure_c89_target(lql_json_fuzz)
+endif()
+
+if(LQL_INSTALL)
+  install(DIRECTORY include/lql
+          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/include/lql/version.h"
+          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/lql")
+  install(FILES LICENSE README.md
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/liblql")
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/liblql.pc"
+          DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+  install(FILES
+          "${CMAKE_CURRENT_BINARY_DIR}/liblqlConfig.cmake"
+          "${CMAKE_CURRENT_BINARY_DIR}/liblqlConfigVersion.cmake"
+          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/liblql")
+  if(LQL_BUILD_STATIC)
+    install(TARGETS lql_static
+            EXPORT liblqlTargets
+            ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+  endif()
+  if(LQL_BUILD_SHARED)
+    install(TARGETS lql_shared
+            EXPORT liblqlTargets
+            LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+  endif()
+  install(EXPORT liblqlTargets
+          NAMESPACE liblql::
+          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/liblql")
 endif()

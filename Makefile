@@ -1,4 +1,4 @@
-.PHONY: help deps toolchain-check lifecycle-check build build-debug build-release test valgrind fuzz-smoke fuzz test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check lifecycle-check build build-debug build-release test valgrind fuzz-smoke fuzz install-smoke test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -12,6 +12,7 @@ help:
 	  'make valgrind      run native Valgrind Memcheck gate' \
 	  'make fuzz-smoke    build AFL++ target and verify instrumentation' \
 	  'make fuzz          run the standard bounded AFL++ smoke gate' \
+	  'make install-smoke install SDK and build CMake/pkg-config consumers' \
 	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
 	  'make direct-no-lonejson  verify liblql has no LoneJSON runtime dependency' \
@@ -65,7 +66,11 @@ fuzz-smoke:
 
 fuzz: fuzz-smoke
 
-test-all: lifecycle-check direct-reset direct-no-lonejson test valgrind fuzz-smoke scanner-parity-matrix direct-callback-whitespace direct-live-heap
+install-smoke: build-release
+	@cmake --install build/release --prefix build/install-smoke
+	@sh scripts/check_install_tree.sh
+
+test-all: lifecycle-check direct-reset direct-no-lonejson test valgrind fuzz-smoke install-smoke scanner-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh

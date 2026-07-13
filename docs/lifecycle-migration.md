@@ -35,7 +35,7 @@ release documentation after the migration is complete.
 | `asan-scanner` preset | removed | None; superseded by AFL++ | `make fuzz-smoke`, `make fuzz` |
 | host compiler discovery | Bootlin resolver | GCC C89 warning-clean builds | resolver tests, CMake cache inspection |
 | scanner-specific Make targets | standard lifecycle Make surface | Direct reset, no-LoneJSON, parity, profile, live heap | `make test-all`, `make prerelease` |
-| no package surface | binary SDK packages | static/shared liblql SDK | extracted package consumers |
+| no package surface | install-tree SDK metadata | static/shared liblql SDK | `make install-smoke` |
 | no release matrix | `release-matrix` and `release` | local release proof | checksum/privacy/relocatability gates |
 | no CLI | `clql` example/binary | thin `lql_stream_execute` adapter | CLI smoke/parity tests |
 | no Lua surface | Lua facade/source rock | Lua module parity with current expectations | `make lua-test`, Lua artifact verification |
@@ -52,7 +52,8 @@ release documentation after the migration is complete.
 4. Restore `clql` and executable examples.
 5. Restore Lua facade, development rock, Lua tests, and release Lua artifacts.
 6. Add install rules, CMake package config, pkg-config metadata, and extracted
-   SDK consumer tests.
+   SDK consumer tests. Done for the install-tree smoke; release archive
+   packaging and checksum verification remain.
 7. Add target-tool discovery for package generation and verification.
 8. Add package generation, checksum manifest generation, privacy scans,
    relocatability checks, and release matrix.

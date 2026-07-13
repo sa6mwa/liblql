@@ -1,0 +1,10 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: liblql
+Description: C implementation of LQL
+Version: @LQL_RESOLVED_VERSION@
+Libs: -L${libdir} -llql
+Cflags: -I${includedir}

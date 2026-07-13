@@ -1,6 +1,8 @@
 #ifndef LQL_LQL_H
 #define LQL_LQL_H
 
+#include <lql/version.h>
+
 #include <stddef.h>
 #include <stdio.h>
 
