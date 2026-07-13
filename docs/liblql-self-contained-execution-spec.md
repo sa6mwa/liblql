@@ -158,6 +158,13 @@ accepted matrix row below 1.0x under GCC. Do not reintroduce those
 micro-optimizations unless the design changes enough to preserve the full
 accepted-row matrix, not just the focused scalar row.
 
+Likewise, generalized first-byte rejection before `memcmp` in streaming string
+span matching and nested key matching reduced the visible `memcmp` sample share
+on the realworld multi-clause profile, but A/B focused GCC runs made the
+current worst C row slower. Keep the committed top-level plain-key first-byte
+reject, but do not broaden that pattern back into value spans or nested key
+segments without a new profile and full accepted-row matrix proof.
+
 ## Verification
 
 The required proof is cumulative:
