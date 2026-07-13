@@ -39,14 +39,16 @@ release documentation after the migration is complete.
 | no release matrix | `release-matrix` and `release` | local release proof | checksum/privacy/relocatability gates |
 | no CLI | `clql` example/binary | thin `lql_stream_execute` adapter | CLI smoke/parity tests |
 | no Lua surface | Lua facade/source rock | Lua module parity with current expectations | `make lua-test`, Lua artifact verification |
-| no fuzz surface | AFL++ fuzz targets | parser/stream robustness | `make fuzz-smoke` |
+| no fuzz surface | AFL++ fuzz target and corpus | parser/stream robustness | `make fuzz-smoke` |
 
 ## Open migration tasks
 
 1. Wire Bootlin and AFL++ resolver scripts into CMake toolchain files and Make
    targets.
 2. Normalize CMake presets and add preset verification.
-3. Replace ASan lifecycle target with AFL++ fuzzing.
+3. Replace ASan lifecycle target with AFL++ fuzzing. Done for the first JSON
+   stream harness and smoke instrumentation gate; add more harnesses as the
+   CLI/Lua/package surfaces return.
 4. Restore `clql` and executable examples.
 5. Restore Lua facade, development rock, Lua tests, and release Lua artifacts.
 6. Add install rules, CMake package config, pkg-config metadata, and extracted

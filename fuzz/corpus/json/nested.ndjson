@@ -1,0 +1,2 @@
+{"status":"closed","items":[{"sku":"A"},{"sku":"B"}],"meta":{"state":"open"}}
+{"status":"open","msg":"escaped\nvalue","code":1}
