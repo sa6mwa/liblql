@@ -41,6 +41,8 @@ REQUIRED_MAKE_TARGETS = {
     "lua-test",
     "lua-rock",
     "lua-cli-smoke",
+    "lua-artifact-privacy-regression",
+    "release-lua-artifacts",
     "valgrind",
     "package",
     "package-source",
@@ -61,6 +63,12 @@ REQUIRED_MAKE_TARGETS = {
     "perf-gate",
     "clean",
     "clean-dist",
+}
+REQUIRED_SCRIPT_SURFACES = {
+    "scripts/build_lua_rock.sh",
+    "scripts/render_release_rockspec.sh",
+    "scripts/stage_lua_rock_sources.sh",
+    "scripts/package-verify.sh",
 }
 OLD_PHASE = "scanner"
 FORBIDDEN_PUBLIC_TERMS = {
@@ -129,6 +137,13 @@ def main() -> None:
     missing_targets = REQUIRED_MAKE_TARGETS - phony_targets
     if missing_targets:
         fail(f"missing lifecycle Make targets: {', '.join(sorted(missing_targets))}")
+
+    missing_scripts = [
+        script for script in sorted(REQUIRED_SCRIPT_SURFACES)
+        if not (ROOT / script).is_file()
+    ]
+    if missing_scripts:
+        fail(f"missing lifecycle script surfaces: {', '.join(missing_scripts)}")
 
     base_vars = cache_vars(configure["base"])
     if base_vars.get("CMAKE_TOOLCHAIN_FILE") != "${sourceDir}/cmake/cpkt-toolchain.cmake":

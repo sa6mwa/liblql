@@ -239,7 +239,11 @@ verify_source_archive() {
     include/lql/lql.h \
     cmake/LqlVersion.cmake \
     scripts/cpkt-toolchains.sh \
+    scripts/package-verify.sh \
+    scripts/package_lua.sh \
     scripts/package_source.sh \
+    scripts/render_release_rockspec.sh \
+    scripts/stage_lua_rock_sources.sh \
     lua/bin/lql.lua \
     lua/lql/cli.lua \
     lua/lql_core.c \
@@ -250,10 +254,12 @@ verify_source_archive() {
       exit 1
     fi
   done
-  if find "$prefix" \( -path '*/.git/*' -o -path '*/build/*' -o -path '*/dist/*' \) |
+  if find "$prefix" \( -path '*/.git/*' -o -path '*/build/*' -o \
+      -path '*/dist/*' -o -path '*/vendor/lonejson/*' \) |
     sed -n '1p' | grep . >/dev/null; then
     printf 'package verify: source archive contains generated or VCS state\n' >&2
-    find "$prefix" \( -path '*/.git/*' -o -path '*/build/*' -o -path '*/dist/*' \) >&2
+    find "$prefix" \( -path '*/.git/*' -o -path '*/build/*' -o \
+      -path '*/dist/*' -o -path '*/vendor/lonejson/*' \) >&2
     exit 1
   fi
   source_version=$(sed -n '1p' "$prefix/VERSION")
@@ -308,11 +314,15 @@ verify_lua_source_archive() {
     RELEASE_MANIFEST \
     include/lql/lql.h \
     include/lql/version.h \
+    liblql-dev-1.rockspec.in \
     lua/bin/lql.lua \
     lua/lql/cli.lua \
     lua/lql_core.c \
     lua/lql/init.lua \
+    scripts/build_lua_rock.sh \
+    scripts/render_release_rockspec.sh \
     scripts/run_lua_tests.sh \
+    scripts/stage_lua_rock_sources.sh \
     "$project-$version-1.rockspec"
   do
     if [ ! -e "$prefix/$path" ]; then

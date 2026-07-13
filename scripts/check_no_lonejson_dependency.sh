@@ -9,6 +9,13 @@ if [ -n "$source_matches" ]; then
   exit 1
 fi
 
+vendor_matches=$(git ls-files 'vendor/lonejson/*')
+if [ -n "$vendor_matches" ]; then
+  printf '%s\n' 'Tracked vendored LoneJSON files remain:' >&2
+  printf '%s\n' "$vendor_matches" >&2
+  exit 1
+fi
+
 check_pair() {
   shared=$1
   static=$2

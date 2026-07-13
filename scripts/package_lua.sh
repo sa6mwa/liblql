@@ -34,7 +34,7 @@ src_rock=$dist_dir/$project-$version-1.src.rock
 checksums=$dist_dir/$project-$version-CHECKSUMS
 
 rm -rf "$stage" "$build_dir/rockpack"
-mkdir -p "$stage/lua/bin" "$stage/lua/lql" "$stage/include/lql" "$stage/scripts" "$dist_dir"
+mkdir -p "$dist_dir"
 if [ "$checksum_mode" != "append" ]; then
   rm -f "$dist_dir"/$project-*.tar.gz \
     "$dist_dir"/$project-*-1.rockspec \
@@ -42,36 +42,10 @@ if [ "$checksum_mode" != "append" ]; then
     "$dist_dir"/$project-*-CHECKSUMS
 fi
 
-cp LICENSE README.md "$stage/"
-cp lua/lql_core.c "$stage/lua/"
-cp lua/bin/lql.lua "$stage/lua/bin/"
-cp lua/lql/init.lua "$stage/lua/lql/"
-cp lua/lql/cli.lua "$stage/lua/lql/"
-cp include/lql/lql.h "$stage/include/lql/"
-cp "$version_header" "$stage/include/lql/version.h"
-cp scripts/run_lua_tests.sh "$stage/scripts/"
-printf '%s\n' "$version" >"$stage/VERSION"
-{
-  printf '%s\n' \
-    LICENSE \
-    README.md \
-    VERSION \
-    RELEASE_MANIFEST \
-    include/lql/lql.h \
-    include/lql/version.h \
-    lua/bin/lql.lua \
-    lua/lql/cli.lua \
-    lua/lql_core.c \
-    lua/lql/init.lua \
-    scripts/run_lua_tests.sh
-} | sort -u >"$stage/RELEASE_MANIFEST"
-
-sed \
-  -e "s|@LQL_ROCK_VERSION@|$version-1|g" \
-  -e "s|@LQL_ROCK_SOURCE_URL@|$root_name.tar.gz|g" \
-  -e "s|@LQL_ROCK_SOURCE_DIR@|$root_name|g" \
-  liblql-dev-1.rockspec.in >"$rockspec"
-cp "$rockspec" "$stage/$project-$version-1.rockspec"
+sh scripts/render_release_rockspec.sh \
+  "$version" "$root_name.tar.gz" "$root_name" "$rockspec"
+sh scripts/stage_lua_rock_sources.sh \
+  "$stage" "$version" "$version_header" "$rockspec"
 
 tar_args='--sort=name --owner=0 --group=0 --numeric-owner'
 if tar --version >/dev/null 2>&1; then

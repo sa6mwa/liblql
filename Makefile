@@ -1,4 +1,4 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -20,6 +20,7 @@ help:
 	  'make lua-cli-smoke run installed lql.lua CLI smoke tests' \
 	  'make lua-env       print environment for repo-local LuaRocks tree' \
 	  'make lua-artifact-smoke verify Lua release artifacts' \
+	  'make lua-artifact-privacy-regression verify Lua artifact leak fixtures fail closed' \
 	  'make valgrind      run native Valgrind Memcheck gate' \
 	  'make fuzz-smoke    build AFL++ target and verify instrumentation' \
 	  'make fuzz          run the standard bounded AFL++ smoke gate' \
@@ -128,7 +129,10 @@ release-lua-artifacts:
 	@sh scripts/package_lua.sh
 
 lua-artifact-smoke: release-lua-artifacts
-	@sh scripts/package_verify.sh lua
+	@sh scripts/package-verify.sh lua
+
+lua-artifact-privacy-regression:
+	@sh scripts/check_lua_artifact_privacy_regression.sh
 
 valgrind: build-debug
 	@sh scripts/check_valgrind.sh
@@ -154,19 +158,19 @@ package-source:
 	@sh scripts/package_source.sh
 
 package-source-smoke: package-source
-	@sh scripts/package_verify.sh source
+	@sh scripts/package-verify.sh source
 
 package-checksums:
-	@sh scripts/package_verify.sh checksums
+	@sh scripts/package-verify.sh checksums
 
 package-verify: package
-	@sh scripts/package_verify.sh x86_64-linux-gnu
+	@sh scripts/package-verify.sh x86_64-linux-gnu
 
 verify-release-archives:
-	@sh scripts/package_verify.sh archives
+	@sh scripts/package-verify.sh archives
 
 verify-release-privacy:
-	@sh scripts/package_verify.sh privacy
+	@sh scripts/package-verify.sh privacy
 
 release-matrix:
 	@sh scripts/package_matrix.sh
@@ -184,7 +188,7 @@ release:
 	@$(MAKE) clean
 	@$(MAKE) release-pipeline
 
-test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test lua-cli-smoke valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
+test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test lua-cli-smoke lua-artifact-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
