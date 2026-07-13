@@ -2533,6 +2533,127 @@ static int run_completed_record_before_root_array_error(lql *ctx) {
   return 0;
 }
 
+static int run_output_modes_skip_scalar_roots(lql *ctx) {
+  static const char input[] = " true \n"
+                              "\t{\"status\":\"open\",\"n\":1}\n";
+  static const char selected_output[] = "{\"status\":\"open\",\"n\":1}\n";
+  static const char projection_output[] = "{\"n\":1,\"status\":\"open\"}\n";
+  static const char mutation_output[] =
+      "{\"status\":\"open\",\"n\":1,\"added\":true}\n";
+  static const char project_mutation_output[] =
+      "{\"n\":1,\"status\":\"open\",\"added\":true}\n";
+  static const char *const projection_paths[] = {"/n", "/status"};
+  static const char *const mutations[] = {"/added=true"};
+  lql_selector *selector;
+  lql_projection *projection;
+  lql_mutation *mutation;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+
+  selector = NULL;
+  projection = NULL;
+  mutation = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+          LQL_STATUS_OK ||
+      ctx->projection_parse(ctx, projection_paths, 2u, &projection, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_parse(ctx, mutations, 1u, &mutation, &error) !=
+          LQL_STATUS_OK) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 1u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = selector;
+  request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(selected_output) - 1u ||
+      memcmp(writer.data, selected_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.projection = projection;
+  request.output_mode = LQL_STREAM_OUTPUT_PROJECTION;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(projection_output) - 1u ||
+      memcmp(writer.data, projection_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.projection = NULL;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(mutation_output) - 1u ||
+      memcmp(writer.data, mutation_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 4u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.projection = projection;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(project_mutation_output) - 1u ||
+      memcmp(writer.data, project_mutation_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  ctx->mutation_destroy(ctx, mutation);
+  ctx->projection_destroy(ctx, projection);
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 static int run_stop_and_root_array(lql *ctx) {
   static const char input[] = "{\"status\":\"open\"}\n{\"status\":\"open\"}\n";
   static const char root_array[] = "[{\"status\":\"open\"}]\n";
@@ -2737,6 +2858,7 @@ int main(void) {
       run_projection_then_mutation_output(ctx) ||
       run_output_modes_preserve_completed_before_malformed(ctx) ||
       run_completed_record_before_root_array_error(ctx) ||
+      run_output_modes_skip_scalar_roots(ctx) ||
       run_stop_and_root_array(ctx) || run_record_limit(ctx) ||
       run_byte_limit(ctx)) {
     ctx->destroy(ctx);
