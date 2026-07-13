@@ -1,4 +1,4 @@
-.PHONY: help deps toolchain-check build build-debug build-release test valgrind test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check lifecycle-check build build-debug build-release test valgrind test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -6,6 +6,7 @@ help:
 	  'make build-release build the optimized self-contained scanner foundation' \
 	  'make deps          ensure cached Bootlin GCC and AFL++ lifecycle tools' \
 	  'make toolchain-check  run resolver syntax and unit checks' \
+	  'make lifecycle-check  verify lifecycle preset/command contract' \
 	  'make build        build the debug lifecycle preset' \
 	  'make test          build and run the direct-stream test suite' \
 	  'make valgrind      run native Valgrind Memcheck gate' \
@@ -34,6 +35,9 @@ toolchain-check:
 	@bash scripts/test-cpkt-toolchain-resolvers.sh
 	@bash scripts/test-cpkt-aflpp-resolver.sh
 
+lifecycle-check: toolchain-check
+	@python3 scripts/check_lifecycle_presets.py
+
 build: build-debug
 
 build-debug:
@@ -52,7 +56,7 @@ test:
 valgrind: build-debug
 	@sh scripts/check_valgrind.sh
 
-test-all: direct-reset direct-no-lonejson test valgrind scanner-parity-matrix direct-callback-whitespace direct-live-heap
+test-all: lifecycle-check direct-reset direct-no-lonejson test valgrind scanner-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
