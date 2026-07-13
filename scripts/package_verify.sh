@@ -59,6 +59,33 @@ verify_privacy() {
   fi
 }
 
+verify_source_privacy() {
+  archive=$1
+  prefix=$2
+  repo=$(pwd -P)
+  home=${HOME:-}
+  if grep -R -a -n -F "$repo" "$prefix" >/dev/null 2>&1; then
+    printf 'package verify: repository path leaked into %s\n' "$archive" >&2
+    grep -R -a -n -F "$repo" "$prefix" >&2
+    exit 1
+  fi
+  if [ -n "$home" ] && grep -R -a -n -F "$home" "$prefix" >/dev/null 2>&1; then
+    printf 'package verify: HOME path leaked into %s\n' "$archive" >&2
+    grep -R -a -n -F "$home" "$prefix" >&2
+    exit 1
+  fi
+  if grep -R -a -n -F "file://$repo" "$prefix" >/dev/null 2>&1; then
+    printf 'package verify: repository file URL leaked into %s\n' "$archive" >&2
+    grep -R -a -n -F "file://$repo" "$prefix" >&2
+    exit 1
+  fi
+  if [ -n "$home" ] && grep -R -a -n -F "file://$home" "$prefix" >/dev/null 2>&1; then
+    printf 'package verify: HOME file URL leaked into %s\n' "$archive" >&2
+    grep -R -a -n -F "file://$home" "$prefix" >&2
+    exit 1
+  fi
+}
+
 verify_linux_runtime_paths() {
   target=$1
   prefix=$2
@@ -181,12 +208,99 @@ verify_payload() {
   printf 'package verify: verified %s\n' "$archive"
 }
 
+verify_source_archive() {
+  archive=$dist_dir/$project-$version.tar.gz
+  root=$project-$version
+  extract_dir=$work/extract/source
+  prefix=$extract_dir/$root
+  source_build=$work/source-build
+
+  if [ ! -f "$archive" ]; then
+    printf 'package verify: missing source archive: %s\n' "$archive" >&2
+    exit 1
+  fi
+  mkdir -p "$extract_dir"
+  tar -xzf "$archive" -C "$extract_dir"
+  roots=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+  if [ "$roots" != "$root" ]; then
+    printf 'package verify: source archive root mismatch: expected %s got %s\n' \
+      "$root" "$roots" >&2
+    exit 1
+  fi
+  for path in \
+    CMakeLists.txt \
+    CMakePresets.json \
+    Makefile \
+    LICENSE \
+    README.md \
+    VERSION \
+    RELEASE_MANIFEST \
+    include/lql/lql.h \
+    cmake/LqlVersion.cmake \
+    scripts/cpkt-toolchains.sh \
+    scripts/package_source.sh \
+    lua/lql_core.c \
+    lua/lql/init.lua
+  do
+    if [ ! -e "$prefix/$path" ]; then
+      printf 'package verify: missing source payload path: %s\n' "$path" >&2
+      exit 1
+    fi
+  done
+  if find "$prefix" \( -path '*/.git/*' -o -path '*/build/*' -o -path '*/dist/*' \) |
+    sed -n '1p' | grep . >/dev/null; then
+    printf 'package verify: source archive contains generated or VCS state\n' >&2
+    find "$prefix" \( -path '*/.git/*' -o -path '*/build/*' -o -path '*/dist/*' \) >&2
+    exit 1
+  fi
+  source_version=$(sed -n '1p' "$prefix/VERSION")
+  if [ "$source_version" != "$version" ]; then
+    printf 'package verify: source VERSION mismatch: got %s want %s\n' \
+      "$source_version" "$version" >&2
+    exit 1
+  fi
+  if ! grep '^VERSION$' "$prefix/RELEASE_MANIFEST" >/dev/null ||
+    ! grep '^RELEASE_MANIFEST$' "$prefix/RELEASE_MANIFEST" >/dev/null; then
+    printf 'package verify: source RELEASE_MANIFEST omits injected files\n' >&2
+    exit 1
+  fi
+  verify_source_privacy "$archive" "$prefix"
+  prefix_abs=$(cd "$prefix" && pwd -P)
+  source_build_abs=$(mkdir -p "$source_build" && cd "$source_build" && pwd -P)
+  cmake -S "$prefix_abs" -B "$source_build_abs" -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$prefix_abs/cmake/cpkt-toolchain.cmake" \
+    -DLQL_TARGET_ID=x86_64-linux-gnu >/dev/null
+  cmake --build "$source_build_abs" >/dev/null
+  ctest --test-dir "$source_build_abs" --output-on-failure >/dev/null
+  if ! grep '#define LQL_VERSION "'$version'"' \
+    "$source_build_abs/generated/include/lql/version.h" >/dev/null; then
+    printf 'package verify: source build generated wrong version\n' >&2
+    exit 1
+  fi
+  printf 'package verify: verified %s\n' "$archive"
+}
+
 if [ "$target_arg" = "all" ]; then
   awk '{print $2}' "$manifest" | sort | while IFS= read -r artifact; do
-    target=$(printf '%s\n' "$artifact" |
-      sed "s/^$project-$version-//;s/\\.tar\\.gz\$//")
-    verify_payload "$target"
+    case "$artifact" in
+      "$project-$version.tar.gz")
+        verify_source_archive
+        ;;
+      "$project-$version-"*.tar.gz)
+        target=$(printf '%s\n' "$artifact" |
+          sed "s/^$project-$version-//;s/\\.tar\\.gz\$//")
+        verify_payload "$target"
+        ;;
+      *)
+        printf 'package verify: unsupported release artifact: %s\n' "$artifact" >&2
+        exit 1
+        ;;
+    esac
   done
 else
-  verify_payload "$target_arg"
+  if [ "$target_arg" = "source" ]; then
+    verify_source_archive
+  else
+    verify_payload "$target_arg"
+  fi
 fi

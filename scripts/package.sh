@@ -29,6 +29,9 @@ checksums=$dist_dir/$project-$version-CHECKSUMS
 
 rm -rf "$stage"
 mkdir -p "$dist_dir" "$(dirname "$stage")"
+if [ "$checksum_mode" != "append" ]; then
+  rm -f "$dist_dir"/$project-*.tar.gz "$dist_dir"/$project-*-CHECKSUMS
+fi
 cmake --install "$build_dir" --prefix "$stage"
 
 tar_args='--sort=name --owner=0 --group=0 --numeric-owner'

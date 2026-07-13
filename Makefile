@@ -1,4 +1,4 @@
-.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-verify release-matrix release-pipeline prerelease release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-verify release-matrix release-pipeline prerelease release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -18,6 +18,8 @@ help:
 	  'make install-smoke install SDK and build CMake/pkg-config consumers' \
 	  'make clql-smoke    build clql and run CLI smoke tests' \
 	  'make package       build host binary SDK and checksum manifest' \
+	  'make package-source build source archive and append checksum manifest' \
+	  'make package-source-smoke verify source archive from checksum manifest' \
 	  'make package-verify verify host binary SDK package' \
 	  'make release-matrix build and verify all available SDK target packages' \
 	  'make prerelease    run the full release proof graph without cleaning first' \
@@ -96,6 +98,12 @@ clql-smoke: build-release
 
 package:
 	@sh scripts/package.sh x86_64-linux-gnu
+
+package-source:
+	@sh scripts/package_source.sh
+
+package-source-smoke: package-source
+	@sh scripts/package_verify.sh source
 
 package-verify: package
 	@sh scripts/package_verify.sh x86_64-linux-gnu
