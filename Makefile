@@ -1,4 +1,4 @@
-.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-verify release-matrix test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-verify release-matrix release-pipeline prerelease release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -20,6 +20,8 @@ help:
 	  'make package       build host binary SDK and checksum manifest' \
 	  'make package-verify verify host binary SDK package' \
 	  'make release-matrix build and verify all available SDK target packages' \
+	  'make prerelease    run the full release proof graph without cleaning first' \
+	  'make release       clean, then run the full release proof graph' \
 	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
 	  'make direct-no-lonejson  verify liblql has no LoneJSON runtime dependency' \
@@ -47,6 +49,7 @@ toolchain-check:
 
 lifecycle-check: toolchain-check
 	@python3 scripts/check_lifecycle_presets.py
+	@sh scripts/check_release_targets.sh
 
 target-tool-check:
 	@python3 -m py_compile scripts/discover_target_tools.py
@@ -99,6 +102,14 @@ package-verify: package
 
 release-matrix:
 	@sh scripts/package_matrix.sh
+
+release-pipeline: test-all release-matrix
+
+prerelease: release-pipeline
+
+release:
+	@$(MAKE) clean
+	@$(MAKE) release-pipeline
 
 test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test valgrind fuzz-smoke install-smoke clql-smoke package-verify scanner-parity-matrix direct-callback-whitespace direct-live-heap
 
