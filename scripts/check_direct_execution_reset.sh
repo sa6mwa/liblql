@@ -23,10 +23,19 @@ for path in \
   src/lql_mutation.c \
   src/clql.c \
   bench \
-  lua \
   parity; do
   if git ls-files --error-unmatch "$path" >/dev/null 2>&1; then
     printf '%s\n' "removed path remains tracked: $path" >&2
+    exit 1
+  fi
+done
+
+for path in \
+  lua/benchmarks \
+  lua/lql_payload.c \
+  lua/lql_eval.c; do
+  if git ls-files --error-unmatch "$path" >/dev/null 2>&1; then
+    printf '%s\n' "removed Lua execution path remains tracked: $path" >&2
     exit 1
   fi
 done

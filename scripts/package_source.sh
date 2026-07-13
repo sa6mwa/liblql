@@ -34,7 +34,10 @@ manifest_tmp=$build_dir/source-files.txt
 rm -rf "$stage"
 mkdir -p "$stage" "$dist_dir" "$build_dir"
 if [ "$checksum_mode" != "append" ]; then
-  rm -f "$dist_dir"/$project-*.tar.gz "$dist_dir"/$project-*-CHECKSUMS
+  rm -f "$dist_dir"/$project-*.tar.gz \
+    "$dist_dir"/$project-*-1.rockspec \
+    "$dist_dir"/$project-*-1.src.rock \
+    "$dist_dir"/$project-*-CHECKSUMS
 fi
 
 git ls-files --cached --modified --others --exclude-standard |

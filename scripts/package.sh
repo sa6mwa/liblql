@@ -30,7 +30,10 @@ checksums=$dist_dir/$project-$version-CHECKSUMS
 rm -rf "$stage"
 mkdir -p "$dist_dir" "$(dirname "$stage")"
 if [ "$checksum_mode" != "append" ]; then
-  rm -f "$dist_dir"/$project-*.tar.gz "$dist_dir"/$project-*-CHECKSUMS
+  rm -f "$dist_dir"/$project-*.tar.gz \
+    "$dist_dir"/$project-*-1.rockspec \
+    "$dist_dir"/$project-*-1.src.rock \
+    "$dist_dir"/$project-*-CHECKSUMS
 fi
 cmake --install "$build_dir" --prefix "$stage"
 
