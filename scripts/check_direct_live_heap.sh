@@ -2,7 +2,7 @@
 set -eu
 
 limit_bytes=262144
-expected_cases=20
+expected_cases=22
 checked_cases=0
 binary=${LQL_DIRECT_BENCH_PATH:-build/release-scanner/lql_direct_bench}
 massif_out=${TMPDIR:-/tmp}/liblql-direct-live-heap.$$
@@ -71,6 +71,7 @@ for mode in \
   decision_only_selector \
   plus_value_selector \
   plus_value_source_selector \
+  plus_value_openjson_selector \
   project_file_selector \
   project_source_selector \
   mutate_file_selector \
