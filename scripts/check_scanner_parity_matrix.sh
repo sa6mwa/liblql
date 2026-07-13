@@ -47,6 +47,8 @@ scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open '/status="open"' plus_value_openjson_selector /id
+scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   ne_status_open '/status!="open"' plus_value_source_selector /id
 scanner_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   prefix_status_open 'prefix{field=/status,value=op}' plus_value_source_selector /id
