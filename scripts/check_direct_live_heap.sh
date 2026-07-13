@@ -82,6 +82,8 @@ done
 check_case build/direct-probe/project-mutate-status-100k.ndjson \
   project_mutate_status_100k project_mutation_status '/status="open"' \
   project_mutate_file_selector
+check_case build/direct-probe/large-4x25m.ndjson large_ndjson \
+  eq_status_open_top_set '/status="open"' project_mutate_file_selector
 
 check_case build/direct-probe/realworld-100k.ndjson realworld_sparse \
   realworld_eq_sparse '/event="session_sync"' decision_only_selector

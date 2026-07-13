@@ -127,3 +127,7 @@ profile_row large-mutation-source "$large_samples" \
 profile_row large-projection-source "$large_samples" \
   build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open '/status="open"' project_source_selector
+
+profile_row large-project-mutation "$large_samples" \
+  build/direct-probe/large-4x25m.ndjson large_4x25m \
+  eq_status_open_top_set '/status="open"' project_mutate_file_selector
