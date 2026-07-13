@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+tree=${LQL_LUAROCKS_TREE:-$root/build/luarocks}
+sdk_prefix=${LQL_LUA_SDK_PREFIX:-$root/build/lua-sdk}
+if [ -n "${LUA:-}" ]; then
+  lua_bin=$LUA
+elif command -v lua5.5 >/dev/null 2>&1; then
+  lua_bin=lua5.5
+else
+  lua_bin=lua
+fi
+
+if [ ! -f "$tree/share/lua/5.5/lql/init.lua" ]; then
+  printf 'lua-rock: missing installed Lua module in %s\n' "$tree" >&2
+  exit 1
+fi
+if [ ! -f "$tree/lib/lua/5.5/lql/core.so" ]; then
+  printf 'lua-rock: missing installed Lua C module in %s\n' "$tree" >&2
+  exit 1
+fi
+
+LUA_PATH="$tree/share/lua/5.5/?.lua;$tree/share/lua/5.5/?/init.lua;;" \
+LUA_CPATH="$tree/lib/lua/5.5/?.so;$tree/lib/lua/5.5/?/core.so;;" \
+LD_LIBRARY_PATH="$sdk_prefix/lib:${LD_LIBRARY_PATH:-}" \
+  "$lua_bin" "$root/lua/tests/lql_smoke.lua"
+
+printf 'lua-rock: installed rock smoke passed\n'

@@ -55,7 +55,7 @@ release documentation after the migration is complete.
    expansion.
 5. Restore Lua facade, development rock, Lua tests, and release Lua artifacts.
    Initial Lua 5.5 facade, smoke coverage, source package, rendered rockspec,
-   and source rock are in place. Development rock install workflow remains.
+   source rock, and repo-local development rock install workflow are in place.
 6. Add install rules, CMake package config, pkg-config metadata, and extracted
    SDK consumer tests. Done for install-tree smoke and initial host binary SDK
    archive verification; full release matrix remains.

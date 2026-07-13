@@ -1,4 +1,4 @@
-.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test lua-rock release-lua-artifacts lua-artifact-smoke valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-verify release-matrix release-pipeline prerelease release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test lua-rock lua-env release-lua-artifacts lua-artifact-smoke valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-verify release-matrix release-pipeline prerelease release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -12,7 +12,8 @@ help:
 	  'make build        build the debug lifecycle preset' \
 	  'make test          build and run the direct-stream test suite' \
 	  'make lua-test      build and run Lua 5.5 facade smoke tests' \
-	  'make lua-rock      build Lua release source package and source rock' \
+	  'make lua-rock      install Lua facade into repo-local LuaRocks tree' \
+	  'make lua-env       print environment for repo-local LuaRocks tree' \
 	  'make lua-artifact-smoke verify Lua release artifacts' \
 	  'make valgrind      run native Valgrind Memcheck gate' \
 	  'make fuzz-smoke    build AFL++ target and verify instrumentation' \
@@ -81,7 +82,14 @@ test:
 lua-test: build-debug-lua
 	@sh scripts/run_lua_tests.sh
 
-lua-rock: release-lua-artifacts
+lua-rock:
+	@sh scripts/build_lua_rock.sh
+	@sh scripts/check_lua_rock.sh
+
+lua-env:
+	@printf 'export LUA_PATH=%s/share/lua/5.5/?.lua;%s/share/lua/5.5/?/init.lua;;\n' "$$(pwd -P)/build/luarocks" "$$(pwd -P)/build/luarocks"
+	@printf 'export LUA_CPATH=%s/lib/lua/5.5/?.so;%s/lib/lua/5.5/?/core.so;;\n' "$$(pwd -P)/build/luarocks" "$$(pwd -P)/build/luarocks"
+	@printf 'export LD_LIBRARY_PATH=%s/lib:$${LD_LIBRARY_PATH:-}\n' "$$(pwd -P)/build/lua-sdk"
 
 release-lua-artifacts:
 	@sh scripts/package_lua.sh
