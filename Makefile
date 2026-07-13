@@ -1,4 +1,4 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -15,6 +15,8 @@ help:
 	  'make build-debug-lua build the Lua 5.5 facade module' \
 	  'make test          build and run the direct-stream test suite' \
 	  'make test-debug    alias for make test' \
+	  'make cross-build   build and verify release cross-target package matrix' \
+	  'make cross-test    run cross-target tool and Darwin linker-route checks' \
 	  'make lua-test      build and run Lua 5.5 facade smoke tests' \
 	  'make lua-rock      install Lua facade into repo-local LuaRocks tree' \
 	  'make lua-cli-smoke run installed lql.lua CLI smoke tests' \
@@ -85,6 +87,7 @@ lifecycle-check: toolchain-check
 target-tool-check:
 	@python3 -m py_compile scripts/discover_target_tools.py
 	@sh scripts/test_discover_target_tools.sh
+	@sh scripts/check_darwin_linker_route.sh
 
 build: build-debug
 
@@ -107,6 +110,12 @@ test:
 	@sh scripts/test.sh
 
 test-debug: test
+
+cross-build:
+	@sh scripts/cross_build.sh
+
+cross-test:
+	@sh scripts/cross_test.sh
 
 lua-test: build-debug-lua
 	@sh scripts/run_lua_tests.sh
