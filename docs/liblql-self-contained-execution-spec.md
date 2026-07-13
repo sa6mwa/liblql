@@ -179,5 +179,13 @@ The required proof is cumulative:
   sparse matches, 100 MiB records, and repeated execution;
 - `readelf` or platform equivalent proving liblql has no LoneJSON dependency.
 
+Selected-record writer output is not currently a paired Go/C benchmark row.
+Go v0.17.1 `QueryStreamRequest` exposes decision callbacks and plus-value
+callbacks/payload sinks, but it does not expose a query writer mode equivalent
+to liblql `LQL_STREAM_OUTPUT_SELECTED_RECORD`. Cover selected-record output
+with direct receiver behavior tests, live-heap gates, and C profiling when it
+is hot. Do not model it as a Go plus-value callback benchmark row; that measures
+callback payload delivery, not selected-output writer emission.
+
 No performance result is accepted solely because C is faster on one host or
 because an aggregate median improves.
