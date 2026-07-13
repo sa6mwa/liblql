@@ -50,18 +50,20 @@ release documentation after the migration is complete.
 3. Replace ASan lifecycle target with AFL++ fuzzing. Done for the first JSON
    stream harness and smoke instrumentation gate; add more harnesses as the
    CLI/Lua/package surfaces return.
-4. Restore `clql` and executable examples. First thin selected-output/count
-   CLI and fixture smoke are in place; Go CLI near-parity still needs option
-   expansion.
+4. Restore `clql` and executable examples. Selection/count CLI, Go-compatible
+   selection flags, AND/OR selector arguments, and fixture smoke are in place.
+   Mutation/projection/theme flags fail explicitly until those stream engine
+   paths exist.
 5. Restore Lua facade, development rock, Lua tests, and release Lua artifacts.
    Initial Lua 5.5 facade, smoke coverage, source package, rendered rockspec,
    source rock, and repo-local development rock install workflow are in place.
 6. Add install rules, CMake package config, pkg-config metadata, and extracted
-   SDK consumer tests. Done for install-tree smoke and initial host binary SDK
-   archive verification; full release matrix remains.
+   SDK consumer tests. Done for install-tree smoke, host binary SDK archive
+   verification, and full release matrix package verification.
 7. Add target-tool discovery for package generation and verification. Done for
    configured CMake cache values, compiler sibling tools, PATH fallback, and
-   target mismatch checks; package verification still needs to consume it.
+   target mismatch checks; package verification consumes it for ELF and Mach-O
+   loader metadata checks.
 8. Add package generation, checksum manifest generation, privacy scans,
    relocatability checks, and release matrix. Initial host package, checksum,
    layout, runtime-path, privacy, and extracted-consumer verification are in
