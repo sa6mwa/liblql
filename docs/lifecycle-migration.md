@@ -1,6 +1,6 @@
 # liblql lifecycle migration
 
-This ledger tracks the cutover from the scanner-era repository lifecycle to the
+This ledger tracks the cutover from the rewrite-era repository lifecycle to the
 pkt.systems CMake lifecycle. It is intentionally temporary unless retained as
 release documentation after the migration is complete.
 
@@ -30,11 +30,11 @@ release documentation after the migration is complete.
 
 | Current surface | Target lifecycle surface | Preserved behavior | Verification |
 | --- | --- | --- | --- |
-| `debug-scanner` preset | `debug` preset | Debug build and unit tests | preset contract test, `make test` |
-| `release-scanner` preset | host/release and target release presets | Optimized benchmark/release build | benchmark gates, package matrix |
-| `asan-scanner` preset | removed | None; superseded by AFL++ | `make fuzz-smoke`, `make fuzz` |
+| `debug` preset | `debug` preset | Debug build and unit tests | preset contract test, `make test` |
+| `release` preset | host/release and target release presets | Optimized benchmark/release build | benchmark gates, package matrix |
+| ASan/libFuzzer preset | removed | None; superseded by AFL++ | `make fuzz-smoke`, `make fuzz` |
 | host compiler discovery | Bootlin resolver | GCC C89 warning-clean builds | resolver tests, CMake cache inspection |
-| scanner-specific Make targets | standard lifecycle Make surface | Direct reset, no-LoneJSON, parity, profile, live heap | `make test-all`, `make prerelease` |
+| rewrite-specific Make targets | standard lifecycle Make surface | Direct reset, no-LoneJSON, parity, profile, live heap | `make test-all`, `make prerelease` |
 | no package surface | host binary SDK archive | static/shared liblql SDK | `make package-verify` |
 | no target tool helper | `scripts/discover_target_tools.sh` | package verification uses configured target tools | `make target-tool-check` |
 | no release matrix | `release-matrix` and `release` | local release proof | checksum/privacy/relocatability gates |

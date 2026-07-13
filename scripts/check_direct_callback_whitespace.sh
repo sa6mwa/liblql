@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-c_bench=${LQL_DIRECT_BENCH_PATH:-build/release-scanner/lql_direct_bench}
+c_bench=${LQL_DIRECT_BENCH_PATH:-build/release/lql_direct_bench}
 
 if [ ! -x "$c_bench" ]; then
   printf 'direct callback whitespace: missing C benchmark binary: %s\n' "$c_bench" >&2

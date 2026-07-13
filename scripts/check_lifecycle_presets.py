@@ -27,6 +27,47 @@ REQUIRED_CONFIGURE_PRESETS = {
 
 REQUIRED_BUILD_PRESETS = REQUIRED_CONFIGURE_PRESETS - {"base"}
 REQUIRED_TEST_PRESETS = {"debug", "debug-lua", "valgrind"}
+REQUIRED_MAKE_TARGETS = {
+    "help",
+    "deps-debug",
+    "deps-release",
+    "deps-cross",
+    "build",
+    "build-debug",
+    "build-release",
+    "test",
+    "test-debug",
+    "test-all",
+    "valgrind",
+    "package",
+    "package-source",
+    "package-source-smoke",
+    "package-checksums",
+    "package-verify",
+    "verify-release-archives",
+    "verify-release-privacy",
+    "release-matrix",
+    "prerelease",
+    "prerelease-hardening",
+    "prerelease-live",
+    "release",
+    "direct-parity-smoke",
+    "direct-parity-matrix",
+    "direct-profile-hotspots",
+    "bench-gate",
+    "perf-gate",
+    "clean",
+    "clean-dist",
+}
+OLD_PHASE = "scanner"
+FORBIDDEN_PUBLIC_TERMS = {
+    "debug-" + OLD_PHASE,
+    "release-" + OLD_PHASE,
+    OLD_PHASE + "-parity",
+    OLD_PHASE + "-profile",
+    "build/release-" + OLD_PHASE,
+    "LQL_" + OLD_PHASE.upper() + "_",
+}
 LINUX_RELEASE_TARGETS = {
     "x86_64-linux-gnu-release": "x86_64-linux-gnu",
     "x86_64-linux-musl-release": "x86_64-linux-musl",
@@ -70,6 +111,21 @@ def main() -> None:
     for word in forbidden:
         if word in text.lower():
             fail(f"forbidden sanitizer/libFuzzer lifecycle reference remains: {word}")
+    for word in FORBIDDEN_PUBLIC_TERMS:
+        if word in text:
+            fail(f"legacy public lifecycle reference remains: {word}")
+
+    phony_line = ""
+    for line in MAKEFILE.read_text(encoding="utf-8").splitlines():
+        if line.startswith(".PHONY:"):
+            phony_line = line
+            break
+    if not phony_line:
+        fail("Makefile is missing .PHONY command surface")
+    phony_targets = set(phony_line.split()[1:])
+    missing_targets = REQUIRED_MAKE_TARGETS - phony_targets
+    if missing_targets:
+        fail(f"missing lifecycle Make targets: {', '.join(sorted(missing_targets))}")
 
     base_vars = cache_vars(configure["base"])
     if base_vars.get("CMAKE_TOOLCHAIN_FILE") != "${sourceDir}/cmake/cpkt-toolchain.cmake":

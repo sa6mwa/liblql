@@ -418,7 +418,11 @@ if [ "$target_arg" = "all" ]; then
     esac
   done
 else
-  if [ "$target_arg" = "source" ]; then
+  if [ "$target_arg" = "checksums" ]; then
+    printf 'package verify: verified checksum manifest %s\n' "$manifest"
+  elif [ "$target_arg" = "archives" ] || [ "$target_arg" = "privacy" ]; then
+    "$0" all
+  elif [ "$target_arg" = "source" ]; then
     verify_source_archive
   elif [ "$target_arg" = "lua" ]; then
     verify_lua_source_archive

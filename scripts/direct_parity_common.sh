@@ -1,26 +1,26 @@
-scanner_parity_init() {
-  scanner_parity_name=$1
-  scanner_parity_default_out=$2
-  scanner_parity_default_samples=$3
+direct_parity_init() {
+  direct_parity_name=$1
+  direct_parity_default_out=$2
+  direct_parity_default_samples=$3
 
-  c_bench=${LQL_DIRECT_BENCH_PATH:-build/release-scanner/lql_direct_bench}
+  c_bench=${LQL_DIRECT_BENCH_PATH:-build/release/lql_direct_bench}
   go_bench=${LQL_GO_BENCH_PATH:-build/reference-lqlbench}
   validator=${LQL_BENCHVALIDATE_PATH:-build/reference-benchvalidate}
-  out=${LQL_SCANNER_PARITY_OUT:-$scanner_parity_default_out}
-  samples=${LQL_BENCH_SAMPLES:-$scanner_parity_default_samples}
+  out=${LQL_DIRECT_PARITY_OUT:-$direct_parity_default_out}
+  samples=${LQL_BENCH_SAMPLES:-$direct_parity_default_samples}
 
   if [ ! -x "$c_bench" ]; then
-    printf '%s: missing C benchmark binary: %s\n' "$scanner_parity_name" \
+    printf '%s: missing C benchmark binary: %s\n' "$direct_parity_name" \
       "$c_bench" >&2
     exit 1
   fi
   if [ ! -x "$go_bench" ]; then
-    printf '%s: missing Go benchmark binary: %s\n' "$scanner_parity_name" \
+    printf '%s: missing Go benchmark binary: %s\n' "$direct_parity_name" \
       "$go_bench" >&2
     exit 1
   fi
   if [ ! -x "$validator" ]; then
-    printf '%s: missing benchmark validator: %s\n' "$scanner_parity_name" \
+    printf '%s: missing benchmark validator: %s\n' "$direct_parity_name" \
       "$validator" >&2
     exit 1
   fi
@@ -30,7 +30,7 @@ scanner_parity_init() {
   export LQL_BENCH_SAMPLES=$samples
 }
 
-scanner_parity_run_one() {
+direct_parity_run_one() {
   impl=$1
   submode=$2
   fixture=$3
@@ -41,7 +41,7 @@ scanner_parity_run_one() {
   projection=$8
 
   if [ ! -f "$fixture" ]; then
-    printf '%s: missing fixture: %s\n' "$scanner_parity_name" "$fixture" >&2
+    printf '%s: missing fixture: %s\n' "$direct_parity_name" "$fixture" >&2
     exit 1
   fi
 
@@ -66,7 +66,7 @@ scanner_parity_run_one() {
   fi
 }
 
-scanner_parity_run_row() {
+direct_parity_run_row() {
   fixture=$1
   dataset=$2
   selector=$3
@@ -74,28 +74,28 @@ scanner_parity_run_row() {
   mode=$5
   projection=$6
 
-  scanner_parity_run_one go warmup_included "$fixture" "$dataset" "$selector" \
+  direct_parity_run_one go warmup_included "$fixture" "$dataset" "$selector" \
     "$expr" "$mode" "$projection"
-  scanner_parity_run_one c warmup_included "$fixture" "$dataset" "$selector" \
+  direct_parity_run_one c warmup_included "$fixture" "$dataset" "$selector" \
     "$expr" "$mode" "$projection"
-  scanner_parity_run_one go steady_state "$fixture" "$dataset" "$selector" \
+  direct_parity_run_one go steady_state "$fixture" "$dataset" "$selector" \
     "$expr" "$mode" "$projection"
-  scanner_parity_run_one c steady_state "$fixture" "$dataset" "$selector" \
+  direct_parity_run_one c steady_state "$fixture" "$dataset" "$selector" \
     "$expr" "$mode" "$projection"
 }
 
-scanner_parity_validate() {
+direct_parity_validate() {
   "$validator" --forbid-unsupported --min-c-go-speedup=1.0 \
     --speedup-submode steady_state <"$out"
-  printf '%s: wrote %s\n' "$scanner_parity_name" "$out"
+  printf '%s: wrote %s\n' "$direct_parity_name" "$out"
 }
 
-scanner_parity_expect_records() {
+direct_parity_expect_records() {
   expected=$1
   actual=$(wc -l <"$out" | tr -d ' ')
   if [ "$actual" != "$expected" ]; then
     printf '%s: expected %s benchmark records, got %s in %s\n' \
-      "$scanner_parity_name" "$expected" "$actual" "$out" >&2
+      "$direct_parity_name" "$expected" "$actual" "$out" >&2
     exit 1
   fi
 }

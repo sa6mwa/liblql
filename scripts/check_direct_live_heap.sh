@@ -4,7 +4,7 @@ set -eu
 limit_bytes=262144
 expected_cases=22
 checked_cases=0
-binary=${LQL_DIRECT_BENCH_PATH:-build/release-scanner/lql_direct_bench}
+binary=${LQL_DIRECT_BENCH_PATH:-build/release/lql_direct_bench}
 massif_out=${TMPDIR:-/tmp}/liblql-direct-live-heap.$$
 
 cleanup() {
@@ -21,7 +21,7 @@ if [ ! -x "$binary" ]; then
   exit 0
 fi
 
-sh scripts/ensure_scanner_parity_fixtures.sh
+sh scripts/ensure_direct_parity_fixtures.sh
 
 check_case() {
   fixture=$1

@@ -42,18 +42,18 @@ performance claim with profiling and paired Go/C benchmarks.
   file-backed spill.
 - GCC Go/C speedup is at least 1.0x on every accepted row. Profile before
   optimizing; do not add caches or special cases based only on benchmark deltas.
-- `make scanner-parity-smoke` is the fast executable GCC-only parity gate. It
+- `make direct-parity-smoke` is the fast executable GCC-only parity gate. It
   must include warmup and steady-state Go/C records, forbid unsupported rows,
   validate Go/C counters for every emitted row, and enforce at least 1.0x
   C-vs-Go speedup on representative steady-state accepted paths.
-- `make scanner-parity-matrix` is the broader GCC-only accepted-row gate. It
+- `make direct-parity-matrix` is the broader GCC-only accepted-row gate. It
   extends smoke coverage across source/file callbacks, projection, mutation
   families, temporal, array, range, indexed, and large-record cases. Rows that
   are unsupported or below 1.0x are not accepted rows; profile and optimize
   them before adding them to this gate.
-- `make scanner-profile-hotspots` is the bounded C profiling gate before
+- `make direct-profile-hotspots` is the bounded C profiling gate before
   performance-directed scanner/emitter changes. It profiles the currently
-  tight GCC rows and writes perf reports under `build/scanner-profiles/`.
+  tight GCC rows and writes perf reports under `build/direct-profiles/`.
 
 ## Execution State Machine
 

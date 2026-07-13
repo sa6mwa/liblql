@@ -8,4 +8,15 @@ case "$root" in
     exit 1
     ;;
 esac
-rm -rf "$root/build" "$root/dist"
+case "${1:-all}" in
+  all)
+    rm -rf "$root/build" "$root/dist"
+    ;;
+  dist)
+    rm -rf "$root/dist"
+    ;;
+  *)
+    printf '%s\n' "clean: unsupported scope: $1" >&2
+    exit 2
+    ;;
+esac

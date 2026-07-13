@@ -16,8 +16,28 @@ require_line '^release-pipeline: test-all release-matrix$' \
   'release-pipeline must run ordinary gates before release-matrix'
 require_line '^prerelease: release-pipeline$' \
   'prerelease must share release-pipeline'
+require_line '^prerelease-hardening: prerelease$' \
+  'prerelease-hardening must preserve the shared prerelease graph'
+require_line '^package-checksums:$' \
+  'package-checksums target is missing'
+require_line '^verify-release-archives:$' \
+  'verify-release-archives target is missing'
+require_line '^verify-release-privacy:$' \
+  'verify-release-privacy target is missing'
+require_line '^clean-dist:$' \
+  'clean-dist target is missing'
+require_line '^direct-parity-matrix: direct-bench$' \
+  'direct-parity-matrix must be the public parity matrix target'
+require_line '^bench-gate: direct-parity-matrix$' \
+  'bench-gate must enforce the accepted direct parity matrix'
 require_line '^release:$' \
   'release target is missing'
+
+old_phase=scanner
+if grep -E "(^|[^[:alnum:]_-])(${old_phase}-parity|${old_phase}-profile|debug-${old_phase}|release-${old_phase})([^[:alnum:]_-]|$)" "$makefile" >/dev/null; then
+  printf 'release target check: legacy public lifecycle target remains\n' >&2
+  exit 1
+fi
 
 release_line=$(grep -n '^release:$' "$makefile" | cut -d: -f1 | head -1)
 clean_line=$((release_line + 1))

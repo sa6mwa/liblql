@@ -1,16 +1,20 @@
-.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test lua-rock lua-env release-lua-artifacts lua-artifact-smoke valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-verify release-matrix release-pipeline prerelease release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug lua-test lua-rock lua-env release-lua-artifacts lua-artifact-smoke valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
 help:
 	@printf '%s\n' \
-	  'make build-debug   build the debug self-contained scanner foundation' \
-	  'make build-release build the optimized self-contained scanner foundation' \
-	  'make build-debug-lua build the Lua 5.5 facade module' \
+	  'make deps-debug    ensure native debug Bootlin GCC lifecycle tools' \
+	  'make deps-release  ensure all release Bootlin GCC lifecycle tools' \
+	  'make deps-cross    ensure all cross Bootlin GCC lifecycle tools' \
 	  'make deps          ensure cached Bootlin GCC and AFL++ lifecycle tools' \
 	  'make toolchain-check  run resolver syntax and unit checks' \
 	  'make lifecycle-check  verify lifecycle preset/command contract' \
 	  'make target-tool-check  verify target inspection tool discovery' \
 	  'make build        build the debug lifecycle preset' \
+	  'make build-debug   build the debug self-contained liblql direct-execution implementation' \
+	  'make build-release build the optimized self-contained liblql direct-execution implementation' \
+	  'make build-debug-lua build the Lua 5.5 facade module' \
 	  'make test          build and run the direct-stream test suite' \
+	  'make test-debug    alias for make test' \
 	  'make lua-test      build and run Lua 5.5 facade smoke tests' \
 	  'make lua-rock      install Lua facade into repo-local LuaRocks tree' \
 	  'make lua-env       print environment for repo-local LuaRocks tree' \
@@ -23,9 +27,14 @@ help:
 	  'make package       build host binary SDK and checksum manifest' \
 	  'make package-source build source archive and append checksum manifest' \
 	  'make package-source-smoke verify source archive from checksum manifest' \
+	  'make package-checksums verify the release checksum manifest' \
 	  'make package-verify verify host binary SDK package' \
+	  'make verify-release-archives verify checksum-listed release archives' \
+	  'make verify-release-privacy verify release artifact privacy/relocatability' \
 	  'make release-matrix build and verify all available SDK target packages' \
 	  'make prerelease    run the full release proof graph without cleaning first' \
+	  'make prerelease-hardening alias for prerelease until extra hardening exists' \
+	  'make prerelease-live fail-closed placeholder for opt-in live checks' \
 	  'make release       clean, then run the full release proof graph' \
 	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
@@ -34,15 +43,29 @@ help:
 	  'make direct-bench  build the optimized direct benchmark runner' \
 	  'make direct-callback-whitespace  verify whitespace callback capture uses compact spool' \
 	  'make direct-live-heap  run Massif live-heap gate for direct execution' \
-	  'make scanner-parity-smoke  run GCC C-vs-Go scanner parity smoke' \
-	  'make scanner-parity-matrix  run broader GCC C-vs-Go scanner parity matrix' \
-	  'make scanner-profile-hotspots  profile tight GCC scanner rows with perf' \
+	  'make direct-parity-smoke  run GCC C-vs-Go direct-execution parity smoke' \
+	  'make direct-parity-matrix run broader GCC C-vs-Go direct-execution parity matrix' \
+	  'make direct-profile-hotspots profile tight GCC direct-execution rows with perf' \
+	  'make bench-gate    run the accepted direct-execution performance gate' \
+	  'make perf-gate     alias for bench-gate' \
+	  'make finalize-slice run formatting and debug tests for a small slice' \
 	  'make format        format retained C sources' \
-	  'make clean         remove generated build output'
+	  'make clean-dist    remove generated release artifacts under dist/' \
+	  'make clean         remove generated build and release output'
 
 deps:
 	@bash scripts/cpkt-toolchains.sh ensure all
 	@bash scripts/cpkt-aflpp.sh ensure
+
+deps-debug:
+	@bash scripts/cpkt-toolchains.sh ensure x86_64-linux-gnu
+
+deps-release:
+	@bash scripts/cpkt-toolchains.sh ensure all
+	@bash scripts/cpkt-aflpp.sh ensure
+
+deps-cross:
+	@bash scripts/cpkt-toolchains.sh ensure all
 
 toolchain-check:
 	@bash -n scripts/cpkt-toolchains.sh
@@ -78,6 +101,8 @@ test:
 	@cmake --preset debug
 	@cmake --build --preset debug
 	@ctest --preset debug
+
+test-debug: test
 
 lua-test: build-debug-lua
 	@sh scripts/run_lua_tests.sh
@@ -123,8 +148,17 @@ package-source:
 package-source-smoke: package-source
 	@sh scripts/package_verify.sh source
 
+package-checksums:
+	@sh scripts/package_verify.sh checksums
+
 package-verify: package
 	@sh scripts/package_verify.sh x86_64-linux-gnu
+
+verify-release-archives:
+	@sh scripts/package_verify.sh archives
+
+verify-release-privacy:
+	@sh scripts/package_verify.sh privacy
 
 release-matrix:
 	@sh scripts/package_matrix.sh
@@ -133,11 +167,16 @@ release-pipeline: test-all release-matrix
 
 prerelease: release-pipeline
 
+prerelease-hardening: prerelease
+
+prerelease-live:
+	@printf '%s\n' 'SKIP: liblql has no live external-provider prerelease checks'
+
 release:
 	@$(MAKE) clean
 	@$(MAKE) release-pipeline
 
-test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test valgrind fuzz-smoke install-smoke clql-smoke package-verify scanner-parity-matrix direct-callback-whitespace direct-live-heap
+test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
@@ -159,23 +198,32 @@ direct-callback-whitespace: direct-bench
 direct-live-heap: direct-bench
 	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench sh scripts/check_direct_live_heap.sh
 
-scanner-parity-smoke: direct-bench
+direct-parity-smoke: direct-bench
 	@mkdir -p build
 	@cd reference/go-benchmark && go build -o ../../build/reference-lqlbench ./cmd/lqlbench
 	@cd reference/go-benchmark && go build -o ../../build/reference-benchvalidate ./cmd/benchvalidate
-	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench LQL_GO_BENCH_PATH=build/reference-lqlbench LQL_BENCHVALIDATE_PATH=build/reference-benchvalidate sh scripts/check_scanner_parity_smoke.sh
+	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench LQL_GO_BENCH_PATH=build/reference-lqlbench LQL_BENCHVALIDATE_PATH=build/reference-benchvalidate sh scripts/check_direct_parity_smoke.sh
 
-scanner-parity-matrix: direct-bench
+direct-parity-matrix: direct-bench
 	@mkdir -p build
 	@cd reference/go-benchmark && go build -o ../../build/reference-lqlbench ./cmd/lqlbench
 	@cd reference/go-benchmark && go build -o ../../build/reference-benchvalidate ./cmd/benchvalidate
-	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench LQL_GO_BENCH_PATH=build/reference-lqlbench LQL_BENCHVALIDATE_PATH=build/reference-benchvalidate sh scripts/check_scanner_parity_matrix.sh
+	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench LQL_GO_BENCH_PATH=build/reference-lqlbench LQL_BENCHVALIDATE_PATH=build/reference-benchvalidate sh scripts/check_direct_parity_matrix.sh
 
-scanner-profile-hotspots: direct-bench
-	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench sh scripts/profile_scanner_hotspots.sh
+direct-profile-hotspots: direct-bench
+	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench sh scripts/profile_direct_hotspots.sh
+
+bench-gate: direct-parity-matrix
+
+perf-gate: bench-gate
+
+finalize-slice: format test-debug
 
 format:
 	@clang-format -i include/lql/*.h src/*.c src/*.h tests/header_smoke.c tests/header_smoke.cpp tools/lql_direct_bench.c tools/clql.c fuzz/json_fuzz.c lua/lql_core.c
+
+clean-dist:
+	@./scripts/clean.sh dist
 
 clean:
 	@./scripts/clean.sh

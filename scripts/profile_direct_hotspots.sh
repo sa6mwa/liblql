@@ -1,30 +1,30 @@
 #!/bin/sh
 set -eu
 
-c_bench=${LQL_DIRECT_BENCH_PATH:-build/release-scanner/lql_direct_bench}
-out_dir=${LQL_SCANNER_PROFILE_DIR:-build/scanner-profiles}
-status_samples=${LQL_SCANNER_PROFILE_STATUS_SAMPLES:-120}
-scalar_samples=${LQL_SCANNER_PROFILE_SCALAR_SAMPLES:-120}
-plus_value_source_samples=${LQL_SCANNER_PROFILE_PLUS_VALUE_SOURCE_SAMPLES:-120}
-recursive_samples=${LQL_SCANNER_PROFILE_RECURSIVE_SAMPLES:-120}
-realworld_samples=${LQL_SCANNER_PROFILE_REALWORLD_SAMPLES:-80}
-large_samples=${LQL_SCANNER_PROFILE_LARGE_SAMPLES:-60}
-freq=${LQL_SCANNER_PROFILE_FREQ:-999}
+c_bench=${LQL_DIRECT_BENCH_PATH:-build/release/lql_direct_bench}
+out_dir=${LQL_DIRECT_PROFILE_DIR:-build/direct-profiles}
+status_samples=${LQL_DIRECT_PROFILE_STATUS_SAMPLES:-120}
+scalar_samples=${LQL_DIRECT_PROFILE_SCALAR_SAMPLES:-120}
+plus_value_source_samples=${LQL_DIRECT_PROFILE_PLUS_VALUE_SOURCE_SAMPLES:-120}
+recursive_samples=${LQL_DIRECT_PROFILE_RECURSIVE_SAMPLES:-120}
+realworld_samples=${LQL_DIRECT_PROFILE_REALWORLD_SAMPLES:-80}
+large_samples=${LQL_DIRECT_PROFILE_LARGE_SAMPLES:-60}
+freq=${LQL_DIRECT_PROFILE_FREQ:-999}
 expected_profiles=14
 profile_count=0
 
 if [ ! -x "$c_bench" ]; then
-  printf 'scanner profile: missing C benchmark binary: %s\n' "$c_bench" >&2
+  printf 'direct profile: missing C benchmark binary: %s\n' "$c_bench" >&2
   exit 1
 fi
 if ! command -v perf >/dev/null 2>&1; then
-  printf 'scanner profile: perf is required\n' >&2
+  printf 'direct profile: perf is required\n' >&2
   exit 1
 fi
 
 mkdir -p "$out_dir"
 
-sh scripts/ensure_scanner_parity_fixtures.sh
+sh scripts/ensure_direct_parity_fixtures.sh
 
 profile_row() {
   name=$1
@@ -38,11 +38,11 @@ profile_row() {
   report=$out_dir/$name.report.txt
 
   if [ ! -f "$fixture" ]; then
-    printf 'scanner profile: missing fixture: %s\n' "$fixture" >&2
+    printf 'direct profile: missing fixture: %s\n' "$fixture" >&2
     exit 1
   fi
 
-  printf 'scanner profile: recording %s (%s samples per benchmark)\n' "$name" "$samples"
+  printf 'direct profile: recording %s (%s samples per benchmark)\n' "$name" "$samples"
   LQL_BENCH_SAMPLES=$samples perf record -F "$freq" -g --call-graph fp \
     -o "$data" -- "$c_bench" \
     --fixture "$fixture" \
@@ -55,7 +55,7 @@ profile_row() {
 
   perf report --stdio --no-children --call-graph=none \
     --sort=dso,symbol --percent-limit 1 -i "$data" >"$report"
-  printf 'scanner profile: wrote %s\n' "$report"
+  printf 'direct profile: wrote %s\n' "$report"
   sed -n '1,80p' "$report"
   profile_count=$((profile_count + 1))
 }
@@ -120,7 +120,7 @@ profile_row large-project-mutation "$large_samples" \
   eq_status_open_top_set '/status="open"' project_mutate_file_selector
 
 if [ "$profile_count" -ne "$expected_profiles" ]; then
-  printf 'scanner profile: expected %s profiles, wrote %s profiles\n' \
+  printf 'direct profile: expected %s profiles, wrote %s profiles\n' \
     "$expected_profiles" "$profile_count" >&2
   exit 1
 fi
