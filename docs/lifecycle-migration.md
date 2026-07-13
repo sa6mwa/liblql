@@ -54,6 +54,8 @@ release documentation after the migration is complete.
    CLI and fixture smoke are in place; Go CLI near-parity still needs option
    expansion.
 5. Restore Lua facade, development rock, Lua tests, and release Lua artifacts.
+   Initial Lua 5.5 facade and smoke coverage are in place; LuaRocks
+   development/release artifacts remain.
 6. Add install rules, CMake package config, pkg-config metadata, and extracted
    SDK consumer tests. Done for install-tree smoke and initial host binary SDK
    archive verification; full release matrix remains.

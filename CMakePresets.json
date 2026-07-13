@@ -20,6 +20,13 @@
       }
     },
     {
+      "name": "debug-lua",
+      "inherits": "debug",
+      "cacheVariables": {
+        "LQL_BUILD_LUA": "ON"
+      }
+    },
+    {
       "name": "release",
       "inherits": "base",
       "cacheVariables": {
@@ -114,6 +121,10 @@
       "configurePreset": "debug"
     },
     {
+      "name": "debug-lua",
+      "configurePreset": "debug-lua"
+    },
+    {
       "name": "release",
       "configurePreset": "release"
     },
@@ -166,6 +177,13 @@
     {
       "name": "debug",
       "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-lua",
+      "configurePreset": "debug-lua",
       "output": {
         "outputOnFailure": true
       }

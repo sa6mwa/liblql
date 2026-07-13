@@ -1,15 +1,17 @@
-.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release test valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-verify test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-verify test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
 	  'make build-debug   build the debug self-contained scanner foundation' \
 	  'make build-release build the optimized self-contained scanner foundation' \
+	  'make build-debug-lua build the Lua 5.5 facade module' \
 	  'make deps          ensure cached Bootlin GCC and AFL++ lifecycle tools' \
 	  'make toolchain-check  run resolver syntax and unit checks' \
 	  'make lifecycle-check  verify lifecycle preset/command contract' \
 	  'make target-tool-check  verify target inspection tool discovery' \
 	  'make build        build the debug lifecycle preset' \
 	  'make test          build and run the direct-stream test suite' \
+	  'make lua-test      build and run Lua 5.5 facade smoke tests' \
 	  'make valgrind      run native Valgrind Memcheck gate' \
 	  'make fuzz-smoke    build AFL++ target and verify instrumentation' \
 	  'make fuzz          run the standard bounded AFL++ smoke gate' \
@@ -59,10 +61,17 @@ build-release:
 	@cmake --preset release
 	@cmake --build --preset release
 
+build-debug-lua:
+	@cmake --preset debug-lua
+	@cmake --build --preset debug-lua --target lql_lua_core
+
 test:
 	@cmake --preset debug
 	@cmake --build --preset debug
 	@ctest --preset debug
+
+lua-test: build-debug-lua
+	@sh scripts/run_lua_tests.sh
 
 valgrind: build-debug
 	@sh scripts/check_valgrind.sh
@@ -87,7 +96,7 @@ package:
 package-verify: package
 	@sh scripts/package_verify.sh x86_64-linux-gnu
 
-test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test valgrind fuzz-smoke install-smoke clql-smoke package-verify scanner-parity-matrix direct-callback-whitespace direct-live-heap
+test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test valgrind fuzz-smoke install-smoke clql-smoke package-verify scanner-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
@@ -125,7 +134,7 @@ scanner-profile-hotspots: direct-bench
 	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench sh scripts/profile_scanner_hotspots.sh
 
 format:
-	@clang-format -i include/lql/*.h src/*.c src/*.h tests/header_smoke.c tests/header_smoke.cpp tools/lql_direct_bench.c tools/clql.c fuzz/json_fuzz.c
+	@clang-format -i include/lql/*.h src/*.c src/*.h tests/header_smoke.c tests/header_smoke.cpp tools/lql_direct_bench.c tools/clql.c fuzz/json_fuzz.c lua/lql_core.c
 
 clean:
 	@./scripts/clean.sh

@@ -31,6 +31,7 @@ option(LQL_BUILD_SHARED "Build shared liblql" ON)
 option(LQL_BUILD_BINARY "Build clql command-line tool" ON)
 option(LQL_BUILD_DIRECT_PROBE "Build the direct-execution architecture probe" ON)
 option(LQL_BUILD_FUZZERS "Build AFL++ fuzz targets" OFF)
+option(LQL_BUILD_LUA "Build Lua 5.5 facade module" OFF)
 option(LQL_INSTALL "Install liblql SDK artifacts" ON)
 set(LQL_VERSION_OVERRIDE "" CACHE STRING "Version override")
 
@@ -126,6 +127,38 @@ if(LQL_BUILD_FUZZERS)
   add_executable(lql_json_fuzz fuzz/json_fuzz.c)
   target_link_libraries(lql_json_fuzz PRIVATE lql_static)
   lql_configure_c89_target(lql_json_fuzz)
+endif()
+
+if(LQL_BUILD_LUA)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(LUA55 REQUIRED lua5.5)
+  if(NOT LUA55_INCLUDE_DIRS)
+    message(FATAL_ERROR "lua5.5 pkg-config did not report include directories")
+  endif()
+  list(GET LUA55_INCLUDE_DIRS 0 LUA55_INCLUDE_DIR)
+  set(LQL_LUA_STAGED_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/lua-host-include")
+  file(MAKE_DIRECTORY "${LQL_LUA_STAGED_INCLUDE}/lua5.5")
+  file(GLOB LQL_LUA_HEADERS "${LUA55_INCLUDE_DIR}/*.h")
+  foreach(header ${LQL_LUA_HEADERS})
+    file(COPY "${header}" DESTINATION "${LQL_LUA_STAGED_INCLUDE}/lua5.5")
+  endforeach()
+  find_file(LQL_LUA_MULTIARCH_HEADER lua5.5-deb-multiarch.h
+    PATHS /usr/include /usr/local/include
+    PATH_SUFFIXES x86_64-linux-gnu aarch64-linux-gnu arm-linux-gnueabihf
+    NO_CMAKE_FIND_ROOT_PATH)
+  if(LQL_LUA_MULTIARCH_HEADER)
+    file(COPY "${LQL_LUA_MULTIARCH_HEADER}"
+         DESTINATION "${LQL_LUA_STAGED_INCLUDE}/lua5.5")
+  endif()
+  add_library(lql_lua_core MODULE lua/lql_core.c)
+  set_target_properties(lql_lua_core PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME core
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lua/lql")
+  target_link_libraries(lql_lua_core PRIVATE lql_static)
+  target_include_directories(lql_lua_core SYSTEM PRIVATE
+    "${LQL_LUA_STAGED_INCLUDE}/lua5.5")
+  lql_configure_c89_target(lql_lua_core)
 endif()
 
 if(LQL_INSTALL)

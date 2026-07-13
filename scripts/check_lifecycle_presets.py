@@ -12,6 +12,7 @@ MAKEFILE = ROOT / "Makefile"
 REQUIRED_CONFIGURE_PRESETS = {
     "base",
     "debug",
+    "debug-lua",
     "release",
     "valgrind",
     "fuzz",
@@ -25,7 +26,7 @@ REQUIRED_CONFIGURE_PRESETS = {
 }
 
 REQUIRED_BUILD_PRESETS = REQUIRED_CONFIGURE_PRESETS - {"base"}
-REQUIRED_TEST_PRESETS = {"debug", "valgrind"}
+REQUIRED_TEST_PRESETS = {"debug", "debug-lua", "valgrind"}
 LINUX_RELEASE_TARGETS = {
     "x86_64-linux-gnu-release": "x86_64-linux-gnu",
     "x86_64-linux-musl-release": "x86_64-linux-musl",
@@ -81,6 +82,10 @@ def main() -> None:
         fail("fuzz preset does not use cmake/cpkt-aflpp-toolchain.cmake")
     if fuzz_vars.get("LQL_BUILD_FUZZERS") != "ON":
         fail("fuzz preset does not enable LQL_BUILD_FUZZERS")
+
+    lua_vars = cache_vars(configure["debug-lua"])
+    if lua_vars.get("LQL_BUILD_LUA") != "ON":
+        fail("debug-lua preset does not enable LQL_BUILD_LUA")
 
     for preset_name, target_id in LINUX_RELEASE_TARGETS.items():
         if cache_vars(configure[preset_name]).get("LQL_TARGET_ID") != target_id:
