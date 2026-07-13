@@ -23,5 +23,6 @@ for target in $targets; do
 done
 
 LQL_PACKAGE_CHECKSUM_MODE=append sh scripts/package_source.sh
+LQL_PACKAGE_CHECKSUM_MODE=append sh scripts/package_lua.sh
 
 sh scripts/package_verify.sh all

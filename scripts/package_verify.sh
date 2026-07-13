@@ -27,7 +27,8 @@ version=$(basename "$manifest" | sed "s/^$project-//;s/-CHECKSUMS\$//")
 
 listed=$(awk '{print $2}' "$manifest" | sort)
 release_artifacts=$(find "$dist_dir" -maxdepth 1 -type f \
-  \( -name "$project-*.tar.gz" \) -printf '%f\n' | sort)
+  \( -name "$project-*.tar.gz" -o -name "$project-*-1.rockspec" -o \
+     -name "$project-*-1.src.rock" \) -printf '%f\n' | sort)
 if [ "$listed" != "$release_artifacts" ]; then
   printf 'package verify: checksum manifest does not match release artifacts\n' >&2
   printf 'listed:\n%s\nartifacts:\n%s\n' "$listed" "$release_artifacts" >&2
@@ -280,11 +281,130 @@ verify_source_archive() {
   printf 'package verify: verified %s\n' "$archive"
 }
 
+verify_lua_source_archive() {
+  archive=$dist_dir/$project-lua-$version.tar.gz
+  root=$project-lua-$version
+  extract_dir=$work/extract/lua-source
+  prefix=$extract_dir/$root
+
+  if [ ! -f "$archive" ]; then
+    printf 'package verify: missing Lua source archive: %s\n' "$archive" >&2
+    exit 1
+  fi
+  mkdir -p "$extract_dir"
+  tar -xzf "$archive" -C "$extract_dir"
+  roots=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+  if [ "$roots" != "$root" ]; then
+    printf 'package verify: Lua source archive root mismatch: expected %s got %s\n' \
+      "$root" "$roots" >&2
+    exit 1
+  fi
+  for path in \
+    LICENSE \
+    README.md \
+    VERSION \
+    RELEASE_MANIFEST \
+    include/lql/lql.h \
+    include/lql/version.h \
+    lua/lql_core.c \
+    lua/lql/init.lua \
+    scripts/run_lua_tests.sh \
+    "$project-$version-1.rockspec"
+  do
+    if [ ! -e "$prefix/$path" ]; then
+      printf 'package verify: missing Lua source payload path: %s\n' "$path" >&2
+      exit 1
+    fi
+  done
+  if find "$prefix" \( -name '*.so' -o -name '*.dylib' -o -name '*.a' -o \
+      -path '*/build/*' -o -path '*/dist/*' -o -path '*/.git/*' \) |
+    sed -n '1p' | grep . >/dev/null; then
+    printf 'package verify: Lua source archive contains binary/generated/VCS state\n' >&2
+    find "$prefix" \( -name '*.so' -o -name '*.dylib' -o -name '*.a' -o \
+      -path '*/build/*' -o -path '*/dist/*' -o -path '*/.git/*' \) >&2
+    exit 1
+  fi
+  lua_version=$(sed -n '1p' "$prefix/VERSION")
+  if [ "$lua_version" != "$version" ]; then
+    printf 'package verify: Lua source VERSION mismatch: got %s want %s\n' \
+      "$lua_version" "$version" >&2
+    exit 1
+  fi
+  verify_source_privacy "$archive" "$prefix"
+  printf 'package verify: verified %s\n' "$archive"
+}
+
+verify_lua_rockspec() {
+  rockspec=$dist_dir/$project-$version-1.rockspec
+  if [ ! -f "$rockspec" ]; then
+    printf 'package verify: missing Lua rockspec: %s\n' "$rockspec" >&2
+    exit 1
+  fi
+  if grep -a -n -F "$(pwd -P)" "$rockspec" >/dev/null ||
+    { [ -n "${HOME:-}" ] && grep -a -n -F "$HOME" "$rockspec" >/dev/null; } ||
+    grep -a -n -E 'file://|/tmp/|/var/tmp/' "$rockspec" >/dev/null; then
+    printf 'package verify: local path leaked into Lua rockspec: %s\n' "$rockspec" >&2
+    exit 1
+  fi
+  if ! grep "version = \"$version-1\"" "$rockspec" >/dev/null ||
+    ! grep "url = \"$project-lua-$version.tar.gz\"" "$rockspec" >/dev/null ||
+    ! grep "dir = \"$project-lua-$version\"" "$rockspec" >/dev/null; then
+    printf 'package verify: Lua rockspec version/source fields are wrong\n' >&2
+    exit 1
+  fi
+  luarocks --lua-version=5.5 lint "$rockspec" >/dev/null
+  printf 'package verify: verified %s\n' "$rockspec"
+}
+
+verify_lua_src_rock() {
+  rock=$dist_dir/$project-$version-1.src.rock
+  extract_dir=$work/extract/lua-src-rock
+  if [ ! -f "$rock" ]; then
+    printf 'package verify: missing Lua source rock: %s\n' "$rock" >&2
+    exit 1
+  fi
+  rm -rf "$extract_dir"
+  mkdir -p "$extract_dir"
+  unzip -q "$rock" -d "$extract_dir"
+  for path in "$project-$version-1.rockspec" "$project-lua-$version.tar.gz"; do
+    if [ ! -f "$extract_dir/$path" ]; then
+      printf 'package verify: source rock missing payload: %s\n' "$path" >&2
+      exit 1
+    fi
+  done
+  cmp -s "$dist_dir/$project-$version-1.rockspec" \
+    "$extract_dir/$project-$version-1.rockspec" || {
+      printf 'package verify: source rock rockspec differs from dist rockspec\n' >&2
+      exit 1
+    }
+  cmp -s "$dist_dir/$project-lua-$version.tar.gz" \
+    "$extract_dir/$project-lua-$version.tar.gz" || {
+      printf 'package verify: source rock Lua source archive differs from dist archive\n' >&2
+      exit 1
+    }
+  if grep -R -a -n -F "$(pwd -P)" "$extract_dir" >/dev/null ||
+    { [ -n "${HOME:-}" ] && grep -R -a -n -F "$HOME" "$extract_dir" >/dev/null; } ||
+    grep -R -a -n -E 'file://|/tmp/|/var/tmp/' "$extract_dir" >/dev/null; then
+    printf 'package verify: local path leaked into Lua source rock: %s\n' "$rock" >&2
+    exit 1
+  fi
+  printf 'package verify: verified %s\n' "$rock"
+}
+
 if [ "$target_arg" = "all" ]; then
   awk '{print $2}' "$manifest" | sort | while IFS= read -r artifact; do
     case "$artifact" in
       "$project-$version.tar.gz")
         verify_source_archive
+        ;;
+      "$project-lua-$version.tar.gz")
+        verify_lua_source_archive
+        ;;
+      "$project-$version-1.rockspec")
+        verify_lua_rockspec
+        ;;
+      "$project-$version-1.src.rock")
+        verify_lua_src_rock
         ;;
       "$project-$version-"*.tar.gz)
         target=$(printf '%s\n' "$artifact" |
@@ -300,6 +420,10 @@ if [ "$target_arg" = "all" ]; then
 else
   if [ "$target_arg" = "source" ]; then
     verify_source_archive
+  elif [ "$target_arg" = "lua" ]; then
+    verify_lua_source_archive
+    verify_lua_rockspec
+    verify_lua_src_rock
   else
     verify_payload "$target_arg"
   fi

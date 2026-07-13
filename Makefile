@@ -1,4 +1,4 @@
-.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-verify release-matrix release-pipeline prerelease release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test lua-rock release-lua-artifacts lua-artifact-smoke valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke package-verify release-matrix release-pipeline prerelease release test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -12,6 +12,8 @@ help:
 	  'make build        build the debug lifecycle preset' \
 	  'make test          build and run the direct-stream test suite' \
 	  'make lua-test      build and run Lua 5.5 facade smoke tests' \
+	  'make lua-rock      build Lua release source package and source rock' \
+	  'make lua-artifact-smoke verify Lua release artifacts' \
 	  'make valgrind      run native Valgrind Memcheck gate' \
 	  'make fuzz-smoke    build AFL++ target and verify instrumentation' \
 	  'make fuzz          run the standard bounded AFL++ smoke gate' \
@@ -78,6 +80,14 @@ test:
 
 lua-test: build-debug-lua
 	@sh scripts/run_lua_tests.sh
+
+lua-rock: release-lua-artifacts
+
+release-lua-artifacts:
+	@sh scripts/package_lua.sh
+
+lua-artifact-smoke: release-lua-artifacts
+	@sh scripts/package_verify.sh lua
 
 valgrind: build-debug
 	@sh scripts/check_valgrind.sh

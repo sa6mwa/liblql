@@ -54,8 +54,8 @@ release documentation after the migration is complete.
    CLI and fixture smoke are in place; Go CLI near-parity still needs option
    expansion.
 5. Restore Lua facade, development rock, Lua tests, and release Lua artifacts.
-   Initial Lua 5.5 facade and smoke coverage are in place; LuaRocks
-   development/release artifacts remain.
+   Initial Lua 5.5 facade, smoke coverage, source package, rendered rockspec,
+   and source rock are in place. Development rock install workflow remains.
 6. Add install rules, CMake package config, pkg-config metadata, and extracted
    SDK consumer tests. Done for install-tree smoke and initial host binary SDK
    archive verification; full release matrix remains.
@@ -66,8 +66,7 @@ release documentation after the migration is complete.
    relocatability checks, and release matrix. Initial host package, checksum,
    layout, runtime-path, privacy, and extracted-consumer verification are in
    place; `make release-matrix` now covers all Linux Bootlin targets, Darwin
-   when osxcross is available, and the source archive. Lua release artifacts
-   remain.
+   when osxcross is available, the source archive, and Lua release artifacts.
 9. Make `prerelease` and `release` share the release pipeline, with `release`
    cleaning first. Done with a structural lifecycle regression check.
 10. Remove this ledger or convert it into permanent lifecycle documentation once
