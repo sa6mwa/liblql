@@ -1,4 +1,4 @@
-.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-verify test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test lua-test valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-verify release-matrix test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -19,6 +19,7 @@ help:
 	  'make clql-smoke    build clql and run CLI smoke tests' \
 	  'make package       build host binary SDK and checksum manifest' \
 	  'make package-verify verify host binary SDK package' \
+	  'make release-matrix build and verify all available SDK target packages' \
 	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
 	  'make direct-no-lonejson  verify liblql has no LoneJSON runtime dependency' \
@@ -95,6 +96,9 @@ package:
 
 package-verify: package
 	@sh scripts/package_verify.sh x86_64-linux-gnu
+
+release-matrix:
+	@sh scripts/package_matrix.sh
 
 test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test valgrind fuzz-smoke install-smoke clql-smoke package-verify scanner-parity-matrix direct-callback-whitespace direct-live-heap
 

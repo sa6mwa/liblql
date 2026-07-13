@@ -85,7 +85,10 @@ endif()
 if(LQL_BUILD_SHARED)
   add_library(lql_shared SHARED $<TARGET_OBJECTS:lql_common>)
   add_library(lql::shared ALIAS lql_shared)
-  set_target_properties(lql_shared PROPERTIES OUTPUT_NAME lql SOVERSION 0)
+  set_target_properties(lql_shared PROPERTIES
+    OUTPUT_NAME lql
+    SOVERSION 0
+    INSTALL_NAME_DIR "@rpath")
   target_include_directories(lql_shared PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>"

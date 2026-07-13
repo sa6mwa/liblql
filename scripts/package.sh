@@ -6,9 +6,10 @@ project=liblql
 preset=${target}-release
 build_dir=build/$preset
 dist_dir=${LQL_DIST_DIR:-dist}
+checksum_mode=${LQL_PACKAGE_CHECKSUM_MODE:-reset}
 version_header=$build_dir/generated/include/lql/version.h
 
-cmake --preset "$preset"
+cmake --preset "$preset" -DBUILD_TESTING=OFF -DLQL_BUILD_DIRECT_PROBE=OFF
 cmake --build --preset "$preset"
 
 if [ ! -f "$version_header" ]; then
@@ -39,7 +40,11 @@ fi
 
 (
   cd "$dist_dir"
-  sha256sum "$(basename "$archive")" >"$(basename "$checksums")"
+  if [ "$checksum_mode" = "append" ]; then
+    sha256sum "$(basename "$archive")" >>"$(basename "$checksums")"
+  else
+    sha256sum "$(basename "$archive")" >"$(basename "$checksums")"
+  fi
 )
 
 printf 'package: wrote %s and %s\n' "$archive" "$checksums"

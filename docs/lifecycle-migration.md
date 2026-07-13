@@ -65,7 +65,9 @@ release documentation after the migration is complete.
 8. Add package generation, checksum manifest generation, privacy scans,
    relocatability checks, and release matrix. Initial host package, checksum,
    layout, runtime-path, privacy, and extracted-consumer verification are in
-   place; cross-target and Darwin matrix coverage remain.
+   place; `make release-matrix` now covers all Linux Bootlin targets and
+   Darwin when osxcross is available. Source/Lua release artifacts and final
+   `make release` remain.
 9. Make `prerelease` and `release` share the release pipeline, with `release`
    cleaning first.
 10. Remove this ledger or convert it into permanent lifecycle documentation once
