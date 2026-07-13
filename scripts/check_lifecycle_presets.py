@@ -32,6 +32,8 @@ REQUIRED_MAKE_TARGETS = {
     "deps-debug",
     "deps-release",
     "deps-cross",
+    "dependency-cache-check",
+    "dependency-cache-privacy-regression",
     "build",
     "build-debug",
     "build-release",
@@ -91,6 +93,8 @@ REQUIRED_SCRIPT_SURFACES = {
     "scripts/package-verify.sh",
     "scripts/print_release_version.sh",
     "scripts/check_source_manifest_exactness.sh",
+    "scripts/test_dependency_cache_config.sh",
+    "scripts/check_dependency_cache_privacy_regression.sh",
 }
 OLD_PHASE = "scanner"
 FORBIDDEN_PUBLIC_TERMS = {
@@ -174,6 +178,10 @@ def main() -> None:
         fail("base preset does not use cmake/cpkt-toolchain.cmake")
     if base_vars.get("LQL_TARGET_ID") != "x86_64-linux-gnu":
         fail("base preset does not default to x86_64-linux-gnu")
+
+    cmake_lists = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    if "include(LqlDependencyCache)" not in cmake_lists:
+        fail("CMake does not resolve CPKT_DEPENDENCY_CACHE through LqlDependencyCache")
 
     fuzz_vars = cache_vars(configure["fuzz"])
     if fuzz_vars.get("CMAKE_TOOLCHAIN_FILE") != "${sourceDir}/cmake/cpkt-aflpp-toolchain.cmake":

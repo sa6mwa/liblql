@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$root"
+
 target=${1:-x86_64-linux-gnu}
 project=liblql
 preset=${target}-release

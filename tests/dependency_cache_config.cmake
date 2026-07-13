@@ -1,0 +1,11 @@
+if(NOT DEFINED EXPECTED_CPKT_DEPENDENCY_CACHE)
+  message(FATAL_ERROR "EXPECTED_CPKT_DEPENDENCY_CACHE is required")
+endif()
+
+get_filename_component(LQL_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+include("${LQL_SOURCE_ROOT}/cmake/LqlDependencyCache.cmake")
+
+if(NOT CPKT_DEPENDENCY_CACHE STREQUAL EXPECTED_CPKT_DEPENDENCY_CACHE)
+  message(FATAL_ERROR
+    "dependency cache mismatch: got ${CPKT_DEPENDENCY_CACHE}, expected ${EXPECTED_CPKT_DEPENDENCY_CACHE}")
+endif()

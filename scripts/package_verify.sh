@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$root"
+
 project=liblql
 dist_dir=${LQL_DIST_DIR:-dist}
 target_arg=${1:-all}
@@ -21,9 +24,29 @@ manifest=$(find_manifest)
 version=$(basename "$manifest" | sed "s/^$project-//;s/-CHECKSUMS\$//")
 repo=$(pwd -P)
 home=${HOME:-}
+if [ -n "${CPKT_DEPENDENCY_CACHE:-}" ]; then
+  dependency_cache=$CPKT_DEPENDENCY_CACHE
+elif [ -n "${XDG_CACHE_HOME:-}" ]; then
+  dependency_cache=$XDG_CACHE_HOME/c.pkt.systems/deps
+elif [ -n "$home" ]; then
+  dependency_cache=$home/.cache/c.pkt.systems/deps
+else
+  dependency_cache=
+fi
+if [ -n "${CPKT_TOOLCHAIN_CACHE:-}" ]; then
+  toolchain_cache=$CPKT_TOOLCHAIN_CACHE
+elif [ -n "${XDG_CACHE_HOME:-}" ]; then
+  toolchain_cache=$XDG_CACHE_HOME/c.pkt.systems/toolchains
+elif [ -n "$home" ]; then
+  toolchain_cache=$home/.cache/c.pkt.systems/toolchains
+else
+  toolchain_cache=
+fi
 
 if grep -a -n -F "$repo" "$manifest" >/dev/null ||
   { [ -n "$home" ] && grep -a -n -F "$home" "$manifest" >/dev/null; } ||
+  { [ -n "$dependency_cache" ] && grep -a -n -F "$dependency_cache" "$manifest" >/dev/null; } ||
+  { [ -n "$toolchain_cache" ] && grep -a -n -F "$toolchain_cache" "$manifest" >/dev/null; } ||
   grep -a -n -E 'file://|/tmp/|/var/tmp/' "$manifest" >/dev/null; then
   printf 'package verify: local path leaked into checksum manifest: %s\n' \
     "$manifest" >&2
@@ -63,6 +86,18 @@ verify_privacy() {
     grep -R -a -n -F "$home" "$prefix" >&2
     exit 1
   fi
+  if [ -n "$dependency_cache" ] &&
+    grep -R -a -n -F "$dependency_cache" "$prefix" >/dev/null 2>&1; then
+    printf 'package verify: dependency cache path leaked into %s\n' "$archive" >&2
+    grep -R -a -n -F "$dependency_cache" "$prefix" >&2
+    exit 1
+  fi
+  if [ -n "$toolchain_cache" ] &&
+    grep -R -a -n -F "$toolchain_cache" "$prefix" >/dev/null 2>&1; then
+    printf 'package verify: toolchain cache path leaked into %s\n' "$archive" >&2
+    grep -R -a -n -F "$toolchain_cache" "$prefix" >&2
+    exit 1
+  fi
   if grep -R -a -n -E 'file://|/tmp/|/var/tmp/' "$prefix" >/dev/null 2>&1; then
     printf 'package verify: local URL or temp path leaked into %s\n' "$archive" >&2
     grep -R -a -n -E 'file://|/tmp/|/var/tmp/' "$prefix" >&2
@@ -83,6 +118,18 @@ verify_source_privacy() {
   if [ -n "$home" ] && grep -R -a -n -F "$home" "$prefix" >/dev/null 2>&1; then
     printf 'package verify: HOME path leaked into %s\n' "$archive" >&2
     grep -R -a -n -F "$home" "$prefix" >&2
+    exit 1
+  fi
+  if [ -n "$dependency_cache" ] &&
+    grep -R -a -n -F "$dependency_cache" "$prefix" >/dev/null 2>&1; then
+    printf 'package verify: dependency cache path leaked into %s\n' "$archive" >&2
+    grep -R -a -n -F "$dependency_cache" "$prefix" >&2
+    exit 1
+  fi
+  if [ -n "$toolchain_cache" ] &&
+    grep -R -a -n -F "$toolchain_cache" "$prefix" >/dev/null 2>&1; then
+    printf 'package verify: toolchain cache path leaked into %s\n' "$archive" >&2
+    grep -R -a -n -F "$toolchain_cache" "$prefix" >&2
     exit 1
   fi
   if grep -R -a -n -F "file://$repo" "$prefix" >/dev/null 2>&1; then
@@ -248,7 +295,10 @@ verify_source_archive() {
     RELEASE_MANIFEST \
     include/lql/lql.h \
     cmake/LqlVersion.cmake \
+    cmake/LqlDependencyCache.cmake \
     scripts/cpkt-toolchains.sh \
+    scripts/test_dependency_cache_config.sh \
+    scripts/check_dependency_cache_privacy_regression.sh \
     scripts/package-verify.sh \
     scripts/package_lua.sh \
     scripts/package_source.sh \
@@ -264,12 +314,17 @@ verify_source_archive() {
       exit 1
     fi
   done
-  if find "$prefix" \( -path '*/.git/*' -o -path '*/build/*' -o \
-      -path '*/dist/*' -o -path '*/vendor/lonejson/*' \) |
-    sed -n '1p' | grep . >/dev/null; then
+  if (
+    cd "$prefix"
+    find . \( -path './.git/*' -o -path './build/*' -o \
+      -path './dist/*' -o -path './vendor/lonejson/*' \)
+  ) | sed -n '1p' | grep . >/dev/null; then
     printf 'package verify: source archive contains generated or VCS state\n' >&2
-    find "$prefix" \( -path '*/.git/*' -o -path '*/build/*' -o \
-      -path '*/dist/*' -o -path '*/vendor/lonejson/*' \) >&2
+    (
+      cd "$prefix"
+      find . \( -path './.git/*' -o -path './build/*' -o \
+        -path './dist/*' -o -path './vendor/lonejson/*' \)
+    ) >&2
     exit 1
   fi
   source_version=$(sed -n '1p' "$prefix/VERSION")
@@ -352,12 +407,17 @@ verify_lua_source_archive() {
       exit 1
     fi
   done
-  if find "$prefix" \( -name '*.so' -o -name '*.dylib' -o -name '*.a' -o \
-      -path '*/build/*' -o -path '*/dist/*' -o -path '*/.git/*' \) |
-    sed -n '1p' | grep . >/dev/null; then
+  if (
+    cd "$prefix"
+    find . \( -name '*.so' -o -name '*.dylib' -o -name '*.a' -o \
+      -path './build/*' -o -path './dist/*' -o -path './.git/*' \)
+  ) | sed -n '1p' | grep . >/dev/null; then
     printf 'package verify: Lua source archive contains binary/generated/VCS state\n' >&2
-    find "$prefix" \( -name '*.so' -o -name '*.dylib' -o -name '*.a' -o \
-      -path '*/build/*' -o -path '*/dist/*' -o -path '*/.git/*' \) >&2
+    (
+      cd "$prefix"
+      find . \( -name '*.so' -o -name '*.dylib' -o -name '*.a' -o \
+        -path './build/*' -o -path './dist/*' -o -path './.git/*' \)
+    ) >&2
     exit 1
   fi
   lua_version=$(sed -n '1p' "$prefix/VERSION")
@@ -378,6 +438,8 @@ verify_lua_rockspec() {
   fi
   if grep -a -n -F "$(pwd -P)" "$rockspec" >/dev/null ||
     { [ -n "${HOME:-}" ] && grep -a -n -F "$HOME" "$rockspec" >/dev/null; } ||
+    { [ -n "$dependency_cache" ] && grep -a -n -F "$dependency_cache" "$rockspec" >/dev/null; } ||
+    { [ -n "$toolchain_cache" ] && grep -a -n -F "$toolchain_cache" "$rockspec" >/dev/null; } ||
     grep -a -n -E 'file://|/tmp/|/var/tmp/' "$rockspec" >/dev/null; then
     printf 'package verify: local path leaked into Lua rockspec: %s\n' "$rockspec" >&2
     exit 1
@@ -428,6 +490,8 @@ verify_lua_src_rock() {
   fi
   if grep -R -a -n -F "$(pwd -P)" "$extract_dir" >/dev/null ||
     { [ -n "${HOME:-}" ] && grep -R -a -n -F "$HOME" "$extract_dir" >/dev/null; } ||
+    { [ -n "$dependency_cache" ] && grep -R -a -n -F "$dependency_cache" "$extract_dir" >/dev/null; } ||
+    { [ -n "$toolchain_cache" ] && grep -R -a -n -F "$toolchain_cache" "$extract_dir" >/dev/null; } ||
     grep -R -a -n -E 'file://|/tmp/|/var/tmp/' "$extract_dir" >/dev/null; then
     printf 'package verify: local path leaked into Lua source rock: %s\n' "$rock" >&2
     exit 1

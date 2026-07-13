@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$root"
+
 project=liblql
 dist_dir=${LQL_DIST_DIR:-dist}
 targets=${LQL_RELEASE_TARGETS:-"x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-linux-musl armhf-linux-gnu armhf-linux-musl"}

@@ -25,6 +25,11 @@ release documentation after the migration is complete.
   runtime/link dependency, strict whitespace-tolerant NDJSON semantics, GCC
   C-vs-Go accepted-row parity at or above 1.0x, and live heap at or below
   256 KiB.
+- Dependency archives: current liblql has none.  CMake still resolves the
+  shared `CPKT_DEPENDENCY_CACHE` contract once so a future checksum-pinned
+  archive can be acquired through the lifecycle cache rather than a
+  project-local download path.  Bootlin and AFL++ remain separate
+  toolchain-cache concerns.
 
 ## Migration map
 
@@ -41,6 +46,7 @@ release documentation after the migration is complete.
 | no CLI | `clql` example/binary | thin `lql_stream_execute` adapter | `make clql-smoke` |
 | no Lua surface | Lua facade/source rock | Lua module parity with current expectations | `make lua-test`, Lua artifact verification |
 | no fuzz surface | AFL++ fuzz target and corpus | parser/stream robustness | `make fuzz-smoke` |
+| no dependency archive cache contract | shared `CPKT_DEPENDENCY_CACHE` resolution | self-contained build does not download archives; future dependencies have one cache boundary | `make dependency-cache-check`, `make dependency-cache-privacy-regression` |
 
 ## Open migration tasks
 

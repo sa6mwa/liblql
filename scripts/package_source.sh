@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$root"
+
 project=liblql
 dist_dir=${LQL_DIST_DIR:-dist}
 checksum_mode=${LQL_PACKAGE_CHECKSUM_MODE:-reset}

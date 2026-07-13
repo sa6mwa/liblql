@@ -1,4 +1,4 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -7,6 +7,8 @@ help:
 	  'make deps-cross    ensure all cross Bootlin GCC lifecycle tools' \
 	  'make deps          ensure cached Bootlin GCC and AFL++ lifecycle tools' \
 	  'make toolchain-check  run resolver syntax and unit checks' \
+	  'make dependency-cache-check  verify shared dependency-cache resolution' \
+	  'make dependency-cache-privacy-regression  prove release privacy rejects dependency-cache paths' \
 	  'make lifecycle-check  verify lifecycle preset/command contract' \
 	  'make target-tool-check  verify target inspection tool discovery' \
 	  'make build        build the debug lifecycle preset' \
@@ -80,7 +82,13 @@ toolchain-check:
 	@bash scripts/test-cpkt-toolchain-resolvers.sh
 	@bash scripts/test-cpkt-aflpp-resolver.sh
 
-lifecycle-check: toolchain-check
+dependency-cache-check:
+	@sh scripts/test_dependency_cache_config.sh
+
+dependency-cache-privacy-regression:
+	@sh scripts/check_dependency_cache_privacy_regression.sh
+
+lifecycle-check: toolchain-check dependency-cache-check
 	@python3 scripts/check_lifecycle_presets.py
 	@sh scripts/check_release_targets.sh
 
@@ -199,7 +207,7 @@ release:
 print-release-version:
 	@sh scripts/release_version.sh
 
-test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test lua-cli-smoke lua-artifact-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
+test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test lua-cli-smoke lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh

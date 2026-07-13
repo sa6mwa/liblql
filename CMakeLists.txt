@@ -42,6 +42,7 @@ if(NOT LQL_BUILD_STATIC AND NOT LQL_BUILD_SHARED)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(LqlDependencyCache)
 include(LqlVersion)
 
 configure_file(cmake/lql_version.h.in
