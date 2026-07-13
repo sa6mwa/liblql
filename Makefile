@@ -46,7 +46,7 @@ test-all: direct-reset direct-no-lonejson test valgrind asan scanner-parity-matr
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
 
-direct-no-lonejson: build-debug
+direct-no-lonejson: build-debug build-release
 	@sh scripts/check_no_lonejson_dependency.sh
 
 direct-probe:
