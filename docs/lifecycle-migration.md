@@ -36,6 +36,7 @@ release documentation after the migration is complete.
 | host compiler discovery | Bootlin resolver | GCC C89 warning-clean builds | resolver tests, CMake cache inspection |
 | scanner-specific Make targets | standard lifecycle Make surface | Direct reset, no-LoneJSON, parity, profile, live heap | `make test-all`, `make prerelease` |
 | no package surface | install-tree SDK metadata | static/shared liblql SDK | `make install-smoke` |
+| no target tool helper | `scripts/discover_target_tools.sh` | package verification uses configured target tools | `make target-tool-check` |
 | no release matrix | `release-matrix` and `release` | local release proof | checksum/privacy/relocatability gates |
 | no CLI | `clql` example/binary | thin `lql_stream_execute` adapter | `make clql-smoke` |
 | no Lua surface | Lua facade/source rock | Lua module parity with current expectations | `make lua-test`, Lua artifact verification |
@@ -56,7 +57,9 @@ release documentation after the migration is complete.
 6. Add install rules, CMake package config, pkg-config metadata, and extracted
    SDK consumer tests. Done for the install-tree smoke; release archive
    packaging and checksum verification remain.
-7. Add target-tool discovery for package generation and verification.
+7. Add target-tool discovery for package generation and verification. Done for
+   configured CMake cache values, compiler sibling tools, PATH fallback, and
+   target mismatch checks; package verification still needs to consume it.
 8. Add package generation, checksum manifest generation, privacy scans,
    relocatability checks, and release matrix.
 9. Make `prerelease` and `release` share the release pipeline, with `release`

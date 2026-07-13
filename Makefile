@@ -1,4 +1,4 @@
-.PHONY: help deps toolchain-check lifecycle-check build build-debug build-release test valgrind fuzz-smoke fuzz install-smoke clql-smoke test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
+.PHONY: help deps toolchain-check lifecycle-check target-tool-check build build-debug build-release test valgrind fuzz-smoke fuzz install-smoke clql-smoke test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap scanner-parity-smoke scanner-parity-matrix scanner-profile-hotspots format clean
 
 help:
 	@printf '%s\n' \
@@ -7,6 +7,7 @@ help:
 	  'make deps          ensure cached Bootlin GCC and AFL++ lifecycle tools' \
 	  'make toolchain-check  run resolver syntax and unit checks' \
 	  'make lifecycle-check  verify lifecycle preset/command contract' \
+	  'make target-tool-check  verify target inspection tool discovery' \
 	  'make build        build the debug lifecycle preset' \
 	  'make test          build and run the direct-stream test suite' \
 	  'make valgrind      run native Valgrind Memcheck gate' \
@@ -42,6 +43,10 @@ toolchain-check:
 lifecycle-check: toolchain-check
 	@python3 scripts/check_lifecycle_presets.py
 
+target-tool-check:
+	@python3 -m py_compile scripts/discover_target_tools.py
+	@sh scripts/test_discover_target_tools.sh
+
 build: build-debug
 
 build-debug:
@@ -74,7 +79,7 @@ install-smoke: build-release
 clql-smoke: build-release
 	@sh scripts/check_clql_smoke.sh
 
-test-all: lifecycle-check direct-reset direct-no-lonejson test valgrind fuzz-smoke install-smoke clql-smoke scanner-parity-matrix direct-callback-whitespace direct-live-heap
+test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test valgrind fuzz-smoke install-smoke clql-smoke scanner-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
