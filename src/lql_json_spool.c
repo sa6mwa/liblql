@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define LQL_JSON_SPOOL_IO_BUFFER_BYTES 32768u
+
 static void lql_json_spool_error(lql_error *error, lql_status status,
                                  const char *message) {
   if (error != NULL) {
@@ -117,7 +119,7 @@ size_t lql_json_spool_size(const lql_json_spool *spool) {
 lql_status lql_json_spool_write_to(const lql_json_spool *spool,
                                    lql_stream_writer_fn writer,
                                    void *writer_user, lql_error *error) {
-  unsigned char buffer[8192];
+  unsigned char buffer[LQL_JSON_SPOOL_IO_BUFFER_BYTES];
   size_t amount;
   lql_status status;
   if (spool == NULL || spool->memory == NULL || writer == NULL) {
@@ -151,7 +153,7 @@ lql_status lql_json_spool_write_slice(const lql_json_spool *spool,
                                       size_t offset, size_t len,
                                       lql_stream_writer_fn writer,
                                       void *writer_user, lql_error *error) {
-  unsigned char buffer[8192];
+  unsigned char buffer[LQL_JSON_SPOOL_IO_BUFFER_BYTES];
   lql_status status;
   if (spool == NULL || spool->memory == NULL || writer == NULL ||
       offset > spool->size || len > spool->size - offset) {
