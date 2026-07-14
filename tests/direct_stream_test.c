@@ -2,6 +2,9 @@
 
 #include <string.h>
 
+/* Historical semantic tests intentionally exercise the explicit spooled API. */
+#define lql_stream_execute lql_stream_execute_spooled
+
 typedef struct test_reader {
   const unsigned char *data;
   size_t len;
@@ -2852,6 +2855,126 @@ static int run_byte_limit(lql *ctx) {
   return 0;
 }
 
+#undef lql_stream_execute
+
+static int run_true_stream_contract(lql *ctx) {
+  static const char compact_input[] =
+      "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n";
+  static const char spaced_input[] = "{ \"status\" : \"open\" }\n";
+  static const char selected_output[] = "{\"status\":\"open\"}\n";
+  const char *paths[1];
+  lql_selector *selector;
+  lql_projection *projection;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+  test_decisions decisions;
+
+  selector = NULL;
+  projection = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)compact_input;
+  reader.len = sizeof(compact_input) - 1u;
+  reader.chunk_size = 1u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.range_writer = test_range_write;
+  request.range_user = &reader;
+  request.input_is_compact = 1;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = selector;
+  request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      reader.range_writes != 1u || writer.len != sizeof(selected_output) - 1u ||
+      memcmp(writer.data, selected_output, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)spaced_input;
+  reader.len = sizeof(spaced_input) - 1u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.range_user = &reader;
+  request.input_is_compact = 0;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+          LQL_STATUS_UNSUPPORTED ||
+      reader.offset != 0u || writer.len != 0u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)spaced_input;
+  reader.len = sizeof(spaced_input) - 1u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.range_user = &reader;
+  request.input_is_compact = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+          LQL_STATUS_UNSUPPORTED ||
+      reader.offset != reader.len || writer.len != 0u || reader.range_writes != 0u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  paths[0] = "/status";
+  if (ctx->projection_parse(ctx, paths, 1u, &projection, &error) !=
+      LQL_STATUS_OK) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)compact_input;
+  reader.len = sizeof(compact_input) - 1u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.range_user = &reader;
+  request.input_is_compact = 1;
+  request.projection = projection;
+  request.output_mode = LQL_STREAM_OUTPUT_PROJECTION;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+          LQL_STATUS_UNSUPPORTED ||
+      reader.offset != 0u || writer.len != 0u) {
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->projection_destroy(ctx, projection);
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)spaced_input;
+  reader.len = sizeof(spaced_input) - 1u;
+  memset(&decisions, 0, sizeof(decisions));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  request.on_decision = test_decide;
+  request.decision_user = &decisions;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      decisions.count != 1u || decisions.matches != 1u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 int main(void) {
   lql *ctx;
   lql_error error;
@@ -2875,7 +2998,7 @@ int main(void) {
       run_completed_record_before_root_array_error(ctx) ||
       run_output_modes_skip_scalar_roots(ctx) ||
       run_stop_and_root_array(ctx) || run_record_limit(ctx) ||
-      run_byte_limit(ctx)) {
+      run_byte_limit(ctx) || run_true_stream_contract(ctx)) {
     ctx->destroy(ctx);
     return match_all_status != 0 ? match_all_status : 1;
   }

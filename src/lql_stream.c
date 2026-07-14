@@ -50,8 +50,9 @@ lql_status lql_stream_value_write_to(const lql_stream_value *value,
   return LQL_STATUS_INVALID_ARGUMENT;
 }
 
-lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
-                              lql_stream_result *result, lql_error *error) {
+static lql_status lql_stream_execute_common(
+    lql *self, const lql_stream_request *request, lql_stream_result *result,
+    lql_error *error, int allow_spool) {
   lql_status status;
   int handled;
   if (result != NULL) {
@@ -103,12 +104,41 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
                   "combined output requires projection and mutation handles");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
+  if (!allow_spool &&
+      (request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
+       request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
+       request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION)) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "streaming projection and mutation require an incremental emitter");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  if (!allow_spool &&
+      (request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
+       request->on_value != NULL) &&
+      (!request->input_is_compact || request->range_writer == NULL)) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "streaming selected values require compact input and a source range writer");
+    return LQL_STATUS_UNSUPPORTED;
+  }
   handled = 0;
-  status = lql_stream_execute_flat_eq(self, request, result, error, &handled);
+  status = lql_stream_execute_flat_eq(self, request, result, error,
+                                      allow_spool, &handled);
   if (handled) {
     return status;
   }
   lql_set_error(error, LQL_STATUS_UNSUPPORTED,
                 "direct stream selector is not implemented by scanner");
   return LQL_STATUS_UNSUPPORTED;
+}
+
+lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
+                              lql_stream_result *result, lql_error *error) {
+  return lql_stream_execute_common(self, request, result, error, 0);
+}
+
+lql_status lql_stream_execute_spooled(lql *self,
+                                      const lql_stream_request *request,
+                                      lql_stream_result *result,
+                                      lql_error *error) {
+  return lql_stream_execute_common(self, request, result, error, 1);
 }

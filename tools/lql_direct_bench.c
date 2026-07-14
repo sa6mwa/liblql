@@ -630,7 +630,7 @@ static int run_once(FILE *file, lql *ctx, lql_selector *selector,
     request.mutation = mutation;
     request.output_mode = LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION;
   }
-  status = lql_stream_execute(ctx, &request, result, error);
+  status = lql_stream_execute_spooled(ctx, &request, result, error);
   if (temporary != NULL) {
     ctx->selector_destroy(ctx, temporary);
   }

@@ -274,7 +274,7 @@ int main(int argc, char **argv) {
     request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
   }
 
-  status = lql_stream_execute(ctx, &request, &result, &error);
+  status = lql_stream_execute_spooled(ctx, &request, &result, &error);
   ctx->selector_destroy(ctx, selector);
   ctx->destroy(ctx);
   if (input != stdin) {

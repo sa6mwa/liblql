@@ -25,7 +25,9 @@ performance claim with profiling and paired Go/C benchmarks.
 - ANSI C89, with GCC as the authoritative performance compiler.
 - GCC-only performance evidence. Do not run or maintain Clang comparison rows
   for this rewrite; upstream release toolchains are Bootlin GCC.
-- One public execution entry point: `lql_stream_execute`.
+- `lql_stream_execute` is the sole true-streaming execution entry point.
+  `lql_stream_execute_spooled` is an explicitly named compatibility API for
+  operations that still require a current-record materialization.
 - Strict NDJSON only. Root arrays are hard errors. Scalar roots are validated
   records and do not match a non-empty selector.
 - Input records may use any JSON-permitted whitespace around structural tokens;
@@ -35,11 +37,14 @@ performance claim with profiling and paired Go/C benchmarks.
 - Duplicate object keys are observed in source order.
 - The existing receiver API, selector AST, temporal behavior, output modes,
   limits, callback semantics, and Go v0.17.1 parity requirements remain in
-  force unless this document names a replacement.
+  force unless this document names a replacement. Projection and mutation
+  remain unavailable from the true-streaming API until they have incremental
+  emitters; callers needing their existing semantics must opt into the named
+  spooled API.
 - Live heap remains at or below 256 KiB, independent of total input, records,
-  matches, and repeated executions. A callback or semantic delayed-output path
-  may use one current-record spool with a bounded in-memory prefix and
-  file-backed spill.
+  matches, and repeated executions. The true-streaming API never materializes
+  a record or writes input to disk. The explicitly named spooled compatibility
+  API may retain one current record and spill it to a temporary file.
 - GCC Go/C speedup is at least 1.0x on every accepted row. Profile before
   optimizing; do not add caches or special cases based only on benchmark deltas.
 - `make direct-parity-smoke` is the fast executable GCC-only parity gate. It
@@ -63,9 +68,9 @@ and one resettable `lql_json_candidate` state for the current record.
 ```text
 reader → bounded byte buffer → strict JSON scanner
                                 ├─ selector observer
-                                ├─ compact payload emitter / spool
-                                ├─ projection or mutation state
-                                └─ record framing, limits, diagnostics
+                                ├─ caller-owned compact source-range replay
+                                ├─ record framing, limits, diagnostics
+                                └─ explicit spooled compatibility adapter
 ```
 
 The scanner is not a general DOM parser. It is a pull scanner with bounded
@@ -80,12 +85,14 @@ compiled program:
 1. Consume and validate the token.
 2. Update path/container and selector state when the token can affect a
    predicate.
-3. If payload capture remains enabled, emit the token's compact form to the
-   current spool or output sink.
+3. At the completed root, finalize selection and invoke decisions. Selected
+   output and value callbacks replay a validated compact source range supplied
+   by the caller; no record bytes are retained by `lql_stream_execute`.
 4. Once a monotonic selector state proves a matched-only record cannot match,
-   disable capture and use structural skip routines for irrelevant descendants.
-5. At the completed root, finalize selection, invoke decision/value callbacks,
-   emit selected output when requested, reset all candidate state, and continue.
+   use structural skip routines for irrelevant descendants.
+5. Reset candidate state and continue. Projection, mutation, and compacting
+   non-compact selected records require either a future incremental emitter or
+   the explicitly requested spooled compatibility API.
 
 This mirrors the Go reference's fast object path. It is not a callback adapter
 around a generic JSON transform engine and it must not reintroduce Candidate
@@ -102,8 +109,9 @@ The implementation is split by stable responsibility:
 - `lql_json_emit`: compact JSON escaping and punctuation emission to an
   internal sink. It is used directly by the scanner; there is no event visitor
   boundary in the hot path.
-- `lql_json_spool`: one resettable callback/delayed-output payload container.
-  It retains only a bounded memory prefix and spills larger current records.
+- `lql_json_spool`: private implementation of the explicitly named
+  `lql_stream_execute_spooled` compatibility API. It is never entered from
+  `lql_stream_execute`.
 - `lql_stream`: selector compilation, candidate decisions, callbacks, limits,
   projection/mutation composition, and error translation.
 
@@ -112,20 +120,20 @@ cutover.
 
 ## Capture Policy
 
-Payload capture is explicit and only enabled for selected output, a value
-callback, or a semantic delayed-output operation.
+`lql_stream_execute` has no payload capture policy. Decision-only execution
+reads and validates through bounded scanner state. Selected output and value
+callbacks require caller-declared compact input and a source-range writer; the
+scanner validates the record first, then replays that caller-owned range.
 
-For matched-only object selection, capture begins conservatively. The scanner
-disables it as soon as the compiled selector can no longer match the current
-object root. It continues strict structural validation without emitting or
-retaining irrelevant bytes. A matched record retains a compact current-record
-payload until its callback returns; an unmatched record is released before the
-next record.
+`lql_stream_execute_spooled` has explicit payload capture for selected output,
+value callbacks, or semantic delayed-output operations. It may spill records,
+so its API name and documentation must remain precise.
 
 The first proof path is one direct top-level string equality selector with a
-value callback. It must cover dense and sparse records, fragmented reads,
-escaped strings, a later malformed record, callback stop/error, and the 100
-MiB spill case.
+value callback and caller-owned compact range. It must cover dense and sparse
+records, fragmented reads, escaped strings, a later malformed record, and
+callback stop/error. The spooled compatibility proof separately covers its
+100 MiB spill behavior.
 
 ## Cutover Sequence
 
@@ -139,10 +147,12 @@ MiB spill case.
 3. Move decision-only direct selectors onto the scanner, then add path-aware
    selector observation for nested, wildcard, recursive, numeric, and temporal
    terms.
-4. Move selected output and callbacks fully onto scanner-owned compact capture;
-   delete the LoneJSON rewriter, event tape, candidate stream, and spool paths.
-5. Port projection and mutation onto scanner-owned emit/spool primitives while
+4. Move selected output and callbacks onto validated caller-owned compact
+   source ranges; delete the LoneJSON rewriter, event tape, and candidate
+   stream paths.
+5. Port projection and mutation onto scanner-owned incremental emitters while
    preserving original-record selection and projection-before-mutation order.
+   Until then, retain them only through the explicitly named spooled API.
 6. Remove LoneJSON includes, CMake targets/linkage, tests, vendored delivery
    assumptions, and all `lql_lonejson_*` helpers. Verify the installed static
    and shared liblql link no LoneJSON SONAME or archive.
@@ -175,8 +185,9 @@ The required proof is cumulative:
 - GCC focused benchmark gate for every accepted row, then the accepted-row
   matrix;
 - Callgrind or equivalent leaf attribution for any hot-path optimization;
-- Massif live-heap gate for decision, callback capture, projection, mutation,
-  sparse matches, 100 MiB records, and repeated execution;
+- Massif live-heap gate for decision, source-range callbacks, sparse matches,
+  100 MiB records, and repeated execution. Spooling is verified separately as
+  an explicitly materialized compatibility behavior;
 - `readelf` or platform equivalent proving liblql has no LoneJSON dependency.
 
 Selected-record writer output is not currently a paired Go/C benchmark row.

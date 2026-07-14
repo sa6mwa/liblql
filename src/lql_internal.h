@@ -220,6 +220,6 @@ LQL_INTERNAL_SYMBOL void lql_stream_program_destroy(lql *self,
                                                     lql_selector *selector);
 LQL_INTERNAL_SYMBOL lql_status lql_stream_execute_flat_eq(
     lql *self, const lql_stream_request *request, lql_stream_result *result,
-    lql_error *error, int *out_handled);
+    lql_error *error, int allow_spool, int *out_handled);
 
 #endif

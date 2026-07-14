@@ -68,10 +68,10 @@ typedef lql_status (*lql_stream_writer_fn)(void *user, const void *data,
                                            size_t len, lql_error *error);
 
 /**
- * Writes a source-backed byte range through `writer`.  This optional adapter is
- * used only when the executor can prove the source range is already
- * compact-JSON equivalent; otherwise values use the normal compact capture
- * path.
+ * Writes an immutable, caller-owned source byte range through `writer`.
+ * `lql_stream_execute` uses this adapter to deliver selected compact records
+ * without retaining them. The adapter must keep the source available until
+ * the reader has returned EOF or the execution call has returned.
  */
 typedef lql_status (*lql_stream_range_writer_fn)(
     void *user, size_t offset, size_t len, lql_stream_writer_fn writer,
@@ -108,7 +108,12 @@ typedef struct lql_stream_decision {
 typedef lql_stream_callback_result (*lql_stream_decision_fn)(
     void *user, const lql_stream_decision *decision, lql_error *error);
 
-/** Receives one completed matched record. The value is callback-scoped. */
+/**
+ * Receives one completed matched record. The value is callback-scoped.
+ * With `lql_stream_execute`, values are caller-owned compact source ranges.
+ * `lql_stream_execute_spooled` may instead retain a compact record and spill
+ * it to a temporary file.
+ */
 typedef lql_stream_callback_result (*lql_stream_value_fn)(
     void *user, const lql_stream_value *value, lql_error *error);
 
@@ -123,7 +128,7 @@ typedef struct lql_stream_request {
   void *reader_user;
   lql_stream_range_writer_fn range_writer;
   void *range_user;
-  /* Non-zero only when the input records are already compact JSON. */
+  /* Caller assertion that input records are compact; liblql verifies each one. */
   int input_is_compact;
   lql_stream_writer_fn writer;
   void *writer_user;
@@ -322,11 +327,26 @@ void lql_error_init(lql_error *error);
 const char *lql_status_string(lql_status status);
 
 /**
- * Executes strict NDJSON through liblql's sole stream engine. Root arrays are
- * rejected. Invalid arguments clear `result` before this function returns.
+ * Executes strict NDJSON with real producer-to-consumer streaming. Root arrays
+ * are rejected. Decision-only execution never retains a record. Selected
+ * output and value callbacks require `input_is_compact` plus `range_writer`,
+ * so liblql can replay caller-owned source ranges only after validation.
+ * Projection and mutation output return LQL_STATUS_UNSUPPORTED until they have
+ * an incremental emitter. Invalid arguments clear `result` before return.
  */
 lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
                               lql_stream_result *result, lql_error *error);
+
+/**
+ * Executes strict NDJSON with materialized record handling. This explicit
+ * compatibility API may retain one compact record and spill it to a temporary
+ * file for selected output, callbacks, projection, or mutation. Do not use it
+ * for sensitive inputs or where end-to-end streaming is required.
+ */
+lql_status lql_stream_execute_spooled(lql *self,
+                                      const lql_stream_request *request,
+                                      lql_stream_result *result,
+                                      lql_error *error);
 
 /** Returns the compact JSON size of one callback-scoped value. */
 size_t lql_stream_value_size(const lql_stream_value *value);

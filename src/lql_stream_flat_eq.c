@@ -745,6 +745,34 @@ static lql_status lql_flat_eq_emit(lql_flat_eq_state *state,
   return status;
 }
 
+static lql_status lql_flat_eq_emit_range(lql_flat_eq_state *state,
+                                         size_t source_offset,
+                                         size_t source_len,
+                                         lql_error *error) {
+  lql_status status;
+  static const char newline[] = "\n";
+  if (state == NULL || state->request == NULL ||
+      state->request->range_writer == NULL || state->writer == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "streaming selected record range is unavailable");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  status = state->request->range_writer(
+      state->request->range_user, source_offset, source_len, state->writer,
+      state->writer_user, error);
+  if (status != LQL_STATUS_OK) {
+    if (error != NULL && error->code == LQL_STATUS_OK)
+      lql_set_error(error, status, "stream range writer failed");
+    return status;
+  }
+  status = state->writer(state->writer_user, newline, sizeof(newline) - 1u,
+                         error);
+  if (status != LQL_STATUS_OK && error != NULL &&
+      error->code == LQL_STATUS_OK)
+    lql_set_error(error, status, "stream writer failed");
+  return status;
+}
+
 static lql_status lql_flat_eq_write(lql_flat_eq_state *state, const void *data,
                                     size_t len, lql_error *error) {
   lql_status status;
@@ -2249,10 +2277,11 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
   }
   if (matched && state->request->on_value != NULL) {
     if (spool == NULL && (!source_compact ||
+                          !state->request->input_is_compact ||
                           state->request->range_writer == NULL)) {
-      lql_set_error(error, LQL_STATUS_CALLBACK_ERROR,
-                    "matched value capture is unavailable");
-      return LQL_STATUS_CALLBACK_ERROR;
+      lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                    "streaming matched value range is unavailable");
+      return LQL_STATUS_UNSUPPORTED;
     }
     memset(&value, 0, sizeof(value));
     if (source_compact && state->request->range_writer != NULL) {
@@ -2283,11 +2312,16 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
   if (state->request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD &&
       (matched || !state->request->matched_only)) {
     if (spool == NULL) {
-      lql_set_error(error, LQL_STATUS_CALLBACK_ERROR,
-                    "selected record capture is unavailable");
-      return LQL_STATUS_CALLBACK_ERROR;
+      if (!source_compact || !state->request->input_is_compact ||
+          state->request->range_writer == NULL) {
+        lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                      "streaming selected record range is unavailable");
+        return LQL_STATUS_UNSUPPORTED;
+      }
+      status = lql_flat_eq_emit_range(state, source_offset, source_len, error);
+    } else {
+      status = lql_flat_eq_emit(state, spool, error);
     }
-    status = lql_flat_eq_emit(state, spool, error);
     if (status != LQL_STATUS_OK) {
       return status;
     }
@@ -2440,7 +2474,8 @@ static int lql_flat_eq_projection_append(lql_flat_eq_program *program,
 lql_status lql_stream_execute_flat_eq(lql *self,
                                       const lql_stream_request *request,
                                       lql_stream_result *result,
-                                      lql_error *error, int *out_handled) {
+                                      lql_error *error, int allow_spool,
+                                      int *out_handled) {
   lql_json_flat_eq_request scan_request;
   lql_json_spool spool;
   lql_flat_eq_state state;
@@ -2489,15 +2524,14 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   program.stop_hit_mask = lql_flat_eq_stop_mask(&program, request->selector);
   program.stop_matching_on_hit = program.stop_hit_mask != 0ul;
   *out_handled = 1;
-  range_only_value = request->on_value != NULL &&
-                     request->range_writer != NULL &&
-                     request->input_is_compact &&
-                     request->output_mode == LQL_STREAM_OUTPUT_DECISION_ONLY;
-  capture = (request->on_value != NULL && !range_only_value) ||
-            request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
-            request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
-            request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
-            request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION;
+  range_only_value = !allow_spool && request->on_value != NULL &&
+                     request->range_writer != NULL && request->input_is_compact;
+  capture = allow_spool &&
+            ((request->on_value != NULL && !range_only_value) ||
+             request->output_mode == LQL_STREAM_OUTPUT_SELECTED_RECORD ||
+             request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
+             request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
+             request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION);
   memset(&spool, 0, sizeof(spool));
   if (capture) {
     status = lql_json_spool_init(&spool, error);
