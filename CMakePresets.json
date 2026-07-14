@@ -112,7 +112,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "LQL_DIST_DIR": "${sourceDir}/dist",
-        "LQL_TARGET_ID": "arm64-apple-darwin"
+        "LQL_TARGET_ID": "arm64-apple-darwin",
+        "LQL_BUILD_DIRECT_PROBE": "OFF"
       }
     }
   ],

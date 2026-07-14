@@ -207,6 +207,8 @@ def main() -> None:
         fail("arm64 Darwin release preset does not set LQL_TARGET_ID=arm64-apple-darwin")
     if darwin_vars.get("LQL_DIST_DIR") != "${sourceDir}/dist":
         fail("arm64 Darwin release preset does not set LQL_DIST_DIR=${sourceDir}/dist")
+    if darwin_vars.get("LQL_BUILD_DIRECT_PROBE") != "OFF":
+        fail("arm64 Darwin release preset does not disable the host-only direct probe")
 
     print("lifecycle preset check passed")
 
