@@ -1,16 +1,18 @@
 # Superseded: LoneJSON-Backed Direct Execution Specification
 
-This document records the rejected LoneJSON-backed design. The governing v0
-architecture is now
-[`liblql-self-contained-execution-spec.md`](liblql-self-contained-execution-spec.md).
+> **Archived design record — do not implement from this document.** Its
+> LoneJSON runtime dependency, single-entry-point contract, and spool rules are
+> rejected. The governing v0 architecture is
+> [`liblql-self-contained-execution-spec.md`](liblql-self-contained-execution-spec.md),
+> and the installed header is the API authority.
 
-# Historical liblql Direct Execution Rewrite Specification
+## Historical liblql Direct Execution Rewrite Specification
 
-## Authority And Status
+## Historical Authority And Status
 
-This is the governing implementation specification. It supersedes every
-previous Candidate Run, candidate-transform, hybrid, port, parity, and
-benchmark document.
+At the time of writing, this superseded every earlier Candidate Run,
+candidate-transform, hybrid, port, parity, and benchmark document. It no
+longer governs the repository.
 
 The repository is deliberately at a deletion checkpoint. Only the allocator,
 selector AST/parser, temporal support, vendored LoneJSON basics, public header
@@ -139,14 +141,15 @@ observer families, predicate flattening, hit indexes, and path execution
 caches must not be reintroduced as the old evaluator. The new compiled program
 is derived afresh from the AST and is owned by the new executor.
 
-## Public Receiver Contract
+## Historical Public Receiver Contract (Rejected)
 
-The replacement public C surface is receiver-based and has one stream engine.
-The exact declarations belong in `include/lql/lql.h`, but this contract is
-mandatory:
+The rejected public surface was receiver-based and had one stream engine. The
+exact declarations now belong in `include/lql/lql.h`; the historical contract
+below is retained only to explain the abandoned design:
 
 - `lql_stream_execute(lql *, const lql_stream_request *,
-  lql_stream_result *, lql_error *)` is the only execution entry point;
+  lql_stream_result *, lql_error *)` was intended as the only execution entry
+  point;
 - a request accepts one reader callback, optional writer callback, compiled
   selector/projection/mutation handles, explicit output mode, matched-only
   policy, limits, and optional decision/value callbacks;

@@ -9,9 +9,9 @@ runtime.
 
 The previous LoneJSON-backed execution architecture has been removed. This
 branch is rebuilding direct execution around one scanner state that performs
-strict NDJSON framing, JSON validation, selector observation, compact payload
-emission, projection, and mutation without a parser/writer event boundary in
-the hot path. The governing contract and completion gates are in
+strict NDJSON framing, JSON validation, selector observation, and compact
+emission without a parser/writer event boundary in the hot path. The governing
+contract and completion gates are in
 [`docs/liblql-self-contained-execution-spec.md`](docs/liblql-self-contained-execution-spec.md).
 
 Streaming inputs are strict NDJSON. Root arrays are hard errors and are never
@@ -22,6 +22,24 @@ The implementation must prove Go behavioral parity and at least 1.0x GCC C/Go
 performance on every accepted benchmark row. Live heap, not RSS, is the primary
 embedded-memory invariant and must remain at or below 256 KiB, including the
 100 MiB current-record gate.
+
+## Execution Contracts
+
+`lql_stream_execute` is the public true-streaming API. It validates arbitrary
+whitespace-tolerant NDJSON with bounded internal state. Decision callbacks work
+with any valid input. Selected-record output and value callbacks require the
+caller to provide compact input and a `range_writer` that can replay the
+validated source range. Missing compact-source configuration returns
+`LQL_STATUS_UNSUPPORTED` before consuming input; a false compact-input
+assertion fails after validating that record and emits none of it. Projection
+and mutation output also return `LQL_STATUS_UNSUPPORTED` until they have
+incremental emitters.
+
+`lql_stream_execute_spooled` is a separately named compatibility API. It may
+materialize one normalized record and spill it to a temporary file for selected
+output, callbacks, projection, or mutation. Use it only when that local disk
+side effect is acceptable. `clql` and the Lua selected-output facade use this
+compatibility API to retain their whitespace-normalizing behavior.
 
 ## Lifecycle Surface
 
@@ -60,4 +78,6 @@ make lua-artifact-smoke
 ```
 
 The installed Lua CLI is `lql.lua`; it mirrors the supported `clql` selector
-workflow and streams file/stdin input through liblql.
+workflow. Its selected-output workflow uses the explicitly spooled liblql API
+so it can normalize whitespace-tolerant input; it can therefore spill the
+current record to a temporary file.

@@ -32,6 +32,9 @@ static void usage(FILE *file) {
         file);
   fputs("records to stdout, one JSON value per line. Root arrays are errors.\n",
         file);
+  fputs("Selected output uses liblql's explicitly spooled compatibility path\n",
+        file);
+  fputs("and may spill the current record to a temporary file.\n", file);
 }
 
 static lql_status clql_read(void *user, unsigned char *buffer, size_t capacity,

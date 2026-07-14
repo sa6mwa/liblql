@@ -17,6 +17,7 @@ fi
 
 "$clql" --help >"$tmp.out"
 grep 'usage: clql' "$tmp.out" >/dev/null
+grep 'explicitly spooled compatibility path' "$tmp.out" >/dev/null
 
 "$clql" --version >"$tmp.out"
 grep '^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$' "$tmp.out" >/dev/null
@@ -58,4 +59,4 @@ then
 fi
 grep 'JSON' "$tmp.err" >/dev/null
 
-printf 'clql smoke: selected output, count, stdin error, help, and version passed\n'
+printf 'clql smoke: selected output, count, stdin error, spill help, and version passed\n'

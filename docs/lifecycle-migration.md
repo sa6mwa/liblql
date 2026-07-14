@@ -16,7 +16,11 @@ release documentation after the migration is complete.
 - Library artifacts: ship both static and shared liblql SDK artifacts.
 - Consumer metadata: ship both CMake package config and pkg-config metadata.
 - CLI/examples: restore examples and `clql`, targeting near parity with the Go
-  LQL CLI while keeping `clql` as a thin adapter over `lql_stream_execute`.
+  LQL CLI while keeping `clql` as a thin adapter over the public liblql stream
+  APIs. The current CLI and Lua workflows invoke the explicitly named
+  `lql_stream_execute_spooled` API so selected output can normalize arbitrary
+  whitespace; decision-only library callers should use
+  `lql_stream_execute` directly.
 - Lua: restore the Lua facade and Lua release artifacts according to the
   lifecycle Lua contract.
 - Fuzzing: remove ASan/libFuzzer-style lifecycle gates in favor of AFL++ GCC
@@ -43,7 +47,7 @@ release documentation after the migration is complete.
 | no package surface | host binary SDK archive | static/shared liblql SDK | `make package-verify` |
 | no target tool helper | `scripts/discover_target_tools.sh` | package verification uses configured target tools | `make target-tool-check` |
 | no release matrix | `release-matrix` and `release` | local release proof | checksum/privacy/relocatability gates |
-| no CLI | `clql` example/binary | thin `lql_stream_execute` adapter | `make clql-smoke` |
+| no CLI | `clql` example/binary | thin public stream adapter; selected output is explicitly spooled | `make clql-smoke` |
 | no Lua surface | Lua facade/source rock | Lua module parity with current expectations | `make lua-test`, Lua artifact verification |
 | no fuzz surface | AFL++ fuzz target and corpus | parser/stream robustness | `make fuzz-smoke` |
 | no dependency archive cache contract | shared `CPKT_DEPENDENCY_CACHE` resolution | self-contained build does not download archives; future dependencies have one cache boundary | `make dependency-cache-check`, `make dependency-cache-privacy-regression` |

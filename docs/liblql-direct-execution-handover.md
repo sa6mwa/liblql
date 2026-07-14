@@ -1,5 +1,9 @@
 # Historical LoneJSON-Backed Direct Execution Handover
 
+> **Archived handover — do not implement or package from this document.** In
+> particular, its LoneJSON delivery boundary and one-entry-point direction are
+> rejected by the active design.
+
 This handover applies only to the rejected LoneJSON-backed design. The active
 architecture is
 [`liblql-self-contained-execution-spec.md`](liblql-self-contained-execution-spec.md).

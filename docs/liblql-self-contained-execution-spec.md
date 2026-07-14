@@ -115,8 +115,9 @@ The implementation is split by stable responsibility:
 - `lql_stream`: selector compilation, candidate decisions, callbacks, limits,
   projection/mutation composition, and error translation.
 
-All components are private. The public receiver API is unchanged during the
-cutover.
+All components are private. The installed public header is the API authority;
+it documents the separate true-streaming and explicitly spooled execution
+contracts.
 
 ## Capture Policy
 

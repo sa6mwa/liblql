@@ -18,6 +18,8 @@ local function usage(file)
   file:write("  -i/--inline, -w/--write, -F/--enable-file-mutations.\n\n")
   file:write("Reads strict NDJSON from file or stdin and writes compact matching\n")
   file:write("records to stdout, one JSON value per line. Root arrays are errors.\n")
+  file:write("Selected output uses liblql's explicitly spooled compatibility path\n")
+  file:write("and may spill the current record to a temporary file.\n")
 end
 
 local function exists_file(path)
