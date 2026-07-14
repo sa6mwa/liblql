@@ -9,7 +9,8 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/cpkt-toolchain.cmake",
-        "LQL_TARGET_ID": "x86_64-linux-gnu"
+        "LQL_TARGET_ID": "x86_64-linux-gnu",
+        "LQL_CLQL_STATIC": "OFF"
       }
     },
     {

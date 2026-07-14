@@ -29,6 +29,7 @@ endfunction()
 option(LQL_BUILD_STATIC "Build static liblql" ON)
 option(LQL_BUILD_SHARED "Build shared liblql" ON)
 option(LQL_BUILD_BINARY "Build clql command-line tool" ON)
+option(LQL_CLQL_STATIC "Build clql as a fully static Linux executable" OFF)
 option(LQL_BUILD_DIRECT_PROBE "Build the direct-execution architecture probe" ON)
 option(LQL_BUILD_FUZZERS "Build AFL++ fuzz targets" OFF)
 option(LQL_BUILD_LUA "Build Lua 5.5 facade module" OFF)
@@ -39,6 +40,9 @@ set(LQL_DIST_DIR "dist" CACHE PATH "Release artifact output directory")
 
 if(NOT LQL_BUILD_STATIC AND NOT LQL_BUILD_SHARED)
   message(FATAL_ERROR "Enable LQL_BUILD_STATIC or LQL_BUILD_SHARED")
+endif()
+if(LQL_CLQL_STATIC AND NOT LQL_BUILD_STATIC)
+  message(FATAL_ERROR "LQL_CLQL_STATIC requires LQL_BUILD_STATIC")
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -137,6 +141,9 @@ endif()
 if(LQL_BUILD_BINARY)
   add_executable(clql tools/clql.c)
   target_link_libraries(clql PRIVATE ${LQL_INTERNAL_LIBRARY})
+  if(LQL_CLQL_STATIC AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(clql PRIVATE -static)
+  endif()
   lql_configure_c89_target(clql)
 endif()
 
@@ -208,10 +215,6 @@ if(LQL_INSTALL)
     install(TARGETS lql_shared
             EXPORT liblqlTargets
             LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-  endif()
-  if(LQL_BUILD_BINARY)
-    install(TARGETS clql
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
   endif()
   install(EXPORT liblqlTargets

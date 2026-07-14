@@ -1,4 +1,4 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -31,7 +31,8 @@ help:
 	  'make fuzz          run the standard bounded AFL++ smoke gate' \
 	  'make install-smoke install SDK and build CMake/pkg-config consumers' \
 	  'make clql-smoke    build clql and run CLI smoke tests' \
-	  'make package       build host binary SDK and checksum manifest' \
+	  'make package       build host liblql SDK and checksum manifest' \
+	  'make package-clql  build host static clql runtime archive and append checksum' \
 	  'make package-source build source archive and append checksum manifest' \
 	  'make package-source-smoke verify source archive from checksum manifest' \
 	  'make source-manifest-exactness verify source archive payload matches RELEASE_MANIFEST' \
@@ -171,6 +172,9 @@ clql-smoke: build-release
 package:
 	@sh scripts/package.sh x86_64-linux-gnu
 
+package-clql: package
+	@LQL_PACKAGE_CHECKSUM_MODE=append sh scripts/package_clql.sh x86_64-linux-gnu
+
 package-source:
 	@sh scripts/stage_release_sources.sh
 
@@ -183,7 +187,7 @@ source-manifest-exactness: package-source
 package-checksums:
 	@sh scripts/package-verify.sh checksums
 
-package-verify: package
+package-verify: package-clql
 	@sh scripts/package-verify.sh all
 
 verify-release-archives:

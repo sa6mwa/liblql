@@ -60,7 +60,8 @@ fi
 
 listed=$(awk '{print $2}' "$manifest" | sort)
 release_artifacts=$(find "$dist_dir" -maxdepth 1 -type f \
-  \( -name "$project-*.tar.gz" -o -name "$project-*-1.rockspec" -o \
+  \( -name "$project-*.tar.gz" -o -name "clql-*.tar.gz" -o \
+     -name "$project-*-1.rockspec" -o \
      -name "$project-*-1.src.rock" \) -printf '%f\n' | sort)
 if [ "$listed" != "$release_artifacts" ]; then
   printf 'package verify: checksum manifest does not match release artifacts\n' >&2
@@ -74,6 +75,7 @@ mkdir -p "$work/extract"
 verify_privacy() {
   archive=$1
   prefix=$2
+  allow_runtime_temp=${3:-0}
   repo=$(pwd -P)
   home=${HOME:-}
   if grep -R -a -n -F "$repo" "$prefix" >/dev/null 2>&1; then
@@ -97,6 +99,15 @@ verify_privacy() {
     printf 'package verify: toolchain cache path leaked into %s\n' "$archive" >&2
     grep -R -a -n -F "$toolchain_cache" "$prefix" >&2
     exit 1
+  fi
+  if [ "$allow_runtime_temp" = 1 ]; then
+    if grep -a -n -E 'file://' "$prefix/bin/clql" >/dev/null 2>&1 ||
+      grep -R -a -n -E 'file://|/tmp/|/var/tmp/' "$prefix/share" \
+        >/dev/null 2>&1; then
+      printf 'package verify: local URL or temp path leaked into %s\n' "$archive" >&2
+      exit 1
+    fi
+    return
   fi
   if grep -R -a -n -E 'file://|/tmp/|/var/tmp/' "$prefix" >/dev/null 2>&1; then
     printf 'package verify: local URL or temp path leaked into %s\n' "$archive" >&2
@@ -154,7 +165,7 @@ verify_linux_runtime_paths() {
     printf 'package verify: missing readelf for %s\n' "$target" >&2
     exit 1
   fi
-  for elf in "$prefix/lib/liblql.so.0" "$prefix/bin/clql"; do
+  for elf in "$prefix/lib/liblql.so.0"; do
     if "$readelf_tool" -d "$elf" | grep -E 'RPATH|RUNPATH' >/dev/null 2>&1; then
       if "$readelf_tool" -d "$elf" | grep -E 'RPATH|RUNPATH' |
         grep -v '\$ORIGIN' >/dev/null 2>&1; then
@@ -176,7 +187,7 @@ verify_darwin_runtime_paths() {
     printf 'package verify: missing otool for %s\n' "$target" >&2
     exit 1
   fi
-  for macho in "$prefix/lib/liblql.0.dylib" "$prefix/bin/clql"; do
+  for macho in "$prefix/lib/liblql.0.dylib"; do
     if "$otool" -L "$macho" |
       grep -E "$HOME|$(pwd -P)|/tmp/|/var/tmp/|/usr/local/" >/dev/null 2>&1; then
       printf 'package verify: non-relocatable Darwin dependency in %s\n' "$macho" >&2
@@ -218,7 +229,6 @@ verify_payload() {
     lib/liblql.a \
     lib/cmake/liblql/liblqlConfig.cmake \
     lib/pkgconfig/liblql.pc \
-    bin/clql \
     share/doc/liblql/LICENSE \
     share/doc/liblql/README.md
   do
@@ -227,6 +237,12 @@ verify_payload() {
       exit 1
     fi
   done
+
+  if [ -e "$prefix/bin" ]; then
+    printf 'package verify: liblql SDK must not contain executables: %s\n' \
+      "$target" >&2
+    exit 1
+  fi
 
   case "$target" in
     *-darwin)
@@ -266,6 +282,101 @@ verify_payload() {
   printf 'package verify: verified %s\n' "$archive"
 }
 
+verify_linux_clql() {
+  target=$1
+  binary=$2
+  tools=$work/tools-clql-$target.env
+  scripts/discover_target_tools.sh "build/$target-release" "$target" >"$tools"
+  readelf_tool=$(sed -n 's/^READELF=//p' "$tools")
+  if [ -z "$readelf_tool" ] || [ ! -x "$readelf_tool" ]; then
+    printf 'package verify: missing readelf for clql %s\n' "$target" >&2
+    exit 1
+  fi
+  if "$readelf_tool" -d "$binary" 2>/dev/null |
+    grep -E 'NEEDED|RPATH|RUNPATH' >/dev/null; then
+    printf 'package verify: Linux clql is not fully static: %s\n' "$binary" >&2
+    "$readelf_tool" -d "$binary" >&2 || true
+    exit 1
+  fi
+}
+
+verify_darwin_clql() {
+  target=$1
+  binary=$2
+  tools=$work/tools-clql-$target.env
+  scripts/discover_target_tools.sh "build/$target-release" "$target" >"$tools"
+  otool=$(sed -n 's/^OTOOL=//p' "$tools")
+  if [ -z "$otool" ] || [ ! -x "$otool" ]; then
+    printf 'package verify: missing otool for clql %s\n' "$target" >&2
+    exit 1
+  fi
+  if "$otool" -L "$binary" | sed '1d' |
+    grep -v -E '^[[:space:]]+(/usr/lib/|/System/Library/)' |
+    grep . >/dev/null 2>&1; then
+    printf 'package verify: Darwin clql has a non-system dependency: %s\n' \
+      "$binary" >&2
+    "$otool" -L "$binary" >&2
+    exit 1
+  fi
+}
+
+verify_clql_payload() {
+  target=$1
+  archive=$dist_dir/clql-$version-$target.tar.gz
+  root=clql-$version-$target
+  extract_dir=$work/extract/clql-$target
+  prefix=$extract_dir/$root
+  binary=$prefix/bin/clql
+
+  if [ ! -f "$archive" ]; then
+    printf 'package verify: missing clql archive: %s\n' "$archive" >&2
+    exit 1
+  fi
+  mkdir -p "$extract_dir"
+  tar -xzf "$archive" -C "$extract_dir"
+  roots=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+  if [ "$roots" != "$root" ]; then
+    printf 'package verify: clql archive root mismatch: expected %s got %s\n' \
+      "$root" "$roots" >&2
+    exit 1
+  fi
+  for path in bin/clql share/doc/clql/LICENSE share/doc/clql/README.md; do
+    if [ ! -e "$prefix/$path" ]; then
+      printf 'package verify: missing clql payload path: %s in %s\n' \
+        "$path" "$target" >&2
+      exit 1
+    fi
+  done
+  if [ ! -x "$binary" ] || [ -e "$prefix/include" ] || [ -e "$prefix/lib" ]; then
+    printf 'package verify: clql archive layout is invalid for %s\n' "$target" >&2
+    exit 1
+  fi
+
+  case "$target" in
+    *-linux-*)
+      verify_linux_clql "$target" "$binary"
+      ;;
+    *-darwin)
+      verify_darwin_clql "$target" "$binary"
+      ;;
+    *)
+      printf 'package verify: unsupported clql target: %s\n' "$target" >&2
+      exit 1
+      ;;
+  esac
+  # clql statically embeds the documented spooled execution path, whose
+  # portable tempfile template is an intentional runtime string, not build
+  # provenance. All repository, home, cache, and file-URL scans still include
+  # the binary; only that generic runtime-temp string is exempted.
+  verify_privacy "$archive" "$prefix" 1
+  if [ "$target" = "x86_64-linux-gnu" ] && [ "$(uname -m)" = "x86_64" ]; then
+    "$binary" --version >/dev/null
+  else
+    printf 'package verify: skipped clql execution for cross target %s\n' "$target"
+  fi
+  printf 'package verify: verified %s\n' "$archive"
+}
+
 verify_source_archive() {
   archive=$dist_dir/$project-$version.tar.gz
   root=$project-$version
@@ -300,6 +411,7 @@ verify_source_archive() {
     scripts/test_dependency_cache_config.sh \
     scripts/check_dependency_cache_privacy_regression.sh \
     scripts/package-verify.sh \
+    scripts/package_clql.sh \
     scripts/package_lua.sh \
     scripts/package_source.sh \
     scripts/render_release_rockspec.sh \
@@ -513,6 +625,11 @@ if [ "$target_arg" = "all" ]; then
         ;;
       "$project-$version-1.src.rock")
         verify_lua_src_rock
+        ;;
+      "clql-$version-"*.tar.gz)
+        target=$(printf '%s\n' "$artifact" |
+          sed "s/^clql-$version-//;s/\\.tar\\.gz\$//")
+        verify_clql_payload "$target"
         ;;
       "$project-$version-"*.tar.gz)
         target=$(printf '%s\n' "$artifact" |

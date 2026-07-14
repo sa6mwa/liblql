@@ -40,6 +40,7 @@ rm -rf "$stage" "$build_dir/rockpack"
 mkdir -p "$dist_dir"
 if [ "$checksum_mode" != "append" ]; then
   rm -f "$dist_dir"/$project-*.tar.gz \
+    "$dist_dir"/clql-*.tar.gz \
     "$dist_dir"/$project-*-1.rockspec \
     "$dist_dir"/$project-*-1.src.rock \
     "$dist_dir"/$project-*-CHECKSUMS

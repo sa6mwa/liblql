@@ -63,6 +63,13 @@ make print-release-version
 Release uploads are selected from `dist/liblql-<version>-CHECKSUMS`, not from a
 `dist/` glob.
 
+Each target produces two C artifacts. `liblql-<version>-<target>.tar.gz` is a
+library-only SDK containing headers, `liblql.a`, shared-library ABI files,
+CMake/pkg-config metadata, and documentation. `clql-<version>-<target>.tar.gz`
+contains only `bin/clql` and `share/doc/clql/`; Linux CLI binaries are fully
+static (including glibc and musl targets), while Darwin keeps its normal system
+loader linkage. The CLI archive does not include liblql SDK files.
+
 ## Lua Facade
 
 The Lua 5.5 facade is a LuaRocks source module over the public shared

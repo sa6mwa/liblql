@@ -16,12 +16,14 @@ else
 fi
 
 mkdir -p "$dist_dir"
-rm -f "$dist_dir"/$project-*.tar.gz "$dist_dir"/$project-*-CHECKSUMS
+rm -f "$dist_dir"/$project-*.tar.gz "$dist_dir"/clql-*.tar.gz \
+  "$dist_dir"/$project-*-CHECKSUMS
 
 mode=reset
 for target in $targets; do
   printf 'package matrix: building %s\n' "$target"
   LQL_PACKAGE_CHECKSUM_MODE=$mode sh scripts/package.sh "$target"
+  LQL_PACKAGE_CHECKSUM_MODE=append sh scripts/package_clql.sh "$target"
   mode=append
 done
 

@@ -5,7 +5,8 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
 
 target=${1:-x86_64-linux-gnu}
-project=liblql
+project=clql
+library_project=liblql
 preset=${target}-release
 build_dir=build/$preset
 dist_dir=${LQL_DIST_DIR:-dist}
@@ -15,37 +16,38 @@ version_header=$build_dir/generated/include/lql/version.h
 cmake --preset "$preset" \
   -DBUILD_TESTING=OFF \
   -DLQL_BUILD_STATIC=ON \
-  -DLQL_BUILD_SHARED=ON \
-  -DLQL_BUILD_BINARY=OFF \
-  -DLQL_CLQL_STATIC=OFF \
+  -DLQL_BUILD_SHARED=OFF \
+  -DLQL_BUILD_BINARY=ON \
+  -DLQL_CLQL_STATIC=ON \
   -DLQL_BUILD_DIRECT_PROBE=OFF
-cmake --build --preset "$preset"
+cmake --build --preset "$preset" --target clql
 
 if [ ! -f "$version_header" ]; then
-  printf 'package: missing generated version header: %s\n' "$version_header" >&2
+  printf 'package clql: missing generated version header: %s\n' "$version_header" >&2
   exit 1
 fi
 version=$(sed -n 's/^#define LQL_VERSION "\(.*\)"/\1/p' "$version_header")
 if [ -z "$version" ]; then
-  printf 'package: unable to resolve version from %s\n' "$version_header" >&2
+  printf 'package clql: unable to resolve version from %s\n' "$version_header" >&2
   exit 1
 fi
 
 root_name=$project-$version-$target
 stage=build/package/$root_name
 archive=$dist_dir/$root_name.tar.gz
-checksums=$dist_dir/$project-$version-CHECKSUMS
+checksums=$dist_dir/$library_project-$version-CHECKSUMS
 
 rm -rf "$stage"
-mkdir -p "$dist_dir" "$(dirname "$stage")"
+mkdir -p "$stage/bin" "$stage/share/doc/clql" "$dist_dir"
 if [ "$checksum_mode" != "append" ]; then
-  rm -f "$dist_dir"/$project-*.tar.gz \
+  rm -f "$dist_dir"/$library_project-*.tar.gz \
     "$dist_dir"/clql-*.tar.gz \
-    "$dist_dir"/$project-*-1.rockspec \
-    "$dist_dir"/$project-*-1.src.rock \
-    "$dist_dir"/$project-*-CHECKSUMS
+    "$dist_dir"/$library_project-*-1.rockspec \
+    "$dist_dir"/$library_project-*-1.src.rock \
+    "$dist_dir"/$library_project-*-CHECKSUMS
 fi
-cmake --install "$build_dir" --prefix "$stage"
+cp "$build_dir/clql" "$stage/bin/clql"
+cp LICENSE README.md "$stage/share/doc/clql/"
 
 tar_args='--sort=name --owner=0 --group=0 --numeric-owner'
 if tar --version >/dev/null 2>&1; then
@@ -63,4 +65,4 @@ fi
   fi
 )
 
-printf 'package: wrote %s and %s\n' "$archive" "$checksums"
+printf 'package clql: wrote %s and %s\n' "$archive" "$checksums"
