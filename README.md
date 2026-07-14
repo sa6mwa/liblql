@@ -41,6 +41,11 @@ output, callbacks, projection, or mutation. Use it only when that local disk
 side effect is acceptable. `clql` and the Lua selected-output facade use this
 compatibility API to retain their whitespace-normalizing behavior.
 
+`lql_new()` returns a receiver shell. Prefer `ctx->stream_execute(ctx, ...)`
+and `ctx->stream_execute_spooled(ctx, ...)`, alongside the other receiver
+methods; the identically signed `lql_stream_execute` free functions remain
+compatibility entry points.
+
 ## Lifecycle Surface
 
 This repository follows the pkt.systems CMake lifecycle. Linux builds use the

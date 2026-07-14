@@ -147,6 +147,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
   ctx->mutation_parse = mutation_parse_method;
   ctx->mutation_destroy = mutation_destroy_method;
   ctx->mutation_count = mutation_count_method;
+  ctx->stream_execute = lql_stream_execute;
+  ctx->stream_execute_spooled = lql_stream_execute_spooled;
   ctx->selector_is_empty = selector_is_empty_method;
   ctx->selector_capabilities_get = selector_capabilities_get_method;
   ctx->selector_root = selector_root_method;

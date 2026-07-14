@@ -14,6 +14,10 @@ static int check_lql_header_cpp(void) {
     return 1;
   }
   ctx->capabilities_get(ctx, &capabilities);
+  if (ctx->stream_execute == 0 || ctx->stream_execute_spooled == 0) {
+    ctx->destroy(ctx);
+    return 1;
+  }
   ctx->destroy(ctx);
   (void)status;
   (void)selector;

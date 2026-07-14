@@ -353,6 +353,21 @@ struct lql {
   void (*mutation_destroy)(lql *self, lql_mutation *mutation);
   /** Returns the number of parsed actions in `mutation`. */
   size_t (*mutation_count)(const lql *self, const lql_mutation *mutation);
+  /**
+   * Executes strict NDJSON with real producer-to-consumer streaming. Selected
+   * output requires caller-owned compact source-range replay; projection and
+   * mutation require incremental emitters and otherwise return UNSUPPORTED.
+   */
+  lql_status (*stream_execute)(lql *self, const lql_stream_request *request,
+                               lql_stream_result *result, lql_error *error);
+  /**
+   * Executes strict NDJSON through the explicitly materialized compatibility
+   * path, which may spill one current record to a temporary file.
+   */
+  lql_status (*stream_execute_spooled)(lql *self,
+                                       const lql_stream_request *request,
+                                       lql_stream_result *result,
+                                       lql_error *error);
   /** Returns non-zero when `selector` is the match-all selector. */
   int (*selector_is_empty)(const lql *self, const lql_selector *selector);
   /** Writes capability flags for `selector` to `out`; `out` is required. */
@@ -450,7 +465,8 @@ void lql_error_init(lql_error *error);
 const char *lql_status_string(lql_status status);
 
 /**
- * Executes strict NDJSON with real producer-to-consumer streaming. Root arrays
+ * Compatibility entry point for `self->stream_execute(self, ...)`. Executes
+ * strict NDJSON with real producer-to-consumer streaming. Root arrays
  * are rejected. Decision-only execution never retains a record. Selected
  * output and value callbacks require `input_is_compact` plus `range_writer`,
  * so liblql can replay caller-owned source ranges only after validation.
@@ -461,6 +477,7 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
                               lql_stream_result *result, lql_error *error);
 
 /**
+ * Compatibility entry point for `self->stream_execute_spooled(self, ...)`.
  * Executes strict NDJSON with materialized record handling. This explicit
  * compatibility API may retain one compact record and spill it to a temporary
  * file for selected output, callbacks, projection, or mutation. Do not use it

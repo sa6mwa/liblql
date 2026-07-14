@@ -2875,6 +2875,9 @@ static int run_true_stream_contract(lql *ctx) {
   selector = NULL;
   projection = NULL;
   lql_error_init(&error);
+  if (ctx->stream_execute == NULL || ctx->stream_execute_spooled == NULL) {
+    return 1;
+  }
   if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
       LQL_STATUS_OK) {
     return 1;
@@ -2895,7 +2898,7 @@ static int run_true_stream_contract(lql *ctx) {
   request.selector = selector;
   request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
   request.matched_only = 1;
-  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+  if (ctx->stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
       result.records_seen != 2u || result.records_matched != 1u ||
       reader.range_writes != 1u || writer.len != sizeof(selected_output) - 1u ||
       memcmp(writer.data, selected_output, writer.len) != 0) {

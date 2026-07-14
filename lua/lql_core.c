@@ -476,7 +476,8 @@ static int lua_lql_execute_string(lua_State *lua) {
     request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
   }
   memset(&result, 0, sizeof(result));
-  status = lql_stream_execute_spooled(client->ctx, &request, &result, &error);
+  status = client->ctx->stream_execute_spooled(client->ctx, &request, &result,
+                                               &error);
   if (owned) {
     client->ctx->selector_destroy(client->ctx, selector);
   }
@@ -570,7 +571,8 @@ static int lua_lql_execute_file(lua_State *lua) {
     }
   }
   memset(&result, 0, sizeof(result));
-  status = lql_stream_execute_spooled(client->ctx, &request, &result, &error);
+  status = client->ctx->stream_execute_spooled(client->ctx, &request, &result,
+                                               &error);
   if (owned) {
     client->ctx->selector_destroy(client->ctx, selector);
   }

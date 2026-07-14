@@ -139,9 +139,9 @@ int main(int argc, char **argv) {
     request.mutation = mutation;
     request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
   }
-  if ((mutation != NULL ? lql_stream_execute_spooled(ctx, &request, &result,
-                                                      &error)
-                        : lql_stream_execute(ctx, &request, &result, &error)) !=
+  if ((mutation != NULL
+           ? ctx->stream_execute_spooled(ctx, &request, &result, &error)
+           : ctx->stream_execute(ctx, &request, &result, &error)) !=
       LQL_STATUS_OK) {
     fprintf(stderr, "lql_direct_probe: warmup failed: %s\n", error.message);
     if (mutation != NULL) {
@@ -167,8 +167,8 @@ int main(int argc, char **argv) {
     }
     if (clock_gettime(CLOCK_MONOTONIC, &start) != 0 ||
         (mutation != NULL
-             ? lql_stream_execute_spooled(ctx, &request, &result, &error)
-             : lql_stream_execute(ctx, &request, &result, &error)) !=
+             ? ctx->stream_execute_spooled(ctx, &request, &result, &error)
+             : ctx->stream_execute(ctx, &request, &result, &error)) !=
             LQL_STATUS_OK ||
         clock_gettime(CLOCK_MONOTONIC, &end) != 0) {
       fprintf(stderr, "lql_direct_probe: stream failed: %s\n", error.message);

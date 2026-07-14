@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
   request.reader_user = &reader;
   request.selector = selector;
   request.matched_only = 1;
-  status = lql_stream_execute(ctx, &request, &result, &error);
+  status = ctx->stream_execute(ctx, &request, &result, &error);
   (void)status;
 
   ctx->selector_destroy(ctx, selector);
