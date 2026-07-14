@@ -2219,6 +2219,85 @@ static int run_mutation_output(lql *ctx) {
   return 0;
 }
 
+/*
+ * Mutation quotes are LQL delimiters, not JSON string literals: Go LQL strips
+ * only the outer matching quotes before json.Marshal encodes the stored value.
+ * Keep that exact behavior while proving native UTF-8 survives JSON emission.
+ */
+static int run_mutation_literal_parity(lql *ctx) {
+  static const char input[] = "{\"status\":\"open\"}\n";
+  static const char *const escaped[] = {
+      "/escaped=\"a\\\"b\\n\\uD83D\\uDE00\""};
+  static const char escaped_output[] =
+      "{\"status\":\"open\",\"escaped\":\"a\\\\\\\"b\\\\n\\\\uD83D\\\\uDE00\"}\n";
+  static const char *const unicode[] = {
+      "/japanese=日本語", "/emoji=😀", "/supplementary=𐐷"};
+  static const char unicode_output[] =
+      "{\"status\":\"open\",\"japanese\":\"日本語\",\"emoji\":\"😀\","
+      "\"supplementary\":\"𐐷\"}\n";
+  lql_mutation *mutation;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+
+  mutation = NULL;
+  lql_error_init(&error);
+  if (ctx->mutation_parse(ctx, escaped, 1u, &mutation, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 1u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(escaped_output) - 1u ||
+      memcmp(writer.data, escaped_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, unicode,
+                          sizeof(unicode) / sizeof(unicode[0]), &mutation,
+                          &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(unicode_output) - 1u ||
+      memcmp(writer.data, unicode_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  return 0;
+}
+
 static int run_projection_then_mutation_output(lql *ctx) {
   static const char input[] = "{\"status\":\"open\",\"n\":1,\"drop\":9}\n";
   static const char *const projection_paths[] = {"/status", "/n"};
@@ -2996,6 +3075,7 @@ int main(void) {
       run_root_wildcard_array_error(ctx) || run_selected_record_output(ctx) ||
       run_value_callback(ctx) || run_value_callback_control(ctx) ||
       run_nested_projection_output(ctx) || run_mutation_output(ctx) ||
+      run_mutation_literal_parity(ctx) ||
       run_projection_then_mutation_output(ctx) ||
       run_output_modes_preserve_completed_before_malformed(ctx) ||
       run_completed_record_before_root_array_error(ctx) ||

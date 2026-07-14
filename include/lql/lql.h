@@ -344,7 +344,11 @@ struct lql {
                                 const lql_projection *projection,
                                 size_t index, lql_string_view *out,
                                 lql_error *error);
-  /** Parses mutation expressions and transfers `*out` on success. */
+  /**
+   * Parses mutation expressions and transfers `*out` on success. Matching
+   * outer single or double quotes delimit a string value; their contents are
+   * literal LQL text, not JSON escape syntax.
+   */
   lql_status (*mutation_parse)(lql *self,
                                const char *const *expressions,
                                size_t expression_count,
