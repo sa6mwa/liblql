@@ -11,7 +11,12 @@ release documentation after the migration is complete.
   `aarch64-linux-musl`, `armhf-linux-gnu`, `armhf-linux-musl`, and
   `arm64-apple-darwin` when the local osxcross toolchain is available.
 - Compiler policy: Linux builds use cached Bootlin GCC collections only.
-  Host Clang is allowed only for `clang-format` and native-host `clangd`
+  Shared Bootlin and AFL++ cache publication is serialized with bounded
+  per-collection `flock` locks (`CPKT_TOOLCHAIN_LOCK_TIMEOUT`, default
+  600 seconds), validates cache hits before use, and publishes only completed
+  roots. AFL++ roots include the selected Bootlin collection identity, so a
+  compiler collection update cannot reuse an incompatible plugin build. Host
+  Clang is allowed only for `clang-format` and native-host `clangd`
   development checks.
 - Library artifacts: ship both static and shared liblql SDK artifacts.
 - Consumer metadata: ship both CMake package config and pkg-config metadata.

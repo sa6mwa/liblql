@@ -42,6 +42,26 @@ download_file() {
   fi
 }
 
+install_cleanup_trap() {
+  local path=$1 remove_option=$2 cleanup
+  printf -v cleanup 'status=$?; rm %s -- %q || :; trap - EXIT HUP INT TERM; exit "$status"' \
+    "$remove_option" "$path"
+  trap "$cleanup" EXIT
+  trap 'exit 1' HUP INT TERM
+}
+
+with_cache_lock() {
+  local lock_path=$1 lock_fd
+  shift
+  command -v flock >/dev/null 2>&1 || die 'flock is required to provision shared Linux toolchains'
+  mkdir -p "$(dirname -- "$lock_path")"
+  exec {lock_fd}>"$lock_path"
+  flock -w "${CPKT_TOOLCHAIN_LOCK_TIMEOUT:-600}" "$lock_fd" || die "timed out waiting for shared toolchain lock: $lock_path"
+  "$@"
+  flock -u "$lock_fd"
+  eval "exec ${lock_fd}>&-"
+}
+
 target_ids() {
   cat <<'TARGETS'
 x86_64-linux-gnu
@@ -143,6 +163,16 @@ osxcross_candidate() {
 }
 
 install_bootlin() {
+  local target=$1 values arch name sha256 prefix sysroot_rel root
+  values=$(bootlin_values "$target")
+  IFS='|' read -r arch name sha256 prefix sysroot_rel root <<<"$values"
+  if bootlin_ready "$root" "$prefix" "$root/$sysroot_rel"; then
+    return
+  fi
+  with_cache_lock "$(cache_root)/locks/bootlin-$name.lock" install_bootlin_locked "$target"
+}
+
+install_bootlin_locked() {
   local target=$1 values arch name sha256 prefix sysroot_rel root archive_dir archive tmp extract actual
   values=$(bootlin_values "$target")
   IFS='|' read -r arch name sha256 prefix sysroot_rel root <<<"$values"
@@ -153,21 +183,25 @@ install_bootlin() {
   archive_dir="$(cache_root)/archives"
   archive="$archive_dir/$name.tar.xz"
   mkdir -p "$archive_dir" "$(cache_root)/roots"
+  if [[ -f "$archive" ]]; then
+    actual=$(sha256_file "$archive")
+    if [[ "$actual" != "$sha256" ]]; then
+      printf 'cpkt-toolchains: discarding corrupt cached archive: %s\n' "$archive" >&2
+      rm -f -- "$archive"
+    fi
+  fi
   if [[ ! -f "$archive" ]]; then
     tmp="$archive.tmp.$$"
-    trap 'rm -f "$tmp"' EXIT HUP INT TERM
+    install_cleanup_trap "$tmp" -f
     download_file "https://toolchains.bootlin.com/downloads/releases/toolchains/$arch/tarballs/$name.tar.xz" "$tmp"
     actual=$(sha256_file "$tmp")
     [[ "$actual" == "$sha256" ]] || die "checksum mismatch for $name.tar.xz: expected $sha256, got $actual"
     mv "$tmp" "$archive"
     trap - EXIT HUP INT TERM
-  else
-    actual=$(sha256_file "$archive")
-    [[ "$actual" == "$sha256" ]] || die "cached archive checksum mismatch for $archive: expected $sha256, got $actual"
   fi
 
   extract="$(cache_root)/roots/.extract-$name.$$"
-  trap 'rm -rf "$extract"' EXIT HUP INT TERM
+  install_cleanup_trap "$extract" -rf
   mkdir -p "$extract"
   tar -C "$extract" -xf "$archive"
   [[ -d "$extract/$name/bin" ]] || die "unexpected archive layout for $name.tar.xz"

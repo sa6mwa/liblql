@@ -11,6 +11,9 @@ fail() {
   exit 1
 }
 
+grep -Fq 'with_cache_lock "$(cache_root)/locks/bootlin-$name.lock" install_bootlin_locked "$target"' "$bootlin_resolver" || fail 'Bootlin root publication is not serialized'
+grep -Fq 'if bootlin_ready "$root" "$prefix" "$root/$sysroot_rel"; then' "$bootlin_resolver" || fail 'Bootlin root readiness is not rechecked under the lock'
+
 require_line() {
   local expected=$1 output=$2
   printf '%s\n' "$output" | grep -Fqx "$expected" || fail "missing output: $expected"
