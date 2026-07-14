@@ -39,6 +39,7 @@ REQUIRED_MAKE_TARGETS = {
     "build-release",
     "test",
     "test-debug",
+    "shared-only-smoke",
     "cross-build",
     "cross-test",
     "test-all",
@@ -93,6 +94,7 @@ REQUIRED_SCRIPT_SURFACES = {
     "scripts/package-verify.sh",
     "scripts/print_release_version.sh",
     "scripts/check_source_manifest_exactness.sh",
+    "scripts/check_shared_only_build.sh",
     "scripts/test_dependency_cache_config.sh",
     "scripts/check_dependency_cache_privacy_regression.sh",
 }

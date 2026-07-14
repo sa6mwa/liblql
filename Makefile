@@ -1,4 +1,4 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -17,6 +17,7 @@ help:
 	  'make build-debug-lua build the Lua 5.5 facade module' \
 	  'make test          build and run the direct-stream test suite' \
 	  'make test-debug    alias for make test' \
+	  'make shared-only-smoke  configure, build, and test without liblql.a' \
 	  'make cross-build   build and verify release cross-target package matrix' \
 	  'make cross-test    run cross-target tool and Darwin linker-route checks' \
 	  'make lua-test      build and run Lua 5.5 facade smoke tests' \
@@ -119,6 +120,9 @@ test:
 
 test-debug: test
 
+shared-only-smoke:
+	@sh scripts/check_shared_only_build.sh
+
 cross-build:
 	@sh scripts/cross_build.sh
 
@@ -207,7 +211,7 @@ release:
 print-release-version:
 	@sh scripts/release_version.sh
 
-test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test lua-test lua-cli-smoke lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
+test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test shared-only-smoke lua-test lua-cli-smoke lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh

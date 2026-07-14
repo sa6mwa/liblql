@@ -34,6 +34,65 @@ static int mutation_equal_ci(const char *text, size_t len,
   return 1;
 }
 
+static int mutation_json_number(const char *begin, const char *end) {
+  const char *cursor;
+
+  cursor = begin;
+  if (cursor < end && *cursor == '-') {
+    ++cursor;
+  }
+  if (cursor == end) {
+    return 0;
+  }
+  if (*cursor == '0') {
+    ++cursor;
+  } else if (*cursor >= '1' && *cursor <= '9') {
+    do {
+      ++cursor;
+    } while (cursor < end && *cursor >= '0' && *cursor <= '9');
+  } else {
+    return 0;
+  }
+  if (cursor < end && *cursor == '.') {
+    ++cursor;
+    if (cursor == end || *cursor < '0' || *cursor > '9') {
+      return 0;
+    }
+    do {
+      ++cursor;
+    } while (cursor < end && *cursor >= '0' && *cursor <= '9');
+  }
+  if (cursor < end && (*cursor == 'e' || *cursor == 'E')) {
+    ++cursor;
+    if (cursor < end && (*cursor == '+' || *cursor == '-')) {
+      ++cursor;
+    }
+    if (cursor == end || *cursor < '0' || *cursor > '9') {
+      return 0;
+    }
+    do {
+      ++cursor;
+    } while (cursor < end && *cursor >= '0' && *cursor <= '9');
+  }
+  return cursor == end;
+}
+
+static int mutation_numeric_candidate(const char *begin, const char *end) {
+  char *end_ptr;
+  double ignored_number;
+
+  if (begin == end) {
+    return 0;
+  }
+  if (*begin == '+' || *begin == '-' || (*begin >= '0' && *begin <= '9')) {
+    return 1;
+  }
+  errno = 0;
+  ignored_number = strtod(begin, &end_ptr);
+  (void)ignored_number;
+  return end_ptr == end && end_ptr != begin;
+}
+
 static char *mutation_copy(lql_allocator *allocator, const char *data,
                            size_t len) {
   char *out;
@@ -186,15 +245,23 @@ static lql_status mutation_parse_value(lql_allocator *allocator,
     action->value_kind = LQL_MUTATION_VALUE_NULL;
     value_begin = "null";
     value_len = 4u;
-  } else {
+  } else if (mutation_numeric_candidate(begin, end)) {
+    if (!mutation_json_number(begin, end)) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "mutation numeric value must be a JSON number");
+      return LQL_STATUS_PARSE_ERROR;
+    }
     errno = 0;
     ignored_number = strtod(begin, &end_ptr);
-    (void)ignored_number;
-    if (end_ptr == end && errno != ERANGE) {
-      action->value_kind = LQL_MUTATION_VALUE_NUMBER;
-    } else {
-      action->value_kind = LQL_MUTATION_VALUE_STRING;
+    if (end_ptr != end || errno == ERANGE || ignored_number != ignored_number ||
+        ignored_number == HUGE_VAL || ignored_number == -HUGE_VAL) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "mutation numeric value must be finite");
+      return LQL_STATUS_PARSE_ERROR;
     }
+    action->value_kind = LQL_MUTATION_VALUE_NUMBER;
+  } else {
+    action->value_kind = LQL_MUTATION_VALUE_STRING;
   }
   action->value = mutation_copy(allocator, value_begin, value_len);
   if (action->value == NULL) {

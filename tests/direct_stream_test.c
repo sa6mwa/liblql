@@ -1490,6 +1490,8 @@ static int run_mutation_output(lql *ctx) {
   static const char ordered_output[] =
       "{\"status\":\"ready\",\"meta\":{\"a/b\":true}}\n";
   static const char *const invalid_root[] = {"/=value"};
+  static const char *const invalid_json_numbers[] = {
+      "/n=01", "/n=nan", "/n=inf", "/n=+0", "/n=1e9999"};
   lql_selector *selector;
   lql_mutation *mutation;
   lql_stream_request request;
@@ -1497,6 +1499,7 @@ static int run_mutation_output(lql *ctx) {
   lql_error error;
   test_reader reader;
   test_writer writer;
+  size_t invalid_number_index;
 
   selector = NULL;
   mutation = NULL;
@@ -1511,6 +1514,18 @@ static int run_mutation_output(lql *ctx) {
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
     return 1;
+  }
+  for (invalid_number_index = 0u;
+       invalid_number_index <
+           sizeof(invalid_json_numbers) / sizeof(invalid_json_numbers[0]);
+       ++invalid_number_index) {
+    if (ctx->mutation_parse(ctx, &invalid_json_numbers[invalid_number_index],
+                            1u, &mutation, &error) != LQL_STATUS_PARSE_ERROR ||
+        mutation != NULL) {
+      ctx->mutation_destroy(ctx, mutation);
+      ctx->selector_destroy(ctx, selector);
+      return 1;
+    }
   }
   if (ctx->mutation_parse(ctx, increment, 1u, &mutation, &error) !=
           LQL_STATUS_OK ||
