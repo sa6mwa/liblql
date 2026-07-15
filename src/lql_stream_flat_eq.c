@@ -64,41 +64,20 @@ static int lql_flat_eq_selector_needs_time(const lql_selector *selector) {
   return 0;
 }
 
-static int lql_flat_eq_text_scalar_coerces(const char *value,
-                                           lql_selector_literal_kind kind) {
-  double number;
-  if (kind == LQL_SELECTOR_LITERAL_NUMBER ||
-      kind == LQL_SELECTOR_LITERAL_BOOL) {
-    return 1;
-  }
-  if (kind != LQL_SELECTOR_LITERAL_STRING || value == NULL) {
-    return 0;
-  }
-  if (strcmp(value, "true") == 0 || strcmp(value, "false") == 0) {
-    return 1;
-  }
-  return lql_number_parse_json(value, strlen(value), &number);
-}
-
 static int lql_flat_eq_literal_kind(const char *value,
                                     lql_selector_literal_kind literal_kind,
                                     int from_json,
                                     lql_json_flat_term_kind *out) {
+  (void)value;
+  (void)from_json;
   if (out == NULL) {
     return 0;
   }
-  if (!from_json) {
-    if (lql_flat_eq_text_scalar_coerces(value, literal_kind)) {
-      *out = LQL_JSON_FLAT_TERM_TEXT_EQ;
-      return 1;
-    }
-    if (literal_kind == LQL_SELECTOR_LITERAL_STRING ||
-        literal_kind == LQL_SELECTOR_LITERAL_NULL) {
-      *out = LQL_JSON_FLAT_TERM_EQ;
-      return 1;
-    }
-    return 0;
-  }
+  /*
+   * Intentional liblql semantics: unquoted selector scalars stay typed instead
+   * of following Go lql's scalar-to-string coercion. Numeric equality is
+   * handled by the scanner as numeric JSON equality, not source text equality.
+   */
   switch (literal_kind) {
   case LQL_SELECTOR_LITERAL_STRING:
     *out = LQL_JSON_FLAT_TERM_EQ;
@@ -2622,7 +2601,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
     result->stopped_early = 1;
     result->stop_reason = LQL_STREAM_STOP_BYTE_LIMIT;
   }
-  if (status == LQL_STATUS_STOP) {
+  if (status == LQL_STATUS_STOP && result->stopped_early) {
     return LQL_STATUS_OK;
   }
   return status;

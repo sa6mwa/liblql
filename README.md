@@ -18,10 +18,14 @@ Streaming inputs are strict NDJSON. Root arrays are hard errors and are never
 flattened. Input may contain ordinary JSON whitespace; emitted records are
 compact JSON plus one newline.
 
-The implementation must prove Go behavioral parity and at least 1.0x GCC C/Go
-performance on every accepted benchmark row. Live heap, not RSS, is the primary
-embedded-memory invariant and must remain at or below 256 KiB, including the
-100 MiB current-record gate.
+The implementation must prove Go behavioral parity on accepted parity rows and
+at least 1.0x GCC C/Go performance on every accepted benchmark row. JSON scalar
+equality intentionally uses liblql's typed JSON semantics instead of the pinned
+Go library's selector-string coercion: unquoted numbers, booleans, and null are
+typed, quoted values are strings, and numeric equality compares JSON numbers by
+numeric value rather than by source spelling. Live heap, not RSS, is the
+primary embedded-memory invariant and must remain at or below 256 KiB,
+including the 100 MiB current-record gate.
 
 ## Execution Contracts
 

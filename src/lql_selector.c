@@ -543,7 +543,7 @@ static int parse_number_literal(const char *decoded, double *out);
 
 static lql_selector_literal_kind selector_literal_kind(const char *raw) {
   double number;
-  if (raw == NULL || raw[0] == '"') {
+  if (raw == NULL) {
     return LQL_SELECTOR_LITERAL_STRING;
   }
   if (strcmp(raw, "true") == 0 || strcmp(raw, "false") == 0) {
@@ -593,8 +593,9 @@ static int parse_any_values(lql_selector_parser *ctx, char *decoded,
       return 0;
     }
     if (item[0] != '\0') {
-      if (!selector_any_push(ctx, selector, item, selector_literal_kind(item),
-                             0)) {
+      lql_selector_literal_kind kind;
+      kind = selector_literal_kind(item);
+      if (!selector_any_push(ctx, selector, item, kind, 0)) {
         ctx->allocator->destroy(ctx->allocator, item);
         return 0;
       }
@@ -1248,7 +1249,8 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
     out->field = normalize_field_path(ctx, raw_field);
     out->value = unquote(ctx, raw_value);
     out->value_is_string = raw_value[0] == '"';
-    out->value_kind = selector_literal_kind(raw_value);
+    out->value_kind = out->value_is_string ? LQL_SELECTOR_LITERAL_STRING
+                                           : selector_literal_kind(out->value);
     ctx->allocator->destroy(ctx->allocator, raw_field);
     ctx->allocator->destroy(ctx->allocator, raw_value);
     out->value_set = 1;

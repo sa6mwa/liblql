@@ -68,8 +68,7 @@ static lql_status json_flat_record(void *user, size_t record_index,
                                    int root_is_object, unsigned long hits,
                                    const lql_json_spool *spool,
                                    size_t source_offset, size_t source_len,
-                                   int source_compact,
-                                   lql_error *error) {
+                                   int source_compact, lql_error *error) {
   json_flat_result *result;
   (void)record_index;
   (void)source_offset;
@@ -151,15 +150,35 @@ int main(void) {
       {LQL_JSON_FLAT_TERM_NUMBER_EQ, "code", 4u, "1", 1u},
       {LQL_JSON_FLAT_TERM_BOOL_EQ, "enabled", 7u, "true", 4u},
       {LQL_JSON_FLAT_TERM_NULL_EQ, "empty", 5u, "null", 4u}};
-  static const char range_flat_input[] =
-      "{\"code\":1}\n"
-      "{\"code\":2}\n"
-      "{\"code\":3.5}\n"
-      "{\"code\":4}\n"
-      "{\"code\":\"3\"}\n";
+  static const char range_flat_input[] = "{\"code\":1}\n"
+                                         "{\"code\":2}\n"
+                                         "{\"code\":3.5}\n"
+                                         "{\"code\":4}\n"
+                                         "{\"code\":\"3\"}\n";
   static const lql_json_flat_eq_term range_flat_terms[] = {
-      {LQL_JSON_FLAT_TERM_NUMBER_RANGE, "code", 4u, NULL, 0u, NULL, 0u, 0u,
-       0ul, 0ul, 0ul, 0ul, 0ul, NULL, 0u, 0u, 0.0, 2.0, 4.0, 0.0, 0, 1, 1,
+      {LQL_JSON_FLAT_TERM_NUMBER_RANGE,
+       "code",
+       4u,
+       NULL,
+       0u,
+       NULL,
+       0u,
+       0u,
+       0ul,
+       0ul,
+       0ul,
+       0ul,
+       0ul,
+       NULL,
+       0u,
+       0u,
+       0.0,
+       2.0,
+       4.0,
+       0.0,
+       0,
+       1,
+       1,
        0}};
   static const char temporal_flat_input[] =
       "{\"timestamp\":\"2026-03-05T10:28:20Z\"}\n"
@@ -179,20 +198,17 @@ int main(void) {
   static const lql_json_flat_eq_term indexed_flat_terms[] = {
       {LQL_JSON_FLAT_TERM_EQ, "items", 5u, "B", 1u, "/items/1/sku", 12u, 3u,
        2ul}};
-  static const char indexed_scalar_input[] =
-      "{\"values\":[\"A\",\"B\"]}\n"
-      "{\"values\":[\"B\",\"A\"]}\n"
-      "{\"values\":[\"A\"]}\n";
+  static const char indexed_scalar_input[] = "{\"values\":[\"A\",\"B\"]}\n"
+                                             "{\"values\":[\"B\",\"A\"]}\n"
+                                             "{\"values\":[\"A\"]}\n";
   static const lql_json_flat_eq_term indexed_scalar_terms[] = {
-      {LQL_JSON_FLAT_TERM_EQ, "values", 6u, "B", 1u, "/values/1", 9u, 2u,
-       2ul}};
+      {LQL_JSON_FLAT_TERM_EQ, "values", 6u, "B", 1u, "/values/1", 9u, 2u, 2ul}};
   static const lql_json_flat_eq_term array_scalar_wildcard_terms[] = {
-      {LQL_JSON_FLAT_TERM_EQ, "values", 6u, "B", 1u, "/values/[]", 10u, 2u,
-       0ul, 0ul, 2ul}};
-  static const char indexed_exists_input[] =
-      "{\"values\":[null,\"B\"]}\n"
-      "{\"values\":[\"B\",null]}\n"
-      "{\"values\":[\"A\"]}\n";
+      {LQL_JSON_FLAT_TERM_EQ, "values", 6u, "B", 1u, "/values/[]", 10u, 2u, 0ul,
+       0ul, 2ul}};
+  static const char indexed_exists_input[] = "{\"values\":[null,\"B\"]}\n"
+                                             "{\"values\":[\"B\",null]}\n"
+                                             "{\"values\":[\"A\"]}\n";
   static const lql_json_flat_eq_term indexed_exists_terms[] = {
       {LQL_JSON_FLAT_TERM_EXISTS, "values", 6u, NULL, 0u, "/values/1", 9u, 2u,
        2ul}};
@@ -218,10 +234,40 @@ int main(void) {
                                             "{\"msg\":\"xxabb\"}\n"
                                             "{\"msg\":\"xxa\\u0062a\"}\n";
   static const lql_json_flat_eq_term contains_flat_terms[] = {
-      {LQL_JSON_FLAT_TERM_CONTAINS, "msg", 3u, "aba", 3u, NULL, 0u, 0u, 0ul,
-       0ul, 0ul, 0ul, 0ul, NULL, 0u, 0u, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0,
-       {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0},
-       {0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0}, 0, 0, 0, 0, 0,
+      {LQL_JSON_FLAT_TERM_CONTAINS,
+       "msg",
+       3u,
+       "aba",
+       3u,
+       NULL,
+       0u,
+       0u,
+       0ul,
+       0ul,
+       0ul,
+       0ul,
+       0ul,
+       NULL,
+       0u,
+       0u,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0,
+       0,
+       0,
+       0,
+       {0, 0, 0, 0, 0, 0},
+       {0, 0, 0, 0, 0, 0},
+       {0, 0, 0, 0, 0, 0},
+       {0, 0, 0, 0, 0, 0},
+       {0, 0, 0, 0, 0, 0},
+       0,
+       0,
+       0,
+       0,
+       0,
        contains_failure}};
   lql_json_flat_eq_term temporal_flat_terms[1];
   lql_json_flat_eq_request flat_request;
@@ -389,9 +435,8 @@ int main(void) {
                                    &flat_error) != LQL_STATUS_OK ||
       flat_records != 4u || flat_bytes != flat_reader.len ||
       flat_result.objects != 4u || flat_result.matches != 2u ||
-      flat_writer.len !=
-          strlen("{\"timestamp\":\"2026-03-05T10:28:21Z\"}\n"
-                 "{\"timestamp\":\"2026-03-05T10:29:21Z\"}\n") ||
+      flat_writer.len != strlen("{\"timestamp\":\"2026-03-05T10:28:21Z\"}\n"
+                                "{\"timestamp\":\"2026-03-05T10:29:21Z\"}\n") ||
       memcmp(flat_writer.data,
              "{\"timestamp\":\"2026-03-05T10:28:21Z\"}\n"
              "{\"timestamp\":\"2026-03-05T10:29:21Z\"}\n",
@@ -424,12 +469,14 @@ int main(void) {
   if (lql_json_scan_flat_eq_ndjson(&flat_request, &flat_records, &flat_bytes,
                                    &flat_error) != LQL_STATUS_OK ||
       flat_records != 3u || flat_bytes != flat_reader.len ||
-      flat_result.objects != 3u || flat_result.matches != 2u ||
+      flat_result.objects != 3u || flat_result.matches != 3u ||
       flat_writer.len !=
           strlen("{\"code\":1,\"enabled\":true,\"empty\":null}\n"
+                 "{\"code\":1.0,\"enabled\":false,\"empty\":\"null\"}\n"
                  "{\"code\":2,\"enabled\":true,\"empty\":null}\n") ||
       memcmp(flat_writer.data,
              "{\"code\":1,\"enabled\":true,\"empty\":null}\n"
+             "{\"code\":1.0,\"enabled\":false,\"empty\":\"null\"}\n"
              "{\"code\":2,\"enabled\":true,\"empty\":null}\n",
              flat_writer.len) != 0) {
     lql_json_spool_cleanup(&flat_spool);

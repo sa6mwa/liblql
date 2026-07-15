@@ -191,8 +191,11 @@ representation as a structural interchange format:
 Serialization omits empty fields the same way Go omits `omitempty` fields. The
 zero-value selector serializes as an empty JSON object. JSON object member order
 is not a compatibility contract. The required contract is that Go-emitted
-selector AST JSON parses into liblql, liblql-emitted selector AST JSON parses
-as the same logical AST, and the resulting selector behavior is equivalent.
+selector AST JSON parses into liblql and liblql-emitted selector AST JSON parses
+as the same logical AST. JSON scalar equality is an intentional semantic
+divergence from Go: liblql treats unquoted text-selector numbers, booleans, and
+null as typed JSON scalar literals, quoted values as strings, and JSON numbers
+as equal by numeric value instead of by source spelling.
 
 String terms have a critical invariant:
 
@@ -210,9 +213,10 @@ Range bounds are a union:
 - empty datetime string bounds are rejected;
 - unsupported JSON types are rejected.
 
-Term `value` parsing must accept the Go-compatible scalar forms and convert
-them to selector strings. Term `any` parsing must accept both Go-compatible
-string forms and arrays where the Go library accepts them.
+Term `value` and `any` parsing must preserve typed JSON scalar behavior for
+unquoted selector text. Selector JSON parsing follows the JSON value type
+directly. This deliberately rejects the pinned Go library's scalar-to-string
+matching behavior for numbers, booleans, and null.
 
 ## Self-contained JSON Requirement
 

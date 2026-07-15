@@ -182,7 +182,10 @@ The required proof is cumulative:
 
 - direct reset gate and strict C89 warning-clean GCC builds;
 - scanner behavior tests and public receiver tests;
-- Go/C output parity and paired counters;
+- Go/C output parity and paired counters for accepted parity rows; JSON scalar
+  equality rows that exercise liblql's typed numeric/boolean/null semantics are
+  covered by liblql behavior tests instead of Go parity because they
+  intentionally diverge from the pinned Go selector-string coercion behavior;
 - GCC focused benchmark gate for every accepted row, then the accepted-row
   matrix;
 - Callgrind or equivalent leaf attribution for any hot-path optimization;

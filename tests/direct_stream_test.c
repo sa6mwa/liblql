@@ -90,6 +90,28 @@ static lql_status test_write(void *user, const void *data, size_t len,
   return LQL_STATUS_OK;
 }
 
+static lql_status test_stop_read(void *user, unsigned char *buffer,
+                                 size_t capacity, size_t *out_len,
+                                 lql_error *error) {
+  (void)user;
+  (void)buffer;
+  (void)capacity;
+  (void)error;
+  if (out_len != NULL) {
+    *out_len = 0u;
+  }
+  return LQL_STATUS_STOP;
+}
+
+static lql_status test_stop_write(void *user, const void *data, size_t len,
+                                  lql_error *error) {
+  (void)user;
+  (void)data;
+  (void)len;
+  (void)error;
+  return LQL_STATUS_STOP;
+}
+
 static lql_status test_range_write(void *user, size_t offset, size_t len,
                                    lql_stream_writer_fn writer,
                                    void *writer_user, lql_error *error) {
@@ -192,17 +214,16 @@ static int selector_matches(lql *ctx, lql_selector *selector, const char *input,
          result.records_matched == expected_matches;
 }
 
-static int run_scalar_go_parity_regressions(lql *ctx) {
-  static const char scalar_text_input[] =
-      "{\"v\":1}\n"
-      "{\"v\":\"1\"}\n"
-      "{\"v\":true}\n"
-      "{\"v\":\"true\"}\n"
-      "{\"v\":null}\n"
-      "{\"v\":\"null\"}\n"
-      "{\"v\":false}\n"
-      "{\"v\":\"false\"}\n"
-      "{\"v\":\"x\"}\n";
+static int run_scalar_json_semantic_regressions(lql *ctx) {
+  static const char scalar_text_input[] = "{\"v\":1}\n"
+                                          "{\"v\":\"1\"}\n"
+                                          "{\"v\":true}\n"
+                                          "{\"v\":\"true\"}\n"
+                                          "{\"v\":null}\n"
+                                          "{\"v\":\"null\"}\n"
+                                          "{\"v\":false}\n"
+                                          "{\"v\":\"false\"}\n"
+                                          "{\"v\":\"x\"}\n";
   static const char typed_json_selector[] =
       "{\"and\":[{\"eq\":{\"field\":\"/n\",\"value\":1}},"
       "{\"eq\":{\"field\":\"/b\",\"value\":true}},"
@@ -222,31 +243,66 @@ static int run_scalar_go_parity_regressions(lql *ctx) {
       "0000000000000000000000000000000000000000000000000000000000000000"
       "0000000000000000000000000000000000000000000000000000000000000000"
       "0001}\n";
+  static const char numeric_text_input[] = "{\"v\":1}\n"
+                                           "{\"v\":1.0}\n"
+                                           "{\"v\":\"1\"}\n"
+                                           "{\"v\":\"1.0\"}\n"
+                                           "{\"v\":10}\n"
+                                           "{\"v\":1e1}\n"
+                                           "{\"v\":\"10\"}\n"
+                                           "{\"v\":\"1e1\"}\n"
+                                           "{\"v\":0.1}\n"
+                                           "{\"v\":1e-1}\n"
+                                           "{\"v\":\"0.1\"}\n"
+                                           "{\"v\":\"1e-1\"}\n"
+                                           "{\"v\":0}\n"
+                                           "{\"v\":\"0\"}\n"
+                                           "{\"v\":\"00\"}\n"
+                                           "{\"v\":9223372036854775807}\n"
+                                           "{\"v\":\"9223372036854776000\"}\n"
+                                           "{\"v\":\"9223372036854775807\"}\n";
   lql_selector *selector;
   lql_error error;
 
   /*
-   * Text selectors follow Go lql's scalar-to-text comparison contract:
-   * numeric and boolean selector text also matches JSON strings with the same
-   * text, while null selector text matches the string "null", not JSON null.
+   * liblql intentionally diverges from Go lql here: unquoted JSON scalar
+   * selector values are typed, quoted values are strings, and numeric equality
+   * compares JSON numbers by value rather than by source spelling.
    */
-  if (run_selection(ctx, "/v=1", scalar_text_input, 9u, 2u) ||
-      run_selection(ctx, "/v=\"1\"", scalar_text_input, 9u, 2u) ||
-      run_selection(ctx, "/v=true", scalar_text_input, 9u, 2u) ||
-      run_selection(ctx, "/v=\"true\"", scalar_text_input, 9u, 2u) ||
-      run_selection(ctx, "/v=false", scalar_text_input, 9u, 2u) ||
-      run_selection(ctx, "/v=\"false\"", scalar_text_input, 9u, 2u) ||
+  if (run_selection(ctx, "/v=1", scalar_text_input, 9u, 1u) ||
+      run_selection(ctx, "/v=\"1\"", scalar_text_input, 9u, 1u) ||
+      run_selection(ctx, "/v=true", scalar_text_input, 9u, 1u) ||
+      run_selection(ctx, "/v=\"true\"", scalar_text_input, 9u, 1u) ||
+      run_selection(ctx, "/v=false", scalar_text_input, 9u, 1u) ||
+      run_selection(ctx, "/v=\"false\"", scalar_text_input, 9u, 1u) ||
       run_selection(ctx, "/v=null", scalar_text_input, 9u, 1u) ||
       run_selection(ctx, "/v=\"null\"", scalar_text_input, 9u, 1u) ||
       run_selection(ctx, "in{field=/v,any=1|true|null|false|x}",
-                    scalar_text_input, 9u, 8u)) {
+                    scalar_text_input, 9u, 5u)) {
     return 1;
   }
 
   /*
-   * Selector JSON keeps typed scalar literals token-strict. This prevents the
-   * text-selector compatibility rule above from weakening Go-compatible AST
-   * interchange semantics for callers that supplied JSON numbers/bools/nulls.
+   * Numeric equality is semantic for JSON numbers: source forms such as 10 and
+   * 1e1 compare equal.  The selector parser still uses JSON number syntax, so
+   * bare 00 is a string selector value and only matches the JSON string "00".
+   */
+  if (run_selection(ctx, "/v=1", numeric_text_input, 18u, 2u) ||
+      run_selection(ctx, "/v=1.0", numeric_text_input, 18u, 2u) ||
+      run_selection(ctx, "/v=\"1.0\"", numeric_text_input, 18u, 1u) ||
+      run_selection(ctx, "/v=1e1", numeric_text_input, 18u, 2u) ||
+      run_selection(ctx, "/v=\"1e1\"", numeric_text_input, 18u, 1u) ||
+      run_selection(ctx, "/v=1e-1", numeric_text_input, 18u, 2u) ||
+      run_selection(ctx, "/v=00", numeric_text_input, 18u, 1u) ||
+      run_selection(ctx, "/v=9223372036854775807", numeric_text_input, 18u,
+                    1u) ||
+      run_selection(ctx, "in{field=/v,any=1.0|1e1|00}", numeric_text_input, 18u,
+                    5u)) {
+    return 1;
+  }
+
+  /*
+   * Selector JSON keeps the same typed scalar behavior as selector text.
    */
   selector = NULL;
   lql_error_init(&error);
@@ -914,8 +970,8 @@ static int run_mapped_string_predicates(lql *ctx) {
   if (run_selection(ctx, "/status!=\"open\"", input, 3u, 2u)) {
     return 110;
   }
-  if (run_selection(ctx, "/code=1", scalar_input, 4u, 2u) ||
-      run_selection(ctx, "in{field=/code,any=1|2}", scalar_input, 4u, 3u) ||
+  if (run_selection(ctx, "/code=1", scalar_input, 4u, 3u) ||
+      run_selection(ctx, "in{field=/code,any=1|2}", scalar_input, 4u, 4u) ||
       run_selection(ctx, "/enabled=true", scalar_input, 4u, 1u)) {
     return 16;
   }
@@ -3191,6 +3247,49 @@ static int run_byte_limit(lql *ctx) {
   return 0;
 }
 
+static int run_unintentional_stop_status(lql *ctx) {
+  static const char input[] = "{\"status\":\"open\"}\n";
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+
+  memset(&request, 0, sizeof(request));
+  request.reader = test_stop_read;
+  request.selector = selector;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_STOP) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+  request.matched_only = 1;
+  request.writer = test_stop_write;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_STOP ||
+      result.stopped_early) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 #undef lql_stream_execute
 
 static int run_true_stream_contract(lql *ctx) {
@@ -3238,6 +3337,26 @@ static int run_true_stream_contract(lql *ctx) {
       result.records_seen != 2u || result.records_matched != 1u ||
       reader.range_writes != 1u || writer.len != sizeof(selected_output) - 1u ||
       memcmp(writer.data, selected_output, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)compact_input;
+  reader.len = sizeof(compact_input) - 1u;
+  reader.chunk_size = 1u;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.range_writer = test_range_write;
+  request.range_user = &reader;
+  request.input_is_compact = 1;
+  request.writer = test_stop_write;
+  request.selector = selector;
+  request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+  request.matched_only = 1;
+  if (ctx->stream_execute(ctx, &request, &result, &error) != LQL_STATUS_STOP ||
+      result.stopped_early) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
@@ -3326,11 +3445,10 @@ int main(void) {
   }
   match_all_status = 0;
   if (run_projection_parse(ctx) || run_selector_json_write(ctx) ||
-      run_scalar_go_parity_regressions(ctx) ||
-      run_status_selection(ctx) || run_escaped_pointer_selection(ctx) ||
-      run_conjunction_selection(ctx) || run_or_selection(ctx) ||
-      run_post_hit_validation(ctx) || run_not_selection(ctx) ||
-      run_mapped_string_predicates(ctx) ||
+      run_scalar_json_semantic_regressions(ctx) || run_status_selection(ctx) ||
+      run_escaped_pointer_selection(ctx) || run_conjunction_selection(ctx) ||
+      run_or_selection(ctx) || run_post_hit_validation(ctx) ||
+      run_not_selection(ctx) || run_mapped_string_predicates(ctx) ||
       ((match_all_status = run_match_all(ctx)) != 0) ||
       run_root_wildcard_array_error(ctx) || run_selected_record_output(ctx) ||
       run_value_callback(ctx) || run_value_callback_control(ctx) ||
@@ -3342,7 +3460,7 @@ int main(void) {
       run_completed_record_before_root_array_error(ctx) ||
       run_output_modes_skip_scalar_roots(ctx) || run_stop_and_root_array(ctx) ||
       run_record_limit(ctx) || run_byte_limit(ctx) ||
-      run_true_stream_contract(ctx)) {
+      run_unintentional_stop_status(ctx) || run_true_stream_contract(ctx)) {
     ctx->destroy(ctx);
     return match_all_status != 0 ? match_all_status : 1;
   }

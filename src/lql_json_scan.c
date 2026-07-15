@@ -367,14 +367,12 @@ static int lql_json_number_match_integer(const char *text, size_t len,
   return 1;
 }
 
-static unsigned long lql_json_number_range_complete(lql_json_scan *scan) {
+static int lql_json_number_complete_value(lql_json_scan *scan, double *out) {
   long double value_ld;
   long double multiplier;
   double value;
-  unsigned long hits;
-  size_t i;
   if (scan->number_range_active == 0ul || scan->number_accumulator_failed) {
-    return 0ul;
+    return 0;
   }
   if (scan->number_match_len + 1u < sizeof(scan->number_match)) {
     scan->number_match[scan->number_match_len] = '\0';
@@ -382,7 +380,7 @@ static unsigned long lql_json_number_range_complete(lql_json_scan *scan) {
                                        scan->number_match_len, &value) &&
         !lql_number_parse_json(scan->number_match, scan->number_match_len,
                                &value)) {
-      return 0ul;
+      return 0;
     }
   } else {
     value_ld = scan->number_value;
@@ -391,7 +389,7 @@ static unsigned long lql_json_number_range_complete(lql_json_scan *scan) {
                                      ? -scan->number_exponent
                                      : scan->number_exponent,
                                  &multiplier)) {
-        return 0ul;
+        return 0;
       }
       value_ld *= multiplier;
     }
@@ -400,8 +398,19 @@ static unsigned long lql_json_number_range_complete(lql_json_scan *scan) {
     }
     value = (double)value_ld;
     if (!(value == value) || value == HUGE_VAL || value == -HUGE_VAL) {
-      return 0ul;
+      return 0;
     }
+  }
+  *out = value;
+  return 1;
+}
+
+static unsigned long lql_json_number_range_complete(lql_json_scan *scan) {
+  double value;
+  unsigned long hits;
+  size_t i;
+  if (!lql_json_number_complete_value(scan, &value)) {
+    return 0ul;
   }
   hits = 0ul;
   for (i = 0u; i < scan->flat_term_count; ++i) {
@@ -429,6 +438,35 @@ static unsigned long lql_json_number_range_complete(lql_json_scan *scan) {
       continue;
     }
     hits |= bit;
+  }
+  return hits;
+}
+
+static unsigned long lql_json_number_eq_complete(lql_json_scan *scan,
+                                                 unsigned long terms) {
+  double value;
+  unsigned long hits;
+  size_t i;
+  if (terms == 0ul || !lql_json_number_complete_value(scan, &value)) {
+    return 0ul;
+  }
+  hits = 0ul;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    const lql_json_flat_eq_term *term;
+    unsigned long bit;
+    double expected;
+    bit = 1ul << i;
+    if ((terms & bit) == 0ul || (scan->number_range_failed & bit) != 0ul) {
+      continue;
+    }
+    term = &scan->flat_terms[i];
+    if (term->kind != LQL_JSON_FLAT_TERM_NUMBER_EQ ||
+        !lql_number_parse_json(term->value, term->value_len, &expected)) {
+      continue;
+    }
+    if (value == expected) {
+      hits |= bit;
+    }
   }
   return hits;
 }
@@ -2067,10 +2105,12 @@ static lql_status lql_json_matched_scalar_value(lql_json_scan *scan,
     lql_json_flat_term_kind scalar_kind;
     unsigned long scalar_terms;
     unsigned long range_terms;
+    unsigned long number_eq_terms;
     const char *literal;
     size_t literal_len;
     literal = NULL;
     literal_len = 0u;
+    number_eq_terms = 0ul;
     if (value == 't' || value == 'f') {
       scalar_kind = LQL_JSON_FLAT_TERM_BOOL_EQ;
       range_terms = 0ul;
@@ -2094,6 +2134,11 @@ static lql_status lql_json_matched_scalar_value(lql_json_scan *scan,
               scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_NUMBER_RANGE) {
             range_terms |= bit;
           }
+          if ((matches & bit) != 0ul &&
+              lql_json_term_value_at(&scan->flat_terms[i], path_segment) &&
+              scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_NUMBER_EQ) {
+            number_eq_terms |= bit;
+          }
         }
       }
     }
@@ -2105,14 +2150,13 @@ static lql_status lql_json_matched_scalar_value(lql_json_scan *scan,
         bit = 1ul << i;
         if ((matches & bit) != 0ul &&
             lql_json_term_value_at(&scan->flat_terms[i], path_segment) &&
-            (scan->flat_terms[i].kind == scalar_kind ||
-             (value != 'n' &&
-              scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_TEXT_EQ))) {
+            scan->flat_terms[i].kind == scalar_kind &&
+            scalar_kind != LQL_JSON_FLAT_TERM_NUMBER_EQ) {
           scalar_terms |= bit;
         }
       }
     }
-    if (scalar_terms == 0ul && range_terms == 0ul)
+    if (scalar_terms == 0ul && range_terms == 0ul && number_eq_terms == 0ul)
       return lql_json_value(scan);
     if (literal != NULL && range_terms == 0ul) {
       status = lql_json_literal(scan, literal);
@@ -2123,11 +2167,12 @@ static lql_status lql_json_matched_scalar_value(lql_json_scan *scan,
       return status;
     }
     lql_json_match_start(scan, scalar_terms, 0, 0u);
-    lql_json_number_range_start(scan, range_terms);
+    lql_json_number_range_start(scan, range_terms | number_eq_terms);
     status = lql_json_value(scan);
     if (status == LQL_STATUS_OK) {
       scan->flat_eq_hits |= lql_json_match_complete(scan);
       scan->flat_eq_hits |= lql_json_number_range_complete(scan);
+      scan->flat_eq_hits |= lql_json_number_eq_complete(scan, number_eq_terms);
     }
     lql_json_number_range_start(scan, 0ul);
     lql_json_match_start(scan, 0ul, 0, 0u);
@@ -2409,9 +2454,11 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       lql_json_flat_term_kind scalar_kind;
       unsigned long scalar_terms;
       unsigned long range_terms;
+      unsigned long number_eq_terms;
       const char *literal;
       size_t literal_len;
       range_terms = 0ul;
+      number_eq_terms = 0ul;
       literal = NULL;
       literal_len = 0u;
       if (value == 't' || value == 'f') {
@@ -2426,14 +2473,14 @@ static lql_status lql_json_object(lql_json_scan *scan) {
         scalar_kind = LQL_JSON_FLAT_TERM_NUMBER_EQ;
         range_terms = lql_json_match_terms_for_kind(
             scan, key_matches, LQL_JSON_FLAT_TERM_NUMBER_RANGE);
+        number_eq_terms = lql_json_match_terms_for_kind(
+            scan, key_matches, LQL_JSON_FLAT_TERM_NUMBER_EQ);
       }
       scalar_terms =
-          lql_json_match_terms_for_kind(scan, key_matches, scalar_kind);
-      if (value != 'n') {
-        scalar_terms |= lql_json_match_terms_for_kind(
-            scan, key_matches, LQL_JSON_FLAT_TERM_TEXT_EQ);
-      }
-      if (literal != NULL && range_terms == 0ul) {
+          scalar_kind == LQL_JSON_FLAT_TERM_NUMBER_EQ
+              ? 0ul
+              : lql_json_match_terms_for_kind(scan, key_matches, scalar_kind);
+      if (literal != NULL && range_terms == 0ul && number_eq_terms == 0ul) {
         status = lql_json_literal(scan, literal);
         if (status == LQL_STATUS_OK) {
           scan->flat_eq_hits |= lql_json_scalar_literal_hits(
@@ -2441,11 +2488,13 @@ static lql_status lql_json_object(lql_json_scan *scan) {
         }
       } else {
         lql_json_match_start(scan, scalar_terms, 0, 0u);
-        lql_json_number_range_start(scan, range_terms);
+        lql_json_number_range_start(scan, range_terms | number_eq_terms);
         status = lql_json_value(scan);
         if (status == LQL_STATUS_OK) {
           scan->flat_eq_hits |= lql_json_match_complete(scan);
           scan->flat_eq_hits |= lql_json_number_range_complete(scan);
+          scan->flat_eq_hits |=
+              lql_json_number_eq_complete(scan, number_eq_terms);
         }
         lql_json_number_range_start(scan, 0ul);
         lql_json_match_start(scan, 0ul, 0, 0u);
