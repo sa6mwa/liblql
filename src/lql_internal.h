@@ -90,12 +90,14 @@ struct lql_selector {
   char *value;
   int value_set;
   int value_is_string;
+  int value_from_json;
   lql_selector_literal_kind value_kind;
   int value_is_temporal;
   int ignore_case;
   char **any;
   size_t *any_lens;
   lql_selector_literal_kind *any_kinds;
+  int *any_from_json;
   size_t any_count;
   char *range_gt_text;
   char *range_gte_text;

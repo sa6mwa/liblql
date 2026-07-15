@@ -64,9 +64,39 @@ static int lql_flat_eq_selector_needs_time(const lql_selector *selector) {
   return 0;
 }
 
-static int lql_flat_eq_literal_kind(lql_selector_literal_kind literal_kind,
+static int lql_flat_eq_text_scalar_coerces(const char *value,
+                                           lql_selector_literal_kind kind) {
+  double number;
+  if (kind == LQL_SELECTOR_LITERAL_NUMBER ||
+      kind == LQL_SELECTOR_LITERAL_BOOL) {
+    return 1;
+  }
+  if (kind != LQL_SELECTOR_LITERAL_STRING || value == NULL) {
+    return 0;
+  }
+  if (strcmp(value, "true") == 0 || strcmp(value, "false") == 0) {
+    return 1;
+  }
+  return lql_number_parse_json(value, strlen(value), &number);
+}
+
+static int lql_flat_eq_literal_kind(const char *value,
+                                    lql_selector_literal_kind literal_kind,
+                                    int from_json,
                                     lql_json_flat_term_kind *out) {
   if (out == NULL) {
+    return 0;
+  }
+  if (!from_json) {
+    if (lql_flat_eq_text_scalar_coerces(value, literal_kind)) {
+      *out = LQL_JSON_FLAT_TERM_TEXT_EQ;
+      return 1;
+    }
+    if (literal_kind == LQL_SELECTOR_LITERAL_STRING ||
+        literal_kind == LQL_SELECTOR_LITERAL_NULL) {
+      *out = LQL_JSON_FLAT_TERM_EQ;
+      return 1;
+    }
     return 0;
   }
   switch (literal_kind) {
@@ -405,7 +435,10 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       return 0;
     }
     for (i = 0u; i < selector->any_count; ++i) {
-      if (!lql_flat_eq_literal_kind(selector->any_kinds[i], &term_kind) ||
+      if (!lql_flat_eq_literal_kind(
+              selector->any[i], selector->any_kinds[i],
+              selector->any_from_json != NULL ? selector->any_from_json[i] : 0,
+              &term_kind) ||
           program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
         return 0;
       }
@@ -592,7 +625,9 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
         selector->kind == LQL_SELECTOR_KIND_IPREFIX || selector->ignore_case
             ? LQL_JSON_FLAT_TERM_IPREFIX
             : LQL_JSON_FLAT_TERM_PREFIX;
-  } else if (!lql_flat_eq_literal_kind(selector->value_kind, &term->kind)) {
+  } else if (!lql_flat_eq_literal_kind(selector->value, selector->value_kind,
+                                       selector->value_from_json,
+                                       &term->kind)) {
     return 0;
   }
   if (term->kind != LQL_JSON_FLAT_TERM_EXISTS) {
@@ -1105,7 +1140,8 @@ static lql_status lql_flat_eq_mutation_increment(
     lql_flat_eq_state *state, const lql_mutation_action *action,
     const lql_json_spool *spool, size_t value_start, size_t value_end,
     int present, lql_error *error) {
-  char number[128];
+  char stack_number[128];
+  char *number;
   double current;
   double next;
   size_t len;
@@ -1114,11 +1150,24 @@ static lql_status lql_flat_eq_mutation_increment(
     return LQL_STATUS_INVALID_ARGUMENT;
   if (!present)
     return lql_flat_eq_mutation_number(state, action->delta, error);
-  len = value_end - value_start;
-  if (len == 0u || len >= sizeof(number)) {
+  if (value_end < value_start) {
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
                   "increment target number is invalid");
     return LQL_STATUS_JSON_ERROR;
+  }
+  len = value_end - value_start;
+  if (len == 0u) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "increment target number is invalid");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  number = len < sizeof(stack_number) ? stack_number : NULL;
+  if (number == NULL) {
+    number = (char *)malloc(len + 1u);
+    if (number == NULL) {
+      lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+      return LQL_STATUS_NO_MEMORY;
+    }
   }
   {
     size_t i;
@@ -1126,17 +1175,24 @@ static lql_status lql_flat_eq_mutation_increment(
     unsigned char ch;
     for (i = 0u; i < len; ++i) {
       copy_status = lql_flat_eq_spool_byte(spool, value_start + i, &ch, error);
-      if (copy_status != LQL_STATUS_OK)
+      if (copy_status != LQL_STATUS_OK) {
+        if (number != stack_number)
+          free(number);
         return copy_status;
+      }
       number[i] = (char)ch;
     }
   }
   number[len] = '\0';
   if (!lql_number_parse_json(number, len, &current)) {
+    if (number != stack_number)
+      free(number);
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
                   "increment target number is invalid");
     return LQL_STATUS_JSON_ERROR;
   }
+  if (number != stack_number)
+    free(number);
   next = current + action->delta;
   return lql_flat_eq_mutation_number(state, next, error);
 }

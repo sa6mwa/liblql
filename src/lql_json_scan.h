@@ -36,7 +36,8 @@ typedef enum lql_json_flat_term_kind {
   LQL_JSON_FLAT_TERM_ICONTAINS = 7,
   LQL_JSON_FLAT_TERM_IPREFIX = 8,
   LQL_JSON_FLAT_TERM_NUMBER_RANGE = 9,
-  LQL_JSON_FLAT_TERM_TEMPORAL_RANGE = 10
+  LQL_JSON_FLAT_TERM_TEMPORAL_RANGE = 10,
+  LQL_JSON_FLAT_TERM_TEXT_EQ = 11
 } lql_json_flat_term_kind;
 
 #define LQL_JSON_PATH_SEGMENT_CAPACITY (sizeof(unsigned long) * CHAR_BIT)

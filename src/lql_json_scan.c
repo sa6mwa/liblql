@@ -3,7 +3,9 @@
 #include "lql_unicode_lower.h"
 
 #include <errno.h>
+#include <float.h>
 #include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -62,6 +64,13 @@ typedef struct lql_json_scan {
   unsigned long number_range_failed;
   char number_match[LQL_JSON_NUMBER_MATCH_BYTES];
   size_t number_match_len;
+  long double number_value;
+  long double number_fraction_scale;
+  int number_negative;
+  int number_stage;
+  int number_exp_negative;
+  int number_exponent;
+  int number_accumulator_failed;
   unsigned long temporal_range_active;
   unsigned long temporal_range_failed;
   char temporal_match[LQL_JSON_NUMBER_MATCH_BYTES];
@@ -185,6 +194,13 @@ static void lql_json_number_range_start(lql_json_scan *scan,
   scan->number_range_active = active;
   scan->number_range_failed = 0ul;
   scan->number_match_len = 0u;
+  scan->number_value = 0.0L;
+  scan->number_fraction_scale = 0.1L;
+  scan->number_negative = 0;
+  scan->number_stage = 0;
+  scan->number_exp_negative = 0;
+  scan->number_exponent = 0;
+  scan->number_accumulator_failed = 0;
 }
 
 LQL_JSON_INLINE void lql_json_number_range_byte(lql_json_scan *scan,
@@ -192,11 +208,83 @@ LQL_JSON_INLINE void lql_json_number_range_byte(lql_json_scan *scan,
   if (scan->number_range_active == 0ul) {
     return;
   }
-  if (scan->number_match_len + 1u >= sizeof(scan->number_match)) {
+  if (scan->number_match_len + 1u < sizeof(scan->number_match)) {
+    scan->number_match[scan->number_match_len++] = (char)value;
+  }
+  if (scan->number_accumulator_failed) {
+    return;
+  }
+  if (value == (unsigned char)'-' && scan->number_stage == 0 &&
+      scan->number_match_len <= 1u) {
+    scan->number_negative = 1;
+    return;
+  }
+  if (value == (unsigned char)'.' && scan->number_stage == 0) {
+    scan->number_stage = 1;
+    return;
+  }
+  if ((value == (unsigned char)'e' || value == (unsigned char)'E') &&
+      scan->number_stage != 2) {
+    scan->number_stage = 2;
+    return;
+  }
+  if ((value == (unsigned char)'+' || value == (unsigned char)'-') &&
+      scan->number_stage == 2 && scan->number_exponent == 0) {
+    scan->number_exp_negative = value == (unsigned char)'-';
+    return;
+  }
+  if (value < (unsigned char)'0' || value > (unsigned char)'9') {
+    scan->number_accumulator_failed = 1;
     scan->number_range_failed |= scan->number_range_active;
     return;
   }
-  scan->number_match[scan->number_match_len++] = (char)value;
+  if (scan->number_stage == 0) {
+    if (scan->number_value > (LDBL_MAX - 9.0L) / 10.0L) {
+      scan->number_accumulator_failed = 1;
+      scan->number_range_failed |= scan->number_range_active;
+      return;
+    }
+    scan->number_value =
+        scan->number_value * 10.0L + (long double)(value - (unsigned char)'0');
+  } else if (scan->number_stage == 1) {
+    scan->number_value +=
+        (long double)(value - (unsigned char)'0') * scan->number_fraction_scale;
+    scan->number_fraction_scale *= 0.1L;
+  } else {
+    if (scan->number_exponent > 10000) {
+      scan->number_accumulator_failed = 1;
+      scan->number_range_failed |= scan->number_range_active;
+      return;
+    }
+    scan->number_exponent =
+        scan->number_exponent * 10 + (int)(value - (unsigned char)'0');
+  }
+}
+
+static int lql_json_number_pow10(int exponent, long double *out) {
+  long double result;
+  long double factor;
+  unsigned int power;
+  result = 1.0L;
+  factor = 10.0L;
+  power = exponent < 0 ? (unsigned int)(-exponent) : (unsigned int)exponent;
+  while (power != 0u) {
+    if ((power & 1u) != 0u) {
+      result *= factor;
+      if (result > LDBL_MAX / 2.0L) {
+        return 0;
+      }
+    }
+    power >>= 1;
+    if (power != 0u) {
+      factor *= factor;
+      if (factor > LDBL_MAX / 2.0L) {
+        return 0;
+      }
+    }
+  }
+  *out = exponent < 0 ? 1.0L / result : result;
+  return 1;
 }
 
 static void lql_json_temporal_range_start(lql_json_scan *scan,
@@ -280,18 +368,38 @@ static int lql_json_number_match_integer(const char *text, size_t len,
 }
 
 static unsigned long lql_json_number_range_complete(lql_json_scan *scan) {
+  long double value_ld;
+  long double multiplier;
   double value;
   unsigned long hits;
   size_t i;
-  if (scan->number_range_active == 0ul ||
-      scan->number_match_len >= sizeof(scan->number_match)) {
+  if (scan->number_range_active == 0ul || scan->number_accumulator_failed) {
     return 0ul;
   }
-  scan->number_match[scan->number_match_len] = '\0';
-  if (!lql_json_number_match_integer(scan->number_match, scan->number_match_len,
-                                     &value)) {
-    if (!lql_number_parse_json(scan->number_match, scan->number_match_len,
+  if (scan->number_match_len + 1u < sizeof(scan->number_match)) {
+    scan->number_match[scan->number_match_len] = '\0';
+    if (!lql_json_number_match_integer(scan->number_match,
+                                       scan->number_match_len, &value) &&
+        !lql_number_parse_json(scan->number_match, scan->number_match_len,
                                &value)) {
+      return 0ul;
+    }
+  } else {
+    value_ld = scan->number_value;
+    if (scan->number_stage == 2 && scan->number_exponent != 0) {
+      if (!lql_json_number_pow10(scan->number_exp_negative
+                                     ? -scan->number_exponent
+                                     : scan->number_exponent,
+                                 &multiplier)) {
+        return 0ul;
+      }
+      value_ld *= multiplier;
+    }
+    if (scan->number_negative) {
+      value_ld = -value_ld;
+    }
+    value = (double)value_ld;
+    if (!(value == value) || value == HUGE_VAL || value == -HUGE_VAL) {
       return 0ul;
     }
   }
@@ -1933,6 +2041,7 @@ static lql_status lql_json_matched_scalar_value(lql_json_scan *scan,
         if (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_TEMPORAL_RANGE) {
           temporal_terms |= bit;
         } else if (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EQ ||
+                   scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_TEXT_EQ ||
                    scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_PREFIX ||
                    scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_CONTAINS ||
                    scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_ICONTAINS ||
@@ -1996,7 +2105,9 @@ static lql_status lql_json_matched_scalar_value(lql_json_scan *scan,
         bit = 1ul << i;
         if ((matches & bit) != 0ul &&
             lql_json_term_value_at(&scan->flat_terms[i], path_segment) &&
-            scan->flat_terms[i].kind == scalar_kind) {
+            (scan->flat_terms[i].kind == scalar_kind ||
+             (value != 'n' &&
+              scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_TEXT_EQ))) {
           scalar_terms |= bit;
         }
       }
@@ -2276,6 +2387,7 @@ static lql_status lql_json_object(lql_json_scan *scan) {
           if (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_TEMPORAL_RANGE) {
             temporal_terms |= bit;
           } else if (scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_EQ ||
+                     scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_TEXT_EQ ||
                      scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_PREFIX ||
                      scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_CONTAINS ||
                      scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_ICONTAINS ||
@@ -2317,6 +2429,10 @@ static lql_status lql_json_object(lql_json_scan *scan) {
       }
       scalar_terms =
           lql_json_match_terms_for_kind(scan, key_matches, scalar_kind);
+      if (value != 'n') {
+        scalar_terms |= lql_json_match_terms_for_kind(
+            scan, key_matches, LQL_JSON_FLAT_TERM_TEXT_EQ);
+      }
       if (literal != NULL && range_terms == 0ul) {
         status = lql_json_literal(scan, literal);
         if (status == LQL_STATUS_OK) {

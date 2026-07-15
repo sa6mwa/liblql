@@ -192,6 +192,80 @@ static int selector_matches(lql *ctx, lql_selector *selector, const char *input,
          result.records_matched == expected_matches;
 }
 
+static int run_scalar_go_parity_regressions(lql *ctx) {
+  static const char scalar_text_input[] =
+      "{\"v\":1}\n"
+      "{\"v\":\"1\"}\n"
+      "{\"v\":true}\n"
+      "{\"v\":\"true\"}\n"
+      "{\"v\":null}\n"
+      "{\"v\":\"null\"}\n"
+      "{\"v\":false}\n"
+      "{\"v\":\"false\"}\n"
+      "{\"v\":\"x\"}\n";
+  static const char typed_json_selector[] =
+      "{\"and\":[{\"eq\":{\"field\":\"/n\",\"value\":1}},"
+      "{\"eq\":{\"field\":\"/b\",\"value\":true}},"
+      "{\"eq\":{\"field\":\"/z\",\"value\":null}},"
+      "{\"in\":{\"field\":\"/tag\",\"any\":[1,false,null,\"x\"]}}]}";
+  static const char typed_json_input[] =
+      "{\"n\":1,\"b\":true,\"z\":null,\"tag\":1}\n"
+      "{\"n\":\"1\",\"b\":true,\"z\":null,\"tag\":1}\n"
+      "{\"n\":1,\"b\":\"true\",\"z\":null,\"tag\":1}\n"
+      "{\"n\":1,\"b\":true,\"z\":\"null\",\"tag\":1}\n"
+      "{\"n\":1,\"b\":true,\"z\":null,\"tag\":\"1\"}\n"
+      "{\"n\":1,\"b\":true,\"z\":null,\"tag\":false}\n"
+      "{\"n\":1,\"b\":true,\"z\":null,\"tag\":null}\n"
+      "{\"n\":1,\"b\":true,\"z\":null,\"tag\":\"x\"}\n";
+  static const char long_number_input[] =
+      "{\"n\":0."
+      "0000000000000000000000000000000000000000000000000000000000000000"
+      "0000000000000000000000000000000000000000000000000000000000000000"
+      "0001}\n";
+  lql_selector *selector;
+  lql_error error;
+
+  /*
+   * Text selectors follow Go lql's scalar-to-text comparison contract:
+   * numeric and boolean selector text also matches JSON strings with the same
+   * text, while null selector text matches the string "null", not JSON null.
+   */
+  if (run_selection(ctx, "/v=1", scalar_text_input, 9u, 2u) ||
+      run_selection(ctx, "/v=\"1\"", scalar_text_input, 9u, 2u) ||
+      run_selection(ctx, "/v=true", scalar_text_input, 9u, 2u) ||
+      run_selection(ctx, "/v=\"true\"", scalar_text_input, 9u, 2u) ||
+      run_selection(ctx, "/v=false", scalar_text_input, 9u, 2u) ||
+      run_selection(ctx, "/v=\"false\"", scalar_text_input, 9u, 2u) ||
+      run_selection(ctx, "/v=null", scalar_text_input, 9u, 1u) ||
+      run_selection(ctx, "/v=\"null\"", scalar_text_input, 9u, 1u) ||
+      run_selection(ctx, "in{field=/v,any=1|true|null|false|x}",
+                    scalar_text_input, 9u, 8u)) {
+    return 1;
+  }
+
+  /*
+   * Selector JSON keeps typed scalar literals token-strict. This prevents the
+   * text-selector compatibility rule above from weakening Go-compatible AST
+   * interchange semantics for callers that supplied JSON numbers/bools/nulls.
+   */
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse_json(ctx, typed_json_selector,
+                               sizeof(typed_json_selector) - 1u, &selector,
+                               &error) != LQL_STATUS_OK ||
+      !selector_matches(ctx, selector, typed_json_input, 8u, 4u)) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+
+  if (run_selection(ctx, "range{field=/n,gt=0}", long_number_input, 1u, 1u) ||
+      run_selection(ctx, "range{field=/n,lte=1}", long_number_input, 1u, 1u)) {
+    return 1;
+  }
+  return 0;
+}
+
 static int run_status_selection(lql *ctx) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n"
@@ -2427,6 +2501,60 @@ static int run_mutation_literal_parity(lql *ctx) {
   return 0;
 }
 
+static int run_long_number_mutation_regression(lql *ctx) {
+  static const char input[] =
+      "{\"status\":\"open\",\"n\":0."
+      "0000000000000000000000000000000000000000000000000000000000000000"
+      "0000000000000000000000000000000000000000000000000000000000000000"
+      "0001}\n";
+  static const char output[] = "{\"status\":\"open\",\"n\":1}\n";
+  static const char *const mutations[] = {"/n=+1"};
+  lql_selector *selector;
+  lql_mutation *mutation;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+
+  selector = NULL;
+  mutation = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_parse(ctx, mutations, 1u, &mutation, &error) !=
+          LQL_STATUS_OK) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 7u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = selector;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(output) - 1u ||
+      memcmp(writer.data, output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 static int run_projection_then_mutation_output(lql *ctx) {
   static const char input[] = "{\"status\":\"open\",\"n\":1,\"drop\":9}\n";
   static const char *const projection_paths[] = {"/status", "/n"};
@@ -3198,6 +3326,7 @@ int main(void) {
   }
   match_all_status = 0;
   if (run_projection_parse(ctx) || run_selector_json_write(ctx) ||
+      run_scalar_go_parity_regressions(ctx) ||
       run_status_selection(ctx) || run_escaped_pointer_selection(ctx) ||
       run_conjunction_selection(ctx) || run_or_selection(ctx) ||
       run_post_hit_validation(ctx) || run_not_selection(ctx) ||
@@ -3207,6 +3336,7 @@ int main(void) {
       run_value_callback(ctx) || run_value_callback_control(ctx) ||
       run_nested_projection_output(ctx) || run_mutation_output(ctx) ||
       run_mutation_literal_parity(ctx) ||
+      run_long_number_mutation_regression(ctx) ||
       run_projection_then_mutation_output(ctx) ||
       run_output_modes_preserve_completed_before_malformed(ctx) ||
       run_completed_record_before_root_array_error(ctx) ||

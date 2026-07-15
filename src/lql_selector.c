@@ -69,10 +69,12 @@ static int token_list_push(lql_selector_parser *ctx, lql_token_list *list,
 }
 
 static int selector_any_push(lql_selector_parser *ctx, lql_selector *selector,
-                             char *item, lql_selector_literal_kind kind) {
+                             char *item, lql_selector_literal_kind kind,
+                             int from_json) {
   char **next;
   size_t *next_lens;
   lql_selector_literal_kind *next_kinds;
+  int *next_from_json;
   size_t len;
   len = strlen(item);
   next = (char **)ctx->allocator->realloc(ctx->allocator, selector->any,
@@ -96,9 +98,17 @@ static int selector_any_push(lql_selector_parser *ctx, lql_selector *selector,
     return 0;
   }
   selector->any_kinds = next_kinds;
+  next_from_json =
+      (int *)ctx->allocator->realloc(ctx->allocator, selector->any_from_json,
+                                     sizeof(int) * (selector->any_count + 1u));
+  if (next_from_json == NULL) {
+    return 0;
+  }
+  selector->any_from_json = next_from_json;
   selector->any[selector->any_count] = item;
   selector->any_lens[selector->any_count] = len;
   selector->any_kinds[selector->any_count] = kind;
+  selector->any_from_json[selector->any_count] = from_json ? 1 : 0;
   ++selector->any_count;
   return 1;
 }
@@ -583,8 +593,8 @@ static int parse_any_values(lql_selector_parser *ctx, char *decoded,
       return 0;
     }
     if (item[0] != '\0') {
-      if (!selector_any_push(ctx, selector, item,
-                             selector_literal_kind(item))) {
+      if (!selector_any_push(ctx, selector, item, selector_literal_kind(item),
+                             0)) {
         ctx->allocator->destroy(ctx->allocator, item);
         return 0;
       }
@@ -1572,6 +1582,7 @@ static int selector_json_store_value(selector_json_state *state,
   selector->value = copy;
   selector->value_set = 1;
   selector->value_is_string = kind == LQL_SELECTOR_LITERAL_STRING;
+  selector->value_from_json = 1;
   selector->value_kind = kind;
   return 1;
 }
@@ -1584,7 +1595,7 @@ static int selector_json_push_any(selector_json_state *state,
   if (copy == NULL) {
     return 0;
   }
-  if (!selector_any_push(&state->parser, selector, copy, kind)) {
+  if (!selector_any_push(&state->parser, selector, copy, kind, 1)) {
     state->parser.allocator->destroy(state->parser.allocator, copy);
     return 0;
   }
@@ -2738,6 +2749,7 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->any = NULL;
   dst->any_lens = NULL;
   dst->any_kinds = NULL;
+  dst->any_from_json = NULL;
   dst->any_count = 0u;
   dst->range_gt_text = NULL;
   dst->range_gte_text = NULL;
@@ -2770,7 +2782,10 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   for (i = 0u; i < src->any_count; ++i) {
     char *copy;
     copy = lql_strndup_local(ctx, src->any[i], src->any_lens[i]);
-    if (copy == NULL || !selector_any_push(ctx, dst, copy, src->any_kinds[i])) {
+    if (copy == NULL ||
+        !selector_any_push(ctx, dst, copy, src->any_kinds[i],
+                           src->any_from_json != NULL ? src->any_from_json[i]
+                                                      : 0)) {
       ctx->allocator->destroy(ctx->allocator, copy);
       return 0;
     }
@@ -2908,7 +2923,8 @@ static int build_any_values(lql_selector_parser *ctx, lql_selector *selector,
     if (!view_to_cstr(ctx, values[i], 0, &copy)) {
       return 0;
     }
-    if (!selector_any_push(ctx, selector, copy, LQL_SELECTOR_LITERAL_STRING)) {
+    if (!selector_any_push(ctx, selector, copy, LQL_SELECTOR_LITERAL_STRING,
+                           0)) {
       ctx->allocator->destroy(ctx->allocator, copy);
       return 0;
     }
