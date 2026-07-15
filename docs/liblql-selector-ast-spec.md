@@ -3,8 +3,9 @@
 ## Purpose
 
 This document defines the selector AST surface required for liblql parity with
-the Go `pkt.systems/lql v0.17.1` public library. It is an implementation target,
-not a record of the current code.
+the Go `pkt.systems/lql v0.17.1` public library, except where this document
+explicitly names an intentional liblql semantic divergence. It is the
+implementation contract for the public selector AST surface.
 
 The goal is not to copy Go structs into C. The goal is to implement the same
 selector model in idiomatic C:
@@ -16,8 +17,8 @@ selector model in idiomatic C:
 - evaluate selectors and derive optimized plans from the same AST;
 - expose the same high-value AST workflows through Lua.
 
-The current opaque selector-evaluation handle is not enough for SDK parity, and
-a private AST hidden behind a public facade is also not enough. The selector AST
+An opaque selector-evaluation handle alone is not enough for SDK parity, and a
+private AST hidden behind a public facade is also not enough. The selector AST
 must be the product type, not an adapter over another selector tree.
 
 ## Required Architecture
@@ -148,7 +149,7 @@ The construction surface must support every public Go selector family:
 - `in` terms;
 - `exists` path selectors.
 
-Construction must preserve term details needed for Go-compatible JSON and
+Construction must preserve term details needed for selector AST JSON and
 evaluation:
 
 - field path;
@@ -226,8 +227,11 @@ small internal JSON scanner, provided it remains strict JSON, accepts ordinary
 whitespace, decodes string escapes including Unicode escapes, and emits directly
 into `lql_selector` without an intermediate private selector tree.
 
-Range bound and permissive scalar-to-string term conversion remain the important
-union points. The recursive selector node itself is also a union point:
+Range bounds and typed scalar term conversion remain the important union points.
+Numeric range bounds carry number/datetime union state. Scalar term values
+preserve JSON type for unquoted selector text and selector JSON instead of
+coercing numbers, booleans, and null to strings. The recursive selector node
+itself is also a union point:
 `and`/`or` carry arrays, `not` carries one child node, term operators carry
 operator-specific objects, and `exists` carries a string. The output of that
 parsing is `lql_selector`, not an intermediate private selector tree.
@@ -250,8 +254,10 @@ Lua must support:
   constructors;
 - inspecting selector userdata as node kinds, children, and term fields through
   methods backed by the public C API;
-- converting selector userdata to Go-compatible selector JSON;
-- constructing selector userdata from Go-compatible selector JSON;
+- converting selector userdata to selector AST JSON using the Go-compatible
+  object shape and liblql typed-scalar semantics;
+- constructing selector userdata from selector AST JSON using the Go-compatible
+  object shape and liblql typed-scalar semantics;
 - using selector userdata in query, projection-before-mutation, and mutation
   workflows.
 
@@ -277,10 +283,13 @@ The selector AST work is not complete until all of these are executable gates:
 - C-only tests for omitted `value` versus explicit empty `value`;
 - C-only tests for range-bound numeric/string union behavior;
 - C-only tests for cleanup after failed AST JSON parse and failed builder calls;
-- Go-vs-C SDK parity tests proving Go selector AST JSON imports into liblql
-  and preserves selector behavior across representative node families;
+- Go-vs-C SDK parity tests proving accepted Go selector AST JSON imports into
+  liblql and preserves selector behavior across representative node families;
 - Go-vs-C SDK parity tests for constructor-equivalent ASTs where the C builder
   is the public equivalent of Go constructors;
+- C-only behavior tests covering intentional liblql JSON scalar equality
+  semantics for typed numbers, booleans, null, quoted strings, and numeric
+  equality independent of source spelling;
 - Lua tests for selector userdata construction, traversal, JSON round-trips,
   optional table conversion helpers if present, and use in query workflows;
 - manifest rows in `parity/oracle_inventory.tsv` updated from `gap` or

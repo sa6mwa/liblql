@@ -888,9 +888,9 @@ static lql_status write_selector_literal_json(FILE *out, const char *value,
                                 value == NULL ? 0u : len, error);
   }
   /*
-   * Go selector AST JSON carries scalar term values as JSON scalars. The
-   * parser records the literal kind when text or JSON enters liblql, so export
-   * uses that metadata instead of quoting everything and changing behavior.
+   * Selector AST JSON carries scalar term values as JSON scalars. The parser
+   * records the literal kind when text or JSON enters liblql, so export uses
+   * that metadata instead of quoting everything and changing typed equality.
    */
   return selector_json_literal(out, value == NULL ? "" : value, error);
 }
@@ -1229,9 +1229,9 @@ static lql_status write_selector_json(FILE *out, const lql_selector *selector,
       case LQL_SELECTOR_KIND_NE: {
         lql_selector eq_selector;
         /*
-         * The Go-compatible selector JSON has no "ne" operator. If a legacy or
-         * future internal producer creates LQL_SELECTOR_KIND_NE, serialize it
-         * as the semantic AST form not(eq(...)) so round-trips cannot invert
+         * The selector AST JSON object shape has no "ne" operator. If a legacy
+         * or future internal producer creates LQL_SELECTOR_KIND_NE, serialize
+         * it as the semantic AST form not(eq(...)) so round-trips cannot invert
          * it.
          */
         eq_selector = *selector;

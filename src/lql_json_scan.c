@@ -636,7 +636,7 @@ static int lql_json_pointer_target_byte(const char *target, size_t target_len,
                                         size_t *advance) {
   /*
    * Selector fields are JSON Pointer text. Object keys arrive here as decoded
-   * JSON string bytes, so compare ~0/~1 as their Go-compatible key bytes.
+   * JSON string bytes, so compare ~0/~1 as their JSON Pointer escape bytes.
    */
   if (target == NULL || out == NULL || advance == NULL || pos >= target_len) {
     return 0;

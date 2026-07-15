@@ -36,11 +36,13 @@ performance claim with profiling and paired Go/C benchmarks.
 - Earlier completed records remain observable if a later record is malformed.
 - Duplicate object keys are observed in source order.
 - The existing receiver API, selector AST, temporal behavior, output modes,
-  limits, callback semantics, and Go v0.17.1 parity requirements remain in
-  force unless this document names a replacement. Projection and mutation
-  remain unavailable from the true-streaming API until they have incremental
-  emitters; callers needing their existing semantics must opt into the named
-  spooled API.
+  limits, callback semantics, and accepted Go v0.17.1 parity requirements remain
+  in force unless this document names a replacement. JSON scalar equality is the
+  documented liblql divergence: typed numbers, booleans, and null are verified
+  by C behavior tests rather than by pinned-Go parity rows. Projection and
+  mutation remain unavailable from the true-streaming API until they have
+  incremental emitters; callers needing their existing semantics must opt into
+  the named spooled API.
 - Live heap remains at or below 256 KiB, independent of total input, records,
   matches, and repeated executions. The true-streaming API never materializes
   a record or writes input to disk. The explicitly named spooled compatibility

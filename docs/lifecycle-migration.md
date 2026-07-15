@@ -32,8 +32,9 @@ release documentation after the migration is complete.
   plugin fuzzing through the cached Bootlin x86_64 GNU toolchain.
 - Existing invariants: preserve self-contained direct execution, no LoneJSON
   runtime/link dependency, strict whitespace-tolerant NDJSON semantics, GCC
-  C-vs-Go accepted-row parity at or above 1.0x, and live heap at or below
-  256 KiB.
+  C-vs-Go accepted-row parity at or above 1.0x, documented liblql JSON scalar
+  equality behavior outside the pinned-Go accepted rows, and live heap at or
+  below 256 KiB.
 - Dependency archives: current liblql has none.  CMake still resolves the
   shared `CPKT_DEPENDENCY_CACHE` contract once so a future checksum-pinned
   archive can be acquired through the lifecycle cache rather than a

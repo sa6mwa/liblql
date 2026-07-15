@@ -324,7 +324,12 @@ struct lql {
   /** Parses an OR-combined selector expression and transfers `*out` on success. */
   lql_status (*selector_parse_or)(lql *self, const char *expr,
                                   lql_selector **out, lql_error *error);
-  /** Parses Go-compatible selector JSON and transfers `*out` on success. */
+  /**
+   * Parses selector AST JSON and transfers `*out` on success. The JSON shape is
+   * compatible with Go lql; liblql intentionally preserves typed scalar
+   * equality for numbers, booleans, and null instead of Go's scalar-to-string
+   * coercion.
+   */
   lql_status (*selector_parse_json)(lql *self, const void *json,
                                     size_t json_len, lql_selector **out,
                                     lql_error *error);
@@ -423,7 +428,7 @@ struct lql {
                                           lql_selector_node node,
                                           lql_string_view *out,
                                           lql_error *error);
-  /** Serializes `selector` as Go-compatible JSON to caller-owned `out`. */
+  /** Serializes `selector` as selector AST JSON to caller-owned `out`. */
   lql_status (*selector_write_json)(lql *self, const lql_selector *selector,
                                     FILE *out, lql_error *error);
   /** Builds and transfers the match-all selector to `*out`. */
