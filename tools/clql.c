@@ -28,6 +28,56 @@ static void usage(FILE *file) {
   fputs("Unsupported Go lql flags fail explicitly until supported:\n", file);
   fputs("  -m/--mutate, -f/--field, -t/--theme,\n", file);
   fputs("  -i/--inline, -w/--write, -F/--enable-file-mutations.\n\n", file);
+  fputs("Selector examples (shorthand):\n", file);
+  fputs("  /status=\"open\"\n", file);
+  fputs("  /status!=closed\n", file);
+  fputs("  /progress>=50\n", file);
+  fputs("  /timestamp>=\"2025-01-01T00:00:00Z\"\n", file);
+  fputs("  /devices/0/status=\"online\"\n", file);
+  fputs("  /labels/*=\"production\"\n", file);
+  fputs("  /items[]/sku=\"ABC-123\"\n", file);
+  fputs("  /items/**/sku=\"ABC-123\"\n", file);
+  fputs("  /items/.../sku=\"ABC-123\"\n\n", file);
+  fputs("Selector examples (full LQL):\n", file);
+  fputs("  eq{field=/status,value=open}\n", file);
+  fputs("  contains{field=/msg,value=timeout,ic=t}\n", file);
+  fputs("  contains{field=/msg,any=timeout|degraded}\n", file);
+  fputs("  icontains{field=/msg,value=timeout}\n", file);
+  fputs("  icontains{field=/service,a=AUTH|EDGE}\n", file);
+  fputs("  iprefix{field=/service,value=auth}\n", file);
+  fputs("  date{field=/timestamp,after=2025-01-01,before=2025-02-01}\n", file);
+  fputs("  date{f=/timestamp,since=yesterday}\n", file);
+  fputs(
+      "  and.eq{field=/status,value=open},and.range{field=/progress,gte=50}\n",
+      file);
+  fputs("  or.eq{field=/region,value=us},or.eq{field=/region,value=eu}\n",
+        file);
+  fputs("  not.eq{field=/state,value=disabled}\n", file);
+  fputs("  exists{/metadata/etag}\n\n", file);
+  fputs("Invocation examples:\n", file);
+  fputs("  clql -O '/status=\"open\"' '/status=\"queued\"' data.json\n", file);
+  fputs("  clql --count '/status=\"open\"' data.json\n", file);
+  fputs("  cat data.json | clql '/items[]/sku=\"ABC-123\"'\n\n", file);
+  fputs("Unsupported Go lql mutation example (fails explicitly in clql):\n",
+        file);
+  fputs("  printf '{}\\n' | clql -F \\\n", file);
+  fputs("    -m '/filename=notes.txt' -m '/tags/kind=document' \\\n", file);
+  fputs("    -m '/tags/source=local' -m 'textfile:/content=notes.txt'\n\n",
+        file);
+  fputs("Notes:\n", file);
+  fputs(
+      "  contains/icontains accept value=... or any=/a=... (pipe-delimited).\n",
+      file);
+  fputs("  range comparisons accept numeric or datetime literals.\n", file);
+  fputs("  date supports value/after/before/gt/gte/lt/lte; aliases a=after and "
+        "b=before.\n",
+        file);
+  fputs("  only date{...,since=...} supports relative macros (now, today, "
+        "yesterday).\n",
+        file);
+  fputs("  omitted values for contains/icontains/prefix/iprefix act as path "
+        "assertions.\n\n",
+        file);
   fputs("Reads strict NDJSON from file or stdin and writes compact matching\n",
         file);
   fputs("records to stdout, one JSON value per line. Root arrays are errors.\n",

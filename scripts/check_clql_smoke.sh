@@ -17,6 +17,20 @@ fi
 
 "$clql" --help >"$tmp.out"
 grep 'usage: clql' "$tmp.out" >/dev/null
+grep 'Selector examples (shorthand):' "$tmp.out" >/dev/null
+grep 'Selector examples (full LQL):' "$tmp.out" >/dev/null
+grep 'Invocation examples:' "$tmp.out" >/dev/null
+grep 'Unsupported Go lql mutation example' "$tmp.out" >/dev/null
+awk '
+  /^Selector examples \(shorthand\):$/ { section = "shorthand"; next }
+  /^Selector examples \(full LQL\):$/ { section = "full"; next }
+  /^Invocation examples:$/ { section = ""; next }
+  section == "shorthand" && /^  [^ ]/ { shorthand++ }
+  section == "full" && /^  [^ ]/ { full++ }
+  END { exit !(shorthand >= 9 && full >= 12) }
+' "$tmp.out"
+grep 'clql -O' "$tmp.out" >/dev/null
+grep 'clql --count' "$tmp.out" >/dev/null
 grep 'explicitly spooled compatibility path' "$tmp.out" >/dev/null
 
 "$clql" --version >"$tmp.out"
