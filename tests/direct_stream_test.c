@@ -2620,9 +2620,15 @@ static int run_long_number_mutation_regression(lql *ctx) {
 
 static int run_projection_then_mutation_output(lql *ctx) {
   static const char input[] = "{\"status\":\"open\",\"n\":1,\"drop\":9}\n";
+  static const char mixed_input[] =
+      "{\"status\":\"closed\",\"n\":1,\"drop\":9}\n"
+      "{\"status\":\"open\",\"n\":1,\"drop\":9}\n";
   static const char *const projection_paths[] = {"/status", "/n"};
   static const char *const mutations[] = {"/n=+2", "/added=true"};
   static const char output[] = "{\"n\":3,\"status\":\"open\",\"added\":true}\n";
+  static const char mixed_output[] =
+      "{\"n\":1,\"status\":\"closed\"}\n"
+      "{\"n\":3,\"status\":\"open\",\"added\":true}\n";
   lql_selector *selector;
   lql_projection *projection;
   lql_mutation *mutation;
@@ -2670,6 +2676,22 @@ static int run_projection_then_mutation_output(lql *ctx) {
     ctx->projection_destroy(ctx, projection);
     ctx->selector_destroy(ctx, selector);
     return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)mixed_input;
+  reader.len = sizeof(mixed_input) - 1u;
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.matched_only = 0;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(mixed_output) - 1u ||
+      memcmp(writer.data, mixed_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->projection_destroy(ctx, projection);
+    ctx->selector_destroy(ctx, selector);
+    return 2;
   }
   ctx->mutation_destroy(ctx, mutation);
   ctx->projection_destroy(ctx, projection);

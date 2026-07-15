@@ -2422,14 +2422,16 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
   } else if (state->request->output_mode ==
                  LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION &&
              !state->request->matched_only) {
-    if (spool == NULL) {
-      lql_set_error(error, LQL_STATUS_CALLBACK_ERROR,
-                    "combined passthrough capture is unavailable");
-      return LQL_STATUS_CALLBACK_ERROR;
+    if (!root_is_object) {
+      lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                    "combined input must be a JSON object");
+      return LQL_STATUS_JSON_ERROR;
     }
-    status = lql_flat_eq_emit(state, spool, error);
-    if (status != LQL_STATUS_OK)
-      return status;
+    if (lql_flat_eq_projection_found(state, spool)) {
+      status = lql_flat_eq_projection_emit(state, spool, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
   }
   if (matched && state->request->limits.max_matches != 0u &&
       state->result->records_matched >= state->request->limits.max_matches) {
