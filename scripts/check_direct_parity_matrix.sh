@@ -28,6 +28,16 @@ direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   icontains_payload_cde 'icontains{f=/payload,v=CDE}' decision_only_selector /id
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_payload_exists 'eq{field=/payload}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  contains_payload_exists 'contains{field=/payload}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  icontains_payload_exists 'icontains{field=/payload}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  prefix_payload_exists 'prefix{field=/payload}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  iprefix_payload_exists 'iprefix{field=/payload}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   in_status_open_closed 'in{field=/status,any=open|closed}' decision_only_selector /id
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   in_status_open_pending 'in{field=/status,any=open|pending}' decision_only_selector /id
@@ -148,4 +158,4 @@ direct_parity_run_row build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' project_mutate_file_selector /id
 
 direct_parity_validate
-direct_parity_expect_records 264
+direct_parity_expect_records 284

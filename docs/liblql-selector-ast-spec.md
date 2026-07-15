@@ -198,9 +198,12 @@ divergence from Go: liblql treats unquoted text-selector numbers, booleans, and
 null as typed JSON scalar literals, quoted values as strings, and JSON numbers
 as equal by numeric value instead of by source spelling.
 
-String terms have a critical invariant:
+String terms have critical invariants:
 
-- omitted `value` means path assertion behavior for string predicates;
+- omitted `value` means path assertion behavior for `contains`, `icontains`,
+  `prefix`, and `iprefix`;
+- omitted `value` for `eq` follows the pinned Go behavior and matches no JSON
+  value;
 - explicit `"value": ""` means an explicit empty string value;
 - non-empty `value` is emitted even when a constructor did not separately mark
   it as explicit.

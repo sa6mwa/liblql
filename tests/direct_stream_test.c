@@ -908,6 +908,13 @@ static int run_mapped_string_predicates(lql *ctx) {
                     2u, 1u)) {
     return 104;
   }
+  if (run_selection(ctx, "eq{f=/msg}", input, 3u, 0u) ||
+      run_selection(ctx, "contains{f=/msg}", input, 3u, 3u) ||
+      run_selection(ctx, "icontains{f=/msg}", input, 3u, 3u) ||
+      run_selection(ctx, "prefix{f=/msg}", input, 3u, 3u) ||
+      run_selection(ctx, "iprefix{f=/msg}", input, 3u, 3u)) {
+    return 105;
+  }
   if (run_selection(ctx, "in{f=/env,a=prod|stage}", input, 3u, 2u)) {
     return 3;
   }

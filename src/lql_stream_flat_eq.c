@@ -300,12 +300,34 @@ static int lql_flat_eq_append_contains(
     unsigned long path_object_wildcards, unsigned long path_array_wildcards,
     unsigned long path_any_wildcards, unsigned long path_recursive_segments,
     int ignore_case) {
+  lql_json_flat_eq_term *term;
   size_t count;
   size_t i;
   if (program == NULL || selector == NULL || field == NULL) {
     return 0;
   }
   count = selector->any_count == 0u ? 1u : selector->any_count;
+  if (selector->any_count == 0u && !selector->value_set) {
+    if (program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
+      return 0;
+    }
+    term = &program->terms[program->term_count];
+    term->kind = LQL_JSON_FLAT_TERM_EXISTS;
+    term->field = field + 1;
+    term->field_len = first_segment_len;
+    term->path = field;
+    term->path_len = path_len;
+    term->path_segment_count = path_segment_count;
+    term->path_array_segments = path_array_segments;
+    term->path_object_wildcards = path_object_wildcards;
+    term->path_array_wildcards = path_array_wildcards;
+    term->path_any_wildcards = path_any_wildcards;
+    term->path_recursive_segments = path_recursive_segments;
+    lql_flat_eq_cache_paths(term);
+    program->selectors[program->term_count] = selector;
+    ++program->term_count;
+    return 1;
+  }
   if (count > LQL_FLAT_EQ_TERM_CAPACITY - program->term_count ||
       (selector->any_count != 0u &&
        (selector->any == NULL || selector->any_lens == NULL ||
@@ -317,7 +339,6 @@ static int lql_flat_eq_append_contains(
     return 0;
   }
   for (i = 0u; i < count; ++i) {
-    lql_json_flat_eq_term *term;
     const char *value;
     size_t value_len;
     if (selector->any_count != 0u) {
@@ -610,16 +631,23 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     return 0;
   }
   if (term->kind != LQL_JSON_FLAT_TERM_EXISTS) {
-    if (!selector->value_set ||
-        (selector->value_is_temporal &&
-         term->kind != LQL_JSON_FLAT_TERM_TEMPORAL_RANGE) ||
-        selector->value == NULL ||
-        ((term->kind == LQL_JSON_FLAT_TERM_PREFIX ||
-          term->kind == LQL_JSON_FLAT_TERM_IPREFIX) &&
-         selector->value_kind != LQL_SELECTOR_LITERAL_STRING)) {
+    if (!selector->value_set) {
+      if (selector->kind == LQL_SELECTOR_KIND_EQ) {
+        return 1;
+      }
+      term->kind = LQL_JSON_FLAT_TERM_EXISTS;
+    } else if ((selector->value_is_temporal &&
+                term->kind != LQL_JSON_FLAT_TERM_TEMPORAL_RANGE) ||
+               selector->value == NULL ||
+               ((term->kind == LQL_JSON_FLAT_TERM_PREFIX ||
+                 term->kind == LQL_JSON_FLAT_TERM_IPREFIX) &&
+                selector->value_kind != LQL_SELECTOR_LITERAL_STRING)) {
       return 0;
     }
-    if (term->kind == LQL_JSON_FLAT_TERM_IPREFIX) {
+    if (term->kind == LQL_JSON_FLAT_TERM_EXISTS) {
+      term->value = NULL;
+      term->value_len = 0u;
+    } else if (term->kind == LQL_JSON_FLAT_TERM_IPREFIX) {
       if (!lql_unicode_utf8_lower(
               selector->value, strlen(selector->value),
               program->icontains_needles[program->term_count],
