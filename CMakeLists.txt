@@ -67,6 +67,7 @@ add_library(lql_common OBJECT
   src/lql_direct_actions.c
   src/lql_json_scan.c
   src/lql_json_spool.c
+  src/lql_number.c
   src/lql_projection.c
   src/lql_selector.c
   src/lql_stream.c

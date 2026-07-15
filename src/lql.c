@@ -849,8 +849,7 @@ static lql_status selector_json_key(FILE *out, const char *key,
   return selector_json_putc(out, ':', error);
 }
 
-static lql_status selector_json_comma(FILE *out, int *first,
-                                      lql_error *error) {
+static lql_status selector_json_comma(FILE *out, int *first, lql_error *error) {
   if (first == NULL) {
     return LQL_STATUS_INVALID_ARGUMENT;
   }
@@ -863,7 +862,13 @@ static lql_status selector_json_comma(FILE *out, int *first,
 
 static lql_status selector_json_number(FILE *out, double value,
                                        lql_error *error) {
-  if (fprintf(out, "%.17g", value) < 0) {
+  char buffer[64];
+  if (!lql_number_format_json(value, buffer, sizeof(buffer))) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "selector JSON number is not finite");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (fprintf(out, "%s", buffer) < 0) {
     lql_set_error(error, LQL_STATUS_IO_ERROR, "selector JSON write failed");
     return LQL_STATUS_IO_ERROR;
   }
@@ -872,6 +877,22 @@ static lql_status selector_json_number(FILE *out, double value,
 
 static lql_status write_selector_json(FILE *out, const lql_selector *selector,
                                       lql_error *error);
+
+static lql_status write_selector_literal_json(FILE *out, const char *value,
+                                              size_t len,
+                                              lql_selector_literal_kind kind,
+                                              lql_error *error) {
+  if (kind == LQL_SELECTOR_LITERAL_STRING) {
+    return selector_json_string(out, value == NULL ? "" : value,
+                                value == NULL ? 0u : len, error);
+  }
+  /*
+   * Go selector AST JSON carries scalar term values as JSON scalars. The
+   * parser records the literal kind when text or JSON enters liblql, so export
+   * uses that metadata instead of quoting everything and changing behavior.
+   */
+  return selector_json_literal(out, value == NULL ? "" : value, error);
+}
 
 static lql_status write_string_predicate_json(FILE *out,
                                               const lql_selector *selector,
@@ -894,10 +915,10 @@ static lql_status write_string_predicate_json(FILE *out,
     status = selector_json_comma(out, &first, error);
     if (status != LQL_STATUS_OK ||
         (status = selector_json_key(out, "value", error)) != LQL_STATUS_OK ||
-        (status = selector_json_string(
+        (status = write_selector_literal_json(
              out, selector->value == NULL ? "" : selector->value,
-             selector->value == NULL ? 0u : strlen(selector->value), error)) !=
-            LQL_STATUS_OK) {
+             selector->value == NULL ? 0u : strlen(selector->value),
+             selector->value_kind, error)) != LQL_STATUS_OK) {
       return status;
     }
   }
@@ -913,9 +934,9 @@ static lql_status write_string_predicate_json(FILE *out,
           (status = selector_json_putc(out, ',', error)) != LQL_STATUS_OK) {
         return status;
       }
-      status =
-          selector_json_string(out, selector->any[i], selector->any_lens[i],
-                               error);
+      status = write_selector_literal_json(out, selector->any[i],
+                                           selector->any_lens[i],
+                                           selector->any_kinds[i], error);
       if (status != LQL_STATUS_OK) {
         return status;
       }
@@ -930,8 +951,7 @@ static lql_status write_string_predicate_json(FILE *out,
     if (status != LQL_STATUS_OK ||
         (status = selector_json_key(out, "ignoreCase", error)) !=
             LQL_STATUS_OK ||
-        (status = selector_json_literal(out, "true", error)) !=
-            LQL_STATUS_OK) {
+        (status = selector_json_literal(out, "true", error)) != LQL_STATUS_OK) {
       return status;
     }
   }
@@ -1097,9 +1117,9 @@ static lql_status write_in_predicate_json(FILE *out,
         (status = selector_json_putc(out, ',', error)) != LQL_STATUS_OK) {
       return status;
     }
-    status =
-        selector_json_string(out, selector->any[i], selector->any_lens[i],
-                             error);
+    status = write_selector_literal_json(out, selector->any[i],
+                                         selector->any_lens[i],
+                                         selector->any_kinds[i], error);
     if (status != LQL_STATUS_OK) {
       return status;
     }
@@ -1152,8 +1172,10 @@ static lql_status write_selector_json(FILE *out, const lql_selector *selector,
       key = "not";
       break;
     case LQL_SELECTOR_KIND_EQ:
-    case LQL_SELECTOR_KIND_NE:
       key = "eq";
+      break;
+    case LQL_SELECTOR_KIND_NE:
+      key = "not";
       break;
     case LQL_SELECTOR_KIND_CONTAINS:
       key = "contains";
@@ -1203,8 +1225,23 @@ static lql_status write_selector_json(FILE *out, const lql_selector *selector,
           return status;
         }
         break;
+      case LQL_SELECTOR_KIND_NE: {
+        lql_selector eq_selector;
+        /*
+         * The Go-compatible selector JSON has no "ne" operator. If a legacy or
+         * future internal producer creates LQL_SELECTOR_KIND_NE, serialize it
+         * as the semantic AST form not(eq(...)) so round-trips cannot invert
+         * it.
+         */
+        eq_selector = *selector;
+        eq_selector.kind = LQL_SELECTOR_KIND_EQ;
+        status = write_selector_json(out, &eq_selector, error);
+        if (status != LQL_STATUS_OK) {
+          return status;
+        }
+        break;
+      }
       case LQL_SELECTOR_KIND_EQ:
-      case LQL_SELECTOR_KIND_NE:
       case LQL_SELECTOR_KIND_CONTAINS:
       case LQL_SELECTOR_KIND_ICONTAINS:
       case LQL_SELECTOR_KIND_PREFIX:

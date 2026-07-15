@@ -602,20 +602,20 @@ static int parse_any_values(lql_selector_parser *ctx, char *decoded,
 }
 
 static int parse_number_literal(const char *decoded, double *out) {
-  char *end;
-  double value;
-  value = strtod(decoded, &end);
-  if (end == decoded) {
+  const char *begin;
+  const char *end;
+  begin = decoded;
+  if (begin == NULL) {
     return 0;
   }
-  while (isspace((unsigned char)*end)) {
-    ++end;
+  while (isspace((unsigned char)*begin)) {
+    ++begin;
   }
-  if (*end != '\0') {
-    return 0;
+  end = begin + strlen(begin);
+  while (end > begin && isspace((unsigned char)end[-1])) {
+    --end;
   }
-  *out = value;
-  return 1;
+  return lql_number_parse_json(begin, (size_t)(end - begin), out);
 }
 
 static int ascii_equal_ignore_case(const char *a, const char *b) {
@@ -1561,8 +1561,8 @@ static int selector_json_store_field(selector_json_state *state,
 }
 
 static int selector_json_store_value(selector_json_state *state,
-                                     lql_selector *selector,
-                                     const char *value) {
+                                     lql_selector *selector, const char *value,
+                                     lql_selector_literal_kind kind) {
   char *copy;
   copy = state->parser.allocator->strdup(state->parser.allocator, value);
   if (copy == NULL) {
@@ -1571,24 +1571,54 @@ static int selector_json_store_value(selector_json_state *state,
   state->parser.allocator->destroy(state->parser.allocator, selector->value);
   selector->value = copy;
   selector->value_set = 1;
-  selector->value_is_string = 1;
-  selector->value_kind = LQL_SELECTOR_LITERAL_STRING;
+  selector->value_is_string = kind == LQL_SELECTOR_LITERAL_STRING;
+  selector->value_kind = kind;
   return 1;
 }
 
 static int selector_json_push_any(selector_json_state *state,
-                                  lql_selector *selector, const char *value) {
+                                  lql_selector *selector, const char *value,
+                                  lql_selector_literal_kind kind) {
   char *copy;
   copy = state->parser.allocator->strdup(state->parser.allocator, value);
   if (copy == NULL) {
     return 0;
   }
-  if (!selector_any_push(&state->parser, selector, copy,
-                         LQL_SELECTOR_LITERAL_STRING)) {
+  if (!selector_any_push(&state->parser, selector, copy, kind)) {
     state->parser.allocator->destroy(state->parser.allocator, copy);
     return 0;
   }
   return 1;
+}
+
+static int selector_json_store_scalar(selector_json_state *state,
+                                      selector_json_frame *frame,
+                                      const char *value,
+                                      lql_selector_literal_kind kind) {
+  double number;
+  if (frame == NULL) {
+    lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
+                  "unexpected selector JSON scalar");
+    return 0;
+  }
+  if (kind == LQL_SELECTOR_LITERAL_NUMBER &&
+      !lql_number_parse_json(value, strlen(value), &number)) {
+    lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
+                  "selector JSON number must be finite");
+    return 0;
+  }
+  if (frame->kind == SELECTOR_JSON_FRAME_PREDICATE &&
+      frame->pending_key != NULL && key_is_value(frame->pending_key) &&
+      frame->selector != NULL &&
+      frame->selector->kind != LQL_SELECTOR_KIND_DATE) {
+    return selector_json_store_value(state, frame->selector, value, kind);
+  }
+  if (frame->kind == SELECTOR_JSON_FRAME_ANY_ARRAY && frame->selector != NULL) {
+    return selector_json_push_any(state, frame->selector, value, kind);
+  }
+  lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
+                "unexpected selector JSON scalar");
+  return 0;
 }
 
 static lql_status selector_json_validate_predicate(selector_json_state *state,
@@ -1667,8 +1697,8 @@ static lql_status selector_json_validate_predicate(selector_json_state *state,
 }
 
 static lql_status selector_json_consume_key(selector_json_state *state,
-                                                 selector_json_frame *frame,
-                                                 lql_error *error) {
+                                            selector_json_frame *frame,
+                                            lql_error *error) {
   state->parser.allocator->destroy(state->parser.allocator, frame->pending_key);
   frame->pending_key =
       state->parser.allocator->strdup(state->parser.allocator, state->text);
@@ -1679,8 +1709,7 @@ static lql_status selector_json_consume_key(selector_json_state *state,
   return LQL_STATUS_OK;
 }
 
-static lql_status selector_json_begin_key(void *user,
-                                               lql_error *error) {
+static lql_status selector_json_begin_key(void *user, lql_error *error) {
   selector_json_state *state;
   state = (selector_json_state *)user;
   if (!selector_json_reset_text(state)) {
@@ -1691,8 +1720,7 @@ static lql_status selector_json_begin_key(void *user,
 }
 
 static lql_status selector_json_key_chunk(void *user, const char *data,
-                                               size_t len,
-                                               lql_error *error) {
+                                          size_t len, lql_error *error) {
   selector_json_state *state;
   state = (selector_json_state *)user;
   if (!selector_json_append_text(state, data, len)) {
@@ -1702,8 +1730,7 @@ static lql_status selector_json_key_chunk(void *user, const char *data,
   return LQL_STATUS_OK;
 }
 
-static lql_status selector_json_end_key(void *user,
-                                             lql_error *error) {
+static lql_status selector_json_end_key(void *user, lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   lql_selector_kind kind;
@@ -1752,8 +1779,7 @@ static lql_selector *selector_json_append_child(selector_json_state *state,
   return &parent->children[parent->child_count - 1u];
 }
 
-static lql_status selector_json_object_begin(void *user,
-                                                  lql_error *error) {
+static lql_status selector_json_object_begin(void *user, lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   lql_selector *child;
@@ -1821,8 +1847,7 @@ static lql_status selector_json_object_begin(void *user,
                             "unexpected selector JSON object");
 }
 
-static lql_status selector_json_object_end(void *user,
-                                                lql_error *error) {
+static lql_status selector_json_object_end(void *user, lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   lql_status st;
@@ -1866,8 +1891,7 @@ static lql_status selector_json_object_end(void *user,
   return LQL_STATUS_OK;
 }
 
-static lql_status selector_json_array_begin(void *user,
-                                                 lql_error *error) {
+static lql_status selector_json_array_begin(void *user, lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   state = (selector_json_state *)user;
@@ -1905,8 +1929,7 @@ static lql_status selector_json_array_begin(void *user,
                             "unexpected selector JSON array");
 }
 
-static lql_status selector_json_array_end(void *user,
-                                               lql_error *error) {
+static lql_status selector_json_array_end(void *user, lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   state = (selector_json_state *)user;
@@ -1920,8 +1943,7 @@ static lql_status selector_json_array_end(void *user,
   return LQL_STATUS_OK;
 }
 
-static lql_status selector_json_string_begin(void *user,
-                                                  lql_error *error) {
+static lql_status selector_json_string_begin(void *user, lql_error *error) {
   selector_json_state *state;
   state = (selector_json_state *)user;
   if (!selector_json_reset_text(state)) {
@@ -1932,8 +1954,7 @@ static lql_status selector_json_string_begin(void *user,
 }
 
 static lql_status selector_json_string_chunk(void *user, const char *data,
-                                                  size_t len,
-                                                  lql_error *error) {
+                                             size_t len, lql_error *error) {
   selector_json_state *state;
   state = (selector_json_state *)user;
   if (!selector_json_append_text(state, data, len)) {
@@ -1943,10 +1964,8 @@ static lql_status selector_json_string_chunk(void *user, const char *data,
   return LQL_STATUS_OK;
 }
 
-static lql_status
-selector_json_store_predicate_string(selector_json_state *state,
-                                     selector_json_frame *frame,
-                                     lql_error *error) {
+static lql_status selector_json_store_predicate_string(
+    selector_json_state *state, selector_json_frame *frame, lql_error *error) {
   const char *key;
   lql_selector *selector;
   int ok;
@@ -1959,7 +1978,8 @@ selector_json_store_predicate_string(selector_json_state *state,
     ok = set_date_bound(&state->parser, selector, "value", state->text,
                         state->error);
   } else if (key_is_value(key)) {
-    ok = selector_json_store_value(state, selector, state->text);
+    ok = selector_json_store_value(state, selector, state->text,
+                                   LQL_SELECTOR_LITERAL_STRING);
   } else if (selector->kind == LQL_SELECTOR_KIND_DATE &&
              (key_is_after(key) || key_is_before(key) || key_is_since(key))) {
     ok = set_date_bound(&state->parser, selector,
@@ -2000,8 +2020,7 @@ selector_json_store_predicate_string(selector_json_state *state,
   return LQL_STATUS_OK;
 }
 
-static lql_status selector_json_string_end(void *user,
-                                                lql_error *error) {
+static lql_status selector_json_string_end(void *user, lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   state = (selector_json_state *)user;
@@ -2031,7 +2050,8 @@ static lql_status selector_json_string_end(void *user,
     return selector_json_store_predicate_string(state, frame, error);
   }
   if (frame->kind == SELECTOR_JSON_FRAME_ANY_ARRAY && frame->selector != NULL) {
-    if (!selector_json_push_any(state, frame->selector, state->text)) {
+    if (!selector_json_push_any(state, frame->selector, state->text,
+                                LQL_SELECTOR_LITERAL_STRING)) {
       return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                                 "out of memory");
     }
@@ -2041,33 +2061,31 @@ static lql_status selector_json_string_end(void *user,
                             "unexpected selector JSON string");
 }
 
-static lql_status selector_json_number_begin(void *user,
-                                                  lql_error *error) {
+static lql_status selector_json_number_begin(void *user, lql_error *error) {
   return selector_json_string_begin(user, error);
 }
 
 static lql_status selector_json_number_chunk(void *user, const char *data,
-                                                  size_t len,
-                                                  lql_error *error) {
+                                             size_t len, lql_error *error) {
   return selector_json_string_chunk(user, data, len, error);
 }
 
-static lql_status selector_json_number_end(void *user,
-                                                lql_error *error) {
+static lql_status selector_json_number_end(void *user, lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
   int ok;
   state = (selector_json_state *)user;
   frame = selector_json_top(state);
-  if (frame == NULL || frame->kind != SELECTOR_JSON_FRAME_PREDICATE ||
-      frame->pending_key == NULL || frame->selector == NULL ||
-      !key_is_range_bound(frame->pending_key) ||
-      frame->selector->kind != LQL_SELECTOR_KIND_RANGE) {
-    return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
-                              "unexpected selector JSON number");
+  if (frame != NULL && frame->kind == SELECTOR_JSON_FRAME_PREDICATE &&
+      frame->pending_key != NULL && frame->selector != NULL &&
+      key_is_range_bound(frame->pending_key) &&
+      frame->selector->kind == LQL_SELECTOR_KIND_RANGE) {
+    ok = set_range_bound(&state->parser, frame->selector, frame->pending_key,
+                         state->text, state->error);
+  } else {
+    ok = selector_json_store_scalar(state, frame, state->text,
+                                    LQL_SELECTOR_LITERAL_NUMBER);
   }
-  ok = set_range_bound(&state->parser, frame->selector, frame->pending_key,
-                       state->text, state->error);
   if (!ok) {
     return selector_json_fail(
         state, error,
@@ -2084,18 +2102,32 @@ static lql_status selector_json_number_end(void *user,
 }
 
 static lql_status selector_json_boolean(void *user, int value,
-                                             lql_error *error) {
+                                        lql_error *error) {
   selector_json_state *state;
   selector_json_frame *frame;
+  int ok;
+  const char *literal;
   state = (selector_json_state *)user;
   frame = selector_json_top(state);
-  if (frame == NULL || frame->kind != SELECTOR_JSON_FRAME_PREDICATE ||
-      frame->pending_key == NULL || frame->selector == NULL ||
-      !key_is_ignore_case(frame->pending_key)) {
-    return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
-                              "unexpected selector JSON boolean");
+  if (frame != NULL && frame->kind == SELECTOR_JSON_FRAME_PREDICATE &&
+      frame->pending_key != NULL && frame->selector != NULL &&
+      key_is_ignore_case(frame->pending_key)) {
+    frame->selector->ignore_case = value ? 1 : 0;
+  } else {
+    literal = value ? "true" : "false";
+    ok = selector_json_store_scalar(state, frame, literal,
+                                    LQL_SELECTOR_LITERAL_BOOL);
+    if (!ok) {
+      return selector_json_fail(
+          state, error,
+          state->error != NULL && state->error->code != LQL_STATUS_OK
+              ? state->error->code
+              : LQL_STATUS_PARSE_ERROR,
+          state->error != NULL && state->error->message[0] != '\0'
+              ? state->error->message
+              : "unexpected selector JSON boolean");
+    }
   }
-  frame->selector->ignore_case = value ? 1 : 0;
   state->parser.allocator->destroy(state->parser.allocator, frame->pending_key);
   frame->pending_key = NULL;
   return LQL_STATUS_OK;
@@ -2103,9 +2135,28 @@ static lql_status selector_json_boolean(void *user, int value,
 
 static lql_status selector_json_null(void *user, lql_error *error) {
   selector_json_state *state;
+  selector_json_frame *frame;
+  int ok;
   state = (selector_json_state *)user;
-  return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
-                            "selector JSON null is unsupported");
+  frame = selector_json_top(state);
+  ok = selector_json_store_scalar(state, frame, "null",
+                                  LQL_SELECTOR_LITERAL_NULL);
+  if (!ok) {
+    return selector_json_fail(
+        state, error,
+        state->error != NULL && state->error->code != LQL_STATUS_OK
+            ? state->error->code
+            : LQL_STATUS_PARSE_ERROR,
+        state->error != NULL && state->error->message[0] != '\0'
+            ? state->error->message
+            : "unexpected selector JSON null");
+  }
+  if (frame != NULL && frame->pending_key != NULL) {
+    state->parser.allocator->destroy(state->parser.allocator,
+                                     frame->pending_key);
+    frame->pending_key = NULL;
+  }
+  return LQL_STATUS_OK;
 }
 
 static void selector_json_state_cleanup(selector_json_state *state) {
@@ -2213,8 +2264,9 @@ static size_t selector_json_utf8_encode(unsigned long cp, char out[4]) {
   return 4u;
 }
 
-static lql_status selector_json_emit_string_chunk(
-    selector_json_scanner *scanner, int key, const char *data, size_t len) {
+static lql_status
+selector_json_emit_string_chunk(selector_json_scanner *scanner, int key,
+                                const char *data, size_t len) {
   if (len == 0u) {
     return LQL_STATUS_OK;
   }
@@ -2277,7 +2329,8 @@ static lql_status selector_json_scan_string(selector_json_scanner *scanner,
     }
     ++scanner->pos;
     if (scanner->pos >= scanner->len) {
-      return selector_json_scan_fail(scanner, "JSON string escape is truncated");
+      return selector_json_scan_fail(scanner,
+                                     "JSON string escape is truncated");
     }
     c = scanner->data[scanner->pos++];
     switch (c) {
@@ -2404,9 +2457,9 @@ static lql_status selector_json_scan_number(selector_json_scanner *scanner) {
   if (st != LQL_STATUS_OK) {
     return st;
   }
-  st = selector_json_number_chunk(
-      scanner->state, (const char *)&scanner->data[start],
-      scanner->pos - start, scanner->error);
+  st = selector_json_number_chunk(scanner->state,
+                                  (const char *)&scanner->data[start],
+                                  scanner->pos - start, scanner->error);
   if (st != LQL_STATUS_OK) {
     return st;
   }
@@ -2543,8 +2596,7 @@ static lql_status selector_json_scan_value(selector_json_scanner *scanner) {
 }
 
 static lql_status selector_json_scan_document(selector_json_state *state,
-                                              const void *json,
-                                              size_t json_len,
+                                              const void *json, size_t json_len,
                                               lql_error *error) {
   selector_json_scanner scanner;
   memset(&scanner, 0, sizeof(scanner));
@@ -2873,7 +2925,11 @@ static int build_range_bound(lql_selector_parser *ctx, lql_selector *selector,
     return 1;
   }
   if (bound.kind == LQL_SELECTOR_BOUND_NUMBER) {
-    sprintf(number_buf, "%.17g", bound.number);
+    if (!lql_number_format_json(bound.number, number_buf, sizeof(number_buf))) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "range selector numeric bound must be finite");
+      return 0;
+    }
     return set_range_bound(ctx, selector, key, number_buf, error);
   }
   if (bound.kind == LQL_SELECTOR_BOUND_DATETIME) {

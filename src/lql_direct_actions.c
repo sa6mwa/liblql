@@ -1,9 +1,7 @@
 #include "lql_internal.h"
 
 #include <ctype.h>
-#include <errno.h>
 #include <math.h>
-#include <stdlib.h>
 #include <string.h>
 
 static int mutation_space(unsigned char ch) {
@@ -78,19 +76,15 @@ static int mutation_json_number(const char *begin, const char *end) {
 }
 
 static int mutation_numeric_candidate(const char *begin, const char *end) {
-  char *end_ptr;
-  double ignored_number;
-
   if (begin == end) {
     return 0;
   }
   if (*begin == '+' || *begin == '-' || (*begin >= '0' && *begin <= '9')) {
     return 1;
   }
-  errno = 0;
-  ignored_number = strtod(begin, &end_ptr);
-  (void)ignored_number;
-  return end_ptr == end && end_ptr != begin;
+  return mutation_equal_ci(begin, (size_t)(end - begin), "nan") ||
+         mutation_equal_ci(begin, (size_t)(end - begin), "inf") ||
+         mutation_equal_ci(begin, (size_t)(end - begin), "infinity");
 }
 
 static int mutation_finite(double value) {
@@ -221,7 +215,6 @@ static lql_status mutation_parse_value(lql_allocator *allocator,
                                        const char *begin, const char *end,
                                        lql_mutation_action *action,
                                        lql_error *error) {
-  char *end_ptr;
   double ignored_number;
   const char *value_begin;
   size_t value_len;
@@ -256,9 +249,8 @@ static lql_status mutation_parse_value(lql_allocator *allocator,
                     "mutation numeric value must be a JSON number");
       return LQL_STATUS_PARSE_ERROR;
     }
-    errno = 0;
-    ignored_number = strtod(begin, &end_ptr);
-    if (end_ptr != end || errno == ERANGE || !mutation_finite(ignored_number)) {
+    if (!lql_number_parse_json(begin, (size_t)(end - begin), &ignored_number) ||
+        !mutation_finite(ignored_number)) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "mutation numeric value must be finite");
       return LQL_STATUS_PARSE_ERROR;
@@ -282,7 +274,6 @@ static lql_status mutation_parse_one(lql_allocator *allocator, const char *raw,
   const char *end;
   const char *equal;
   const char *delta_text;
-  char *end_ptr;
   double delta;
   lql_status status;
 
@@ -333,11 +324,12 @@ static lql_status mutation_parse_one(lql_allocator *allocator, const char *raw,
   }
   delta_text = equal + 1;
   mutation_trim(&delta_text, &end);
-  errno = 0;
-  delta = strtod(delta_text, &end_ptr);
   if (delta_text < end && (*delta_text == '+' || *delta_text == '-') &&
-      end_ptr == end && errno != ERANGE && delta != 0.0 &&
-      mutation_finite(delta)) {
+      lql_number_parse_json(
+          *delta_text == '+' ? delta_text + 1 : delta_text,
+          (size_t)(end - (*delta_text == '+' ? delta_text + 1 : delta_text)),
+          &delta) &&
+      delta != 0.0 && mutation_finite(delta)) {
     action->kind = LQL_MUTATION_INCREMENT;
     action->delta = delta;
     return LQL_STATUS_OK;

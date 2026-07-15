@@ -169,6 +169,29 @@ static int run_selection(lql *ctx, const char *expr, const char *input,
   return 0;
 }
 
+static int selector_matches(lql *ctx, lql_selector *selector, const char *input,
+                            size_t expected_records, size_t expected_matches) {
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+
+  lql_error_init(&error);
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = strlen(input);
+  reader.chunk_size = 1u;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK) {
+    return 0;
+  }
+  return result.records_seen == expected_records &&
+         result.records_matched == expected_matches;
+}
+
 static int run_status_selection(lql *ctx) {
   static const char input[] =
       "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n"
@@ -212,9 +235,8 @@ static int run_status_selection(lql *ctx) {
 }
 
 static int run_escaped_pointer_selection(lql *ctx) {
-  static const char input[] =
-      "{\"slash/key\":true,\"tilde~key\":true}\n"
-      "{\"slash\":{\"key\":true},\"tilde0key\":true}\n";
+  static const char input[] = "{\"slash/key\":true,\"tilde~key\":true}\n"
+                              "{\"slash\":{\"key\":true},\"tilde0key\":true}\n";
   lql_selector *selector;
   lql_stream_request request;
   lql_stream_result result;
@@ -380,6 +402,22 @@ static int run_selector_json_write(lql *ctx) {
                                  "\"value\":\"open\"}}";
   static const char escaped_expected[] =
       "{\"eq\":{\"field\":\"/msg\",\"value\":\"a\\\"b\\n\"}}";
+  static const char typed_expected[] =
+      "{\"and\":[{\"eq\":{\"field\":\"/n\",\"value\":1.5}},"
+      "{\"eq\":{\"field\":\"/enabled\",\"value\":true}},"
+      "{\"eq\":{\"field\":\"/missing\",\"value\":null}},"
+      "{\"in\":{\"field\":\"/tag\",\"any\":[1,false,null,\"x\"]}}]}";
+  static const char typed_input[] =
+      "{\"n\":1.5,\"enabled\":true,\"missing\":null,\"tag\":1}\n"
+      "{\"n\":\"1.5\",\"enabled\":true,\"missing\":null,\"tag\":1}\n"
+      "{\"n\":1.5,\"enabled\":\"true\",\"missing\":null,\"tag\":1}\n"
+      "{\"n\":1.5,\"enabled\":true,\"missing\":\"null\",\"tag\":1}\n"
+      "{\"n\":1.5,\"enabled\":true,\"missing\":null,\"tag\":\"1\"}\n"
+      "{\"n\":1.5,\"enabled\":true,\"missing\":null,\"tag\":false}\n";
+  static const char ne_expected[] =
+      "{\"not\":{\"eq\":{\"field\":\"/status\",\"value\":\"open\"}}}";
+  static const char ne_input[] =
+      "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n{\"status\":null}\n";
   static const char spaced_json[] =
       " \n { \"eq\" : { \"field\" : \"\\/status\" "
       ", \"value\" : \"\\u006fpen\" } } \t";
@@ -476,6 +514,65 @@ static int run_selector_json_write(lql *ctx) {
     return 1;
   }
   fclose(file);
+  ctx->selector_destroy(ctx, selector);
+  selector = NULL;
+
+  if (ctx->selector_parse(ctx,
+                          "/n=1.5,/enabled=true,/missing=null,in{field=/"
+                          "tag,any=1|false|null|x}",
+                          &selector, &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  file = tmpfile();
+  if (file == NULL) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  if (ctx->selector_write_json(ctx, selector, file, &error) != LQL_STATUS_OK ||
+      read_tmpfile(file, buffer, sizeof(buffer), &len) ||
+      len != sizeof(typed_expected) - 1u ||
+      memcmp(buffer, typed_expected, sizeof(typed_expected) - 1u) != 0 ||
+      ctx->selector_parse_json(ctx, buffer, len, &roundtrip, &error) !=
+          LQL_STATUS_OK ||
+      !selector_matches(ctx, roundtrip, typed_input, 6u, 2u)) {
+    fclose(file);
+    if (roundtrip != NULL) {
+      ctx->selector_destroy(ctx, roundtrip);
+    }
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  fclose(file);
+  ctx->selector_destroy(ctx, roundtrip);
+  ctx->selector_destroy(ctx, selector);
+  roundtrip = NULL;
+  selector = NULL;
+
+  if (ctx->selector_parse(ctx, "/status!=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  file = tmpfile();
+  if (file == NULL) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  if (ctx->selector_write_json(ctx, selector, file, &error) != LQL_STATUS_OK ||
+      read_tmpfile(file, buffer, sizeof(buffer), &len) ||
+      len != sizeof(ne_expected) - 1u ||
+      memcmp(buffer, ne_expected, sizeof(ne_expected) - 1u) != 0 ||
+      ctx->selector_parse_json(ctx, buffer, len, &roundtrip, &error) !=
+          LQL_STATUS_OK ||
+      !selector_matches(ctx, roundtrip, ne_input, 3u, 2u)) {
+    fclose(file);
+    if (roundtrip != NULL) {
+      ctx->selector_destroy(ctx, roundtrip);
+    }
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  fclose(file);
+  ctx->selector_destroy(ctx, roundtrip);
   ctx->selector_destroy(ctx, selector);
   return 0;
 }
@@ -760,9 +857,9 @@ static int run_mapped_string_predicates(lql *ctx) {
                     3u)) {
     return 109;
   }
-  if (run_selection(ctx, "/empty=null", null_input, 3u, 0u) ||
+  if (run_selection(ctx, "/empty=null", null_input, 3u, 1u) ||
       run_selection(ctx, "in{field=/empty,any=null|false}", null_input, 3u,
-                    1u)) {
+                    2u)) {
     return 107;
   }
   if (run_selection(ctx, "/meta/state=\"open\"", object_path_input, 4u, 2u) ||
@@ -1527,8 +1624,7 @@ static int run_mutation_output(lql *ctx) {
       "{\"status\":\"ready\",\"meta\":{\"a/b\":true}}\n";
   static const char *const invalid_root[] = {"/=value"};
   static const char *const invalid_json_numbers[] = {
-      "/n=01", "/n=nan", "/n=inf", "/n=+nan", "/n=+inf", "/n=+0",
-      "/n=1e9999"};
+      "/n=01", "/n=nan", "/n=inf", "/n=+nan", "/n=+inf", "/n=+0", "/n=1e9999"};
   lql_selector *selector;
   lql_mutation *mutation;
   lql_stream_request request;
@@ -1554,7 +1650,7 @@ static int run_mutation_output(lql *ctx) {
   }
   for (invalid_number_index = 0u;
        invalid_number_index <
-           sizeof(invalid_json_numbers) / sizeof(invalid_json_numbers[0]);
+       sizeof(invalid_json_numbers) / sizeof(invalid_json_numbers[0]);
        ++invalid_number_index) {
     if (ctx->mutation_parse(ctx, &invalid_json_numbers[invalid_number_index],
                             1u, &mutation, &error) != LQL_STATUS_PARSE_ERROR ||
@@ -2260,12 +2356,12 @@ static int run_mutation_output(lql *ctx) {
  */
 static int run_mutation_literal_parity(lql *ctx) {
   static const char input[] = "{\"status\":\"open\"}\n";
-  static const char *const escaped[] = {
-      "/escaped=\"a\\\"b\\n\\uD83D\\uDE00\""};
+  static const char *const escaped[] = {"/escaped=\"a\\\"b\\n\\uD83D\\uDE00\""};
   static const char escaped_output[] =
-      "{\"status\":\"open\",\"escaped\":\"a\\\\\\\"b\\\\n\\\\uD83D\\\\uDE00\"}\n";
-  static const char *const unicode[] = {
-      "/japanese=日本語", "/emoji=😀", "/supplementary=𐐷"};
+      "{\"status\":\"open\",\"escaped\":\"a\\\\\\\"b\\\\n\\\\uD83D\\\\uDE00\"}"
+      "\n";
+  static const char *const unicode[] = {"/japanese=日本語", "/emoji=😀",
+                                        "/supplementary=𐐷"};
   static const char unicode_output[] =
       "{\"status\":\"open\",\"japanese\":\"日本語\",\"emoji\":\"😀\","
       "\"supplementary\":\"𐐷\"}\n";
@@ -2304,9 +2400,8 @@ static int run_mutation_literal_parity(lql *ctx) {
   ctx->mutation_destroy(ctx, mutation);
 
   mutation = NULL;
-  if (ctx->mutation_parse(ctx, unicode,
-                          sizeof(unicode) / sizeof(unicode[0]), &mutation,
-                          &error) != LQL_STATUS_OK) {
+  if (ctx->mutation_parse(ctx, unicode, sizeof(unicode) / sizeof(unicode[0]),
+                          &mutation, &error) != LQL_STATUS_OK) {
     return 1;
   }
   memset(&reader, 0, sizeof(reader));
@@ -3042,7 +3137,8 @@ static int run_true_stream_contract(lql *ctx) {
   request.input_is_compact = 1;
   if (lql_stream_execute(ctx, &request, &result, &error) !=
           LQL_STATUS_UNSUPPORTED ||
-      reader.offset != reader.len || writer.len != 0u || reader.range_writes != 0u) {
+      reader.offset != reader.len || writer.len != 0u ||
+      reader.range_writes != 0u) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
@@ -3104,8 +3200,8 @@ int main(void) {
   if (run_projection_parse(ctx) || run_selector_json_write(ctx) ||
       run_status_selection(ctx) || run_escaped_pointer_selection(ctx) ||
       run_conjunction_selection(ctx) || run_or_selection(ctx) ||
-      run_post_hit_validation(ctx) ||
-      run_not_selection(ctx) || run_mapped_string_predicates(ctx) ||
+      run_post_hit_validation(ctx) || run_not_selection(ctx) ||
+      run_mapped_string_predicates(ctx) ||
       ((match_all_status = run_match_all(ctx)) != 0) ||
       run_root_wildcard_array_error(ctx) || run_selected_record_output(ctx) ||
       run_value_callback(ctx) || run_value_callback_control(ctx) ||
@@ -3114,9 +3210,9 @@ int main(void) {
       run_projection_then_mutation_output(ctx) ||
       run_output_modes_preserve_completed_before_malformed(ctx) ||
       run_completed_record_before_root_array_error(ctx) ||
-      run_output_modes_skip_scalar_roots(ctx) ||
-      run_stop_and_root_array(ctx) || run_record_limit(ctx) ||
-      run_byte_limit(ctx) || run_true_stream_contract(ctx)) {
+      run_output_modes_skip_scalar_roots(ctx) || run_stop_and_root_array(ctx) ||
+      run_record_limit(ctx) || run_byte_limit(ctx) ||
+      run_true_stream_contract(ctx)) {
     ctx->destroy(ctx);
     return match_all_status != 0 ? match_all_status : 1;
   }

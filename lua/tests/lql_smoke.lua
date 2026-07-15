@@ -88,3 +88,17 @@ local invalid_run, invalid_run_err =
 if invalid_run ~= nil or not invalid_run_err or invalid_run_err.status == 0 then
   fail("expected structured execute error")
 end
+
+local ok_missing_input = pcall(function()
+  client:execute_string('/status="open"')
+end)
+if ok_missing_input then
+  fail("expected execute_string missing input argument error")
+end
+
+local ok_missing_path = pcall(function()
+  client:execute_file('/status="open"')
+end)
+if ok_missing_path then
+  fail("expected execute_file missing path argument error")
+end

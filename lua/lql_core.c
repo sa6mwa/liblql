@@ -448,17 +448,17 @@ static int lua_lql_execute_string(lua_State *lua) {
   lua_lql_buffer output;
 
   client = lua_lql_check_client(lua, 1);
-  lql_error_init(&error);
-  status = lua_lql_selector_arg(lua, client, 2, &selector, &owned, &error);
-  if (status != LQL_STATUS_OK) {
-    return lua_lql_return_error(lua, &error, status);
-  }
   input = luaL_checklstring(lua, 3, &input_len);
   count_only = 0;
   if (lua_istable(lua, 4)) {
     lua_getfield(lua, 4, "count");
     count_only = lua_toboolean(lua, -1);
     lua_pop(lua, 1);
+  }
+  lql_error_init(&error);
+  status = lua_lql_selector_arg(lua, client, 2, &selector, &owned, &error);
+  if (status != LQL_STATUS_OK) {
+    return lua_lql_return_error(lua, &error, status);
   }
 
   memset(&reader, 0, sizeof(reader));
@@ -520,11 +520,6 @@ static int lua_lql_execute_file(lua_State *lua) {
   lua_lql_buffer output;
 
   client = lua_lql_check_client(lua, 1);
-  lql_error_init(&error);
-  status = lua_lql_selector_arg(lua, client, 2, &selector, &owned, &error);
-  if (status != LQL_STATUS_OK) {
-    return lua_lql_return_error(lua, &error, status);
-  }
   path = luaL_checkstring(lua, 3);
   count_only = 0;
   stdout_output = 0;
@@ -535,6 +530,11 @@ static int lua_lql_execute_file(lua_State *lua) {
     lua_getfield(lua, 4, "stdout");
     stdout_output = lua_toboolean(lua, -1);
     lua_pop(lua, 1);
+  }
+  lql_error_init(&error);
+  status = lua_lql_selector_arg(lua, client, 2, &selector, &owned, &error);
+  if (status != LQL_STATUS_OK) {
+    return lua_lql_return_error(lua, &error, status);
   }
 
   input = stdin;

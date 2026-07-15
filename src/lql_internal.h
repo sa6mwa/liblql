@@ -174,6 +174,10 @@ struct lql_mutation {
 
 LQL_INTERNAL_SYMBOL void lql_set_error(lql_error *error, lql_status status,
                                        const char *message);
+LQL_INTERNAL_SYMBOL int lql_number_parse_json(const char *text, size_t len,
+                                              double *out);
+LQL_INTERNAL_SYMBOL int lql_number_format_json(double value, char *out,
+                                               size_t cap);
 LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
                                               lql_selector *selector);
 LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
