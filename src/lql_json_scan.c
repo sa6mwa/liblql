@@ -488,6 +488,66 @@ static int lql_json_term_path_segment(const lql_json_flat_eq_term *term,
   return 1;
 }
 
+static int lql_json_pointer_target_byte(const char *target, size_t target_len,
+                                        size_t pos, unsigned char *out,
+                                        size_t *advance) {
+  /*
+   * Selector fields are JSON Pointer text. Object keys arrive here as decoded
+   * JSON string bytes, so compare ~0/~1 as their Go-compatible key bytes.
+   */
+  if (target == NULL || out == NULL || advance == NULL || pos >= target_len) {
+    return 0;
+  }
+  if (target[pos] == '~' && pos + 1u < target_len &&
+      (target[pos + 1u] == '0' || target[pos + 1u] == '1')) {
+    *out = target[pos + 1u] == '0' ? (unsigned char)'~' : (unsigned char)'/';
+    *advance = 2u;
+    return 1;
+  }
+  *out = (unsigned char)target[pos];
+  *advance = 1u;
+  return 1;
+}
+
+static int lql_json_pointer_segment_equal(const char *target,
+                                          size_t target_len,
+                                          const unsigned char *key,
+                                          size_t key_len) {
+  size_t target_pos;
+  size_t key_pos;
+  target_pos = 0u;
+  key_pos = 0u;
+  if (target == NULL || key == NULL) {
+    return 0;
+  }
+  while (target_pos < target_len && key_pos < key_len) {
+    unsigned char target_byte;
+    size_t advance;
+    if (!lql_json_pointer_target_byte(target, target_len, target_pos,
+                                      &target_byte, &advance) ||
+        target_byte != key[key_pos]) {
+      return 0;
+    }
+    target_pos += advance;
+    ++key_pos;
+  }
+  return target_pos == target_len && key_pos == key_len;
+}
+
+static int lql_json_pointer_segment_has_escape(const char *target,
+                                               size_t target_len) {
+  size_t i;
+  if (target == NULL) {
+    return 0;
+  }
+  for (i = 0u; i + 1u < target_len; ++i) {
+    if (target[i] == '~' && (target[i + 1u] == '0' || target[i + 1u] == '1')) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int lql_json_term_value_at(const lql_json_flat_eq_term *term,
                                   size_t path_segment) {
   if (term == NULL) {
@@ -758,6 +818,9 @@ static int lql_json_match_span_term(lql_json_scan *scan,
     target = term->value;
     target_len = term->value_len;
   }
+  if (scan->match_key && lql_json_pointer_segment_has_escape(target, target_len)) {
+    return 0;
+  }
   pos = scan->match_pos[term_index];
   if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_PREFIX &&
       pos == target_len) {
@@ -920,6 +983,18 @@ static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
       } else {
         target = term->value;
         target_len = term->value_len;
+      }
+      if (scan->match_key) {
+        unsigned char target_byte;
+        size_t advance;
+        if (!lql_json_pointer_target_byte(target, target_len, scan->match_pos[i],
+                                          &target_byte, &advance) ||
+            target_byte != value) {
+          scan->match_failed |= bit;
+        } else {
+          scan->match_pos[i] += advance;
+        }
+        continue;
       }
       if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_CONTAINS) {
         size_t pos;
@@ -1992,9 +2067,8 @@ static int lql_json_try_plain_key_match(lql_json_scan *scan,
         continue;
       }
       term = &scan->flat_terms[i];
-      if (term->field_len == key_len &&
-          (key_len == 0u || (unsigned char)term->field[0] == key[0]) &&
-          (key_len == 0u || memcmp(term->field, key, key_len) == 0)) {
+      if (lql_json_pointer_segment_equal(term->field, term->field_len, key,
+                                         key_len)) {
         scan->match_term_segment[i] = 0u;
         matches |= bit;
       }
@@ -2030,8 +2104,7 @@ static int lql_json_try_plain_key_match(lql_json_scan *scan,
                                            &target_len)) {
       continue;
     }
-    if (target_len == key_len &&
-        (key_len == 0u || memcmp(target, key, key_len) == 0)) {
+    if (lql_json_pointer_segment_equal(target, target_len, key, key_len)) {
       scan->match_term_segment[i] = segment;
       matches |= bit;
     }

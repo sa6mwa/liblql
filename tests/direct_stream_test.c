@@ -211,6 +211,39 @@ static int run_status_selection(lql *ctx) {
   return 0;
 }
 
+static int run_escaped_pointer_selection(lql *ctx) {
+  static const char input[] =
+      "{\"slash/key\":true,\"tilde~key\":true}\n"
+      "{\"slash\":{\"key\":true},\"tilde0key\":true}\n";
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/slash~1key=true,/tilde~0key=true", &selector,
+                          &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
 static int run_post_hit_validation(lql *ctx) {
   static const char malformed_array[] = "{\"status\":\"open\",\"bad\":[1,]}\n";
   static const char malformed_string[] =
@@ -1494,7 +1527,8 @@ static int run_mutation_output(lql *ctx) {
       "{\"status\":\"ready\",\"meta\":{\"a/b\":true}}\n";
   static const char *const invalid_root[] = {"/=value"};
   static const char *const invalid_json_numbers[] = {
-      "/n=01", "/n=nan", "/n=inf", "/n=+0", "/n=1e9999"};
+      "/n=01", "/n=nan", "/n=inf", "/n=+nan", "/n=+inf", "/n=+0",
+      "/n=1e9999"};
   lql_selector *selector;
   lql_mutation *mutation;
   lql_stream_request request;
@@ -3068,8 +3102,9 @@ int main(void) {
   }
   match_all_status = 0;
   if (run_projection_parse(ctx) || run_selector_json_write(ctx) ||
-      run_status_selection(ctx) || run_conjunction_selection(ctx) ||
-      run_or_selection(ctx) || run_post_hit_validation(ctx) ||
+      run_status_selection(ctx) || run_escaped_pointer_selection(ctx) ||
+      run_conjunction_selection(ctx) || run_or_selection(ctx) ||
+      run_post_hit_validation(ctx) ||
       run_not_selection(ctx) || run_mapped_string_predicates(ctx) ||
       ((match_all_status = run_match_all(ctx)) != 0) ||
       run_root_wildcard_array_error(ctx) || run_selected_record_output(ctx) ||

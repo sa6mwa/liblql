@@ -126,8 +126,7 @@ static int lql_flat_eq_literal_object_path(
         break;
       }
     }
-    if (segment_len == 0u || memchr(segment, '~', segment_len) != NULL ||
-        segment_count >= sizeof(unsigned long) * CHAR_BIT ||
+    if (segment_len == 0u || segment_count >= sizeof(unsigned long) * CHAR_BIT ||
         ((segment_len == 2u && segment[0] == '*' && segment[1] == '*') &&
          slash == NULL) ||
         ((segment_len == 3u && memcmp(segment, "...", 3u) == 0) &&

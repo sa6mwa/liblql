@@ -93,6 +93,11 @@ static int mutation_numeric_candidate(const char *begin, const char *end) {
   return end_ptr == end && end_ptr != begin;
 }
 
+static int mutation_finite(double value) {
+  /* Keep parse-time errors aligned for set and signed increment literals. */
+  return value == value && value != HUGE_VAL && value != -HUGE_VAL;
+}
+
 static char *mutation_copy(lql_allocator *allocator, const char *data,
                            size_t len) {
   char *out;
@@ -253,8 +258,7 @@ static lql_status mutation_parse_value(lql_allocator *allocator,
     }
     errno = 0;
     ignored_number = strtod(begin, &end_ptr);
-    if (end_ptr != end || errno == ERANGE || ignored_number != ignored_number ||
-        ignored_number == HUGE_VAL || ignored_number == -HUGE_VAL) {
+    if (end_ptr != end || errno == ERANGE || !mutation_finite(ignored_number)) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "mutation numeric value must be finite");
       return LQL_STATUS_PARSE_ERROR;
@@ -332,7 +336,8 @@ static lql_status mutation_parse_one(lql_allocator *allocator, const char *raw,
   errno = 0;
   delta = strtod(delta_text, &end_ptr);
   if (delta_text < end && (*delta_text == '+' || *delta_text == '-') &&
-      end_ptr == end && errno != ERANGE && delta != 0.0) {
+      end_ptr == end && errno != ERANGE && delta != 0.0 &&
+      mutation_finite(delta)) {
     action->kind = LQL_MUTATION_INCREMENT;
     action->delta = delta;
     return LQL_STATUS_OK;
