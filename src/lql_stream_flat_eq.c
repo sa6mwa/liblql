@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,20 +19,31 @@
 #define LQL_FLAT_CONTAINS_NEEDLE_MAX 256u
 #define LQL_FLAT_ICONTAINS_NEEDLE_MAX (LQL_FLAT_CONTAINS_NEEDLE_MAX * 2u)
 
+typedef struct lql_flat_eq_selector_group {
+  const lql_selector *selector;
+  size_t first;
+  size_t count;
+} lql_flat_eq_selector_group;
+
 typedef struct lql_flat_eq_program {
-  lql_json_flat_eq_term terms[LQL_FLAT_EQ_TERM_CAPACITY];
-  const lql_selector *selectors[LQL_FLAT_EQ_TERM_CAPACITY];
-  lql_json_capture_key capture_keys[LQL_FLAT_EQ_TERM_CAPACITY];
-  lql_json_capture_span capture_spans[LQL_FLAT_EQ_TERM_CAPACITY];
+  lql_json_flat_eq_term *terms;
+  const lql_selector **selectors;
+  lql_json_flat_eq_term *scan_terms;
+  size_t *term_sources;
+  size_t scan_term_count;
+  lql_flat_eq_selector_group *selector_groups;
+  size_t *selector_group_table;
+  size_t selector_group_count;
+  size_t selector_group_table_size;
+  lql_json_capture_key *capture_keys;
+  lql_json_capture_span *capture_spans;
   size_t capture_key_count;
-  size_t contains_failures[LQL_FLAT_EQ_TERM_CAPACITY]
-                          [LQL_FLAT_ICONTAINS_NEEDLE_MAX];
-  char icontains_needles[LQL_FLAT_EQ_TERM_CAPACITY]
-                        [LQL_FLAT_ICONTAINS_NEEDLE_MAX];
+  size_t (*contains_failures)[LQL_FLAT_ICONTAINS_NEEDLE_MAX];
+  char (*icontains_needles)[LQL_FLAT_ICONTAINS_NEEDLE_MAX];
   size_t term_count;
   int stop_matching_on_hit;
   unsigned long stop_hit_mask;
-  const lql_mutation_action *direct_mutation_actions[LQL_FLAT_EQ_TERM_CAPACITY];
+  const lql_mutation_action **direct_mutation_actions;
   size_t direct_mutation_action_count;
 } lql_flat_eq_program;
 
@@ -47,10 +59,248 @@ typedef struct lql_flat_eq_time_bounds {
 typedef struct lql_flat_eq_state {
   const lql_stream_request *request;
   lql_stream_result *result;
-  const lql_flat_eq_program *program;
+  lql_flat_eq_program *program;
   lql_stream_writer_fn writer;
   void *writer_user;
 } lql_flat_eq_state;
+
+static void lql_flat_eq_program_cleanup(lql_flat_eq_program *program) {
+  if (program == NULL) {
+    return;
+  }
+  free(program->direct_mutation_actions);
+  free(program->selector_group_table);
+  free(program->selector_groups);
+  free(program->term_sources);
+  free(program->scan_terms);
+  free(program->icontains_needles);
+  free(program->contains_failures);
+  free(program->capture_spans);
+  free(program->capture_keys);
+  free(program->selectors);
+  free(program->terms);
+  memset(program, 0, sizeof(*program));
+}
+
+static int lql_flat_eq_program_init(lql_flat_eq_program *program,
+                                    size_t term_count, size_t capture_count,
+                                    size_t mutation_count) {
+  if (program == NULL) {
+    return 0;
+  }
+  memset(program, 0, sizeof(*program));
+  if (term_count != 0u) {
+    program->terms = calloc(term_count, sizeof(*program->terms));
+    program->selectors = calloc(term_count, sizeof(*program->selectors));
+    program->contains_failures =
+        calloc(term_count, sizeof(*program->contains_failures));
+    program->icontains_needles =
+        calloc(term_count, sizeof(*program->icontains_needles));
+    if (program->terms == NULL || program->selectors == NULL ||
+        program->contains_failures == NULL ||
+        program->icontains_needles == NULL) {
+      lql_flat_eq_program_cleanup(program);
+      return 0;
+    }
+  }
+  if (capture_count != 0u) {
+    program->capture_keys =
+        calloc(capture_count, sizeof(*program->capture_keys));
+    program->capture_spans =
+        calloc(capture_count, sizeof(*program->capture_spans));
+    if (program->capture_keys == NULL || program->capture_spans == NULL) {
+      lql_flat_eq_program_cleanup(program);
+      return 0;
+    }
+  }
+  if (mutation_count != 0u) {
+    program->direct_mutation_actions =
+        calloc(mutation_count, sizeof(*program->direct_mutation_actions));
+    if (program->direct_mutation_actions == NULL) {
+      lql_flat_eq_program_cleanup(program);
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int lql_flat_eq_selector_term_count(const lql_selector *selector,
+                                           size_t *out) {
+  size_t count;
+  size_t i;
+  if (out == NULL) {
+    return 0;
+  }
+  if (selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL) {
+    *out = 0u;
+    return 1;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_AND ||
+      selector->kind == LQL_SELECTOR_KIND_OR ||
+      selector->kind == LQL_SELECTOR_KIND_NOT) {
+    count = 0u;
+    for (i = 0u; i < selector->child_count; ++i) {
+      size_t child_count;
+      if (!lql_flat_eq_selector_term_count(&selector->children[i],
+                                           &child_count) ||
+          child_count > (size_t)-1 - count) {
+        return 0;
+      }
+      count += child_count;
+    }
+    *out = count;
+    return 1;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_IN) {
+    *out = selector->any_count;
+    return 1;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_CONTAINS ||
+      selector->kind == LQL_SELECTOR_KIND_ICONTAINS) {
+    *out = selector->any_count == 0u ? 1u : selector->any_count;
+    return 1;
+  }
+  *out = 1u;
+  return 1;
+}
+
+static int lql_flat_eq_text_equal(const char *left, size_t left_len,
+                                  const char *right, size_t right_len) {
+  return left_len == right_len &&
+         (left_len == 0u || (left != NULL && right != NULL &&
+                             memcmp(left, right, left_len) == 0));
+}
+
+static int
+lql_flat_eq_scan_term_equivalent(const lql_json_flat_eq_term *left,
+                                 const lql_json_flat_eq_term *right) {
+  if (left == NULL || right == NULL || left->kind != right->kind ||
+      left->kind == LQL_JSON_FLAT_TERM_NUMBER_RANGE ||
+      left->kind == LQL_JSON_FLAT_TERM_TEMPORAL_RANGE ||
+      left->kind == LQL_JSON_FLAT_TERM_CONTAINS ||
+      left->kind == LQL_JSON_FLAT_TERM_ICONTAINS ||
+      left->kind == LQL_JSON_FLAT_TERM_IPREFIX) {
+    return 0;
+  }
+  return left->path_segment_count == right->path_segment_count &&
+         left->path_array_segments == right->path_array_segments &&
+         left->path_object_wildcards == right->path_object_wildcards &&
+         left->path_array_wildcards == right->path_array_wildcards &&
+         left->path_any_wildcards == right->path_any_wildcards &&
+         left->path_recursive_segments == right->path_recursive_segments &&
+         lql_flat_eq_text_equal(left->field, left->field_len, right->field,
+                                right->field_len) &&
+         lql_flat_eq_text_equal(left->path, left->path_len, right->path,
+                                right->path_len) &&
+         lql_flat_eq_text_equal(left->value, left->value_len, right->value,
+                                right->value_len);
+}
+
+static int lql_flat_eq_program_build_scan_terms(lql_flat_eq_program *program) {
+  size_t i;
+  if (program == NULL || program->term_count == 0u) {
+    return 1;
+  }
+  program->scan_terms =
+      calloc(program->term_count, sizeof(*program->scan_terms));
+  program->term_sources =
+      calloc(program->term_count, sizeof(*program->term_sources));
+  if (program->scan_terms == NULL || program->term_sources == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < program->term_count; ++i) {
+    size_t source;
+    for (source = 0u; source < program->scan_term_count; ++source) {
+      if (lql_flat_eq_scan_term_equivalent(&program->terms[i],
+                                           &program->scan_terms[source])) {
+        break;
+      }
+    }
+    if (source == program->scan_term_count) {
+      program->scan_terms[source] = program->terms[i];
+      ++program->scan_term_count;
+    }
+    program->term_sources[i] = source;
+  }
+  return 1;
+}
+
+static size_t lql_flat_eq_selector_group_hash(const lql_selector *selector) {
+  return (size_t)((uintptr_t)selector >> 4u);
+}
+
+static int
+lql_flat_eq_program_build_selector_index(lql_flat_eq_program *program) {
+  size_t table_size;
+  size_t i;
+  if (program == NULL || program->term_count == 0u) {
+    return 1;
+  }
+  if (program->term_count > (size_t)-1 / 2u) {
+    return 0;
+  }
+  table_size = 1u;
+  while (table_size < program->term_count * 2u) {
+    if (table_size > (size_t)-1 / 2u) {
+      return 0;
+    }
+    table_size *= 2u;
+  }
+  program->selector_groups =
+      calloc(program->term_count, sizeof(*program->selector_groups));
+  program->selector_group_table =
+      malloc(table_size * sizeof(*program->selector_group_table));
+  if (program->selector_groups == NULL ||
+      program->selector_group_table == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < table_size; ++i) {
+    program->selector_group_table[i] = (size_t)-1;
+  }
+  program->selector_group_table_size = table_size;
+  for (i = 0u; i < program->term_count; ++i) {
+    size_t slot;
+    size_t group;
+    slot = lql_flat_eq_selector_group_hash(program->selectors[i]) &
+           (table_size - 1u);
+    while (program->selector_group_table[slot] != (size_t)-1 &&
+           program->selector_groups[program->selector_group_table[slot]]
+                   .selector != program->selectors[i]) {
+      slot = (slot + 1u) & (table_size - 1u);
+    }
+    group = program->selector_group_table[slot];
+    if (group == (size_t)-1) {
+      group = program->selector_group_count++;
+      program->selector_group_table[slot] = group;
+      program->selector_groups[group].selector = program->selectors[i];
+      program->selector_groups[group].first = i;
+    }
+    ++program->selector_groups[group].count;
+  }
+  return 1;
+}
+
+static const lql_flat_eq_selector_group *
+lql_flat_eq_selector_group_find(const lql_flat_eq_program *program,
+                                const lql_selector *selector) {
+  size_t slot;
+  if (program == NULL || selector == NULL ||
+      program->selector_group_table == NULL ||
+      program->selector_group_table_size == 0u) {
+    return NULL;
+  }
+  slot = lql_flat_eq_selector_group_hash(selector) &
+         (program->selector_group_table_size - 1u);
+  while (program->selector_group_table[slot] != (size_t)-1) {
+    const lql_flat_eq_selector_group *group;
+    group = &program->selector_groups[program->selector_group_table[slot]];
+    if (group->selector == selector) {
+      return group;
+    }
+    slot = (slot + 1u) & (program->selector_group_table_size - 1u);
+  }
+  return NULL;
+}
 
 static int lql_flat_eq_selector_needs_time(const lql_selector *selector) {
   size_t i;
@@ -200,8 +450,7 @@ static int lql_flat_eq_contains_failure(lql_flat_eq_program *program,
   size_t matched;
   if (program == NULL || term == NULL || term->value == NULL ||
       term->value_len == 0u ||
-      term->value_len > LQL_FLAT_ICONTAINS_NEEDLE_MAX ||
-      program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
+      term->value_len > LQL_FLAT_ICONTAINS_NEEDLE_MAX) {
     return 0;
   }
   term->contains_failure = program->contains_failures[program->term_count];
@@ -313,9 +562,6 @@ static int lql_flat_eq_append_contains(
   }
   count = selector->any_count == 0u ? 1u : selector->any_count;
   if (selector->any_count == 0u && !selector->value_set) {
-    if (program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
-      return 0;
-    }
     term = &program->terms[program->term_count];
     term->kind = LQL_JSON_FLAT_TERM_EXISTS;
     term->field = field + 1;
@@ -333,8 +579,7 @@ static int lql_flat_eq_append_contains(
     ++program->term_count;
     return 1;
   }
-  if (count > LQL_FLAT_EQ_TERM_CAPACITY - program->term_count ||
-      (selector->any_count != 0u &&
+  if ((selector->any_count != 0u &&
        (selector->any == NULL || selector->any_lens == NULL ||
         selector->any_kinds == NULL)) ||
       (selector->any_count == 0u &&
@@ -443,8 +688,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       if (!lql_flat_eq_literal_kind(
               selector->any[i], selector->any_kinds[i],
               selector->any_from_json != NULL ? selector->any_from_json[i] : 0,
-              &term_kind) ||
-          program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
+              &term_kind)) {
         return 0;
       }
       term = &program->terms[program->term_count];
@@ -486,8 +730,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
         selector->kind == LQL_SELECTOR_KIND_ICONTAINS || selector->ignore_case);
   }
   if (selector->kind == LQL_SELECTOR_KIND_RANGE) {
-    if (selector->field == NULL ||
-        program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
+    if (selector->field == NULL) {
       return 0;
     }
     field = selector->field;
@@ -534,8 +777,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     return 1;
   }
   if (selector->kind == LQL_SELECTOR_KIND_DATE) {
-    if (selector->field == NULL ||
-        program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
+    if (selector->field == NULL) {
       return 0;
     }
     field = selector->field;
@@ -595,8 +837,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
        selector->kind != LQL_SELECTOR_KIND_EXISTS &&
        selector->kind != LQL_SELECTOR_KIND_PREFIX &&
        selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
-      selector->field == NULL ||
-      program->term_count == LQL_FLAT_EQ_TERM_CAPACITY) {
+      selector->field == NULL) {
     return 0;
   }
   field = selector->field;
@@ -672,9 +913,17 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   return 1;
 }
 
+static int lql_flat_eq_hit(const unsigned long *hits, size_t index) {
+  if (hits == NULL) {
+    return 0;
+  }
+  return (hits[index / LQL_FLAT_EQ_TERM_CAPACITY] &
+          (1ul << (index % LQL_FLAT_EQ_TERM_CAPACITY))) != 0ul;
+}
+
 static int lql_flat_eq_matches(const lql_flat_eq_program *program,
                                const lql_selector *selector,
-                               unsigned long hits) {
+                               const unsigned long *hits) {
   size_t i;
   if (selector == NULL) {
     return 1;
@@ -702,9 +951,16 @@ static int lql_flat_eq_matches(const lql_flat_eq_program *program,
     return selector->child_count == 1u &&
            !lql_flat_eq_matches(program, &selector->children[0], hits);
   }
-  for (i = 0u; i < program->term_count; ++i) {
-    if (program->selectors[i] == selector) {
-      if ((hits & (1ul << i)) != 0ul) {
+  {
+    const lql_flat_eq_selector_group *group;
+    group = lql_flat_eq_selector_group_find(program, selector);
+    if (group == NULL) {
+      return 0;
+    }
+    for (i = group->first; i < group->first + group->count; ++i) {
+      size_t source;
+      source = program->term_sources == NULL ? i : program->term_sources[i];
+      if (lql_flat_eq_hit(hits, source)) {
         return 1;
       }
     }
@@ -3818,11 +4074,11 @@ lql_flat_eq_projection_paths_compatible(const lql_projection *projection) {
   return 1;
 }
 
-static lql_status lql_flat_eq_record(void *user, size_t record_index,
-                                     int root_is_object, unsigned long hits,
-                                     const lql_json_spool *spool,
-                                     size_t source_offset, size_t source_len,
-                                     int source_compact, lql_error *error) {
+static lql_status
+lql_flat_eq_record_words(void *user, size_t record_index, int root_is_object,
+                         const unsigned long *hits, const lql_json_spool *spool,
+                         size_t source_offset, size_t source_len,
+                         int source_compact, lql_error *error) {
   lql_flat_eq_state *state;
   lql_stream_decision decision;
   lql_stream_value value;
@@ -3976,6 +4232,16 @@ static lql_status lql_flat_eq_record(void *user, size_t record_index,
   return LQL_STATUS_OK;
 }
 
+static lql_status lql_flat_eq_record(void *user, size_t record_index,
+                                     int root_is_object, unsigned long hits,
+                                     const lql_json_spool *spool,
+                                     size_t source_offset, size_t source_len,
+                                     int source_compact, lql_error *error) {
+  return lql_flat_eq_record_words(user, record_index, root_is_object, &hits,
+                                  spool, source_offset, source_len,
+                                  source_compact, error);
+}
+
 static int lql_flat_eq_eligible(const lql_stream_request *request) {
   if (request == NULL ||
       (request->output_mode != LQL_STREAM_OUTPUT_DECISION_ONLY &&
@@ -4001,8 +4267,7 @@ static int lql_flat_eq_eligible(const lql_stream_request *request) {
 static int lql_flat_eq_mutation_append(lql_flat_eq_program *program,
                                        const lql_mutation *mutation) {
   size_t i;
-  if (program == NULL || mutation == NULL || mutation->action_count == 0u ||
-      mutation->action_count > LQL_FLAT_EQ_TERM_CAPACITY)
+  if (program == NULL || mutation == NULL || mutation->action_count == 0u)
     return 0;
   for (i = 0u; i < mutation->action_count; ++i) {
     const lql_mutation_action *action;
@@ -4041,7 +4306,6 @@ static int lql_flat_eq_projection_append(lql_flat_eq_program *program,
                                          const lql_projection *projection) {
   size_t i;
   if (projection == NULL || projection->path_count == 0u ||
-      projection->path_count > LQL_FLAT_EQ_TERM_CAPACITY ||
       !lql_flat_eq_projection_paths_compatible(projection))
     return 0;
   for (i = 0u; i < projection->path_count; ++i) {
@@ -4053,6 +4317,213 @@ static int lql_flat_eq_projection_append(lql_flat_eq_program *program,
   }
   program->capture_key_count = projection->path_count;
   return 1;
+}
+
+typedef struct lql_flat_eq_batched_state {
+  lql_flat_eq_state *state;
+  unsigned long *scan_hits;
+  size_t scan_hit_word_count;
+} lql_flat_eq_batched_state;
+
+typedef struct lql_flat_eq_alias_state {
+  lql_flat_eq_state *state;
+} lql_flat_eq_alias_state;
+
+typedef struct lql_flat_eq_term_batch {
+  unsigned long *hits;
+  size_t term_offset;
+  size_t term_count;
+} lql_flat_eq_term_batch;
+
+typedef struct lql_flat_eq_capture_batch {
+  lql_json_capture_span *target;
+  const lql_json_capture_span *source;
+  size_t count;
+} lql_flat_eq_capture_batch;
+
+static lql_status
+lql_flat_eq_alias_record(void *user, size_t record_index, int root_is_object,
+                         unsigned long hits, const lql_json_spool *spool,
+                         size_t source_offset, size_t source_len,
+                         int source_compact, lql_error *error) {
+  lql_flat_eq_alias_state *alias;
+  alias = (lql_flat_eq_alias_state *)user;
+  if (alias == NULL || alias->state == NULL) {
+    return LQL_STATUS_CALLBACK_ERROR;
+  }
+  return lql_flat_eq_record_words(alias->state, record_index, root_is_object,
+                                  &hits, spool, source_offset, source_len,
+                                  source_compact, error);
+}
+
+static lql_status lql_flat_eq_term_batch_record(
+    void *user, size_t record_index, int root_is_object, unsigned long hits,
+    const lql_json_spool *spool, size_t source_offset, size_t source_len,
+    int source_compact, lql_error *error) {
+  lql_flat_eq_term_batch *batch;
+  size_t i;
+  (void)record_index;
+  (void)root_is_object;
+  (void)spool;
+  (void)source_offset;
+  (void)source_len;
+  (void)source_compact;
+  (void)error;
+  batch = (lql_flat_eq_term_batch *)user;
+  if (batch == NULL || batch->hits == NULL) {
+    return LQL_STATUS_CALLBACK_ERROR;
+  }
+  for (i = 0u; i < batch->term_count; ++i) {
+    if ((hits & (1ul << i)) != 0ul) {
+      size_t index;
+      index = batch->term_offset + i;
+      batch->hits[index / LQL_FLAT_EQ_TERM_CAPACITY] |=
+          1ul << (index % LQL_FLAT_EQ_TERM_CAPACITY);
+    }
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status lql_flat_eq_capture_batch_record(
+    void *user, size_t record_index, int root_is_object, unsigned long hits,
+    const lql_json_spool *spool, size_t source_offset, size_t source_len,
+    int source_compact, lql_error *error) {
+  lql_flat_eq_capture_batch *batch;
+  (void)record_index;
+  (void)root_is_object;
+  (void)hits;
+  (void)spool;
+  (void)source_offset;
+  (void)source_len;
+  (void)source_compact;
+  (void)error;
+  batch = (lql_flat_eq_capture_batch *)user;
+  if (batch == NULL || batch->target == NULL || batch->source == NULL) {
+    return LQL_STATUS_CALLBACK_ERROR;
+  }
+  memcpy(batch->target, batch->source, batch->count * sizeof(*batch->target));
+  return LQL_STATUS_OK;
+}
+
+static lql_status lql_flat_eq_scan_term_batch(
+    const lql_json_spool *source, const lql_flat_eq_program *program,
+    size_t offset, size_t count, unsigned long *hits, lql_error *error) {
+  lql_json_flat_eq_request request;
+  lql_json_spool_reader reader;
+  lql_flat_eq_term_batch batch;
+  lql_status status;
+  if (source == NULL || program == NULL || hits == NULL || count == 0u ||
+      count > LQL_FLAT_EQ_TERM_CAPACITY) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  memset(&request, 0, sizeof(request));
+  lql_json_spool_reader_init(&reader, source);
+  batch.hits = hits;
+  batch.term_offset = offset;
+  batch.term_count = count;
+  request.reader = lql_json_spool_read;
+  request.reader_user = &reader;
+  request.terms = program->scan_terms + offset;
+  request.term_count = count;
+  request.max_records = 1u;
+  request.record = lql_flat_eq_term_batch_record;
+  request.record_user = &batch;
+  status = lql_json_scan_flat_eq_ndjson(&request, NULL, NULL, error);
+  return status;
+}
+
+static lql_status lql_flat_eq_scan_capture_batch(const lql_json_spool *source,
+                                                 lql_flat_eq_program *program,
+                                                 size_t offset, size_t count,
+                                                 lql_error *error) {
+  lql_json_flat_eq_request request;
+  lql_json_spool_reader reader;
+  lql_json_spool capture_spool;
+  lql_json_capture_span spans[LQL_FLAT_EQ_TERM_CAPACITY];
+  lql_flat_eq_capture_batch batch;
+  lql_status status;
+  if (source == NULL || program == NULL || count == 0u ||
+      count > LQL_FLAT_EQ_TERM_CAPACITY) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  status = lql_json_spool_init(&capture_spool, error);
+  if (status != LQL_STATUS_OK) {
+    return status;
+  }
+  memset(&request, 0, sizeof(request));
+  memset(spans, 0, sizeof(spans));
+  lql_json_spool_reader_init(&reader, source);
+  batch.target = program->capture_spans + offset;
+  batch.source = spans;
+  batch.count = count;
+  request.reader = lql_json_spool_read;
+  request.reader_user = &reader;
+  request.spool = &capture_spool;
+  request.capture = 1;
+  request.capture_keys = program->capture_keys + offset;
+  request.capture_key_count = count;
+  request.capture_spans = spans;
+  request.max_records = 1u;
+  request.record = lql_flat_eq_capture_batch_record;
+  request.record_user = &batch;
+  status = lql_json_scan_flat_eq_ndjson(&request, NULL, NULL, error);
+  if (status == LQL_STATUS_OK &&
+      lql_json_spool_size(&capture_spool) != lql_json_spool_size(source)) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "batched capture changed compact JSON record size");
+    status = LQL_STATUS_JSON_ERROR;
+  }
+  lql_json_spool_cleanup(&capture_spool);
+  return status;
+}
+
+static lql_status
+lql_flat_eq_batched_record(void *user, size_t record_index, int root_is_object,
+                           unsigned long hits, const lql_json_spool *spool,
+                           size_t source_offset, size_t source_len,
+                           int source_compact, lql_error *error) {
+  lql_flat_eq_batched_state *batch;
+  lql_flat_eq_program *program;
+  size_t offset;
+  lql_status status;
+  (void)hits;
+  batch = (lql_flat_eq_batched_state *)user;
+  if (batch == NULL || batch->state == NULL || batch->scan_hits == NULL ||
+      spool == NULL) {
+    return LQL_STATUS_CALLBACK_ERROR;
+  }
+  program = batch->state->program;
+  memset(batch->scan_hits, 0,
+         batch->scan_hit_word_count * sizeof(*batch->scan_hits));
+  for (offset = 0u; offset < program->scan_term_count;
+       offset += LQL_FLAT_EQ_TERM_CAPACITY) {
+    size_t count;
+    count = program->scan_term_count - offset;
+    if (count > LQL_FLAT_EQ_TERM_CAPACITY) {
+      count = LQL_FLAT_EQ_TERM_CAPACITY;
+    }
+    status = lql_flat_eq_scan_term_batch(spool, program, offset, count,
+                                         batch->scan_hits, error);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+  }
+  for (offset = 0u; offset < program->capture_key_count;
+       offset += LQL_FLAT_EQ_TERM_CAPACITY) {
+    size_t count;
+    count = program->capture_key_count - offset;
+    if (count > LQL_FLAT_EQ_TERM_CAPACITY) {
+      count = LQL_FLAT_EQ_TERM_CAPACITY;
+    }
+    status =
+        lql_flat_eq_scan_capture_batch(spool, program, offset, count, error);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+  }
+  return lql_flat_eq_record_words(batch->state, record_index, root_is_object,
+                                  batch->scan_hits, spool, source_offset,
+                                  source_len, source_compact, error);
 }
 
 lql_status lql_stream_execute_flat_eq(lql *self,
@@ -4069,6 +4540,15 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   lql_flat_eq_time_bounds *time_bounds_ptr;
   size_t records;
   size_t bytes_read;
+  size_t term_capacity;
+  size_t capture_capacity;
+  size_t mutation_capacity;
+  size_t scan_hit_word_count;
+  unsigned long *batched_scan_hits;
+  lql_flat_eq_batched_state batched_state;
+  lql_flat_eq_alias_state alias_state;
+  int batched;
+  int aliased;
   int capture;
   int range_only_value;
   (void)self;
@@ -4081,7 +4561,6 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   if (!lql_flat_eq_eligible(request)) {
     return LQL_STATUS_OK;
   }
-  memset(&program, 0, sizeof(program));
   time_bounds_ptr = NULL;
   if (lql_flat_eq_selector_needs_time(request->selector)) {
     memset(&time_bounds, 0, sizeof(time_bounds));
@@ -4091,22 +4570,74 @@ lql_status lql_stream_execute_flat_eq(lql *self,
         lql_temporal_yesterday(&time_bounds.yesterday);
     time_bounds_ptr = &time_bounds;
   }
+  if (!lql_flat_eq_selector_term_count(request->selector, &term_capacity)) {
+    return LQL_STATUS_OK;
+  }
+  capture_capacity =
+      (request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
+       request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION) &&
+              request->projection != NULL
+          ? request->projection->path_count
+          : 0u;
+  mutation_capacity =
+      (request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
+       request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION) &&
+              request->mutation != NULL
+          ? request->mutation->action_count
+          : 0u;
+  if (!lql_flat_eq_program_init(&program, term_capacity, capture_capacity,
+                                mutation_capacity)) {
+    lql_set_error(error, LQL_STATUS_NO_MEMORY,
+                  "unable to allocate stream selector state");
+    return LQL_STATUS_NO_MEMORY;
+  }
   if (request->selector != NULL &&
       !lql_flat_eq_append(&program, request->selector, time_bounds_ptr)) {
+    lql_flat_eq_program_cleanup(&program);
     return LQL_STATUS_OK;
   }
   if ((request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
        request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION) &&
       !lql_flat_eq_projection_append(&program, request->projection)) {
+    lql_flat_eq_program_cleanup(&program);
     return LQL_STATUS_OK;
   }
   if ((request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
        request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION) &&
       !lql_flat_eq_mutation_append(&program, request->mutation)) {
+    lql_flat_eq_program_cleanup(&program);
     return LQL_STATUS_OK;
   }
-  program.stop_hit_mask = lql_flat_eq_stop_mask(&program, request->selector);
-  program.stop_matching_on_hit = program.stop_hit_mask != 0ul;
+  if (!lql_flat_eq_program_build_selector_index(&program)) {
+    lql_flat_eq_program_cleanup(&program);
+    lql_set_error(error, LQL_STATUS_NO_MEMORY,
+                  "unable to allocate stream selector index");
+    return LQL_STATUS_NO_MEMORY;
+  }
+  batched = program.term_count > LQL_FLAT_EQ_TERM_CAPACITY ||
+            program.capture_key_count > LQL_FLAT_EQ_TERM_CAPACITY;
+  /*
+   * The scanner's word mask is a private fast-path detail, not an API limit.
+   * Deduplicate equivalent predicates first; if their unique set still exceeds
+   * one word, the spooled executor scans each compact record in word batches
+   * and merges those hits before evaluating the original selector tree.
+   */
+  if (batched && !lql_flat_eq_program_build_scan_terms(&program)) {
+    lql_flat_eq_program_cleanup(&program);
+    lql_set_error(error, LQL_STATUS_NO_MEMORY,
+                  "unable to allocate stream selector scan state");
+    return LQL_STATUS_NO_MEMORY;
+  }
+  aliased = batched && program.scan_term_count <= LQL_FLAT_EQ_TERM_CAPACITY &&
+            program.capture_key_count <= LQL_FLAT_EQ_TERM_CAPACITY;
+  if (batched && !aliased && !allow_spool) {
+    lql_flat_eq_program_cleanup(&program);
+    return LQL_STATUS_OK;
+  }
+  if (!batched) {
+    program.stop_hit_mask = lql_flat_eq_stop_mask(&program, request->selector);
+    program.stop_matching_on_hit = program.stop_hit_mask != 0ul;
+  }
   *out_handled = 1;
   range_only_value = !allow_spool && request->on_value != NULL &&
                      request->range_writer != NULL && request->input_is_compact;
@@ -4117,10 +4648,16 @@ lql_status lql_stream_execute_flat_eq(lql *self,
        request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
        request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
        request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION);
+  if (batched && !aliased) {
+    /* Oversized public requests are scanned per compact record in word batches.
+     */
+    capture = 1;
+  }
   memset(&spool, 0, sizeof(spool));
   if (capture) {
     status = lql_json_spool_init(&spool, error);
     if (status != LQL_STATUS_OK) {
+      lql_flat_eq_program_cleanup(&program);
       return status;
     }
   }
@@ -4130,28 +4667,72 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   state.program = &program;
   state.writer = request->writer;
   state.writer_user = request->writer_user;
+  batched_scan_hits = NULL;
+  memset(&batched_state, 0, sizeof(batched_state));
+  memset(&alias_state, 0, sizeof(alias_state));
+  scan_hit_word_count = 0u;
+  if (batched) {
+    if (!aliased) {
+      scan_hit_word_count =
+          (program.scan_term_count + LQL_FLAT_EQ_TERM_CAPACITY - 1u) /
+          LQL_FLAT_EQ_TERM_CAPACITY;
+      if (scan_hit_word_count == 0u) {
+        scan_hit_word_count = 1u;
+      }
+      batched_scan_hits =
+          calloc(scan_hit_word_count, sizeof(*batched_scan_hits));
+    }
+    if (!aliased && batched_scan_hits == NULL) {
+      if (capture) {
+        lql_json_spool_cleanup(&spool);
+      }
+      free(batched_scan_hits);
+      lql_flat_eq_program_cleanup(&program);
+      lql_set_error(error, LQL_STATUS_NO_MEMORY,
+                    "unable to allocate stream selector hit state");
+      return LQL_STATUS_NO_MEMORY;
+    }
+    if (aliased) {
+      alias_state.state = &state;
+    } else {
+      batched_state.state = &state;
+      batched_state.scan_hits = batched_scan_hits;
+      batched_state.scan_hit_word_count = scan_hit_word_count;
+    }
+  }
   memset(&scan_request, 0, sizeof(scan_request));
   scan_request.reader = request->reader;
   scan_request.reader_user = request->reader_user;
-  scan_request.terms = program.terms;
-  scan_request.term_count = program.term_count;
+  scan_request.terms =
+      batched ? (aliased ? program.scan_terms : NULL) : program.terms;
+  scan_request.term_count =
+      batched ? (aliased ? program.scan_term_count : 0u) : program.term_count;
   scan_request.spool = capture ? &spool : NULL;
   scan_request.capture = capture;
-  scan_request.stop_matching_on_hit = program.stop_matching_on_hit;
-  scan_request.stop_hit_mask = program.stop_hit_mask;
-  scan_request.capture_keys = program.capture_keys;
-  scan_request.capture_key_count = program.capture_key_count;
-  scan_request.capture_spans = program.capture_spans;
+  scan_request.stop_matching_on_hit =
+      batched ? 0 : program.stop_matching_on_hit;
+  scan_request.stop_hit_mask = batched ? 0ul : program.stop_hit_mask;
+  scan_request.capture_keys = batched && !aliased ? NULL : program.capture_keys;
+  scan_request.capture_key_count =
+      batched && !aliased ? 0u : program.capture_key_count;
+  scan_request.capture_spans =
+      batched && !aliased ? NULL : program.capture_spans;
   scan_request.max_records = request->limits.max_records;
   scan_request.max_bytes = request->limits.max_bytes;
-  scan_request.record = lql_flat_eq_record;
-  scan_request.record_user = &state;
+  scan_request.record = batched ? (aliased ? lql_flat_eq_alias_record
+                                           : lql_flat_eq_batched_record)
+                                : lql_flat_eq_record;
+  scan_request.record_user =
+      batched ? (aliased ? (void *)&alias_state : (void *)&batched_state)
+              : (void *)&state;
   status =
       lql_json_scan_flat_eq_ndjson(&scan_request, &records, &bytes_read, error);
   result->bytes_consumed = bytes_read;
   if (capture) {
     lql_json_spool_cleanup(&spool);
   }
+  free(batched_scan_hits);
+  lql_flat_eq_program_cleanup(&program);
   if (status == LQL_STATUS_STOP && !result->stopped_early &&
       request->limits.max_records != 0u &&
       result->records_seen >= request->limits.max_records) {

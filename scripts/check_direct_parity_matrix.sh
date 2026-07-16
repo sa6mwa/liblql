@@ -43,6 +43,22 @@ direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   in_status_open_pending 'in{field=/status,any=open|pending}' decision_only_selector /id
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   and_status_open_region_west '/status="open",/region="us-west"' decision_only_selector /id
+
+# Above the scanner's machine-word batch width, repeated predicates must still
+# execute through the compiled alias path rather than becoming unsupported or
+# paying one full input pass per logically duplicate clause.
+wide_selector=''
+wide_index=0
+while [ "$wide_index" -lt 129 ]; do
+  if [ -n "$wide_selector" ]; then
+    wide_selector="$wide_selector,"
+  fi
+  wide_selector="${wide_selector}/status=\"open\""
+  wide_index=$((wide_index + 1))
+done
+direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  wide_129_status_open "$wide_selector" decision_only_selector /id
+
 direct_parity_run_row build/direct-probe/scalar-100k.ndjson scalar_100k \
   code_eq_one '/code=1' decision_only_selector /id
 direct_parity_run_row build/direct-probe/scalar-100k.ndjson scalar_100k \
@@ -162,4 +178,4 @@ direct_parity_run_row build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' project_mutate_file_selector /id
 
 direct_parity_validate
-direct_parity_expect_records 292
+direct_parity_expect_records 296

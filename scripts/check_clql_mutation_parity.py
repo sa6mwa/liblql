@@ -244,6 +244,15 @@ def main():
     for name, input_text, mutations in explicit_cases:
         assert_case(name, input_text, mutations)
 
+    # Mutation counts are public CLI input, not a scanner-bitset contract.
+    # Exercise more actions than either a 32- or 64-bit word can represent.
+    wide_count = 129
+    assert_case(
+        "mutations beyond one machine word",
+        compact({}),
+        [f"/k{i}={i}" for i in range(wide_count)],
+    )
+
     objects = [
         {},
         {"a": 1},
@@ -299,7 +308,9 @@ def main():
             count += 1
             assert_case("ordered mutation sweep", input_text, sequence)
 
-    print(f"clql mutation parity: {len(explicit_cases) + count} cases passed")
+    print(
+        f"clql mutation parity: {len(explicit_cases) + count + 1} cases passed"
+    )
 
 
 if __name__ == "__main__":

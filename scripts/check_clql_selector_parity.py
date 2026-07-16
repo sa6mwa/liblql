@@ -178,7 +178,31 @@ def main():
     for name, args in cases:
         assert_case(name, input_text, args)
 
-    print(f"clql selector parity: {len(cases)} cases passed")
+    # Scanner term state used to be represented by one machine word. Keep this
+    # above both 32- and 64-bit widths so selector and projection parity cannot
+    # regress to an implementation-only execution limit.
+    wide_count = 129
+    wide_record = {"id": "wide"}
+    wide_record.update({f"k{i}": i for i in range(wide_count)})
+    wide_input = compact(wide_record) + "\n"
+    assert_case(
+        "selectors beyond one machine word",
+        wide_input,
+        [f"/k{i}={i}" for i in range(wide_count)],
+    )
+    assert_case(
+        "selector miss beyond one machine word",
+        wide_input,
+        [f"/k{i}={i}" for i in range(wide_count - 1)] + ["/k128=missing"],
+    )
+    assert_case(
+        "projection beyond one machine word",
+        wide_input,
+        sum((["-f", f"/k{i}"] for i in range(wide_count)), [])
+        + ["/id=wide"],
+    )
+
+    print(f"clql selector parity: {len(cases) + 3} cases passed")
 
 
 if __name__ == "__main__":
