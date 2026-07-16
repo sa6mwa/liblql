@@ -941,9 +941,24 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
       ctx->allocator->destroy(ctx->allocator, decoded);
     } else if (key_is_value(key)) {
       ctx->allocator->destroy(ctx->allocator, selector->value);
-      selector->value = decoded;
-      selector->value_set = 1;
-      selector->value_kind = selector_literal_kind(*seen_slot);
+      if (decoded[0] == '\0' &&
+          (kind == LQL_SELECTOR_KIND_CONTAINS ||
+           kind == LQL_SELECTOR_KIND_ICONTAINS ||
+           kind == LQL_SELECTOR_KIND_PREFIX ||
+           kind == LQL_SELECTOR_KIND_IPREFIX)) {
+        /*
+         * Go lql treats value= with an empty value the same as omitting the
+         * value for string-term selectors: assert that the path exists.
+         */
+        ctx->allocator->destroy(ctx->allocator, decoded);
+        selector->value = NULL;
+        selector->value_set = 0;
+        selector->value_kind = LQL_SELECTOR_LITERAL_STRING;
+      } else {
+        selector->value = decoded;
+        selector->value_set = 1;
+        selector->value_kind = selector_literal_kind(*seen_slot);
+      }
     } else if (kind == LQL_SELECTOR_KIND_DATE &&
                (key_is_after(key) || key_is_before(key) || key_is_since(key))) {
       date_slot = key_is_after(key)    ? "after"
@@ -3139,6 +3154,18 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
     return LQL_STATUS_PARSE_ERROR;
   }
   has_value = term->value_present || term->value.len != 0u;
+  if (term->value_present && term->value.len == 0u &&
+      (internal_kind == LQL_SELECTOR_KIND_CONTAINS ||
+       internal_kind == LQL_SELECTOR_KIND_ICONTAINS ||
+       internal_kind == LQL_SELECTOR_KIND_PREFIX ||
+       internal_kind == LQL_SELECTOR_KIND_IPREFIX)) {
+    /*
+     * Go lql treats value= with an empty value the same as an omitted value for
+     * string-term selectors: it is a path assertion, not an empty substring or
+     * prefix search.
+     */
+    has_value = 0;
+  }
   if (term->any_count != 0u) {
     if (any_values == NULL) {
       lql_selector_cleanup(ctx.receiver, &selector);

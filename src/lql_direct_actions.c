@@ -1,4 +1,5 @@
 #include "lql_internal.h"
+#include "lql_temporal_internal.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -359,6 +360,106 @@ static lql_status mutation_parse_value(lql_allocator *allocator,
   return LQL_STATUS_OK;
 }
 
+static lql_status mutation_parse_time_value(lql_allocator *allocator,
+                                            const char *begin, const char *end,
+                                            lql_mutation_action *action,
+                                            lql_error *error) {
+  lql_temporal temporal;
+  char buffer[64];
+  const char *value_begin;
+  size_t value_len;
+
+  mutation_trim(&begin, &end);
+  if (begin == end) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "time mutation value is required");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  value_begin = begin;
+  value_len = (size_t)(end - begin);
+  if (value_len >= 2u && ((begin[0] == '"' && end[-1] == '"') ||
+                          (begin[0] == '\'' && end[-1] == '\''))) {
+    value_begin = begin + 1;
+    value_len -= 2u;
+  }
+  if (mutation_equal_ci(value_begin, value_len, "NOW")) {
+    if (!lql_temporal_now(&temporal)) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "time mutation NOW value is invalid");
+      return LQL_STATUS_PARSE_ERROR;
+    }
+  } else {
+    char *literal;
+    literal = mutation_copy(allocator, value_begin, value_len);
+    if (literal == NULL) {
+      lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+      return LQL_STATUS_NO_MEMORY;
+    }
+    if (!lql_parse_temporal_literal(literal, &temporal)) {
+      allocator->destroy(allocator, literal);
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "time mutation value must be RFC3339");
+      return LQL_STATUS_PARSE_ERROR;
+    }
+    allocator->destroy(allocator, literal);
+  }
+  if (!lql_temporal_format_rfc3339_nano(&temporal, buffer, sizeof(buffer))) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "time mutation value could not be formatted");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  action->value_kind = LQL_MUTATION_VALUE_STRING;
+  action->value = mutation_copy(allocator, buffer, strlen(buffer));
+  if (action->value == NULL) {
+    lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+    return LQL_STATUS_NO_MEMORY;
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status mutation_parse_time_set(lql_allocator *allocator,
+                                          const char *begin, const char *end,
+                                          lql_mutation_action *action,
+                                          lql_error *error) {
+  const char *equal;
+  lql_status status;
+
+  if (mutation_has_prefix(begin, end, "rm:") ||
+      mutation_has_prefix(begin, end, "remove:") ||
+      mutation_has_prefix(begin, end, "delete:") ||
+      mutation_has_prefix(begin, end, "del:")) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "time-prefixed mutation cannot be remove/delete");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  if ((size_t)(end - begin) >= 2u &&
+      ((end[-2] == '+' && end[-1] == '+') ||
+       (end[-2] == '-' && end[-1] == '-'))) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "time-prefixed mutation cannot be increment");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  equal = begin;
+  while (equal < end && *equal != '=') {
+    ++equal;
+  }
+  if (equal == end) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "time-backed mutation requires path=value");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  action->kind = LQL_MUTATION_SET;
+  status = mutation_parse_path(allocator, begin, equal, action, error);
+  if (status != LQL_STATUS_OK) {
+    return status;
+  }
+  status = mutation_parse_time_value(allocator, equal + 1, end, action, error);
+  if (status != LQL_STATUS_OK) {
+    mutation_action_cleanup(allocator, action);
+  }
+  return status;
+}
+
 static lql_status
 mutation_parse_file_set(lql_allocator *allocator, const char *begin,
                         const char *end,
@@ -375,6 +476,8 @@ mutation_parse_file_set(lql_allocator *allocator, const char *begin,
   }
   if (mutation_has_prefix(begin, end, "rm:") ||
       mutation_has_prefix(begin, end, "remove:") ||
+      mutation_has_prefix(begin, end, "delete:") ||
+      mutation_has_prefix(begin, end, "del:") ||
       mutation_has_prefix(begin, end, "time:")) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "file-backed mutation values require path=file");
@@ -451,6 +554,9 @@ static lql_status mutation_parse_one(lql_allocator *allocator, const char *raw,
     return mutation_parse_file_set(allocator, begin + 5u, end, options,
                                    LQL_MUTATION_VALUE_FILE_AUTO, action, error);
   }
+  if (mutation_has_prefix(begin, end, "time:")) {
+    return mutation_parse_time_set(allocator, begin + 5u, end, action, error);
+  }
   if ((size_t)(end - begin) >= 3u && memcmp(begin, "rm:", 3u) == 0) {
     action->kind = LQL_MUTATION_REMOVE;
     return mutation_parse_path(allocator, begin + 3u, end, action, error);
@@ -458,6 +564,14 @@ static lql_status mutation_parse_one(lql_allocator *allocator, const char *raw,
   if ((size_t)(end - begin) >= 7u && memcmp(begin, "remove:", 7u) == 0) {
     action->kind = LQL_MUTATION_REMOVE;
     return mutation_parse_path(allocator, begin + 7u, end, action, error);
+  }
+  if ((size_t)(end - begin) >= 7u && memcmp(begin, "delete:", 7u) == 0) {
+    action->kind = LQL_MUTATION_REMOVE;
+    return mutation_parse_path(allocator, begin + 7u, end, action, error);
+  }
+  if ((size_t)(end - begin) >= 4u && memcmp(begin, "del:", 4u) == 0) {
+    action->kind = LQL_MUTATION_REMOVE;
+    return mutation_parse_path(allocator, begin + 4u, end, action, error);
   }
   if ((size_t)(end - begin) >= 2u && end[-2] == '+' && end[-1] == '+') {
     action->kind = LQL_MUTATION_INCREMENT;
@@ -502,6 +616,177 @@ static lql_status mutation_parse_one(lql_allocator *allocator, const char *raw,
   return status;
 }
 
+static lql_status mutation_append_action(lql_allocator *allocator,
+                                         lql_mutation *mutation,
+                                         size_t *capacity,
+                                         lql_mutation_action *action,
+                                         lql_error *error) {
+  lql_mutation_action *next;
+  size_t next_capacity;
+
+  if (mutation->action_count == *capacity) {
+    next_capacity = *capacity == 0u ? 4u : *capacity * 2u;
+    next = (lql_mutation_action *)allocator->realloc(
+        allocator, mutation->actions, next_capacity * sizeof(*next));
+    if (next == NULL) {
+      lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+      return LQL_STATUS_NO_MEMORY;
+    }
+    memset(next + *capacity, 0,
+           (next_capacity - *capacity) * sizeof(*next));
+    mutation->actions = next;
+    *capacity = next_capacity;
+  }
+  mutation->actions[mutation->action_count++] = *action;
+  memset(action, 0, sizeof(*action));
+  return LQL_STATUS_OK;
+}
+
+static lql_status mutation_prepend_segments(lql_allocator *allocator,
+                                            const lql_mutation_action *prefix,
+                                            lql_mutation_action *action,
+                                            lql_error *error) {
+  char **segments;
+  size_t i;
+  size_t count;
+
+  count = prefix->segment_count + action->segment_count;
+  segments = (char **)allocator->calloc(allocator, count, sizeof(*segments));
+  if (segments == NULL) {
+    lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+    return LQL_STATUS_NO_MEMORY;
+  }
+  for (i = 0u; i < prefix->segment_count; ++i) {
+    segments[i] = mutation_copy(allocator, prefix->segments[i],
+                                strlen(prefix->segments[i]));
+    if (segments[i] == NULL) {
+      while (i > 0u) {
+        --i;
+        allocator->destroy(allocator, segments[i]);
+      }
+      allocator->destroy(allocator, segments);
+      lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+      return LQL_STATUS_NO_MEMORY;
+    }
+  }
+  for (i = 0u; i < action->segment_count; ++i) {
+    segments[prefix->segment_count + i] = action->segments[i];
+  }
+  allocator->destroy(allocator, action->segments);
+  action->segments = segments;
+  action->segment_count = count;
+  return LQL_STATUS_OK;
+}
+
+static int mutation_find_brace(const char *begin, const char *end,
+                               const char **open_brace) {
+  const char *cursor;
+  const char *equal;
+  if (end <= begin || end[-1] != '}') {
+    return 0;
+  }
+  cursor = begin;
+  equal = NULL;
+  while (cursor < end) {
+    if (*cursor == '=') {
+      equal = cursor;
+      break;
+    }
+    if (*cursor == '{') {
+      *open_brace = cursor;
+      return equal == NULL && cursor > begin;
+    }
+    ++cursor;
+  }
+  return 0;
+}
+
+static lql_status mutation_parse_expression(lql_allocator *allocator,
+                                            const char *raw,
+                                            const lql_mutation_parse_options
+                                                *options,
+                                            lql_mutation *mutation,
+                                            size_t *capacity,
+                                            lql_error *error) {
+  const char *begin;
+  const char *end;
+  const char *open_brace;
+  lql_mutation_action action;
+  lql_status status;
+
+  begin = raw;
+  end = raw + strlen(raw);
+  mutation_trim(&begin, &end);
+  if (mutation_find_brace(begin, end, &open_brace)) {
+    lql_mutation_action prefix;
+    const char *part;
+    const char *content_end;
+    memset(&prefix, 0, sizeof(prefix));
+    status = mutation_parse_path(allocator, begin, open_brace, &prefix, error);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+    part = open_brace + 1u;
+    content_end = end - 1u;
+    while (part < content_end) {
+      const char *part_end;
+      const char *scan;
+      int quote;
+      quote = 0;
+      scan = part;
+      while (scan < content_end) {
+        if (quote != 0) {
+          if (*scan == (char)quote) {
+            quote = 0;
+          }
+        } else if (*scan == '"' || *scan == '\'') {
+          quote = (unsigned char)*scan;
+        } else if (*scan == ',' || *scan == '\n') {
+          break;
+        }
+        ++scan;
+      }
+      part_end = scan;
+      mutation_trim(&part, &part_end);
+      if (part < part_end) {
+        char *sub;
+        sub = mutation_copy(allocator, part, (size_t)(part_end - part));
+        if (sub == NULL) {
+          mutation_action_cleanup(allocator, &prefix);
+          lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+          return LQL_STATUS_NO_MEMORY;
+        }
+        memset(&action, 0, sizeof(action));
+        status = mutation_parse_one(allocator, sub, options, &action, error);
+        allocator->destroy(allocator, sub);
+        if (status == LQL_STATUS_OK) {
+          status = mutation_prepend_segments(allocator, &prefix, &action, error);
+        }
+        if (status == LQL_STATUS_OK) {
+          status =
+              mutation_append_action(allocator, mutation, capacity, &action, error);
+        }
+        mutation_action_cleanup(allocator, &action);
+        if (status != LQL_STATUS_OK) {
+          mutation_action_cleanup(allocator, &prefix);
+          return status;
+        }
+      }
+      part = scan < content_end ? scan + 1u : scan;
+    }
+    mutation_action_cleanup(allocator, &prefix);
+    return LQL_STATUS_OK;
+  }
+
+  memset(&action, 0, sizeof(action));
+  status = mutation_parse_one(allocator, raw, options, &action, error);
+  if (status == LQL_STATUS_OK) {
+    status = mutation_append_action(allocator, mutation, capacity, &action, error);
+  }
+  mutation_action_cleanup(allocator, &action);
+  return status;
+}
+
 LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal(
     lql *self, const char *const *expressions, size_t expression_count,
     lql_mutation **out, lql_error *error) {
@@ -515,6 +800,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal_with_options(
     lql_error *error) {
   lql_allocator *allocator;
   lql_mutation *mutation;
+  size_t capacity;
   size_t i;
   lql_status status;
 
@@ -541,22 +827,20 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal_with_options(
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
     return LQL_STATUS_NO_MEMORY;
   }
-  mutation->actions = (lql_mutation_action *)allocator->calloc(
-      allocator, expression_count, sizeof(*mutation->actions));
-  if (mutation->actions == NULL) {
-    allocator->destroy(allocator, mutation);
-    lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
-    return LQL_STATUS_NO_MEMORY;
-  }
+  capacity = 0u;
   for (i = 0u; i < expression_count; ++i) {
-    status =
-        mutation_parse_one(allocator, expressions[i], options,
-                           &mutation->actions[mutation->action_count], error);
+    status = mutation_parse_expression(allocator, expressions[i], options,
+                                       mutation, &capacity, error);
     if (status != LQL_STATUS_OK) {
       lql_mutation_destroy_internal(self, mutation);
       return status;
     }
-    ++mutation->action_count;
+  }
+  if (mutation->action_count == 0u) {
+    lql_mutation_destroy_internal(self, mutation);
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "mutation expressions are required");
+    return LQL_STATUS_PARSE_ERROR;
   }
   *out = mutation;
   return LQL_STATUS_OK;

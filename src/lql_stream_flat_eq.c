@@ -1529,6 +1529,408 @@ static lql_status lql_flat_eq_mutation_increment(
   return lql_flat_eq_mutation_number(state, next, error);
 }
 
+static lql_status lql_flat_eq_mutation_set_existing_key(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t key_depth, lql_error *error) {
+  size_t pos;
+  int first;
+  unsigned char ch;
+  lql_status status;
+  if (key_depth >= action->segment_count)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  if (ch != (unsigned char)'{') {
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
+  }
+  status = lql_flat_eq_write(state, "{", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  pos = value_start + 1u;
+  first = 1;
+  status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  while (pos + 1u < value_end && ch != (unsigned char)'}') {
+    size_t key_start;
+    size_t key_end;
+    size_t child_value_end;
+    int same_key;
+    key_start = pos;
+    status = lql_flat_eq_key_equals(spool, key_start, value_end,
+                                    action->segments[key_depth], &same_key,
+                                    error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    key_end = pos;
+    status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    status = lql_flat_eq_spool_byte(spool, key_end, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch != (unsigned char)':')
+      return LQL_STATUS_JSON_ERROR;
+    child_value_end = key_end + 1u;
+    status = lql_flat_eq_skip_value(spool, &child_value_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (!first &&
+        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+      return status;
+    status =
+        lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
+                                   state->writer, state->writer_user, error);
+    if (status == LQL_STATUS_OK) {
+      if (same_key) {
+        status = lql_flat_eq_mutation_value(state, action, error);
+      } else {
+        status = lql_json_spool_write_slice(
+            spool, key_end + 1u, child_value_end - key_end - 1u, state->writer,
+            state->writer_user, error);
+      }
+    }
+    if (status != LQL_STATUS_OK)
+      return status;
+    first = 0;
+    pos = child_value_end;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch == (unsigned char)',') {
+      ++pos;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
+  }
+  return lql_flat_eq_write(state, "}", 1u, error);
+}
+
+static lql_status lql_flat_eq_mutation_set_recursive_key(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t key_depth, lql_error *error) {
+  size_t pos;
+  int first;
+  unsigned char ch;
+  lql_status status;
+  status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  if (ch == (unsigned char)'[') {
+    status = lql_flat_eq_write(state, "[", 1u, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    pos = value_start + 1u;
+    first = 1;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    while (pos + 1u < value_end && ch != (unsigned char)']') {
+      size_t element_start;
+      size_t element_end;
+      element_start = pos;
+      element_end = pos;
+      status = lql_flat_eq_skip_value(spool, &element_end, value_end, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (!first &&
+          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+        return status;
+      status = lql_flat_eq_mutation_set_recursive_key(
+          state, action, spool, element_start, element_end, key_depth, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      first = 0;
+      pos = element_end;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch == (unsigned char)',') {
+        ++pos;
+        status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+      }
+    }
+    return lql_flat_eq_write(state, "]", 1u, error);
+  }
+  if (ch != (unsigned char)'{') {
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
+  }
+  status = lql_flat_eq_write(state, "{", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  pos = value_start + 1u;
+  first = 1;
+  status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  while (pos + 1u < value_end && ch != (unsigned char)'}') {
+    size_t key_start;
+    size_t key_end;
+    size_t child_value_end;
+    int same_key;
+    key_start = pos;
+    status = lql_flat_eq_key_equals(spool, key_start, value_end,
+                                    action->segments[key_depth], &same_key,
+                                    error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    key_end = pos;
+    status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    status = lql_flat_eq_spool_byte(spool, key_end, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch != (unsigned char)':')
+      return LQL_STATUS_JSON_ERROR;
+    child_value_end = key_end + 1u;
+    status = lql_flat_eq_skip_value(spool, &child_value_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (!first &&
+        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+      return status;
+    status =
+        lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
+                                   state->writer, state->writer_user, error);
+    if (status == LQL_STATUS_OK) {
+      if (same_key) {
+        status = lql_flat_eq_mutation_value(state, action, error);
+      } else {
+        status = lql_flat_eq_mutation_set_recursive_key(
+            state, action, spool, key_end + 1u, child_value_end, key_depth,
+            error);
+      }
+    }
+    if (status != LQL_STATUS_OK)
+      return status;
+    first = 0;
+    pos = child_value_end;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch == (unsigned char)',') {
+      ++pos;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
+  }
+  return lql_flat_eq_write(state, "}", 1u, error);
+}
+
+static lql_status lql_flat_eq_mutation_increment_existing_key(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t key_depth, lql_error *error) {
+  size_t pos;
+  int first;
+  unsigned char ch;
+  lql_status status;
+  if (key_depth >= action->segment_count)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  if (ch != (unsigned char)'{') {
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
+  }
+  status = lql_flat_eq_write(state, "{", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  pos = value_start + 1u;
+  first = 1;
+  status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  while (pos + 1u < value_end && ch != (unsigned char)'}') {
+    size_t key_start;
+    size_t key_end;
+    size_t child_value_end;
+    int same_key;
+    key_start = pos;
+    status = lql_flat_eq_key_equals(spool, key_start, value_end,
+                                    action->segments[key_depth], &same_key,
+                                    error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    key_end = pos;
+    status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    status = lql_flat_eq_spool_byte(spool, key_end, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch != (unsigned char)':')
+      return LQL_STATUS_JSON_ERROR;
+    child_value_end = key_end + 1u;
+    status = lql_flat_eq_skip_value(spool, &child_value_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (!first &&
+        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+      return status;
+    status =
+        lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
+                                   state->writer, state->writer_user, error);
+    if (status == LQL_STATUS_OK) {
+      if (same_key) {
+        status = lql_flat_eq_mutation_increment(
+            state, action, spool, key_end + 1u, child_value_end, 1, error);
+      } else {
+        status = lql_json_spool_write_slice(
+            spool, key_end + 1u, child_value_end - key_end - 1u, state->writer,
+            state->writer_user, error);
+      }
+    }
+    if (status != LQL_STATUS_OK)
+      return status;
+    first = 0;
+    pos = child_value_end;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch == (unsigned char)',') {
+      ++pos;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
+  }
+  return lql_flat_eq_write(state, "}", 1u, error);
+}
+
+static lql_status lql_flat_eq_mutation_increment_recursive_key(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t key_depth, lql_error *error) {
+  size_t pos;
+  int first;
+  unsigned char ch;
+  lql_status status;
+  status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  if (ch == (unsigned char)'[') {
+    status = lql_flat_eq_write(state, "[", 1u, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    pos = value_start + 1u;
+    first = 1;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    while (pos + 1u < value_end && ch != (unsigned char)']') {
+      size_t element_start;
+      size_t element_end;
+      element_start = pos;
+      element_end = pos;
+      status = lql_flat_eq_skip_value(spool, &element_end, value_end, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (!first &&
+          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+        return status;
+      status = lql_flat_eq_mutation_increment_recursive_key(
+          state, action, spool, element_start, element_end, key_depth, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      first = 0;
+      pos = element_end;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch == (unsigned char)',') {
+        ++pos;
+        status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+      }
+    }
+    return lql_flat_eq_write(state, "]", 1u, error);
+  }
+  if (ch != (unsigned char)'{') {
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
+  }
+  status = lql_flat_eq_write(state, "{", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  pos = value_start + 1u;
+  first = 1;
+  status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  while (pos + 1u < value_end && ch != (unsigned char)'}') {
+    size_t key_start;
+    size_t key_end;
+    size_t child_value_end;
+    int same_key;
+    key_start = pos;
+    status = lql_flat_eq_key_equals(spool, key_start, value_end,
+                                    action->segments[key_depth], &same_key,
+                                    error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    key_end = pos;
+    status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    status = lql_flat_eq_spool_byte(spool, key_end, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch != (unsigned char)':')
+      return LQL_STATUS_JSON_ERROR;
+    child_value_end = key_end + 1u;
+    status = lql_flat_eq_skip_value(spool, &child_value_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (!first &&
+        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+      return status;
+    status =
+        lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
+                                   state->writer, state->writer_user, error);
+    if (status == LQL_STATUS_OK) {
+      if (same_key) {
+        status = lql_flat_eq_mutation_increment(
+            state, action, spool, key_end + 1u, child_value_end, 1, error);
+      } else {
+        status = lql_flat_eq_mutation_increment_recursive_key(
+            state, action, spool, key_end + 1u, child_value_end, key_depth,
+            error);
+      }
+    }
+    if (status != LQL_STATUS_OK)
+      return status;
+    first = 0;
+    pos = child_value_end;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch == (unsigned char)',') {
+      ++pos;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
+  }
+  return lql_flat_eq_write(state, "}", 1u, error);
+}
+
 static lql_status lql_flat_eq_mutation_nested_set(
     lql_flat_eq_state *state, const lql_mutation_action *action,
     const lql_json_spool *spool, size_t value_start, size_t value_end,
@@ -1545,8 +1947,126 @@ static lql_status lql_flat_eq_mutation_nested_set(
   status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
   if (status != LQL_STATUS_OK)
     return status;
+  if (strcmp(action->segments[depth], "...") == 0 &&
+      depth + 1u < action->segment_count) {
+    return lql_flat_eq_mutation_set_recursive_key(
+        state, action, spool, value_start, value_end, depth + 1u, error);
+  }
+  if (ch == (unsigned char)'[' &&
+      (strcmp(action->segments[depth], "[]") == 0 ||
+       strcmp(action->segments[depth], "**") == 0)) {
+    size_t pos;
+    int first;
+    status = lql_flat_eq_write(state, "[", 1u, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    pos = value_start + 1u;
+    first = 1;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    while (pos + 1u < value_end && ch != (unsigned char)']') {
+      size_t element_start;
+      size_t element_end;
+      element_start = pos;
+      element_end = pos;
+      status = lql_flat_eq_skip_value(spool, &element_end, value_end, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (!first &&
+          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+        return status;
+      if (depth + 1u == action->segment_count) {
+        status = lql_flat_eq_mutation_value(state, action, error);
+      } else if (depth + 2u == action->segment_count) {
+        status = lql_flat_eq_mutation_set_existing_key(
+            state, action, spool, element_start, element_end, depth + 1u, error);
+      } else {
+        status = lql_json_spool_write_slice(
+            spool, element_start, element_end - element_start, state->writer,
+            state->writer_user, error);
+      }
+      if (status != LQL_STATUS_OK)
+        return status;
+      first = 0;
+      pos = element_end;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch == (unsigned char)',') {
+        ++pos;
+        status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+      }
+    }
+    return lql_flat_eq_write(state, "]", 1u, error);
+  }
   if (ch != (unsigned char)'{')
     return lql_flat_eq_mutation_object_chain(state, action, depth, error);
+  if (strcmp(action->segments[depth], "*") == 0 ||
+      strcmp(action->segments[depth], "**") == 0) {
+    status = lql_flat_eq_write(state, "{", 1u, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    pos = value_start + 1u;
+    first = 1;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    while (pos + 1u < value_end && ch != (unsigned char)'}') {
+      size_t key_start;
+      size_t key_end;
+      size_t child_value_end;
+      key_start = pos;
+      key_end = pos;
+      status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      status = lql_flat_eq_spool_byte(spool, key_end, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch != (unsigned char)':')
+        return LQL_STATUS_JSON_ERROR;
+      child_value_end = key_end + 1u;
+      status = lql_flat_eq_skip_value(spool, &child_value_end, value_end, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (!first &&
+          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+        return status;
+      status =
+          lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
+                                     state->writer, state->writer_user, error);
+      if (status == LQL_STATUS_OK) {
+        if (depth + 1u == action->segment_count) {
+          status = lql_flat_eq_mutation_value(state, action, error);
+        } else if (depth + 2u == action->segment_count) {
+          status = lql_flat_eq_mutation_set_existing_key(
+              state, action, spool, key_end + 1u, child_value_end, depth + 1u,
+              error);
+        } else {
+          status = lql_json_spool_write_slice(
+              spool, key_end + 1u, child_value_end - key_end - 1u,
+              state->writer, state->writer_user, error);
+        }
+      }
+      if (status != LQL_STATUS_OK)
+        return status;
+      first = 0;
+      pos = child_value_end;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch == (unsigned char)',') {
+        ++pos;
+        status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+      }
+    }
+    return lql_flat_eq_write(state, "}", 1u, error);
+  }
   status = lql_flat_eq_write(state, "{", 1u, error);
   if (status != LQL_STATUS_OK)
     return status;
@@ -1647,10 +2167,14 @@ static lql_status lql_flat_eq_mutation_nested_remove_array(
   size_t index;
   size_t pos;
   int first;
+  int all_indexes;
   unsigned char ch;
   lql_status status;
-  if (!lql_flat_eq_projection_segment_index(action->segments[depth],
-                                            &target_index)) {
+  all_indexes = strcmp(action->segments[depth], "[]") == 0 ||
+                strcmp(action->segments[depth], "**") == 0;
+  target_index = 0u;
+  if (!all_indexes && !lql_flat_eq_projection_segment_index(
+                          action->segments[depth], &target_index)) {
     return lql_json_spool_write_slice(spool, value_start,
                                       value_end - value_start, state->writer,
                                       state->writer_user, error);
@@ -1674,7 +2198,7 @@ static lql_status lql_flat_eq_mutation_nested_remove_array(
     if (status != LQL_STATUS_OK)
       return status;
     wrote_element = 0;
-    if (index != target_index) {
+    if (!all_indexes && index != target_index) {
       if (!first &&
           (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
         return status;
@@ -1803,6 +2327,11 @@ static lql_status lql_flat_eq_mutation_nested_remove(
   return lql_flat_eq_write(state, "}", 1u, error);
 }
 
+static lql_status lql_flat_eq_mutation_nested_increment_array(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t depth, lql_error *error);
+
 static lql_status lql_flat_eq_mutation_nested_increment(
     lql_flat_eq_state *state, const lql_mutation_action *action,
     const lql_json_spool *spool, size_t value_start, size_t value_end,
@@ -1820,13 +2349,85 @@ static lql_status lql_flat_eq_mutation_nested_increment(
   if (status != LQL_STATUS_OK)
     return status;
   /*
-   * Go lql materializes missing nested increment parents and replaces
-   * non-object intermediates with an object chain. Array intermediates are not
-   * traversed for increments; remove is the mutation kind that descends into
-   * array indexes.
+   * Go lql materializes missing nested increment parents for ordinary path
+   * segments, but wildcard segments only visit existing containers. Keep that
+   * split explicit so missing wildcard targets stay no-op instead of creating
+   * literal "*" or "[]" object keys.
    */
+  if (strcmp(action->segments[depth], "...") == 0 &&
+      depth + 1u < action->segment_count) {
+    return lql_flat_eq_mutation_increment_recursive_key(
+        state, action, spool, value_start, value_end, depth + 1u, error);
+  }
+  if (ch == (unsigned char)'[')
+    return lql_flat_eq_mutation_nested_increment_array(
+        state, action, spool, value_start, value_end, depth, error);
   if (ch != (unsigned char)'{')
     return lql_flat_eq_mutation_object_chain(state, action, depth, error);
+  if (strcmp(action->segments[depth], "*") == 0 ||
+      strcmp(action->segments[depth], "**") == 0) {
+    status = lql_flat_eq_write(state, "{", 1u, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    pos = value_start + 1u;
+    first = 1;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    while (pos + 1u < value_end && ch != (unsigned char)'}') {
+      size_t key_start;
+      size_t key_end;
+      size_t child_value_end;
+      key_start = pos;
+      key_end = pos;
+      status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      status = lql_flat_eq_spool_byte(spool, key_end, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch != (unsigned char)':')
+        return LQL_STATUS_JSON_ERROR;
+      child_value_end = key_end + 1u;
+      status = lql_flat_eq_skip_value(spool, &child_value_end, value_end, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (!first &&
+          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+        return status;
+      status =
+          lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
+                                     state->writer, state->writer_user, error);
+      if (status == LQL_STATUS_OK) {
+        if (depth + 1u == action->segment_count) {
+          status = lql_flat_eq_mutation_increment(
+              state, action, spool, key_end + 1u, child_value_end, 1, error);
+        } else if (depth + 2u == action->segment_count) {
+          status = lql_flat_eq_mutation_increment_existing_key(
+              state, action, spool, key_end + 1u, child_value_end, depth + 1u,
+              error);
+        } else {
+          status = lql_json_spool_write_slice(
+              spool, key_end + 1u, child_value_end - key_end - 1u,
+              state->writer, state->writer_user, error);
+        }
+      }
+      if (status != LQL_STATUS_OK)
+        return status;
+      first = 0;
+      pos = child_value_end;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch == (unsigned char)',') {
+        ++pos;
+        status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+      }
+    }
+    return lql_flat_eq_write(state, "}", 1u, error);
+  }
   status = lql_flat_eq_write(state, "{", 1u, error);
   if (status != LQL_STATUS_OK)
     return status;
@@ -1916,6 +2517,60 @@ static lql_status lql_flat_eq_mutation_nested_increment(
   return lql_flat_eq_write(state, "}", 1u, error);
 }
 
+static lql_status lql_flat_eq_mutation_nested_increment_array(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t depth, lql_error *error) {
+  size_t pos;
+  int first;
+  unsigned char ch;
+  lql_status status;
+  if (strcmp(action->segments[depth], "[]") != 0 &&
+      strcmp(action->segments[depth], "**") != 0)
+    return lql_flat_eq_mutation_object_chain(state, action, depth, error);
+  status = lql_flat_eq_write(state, "[", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  pos = value_start + 1u;
+  first = 1;
+  status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  while (pos + 1u < value_end && ch != (unsigned char)']') {
+    size_t element_start;
+    size_t element_end;
+    element_start = pos;
+    element_end = pos;
+    status = lql_flat_eq_skip_value(spool, &element_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (!first &&
+        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+      return status;
+    if (depth + 1u == action->segment_count) {
+      status = lql_flat_eq_mutation_increment(
+          state, action, spool, element_start, element_end, 1, error);
+    } else {
+      status = lql_flat_eq_mutation_nested_increment(
+          state, action, spool, element_start, element_end, depth + 1u, error);
+    }
+    if (status != LQL_STATUS_OK)
+      return status;
+    first = 0;
+    pos = element_end;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch == (unsigned char)',') {
+      ++pos;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
+  }
+  return lql_flat_eq_write(state, "]", 1u, error);
+}
+
 static lql_status
 lql_flat_eq_mutation_key_value(lql_flat_eq_state *state,
                                const lql_mutation_action *action,
@@ -1935,6 +2590,9 @@ lql_flat_eq_mutation_key_value(lql_flat_eq_state *state,
                                           error);
   return lql_flat_eq_mutation_value(state, action, error);
 }
+
+static int
+lql_flat_eq_mutation_nonrecursive_wildcard(const lql_mutation_action *action);
 
 static lql_status lql_flat_eq_mutation_find_action(
     const lql_flat_eq_program *program, const lql_json_spool *spool,
@@ -1978,6 +2636,19 @@ static int lql_flat_eq_mutation_groupable(const lql_mutation_action *action) {
   return action->segment_count > 1u && (action->kind == LQL_MUTATION_SET ||
                                         action->kind == LQL_MUTATION_REMOVE ||
                                         action->kind == LQL_MUTATION_INCREMENT);
+}
+
+static int
+lql_flat_eq_mutation_nonrecursive_wildcard(const lql_mutation_action *action) {
+  size_t i;
+  if (action == NULL)
+    return 0;
+  for (i = 0u; i < action->segment_count; ++i) {
+    if (strcmp(action->segments[i], "*") == 0 ||
+        strcmp(action->segments[i], "[]") == 0)
+      return 1;
+  }
+  return 0;
 }
 
 static int lql_flat_eq_mutation_same_top(const lql_mutation_action *left,
@@ -2638,7 +3309,8 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
       size_t group_count;
       action = state->program->direct_mutation_actions[i];
       group_count = lql_flat_eq_mutation_group_count(state->program, action);
-      if ((found & (1ul << i)) != 0ul ||
+      if (lql_flat_eq_mutation_nonrecursive_wildcard(action) ||
+          (found & (1ul << i)) != 0ul ||
           (group_count <= 1u && action->kind == LQL_MUTATION_REMOVE) ||
           (group_count > 1u &&
            lql_flat_eq_mutation_group_seen(state->program, action, i)) ||

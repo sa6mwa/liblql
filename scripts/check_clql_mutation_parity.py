@@ -128,6 +128,68 @@ def main():
             compact({"arr": [{"x": 1}, {"x": 2}]}),
             ["/arr/0/x=+1"],
         ),
+        ("delete alias", compact({"a": 1, "b": 2}), ["delete:/a"]),
+        ("del alias", compact({"a": 1, "b": 2}), ["del:/a"]),
+        (
+            "time literal mutation",
+            compact({}),
+            ["time:/timestamp=2025-01-01T00:00:00+02:00"],
+        ),
+        (
+            "brace shorthand mutation",
+            compact({}),
+            ["/tags{/kind=document,/source=local}"],
+        ),
+        (
+            "array wildcard set",
+            compact({"items": [{"sku": "a"}, {"sku": "b"}]}),
+            ["/items/[]/seen=true"],
+        ),
+        (
+            "array wildcard increment",
+            compact({"items": [{"n": 1}, {"n": 2}]}),
+            ["/items/[]/n=+1"],
+        ),
+        (
+            "array recursive wildcard increment",
+            compact({"items": [{"n": 1}, {"n": 2}]}),
+            ["/items/**/n=+1"],
+        ),
+        (
+            "object wildcard set",
+            compact({"labels": {"a": {"x": 1}, "b": {"x": 2}}}),
+            ["/labels/*/seen=true"],
+        ),
+        (
+            "object wildcard increment",
+            compact({"labels": {"a": {"n": 1}, "b": {"n": 2}}}),
+            ["/labels/*/n=+1"],
+        ),
+        (
+            "object recursive wildcard increment",
+            compact({"labels": {"a": {"n": 1}, "b": {"n": 2}}}),
+            ["/labels/**/n=+1"],
+        ),
+        (
+            "recursive wildcard set",
+            compact({"items": [{"parts": [{"sku": "a"}]}]}),
+            ["/items/**/sku=patched"],
+        ),
+        (
+            "ellipsis recursive wildcard set",
+            compact({"items": [{"parts": [{"sku": "a"}], "sku": "top"}]}),
+            ["/items/.../sku=patched"],
+        ),
+        (
+            "ellipsis recursive wildcard increment",
+            compact({"items": [{"parts": [{"n": 1}], "n": 2}]}),
+            ["/items/.../n=+1"],
+        ),
+        (
+            "wildcard remove",
+            compact({"items": [{"x": 1, "y": 2}, {"x": 3}]}),
+            ["rm:/items/[]/x"],
+        ),
     ]
     for name, input_text, mutations in explicit_cases:
         assert_case(name, input_text, mutations)
@@ -150,12 +212,16 @@ def main():
         "/a=+1",
         "/a++",
         "rm:/a",
+        "delete:/a",
+        "del:/a",
         "/a/b=3",
         "/a/b=+1",
         "rm:/a/b",
         "/a/b/c=z",
         "rm:/arr/0/x",
         "/arr/0/x=+1",
+        "/arr/[]/x=3",
+        "rm:/arr/[]/x",
     ]
     sequences = [
         ["/a=2", "/a=+1"],
@@ -171,6 +237,7 @@ def main():
         ["/a/b=3", "/a/b=+1", "rm:/a/b"],
         ["/arr/0/x=+1", "rm:/arr/0/x"],
         ["rm:/arr/0/x", "/arr/0/y=3"],
+        ["/arr/[]/x=+1", "rm:/arr/[]/x"],
     ]
     count = 0
     for obj in objects:
