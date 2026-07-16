@@ -1,6 +1,7 @@
 #include "lql_internal.h"
 
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,6 +37,49 @@ static int lql_number_pow10(int exponent, long double *out) {
   return 1;
 }
 
+static int lql_number_parse_integer(const char *text, size_t len, double *out) {
+  unsigned long value;
+  unsigned long limit;
+  size_t pos;
+  int negative;
+
+  if (text == NULL || len == 0u || out == NULL) {
+    return 0;
+  }
+  pos = 0u;
+  negative = 0;
+  if (text[pos] == '-') {
+    negative = 1;
+    ++pos;
+    if (pos == len) {
+      return 0;
+    }
+  }
+  if (text[pos] == '0' && pos + 1u != len) {
+    return 0;
+  }
+  value = 0ul;
+  limit = negative ? (unsigned long)LONG_MAX + 1ul : (unsigned long)LONG_MAX;
+  for (; pos < len; ++pos) {
+    unsigned long digit;
+    if (text[pos] < '0' || text[pos] > '9') {
+      return 0;
+    }
+    digit = (unsigned long)(text[pos] - '0');
+    if (value > (limit - digit) / 10ul) {
+      return 0;
+    }
+    value = value * 10ul + digit;
+  }
+  if (negative) {
+    *out = value == (unsigned long)LONG_MAX + 1ul ? (double)LONG_MIN
+                                                  : -(double)value;
+  } else {
+    *out = (double)value;
+  }
+  return 1;
+}
+
 LQL_INTERNAL_SYMBOL int lql_number_parse_json(const char *text, size_t len,
                                               double *out) {
   size_t pos;
@@ -49,6 +93,9 @@ LQL_INTERNAL_SYMBOL int lql_number_parse_json(const char *text, size_t len,
 
   if (text == NULL || len == 0u || out == NULL) {
     return 0;
+  }
+  if (lql_number_parse_integer(text, len, out)) {
+    return 1;
   }
   pos = 0u;
   negative = 0;

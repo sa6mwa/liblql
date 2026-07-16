@@ -1,3 +1,7 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
+
 #include "lql_internal.h"
 #include "lql_json_scan.h"
 #include "lql_unicode_lower.h"
@@ -8,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define LQL_FLAT_EQ_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
 #define LQL_FLAT_CONTAINS_NEEDLE_MAX 256u
@@ -1106,76 +1111,91 @@ lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
                                     lql_error *error) {
   static const char table[] =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  unsigned char buffer[4096];
+  unsigned char buffer[12288];
   unsigned char carry[3];
+  char outbuf[16384];
   FILE *file;
-  size_t amount;
+  ssize_t amount;
   size_t i;
   size_t carry_len;
+  size_t out_len;
+  int fd;
   lql_status status;
 
   status = lql_flat_eq_file_open(action, &file, error);
   if (status != LQL_STATUS_OK)
     return status;
+  fd = fileno(file);
+  if (fd < 0 || lseek(fd, 0, SEEK_SET) < 0) {
+    lql_set_error(error, LQL_STATUS_IO_ERROR,
+                  "unable to rewind file-backed mutation value");
+    return LQL_STATUS_IO_ERROR;
+  }
   status = lql_flat_eq_write(state, "\"", 1u, error);
   if (status != LQL_STATUS_OK)
     return status;
   carry_len = 0u;
-  while ((amount = fread(buffer, 1u, sizeof(buffer), file)) != 0u) {
+  out_len = 0u;
+  while ((amount = read(fd, buffer, sizeof(buffer))) > 0) {
     i = 0u;
     if (carry_len != 0u) {
-      while (carry_len < 3u && i < amount) {
+      while (carry_len < 3u && i < (size_t)amount) {
         carry[carry_len++] = buffer[i++];
       }
       if (carry_len == 3u) {
-        char out[4];
         unsigned long triple;
         triple = ((unsigned long)carry[0] << 16) |
                  ((unsigned long)carry[1] << 8) | carry[2];
-        out[0] = table[(triple >> 18) & 0x3ful];
-        out[1] = table[(triple >> 12) & 0x3ful];
-        out[2] = table[(triple >> 6) & 0x3ful];
-        out[3] = table[triple & 0x3ful];
-        status = lql_flat_eq_write(state, out, sizeof(out), error);
-        if (status != LQL_STATUS_OK)
-          return status;
+        outbuf[out_len++] = table[(triple >> 18) & 0x3ful];
+        outbuf[out_len++] = table[(triple >> 12) & 0x3ful];
+        outbuf[out_len++] = table[(triple >> 6) & 0x3ful];
+        outbuf[out_len++] = table[triple & 0x3ful];
         carry_len = 0u;
       }
     }
-    while (i + 3u <= amount) {
-      char out[4];
+    while (i + 3u <= (size_t)amount) {
       unsigned long triple;
       triple = ((unsigned long)buffer[i] << 16) |
                ((unsigned long)buffer[i + 1u] << 8) | buffer[i + 2u];
-      out[0] = table[(triple >> 18) & 0x3ful];
-      out[1] = table[(triple >> 12) & 0x3ful];
-      out[2] = table[(triple >> 6) & 0x3ful];
-      out[3] = table[triple & 0x3ful];
-      status = lql_flat_eq_write(state, out, sizeof(out), error);
-      if (status != LQL_STATUS_OK)
-        return status;
+      outbuf[out_len++] = table[(triple >> 18) & 0x3ful];
+      outbuf[out_len++] = table[(triple >> 12) & 0x3ful];
+      outbuf[out_len++] = table[(triple >> 6) & 0x3ful];
+      outbuf[out_len++] = table[triple & 0x3ful];
       i += 3u;
     }
-    while (i < amount) {
+    if (out_len != 0u) {
+      status = lql_flat_eq_write(state, outbuf, out_len, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      out_len = 0u;
+    }
+    while (i < (size_t)amount) {
       carry[carry_len++] = buffer[i++];
     }
   }
-  if (ferror(file)) {
+  if (amount < 0) {
     lql_set_error(error, LQL_STATUS_IO_ERROR,
                   "unable to read file-backed mutation value");
     return LQL_STATUS_IO_ERROR;
   }
   if (carry_len != 0u) {
-    char out[4];
     unsigned long triple;
+    if (out_len + 4u > sizeof(outbuf)) {
+      status = lql_flat_eq_write(state, outbuf, out_len, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      out_len = 0u;
+    }
     triple = (unsigned long)carry[0] << 16;
     if (carry_len == 2u)
       triple |= (unsigned long)carry[1] << 8;
-    out[0] = table[(triple >> 18) & 0x3ful];
-    out[1] = table[(triple >> 12) & 0x3ful];
-    out[2] = carry_len == 2u ? table[(triple >> 6) & 0x3ful] : '=';
-    out[3] = '=';
-    status = lql_flat_eq_write(state, out, sizeof(out), error);
+    outbuf[out_len++] = table[(triple >> 18) & 0x3ful];
+    outbuf[out_len++] = table[(triple >> 12) & 0x3ful];
+    outbuf[out_len++] = carry_len == 2u ? table[(triple >> 6) & 0x3ful] : '=';
+    outbuf[out_len++] = '=';
+  }
+  if (out_len != 0u) {
+    status = lql_flat_eq_write(state, outbuf, out_len, error);
     if (status != LQL_STATUS_OK)
       return status;
   }
