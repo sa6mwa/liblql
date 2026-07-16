@@ -110,6 +110,11 @@ compare_go_lql 'textfile mutation values' \
   -c -F -M -m "textfile:/payload=$tmpdir/blob.txt" \
   '/id="a"' "$tmpdir/input.ndjson"
 
+printf '日本語 😀 こんにちは' >"$tmpdir/blob-utf8.txt"
+compare_go_lql 'UTF-8 textfile mutation values' \
+  -c -F -M -m "textfile:/payload=$tmpdir/blob-utf8.txt" \
+  '/id="a"' "$tmpdir/input.ndjson"
+
 printf '\000\001\002\003hello\377' >"$tmpdir/blob.bin"
 compare_go_lql 'base64file mutation values' \
   -c -F -M -m "base64file:/payload=$tmpdir/blob.bin" \

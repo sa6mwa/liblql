@@ -3526,9 +3526,11 @@ static int run_file_backed_mutation_case(lql *ctx, const char *expr,
 
 static int run_file_backed_mutations(lql *ctx) {
   static const char text_path[] = "liblql-file-value-text.tmp";
+  static const char utf8_path[] = "liblql-file-value-utf8.tmp";
   static const char binary_path[] = "liblql-file-value-binary.tmp";
   static const char invalid_path[] = "liblql-file-value-invalid.tmp";
   static const unsigned char text_payload[] = "hello world";
+  static const unsigned char utf8_payload[] = "日本語 😀 こんにちは";
   static const unsigned char binary_payload[] = {0x00u, 0x01u, 0x02u};
   static const unsigned char invalid_payload[] = {0xc0u, 0xafu};
   static const char *const disabled_expr[] = {"file:/payload=payload.txt"};
@@ -3537,9 +3539,11 @@ static int run_file_backed_mutations(lql *ctx) {
   lql_error error;
 
   remove(text_path);
+  remove(utf8_path);
   remove(binary_path);
   remove(invalid_path);
   if (write_test_file(text_path, text_payload, sizeof(text_payload) - 1u) ||
+      write_test_file(utf8_path, utf8_payload, sizeof(utf8_payload) - 1u) ||
       write_test_file(binary_path, binary_payload, sizeof(binary_payload)) ||
       write_test_file(invalid_path, invalid_payload, sizeof(invalid_payload)))
     return 1;
@@ -3551,6 +3555,7 @@ static int run_file_backed_mutations(lql *ctx) {
                                        &mutation,
                                        &error) != LQL_STATUS_PARSE_ERROR) {
     remove(text_path);
+    remove(utf8_path);
     remove(binary_path);
     remove(invalid_path);
     ctx->mutation_destroy(ctx, mutation);
@@ -3559,6 +3564,9 @@ static int run_file_backed_mutations(lql *ctx) {
   if (run_file_backed_mutation_case(
           ctx, "textfile:/payload=liblql-file-value-text.tmp", LQL_STATUS_OK,
           "{\"payload\":\"hello world\"}\n") ||
+      run_file_backed_mutation_case(
+          ctx, "textfile:/payload=liblql-file-value-utf8.tmp", LQL_STATUS_OK,
+          "{\"payload\":\"日本語 😀 こんにちは\"}\n") ||
       run_file_backed_mutation_case(
           ctx, "base64file:/payload=liblql-file-value-binary.tmp",
           LQL_STATUS_OK, "{\"payload\":\"AAEC\"}\n") ||
@@ -3569,12 +3577,14 @@ static int run_file_backed_mutations(lql *ctx) {
           ctx, "textfile:/payload=liblql-file-value-invalid.tmp",
           LQL_STATUS_JSON_ERROR, NULL)) {
     remove(text_path);
+    remove(utf8_path);
     remove(binary_path);
     remove(invalid_path);
     return 1;
   }
 
   remove(text_path);
+  remove(utf8_path);
   remove(binary_path);
   remove(invalid_path);
   return 0;
