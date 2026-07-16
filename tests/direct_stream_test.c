@@ -1646,6 +1646,12 @@ static int run_mutation_output(lql *ctx) {
       "{\"status\":\"open\",\"meta\":{\"count\":5}}\n";
   static const char nested_increment_missing_input[] =
       "{\"status\":\"open\",\"meta\":{}}\n";
+  static const char nested_increment_missing_output[] =
+      "{\"status\":\"open\",\"meta\":{\"count\":1}}\n";
+  static const char nested_increment_scalar_input[] =
+      "{\"status\":\"open\",\"meta\":null}\n";
+  static const char nested_increment_scalar_output[] =
+      "{\"status\":\"open\",\"meta\":{\"count\":1}}\n";
   static const char *const direct_set[] = {"/bench/touched=true"};
   static const char direct_set_output[] =
       "{\"status\":\"open\",\"n\":1,\"bench\":{\"touched\":true}}\n";
@@ -1674,6 +1680,17 @@ static int run_mutation_output(lql *ctx) {
       "{\"status\":\"open\",\"bench\":1}\n";
   static const char nested_remove_scalar_output[] =
       "{\"status\":\"open\",\"bench\":1}\n";
+  static const char *const nested_array_remove[] = {"rm:/bench/0/touched"};
+  static const char nested_array_remove_input[] =
+      "{\"status\":\"open\",\"bench\":[{\"touched\":true,\"old\":1},"
+      "{\"touched\":true}]}\n";
+  static const char nested_array_remove_output[] =
+      "{\"status\":\"open\",\"bench\":[{\"old\":1},{\"touched\":true}]}\n";
+  static const char *const nested_array_increment[] = {"/bench/0/touched=+1"};
+  static const char nested_array_increment_input[] =
+      "{\"status\":\"open\",\"bench\":[{\"touched\":1}]}\n";
+  static const char nested_array_increment_output[] =
+      "{\"status\":\"open\",\"bench\":{\"0\":{\"touched\":1}}}\n";
   static const char *const deep_set[] = {"/voucher/lines/10/bench=true"};
   static const char deep_set_input[] =
       "{\"status\":\"open\",\"voucher\":{\"lines\":{\"10\":{\"old\":1}}}}\n";
@@ -1746,6 +1763,8 @@ static int run_mutation_output(lql *ctx) {
       "{\"status\":\"open\",\"meta\":{\"count\":3,\"state\":\"done\"}}\n";
   static const char same_top_increment_missing_input[] =
       "{\"status\":\"open\",\"meta\":{}}\n";
+  static const char same_top_increment_missing_output[] =
+      "{\"status\":\"open\",\"meta\":{\"count\":1,\"state\":\"done\"}}\n";
   static const char *const same_top_create_increment[] = {
       "/meta/count=2", "/meta/count=+1", "/meta/state=done"};
   static const char same_top_create_increment_input[] =
@@ -1931,13 +1950,28 @@ static int run_mutation_output(lql *ctx) {
   reader.chunk_size = 2u;
   memset(&writer, 0, sizeof(writer));
   request.reader_user = &reader;
-  if (lql_stream_execute(ctx, &request, &result, &error) !=
-      LQL_STATUS_JSON_ERROR) {
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(nested_increment_missing_output) - 1u ||
+      memcmp(writer.data, nested_increment_missing_output, writer.len) != 0) {
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
-  lql_error_init(&error);
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)nested_increment_scalar_input;
+  reader.len = sizeof(nested_increment_scalar_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(nested_increment_scalar_output) - 1u ||
+      memcmp(writer.data, nested_increment_scalar_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
   ctx->mutation_destroy(ctx, mutation);
   mutation = NULL;
   memset(&reader, 0, sizeof(reader));
@@ -2163,13 +2197,15 @@ static int run_mutation_output(lql *ctx) {
   reader.chunk_size = 2u;
   memset(&writer, 0, sizeof(writer));
   request.reader_user = &reader;
-  if (lql_stream_execute(ctx, &request, &result, &error) !=
-      LQL_STATUS_JSON_ERROR) {
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(same_top_increment_missing_output) - 1u ||
+      memcmp(writer.data, same_top_increment_missing_output, writer.len) !=
+          0) {
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
-  lql_error_init(&error);
   ctx->mutation_destroy(ctx, mutation);
   mutation = NULL;
   if (ctx->mutation_parse(ctx, same_top_create_increment, 3u, &mutation,
@@ -2341,6 +2377,56 @@ static int run_mutation_output(lql *ctx) {
       result.records_seen != 1u || result.records_matched != 1u ||
       writer.len != sizeof(nested_remove_scalar_output) - 1u ||
       memcmp(writer.data, nested_remove_scalar_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, nested_array_remove, 1u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)nested_array_remove_input;
+  reader.len = sizeof(nested_array_remove_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(nested_array_remove_output) - 1u ||
+      memcmp(writer.data, nested_array_remove_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, nested_array_increment, 1u, &mutation,
+                          &error) != LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)nested_array_increment_input;
+  reader.len = sizeof(nested_array_increment_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(nested_array_increment_output) - 1u ||
+      memcmp(writer.data, nested_array_increment_output, writer.len) != 0) {
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
     return 1;

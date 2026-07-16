@@ -1,4 +1,4 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check lifecycle-version-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check lifecycle-version-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -33,6 +33,7 @@ help:
 	  'make fuzz          run the standard bounded AFL++ smoke gate' \
 	  'make install-smoke install SDK and build CMake/pkg-config consumers' \
 	  'make clql-smoke    build clql and run CLI smoke tests' \
+	  'make clql-mutation-parity compare clql mutation output against Go lql' \
 	  'make package       build host liblql SDK and checksum manifest' \
 	  'make package-clql  build host static clql runtime archive and append checksum' \
 	  'make package-source build source archive and append checksum manifest' \
@@ -179,6 +180,11 @@ clql-smoke: build-release
 	@repo=$$(pwd); modver=$$(cd reference/go-benchmark && go list -m -f '{{.Version}}' pkt.systems/lql); moddir="$$(go env GOPATH)/pkg/mod/pkt.systems/lql@$$modver"; cd "$$moddir" && go build -o "$$repo/build/reference-lql" ./cmd/lql
 	@LQL_GO_CLI_PATH=build/reference-lql sh scripts/check_clql_smoke.sh
 
+clql-mutation-parity: build-release
+	@mkdir -p build
+	@repo=$$(pwd); modver=$$(cd reference/go-benchmark && go list -m -f '{{.Version}}' pkt.systems/lql); moddir="$$(go env GOPATH)/pkg/mod/pkt.systems/lql@$$modver"; cd "$$moddir" && go build -o "$$repo/build/reference-lql" ./cmd/lql
+	@LQL_GO_CLI_PATH=build/reference-lql CLQL_PATH=build/release/clql python3 scripts/check_clql_mutation_parity.py
+
 package:
 	@sh scripts/package.sh x86_64-linux-gnu
 
@@ -226,7 +232,7 @@ release:
 print-release-version:
 	@sh scripts/release_version.sh
 
-test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test mutation-literal-parity shared-only-smoke lua-test lua-cli-smoke lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
+test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test mutation-literal-parity shared-only-smoke lua-test lua-cli-smoke lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-mutation-parity package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
