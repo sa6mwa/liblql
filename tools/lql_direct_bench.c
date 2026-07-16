@@ -335,6 +335,11 @@ static int mode_is_source(const char *mode) {
          strcmp(mode, "project_source_selector") == 0;
 }
 
+static int mode_is_file_backed_mutation(const char *mode) {
+  return strcmp(mode, "mutate_file_backed_text") == 0 ||
+         strcmp(mode, "mutate_file_backed_base64") == 0;
+}
+
 static int dataset_input_is_compact(const char *dataset) {
   return dataset == NULL || strstr(dataset, "whitespace") == NULL;
 }
@@ -346,7 +351,8 @@ static int mode_is_projection(const char *mode) {
 
 static int mode_is_mutation(const char *mode) {
   return strcmp(mode, "mutate_file_selector") == 0 ||
-         strcmp(mode, "mutate_source_selector") == 0;
+         strcmp(mode, "mutate_source_selector") == 0 ||
+         mode_is_file_backed_mutation(mode);
 }
 
 static int mode_is_project_mutation(const char *mode) {
@@ -363,7 +369,16 @@ static int mode_is_supported(const char *mode) {
          strcmp(mode, "plus_value_openjson_selector") == 0 ||
          mode_is_projection(mode) || mode_is_project_mutation(mode) ||
          strcmp(mode, "mutate_file_selector") == 0 ||
-         strcmp(mode, "mutate_source_selector") == 0;
+         strcmp(mode, "mutate_source_selector") == 0 ||
+         mode_is_file_backed_mutation(mode);
+}
+
+static long file_backed_mutation_bytes(const char *mode) {
+  if (strcmp(mode, "mutate_file_backed_text") == 0)
+    return 12L * 512L;
+  if (strcmp(mode, "mutate_file_backed_base64") == 0)
+    return 4L * 2048L;
+  return 0L;
 }
 
 static unsigned long benchmark_payload_bytes(const char *mode,
@@ -475,6 +490,18 @@ static const char *const *mutations_for(const char *selector_name,
   static const char *const same_top_nested_multi[] = {"/meta/bench=true",
                                                       "/meta/state=done"};
   static const char *const fallback[] = {"/bench/touched=true"};
+  static const char *const file_backed_text[] = {
+      "textfile:/payload=build/direct-probe/file-backed-text.txt"};
+  static const char *const file_backed_base64[] = {
+      "base64file:/payload=build/direct-probe/file-backed-binary.bin"};
+  if (strcmp(selector_name, "eq_status_open_file_backed_text") == 0) {
+    *count = 1u;
+    return file_backed_text;
+  }
+  if (strcmp(selector_name, "eq_status_open_file_backed_base64") == 0) {
+    *count = 1u;
+    return file_backed_base64;
+  }
   if (strcmp(selector_name, "realworld_eq_sparse") == 0) {
     *count = 1u;
     return sparse;
@@ -572,11 +599,10 @@ static const char *const *mutations_for(const char *selector_name,
 
 static int run_once(FILE *file, lql *ctx, lql_selector *selector,
                     const char *expr, int reparse, const char *mode,
-                    int input_is_compact,
-                    lql_projection *projection, lql_mutation *mutation,
-                    size_t max_records, size_t max_bytes,
-                    lql_stream_result *result, bench_writer *writer,
-                    lql_error *error) {
+                    int input_is_compact, lql_projection *projection,
+                    lql_mutation *mutation, size_t max_records,
+                    size_t max_bytes, lql_stream_result *result,
+                    bench_writer *writer, lql_error *error) {
   bench_reader reader;
   lql_stream_request request;
   lql_selector *temporary;
@@ -592,8 +618,7 @@ static int run_once(FILE *file, lql *ctx, lql_selector *selector,
   memset(&reader, 0, sizeof(reader));
   reader.file = file;
   memset(writer, 0, sizeof(*writer));
-  writer->copy_values =
-      !(mode_is_selected(mode) && !mode_is_source(mode));
+  writer->copy_values = !(mode_is_selected(mode) && !mode_is_source(mode));
   writer->source_range_values =
       mode_is_selected(mode) && !mode_is_source(mode) && input_is_compact;
   memset(&request, 0, sizeof(request));
@@ -661,6 +686,7 @@ int main(int argc, char **argv) {
   lql_selector *selector;
   lql_projection *projection;
   lql_mutation *mutation;
+  lql_mutation_parse_options mutation_options;
   lql_error error;
   lql_stream_result result;
   bench_writer writer;
@@ -779,6 +805,10 @@ int main(int argc, char **argv) {
   selector = NULL;
   projection = NULL;
   mutation = NULL;
+  memset(&mutation_options, 0, sizeof(mutation_options));
+  mutation_options.enable_file_values = mode_is_file_backed_mutation(mode);
+  mutation_options.file_value_base_dir.data = ".";
+  mutation_options.file_value_base_dir.len = 1u;
   lql_error_init(&error);
   projection_paths[0] = projection_path;
   if (!unsupported &&
@@ -790,8 +820,12 @@ int main(int argc, char **argv) {
             LQL_STATUS_OK) ||
        ((mode_is_mutation(mode) || mode_is_project_mutation(mode)) &&
         ((mutations = mutations_for(selector_name, expr, &mutation_count)),
-         ctx->mutation_parse(ctx, mutations, mutation_count, &mutation,
-                             &error) != LQL_STATUS_OK)))) {
+         (mode_is_file_backed_mutation(mode)
+              ? ctx->mutation_parse_with_options(ctx, mutations, mutation_count,
+                                                 &mutation_options, &mutation,
+                                                 &error)
+              : ctx->mutation_parse(ctx, mutations, mutation_count, &mutation,
+                                    &error)) != LQL_STATUS_OK)))) {
     fprintf(stderr, "lql_direct_bench: setup failed: %s\n", error.message);
     if (mutation != NULL)
       ctx->mutation_destroy(ctx, mutation);
@@ -808,8 +842,7 @@ int main(int argc, char **argv) {
   if (!unsupported && strcmp(submode, "steady_state") == 0 &&
       !run_once(file, ctx, selector, expr, reparse, mode,
                 dataset_input_is_compact(dataset), projection, mutation,
-                max_records, max_bytes,
-                &result, &writer, &error)) {
+                max_records, max_bytes, &result, &writer, &error)) {
     fprintf(stderr, "lql_direct_bench: warmup failed: %s\n", error.message);
     return 1;
   }
@@ -848,7 +881,8 @@ int main(int argc, char **argv) {
   fputs(",\"submode\":", stdout);
   json_string(submode);
   fprintf(stdout, ",\"bytes_per_iter\":%ld,\"candidates\":%lu,\"matches\":%lu",
-          fixture_bytes, (unsigned long)result.records_seen,
+          fixture_bytes + file_backed_mutation_bytes(mode),
+          (unsigned long)result.records_seen,
           (unsigned long)result.records_matched);
   fprintf(stdout,
           ",\"payloads\":%lu,\"payload_bytes\":%lu,\"payload_source_type\":",
@@ -860,11 +894,12 @@ int main(int argc, char **argv) {
                   mode_is_project_mutation(mode)
               ? benchmark_payload_bytes(mode, &writer)
               : 0ul);
-  json_string(mode_is_selected(mode)
-                  ? (writer.source_range_values ? "seekable_range" : "spooled")
-                  : ((mode_is_projection(mode) || mode_is_project_mutation(mode))
-                         ? "projection"
-                         : "none"));
+  json_string(
+      mode_is_selected(mode)
+          ? (writer.source_range_values ? "seekable_range" : "spooled")
+          : ((mode_is_projection(mode) || mode_is_project_mutation(mode))
+                 ? "projection"
+                 : "none"));
   fputs(",\"fixture_sha256\":", stdout);
   json_string(fixture_hash);
   if (unsupported) {

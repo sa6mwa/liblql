@@ -168,6 +168,7 @@ typedef struct lql_mutation_action {
   char **segments;
   size_t segment_count;
   char *value;
+  FILE *file_value_handle;
   lql_mutation_value_kind value_kind;
   double delta;
 } lql_mutation_action;

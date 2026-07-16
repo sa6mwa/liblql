@@ -2,7 +2,7 @@
 set -eu
 
 limit_bytes=262144
-expected_cases=22
+expected_cases=24
 checked_cases=0
 binary=${LQL_DIRECT_BENCH_PATH:-build/release/lql_direct_bench}
 massif_out=${TMPDIR:-/tmp}/liblql-direct-live-heap.$$
@@ -73,6 +73,10 @@ check_case build/direct-probe/project-mutate-status-100k.ndjson \
   project_mutate_file_selector
 check_case build/direct-probe/large-4x25m.ndjson large_ndjson \
   eq_status_open_top_set '/status="open"' project_mutate_file_selector
+check_case build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open_file_backed_text '/status="open"' mutate_file_backed_text
+check_case build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open_file_backed_base64 '/status="open"' mutate_file_backed_base64
 
 check_case build/direct-probe/realworld-100k.ndjson realworld_sparse \
   realworld_eq_sparse '/event="session_sync"' decision_only_selector

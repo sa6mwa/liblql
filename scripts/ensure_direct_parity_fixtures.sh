@@ -39,3 +39,21 @@ ensure_fixture build/direct-probe/temporal-100k.ndjson 100000 24 temporal
 ensure_fixture build/direct-probe/array-scalar-100k.ndjson 100000 24 arrayscalar
 ensure_fixture build/direct-probe/array-exists-100k.ndjson 100000 24 arrayexists
 ensure_fixture build/direct-probe/range-code-100k.ndjson 100000 24 rangecode
+
+if [ ! -f build/direct-probe/file-backed-text.txt ]; then
+  i=0
+  : >build/direct-probe/file-backed-text.txt
+  while [ "$i" -lt 512 ]; do
+    printf 'hello world\n' >>build/direct-probe/file-backed-text.txt
+    i=$((i + 1))
+  done
+fi
+
+if [ ! -f build/direct-probe/file-backed-binary.bin ]; then
+  i=0
+  : >build/direct-probe/file-backed-binary.bin
+  while [ "$i" -lt 2048 ]; do
+    printf '\000\001\002\003' >>build/direct-probe/file-backed-binary.bin
+    i=$((i + 1))
+  done
+fi

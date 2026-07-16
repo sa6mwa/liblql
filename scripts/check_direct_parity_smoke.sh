@@ -17,6 +17,10 @@ direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open_top_set '/status="open"' mutate_file_selector /id
 direct_parity_run_row build/direct-probe/nested-set-status-100k.ndjson nested_set_status_100k \
   eq_status_open_nested_set '/status="open"' mutate_file_selector /id
+direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open_file_backed_text '/status="open"' mutate_file_backed_text /id
+direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
+  eq_status_open_file_backed_base64 '/status="open"' mutate_file_backed_base64 /id
 direct_parity_run_row build/direct-probe/top-increment-code-100k.ndjson top_increment_code_100k \
   eq_code_one_top_increment '/code=1' mutate_source_selector /id
 direct_parity_run_row build/direct-probe/project-mutate-status-100k.ndjson project_mutate_status_100k \
@@ -29,4 +33,4 @@ direct_parity_run_row build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' mutate_file_selector /id
 
 direct_parity_validate
-direct_parity_expect_records 40
+direct_parity_expect_records 48

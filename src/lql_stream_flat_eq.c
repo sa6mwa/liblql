@@ -970,8 +970,39 @@ static int lql_flat_eq_utf8_accept(lql_flat_eq_utf8_state *state,
   return 1;
 }
 
-static lql_status lql_flat_eq_file_textlike(const char *path, int strict,
-                                            int *out_textlike,
+static lql_status lql_flat_eq_file_open(const lql_mutation_action *action,
+                                        FILE **out, lql_error *error) {
+  lql_mutation_action *mutable_action;
+  FILE *file;
+
+  *out = NULL;
+  /*
+   * The public request borrows a const mutation handle, but the handle owns
+   * this file descriptor cache. Reusing the descriptor avoids per-record open
+   * overhead without caching or materializing file contents.
+   */
+  mutable_action = (lql_mutation_action *)action;
+  file = mutable_action->file_value_handle;
+  if (file == NULL) {
+    file = fopen(action->value, "rb");
+    if (file == NULL) {
+      lql_set_error(error, LQL_STATUS_IO_ERROR,
+                    "unable to open file-backed mutation value");
+      return LQL_STATUS_IO_ERROR;
+    }
+    mutable_action->file_value_handle = file;
+  } else if (fseek(file, 0L, SEEK_SET) != 0) {
+    lql_set_error(error, LQL_STATUS_IO_ERROR,
+                  "unable to rewind file-backed mutation value");
+    return LQL_STATUS_IO_ERROR;
+  }
+  clearerr(file);
+  *out = file;
+  return LQL_STATUS_OK;
+}
+
+static lql_status lql_flat_eq_file_textlike(const lql_mutation_action *action,
+                                            int strict, int *out_textlike,
                                             lql_error *error) {
   unsigned char buffer[4096];
   lql_flat_eq_utf8_state utf8;
@@ -981,16 +1012,11 @@ static lql_status lql_flat_eq_file_textlike(const char *path, int strict,
 
   *out_textlike = 0;
   memset(&utf8, 0, sizeof(utf8));
-  file = fopen(path, "rb");
-  if (file == NULL) {
-    lql_set_error(error, LQL_STATUS_IO_ERROR,
-                  "unable to open file-backed mutation value");
-    return LQL_STATUS_IO_ERROR;
-  }
+  if (lql_flat_eq_file_open(action, &file, error) != LQL_STATUS_OK)
+    return error == NULL ? LQL_STATUS_IO_ERROR : error->code;
   while ((amount = fread(buffer, 1u, sizeof(buffer), file)) != 0u) {
     for (i = 0u; i < amount; ++i) {
       if (buffer[i] == 0u) {
-        fclose(file);
         if (strict) {
           lql_set_error(error, LQL_STATUS_JSON_ERROR,
                         "textfile mutation value contains NUL byte");
@@ -999,7 +1025,6 @@ static lql_status lql_flat_eq_file_textlike(const char *path, int strict,
         return LQL_STATUS_OK;
       }
       if (!lql_flat_eq_utf8_accept(&utf8, buffer[i])) {
-        fclose(file);
         if (strict) {
           lql_set_error(error, LQL_STATUS_JSON_ERROR,
                         "textfile mutation value is not valid UTF-8");
@@ -1010,12 +1035,10 @@ static lql_status lql_flat_eq_file_textlike(const char *path, int strict,
     }
   }
   if (ferror(file)) {
-    fclose(file);
     lql_set_error(error, LQL_STATUS_IO_ERROR,
                   "unable to read file-backed mutation value");
     return LQL_STATUS_IO_ERROR;
   }
-  fclose(file);
   if (utf8.remaining != 0) {
     if (strict) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR,
@@ -1028,9 +1051,10 @@ static lql_status lql_flat_eq_file_textlike(const char *path, int strict,
   return LQL_STATUS_OK;
 }
 
-static lql_status lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
-                                                    const char *path,
-                                                    lql_error *error) {
+static lql_status
+lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
+                                  const lql_mutation_action *action,
+                                  lql_error *error) {
   static const char hex[] = "0123456789abcdef";
   unsigned char buffer[4096];
   FILE *file;
@@ -1038,17 +1062,12 @@ static lql_status lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
   size_t i;
   lql_status status;
 
-  file = fopen(path, "rb");
-  if (file == NULL) {
-    lql_set_error(error, LQL_STATUS_IO_ERROR,
-                  "unable to open file-backed mutation value");
-    return LQL_STATUS_IO_ERROR;
-  }
-  status = lql_flat_eq_write(state, "\"", 1u, error);
-  if (status != LQL_STATUS_OK) {
-    fclose(file);
+  status = lql_flat_eq_file_open(action, &file, error);
+  if (status != LQL_STATUS_OK)
     return status;
-  }
+  status = lql_flat_eq_write(state, "\"", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
   while ((amount = fread(buffer, 1u, sizeof(buffer), file)) != 0u) {
     for (i = 0u; i < amount; ++i) {
       unsigned char ch;
@@ -1069,25 +1088,22 @@ static lql_status lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
       } else {
         status = lql_flat_eq_write(state, buffer + i, 1u, error);
       }
-      if (status != LQL_STATUS_OK) {
-        fclose(file);
+      if (status != LQL_STATUS_OK)
         return status;
-      }
     }
   }
   if (ferror(file)) {
-    fclose(file);
     lql_set_error(error, LQL_STATUS_IO_ERROR,
                   "unable to read file-backed mutation value");
     return LQL_STATUS_IO_ERROR;
   }
-  fclose(file);
   return lql_flat_eq_write(state, "\"", 1u, error);
 }
 
-static lql_status lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
-                                                      const char *path,
-                                                      lql_error *error) {
+static lql_status
+lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
+                                    const lql_mutation_action *action,
+                                    lql_error *error) {
   static const char table[] =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   unsigned char buffer[4096];
@@ -1098,17 +1114,12 @@ static lql_status lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
   size_t carry_len;
   lql_status status;
 
-  file = fopen(path, "rb");
-  if (file == NULL) {
-    lql_set_error(error, LQL_STATUS_IO_ERROR,
-                  "unable to open file-backed mutation value");
-    return LQL_STATUS_IO_ERROR;
-  }
-  status = lql_flat_eq_write(state, "\"", 1u, error);
-  if (status != LQL_STATUS_OK) {
-    fclose(file);
+  status = lql_flat_eq_file_open(action, &file, error);
+  if (status != LQL_STATUS_OK)
     return status;
-  }
+  status = lql_flat_eq_write(state, "\"", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
   carry_len = 0u;
   while ((amount = fread(buffer, 1u, sizeof(buffer), file)) != 0u) {
     i = 0u;
@@ -1126,10 +1137,8 @@ static lql_status lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
         out[2] = table[(triple >> 6) & 0x3ful];
         out[3] = table[triple & 0x3ful];
         status = lql_flat_eq_write(state, out, sizeof(out), error);
-        if (status != LQL_STATUS_OK) {
-          fclose(file);
+        if (status != LQL_STATUS_OK)
           return status;
-        }
         carry_len = 0u;
       }
     }
@@ -1143,10 +1152,8 @@ static lql_status lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
       out[2] = table[(triple >> 6) & 0x3ful];
       out[3] = table[triple & 0x3ful];
       status = lql_flat_eq_write(state, out, sizeof(out), error);
-      if (status != LQL_STATUS_OK) {
-        fclose(file);
+      if (status != LQL_STATUS_OK)
         return status;
-      }
       i += 3u;
     }
     while (i < amount) {
@@ -1154,12 +1161,10 @@ static lql_status lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
     }
   }
   if (ferror(file)) {
-    fclose(file);
     lql_set_error(error, LQL_STATUS_IO_ERROR,
                   "unable to read file-backed mutation value");
     return LQL_STATUS_IO_ERROR;
   }
-  fclose(file);
   if (carry_len != 0u) {
     char out[4];
     unsigned long triple;
@@ -1184,19 +1189,18 @@ static lql_status lql_flat_eq_file_value(lql_flat_eq_state *state,
   lql_status status;
 
   if (action->value_kind == LQL_MUTATION_VALUE_FILE_BASE64)
-    return lql_flat_eq_file_base64_json_string(state, action->value, error);
+    return lql_flat_eq_file_base64_json_string(state, action, error);
   if (action->value_kind == LQL_MUTATION_VALUE_FILE_TEXT) {
-    status = lql_flat_eq_file_textlike(action->value, 1, &textlike, error);
+    status = lql_flat_eq_file_textlike(action, 1, &textlike, error);
     if (status != LQL_STATUS_OK)
       return status;
-    return lql_flat_eq_file_text_json_string(state, action->value, error);
+    return lql_flat_eq_file_text_json_string(state, action, error);
   }
-  status = lql_flat_eq_file_textlike(action->value, 0, &textlike, error);
+  status = lql_flat_eq_file_textlike(action, 0, &textlike, error);
   if (status != LQL_STATUS_OK)
     return status;
-  return textlike
-             ? lql_flat_eq_file_text_json_string(state, action->value, error)
-             : lql_flat_eq_file_base64_json_string(state, action->value, error);
+  return textlike ? lql_flat_eq_file_text_json_string(state, action, error)
+                  : lql_flat_eq_file_base64_json_string(state, action, error);
 }
 
 static lql_status lql_flat_eq_projection_key(lql_flat_eq_state *state,

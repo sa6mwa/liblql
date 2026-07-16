@@ -206,6 +206,9 @@ static void mutation_action_cleanup(lql_allocator *allocator,
   }
   allocator->destroy(allocator, action->segments);
   allocator->destroy(allocator, action->value);
+  if (action->file_value_handle != NULL) {
+    fclose(action->file_value_handle);
+  }
   memset(action, 0, sizeof(*action));
 }
 
