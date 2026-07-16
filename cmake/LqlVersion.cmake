@@ -1,8 +1,4 @@
 function(lql_resolve_version out_var)
-  if(LQL_VERSION_OVERRIDE)
-    set(${out_var} "${LQL_VERSION_OVERRIDE}" PARENT_SCOPE)
-    return()
-  endif()
   execute_process(
     COMMAND git tag --points-at HEAD --list "v[0-9]*.[0-9]*.[0-9]*"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -34,6 +30,10 @@ function(lql_resolve_version out_var)
   endif()
   if(resolved_tag_version)
     set(${out_var} "${resolved_tag_version}" PARENT_SCOPE)
+  elseif(LQL_VERSION_OVERRIDE)
+    set(${out_var} "${LQL_VERSION_OVERRIDE}" PARENT_SCOPE)
+  elseif(DEFINED ENV{LQL_VERSION_OVERRIDE} AND NOT "$ENV{LQL_VERSION_OVERRIDE}" STREQUAL "")
+    set(${out_var} "$ENV{LQL_VERSION_OVERRIDE}" PARENT_SCOPE)
   elseif(EXISTS "${CMAKE_SOURCE_DIR}/VERSION" AND NOT EXISTS "${CMAKE_SOURCE_DIR}/.git")
     file(READ "${CMAKE_SOURCE_DIR}/VERSION" version_file)
     string(STRIP "${version_file}" version_file)

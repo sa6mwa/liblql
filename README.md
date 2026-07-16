@@ -68,6 +68,7 @@ Useful local gates:
 
 ```sh
 make lifecycle-check
+make lifecycle-version-contract
 make test
 make lua-cli-smoke
 make package-source-smoke
@@ -75,8 +76,12 @@ make package-verify
 make print-release-version
 ```
 
-`make prerelease` runs the shared release proof graph without cleaning first.
-`make release` cleans generated state and then runs the same proof graph.
+`make lifecycle-version-contract` verifies that git worktree builds use only an
+exact lightweight `vX.Y.Z` tag on `HEAD`, then `LQL_VERSION_OVERRIDE` for
+untagged release-candidate builds, and otherwise `0.0.0`; `/VERSION` is used
+only by source archives outside git. `make prerelease` runs the shared release
+proof graph without cleaning first. `make release` runs the version contract
+first, then cleans generated state and runs the same proof graph.
 Release uploads are selected from `dist/liblql-<version>-CHECKSUMS`, not from a
 `dist/` glob.
 

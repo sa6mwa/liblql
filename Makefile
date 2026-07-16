@@ -1,4 +1,4 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check lifecycle-version-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
 help:
 	@printf '%s\n' \
@@ -10,6 +10,7 @@ help:
 	  'make dependency-cache-check  verify shared dependency-cache resolution' \
 	  'make dependency-cache-privacy-regression  prove release privacy rejects dependency-cache paths' \
 	  'make lifecycle-check  verify lifecycle preset/command contract' \
+	  'make lifecycle-version-contract  verify exact-tag and override version contract' \
 	  'make target-tool-check  verify target inspection tool discovery' \
 	  'make build        build the debug lifecycle preset' \
 	  'make build-debug   build the debug self-contained liblql direct-execution implementation' \
@@ -45,7 +46,7 @@ help:
 	  'make prerelease    run the full release proof graph without cleaning first' \
 	  'make prerelease-hardening alias for prerelease until extra hardening exists' \
 	  'make prerelease-live fail-closed placeholder for opt-in live checks' \
-	  'make release       clean, then run the full release proof graph' \
+	  'make release       verify version contract, clean, then run the full release proof graph' \
 	  'make print-release-version print the version used by package/release targets' \
 	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
@@ -94,6 +95,9 @@ dependency-cache-privacy-regression:
 lifecycle-check: toolchain-check dependency-cache-check
 	@python3 scripts/check_lifecycle_presets.py
 	@sh scripts/check_release_targets.sh
+
+lifecycle-version-contract:
+	@sh scripts/check_lifecycle_version_contract.sh
 
 target-tool-check:
 	@python3 -m py_compile scripts/discover_target_tools.py
@@ -215,6 +219,7 @@ prerelease-live:
 	@printf '%s\n' 'SKIP: liblql has no live external-provider prerelease checks'
 
 release:
+	@$(MAKE) lifecycle-version-contract
 	@$(MAKE) clean
 	@$(MAKE) release-pipeline
 

@@ -16,6 +16,8 @@ require_line '^release-pipeline: test-all release-matrix$' \
   'release-pipeline must run ordinary gates before release-matrix'
 require_line '^prerelease: release-pipeline$' \
   'prerelease must share release-pipeline'
+require_line '^lifecycle-version-contract:$' \
+  'lifecycle-version-contract target is missing'
 require_line '^prerelease-hardening: prerelease$' \
   'prerelease-hardening must preserve the shared prerelease graph'
 require_line '^package-checksums:$' \
@@ -40,14 +42,21 @@ if grep -E "(^|[^[:alnum:]_-])(${old_phase}-parity|${old_phase}-profile|debug-${
 fi
 
 release_line=$(grep -n '^release:$' "$makefile" | cut -d: -f1 | head -1)
-clean_line=$((release_line + 1))
-pipeline_line=$((release_line + 2))
+version_line=$((release_line + 1))
+clean_line=$((release_line + 2))
+pipeline_line=$((release_line + 3))
+version_cmd=$(sed -n "${version_line}p" "$makefile")
 clean_cmd=$(sed -n "${clean_line}p" "$makefile")
 pipeline_cmd=$(sed -n "${pipeline_line}p" "$makefile")
 tab=$(printf '\t')
 
+if [ "$version_cmd" != "${tab}@\$(MAKE) lifecycle-version-contract" ]; then
+  printf 'release target check: release must run lifecycle-version-contract first\n' >&2
+  exit 1
+fi
+
 if [ "$clean_cmd" != "${tab}@\$(MAKE) clean" ]; then
-  printf 'release target check: release must clean first\n' >&2
+  printf 'release target check: release must clean after version contract\n' >&2
   exit 1
 fi
 

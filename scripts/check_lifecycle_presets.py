@@ -34,6 +34,7 @@ REQUIRED_MAKE_TARGETS = {
     "deps-cross",
     "dependency-cache-check",
     "dependency-cache-privacy-regression",
+    "lifecycle-version-contract",
     "build",
     "build-debug",
     "build-release",
@@ -97,6 +98,7 @@ REQUIRED_SCRIPT_SURFACES = {
     "scripts/check_shared_only_build.sh",
     "scripts/test_dependency_cache_config.sh",
     "scripts/check_dependency_cache_privacy_regression.sh",
+    "scripts/check_lifecycle_version_contract.sh",
 }
 OLD_PHASE = "scanner"
 FORBIDDEN_PUBLIC_TERMS = {
