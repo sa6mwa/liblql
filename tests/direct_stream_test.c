@@ -3463,6 +3463,123 @@ static int run_true_stream_contract(lql *ctx) {
   return 0;
 }
 
+static int write_test_file(const char *path, const unsigned char *data,
+                           size_t len) {
+  FILE *file;
+  file = fopen(path, "wb");
+  if (file == NULL)
+    return 1;
+  if (len != 0u && fwrite(data, 1u, len, file) != len) {
+    fclose(file);
+    return 1;
+  }
+  return fclose(file) != 0;
+}
+
+static int run_file_backed_mutation_case(lql *ctx, const char *expr,
+                                         lql_status expected_status,
+                                         const char *expected_output) {
+  static const char input[] = "{}\n";
+  lql_mutation_parse_options options;
+  lql_mutation *mutation;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+  lql_status status;
+
+  memset(&options, 0, sizeof(options));
+  options.enable_file_values = 1;
+  options.file_value_base_dir.data = ".";
+  options.file_value_base_dir.len = 1u;
+  mutation = NULL;
+  lql_error_init(&error);
+  status = ctx->mutation_parse_with_options(ctx, &expr, 1u, &options, &mutation,
+                                            &error);
+  if (status != LQL_STATUS_OK)
+    return 1;
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 1u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  request.matched_only = 1;
+  status = ctx->stream_execute_spooled(ctx, &request, &result, &error);
+  ctx->mutation_destroy(ctx, mutation);
+  if (status != expected_status)
+    return 1;
+  if (expected_output == NULL)
+    return 0;
+  if (writer.len != strlen(expected_output) ||
+      memcmp(writer.data, expected_output, writer.len) != 0)
+    return 1;
+  return 0;
+}
+
+static int run_file_backed_mutations(lql *ctx) {
+  static const char text_path[] = "liblql-file-value-text.tmp";
+  static const char binary_path[] = "liblql-file-value-binary.tmp";
+  static const char invalid_path[] = "liblql-file-value-invalid.tmp";
+  static const unsigned char text_payload[] = "hello world";
+  static const unsigned char binary_payload[] = {0x00u, 0x01u, 0x02u};
+  static const unsigned char invalid_payload[] = {0xc0u, 0xafu};
+  static const char *const disabled_expr[] = {"file:/payload=payload.txt"};
+  lql_mutation_parse_options options;
+  lql_mutation *mutation;
+  lql_error error;
+
+  remove(text_path);
+  remove(binary_path);
+  remove(invalid_path);
+  if (write_test_file(text_path, text_payload, sizeof(text_payload) - 1u) ||
+      write_test_file(binary_path, binary_payload, sizeof(binary_payload)) ||
+      write_test_file(invalid_path, invalid_payload, sizeof(invalid_payload)))
+    return 1;
+
+  memset(&options, 0, sizeof(options));
+  mutation = NULL;
+  lql_error_init(&error);
+  if (ctx->mutation_parse_with_options(ctx, disabled_expr, 1u, &options,
+                                       &mutation,
+                                       &error) != LQL_STATUS_PARSE_ERROR) {
+    remove(text_path);
+    remove(binary_path);
+    remove(invalid_path);
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  if (run_file_backed_mutation_case(
+          ctx, "textfile:/payload=liblql-file-value-text.tmp", LQL_STATUS_OK,
+          "{\"payload\":\"hello world\"}\n") ||
+      run_file_backed_mutation_case(
+          ctx, "base64file:/payload=liblql-file-value-binary.tmp",
+          LQL_STATUS_OK, "{\"payload\":\"AAEC\"}\n") ||
+      run_file_backed_mutation_case(
+          ctx, "file:/payload=liblql-file-value-binary.tmp", LQL_STATUS_OK,
+          "{\"payload\":\"AAEC\"}\n") ||
+      run_file_backed_mutation_case(
+          ctx, "textfile:/payload=liblql-file-value-invalid.tmp",
+          LQL_STATUS_JSON_ERROR, NULL)) {
+    remove(text_path);
+    remove(binary_path);
+    remove(invalid_path);
+    return 1;
+  }
+
+  remove(text_path);
+  remove(binary_path);
+  remove(invalid_path);
+  return 0;
+}
+
 int main(void) {
   lql *ctx;
   lql_error error;
@@ -3489,7 +3606,8 @@ int main(void) {
       run_completed_record_before_root_array_error(ctx) ||
       run_output_modes_skip_scalar_roots(ctx) || run_stop_and_root_array(ctx) ||
       run_record_limit(ctx) || run_byte_limit(ctx) ||
-      run_unintentional_stop_status(ctx) || run_true_stream_contract(ctx)) {
+      run_unintentional_stop_status(ctx) || run_true_stream_contract(ctx) ||
+      run_file_backed_mutations(ctx)) {
     ctx->destroy(ctx);
     return match_all_status != 0 ? match_all_status : 1;
   }

@@ -213,6 +213,13 @@ time normalization, brace shorthand, explicit file/text/base64 values,
 concrete numeric paths, object/array wildcards, recursive paths, and error
 precedence.
 
+File-backed mutation values are disabled by the default mutation parser and
+must be enabled with explicit parse options. `file:` auto-selects text or
+base64 by inspecting the source file, `textfile:` requires valid UTF-8 text
+without NUL bytes, and `base64file:` streams a base64 JSON string. The parser
+stores a resolved file path in the mutation handle; file bytes are read by the
+mutation emitter so CLI consumers do not materialize or rewrite the value.
+
 For a combined operation, selection occurs on the original record, projection
 is applied before mutation, mutation is applied only when selection and output
 policy require it, and unmatched-record preservation follows the explicit

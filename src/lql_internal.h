@@ -157,7 +157,10 @@ typedef enum lql_mutation_value_kind {
   LQL_MUTATION_VALUE_STRING = 0,
   LQL_MUTATION_VALUE_NUMBER = 1,
   LQL_MUTATION_VALUE_BOOL = 2,
-  LQL_MUTATION_VALUE_NULL = 3
+  LQL_MUTATION_VALUE_NULL = 3,
+  LQL_MUTATION_VALUE_FILE_AUTO = 4,
+  LQL_MUTATION_VALUE_FILE_TEXT = 5,
+  LQL_MUTATION_VALUE_FILE_BASE64 = 6
 } lql_mutation_value_kind;
 
 typedef struct lql_mutation_action {
@@ -195,6 +198,10 @@ lql_projection_destroy_internal(lql *self, lql_projection *projection);
 LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal(
     lql *self, const char *const *expressions, size_t expression_count,
     lql_mutation **out, lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal_with_options(
+    lql *self, const char *const *expressions, size_t expression_count,
+    const lql_mutation_parse_options *options, lql_mutation **out,
+    lql_error *error);
 LQL_INTERNAL_SYMBOL void lql_mutation_destroy_internal(lql *self,
                                                        lql_mutation *mutation);
 LQL_INTERNAL_SYMBOL lql_status

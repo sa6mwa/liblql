@@ -41,6 +41,11 @@ static lql_status mutation_parse_method(lql *self,
                                         const char *const *expressions,
                                         size_t expression_count,
                                         lql_mutation **out, lql_error *error);
+static lql_status
+mutation_parse_with_options_method(lql *self, const char *const *expressions,
+                                   size_t expression_count,
+                                   const lql_mutation_parse_options *options,
+                                   lql_mutation **out, lql_error *error);
 static void mutation_destroy_method(lql *self, lql_mutation *mutation);
 static size_t mutation_count_method(const lql *self,
                                     const lql_mutation *mutation);
@@ -145,6 +150,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
   ctx->projection_path_count = projection_path_count_method;
   ctx->projection_path = projection_path_method;
   ctx->mutation_parse = mutation_parse_method;
+  ctx->mutation_parse_with_options = mutation_parse_with_options_method;
   ctx->mutation_destroy = mutation_destroy_method;
   ctx->mutation_count = mutation_count_method;
   ctx->stream_execute = lql_stream_execute;
@@ -367,6 +373,15 @@ static lql_status mutation_parse_method(lql *self,
                                         lql_mutation **out, lql_error *error) {
   return lql_mutation_parse_internal(self, expressions, expression_count, out,
                                      error);
+}
+
+static lql_status
+mutation_parse_with_options_method(lql *self, const char *const *expressions,
+                                   size_t expression_count,
+                                   const lql_mutation_parse_options *options,
+                                   lql_mutation **out, lql_error *error) {
+  return lql_mutation_parse_internal_with_options(
+      self, expressions, expression_count, options, out, error);
 }
 
 static void mutation_destroy_method(lql *self, lql_mutation *mutation) {

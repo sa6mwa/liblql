@@ -210,19 +210,6 @@ static char *copy_string(const char *value) {
   return out;
 }
 
-static char *copy_range(const char *begin, size_t len) {
-  char *out;
-  out = (char *)malloc(len + 1u);
-  if (out == NULL) {
-    return NULL;
-  }
-  if (len != 0u) {
-    memcpy(out, begin, len);
-  }
-  out[len] = '\0';
-  return out;
-}
-
 static int string_list_push_copy(clql_string_list *list, const char *value) {
   char **next;
   char *copy;
@@ -244,25 +231,6 @@ static int string_list_push_copy(clql_string_list *list, const char *value) {
     return 0;
   }
   list->items[list->count++] = copy;
-  return 1;
-}
-
-static int string_list_push_owned(clql_string_list *list, char *value) {
-  char **next;
-  size_t next_capacity;
-  if (list == NULL || value == NULL) {
-    return 0;
-  }
-  if (list->count == list->capacity) {
-    next_capacity = list->capacity == 0u ? 4u : list->capacity * 2u;
-    next = (char **)realloc(list->items, next_capacity * sizeof(*next));
-    if (next == NULL) {
-      return 0;
-    }
-    list->items = next;
-    list->capacity = next_capacity;
-  }
-  list->items[list->count++] = value;
   return 1;
 }
 
@@ -296,279 +264,6 @@ static int starts_with_option(const char *arg, const char *name,
     return 1;
   }
   return 0;
-}
-
-static char *json_quote_bytes(const unsigned char *data, size_t len) {
-  static const char hex[] = "0123456789abcdef";
-  size_t i;
-  size_t out_len;
-  char *out;
-  char *cursor;
-  out_len = 2u;
-  for (i = 0u; i < len; ++i) {
-    unsigned char ch;
-    ch = data[i];
-    if (ch == '"' || ch == '\\' || ch < 0x20u) {
-      out_len += ch < 0x20u ? 6u : 2u;
-    } else {
-      ++out_len;
-    }
-  }
-  out = (char *)malloc(out_len + 1u);
-  if (out == NULL) {
-    return NULL;
-  }
-  cursor = out;
-  *cursor++ = '"';
-  for (i = 0u; i < len; ++i) {
-    unsigned char ch;
-    ch = data[i];
-    if (ch == '"' || ch == '\\') {
-      *cursor++ = '\\';
-      *cursor++ = (char)ch;
-    } else if (ch < 0x20u) {
-      *cursor++ = '\\';
-      *cursor++ = 'u';
-      *cursor++ = '0';
-      *cursor++ = '0';
-      *cursor++ = hex[(ch >> 4) & 0x0fu];
-      *cursor++ = hex[ch & 0x0fu];
-    } else {
-      *cursor++ = (char)ch;
-    }
-  }
-  *cursor++ = '"';
-  *cursor = '\0';
-  return out;
-}
-
-static char *base64_encode(const unsigned char *data, size_t len) {
-  static const char table[] =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  size_t out_len;
-  size_t i;
-  size_t j;
-  char *out;
-  out_len = ((len + 2u) / 3u) * 4u;
-  out = (char *)malloc(out_len + 1u);
-  if (out == NULL) {
-    return NULL;
-  }
-  i = 0u;
-  j = 0u;
-  while (i < len) {
-    unsigned long octet_a;
-    unsigned long octet_b;
-    unsigned long octet_c;
-    unsigned long triple;
-    octet_a = data[i++];
-    octet_b = i < len ? data[i++] : 0ul;
-    octet_c = i < len ? data[i++] : 0ul;
-    triple = (octet_a << 16) | (octet_b << 8) | octet_c;
-    out[j++] = table[(triple >> 18) & 0x3ful];
-    out[j++] = table[(triple >> 12) & 0x3ful];
-    out[j++] = table[(triple >> 6) & 0x3ful];
-    out[j++] = table[triple & 0x3ful];
-  }
-  if (len % 3u != 0u) {
-    out[out_len - 1u] = '=';
-    if (len % 3u == 1u) {
-      out[out_len - 2u] = '=';
-    }
-  }
-  out[out_len] = '\0';
-  return out;
-}
-
-static int read_file_bytes(const char *path, unsigned char **out_data,
-                           size_t *out_len) {
-  FILE *file;
-  long len;
-  unsigned char *data;
-  if (path == NULL || out_data == NULL || out_len == NULL) {
-    return 0;
-  }
-  *out_data = NULL;
-  *out_len = 0u;
-  file = fopen(path, "rb");
-  if (file == NULL) {
-    return 0;
-  }
-  if (fseek(file, 0L, SEEK_END) != 0 || (len = ftell(file)) < 0L ||
-      fseek(file, 0L, SEEK_SET) != 0) {
-    fclose(file);
-    return 0;
-  }
-  data = (unsigned char *)malloc((size_t)len + 1u);
-  if (data == NULL) {
-    fclose(file);
-    return 0;
-  }
-  if ((size_t)len != 0u && fread(data, 1u, (size_t)len, file) != (size_t)len) {
-    free(data);
-    fclose(file);
-    return 0;
-  }
-  if (ferror(file)) {
-    free(data);
-    fclose(file);
-    return 0;
-  }
-  fclose(file);
-  data[(size_t)len] = '\0';
-  *out_data = data;
-  *out_len = (size_t)len;
-  return 1;
-}
-
-static int is_text_payload(const unsigned char *data, size_t len) {
-  size_t i;
-  for (i = 0u; i < len; ++i) {
-    if (data[i] == 0u) {
-      return 0;
-    }
-  }
-  return 1;
-}
-
-static char *resolve_file_path(const char *raw) {
-  const char *begin;
-  const char *end;
-  const char *home;
-  char *path;
-  size_t len;
-  begin = raw;
-  end = raw + strlen(raw);
-  while (begin < end && (*begin == ' ' || *begin == '\t')) {
-    ++begin;
-  }
-  while (end > begin && (end[-1] == ' ' || end[-1] == '\t')) {
-    --end;
-  }
-  if (end - begin >= 2 && ((*begin == '"' && end[-1] == '"') ||
-                           (*begin == '\'' && end[-1] == '\''))) {
-    ++begin;
-    --end;
-  }
-  if (end - begin >= 1 && *begin == '~' &&
-      (end - begin == 1 || begin[1] == '/')) {
-    home = getenv("HOME");
-    if (home == NULL) {
-      return NULL;
-    }
-    len = strlen(home) + (size_t)(end - begin);
-    path = (char *)malloc(len + 1u);
-    if (path == NULL) {
-      return NULL;
-    }
-    strcpy(path, home);
-    if (end - begin > 1) {
-      strcat(path, begin + 1);
-    }
-    return path;
-  }
-  return copy_range(begin, (size_t)(end - begin));
-}
-
-static char *expand_file_mutation(const char *expr, int enabled) {
-  const char *prefix;
-  size_t prefix_len;
-  const char *stripped;
-  const char *equal;
-  char *path_part;
-  char *file_path;
-  unsigned char *data;
-  size_t data_len;
-  char *encoded;
-  char *quoted;
-  char *out;
-  int base64;
-
-  prefix = NULL;
-  prefix_len = 0u;
-  base64 = 0;
-  if (strncmp(expr, "textfile:", 9u) == 0) {
-    prefix = "textfile:";
-    prefix_len = 9u;
-  } else if (strncmp(expr, "base64file:", 11u) == 0) {
-    prefix = "base64file:";
-    prefix_len = 11u;
-    base64 = 1;
-  } else if (strncmp(expr, "file:", 5u) == 0) {
-    prefix = "file:";
-    prefix_len = 5u;
-  }
-  if (prefix == NULL) {
-    return copy_string(expr);
-  }
-  if (!enabled) {
-    fprintf(stderr, "clql: file-backed mutations are disabled\n");
-    return NULL;
-  }
-  stripped = expr + prefix_len;
-  if (strncmp(stripped, "rm:", 3u) == 0 ||
-      strncmp(stripped, "remove:", 7u) == 0 ||
-      strncmp(stripped, "time:", 5u) == 0) {
-    fprintf(stderr, "clql: file-backed mutation cannot be combined with %s\n",
-            stripped);
-    return NULL;
-  }
-  if (strlen(stripped) >= 2u && stripped[strlen(stripped) - 1u] == '+' &&
-      stripped[strlen(stripped) - 2u] == '+') {
-    fprintf(stderr, "clql: file-backed mutation cannot be combined with ++\n");
-    return NULL;
-  }
-  equal = strchr(stripped, '=');
-  if (equal == NULL) {
-    fprintf(stderr, "clql: file-backed mutation requires path=file\n");
-    return NULL;
-  }
-  path_part = copy_range(stripped, (size_t)(equal - stripped));
-  file_path = resolve_file_path(equal + 1);
-  if (path_part == NULL || file_path == NULL) {
-    free(path_part);
-    free(file_path);
-    fprintf(stderr, "clql: out of memory\n");
-    return NULL;
-  }
-  if (!read_file_bytes(file_path, &data, &data_len)) {
-    fprintf(stderr, "clql: unable to read mutation file: %s\n", file_path);
-    free(path_part);
-    free(file_path);
-    return NULL;
-  }
-  if (prefix_len == 5u && !is_text_payload(data, data_len)) {
-    base64 = 1;
-  }
-  if (base64) {
-    encoded = base64_encode(data, data_len);
-    quoted = encoded == NULL ? NULL
-                             : json_quote_bytes((const unsigned char *)encoded,
-                                                strlen(encoded));
-    free(encoded);
-  } else {
-    quoted = json_quote_bytes(data, data_len);
-  }
-  free(data);
-  free(file_path);
-  if (quoted == NULL) {
-    free(path_part);
-    fprintf(stderr, "clql: out of memory\n");
-    return NULL;
-  }
-  out = (char *)malloc(strlen(path_part) + 1u + strlen(quoted) + 1u);
-  if (out == NULL) {
-    free(path_part);
-    free(quoted);
-    fprintf(stderr, "clql: out of memory\n");
-    return NULL;
-  }
-  strcpy(out, path_part);
-  strcat(out, "=");
-  strcat(out, quoted);
-  free(path_part);
-  free(quoted);
-  return out;
 }
 
 static char *join_selector_list(const clql_string_list *list,
@@ -757,22 +452,6 @@ static int split_mutation_args(const clql_string_list *positionals,
   return 1;
 }
 
-static int prepare_mutations(const clql_config *cfg, clql_string_list *out) {
-  size_t i;
-  memset(out, 0, sizeof(*out));
-  for (i = 0u; i < cfg->mutations.count; ++i) {
-    char *expanded;
-    expanded = expand_file_mutation(cfg->mutations.items[i],
-                                    cfg->enable_file_mutations);
-    if (expanded == NULL || !string_list_push_owned(out, expanded)) {
-      free(expanded);
-      string_list_destroy(out);
-      return 0;
-    }
-  }
-  return 1;
-}
-
 static int open_input_path(const char *path, FILE **out) {
   if (path == NULL || path[0] == '\0' || strcmp(path, "-") == 0) {
     *out = stdin;
@@ -834,7 +513,7 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
   lql_selector *selector;
   lql_projection *projection;
   lql_mutation *mutation;
-  clql_string_list expanded_mutations;
+  lql_mutation_parse_options mutation_options;
   lql_stream_output_mode output_mode;
   lql_stream_result aggregate;
   lql_error error;
@@ -844,7 +523,7 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
   selector = NULL;
   projection = NULL;
   mutation = NULL;
-  memset(&expanded_mutations, 0, sizeof(expanded_mutations));
+  memset(&mutation_options, 0, sizeof(mutation_options));
   memset(&aggregate, 0, sizeof(aggregate));
   expr = join_selector_list(selectors, cfg->or_mode ? "," : "\n");
   if (expr == NULL) {
@@ -870,16 +549,13 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
     }
   }
   if (cfg->mutations.count != 0u) {
-    if (!prepare_mutations(cfg, &expanded_mutations)) {
-      ctx->projection_destroy(ctx, projection);
-      ctx->selector_destroy(ctx, selector);
-      return 1;
-    }
-    status =
-        ctx->mutation_parse(ctx, (const char *const *)expanded_mutations.items,
-                            expanded_mutations.count, &mutation, &error);
+    mutation_options.enable_file_values = cfg->enable_file_mutations;
+    mutation_options.file_value_base_dir.data = ".";
+    mutation_options.file_value_base_dir.len = 1u;
+    status = ctx->mutation_parse_with_options(
+        ctx, (const char *const *)cfg->mutations.items, cfg->mutations.count,
+        &mutation_options, &mutation, &error);
     if (status != LQL_STATUS_OK) {
-      string_list_destroy(&expanded_mutations);
       ctx->projection_destroy(ctx, projection);
       ctx->selector_destroy(ctx, selector);
       return print_error("parse mutation", status, &error);
@@ -936,14 +612,12 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
   if (cfg->count_only) {
     fprintf(output, "%lu\n", (unsigned long)aggregate.records_matched);
   }
-  string_list_destroy(&expanded_mutations);
   ctx->mutation_destroy(ctx, mutation);
   ctx->projection_destroy(ctx, projection);
   ctx->selector_destroy(ctx, selector);
   return 0;
 
 fail:
-  string_list_destroy(&expanded_mutations);
   ctx->mutation_destroy(ctx, mutation);
   ctx->projection_destroy(ctx, projection);
   ctx->selector_destroy(ctx, selector);

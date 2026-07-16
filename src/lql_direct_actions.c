@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int mutation_space(unsigned char ch) {
@@ -104,6 +105,94 @@ static char *mutation_copy(lql_allocator *allocator, const char *data,
   }
   out[len] = '\0';
   return out;
+}
+
+static int mutation_has_prefix(const char *begin, const char *end,
+                               const char *prefix) {
+  size_t len;
+  len = strlen(prefix);
+  return (size_t)(end - begin) >= len && memcmp(begin, prefix, len) == 0;
+}
+
+static lql_status mutation_resolve_file_path(
+    lql_allocator *allocator, const char *begin, const char *end,
+    const lql_mutation_parse_options *options, char **out, lql_error *error) {
+  const char *home;
+  const char *base;
+  size_t home_len;
+  size_t base_len;
+  size_t len;
+  char *path;
+
+  *out = NULL;
+  mutation_trim(&begin, &end);
+  if ((size_t)(end - begin) >= 2u && ((begin[0] == '"' && end[-1] == '"') ||
+                                      (begin[0] == '\'' && end[-1] == '\''))) {
+    ++begin;
+    --end;
+    mutation_trim(&begin, &end);
+  }
+  if (begin == end) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "file-backed mutation path is required");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  if (*begin == '~' && (begin + 1 == end || begin[1] == '/')) {
+    home = getenv("HOME");
+    if (home == NULL || home[0] == '\0') {
+      lql_set_error(error, LQL_STATUS_IO_ERROR,
+                    "HOME is required to resolve file-backed mutation path");
+      return LQL_STATUS_IO_ERROR;
+    }
+    home_len = strlen(home);
+    len = home_len + (size_t)(end - begin) - 1u;
+    path = (char *)allocator->alloc(allocator, len + 1u);
+    if (path == NULL) {
+      lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+      return LQL_STATUS_NO_MEMORY;
+    }
+    memcpy(path, home, home_len);
+    if (begin + 1 < end) {
+      memcpy(path + home_len, begin + 1, (size_t)(end - begin) - 1u);
+    }
+    path[len] = '\0';
+    *out = path;
+    return LQL_STATUS_OK;
+  }
+  if (*begin == '/') {
+    path = mutation_copy(allocator, begin, (size_t)(end - begin));
+    if (path == NULL) {
+      lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+      return LQL_STATUS_NO_MEMORY;
+    }
+    *out = path;
+    return LQL_STATUS_OK;
+  }
+  if (options == NULL || options->file_value_base_dir.data == NULL ||
+      options->file_value_base_dir.len == 0u) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "relative file-backed mutation path requires base dir");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  base = options->file_value_base_dir.data;
+  base_len = options->file_value_base_dir.len;
+  len = base_len + 1u + (size_t)(end - begin);
+  path = (char *)allocator->alloc(allocator, len + 1u);
+  if (path == NULL) {
+    lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+    return LQL_STATUS_NO_MEMORY;
+  }
+  memcpy(path, base, base_len);
+  if (base[base_len - 1u] == '/') {
+    memcpy(path + base_len, begin, (size_t)(end - begin));
+    path[base_len + (size_t)(end - begin)] = '\0';
+  } else {
+    path[base_len] = '/';
+    memcpy(path + base_len + 1u, begin, (size_t)(end - begin));
+    path[len] = '\0';
+  }
+  *out = path;
+  return LQL_STATUS_OK;
 }
 
 static void mutation_action_cleanup(lql_allocator *allocator,
@@ -267,7 +356,62 @@ static lql_status mutation_parse_value(lql_allocator *allocator,
   return LQL_STATUS_OK;
 }
 
+static lql_status
+mutation_parse_file_set(lql_allocator *allocator, const char *begin,
+                        const char *end,
+                        const lql_mutation_parse_options *options,
+                        lql_mutation_value_kind value_kind,
+                        lql_mutation_action *action, lql_error *error) {
+  const char *equal;
+  lql_status status;
+
+  if (options == NULL || !options->enable_file_values) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "file-backed mutations are disabled");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  if (mutation_has_prefix(begin, end, "rm:") ||
+      mutation_has_prefix(begin, end, "remove:") ||
+      mutation_has_prefix(begin, end, "time:")) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "file-backed mutation values require path=file");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  if ((size_t)(end - begin) >= 2u && end[-2] == '+' && end[-1] == '+') {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "file-backed mutation values cannot use ++");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  if ((size_t)(end - begin) >= 2u && end[-2] == '-' && end[-1] == '-') {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "file-backed mutation values cannot use --");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  equal = begin;
+  while (equal < end && *equal != '=') {
+    ++equal;
+  }
+  if (equal == end) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "file-backed mutation requires path=file");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  action->kind = LQL_MUTATION_SET;
+  status = mutation_parse_path(allocator, begin, equal, action, error);
+  if (status != LQL_STATUS_OK) {
+    return status;
+  }
+  action->value_kind = value_kind;
+  status = mutation_resolve_file_path(allocator, equal + 1, end, options,
+                                      &action->value, error);
+  if (status != LQL_STATUS_OK) {
+    mutation_action_cleanup(allocator, action);
+  }
+  return status;
+}
+
 static lql_status mutation_parse_one(lql_allocator *allocator, const char *raw,
+                                     const lql_mutation_parse_options *options,
                                      lql_mutation_action *action,
                                      lql_error *error) {
   const char *begin;
@@ -291,6 +435,19 @@ static lql_status mutation_parse_one(lql_allocator *allocator, const char *raw,
     return LQL_STATUS_PARSE_ERROR;
   }
   memset(action, 0, sizeof(*action));
+  if (mutation_has_prefix(begin, end, "textfile:")) {
+    return mutation_parse_file_set(allocator, begin + 9u, end, options,
+                                   LQL_MUTATION_VALUE_FILE_TEXT, action, error);
+  }
+  if (mutation_has_prefix(begin, end, "base64file:")) {
+    return mutation_parse_file_set(allocator, begin + 11u, end, options,
+                                   LQL_MUTATION_VALUE_FILE_BASE64, action,
+                                   error);
+  }
+  if (mutation_has_prefix(begin, end, "file:")) {
+    return mutation_parse_file_set(allocator, begin + 5u, end, options,
+                                   LQL_MUTATION_VALUE_FILE_AUTO, action, error);
+  }
   if ((size_t)(end - begin) >= 3u && memcmp(begin, "rm:", 3u) == 0) {
     action->kind = LQL_MUTATION_REMOVE;
     return mutation_parse_path(allocator, begin + 3u, end, action, error);
@@ -345,6 +502,14 @@ static lql_status mutation_parse_one(lql_allocator *allocator, const char *raw,
 LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal(
     lql *self, const char *const *expressions, size_t expression_count,
     lql_mutation **out, lql_error *error) {
+  return lql_mutation_parse_internal_with_options(
+      self, expressions, expression_count, NULL, out, error);
+}
+
+LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal_with_options(
+    lql *self, const char *const *expressions, size_t expression_count,
+    const lql_mutation_parse_options *options, lql_mutation **out,
+    lql_error *error) {
   lql_allocator *allocator;
   lql_mutation *mutation;
   size_t i;
@@ -382,7 +547,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal(
   }
   for (i = 0u; i < expression_count; ++i) {
     status =
-        mutation_parse_one(allocator, expressions[i],
+        mutation_parse_one(allocator, expressions[i], options,
                            &mutation->actions[mutation->action_count], error);
     if (status != LQL_STATUS_OK) {
       lql_mutation_destroy_internal(self, mutation);

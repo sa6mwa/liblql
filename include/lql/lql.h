@@ -74,6 +74,19 @@ typedef struct lql_string_view {
 } lql_string_view;
 
 /**
+ * Controls optional local-file mutation values. Zero-initialization preserves
+ * the default-deny behavior of `mutation_parse`: file-backed values are
+ * rejected unless `enable_file_values` is non-zero. Relative file value paths
+ * require `file_value_base_dir`; absolute paths and `~`/`~/...` are resolved
+ * without it. The parsed mutation stores only the resolved source path and the
+ * stream mutation emitter reads that path when output is produced.
+ */
+typedef struct lql_mutation_parse_options {
+  int enable_file_values;
+  lql_string_view file_value_base_dir;
+} lql_mutation_parse_options;
+
+/**
  * Reads up to `capacity` bytes into the library-owned `buffer`. Set `out_len`
  * to the number written; a successful zero-byte read signals EOF. The callback
  * must not retain `buffer`, and any non-OK status terminates execution.
@@ -98,9 +111,11 @@ typedef lql_status (*lql_stream_writer_fn)(void *user, const void *data,
  * available until the reader has reached EOF or execution returns, and must
  * propagate writer failures unchanged.
  */
-typedef lql_status (*lql_stream_range_writer_fn)(
-    void *user, size_t offset, size_t len, lql_stream_writer_fn writer,
-    void *writer_user, lql_error *error);
+typedef lql_status (*lql_stream_range_writer_fn)(void *user, size_t offset,
+                                                 size_t len,
+                                                 lql_stream_writer_fn writer,
+                                                 void *writer_user,
+                                                 lql_error *error);
 
 /** Controls continuation after a decision or value callback. */
 typedef enum lql_stream_callback_result {
@@ -109,7 +124,8 @@ typedef enum lql_stream_callback_result {
   LQL_STREAM_CALLBACK_ERROR = 2
 } lql_stream_callback_result;
 
-/** Requested record-output transformation. Zero-initialization selects decisions only. */
+/** Requested record-output transformation. Zero-initialization selects
+ * decisions only. */
 typedef enum lql_stream_output_mode {
   LQL_STREAM_OUTPUT_DECISION_ONLY = 0,
   LQL_STREAM_OUTPUT_SELECTED_RECORD = 1,
@@ -168,9 +184,11 @@ typedef struct lql_stream_request {
   lql_stream_reader_fn reader;
   /** Opaque context passed to `reader`; never retained after execution. */
   void *reader_user;
-  /** Optional caller-owned source replay adapter for true-stream selected values. */
+  /** Optional caller-owned source replay adapter for true-stream selected
+   * values. */
   lql_stream_range_writer_fn range_writer;
-  /** Opaque context passed to `range_writer`; never retained after execution. */
+  /** Opaque context passed to `range_writer`; never retained after execution.
+   */
   void *range_user;
   /**
    * Non-zero asserts each JSON record is compact (no structural whitespace).
@@ -190,7 +208,8 @@ typedef struct lql_stream_request {
   const lql_mutation *mutation;
   /** Zero selects decision-only execution. */
   lql_stream_output_mode output_mode;
-  /** Non-zero suppresses unmatched record output; it does not suppress decisions. */
+  /** Non-zero suppresses unmatched record output; it does not suppress
+   * decisions. */
   int matched_only;
   /** Optional record, match, and byte limits; zero values are unlimited. */
   lql_stream_limits limits;
@@ -318,10 +337,12 @@ struct lql {
   const char *(*version)(const lql *self);
   /** Writes build capabilities to `out`; `out` is required. */
   void (*capabilities_get)(const lql *self, lql_capabilities *out);
-  /** Parses an AND-combined selector expression and transfers `*out` on success. */
+  /** Parses an AND-combined selector expression and transfers `*out` on
+   * success. */
   lql_status (*selector_parse)(lql *self, const char *expr, lql_selector **out,
                                lql_error *error);
-  /** Parses an OR-combined selector expression and transfers `*out` on success. */
+  /** Parses an OR-combined selector expression and transfers `*out` on success.
+   */
   lql_status (*selector_parse_or)(lql *self, const char *expr,
                                   lql_selector **out, lql_error *error);
   /**
@@ -346,18 +367,27 @@ struct lql {
                                   const lql_projection *projection);
   /** Writes a borrowed normalized projection path at `index` to `out`. */
   lql_status (*projection_path)(const lql *self,
-                                const lql_projection *projection,
-                                size_t index, lql_string_view *out,
-                                lql_error *error);
+                                const lql_projection *projection, size_t index,
+                                lql_string_view *out, lql_error *error);
   /**
    * Parses mutation expressions and transfers `*out` on success. Matching
    * outer single or double quotes delimit a string value; their contents are
    * literal LQL text, not JSON escape syntax.
    */
-  lql_status (*mutation_parse)(lql *self,
-                               const char *const *expressions,
-                               size_t expression_count,
-                               lql_mutation **out, lql_error *error);
+  lql_status (*mutation_parse)(lql *self, const char *const *expressions,
+                               size_t expression_count, lql_mutation **out,
+                               lql_error *error);
+  /**
+   * Parses mutation expressions with explicit opt-in features. File-backed
+   * values use Go-lql-compatible prefixes: `file:` auto-selects text or base64,
+   * `textfile:` streams a UTF-8 text JSON string, and `base64file:` streams a
+   * base64 JSON string. File-backed values are intentionally valid only for set
+   * mutations and are emitted by the streaming mutation path.
+   */
+  lql_status (*mutation_parse_with_options)(
+      lql *self, const char *const *expressions, size_t expression_count,
+      const lql_mutation_parse_options *options, lql_mutation **out,
+      lql_error *error);
   /** Releases a mutation returned by `mutation_parse`; accepts NULL. */
   void (*mutation_destroy)(lql *self, lql_mutation *mutation);
   /** Returns the number of parsed actions in `mutation`. */
@@ -434,7 +464,8 @@ struct lql {
   /** Builds and transfers the match-all selector to `*out`. */
   lql_status (*selector_build_all)(lql *self, lql_selector **out,
                                    lql_error *error);
-  /** Builds an AND or OR selector from borrowed child selectors and transfers `*out`. */
+  /** Builds an AND or OR selector from borrowed child selectors and transfers
+   * `*out`. */
   lql_status (*selector_build_compound)(lql *self, lql_selector_node_kind kind,
                                         const lql_selector *const *children,
                                         size_t child_count, lql_selector **out,
@@ -459,7 +490,8 @@ struct lql {
   lql_status (*selector_build_in)(lql *self, const lql_selector_in_term *term,
                                   const lql_string_view *any_values,
                                   lql_selector **out, lql_error *error);
-  /** Builds an `exists` selector from a borrowed JSON Pointer and transfers `*out`. */
+  /** Builds an `exists` selector from a borrowed JSON Pointer and transfers
+   * `*out`. */
   lql_status (*selector_build_exists)(lql *self, lql_string_view path,
                                       lql_selector **out, lql_error *error);
   /** Releases this receiver and every resource it owns; accepts NULL. */
@@ -470,7 +502,8 @@ struct lql {
 lql_status lql_new(lql **out, lql_error *error);
 /** Clears an error object to LQL_STATUS_OK and an empty message. */
 void lql_error_init(lql_error *error);
-/** Returns a static, non-owning string for `status`, including unknown values. */
+/** Returns a static, non-owning string for `status`, including unknown values.
+ */
 const char *lql_status_string(lql_status status);
 
 /**

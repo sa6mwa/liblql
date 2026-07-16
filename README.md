@@ -50,6 +50,14 @@ and `ctx->stream_execute_spooled(ctx, ...)`, alongside the other receiver
 methods; the identically signed `lql_stream_execute` free functions remain
 compatibility entry points.
 
+File-backed mutation values are a liblql feature, not a `clql` preprocessor.
+`ctx->mutation_parse(ctx, ...)` rejects `file:`, `textfile:`, and
+`base64file:` values by default. Call
+`ctx->mutation_parse_with_options(ctx, ..., &options, ...)` with
+`options.enable_file_values` set and a base directory for relative file paths
+to opt in. The parsed mutation stores the resolved path; mutation output reads
+and streams the file value when records are emitted.
+
 ## Lifecycle Surface
 
 This repository follows the pkt.systems CMake lifecycle. Linux builds use the
