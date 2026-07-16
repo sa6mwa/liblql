@@ -141,14 +141,36 @@ def main():
             ["/tags{/kind=document,/source=local}"],
         ),
         (
+            "brace shorthand quoted comma",
+            compact({"state": {"details": {"owner": "bob"}, "metrics": 1}}),
+            [
+                "/state/progress=ready",
+                "/state/metrics++",
+                '/state/details{/owner="alice",/note="hi, world"}',
+                "/state/metrics=+3",
+                "rm:/state/legacy",
+            ],
+        ),
+        ("decrement shorthand", compact({"state": {"count": 5}}), ["/state/count--"]),
+        (
             "array wildcard set",
             compact({"items": [{"sku": "a"}, {"sku": "b"}]}),
             ["/items/[]/seen=true"],
         ),
         (
+            "array compact wildcard set",
+            compact({"items": [{"sku": "a"}, {"sku": "b"}]}),
+            ["/items[]/seen=true"],
+        ),
+        (
             "array wildcard increment",
             compact({"items": [{"n": 1}, {"n": 2}]}),
             ["/items/[]/n=+1"],
+        ),
+        (
+            "array star wildcard increment",
+            compact({"items": [{"n": 1}, {"n": 2}]}),
+            ["/items/*/n=+1"],
         ),
         (
             "array recursive wildcard increment",
@@ -189,6 +211,34 @@ def main():
             "wildcard remove",
             compact({"items": [{"x": 1, "y": 2}, {"x": 3}]}),
             ["rm:/items/[]/x"],
+        ),
+        (
+            "wildcard remove combo",
+            compact(
+                {
+                    "labels": {"env": "prod", "owner": "alice"},
+                    "items": [{"sku": "A", "price": 10}, {"sku": "B", "price": 20}],
+                    "nested": {"items": [{"sku": "C", "price": 30}]},
+                }
+            ),
+            ["rm:/labels/*", "rm:/items[]/price", "rm:/items/**/sku", "rm:/nested/.../price"],
+        ),
+        (
+            "wildcard full mutation combo",
+            compact(
+                {
+                    "labels": {"env": "prod", "owner": "alice"},
+                    "items": [{"sku": "A", "price": 10}, {"sku": "B", "price": 20}],
+                    "groups": [{"items": [{"sku": "C"}]}],
+                }
+            ),
+            [
+                '/labels/*="tagged"',
+                '/items/**/sku="X"',
+                "/items[]/price=+5",
+                "/items/*/price=+1",
+                '/groups/.../sku="Z"',
+            ],
         ),
     ]
     for name, input_text, mutations in explicit_cases:
