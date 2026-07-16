@@ -171,7 +171,9 @@ install-smoke: build-release
 	@sh scripts/check_install_tree.sh
 
 clql-smoke: build-release
-	@sh scripts/check_clql_smoke.sh
+	@mkdir -p build
+	@repo=$$(pwd); modver=$$(cd reference/go-benchmark && go list -m -f '{{.Version}}' pkt.systems/lql); moddir="$$(go env GOPATH)/pkg/mod/pkt.systems/lql@$$modver"; cd "$$moddir" && go build -o "$$repo/build/reference-lql" ./cmd/lql
+	@LQL_GO_CLI_PATH=build/reference-lql sh scripts/check_clql_smoke.sh
 
 package:
 	@sh scripts/package.sh x86_64-linux-gnu

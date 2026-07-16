@@ -2,12 +2,13 @@
 set -eu
 
 clql=${CLQL_PATH:-build/release/clql}
+go_lql=${LQL_GO_CLI_PATH:-build/reference-lql}
 fixture=${LQL_CLQL_FIXTURE:-examples/status.ndjson}
 tmp=${TMPDIR:-/tmp}/liblql-clql-smoke.$$
 tmpdir=${TMPDIR:-/tmp}/liblql-clql-smoke.dir.$$
 
 cleanup() {
-  rm -f "$tmp.out" "$tmp.err"
+  rm -f "$tmp.out" "$tmp.err" "$tmp.c.out" "$tmp.go.out"
   rm -rf "$tmpdir"
 }
 trap cleanup EXIT HUP INT TERM
@@ -16,6 +17,22 @@ if [ ! -x "$clql" ]; then
   printf 'clql smoke: missing clql binary: %s\n' "$clql" >&2
   exit 1
 fi
+if [ ! -x "$go_lql" ]; then
+  printf 'clql smoke: missing Go lql reference binary: %s\n' "$go_lql" >&2
+  exit 1
+fi
+
+compare_go_lql() {
+  label=$1
+  shift
+  "$clql" "$@" >"$tmp.c.out"
+  "$go_lql" "$@" >"$tmp.go.out"
+  if ! cmp -s "$tmp.go.out" "$tmp.c.out"; then
+    printf 'clql smoke: Go lql CLI parity mismatch for %s\n' "$label" >&2
+    diff -u "$tmp.go.out" "$tmp.c.out" >&2 || true
+    exit 1
+  fi
+}
 
 "$clql" --help >"$tmp.out"
 grep 'usage: clql' "$tmp.out" >/dev/null
@@ -89,6 +106,18 @@ printf '%s\n%s\n' \
   '{"id":"b","status":"old","keep":2,"payload":"hello file"}' |
   cmp -s - "$tmp.out"
 
+compare_go_lql 'textfile mutation values' \
+  -c -F -M -m "textfile:/payload=$tmpdir/blob.txt" \
+  '/id="a"' "$tmpdir/input.ndjson"
+
+printf '\000\001\002\003hello\377' >"$tmpdir/blob.bin"
+compare_go_lql 'base64file mutation values' \
+  -c -F -M -m "base64file:/payload=$tmpdir/blob.bin" \
+  '/id="a"' "$tmpdir/input.ndjson"
+compare_go_lql 'auto file mutation values' \
+  -c -F -M -m "file:/payload=$tmpdir/blob.bin" \
+  '/id="a"' "$tmpdir/input.ndjson"
+
 cp "$tmpdir/input.ndjson" "$tmpdir/inline.ndjson"
 "$clql" -i -m '/status=ready' '/id="a"' "$tmpdir/inline.ndjson"
 printf '%s\n%s\n' \
@@ -118,4 +147,4 @@ then
 fi
 grep 'JSON' "$tmp.err" >/dev/null
 
-printf 'clql smoke: selection, projection, mutation, inline, file-backed values, stdin error, spill help, and version passed\n'
+printf 'clql smoke: selection, projection, mutation, inline, file-backed values, Go CLI parity, stdin error, spill help, and version passed\n'
