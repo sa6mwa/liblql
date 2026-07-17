@@ -416,7 +416,9 @@ struct lql {
   /**
    * Parses mutation expressions and transfers `*out` on success. Matching
    * outer single or double quotes delimit a string value; their contents are
-   * literal LQL text, not JSON escape syntax.
+   * literal LQL text, not JSON escape syntax. Each expression may contain
+   * comma/newline-separated top-level mutation clauses; brace shorthand keeps
+   * its own nested comma/newline splitting.
    */
   lql_status (*mutation_parse)(lql *self, const char *const *expressions,
                                size_t expression_count, lql_mutation **out,

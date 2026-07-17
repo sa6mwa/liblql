@@ -467,6 +467,10 @@ static int run_post_hit_validation(lql *ctx) {
   static const char malformed_array[] = "{\"status\":\"open\",\"bad\":[1,]}\n";
   static const char malformed_string[] =
       "{\"status\":\"open\",\"bad\":\"unterminated}\n";
+  static const unsigned char invalid_utf8[] = {
+      '{', '"', 's', 't', 'a', 't', 'u', 's', '"', ':', '"', 'o', 'p',
+      'e', 'n', '"', ',', '"', 'b', 'a', 'd', '"', ':', '"', 0xffu,
+      '"', '}', '\n'};
   static const char malformed_and[] =
       "{\"status\":\"open\",\"region\":\"us-west\",\"bad\":[1,]}\n";
   static const char valid_nested[] =
@@ -507,6 +511,20 @@ static int run_post_hit_validation(lql *ctx) {
   memset(&reader, 0, sizeof(reader));
   reader.data = (const unsigned char *)malformed_string;
   reader.len = sizeof(malformed_string) - 1u;
+  reader.chunk_size = 3u;
+  memset(&decisions, 0, sizeof(decisions));
+  request.reader_user = &reader;
+  if (lql_stream_execute(ctx, &request, &result, &error) !=
+          LQL_STATUS_JSON_ERROR ||
+      result.records_seen != 0u || result.records_matched != 0u ||
+      decisions.count != 0u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = invalid_utf8;
+  reader.len = sizeof(invalid_utf8);
   reader.chunk_size = 3u;
   memset(&decisions, 0, sizeof(decisions));
   request.reader_user = &reader;
@@ -1845,6 +1863,16 @@ static int run_mutation_output(lql *ctx) {
                                         "/meta/a~1b=true"};
   static const char ordered_output[] =
       "{\"status\":\"ready\",\"meta\":{\"a/b\":true}}\n";
+  static const char *const multiline_list[] = {
+      "/state/details{\n"
+      "  /owner = \"alice\"\n"
+      "  /note = \"hi, world\"\n"
+      "}\n"
+      "rm:/n\n"
+      "/status=ready"};
+  static const char multiline_list_output[] =
+      "{\"status\":\"ready\",\"state\":{\"details\":{\"owner\":\"alice\","
+      "\"note\":\"hi, world\"}}}\n";
   static const char *const invalid_root[] = {"/=value"};
   static const char *const invalid_json_numbers[] = {
       "/n=01", "/n=nan", "/n=inf", "/n=+nan", "/n=+inf", "/n=+0", "/n=1e9999"};
@@ -2629,6 +2657,32 @@ static int run_mutation_output(lql *ctx) {
       result.records_seen != 2u || result.records_matched != 1u ||
       writer.len != sizeof(ordered_output) - 1u ||
       memcmp(writer.data, ordered_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  request.reader_user = &reader;
+  if (ctx->mutation_parse(ctx, multiline_list, 1u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 4u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  reader.offset = 0u;
+  memset(&writer, 0, sizeof(writer));
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(multiline_list_output) - 1u ||
+      memcmp(writer.data, multiline_list_output, writer.len) != 0) {
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
     return 1;

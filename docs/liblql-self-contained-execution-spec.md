@@ -83,8 +83,9 @@ reader → bounded byte buffer → strict JSON scanner
 The scanner is not a general DOM parser. It is a pull scanner with bounded
 input and token scratch storage. It consumes JSON-permitted whitespace at every
 grammar boundary, then recognizes and validates JSON structure, strings,
-escapes, Unicode surrogate pairs, literals, and numbers while the candidate
-state owns LQL decisions.
+escapes, Unicode surrogate pairs, raw UTF-8, literals, and numbers while the
+candidate state owns LQL decisions. Raw invalid UTF-8 in a JSON string is a
+JSON error, even though some Go decoder paths replacement-map it.
 
 For every token, the direct hot path performs only the work required by the
 compiled program:

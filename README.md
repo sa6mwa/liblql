@@ -17,8 +17,8 @@ contract and completion gates are in
 Streaming inputs are strict NDJSON. Root arrays are hard errors and are never
 flattened. This intentionally diverges from Go lql's JSON-stream behavior:
 accepting an array document would weaken the NDJSON framing contract. Input may
-contain ordinary JSON whitespace; emitted records are compact JSON plus one
-newline.
+contain ordinary JSON whitespace but must be standard JSON, including valid
+UTF-8 in strings; emitted records are compact JSON plus one newline.
 
 The implementation must prove Go behavioral parity on accepted parity rows and
 at least 1.0x GCC C/Go performance on every accepted benchmark row. JSON scalar
@@ -60,6 +60,9 @@ methods; the identically signed `lql_stream_execute` free functions remain
 compatibility entry points.
 
 File-backed mutation values are a liblql feature, not a `clql` preprocessor.
+`ctx->mutation_parse(ctx, ...)` accepts pre-split mutation arrays and also
+single strings containing comma/newline-separated top-level clauses, with
+brace shorthand keeping nested clauses together.
 `ctx->mutation_parse(ctx, ...)` rejects `file:`, `textfile:`, and
 `base64file:` values by default. Call
 `ctx->mutation_parse_with_options(ctx, ..., &options, ...)` with

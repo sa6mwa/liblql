@@ -815,7 +815,9 @@ mutation_parse_expression(lql_allocator *allocator, const char *raw,
       scan = part;
       while (scan < content_end) {
         if (quote != 0) {
-          if (*scan == (char)quote) {
+          if (*scan == '\\' && scan + 1u < content_end) {
+            ++scan;
+          } else if (*scan == (char)quote) {
             quote = 0;
           }
         } else if (*scan == '"' || *scan == '\'') {
@@ -868,6 +870,93 @@ mutation_parse_expression(lql_allocator *allocator, const char *raw,
   return status;
 }
 
+static lql_status
+mutation_parse_expression_list(lql_allocator *allocator, const char *raw,
+                               const lql_mutation_parse_options *options,
+                               lql_mutation *mutation, size_t *capacity,
+                               lql_error *error) {
+  const char *begin;
+  const char *end;
+  const char *part;
+  const char *scan;
+  int quote;
+  size_t brace_depth;
+  lql_status status;
+
+  begin = raw;
+  end = raw + strlen(raw);
+  mutation_trim(&begin, &end);
+  part = begin;
+  scan = begin;
+  quote = 0;
+  brace_depth = 0u;
+  while (scan < end) {
+    if (quote != 0) {
+      if (*scan == '\\' && scan + 1u < end) {
+        ++scan;
+      } else if (*scan == (char)quote) {
+        quote = 0;
+      }
+    } else if (*scan == '"' || *scan == '\'') {
+      quote = (unsigned char)*scan;
+    } else if (*scan == '{') {
+      ++brace_depth;
+    } else if (*scan == '}') {
+      if (brace_depth == 0u) {
+        lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                      "unmatched mutation brace");
+        return LQL_STATUS_PARSE_ERROR;
+      }
+      --brace_depth;
+    } else if (brace_depth == 0u && (*scan == ',' || *scan == '\n')) {
+      const char *part_end;
+      part_end = scan;
+      mutation_trim(&part, &part_end);
+      if (part < part_end) {
+        char *expr;
+        expr = mutation_copy(allocator, part, (size_t)(part_end - part));
+        if (expr == NULL) {
+          lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+          return LQL_STATUS_NO_MEMORY;
+        }
+        status = mutation_parse_expression(allocator, expr, options, mutation,
+                                           capacity, error);
+        allocator->destroy(allocator, expr);
+        if (status != LQL_STATUS_OK) {
+          return status;
+        }
+      }
+      part = scan + 1u;
+    }
+    ++scan;
+  }
+  if (quote != 0) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "unterminated quoted mutation value");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  if (brace_depth != 0u) {
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR, "unterminated mutation brace");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  mutation_trim(&part, &end);
+  if (part < end) {
+    char *expr;
+    expr = mutation_copy(allocator, part, (size_t)(end - part));
+    if (expr == NULL) {
+      lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+      return LQL_STATUS_NO_MEMORY;
+    }
+    status = mutation_parse_expression(allocator, expr, options, mutation,
+                                       capacity, error);
+    allocator->destroy(allocator, expr);
+    if (status != LQL_STATUS_OK) {
+      return status;
+    }
+  }
+  return LQL_STATUS_OK;
+}
+
 LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal(
     lql *self, const char *const *expressions, size_t expression_count,
     lql_mutation **out, lql_error *error) {
@@ -910,8 +999,8 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal_with_options(
   }
   capacity = 0u;
   for (i = 0u; i < expression_count; ++i) {
-    status = mutation_parse_expression(allocator, expressions[i], options,
-                                       mutation, &capacity, error);
+    status = mutation_parse_expression_list(allocator, expressions[i], options,
+                                            mutation, &capacity, error);
     if (status != LQL_STATUS_OK) {
       lql_mutation_destroy_internal(self, mutation);
       return status;

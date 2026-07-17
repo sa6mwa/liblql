@@ -212,9 +212,9 @@ pointers, and compact output.
 
 Mutation must match Go parsing and execution for set, remove, increment,
 creation of missing object paths where Go permits it, typed/quoted values,
-time normalization, brace shorthand, explicit file/text/base64 values,
-concrete numeric paths, object/array wildcards, recursive paths, and error
-precedence.
+time normalization, brace shorthand, comma/newline-separated top-level
+mutation clauses, explicit file/text/base64 values, concrete numeric paths,
+object/array wildcards, recursive paths, and error precedence.
 
 File-backed mutation values are disabled by the default mutation parser and
 must be enabled with explicit parse options. `file:` auto-selects text or
