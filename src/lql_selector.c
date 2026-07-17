@@ -1272,7 +1272,12 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
     }
     out->field = normalize_field_path(ctx, raw_field);
     out->value = unquote(ctx, raw_value);
-    out->value_is_string = raw_value[0] == '"';
+    /*
+     * Both quote styles are LQL string delimiters.  Keep this check on the
+     * raw token: after unquoting, values such as 'true' and '1' would otherwise
+     * be reclassified as typed JSON scalars.
+     */
+    out->value_is_string = raw_value[0] == '"' || raw_value[0] == '\'';
     out->value_kind = out->value_is_string ? LQL_SELECTOR_LITERAL_STRING
                                            : selector_literal_kind(out->value);
     ctx->allocator->destroy(ctx->allocator, raw_field);

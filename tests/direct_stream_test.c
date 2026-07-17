@@ -338,12 +338,16 @@ static int run_scalar_json_semantic_regressions(lql *ctx) {
    */
   if (run_selection(ctx, "/v=1", scalar_text_input, 9u, 1u) ||
       run_selection(ctx, "/v=\"1\"", scalar_text_input, 9u, 1u) ||
+      run_selection(ctx, "/v='1'", scalar_text_input, 9u, 1u) ||
       run_selection(ctx, "/v=true", scalar_text_input, 9u, 1u) ||
       run_selection(ctx, "/v=\"true\"", scalar_text_input, 9u, 1u) ||
+      run_selection(ctx, "/v='true'", scalar_text_input, 9u, 1u) ||
       run_selection(ctx, "/v=false", scalar_text_input, 9u, 1u) ||
       run_selection(ctx, "/v=\"false\"", scalar_text_input, 9u, 1u) ||
+      run_selection(ctx, "/v='false'", scalar_text_input, 9u, 1u) ||
       run_selection(ctx, "/v=null", scalar_text_input, 9u, 1u) ||
       run_selection(ctx, "/v=\"null\"", scalar_text_input, 9u, 1u) ||
+      run_selection(ctx, "/v='null'", scalar_text_input, 9u, 1u) ||
       run_selection(ctx, "in{field=/v,any=1|true|null|false|x}",
                     scalar_text_input, 9u, 5u)) {
     return 1;
@@ -357,8 +361,10 @@ static int run_scalar_json_semantic_regressions(lql *ctx) {
   if (run_selection(ctx, "/v=1", numeric_text_input, 18u, 2u) ||
       run_selection(ctx, "/v=1.0", numeric_text_input, 18u, 2u) ||
       run_selection(ctx, "/v=\"1.0\"", numeric_text_input, 18u, 1u) ||
+      run_selection(ctx, "/v='1.0'", numeric_text_input, 18u, 1u) ||
       run_selection(ctx, "/v=1e1", numeric_text_input, 18u, 2u) ||
       run_selection(ctx, "/v=\"1e1\"", numeric_text_input, 18u, 1u) ||
+      run_selection(ctx, "/v='1e1'", numeric_text_input, 18u, 1u) ||
       run_selection(ctx, "/v=1e-1", numeric_text_input, 18u, 2u) ||
       run_selection(ctx, "/v=00", numeric_text_input, 18u, 1u) ||
       run_selection(ctx, "/v=9223372036854775807", numeric_text_input, 18u,

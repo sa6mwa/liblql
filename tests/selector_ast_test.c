@@ -482,6 +482,17 @@ static void test_shorthand_and_capabilities(lql *ctx) {
   }
 
   selector = NULL;
+  if (parse_selector(ctx, "shorthand_single_quoted_scalar", "/enabled='true'",
+                     0, &selector)) {
+    if (root_kind(ctx, "shorthand_single_quoted_scalar", selector,
+                  LQL_SELECTOR_NODE_EQ, &root)) {
+      expect_string_term(ctx, "shorthand_single_quoted_scalar", root,
+                         "/enabled", 1, "true", 0, 0u);
+    }
+    ctx->selector_destroy(ctx, selector);
+  }
+
+  selector = NULL;
   if (parse_selector(ctx, "shorthand_not_eq", "/status!=closed", 0,
                      &selector)) {
     if (root_kind(ctx, "shorthand_not_eq", selector, LQL_SELECTOR_NODE_NOT,
