@@ -932,6 +932,11 @@ static int run_mapped_string_predicates(lql *ctx) {
       "{\"timestamp\":\"2026-03-05T10:29:00+01:00\"}\n"
       "{\"timestamp\":\"2026-03-05T10:29:00Z\"}\n"
       "{\"timestamp\":\"2026-03-05\"}\n";
+  static const char temporal_fraction_input[] =
+      "{\"timestamp\":\"2026-03-11T01:11:28.123456789Z\"}\n"
+      "{\"timestamp\":\"2026-03-11T01:11:28.123+01:00\"}\n"
+      "{\"timestamp\":\"2026-03-11T00:11:28.123Z\"}\n"
+      "{\"timestamp\":\"2026-03-11T01:11:28Z\"}\n";
   static const char wildcard_input[] =
       "{\"items\":[{\"sku\":\"A\"},{\"sku\":\"B\"}],"
       "\"object\":{\"0\":{\"state\":\"open\"}},"
@@ -1046,6 +1051,16 @@ static int run_mapped_string_predicates(lql *ctx) {
                     "before=2026-03-05T10:30:00Z}",
                     temporal_input, 3u, 1u)) {
     return 12;
+  }
+  if (run_selection(ctx, "/timestamp=\"2026-03-11T01:11:28.123456789\"",
+                    temporal_fraction_input, 4u, 1u) ||
+      run_selection(ctx, "/timestamp=\"2026-03-11T00:11:28.123Z\"",
+                    temporal_fraction_input, 4u, 2u) ||
+      run_selection(ctx,
+                    "date{field=/timestamp,after=2026-03-11T01:11:28.122Z,"
+                    "before=2026-03-11T01:11:28.124Z}",
+                    temporal_fraction_input, 4u, 1u)) {
+    return 106;
   }
   if (run_selection(ctx, "date{f=/timestamp,since=yesterday}",
                     "{\"timestamp\":\"2999-01-01T00:00:00Z\"}\n"

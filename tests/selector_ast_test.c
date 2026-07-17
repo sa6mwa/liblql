@@ -398,6 +398,17 @@ static void test_string_terms(lql *ctx) {
   }
 
   selector = NULL;
+  if (parse_selector(ctx, "eq_single_quoted_comma",
+                     "eq{field=/status,value='open,closed'}", 0, &selector)) {
+    if (root_kind(ctx, "eq_single_quoted_comma", selector,
+                  LQL_SELECTOR_NODE_EQ, &root)) {
+      expect_string_term(ctx, "eq_single_quoted_comma", root, "/status", 1,
+                         "open,closed", 0, 0u);
+    }
+    ctx->selector_destroy(ctx, selector);
+  }
+
+  selector = NULL;
   if (parse_selector(ctx, "contains_any_ignore",
                      "contains{f=/msg,a=timeout|error,ignoreCase=t}", 0,
                      &selector)) {
@@ -407,6 +418,18 @@ static void test_string_terms(lql *ctx) {
                            2u)) {
       expect_string_any(ctx, "contains_any_ignore", root, 0u, "timeout");
       expect_string_any(ctx, "contains_any_ignore", root, 1u, "error");
+    }
+    ctx->selector_destroy(ctx, selector);
+  }
+
+  selector = NULL;
+  if (parse_selector(ctx, "contains_single_quoted_phrase",
+                     "contains{field=/msg,value='hello world'}", 0,
+                     &selector)) {
+    if (root_kind(ctx, "contains_single_quoted_phrase", selector,
+                  LQL_SELECTOR_NODE_CONTAINS, &root)) {
+      expect_string_term(ctx, "contains_single_quoted_phrase", root, "/msg", 1,
+                         "hello world", 0, 0u);
     }
     ctx->selector_destroy(ctx, selector);
   }
@@ -650,6 +673,38 @@ static void test_range_date_in_exists(lql *ctx) {
   }
 
   selector = NULL;
+  if (parse_selector(ctx, "date_value", "date{field=/timestamp,value=2025-01-01}",
+                     0, &selector)) {
+    if (root_kind(ctx, "date_value", selector, LQL_SELECTOR_NODE_DATE, &root) &&
+        expect_ok("date_value",
+                  ctx->selector_node_date_term(ctx, root, &date, &error),
+                  &error)) {
+      if (!view_eq(date.field, "/timestamp") ||
+          !view_eq(date.value, "2025-01-01")) {
+        fail("date_value", "unexpected date value term");
+      }
+    }
+    ctx->selector_destroy(ctx, selector);
+  }
+
+  selector = NULL;
+  if (parse_selector(ctx, "date_gte_lt",
+                     "date{field=/timestamp,gte=2025-01-01,lt=2025-01-03}", 0,
+                     &selector)) {
+    if (root_kind(ctx, "date_gte_lt", selector, LQL_SELECTOR_NODE_DATE, &root) &&
+        expect_ok("date_gte_lt",
+                  ctx->selector_node_date_term(ctx, root, &date, &error),
+                  &error)) {
+      if (!view_eq(date.field, "/timestamp") ||
+          !view_eq(date.gte, "2025-01-01") ||
+          !view_eq(date.lt, "2025-01-03")) {
+        fail("date_gte_lt", "unexpected date range aliases");
+      }
+    }
+    ctx->selector_destroy(ctx, selector);
+  }
+
+  selector = NULL;
   if (parse_selector(ctx, "in_any", "in{f=/env,a=prod|stage|dev}", 0,
                      &selector)) {
     if (root_kind(ctx, "in_any", selector, LQL_SELECTOR_NODE_IN, &root) &&
@@ -680,6 +735,21 @@ static void test_range_date_in_exists(lql *ctx) {
       }
       expect_in_any(ctx, "in_any_phrases", root, 0u, "hello world");
       expect_in_any(ctx, "in_any_phrases", root, 1u, "goodbye jupiter");
+    }
+    ctx->selector_destroy(ctx, selector);
+  }
+
+  selector = NULL;
+  if (parse_selector(ctx, "exists_single_quoted_comma", "exists{'/meta,etag'}",
+                     0, &selector)) {
+    if (root_kind(ctx, "exists_single_quoted_comma", selector,
+                  LQL_SELECTOR_NODE_EXISTS, &root) &&
+        expect_ok("exists_single_quoted_comma",
+                  ctx->selector_node_exists_path(ctx, root, &path, &error),
+                  &error)) {
+      if (!view_eq(path, "/meta,etag")) {
+        fail("exists_single_quoted_comma", "unexpected exists path");
+      }
     }
     ctx->selector_destroy(ctx, selector);
   }
