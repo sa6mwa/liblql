@@ -46,7 +46,7 @@ struct lql_impl {
 
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
 LQL_INTERNAL_SYMBOL void lql_allocator_instance_init(lql_impl *impl,
-                                                      lql_allocator *upstream);
+                                                     lql_allocator *upstream);
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_from_receiver(const lql *self);
 LQL_INTERNAL_SYMBOL void *lql_receiver_alloc(lql *self, size_t size);
 LQL_INTERNAL_SYMBOL void *lql_receiver_calloc(lql *self, size_t count,
@@ -174,7 +174,9 @@ typedef struct lql_mutation_action {
   char **segments;
   size_t segment_count;
   char *value;
-  FILE *file_value_handle;
+  lql_mutation_file_open_fn file_value_open;
+  lql_mutation_file_close_fn file_value_close;
+  void *file_value_user;
   lql_mutation_value_kind value_kind;
   double delta;
 } lql_mutation_action;

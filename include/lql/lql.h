@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,19 +75,6 @@ typedef struct lql_string_view {
 } lql_string_view;
 
 /**
- * Controls optional local-file mutation values. Zero-initialization preserves
- * the default-deny behavior of `mutation_parse`: file-backed values are
- * rejected unless `enable_file_values` is non-zero. Relative file value paths
- * require `file_value_base_dir`; absolute paths and `~`/`~/...` are resolved
- * without it. The parsed mutation stores only the resolved source path and the
- * stream mutation emitter reads that path when output is produced.
- */
-typedef struct lql_mutation_parse_options {
-  int enable_file_values;
-  lql_string_view file_value_base_dir;
-} lql_mutation_parse_options;
-
-/**
  * Reads up to `capacity` bytes into the library-owned `buffer`. Set `out_len`
  * to the number written; a successful zero-byte read signals EOF. The callback
  * must not retain `buffer`, and any non-OK status terminates execution.
@@ -94,6 +82,51 @@ typedef struct lql_mutation_parse_options {
 typedef lql_status (*lql_stream_reader_fn)(void *user, unsigned char *buffer,
                                            size_t capacity, size_t *out_len,
                                            lql_error *error);
+
+/** Returns the current wall-clock instant. The default is `time(NULL)`. */
+typedef time_t (*lql_time_now_fn)(void *user);
+
+/**
+ * Opens one fresh file-value byte stream at its beginning. On success, set
+ * `out_reader` and `out_reader_user`; the paired close callback receives that
+ * user pointer once the current evaluation pass ends. The path is an opaque
+ * caller-defined reference when this callback is supplied.
+ */
+typedef lql_status (*lql_mutation_file_open_fn)(
+    void *user, lql_string_view path, lql_stream_reader_fn *out_reader,
+    void **out_reader_user, lql_error *error);
+
+/** Releases one reader returned by `lql_mutation_file_open_fn`. */
+typedef void (*lql_mutation_file_close_fn)(void *user, void *reader_user);
+
+/**
+ * Controls optional file-backed mutation values and time expressions.
+ * Zero-initialization preserves the default-deny behavior of `mutation_parse`:
+ * file-backed values are rejected unless `enable_file_values` is non-zero.
+ *
+ * Without `file_value_open`, liblql uses local `fopen` and resolves relative
+ * paths through `file_value_base_dir`; absolute paths and `~`/`~/...` are
+ * resolved without it. With `file_value_open`, the path is passed through as a
+ * caller-defined opaque reference, and both open and close callbacks are
+ * required. A fresh reader is opened for every pass, so no source needs to be
+ * seekable or rewindable. The mutation handle borrows the callback pointers
+ * and `file_value_user` until it is destroyed.
+ *
+ * `time_now` controls `time:...=NOW` parsing and defaults to `time(NULL)`.
+ * RFC3339 values remain normalized in UTC and do not consult process locale.
+ */
+typedef struct lql_mutation_parse_options {
+  int enable_file_values;
+  lql_string_view file_value_base_dir;
+  lql_mutation_file_open_fn file_value_open;
+  lql_mutation_file_close_fn file_value_close;
+  void *file_value_user;
+  lql_time_now_fn time_now;
+  void *time_user;
+} lql_mutation_parse_options;
+
+/** Returns non-zero to request a successful synchronous stream stop. */
+typedef int (*lql_stream_cancel_fn)(void *user);
 
 /**
  * Consumes exactly one output chunk before returning. The library never retries
@@ -140,7 +173,8 @@ typedef enum lql_stream_stop_reason {
   LQL_STREAM_STOP_RECORD_LIMIT = 1,
   LQL_STREAM_STOP_MATCH_LIMIT = 2,
   LQL_STREAM_STOP_BYTE_LIMIT = 3,
-  LQL_STREAM_STOP_CALLBACK = 4
+  LQL_STREAM_STOP_CALLBACK = 4,
+  LQL_STREAM_STOP_CANCELLED = 5
 } lql_stream_stop_reason;
 
 /** Final selection result for one zero-based NDJSON record index. */
@@ -184,6 +218,16 @@ typedef struct lql_stream_request {
   lql_stream_reader_fn reader;
   /** Opaque context passed to `reader`; never retained after execution. */
   void *reader_user;
+  /** Optional synchronous cancellation predicate. It is checked before source
+   * refills and record dispatch; non-zero stops successfully. */
+  lql_stream_cancel_fn cancelled;
+  /** Opaque context passed to `cancelled`; never retained after execution. */
+  void *cancel_user;
+  /** Optional clock for selector-relative date terms; NULL uses `time(NULL)`.
+   */
+  lql_time_now_fn time_now;
+  /** Opaque context passed to `time_now`; never retained after execution. */
+  void *time_user;
   /** Optional caller-owned source replay adapter for true-stream selected
    * values. */
   lql_stream_range_writer_fn range_writer;
@@ -382,7 +426,8 @@ struct lql {
    * values use Go-lql-compatible prefixes: `file:` auto-selects text or base64,
    * `textfile:` streams a UTF-8 text JSON string, and `base64file:` streams a
    * base64 JSON string. File-backed values are intentionally valid only for set
-   * mutations and are emitted by the streaming mutation path.
+   * mutations and are emitted by the streaming mutation path. Options may
+   * supply a fresh-source callback for non-local or non-seekable values.
    */
   lql_status (*mutation_parse_with_options)(
       lql *self, const char *const *expressions, size_t expression_count,

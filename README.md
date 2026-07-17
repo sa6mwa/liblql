@@ -64,8 +64,21 @@ File-backed mutation values are a liblql feature, not a `clql` preprocessor.
 `base64file:` values by default. Call
 `ctx->mutation_parse_with_options(ctx, ..., &options, ...)` with
 `options.enable_file_values` set and a base directory for relative file paths
-to opt in. The parsed mutation stores the resolved path; mutation output reads
-and streams the file value when records are emitted.
+to opt in. The default local backend reopens each path for every evaluation
+pass, so it does not retain file descriptors or require rewind support. Set
+`options.file_value_open`, `options.file_value_close`, and
+`options.file_value_user` to resolve opaque application references into fresh
+byte readers instead; this is the supported path for virtual or non-seekable
+sources. The callback context remains owned by the caller while the mutation
+handle exists.
+
+`options.time_now` injects a C `time_t` clock for `time:...=NOW`; an omitted
+clock uses `time(NULL)`. `lql_stream_request.time_now` similarly fixes
+selector-relative date terms (`today`, `yesterday`, and `now`) for a stream
+execution. LQL timestamps remain RFC3339 UTC and do not depend on the process
+locale. A request may also set `cancelled`/`cancel_user` to stop synchronously
+between bounded scanner operations; that returns success with
+`LQL_STREAM_STOP_CANCELLED`.
 
 ## Lifecycle Surface
 

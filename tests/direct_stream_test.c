@@ -14,6 +14,21 @@ typedef struct test_reader {
   size_t range_writes;
 } test_reader;
 
+typedef struct test_file_source {
+  const unsigned char *data;
+  size_t len;
+  size_t chunk_size;
+  test_reader reader;
+  size_t opens;
+  size_t closes;
+  int oversize_read;
+} test_file_source;
+
+typedef struct test_cancel_state {
+  size_t checks;
+  size_t stop_at;
+} test_cancel_state;
+
 typedef struct test_decisions {
   size_t count;
   size_t matches;
@@ -75,6 +90,57 @@ static lql_status test_read(void *user, unsigned char *buffer, size_t capacity,
   reader->offset += amount;
   *out_len = amount;
   return LQL_STATUS_OK;
+}
+
+static lql_status test_file_oversize_read(void *user, unsigned char *buffer,
+                                          size_t capacity, size_t *out_len,
+                                          lql_error *error) {
+  (void)user;
+  (void)buffer;
+  (void)error;
+  if (out_len == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  *out_len = capacity + 1u;
+  return LQL_STATUS_OK;
+}
+
+static lql_status test_file_open(void *user, lql_string_view path,
+                                 lql_stream_reader_fn *out_reader,
+                                 void **out_reader_user, lql_error *error) {
+  test_file_source *source;
+  (void)error;
+  source = (test_file_source *)user;
+  if (source == NULL || out_reader == NULL || out_reader_user == NULL ||
+      path.len != strlen("virtual:payload") ||
+      memcmp(path.data, "virtual:payload", path.len) != 0) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  memset(&source->reader, 0, sizeof(source->reader));
+  source->reader.data = source->data;
+  source->reader.len = source->len;
+  source->reader.chunk_size = source->chunk_size;
+  ++source->opens;
+  *out_reader = source->oversize_read ? test_file_oversize_read : test_read;
+  *out_reader_user = &source->reader;
+  return LQL_STATUS_OK;
+}
+
+static void test_file_close(void *user, void *reader_user) {
+  test_file_source *source;
+  source = (test_file_source *)user;
+  if (source != NULL && reader_user == &source->reader)
+    ++source->closes;
+}
+
+static time_t test_fixed_clock(void *user) { return *(const time_t *)user; }
+
+static int test_cancel(void *user) {
+  test_cancel_state *state;
+  state = (test_cancel_state *)user;
+  if (state == NULL)
+    return 0;
+  ++state->checks;
+  return state->checks >= state->stop_at;
 }
 
 static lql_status test_write(void *user, const void *data, size_t len,
@@ -3676,6 +3742,256 @@ static int run_file_backed_mutations(lql *ctx) {
   return 0;
 }
 
+static int run_virtual_file_source(lql *ctx) {
+  static const char input[] = "{}\n";
+  static const unsigned char payload[] = {0x00u, 0x01u, 0x02u};
+  static const char expected[] = "{\"payload\":\"AAEC\"}\n";
+  static const char *const expressions[] = {"file:/payload=virtual:payload"};
+  lql_mutation_parse_options options;
+  lql_mutation *mutation;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_file_source source;
+  test_reader reader;
+  test_writer writer;
+
+  memset(&source, 0, sizeof(source));
+  source.data = payload;
+  source.len = sizeof(payload);
+  source.chunk_size = 1u;
+  memset(&options, 0, sizeof(options));
+  options.enable_file_values = 1;
+  options.file_value_open = test_file_open;
+  options.file_value_close = test_file_close;
+  options.file_value_user = &source;
+  mutation = NULL;
+  lql_error_init(&error);
+  if (ctx->mutation_parse_with_options(ctx, expressions, 1u, &options,
+                                       &mutation, &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 1u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  request.matched_only = 1;
+  if (ctx->stream_execute_spooled(ctx, &request, &result, &error) !=
+          LQL_STATUS_OK ||
+      source.opens != 2u || source.closes != 2u ||
+      writer.len != sizeof(expected) - 1u ||
+      memcmp(writer.data, expected, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  return 0;
+}
+
+static int run_clock_contract(lql *ctx) {
+  static const char *const expressions[] = {"time:/now=NOW"};
+  static const char mutation_input[] = "{}\n";
+  static const char mutation_output[] = "{\"now\":\"2024-03-01T00:00:00Z\"}\n";
+  static const char selector_input[] =
+      "{\"timestamp\":\"2024-02-29T23:59:59Z\"}\n"
+      "{\"timestamp\":\"2024-03-01T00:00:00Z\"}\n";
+  time_t fixed_now;
+  lql_mutation_parse_options options;
+  lql_mutation *mutation;
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+
+  fixed_now = (time_t)1709251200;
+  memset(&options, 0, sizeof(options));
+  options.time_now = test_fixed_clock;
+  options.time_user = &fixed_now;
+  mutation = NULL;
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->mutation_parse_with_options(ctx, expressions, 1u, &options,
+                                       &mutation, &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)mutation_input;
+  reader.len = sizeof(mutation_input) - 1u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  request.matched_only = 1;
+  if (ctx->stream_execute_spooled(ctx, &request, &result, &error) !=
+          LQL_STATUS_OK ||
+      writer.len != sizeof(mutation_output) - 1u ||
+      memcmp(writer.data, mutation_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  if (ctx->selector_parse(ctx, "date{f=/timestamp,since=today}", &selector,
+                          &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)selector_input;
+  reader.len = sizeof(selector_input) - 1u;
+  reader.chunk_size = 1u;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  request.time_now = test_fixed_clock;
+  request.time_user = &fixed_now;
+  if (ctx->stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
+static int run_option_failure_contract(lql *ctx) {
+  static const char *const file_expression[] = {
+      "file:/payload=virtual:payload"};
+  static const char *const time_expression[] = {"time:/now=NOW"};
+  lql_mutation_parse_options options;
+  lql_mutation *mutation;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  time_t invalid_time;
+  test_file_source source;
+  test_reader reader;
+  test_writer writer;
+
+  memset(&options, 0, sizeof(options));
+  options.enable_file_values = 1;
+  options.file_value_open = test_file_open;
+  mutation = NULL;
+  lql_error_init(&error);
+  if (ctx->mutation_parse_with_options(ctx, file_expression, 1u, &options,
+                                       &mutation,
+                                       &error) != LQL_STATUS_INVALID_ARGUMENT ||
+      mutation != NULL) {
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  invalid_time = (time_t)-1;
+  memset(&options, 0, sizeof(options));
+  options.time_now = test_fixed_clock;
+  options.time_user = &invalid_time;
+  if (ctx->mutation_parse_with_options(ctx, time_expression, 1u, &options,
+                                       &mutation,
+                                       &error) != LQL_STATUS_PARSE_ERROR ||
+      mutation != NULL) {
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  memset(&source, 0, sizeof(source));
+  source.oversize_read = 1;
+  memset(&options, 0, sizeof(options));
+  options.enable_file_values = 1;
+  options.file_value_open = test_file_open;
+  options.file_value_close = test_file_close;
+  options.file_value_user = &source;
+  if (ctx->mutation_parse_with_options(ctx, file_expression, 1u, &options,
+                                       &mutation, &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)"{}\n";
+  reader.len = 3u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  request.matched_only = 1;
+  if (ctx->stream_execute_spooled(ctx, &request, &result, &error) !=
+          LQL_STATUS_CALLBACK_ERROR ||
+      source.opens != 1u || source.closes != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  return 0;
+}
+
+static int run_cancellation_contract(lql *ctx) {
+  static const char input[] = "{\"id\":1}\n{\"id\":2}\n";
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_cancel_state cancel;
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  memset(&cancel, 0, sizeof(cancel));
+  cancel.stop_at = 1u;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.cancelled = test_cancel;
+  request.cancel_user = &cancel;
+  lql_error_init(&error);
+  if (ctx->stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      !result.stopped_early ||
+      result.stop_reason != LQL_STREAM_STOP_CANCELLED || reader.offset != 0u ||
+      result.records_seen != 0u) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 1u;
+  memset(&cancel, 0, sizeof(cancel));
+  cancel.stop_at = 3u;
+  request.reader_user = &reader;
+  request.cancel_user = &cancel;
+  if (ctx->stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      !result.stopped_early ||
+      result.stop_reason != LQL_STREAM_STOP_CANCELLED || reader.offset == 0u ||
+      result.records_seen != 0u) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  memset(&cancel, 0, sizeof(cancel));
+  cancel.stop_at = 2u;
+  request.reader_user = &reader;
+  request.cancel_user = &cancel;
+  if (ctx->stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      !result.stopped_early ||
+      result.stop_reason != LQL_STREAM_STOP_CANCELLED ||
+      reader.offset != reader.len || result.records_seen != 0u) {
+    return 1;
+  }
+  return 0;
+}
+
 static int run_wide_plan_stream_contract(lql *ctx) {
   char expr[2048];
   size_t len;
@@ -3813,7 +4129,9 @@ int main(void) {
       run_record_limit(ctx) || run_byte_limit(ctx) ||
       run_unintentional_stop_status(ctx) || run_true_stream_contract(ctx) ||
       run_wide_plan_stream_contract(ctx) || run_instance_memory_contract() ||
-      run_file_backed_mutations(ctx)) {
+      run_file_backed_mutations(ctx) || run_virtual_file_source(ctx) ||
+      run_clock_contract(ctx) || run_option_failure_contract(ctx) ||
+      run_cancellation_contract(ctx)) {
     ctx->destroy(ctx);
     return match_all_status != 0 ? match_all_status : 1;
   }

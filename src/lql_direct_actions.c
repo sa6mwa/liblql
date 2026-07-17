@@ -207,9 +207,6 @@ static void mutation_action_cleanup(lql_allocator *allocator,
   }
   allocator->destroy(allocator, action->segments);
   allocator->destroy(allocator, action->value);
-  if (action->file_value_handle != NULL) {
-    fclose(action->file_value_handle);
-  }
   memset(action, 0, sizeof(*action));
 }
 
@@ -400,10 +397,11 @@ static lql_status mutation_parse_value(lql_allocator *allocator,
   return LQL_STATUS_OK;
 }
 
-static lql_status mutation_parse_time_value(lql_allocator *allocator,
-                                            const char *begin, const char *end,
-                                            lql_mutation_action *action,
-                                            lql_error *error) {
+static lql_status
+mutation_parse_time_value(lql_allocator *allocator, const char *begin,
+                          const char *end,
+                          const lql_mutation_parse_options *options,
+                          lql_mutation_action *action, lql_error *error) {
   lql_temporal temporal;
   char buffer[64];
   const char *value_begin;
@@ -423,7 +421,11 @@ static lql_status mutation_parse_time_value(lql_allocator *allocator,
     value_len -= 2u;
   }
   if (mutation_equal_ci(value_begin, value_len, "NOW")) {
-    if (!lql_temporal_now(&temporal)) {
+    time_t now;
+    now = options != NULL && options->time_now != NULL
+              ? options->time_now(options->time_user)
+              : time(NULL);
+    if (!lql_temporal_from_time_t(now, 0, &temporal)) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "time mutation NOW value is invalid");
       return LQL_STATUS_PARSE_ERROR;
@@ -457,10 +459,11 @@ static lql_status mutation_parse_time_value(lql_allocator *allocator,
   return LQL_STATUS_OK;
 }
 
-static lql_status mutation_parse_time_set(lql_allocator *allocator,
-                                          const char *begin, const char *end,
-                                          lql_mutation_action *action,
-                                          lql_error *error) {
+static lql_status
+mutation_parse_time_set(lql_allocator *allocator, const char *begin,
+                        const char *end,
+                        const lql_mutation_parse_options *options,
+                        lql_mutation_action *action, lql_error *error) {
   const char *equal;
   lql_status status;
 
@@ -492,7 +495,8 @@ static lql_status mutation_parse_time_set(lql_allocator *allocator,
   if (status != LQL_STATUS_OK) {
     return status;
   }
-  status = mutation_parse_time_value(allocator, equal + 1, end, action, error);
+  status = mutation_parse_time_value(allocator, equal + 1, end, options, action,
+                                     error);
   if (status != LQL_STATUS_OK) {
     mutation_action_cleanup(allocator, action);
   }
@@ -547,6 +551,44 @@ mutation_parse_file_set(lql_allocator *allocator, const char *begin,
     return status;
   }
   action->value_kind = value_kind;
+  if ((options->file_value_open == NULL) !=
+      (options->file_value_close == NULL)) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "file value open and close callbacks must be paired");
+    mutation_action_cleanup(allocator, action);
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (options->file_value_open != NULL) {
+    const char *path_begin;
+    const char *path_end;
+    path_begin = equal + 1;
+    path_end = end;
+    mutation_trim(&path_begin, &path_end);
+    if ((size_t)(path_end - path_begin) >= 2u &&
+        ((path_begin[0] == '"' && path_end[-1] == '"') ||
+         (path_begin[0] == '\'' && path_end[-1] == '\''))) {
+      ++path_begin;
+      --path_end;
+      mutation_trim(&path_begin, &path_end);
+    }
+    if (path_begin == path_end) {
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "file-backed mutation path is required");
+      mutation_action_cleanup(allocator, action);
+      return LQL_STATUS_PARSE_ERROR;
+    }
+    action->value =
+        mutation_copy(allocator, path_begin, (size_t)(path_end - path_begin));
+    if (action->value == NULL) {
+      lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+      mutation_action_cleanup(allocator, action);
+      return LQL_STATUS_NO_MEMORY;
+    }
+    action->file_value_open = options->file_value_open;
+    action->file_value_close = options->file_value_close;
+    action->file_value_user = options->file_value_user;
+    return LQL_STATUS_OK;
+  }
   status = mutation_resolve_file_path(allocator, equal + 1, end, options,
                                       &action->value, error);
   if (status != LQL_STATUS_OK) {
@@ -594,7 +636,8 @@ static lql_status mutation_parse_one(lql_allocator *allocator, const char *raw,
                                    LQL_MUTATION_VALUE_FILE_AUTO, action, error);
   }
   if (mutation_has_prefix(begin, end, "time:")) {
-    return mutation_parse_time_set(allocator, begin + 5u, end, action, error);
+    return mutation_parse_time_set(allocator, begin + 5u, end, options, action,
+                                   error);
   }
   if ((size_t)(end - begin) >= 3u && memcmp(begin, "rm:", 3u) == 0) {
     action->kind = LQL_MUTATION_REMOVE;

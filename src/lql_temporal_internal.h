@@ -2,6 +2,7 @@
 #define LQL_TEMPORAL_INTERNAL_H
 
 #include <stddef.h>
+#include <time.h>
 
 #if defined(__GNUC__)
 #define LQL_TEMPORAL_INTERNAL_SYMBOL __attribute__((visibility("hidden")))
@@ -20,16 +21,19 @@ typedef struct lql_temporal {
   int date_only;
 } lql_temporal;
 
-LQL_TEMPORAL_INTERNAL_SYMBOL int lql_parse_temporal_literal(
-    const char *raw, lql_temporal *out);
-LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_compare(
-    const lql_temporal *left, const lql_temporal *right);
-LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_equal(
-    const lql_temporal *left, const lql_temporal *right);
-LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_format_rfc3339_nano(
-    const lql_temporal *value, char *buf, size_t buf_len);
+LQL_TEMPORAL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
+                                                            lql_temporal *out);
+LQL_TEMPORAL_INTERNAL_SYMBOL int
+lql_temporal_compare(const lql_temporal *left, const lql_temporal *right);
+LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_equal(const lql_temporal *left,
+                                                    const lql_temporal *right);
+LQL_TEMPORAL_INTERNAL_SYMBOL int
+lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
+                                 size_t buf_len);
 LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_now(lql_temporal *out);
 LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_today(lql_temporal *out);
 LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_yesterday(lql_temporal *out);
+LQL_TEMPORAL_INTERNAL_SYMBOL int
+lql_temporal_from_time_t(time_t value, int date_only, lql_temporal *out);
 
 #endif

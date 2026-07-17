@@ -127,16 +127,6 @@ static void temporal_from_seconds(lql_int64 seconds, int date_only,
   out->date_only = date_only;
 }
 
-static int current_utc_seconds(lql_int64 *out) {
-  time_t now;
-  now = time(NULL);
-  if (now == (time_t)-1) {
-    return 0;
-  }
-  *out = (lql_int64)now;
-  return 1;
-}
-
 static int parse_temporal_fast(const char *raw, lql_temporal *out) {
   const char *p;
   size_t len;
@@ -386,28 +376,30 @@ lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
 }
 
 LQL_INTERNAL_SYMBOL int lql_temporal_now(lql_temporal *out) {
-  lql_int64 seconds;
-  if (out == NULL || !current_utc_seconds(&seconds)) {
-    return 0;
-  }
-  temporal_from_seconds(seconds, 0, out);
-  return 1;
+  time_t value;
+  value = time(NULL);
+  return lql_temporal_from_time_t(value, 0, out);
 }
 
 LQL_INTERNAL_SYMBOL int lql_temporal_today(lql_temporal *out) {
-  lql_int64 seconds;
-  if (out == NULL || !current_utc_seconds(&seconds)) {
-    return 0;
-  }
-  temporal_from_seconds(seconds, 1, out);
-  return 1;
+  time_t value;
+  value = time(NULL);
+  return lql_temporal_from_time_t(value, 1, out);
 }
 
 LQL_INTERNAL_SYMBOL int lql_temporal_yesterday(lql_temporal *out) {
-  lql_int64 seconds;
-  if (out == NULL || !current_utc_seconds(&seconds)) {
+  time_t value;
+  value = time(NULL);
+  if (value == (time_t)-1 || out == NULL)
     return 0;
-  }
-  temporal_from_seconds(seconds - (lql_int64)86400, 1, out);
+  temporal_from_seconds((lql_int64)value - (lql_int64)86400, 1, out);
+  return 1;
+}
+
+LQL_INTERNAL_SYMBOL int lql_temporal_from_time_t(time_t value, int date_only,
+                                                 lql_temporal *out) {
+  if (out == NULL || value == (time_t)-1)
+    return 0;
+  temporal_from_seconds((lql_int64)value, date_only, out);
   return 1;
 }

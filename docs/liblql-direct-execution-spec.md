@@ -154,7 +154,8 @@ below is retained only to explain the abandoned design:
   point;
 - a request accepts one reader callback, optional writer callback, compiled
   selector/projection/mutation handles, explicit output mode, matched-only
-  policy, limits, and optional decision/value callbacks;
+  policy, limits, an optional synchronous cancellation predicate, an optional
+  C `time_t` source for relative dates, and optional decision/value callbacks;
 - file and buffer helpers, when added, adapt into that request and invoke the
   same executor. They must not become separate file/source execution paths;
 - output modes cover decision-only, selected record output, projection,
@@ -219,8 +220,20 @@ File-backed mutation values are disabled by the default mutation parser and
 must be enabled with explicit parse options. `file:` auto-selects text or
 base64 by inspecting the source file, `textfile:` requires valid UTF-8 text
 without NUL bytes, and `base64file:` streams a base64 JSON string. The parser
-stores a resolved file path in the mutation handle; file bytes are read by the
-mutation emitter so CLI consumers do not materialize or rewrite the value.
+stores a local resolved path when using the default backend; file bytes are
+read by the mutation emitter so CLI consumers do not materialize or rewrite
+the value. The default backend opens a fresh local file for every inspection
+or output pass. A caller may instead supply paired fresh-open/read/close
+callbacks. That source contract is deliberately non-seekable: each open starts
+at byte zero, and liblql never retains caller `FILE *` values, asks a source to
+rewind, or buffers a complete file. The callback context is borrowed by the
+mutation handle until destruction.
+
+`time:...=NOW` accepts an optional parse-option C `time_t` source, and stream
+requests accept the same source for selector-relative date terms. The default
+is `time(NULL)`. RFC3339 parsing and normalization remain UTC and
+locale-independent; accepting process-local date names would change the LQL
+language and is intentionally out of scope.
 
 For a combined operation, selection occurs on the original record, projection
 is applied before mutation, mutation is applied only when selection and output
@@ -232,6 +245,12 @@ matched-only setting. This ordering is a behavior gate, not an optimization.
 Streaming means direct producer-to-consumer flow. The implementation must not
 hide full-record, full-input, or all-result materialization behind a streaming
 API.
+
+An optional request cancellation predicate is synchronous and creates no
+threads. It is checked before reader refills and before completed-record
+dispatch. A non-zero result ends successfully with
+`LQL_STREAM_STOP_CANCELLED`; the maximum check latency is one bounded reader
+buffer plus the current callback-free parser work.
 
 - Default selection, projection, and mutation paths use no candidate/result
   cache and no internal capture/replay path.

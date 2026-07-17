@@ -115,6 +115,9 @@ typedef struct lql_json_flat_eq_request {
   lql_json_capture_span *capture_spans;
   size_t max_records;
   size_t max_bytes;
+  lql_stream_cancel_fn cancelled;
+  void *cancel_user;
+  int *out_cancelled;
   lql_json_flat_eq_record_fn record;
   void *record_user;
 } lql_json_flat_eq_request;

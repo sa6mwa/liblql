@@ -24,6 +24,9 @@
 typedef struct lql_json_scan {
   lql_stream_reader_fn reader;
   void *reader_user;
+  lql_stream_cancel_fn cancelled;
+  void *cancel_user;
+  int *out_cancelled;
   lql_stream_writer_fn writer;
   void *writer_user;
   unsigned char buffer[LQL_JSON_READ_BUFFER_SIZE];
@@ -1499,6 +1502,11 @@ static lql_status lql_json_refill(lql_json_scan *scan) {
   lql_status status;
   if (scan->offset < scan->length) {
     return LQL_STATUS_OK;
+  }
+  if (scan->cancelled != NULL && scan->cancelled(scan->cancel_user)) {
+    if (scan->out_cancelled != NULL)
+      *scan->out_cancelled = 1;
+    return LQL_STATUS_STOP;
   }
   scan->offset = 0u;
   scan->length = 0u;
@@ -3013,6 +3021,11 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   memset(&scan, 0, sizeof(scan));
   scan.reader = request->reader;
   scan.reader_user = request->reader_user;
+  scan.cancelled = request->cancelled;
+  scan.cancel_user = request->cancel_user;
+  scan.out_cancelled = request->out_cancelled;
+  if (scan.out_cancelled != NULL)
+    *scan.out_cancelled = 0;
   scan.writer = request->capture ? lql_json_spool_write : NULL;
   scan.writer_user = request->spool;
   scan.error = error;
@@ -3092,6 +3105,12 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
     }
     status = lql_json_flush(&scan);
     if (status != LQL_STATUS_OK) {
+      break;
+    }
+    if (scan.cancelled != NULL && scan.cancelled(scan.cancel_user)) {
+      if (scan.out_cancelled != NULL)
+        *scan.out_cancelled = 1;
+      status = LQL_STATUS_STOP;
       break;
     }
     status = request->record(request->record_user, records, root_is_object,

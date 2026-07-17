@@ -13,7 +13,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #define LQL_FLAT_EQ_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
 #define LQL_FLAT_CONTAINS_NEEDLE_MAX 256u
@@ -1262,34 +1261,106 @@ static int lql_flat_eq_utf8_accept(lql_flat_eq_utf8_state *state,
   return 1;
 }
 
-static lql_status lql_flat_eq_file_open(const lql_mutation_action *action,
-                                        FILE **out, lql_error *error) {
-  lql_mutation_action *mutable_action;
-  FILE *file;
+typedef struct lql_flat_eq_file_stream {
+  lql_stream_reader_fn reader;
+  void *reader_user;
+  lql_mutation_file_close_fn close;
+  void *close_user;
+} lql_flat_eq_file_stream;
 
-  *out = NULL;
-  /*
-   * The public request borrows a const mutation handle, but the handle owns
-   * this file descriptor cache. Reusing the descriptor avoids per-record open
-   * overhead without caching or materializing file contents.
-   */
-  mutable_action = (lql_mutation_action *)action;
-  file = mutable_action->file_value_handle;
-  if (file == NULL) {
+static lql_status lql_flat_eq_local_file_read(void *user, unsigned char *buffer,
+                                              size_t capacity, size_t *out_len,
+                                              lql_error *error) {
+  FILE *file;
+  size_t amount;
+  if (out_len == NULL || buffer == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  *out_len = 0u;
+  file = (FILE *)user;
+  if (file == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  amount = fread(buffer, 1u, capacity, file);
+  if (amount == 0u && ferror(file)) {
+    lql_set_error(error, LQL_STATUS_IO_ERROR,
+                  "unable to read file-backed mutation value");
+    return LQL_STATUS_IO_ERROR;
+  }
+  *out_len = amount;
+  return LQL_STATUS_OK;
+}
+
+static void lql_flat_eq_local_file_close(void *user, void *reader_user) {
+  (void)user;
+  if (reader_user != NULL)
+    fclose((FILE *)reader_user);
+}
+
+static lql_status lql_flat_eq_file_open(const lql_mutation_action *action,
+                                        lql_flat_eq_file_stream *out,
+                                        lql_error *error) {
+  FILE *file;
+  lql_string_view path;
+  lql_status status;
+  if (action == NULL || out == NULL || action->value == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  memset(out, 0, sizeof(*out));
+  /* Reopen per pass: auto mode inspects before emitting, and a mutation may
+   * apply to many records. This preserves bounded streaming without a seek
+   * requirement or a cached descriptor on the immutable mutation handle. */
+  if (action->file_value_open == NULL) {
     file = fopen(action->value, "rb");
     if (file == NULL) {
       lql_set_error(error, LQL_STATUS_IO_ERROR,
                     "unable to open file-backed mutation value");
       return LQL_STATUS_IO_ERROR;
     }
-    mutable_action->file_value_handle = file;
-  } else if (fseek(file, 0L, SEEK_SET) != 0) {
-    lql_set_error(error, LQL_STATUS_IO_ERROR,
-                  "unable to rewind file-backed mutation value");
-    return LQL_STATUS_IO_ERROR;
+    out->reader = lql_flat_eq_local_file_read;
+    out->reader_user = file;
+    out->close = lql_flat_eq_local_file_close;
+    return LQL_STATUS_OK;
   }
-  clearerr(file);
-  *out = file;
+  path.data = action->value;
+  path.len = strlen(action->value);
+  status = action->file_value_open(action->file_value_user, path, &out->reader,
+                                   &out->reader_user, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  out->close = action->file_value_close;
+  out->close_user = action->file_value_user;
+  if (out->reader == NULL || out->close == NULL) {
+    if (out->close != NULL)
+      out->close(out->close_user, out->reader_user);
+    memset(out, 0, sizeof(*out));
+    lql_set_error(error, LQL_STATUS_CALLBACK_ERROR,
+                  "file value open callback returned no reader");
+    return LQL_STATUS_CALLBACK_ERROR;
+  }
+  return LQL_STATUS_OK;
+}
+
+static void lql_flat_eq_file_close(lql_flat_eq_file_stream *stream) {
+  if (stream != NULL && stream->close != NULL)
+    stream->close(stream->close_user, stream->reader_user);
+  if (stream != NULL)
+    memset(stream, 0, sizeof(*stream));
+}
+
+static lql_status lql_flat_eq_file_read(lql_flat_eq_file_stream *stream,
+                                        unsigned char *buffer, size_t capacity,
+                                        size_t *out_len, lql_error *error) {
+  lql_status status;
+  if (stream == NULL || stream->reader == NULL || out_len == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  *out_len = 0u;
+  status =
+      stream->reader(stream->reader_user, buffer, capacity, out_len, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  if (*out_len > capacity) {
+    lql_set_error(error, LQL_STATUS_CALLBACK_ERROR,
+                  "file value reader exceeded its buffer capacity");
+    return LQL_STATUS_CALLBACK_ERROR;
+  }
   return LQL_STATUS_OK;
 }
 
@@ -1298,49 +1369,58 @@ static lql_status lql_flat_eq_file_textlike(const lql_mutation_action *action,
                                             lql_error *error) {
   unsigned char buffer[4096];
   lql_flat_eq_utf8_state utf8;
-  FILE *file;
+  lql_flat_eq_file_stream stream;
   size_t amount;
   size_t i;
+  lql_status status;
 
   *out_textlike = 0;
   memset(&utf8, 0, sizeof(utf8));
-  if (lql_flat_eq_file_open(action, &file, error) != LQL_STATUS_OK)
-    return error == NULL ? LQL_STATUS_IO_ERROR : error->code;
-  while ((amount = fread(buffer, 1u, sizeof(buffer), file)) != 0u) {
+  status = lql_flat_eq_file_open(action, &stream, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  for (;;) {
+    status =
+        lql_flat_eq_file_read(&stream, buffer, sizeof(buffer), &amount, error);
+    if (status != LQL_STATUS_OK)
+      break;
+    if (amount == 0u)
+      break;
     for (i = 0u; i < amount; ++i) {
       if (buffer[i] == 0u) {
         if (strict) {
           lql_set_error(error, LQL_STATUS_JSON_ERROR,
                         "textfile mutation value contains NUL byte");
-          return LQL_STATUS_JSON_ERROR;
+          status = LQL_STATUS_JSON_ERROR;
+          goto done;
         }
-        return LQL_STATUS_OK;
+        goto done;
       }
       if (!lql_flat_eq_utf8_accept(&utf8, buffer[i])) {
         if (strict) {
           lql_set_error(error, LQL_STATUS_JSON_ERROR,
                         "textfile mutation value is not valid UTF-8");
-          return LQL_STATUS_JSON_ERROR;
+          status = LQL_STATUS_JSON_ERROR;
+          goto done;
         }
-        return LQL_STATUS_OK;
+        goto done;
       }
     }
   }
-  if (ferror(file)) {
-    lql_set_error(error, LQL_STATUS_IO_ERROR,
-                  "unable to read file-backed mutation value");
-    return LQL_STATUS_IO_ERROR;
-  }
-  if (utf8.remaining != 0) {
+  if (status == LQL_STATUS_OK && utf8.remaining != 0) {
     if (strict) {
       lql_set_error(error, LQL_STATUS_JSON_ERROR,
                     "textfile mutation value is not valid UTF-8");
-      return LQL_STATUS_JSON_ERROR;
+      status = LQL_STATUS_JSON_ERROR;
+      goto done;
     }
-    return LQL_STATUS_OK;
+    goto done;
   }
-  *out_textlike = 1;
-  return LQL_STATUS_OK;
+  if (status == LQL_STATUS_OK)
+    *out_textlike = 1;
+done:
+  lql_flat_eq_file_close(&stream);
+  return status;
 }
 
 static lql_status
@@ -1349,18 +1429,22 @@ lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
                                   lql_error *error) {
   static const char hex[] = "0123456789abcdef";
   unsigned char buffer[4096];
-  FILE *file;
+  lql_flat_eq_file_stream stream;
   size_t amount;
   size_t i;
   lql_status status;
 
-  status = lql_flat_eq_file_open(action, &file, error);
+  status = lql_flat_eq_file_open(action, &stream, error);
   if (status != LQL_STATUS_OK)
     return status;
   status = lql_flat_eq_write(state, "\"", 1u, error);
   if (status != LQL_STATUS_OK)
-    return status;
-  while ((amount = fread(buffer, 1u, sizeof(buffer), file)) != 0u) {
+    goto done;
+  for (;;) {
+    status =
+        lql_flat_eq_file_read(&stream, buffer, sizeof(buffer), &amount, error);
+    if (status != LQL_STATUS_OK || amount == 0u)
+      break;
     for (i = 0u; i < amount; ++i) {
       unsigned char ch;
       ch = buffer[i];
@@ -1381,15 +1465,14 @@ lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
         status = lql_flat_eq_write(state, buffer + i, 1u, error);
       }
       if (status != LQL_STATUS_OK)
-        return status;
+        goto done;
     }
   }
-  if (ferror(file)) {
-    lql_set_error(error, LQL_STATUS_IO_ERROR,
-                  "unable to read file-backed mutation value");
-    return LQL_STATUS_IO_ERROR;
-  }
-  return lql_flat_eq_write(state, "\"", 1u, error);
+  if (status == LQL_STATUS_OK)
+    status = lql_flat_eq_write(state, "\"", 1u, error);
+done:
+  lql_flat_eq_file_close(&stream);
+  return status;
 }
 
 static lql_status
@@ -1401,32 +1484,29 @@ lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
   unsigned char buffer[12288];
   unsigned char carry[3];
   char outbuf[16384];
-  FILE *file;
-  ssize_t amount;
+  lql_flat_eq_file_stream stream;
+  size_t amount;
   size_t i;
   size_t carry_len;
   size_t out_len;
-  int fd;
   lql_status status;
 
-  status = lql_flat_eq_file_open(action, &file, error);
+  status = lql_flat_eq_file_open(action, &stream, error);
   if (status != LQL_STATUS_OK)
     return status;
-  fd = fileno(file);
-  if (fd < 0 || lseek(fd, 0, SEEK_SET) < 0) {
-    lql_set_error(error, LQL_STATUS_IO_ERROR,
-                  "unable to rewind file-backed mutation value");
-    return LQL_STATUS_IO_ERROR;
-  }
   status = lql_flat_eq_write(state, "\"", 1u, error);
   if (status != LQL_STATUS_OK)
-    return status;
+    goto done;
   carry_len = 0u;
   out_len = 0u;
-  while ((amount = read(fd, buffer, sizeof(buffer))) > 0) {
+  for (;;) {
+    status =
+        lql_flat_eq_file_read(&stream, buffer, sizeof(buffer), &amount, error);
+    if (status != LQL_STATUS_OK || amount == 0u)
+      break;
     i = 0u;
     if (carry_len != 0u) {
-      while (carry_len < 3u && i < (size_t)amount) {
+      while (carry_len < 3u && i < amount) {
         carry[carry_len++] = buffer[i++];
       }
       if (carry_len == 3u) {
@@ -1440,7 +1520,7 @@ lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
         carry_len = 0u;
       }
     }
-    while (i + 3u <= (size_t)amount) {
+    while (i + 3u <= amount) {
       unsigned long triple;
       triple = ((unsigned long)buffer[i] << 16) |
                ((unsigned long)buffer[i + 1u] << 8) | buffer[i + 2u];
@@ -1453,24 +1533,19 @@ lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
     if (out_len != 0u) {
       status = lql_flat_eq_write(state, outbuf, out_len, error);
       if (status != LQL_STATUS_OK)
-        return status;
+        goto done;
       out_len = 0u;
     }
-    while (i < (size_t)amount) {
+    while (i < amount) {
       carry[carry_len++] = buffer[i++];
     }
   }
-  if (amount < 0) {
-    lql_set_error(error, LQL_STATUS_IO_ERROR,
-                  "unable to read file-backed mutation value");
-    return LQL_STATUS_IO_ERROR;
-  }
-  if (carry_len != 0u) {
+  if (status == LQL_STATUS_OK && carry_len != 0u) {
     unsigned long triple;
     if (out_len + 4u > sizeof(outbuf)) {
       status = lql_flat_eq_write(state, outbuf, out_len, error);
       if (status != LQL_STATUS_OK)
-        return status;
+        goto done;
       out_len = 0u;
     }
     triple = (unsigned long)carry[0] << 16;
@@ -1484,9 +1559,13 @@ lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
   if (out_len != 0u) {
     status = lql_flat_eq_write(state, outbuf, out_len, error);
     if (status != LQL_STATUS_OK)
-      return status;
+      goto done;
   }
-  return lql_flat_eq_write(state, "\"", 1u, error);
+  if (status == LQL_STATUS_OK)
+    status = lql_flat_eq_write(state, "\"", 1u, error);
+done:
+  lql_flat_eq_file_close(&stream);
+  return status;
 }
 
 static lql_status lql_flat_eq_file_value(lql_flat_eq_state *state,
@@ -4616,6 +4695,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   unsigned long *batched_scan_hits;
   lql_flat_eq_batched_state batched_state;
   lql_flat_eq_alias_state alias_state;
+  int cancelled;
   int batched;
   int aliased;
   int all_terms_required;
@@ -4633,11 +4713,16 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   }
   time_bounds_ptr = NULL;
   if (lql_flat_eq_selector_needs_time(request->selector)) {
+    time_t now;
     memset(&time_bounds, 0, sizeof(time_bounds));
-    time_bounds.now_ready = lql_temporal_now(&time_bounds.now);
-    time_bounds.today_ready = lql_temporal_today(&time_bounds.today);
+    now = request->time_now != NULL ? request->time_now(request->time_user)
+                                    : time(NULL);
+    time_bounds.now_ready = lql_temporal_from_time_t(now, 0, &time_bounds.now);
+    time_bounds.today_ready =
+        lql_temporal_from_time_t(now, 1, &time_bounds.today);
     time_bounds.yesterday_ready =
-        lql_temporal_yesterday(&time_bounds.yesterday);
+        now != (time_t)-1 && lql_temporal_from_time_t(now - (time_t)86400, 1,
+                                                      &time_bounds.yesterday);
     time_bounds_ptr = &time_bounds;
   }
   if (!lql_flat_eq_selector_term_count(request->selector, &term_capacity)) {
@@ -4789,6 +4874,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
     }
   }
   memset(&scan_request, 0, sizeof(scan_request));
+  cancelled = 0;
   scan_request.reader = request->reader;
   scan_request.reader_user = request->reader_user;
   scan_request.terms =
@@ -4807,6 +4893,9 @@ lql_status lql_stream_execute_flat_eq(lql *self,
       batched && !aliased ? NULL : program.capture_spans;
   scan_request.max_records = request->limits.max_records;
   scan_request.max_bytes = request->limits.max_bytes;
+  scan_request.cancelled = request->cancelled;
+  scan_request.cancel_user = request->cancel_user;
+  scan_request.out_cancelled = &cancelled;
   scan_request.record = batched ? (aliased ? lql_flat_eq_alias_record
                                            : lql_flat_eq_batched_record)
                                 : lql_flat_eq_record;
@@ -4832,6 +4921,10 @@ lql_status lql_stream_execute_flat_eq(lql *self,
       result->bytes_consumed >= request->limits.max_bytes) {
     result->stopped_early = 1;
     result->stop_reason = LQL_STREAM_STOP_BYTE_LIMIT;
+  }
+  if (status == LQL_STATUS_STOP && !result->stopped_early && cancelled) {
+    result->stopped_early = 1;
+    result->stop_reason = LQL_STREAM_STOP_CANCELLED;
   }
   if (status == LQL_STATUS_STOP && result->stopped_early) {
     return LQL_STATUS_OK;
