@@ -126,18 +126,19 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "allocator required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  ctx = (lql *)allocator->calloc(allocator, 1u, sizeof(*ctx));
-  if (ctx == NULL) {
-    lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
-    return LQL_STATUS_NO_MEMORY;
-  }
   impl = (lql_impl *)allocator->calloc(allocator, 1u, sizeof(*impl));
   if (impl == NULL) {
-    allocator->destroy(allocator, ctx);
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
     return LQL_STATUS_NO_MEMORY;
   }
-  impl->allocator = allocator;
+  lql_allocator_instance_init(impl, allocator);
+  impl->live_bytes = sizeof(*impl);
+  ctx = (lql *)impl->allocator.calloc(&impl->allocator, 1u, sizeof(*ctx));
+  if (ctx == NULL) {
+    allocator->destroy(allocator, impl);
+    lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+    return LQL_STATUS_NO_MEMORY;
+  }
   ctx->impl = impl;
   ctx->version = receiver_version;
   ctx->capabilities_get = receiver_capabilities_get;
@@ -251,17 +252,18 @@ static void receiver_capabilities_get(const lql *self, lql_capabilities *out) {
 }
 
 static void receiver_destroy(lql *self) {
-  lql_allocator *allocator;
   lql_impl *impl;
   if (self == NULL) {
     return;
   }
   impl = (lql_impl *)self->impl;
-  allocator = lql_allocator_from_receiver(self);
-  if (impl != NULL) {
-    allocator->destroy(allocator, impl);
+  if (impl == NULL) {
+    return;
   }
-  allocator->destroy(allocator, self);
+  impl->allocator.destroy(&impl->allocator, self);
+  if (impl != NULL) {
+    impl->upstream_allocator->destroy(impl->upstream_allocator, impl);
+  }
 }
 
 LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,

@@ -25,9 +25,11 @@ Go library's selector-string coercion: unquoted numbers, booleans, and null are
 typed, quoted values are strings, and numeric equality compares JSON numbers by
 numeric value rather than by source spelling. `lql_stream_execute` live heap,
 not RSS, is the primary embedded-memory invariant and must remain at or below
-256 KiB, including the 100 MiB current-record gate. The explicitly spooled
-compatibility executor has a hard 8 MiB compiled-plan budget and a 64 KiB
-in-memory current-record spool before it spills to disk.
+256 KiB, including the 100 MiB current-record gate. Every `lql_new` receiver
+also owns an independent 8 MiB allocation budget covering parsed selectors,
+projections, mutations, execution plans, and compatibility spools. The
+explicitly spooled compatibility executor keeps 64 KiB of the current record in
+memory before it spills to disk.
 
 ## Execution Contracts
 

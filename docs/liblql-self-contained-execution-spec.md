@@ -48,7 +48,8 @@ performance claim with profiling and paired Go/C benchmarks.
   API never materializes a record or writes input to disk. It rejects plans
   wider than its bounded one-pass scanner before consuming input. The explicitly
   named spooled compatibility API may retain one current record and spill it to
-  a temporary file; its compiled execution plan is capped below 8 MiB.
+  a temporary file. Every `lql_new` receiver has one independent 8 MiB budget
+  across parsed handles, temporary execution plans, and compatibility spools.
 - GCC Go/C speedup is at least 1.0x on every accepted row. Profile before
   optimizing; do not add caches or special cases based only on benchmark deltas.
 - `make direct-parity-smoke` is the fast executable GCC-only parity gate. It

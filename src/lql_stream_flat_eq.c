@@ -18,13 +18,6 @@
 #define LQL_FLAT_EQ_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
 #define LQL_FLAT_CONTAINS_NEEDLE_MAX 256u
 #define LQL_FLAT_ICONTAINS_NEEDLE_MAX (LQL_FLAT_CONTAINS_NEEDLE_MAX * 2u)
-/*
- * The compatibility executor may spill records, but it must never turn an
- * unbounded request into unbounded live heap. Leave room below the public
- * 8 MiB process budget for the spool and parser buffers.
- */
-#define LQL_FLAT_EQ_PROGRAM_MEMORY_BYTES (7u * 1024u * 1024u)
-
 typedef struct lql_flat_eq_selector_group {
   const lql_selector *selector;
   size_t first;
@@ -32,6 +25,7 @@ typedef struct lql_flat_eq_selector_group {
 } lql_flat_eq_selector_group;
 
 typedef struct lql_flat_eq_program {
+  lql_allocator *allocator;
   lql_json_flat_eq_term *terms;
   const lql_selector **selectors;
   lql_json_flat_eq_term *scan_terms;
@@ -74,34 +68,42 @@ static void lql_flat_eq_program_cleanup(lql_flat_eq_program *program) {
   if (program == NULL) {
     return;
   }
-  free(program->direct_mutation_actions);
-  free(program->selector_group_table);
-  free(program->selector_groups);
-  free(program->term_sources);
-  free(program->scan_terms);
-  free(program->icontains_needles);
-  free(program->contains_failures);
-  free(program->capture_spans);
-  free(program->capture_keys);
-  free(program->selectors);
-  free(program->terms);
+  if (program->allocator != NULL) {
+    program->allocator->destroy(program->allocator,
+                                program->direct_mutation_actions);
+    program->allocator->destroy(program->allocator,
+                                program->selector_group_table);
+    program->allocator->destroy(program->allocator, program->selector_groups);
+    program->allocator->destroy(program->allocator, program->term_sources);
+    program->allocator->destroy(program->allocator, program->scan_terms);
+    program->allocator->destroy(program->allocator, program->icontains_needles);
+    program->allocator->destroy(program->allocator, program->contains_failures);
+    program->allocator->destroy(program->allocator, program->capture_spans);
+    program->allocator->destroy(program->allocator, program->capture_keys);
+    program->allocator->destroy(program->allocator, program->selectors);
+    program->allocator->destroy(program->allocator, program->terms);
+  }
   memset(program, 0, sizeof(*program));
 }
 
 static int lql_flat_eq_program_init(lql_flat_eq_program *program,
-                                    size_t term_count, size_t capture_count,
+                                    lql_allocator *allocator, size_t term_count,
+                                    size_t capture_count,
                                     size_t mutation_count) {
-  if (program == NULL) {
+  if (program == NULL || allocator == NULL) {
     return 0;
   }
   memset(program, 0, sizeof(*program));
+  program->allocator = allocator;
   if (term_count != 0u) {
-    program->terms = calloc(term_count, sizeof(*program->terms));
-    program->selectors = calloc(term_count, sizeof(*program->selectors));
-    program->contains_failures =
-        calloc(term_count, sizeof(*program->contains_failures));
-    program->icontains_needles =
-        calloc(term_count, sizeof(*program->icontains_needles));
+    program->terms =
+        allocator->calloc(allocator, term_count, sizeof(*program->terms));
+    program->selectors =
+        allocator->calloc(allocator, term_count, sizeof(*program->selectors));
+    program->contains_failures = allocator->calloc(
+        allocator, term_count, sizeof(*program->contains_failures));
+    program->icontains_needles = allocator->calloc(
+        allocator, term_count, sizeof(*program->icontains_needles));
     if (program->terms == NULL || program->selectors == NULL ||
         program->contains_failures == NULL ||
         program->icontains_needles == NULL) {
@@ -110,79 +112,24 @@ static int lql_flat_eq_program_init(lql_flat_eq_program *program,
     }
   }
   if (capture_count != 0u) {
-    program->capture_keys =
-        calloc(capture_count, sizeof(*program->capture_keys));
-    program->capture_spans =
-        calloc(capture_count, sizeof(*program->capture_spans));
+    program->capture_keys = allocator->calloc(allocator, capture_count,
+                                              sizeof(*program->capture_keys));
+    program->capture_spans = allocator->calloc(allocator, capture_count,
+                                               sizeof(*program->capture_spans));
     if (program->capture_keys == NULL || program->capture_spans == NULL) {
       lql_flat_eq_program_cleanup(program);
       return 0;
     }
   }
   if (mutation_count != 0u) {
-    program->direct_mutation_actions =
-        calloc(mutation_count, sizeof(*program->direct_mutation_actions));
+    program->direct_mutation_actions = allocator->calloc(
+        allocator, mutation_count, sizeof(*program->direct_mutation_actions));
     if (program->direct_mutation_actions == NULL) {
       lql_flat_eq_program_cleanup(program);
       return 0;
     }
   }
   return 1;
-}
-
-static int lql_flat_eq_memory_add_product(size_t *total, size_t count,
-                                          size_t size) {
-  size_t amount;
-  if (total == NULL || (count != 0u && size > (size_t)-1 / count)) {
-    return 0;
-  }
-  amount = count * size;
-  if (amount > (size_t)-1 - *total) {
-    return 0;
-  }
-  *total += amount;
-  return 1;
-}
-
-static int lql_flat_eq_program_memory_fits(size_t term_count,
-                                           size_t capture_count,
-                                           size_t mutation_count) {
-  size_t total;
-  size_t selector_table_slots;
-  /*
-   * Account for the largest compatibility plan: compiled terms, the selector
-   * index, deduplicated scan terms, hit sources, captures, and mutations.
-   * The selector index table rounds to a power of two, hence the conservative
-   * four-slot-per-term allowance.
-   */
-  if (term_count > (size_t)-1 / 4u) {
-    return 0;
-  }
-  selector_table_slots = term_count * 4u;
-  total = 0u;
-  return lql_flat_eq_memory_add_product(&total, term_count,
-                                        sizeof(lql_json_flat_eq_term)) &&
-         lql_flat_eq_memory_add_product(&total, term_count,
-                                        sizeof(const lql_selector *)) &&
-         lql_flat_eq_memory_add_product(
-             &total, term_count,
-             sizeof(size_t[LQL_FLAT_ICONTAINS_NEEDLE_MAX])) &&
-         lql_flat_eq_memory_add_product(
-             &total, term_count, sizeof(char[LQL_FLAT_ICONTAINS_NEEDLE_MAX])) &&
-         lql_flat_eq_memory_add_product(&total, term_count,
-                                        sizeof(lql_json_flat_eq_term)) &&
-         lql_flat_eq_memory_add_product(&total, term_count, sizeof(size_t)) &&
-         lql_flat_eq_memory_add_product(&total, term_count,
-                                        sizeof(lql_flat_eq_selector_group)) &&
-         lql_flat_eq_memory_add_product(&total, selector_table_slots,
-                                        sizeof(size_t)) &&
-         lql_flat_eq_memory_add_product(&total, capture_count,
-                                        sizeof(lql_json_capture_key)) &&
-         lql_flat_eq_memory_add_product(&total, capture_count,
-                                        sizeof(lql_json_capture_span)) &&
-         lql_flat_eq_memory_add_product(&total, mutation_count,
-                                        sizeof(const lql_mutation_action *)) &&
-         total <= LQL_FLAT_EQ_PROGRAM_MEMORY_BYTES;
 }
 
 static int lql_flat_eq_selector_term_count(const lql_selector *selector,
@@ -262,10 +209,10 @@ static int lql_flat_eq_program_build_scan_terms(lql_flat_eq_program *program) {
   if (program == NULL || program->term_count == 0u) {
     return 1;
   }
-  program->scan_terms =
-      calloc(program->term_count, sizeof(*program->scan_terms));
-  program->term_sources =
-      calloc(program->term_count, sizeof(*program->term_sources));
+  program->scan_terms = program->allocator->calloc(
+      program->allocator, program->term_count, sizeof(*program->scan_terms));
+  program->term_sources = program->allocator->calloc(
+      program->allocator, program->term_count, sizeof(*program->term_sources));
   if (program->scan_terms == NULL || program->term_sources == NULL) {
     return 0;
   }
@@ -308,9 +255,10 @@ lql_flat_eq_program_build_selector_index(lql_flat_eq_program *program) {
     table_size *= 2u;
   }
   program->selector_groups =
-      calloc(program->term_count, sizeof(*program->selector_groups));
-  program->selector_group_table =
-      malloc(table_size * sizeof(*program->selector_group_table));
+      program->allocator->calloc(program->allocator, program->term_count,
+                                 sizeof(*program->selector_groups));
+  program->selector_group_table = program->allocator->alloc(
+      program->allocator, table_size * sizeof(*program->selector_group_table));
   if (program->selector_groups == NULL ||
       program->selector_group_table == NULL) {
     return 0;
@@ -1816,7 +1764,6 @@ static lql_status lql_flat_eq_mutation_increment(
   double current;
   double next;
   size_t len;
-  (void)state;
   if (action == NULL || action->kind != LQL_MUTATION_INCREMENT)
     return LQL_STATUS_INVALID_ARGUMENT;
   if (!present)
@@ -1834,7 +1781,8 @@ static lql_status lql_flat_eq_mutation_increment(
   }
   number = len < sizeof(stack_number) ? stack_number : NULL;
   if (number == NULL) {
-    number = (char *)malloc(len + 1u);
+    number = (char *)state->program->allocator->alloc(state->program->allocator,
+                                                      len + 1u);
     if (number == NULL) {
       lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
       return LQL_STATUS_NO_MEMORY;
@@ -1848,7 +1796,7 @@ static lql_status lql_flat_eq_mutation_increment(
       copy_status = lql_flat_eq_spool_byte(spool, value_start + i, &ch, error);
       if (copy_status != LQL_STATUS_OK) {
         if (number != stack_number)
-          free(number);
+          state->program->allocator->destroy(state->program->allocator, number);
         return copy_status;
       }
       number[i] = (char)ch;
@@ -1857,13 +1805,13 @@ static lql_status lql_flat_eq_mutation_increment(
   number[len] = '\0';
   if (!lql_number_parse_json(number, len, &current)) {
     if (number != stack_number)
-      free(number);
+      state->program->allocator->destroy(state->program->allocator, number);
     lql_set_error(error, LQL_STATUS_JSON_ERROR,
                   "increment target number is invalid");
     return LQL_STATUS_JSON_ERROR;
   }
   if (number != stack_number)
-    free(number);
+    state->program->allocator->destroy(state->program->allocator, number);
   next = current + action->delta;
   return lql_flat_eq_mutation_number(state, next, error);
 }
@@ -3426,11 +3374,13 @@ static lql_status lql_flat_eq_mutation_emit_existing_group(
     return LQL_STATUS_INVALID_ARGUMENT;
   initialized_first = 0;
   initialized_second = 0;
-  status = lql_json_spool_init(&first, error);
+  status = lql_json_spool_init_with_allocator(&first, state->program->allocator,
+                                              error);
   if (status != LQL_STATUS_OK)
     return status;
   initialized_first = 1;
-  status = lql_json_spool_init(&second, error);
+  status = lql_json_spool_init_with_allocator(&second,
+                                              state->program->allocator, error);
   if (status != LQL_STATUS_OK)
     goto done;
   initialized_second = 1;
@@ -3529,11 +3479,13 @@ static lql_status lql_flat_eq_mutation_emit_existing_nested_group(
   lql_status status;
   initialized_first = 0;
   initialized_second = 0;
-  status = lql_json_spool_init(&first, error);
+  status = lql_json_spool_init_with_allocator(&first, state->program->allocator,
+                                              error);
   if (status != LQL_STATUS_OK)
     return status;
   initialized_first = 1;
-  status = lql_json_spool_init(&second, error);
+  status = lql_json_spool_init_with_allocator(&second,
+                                              state->program->allocator, error);
   if (status != LQL_STATUS_OK)
     goto done;
   initialized_second = 1;
@@ -3583,11 +3535,13 @@ static lql_status lql_flat_eq_mutation_emit_missing_group(
     return LQL_STATUS_INVALID_ARGUMENT;
   initialized_first = 0;
   initialized_second = 0;
-  status = lql_json_spool_init(&first, error);
+  status = lql_json_spool_init_with_allocator(&first, state->program->allocator,
+                                              error);
   if (status != LQL_STATUS_OK)
     return status;
   initialized_first = 1;
-  status = lql_json_spool_init(&second, error);
+  status = lql_json_spool_init_with_allocator(&second,
+                                              state->program->allocator, error);
   if (status != LQL_STATUS_OK)
     goto done;
   initialized_second = 1;
@@ -3748,7 +3702,8 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
           !lql_flat_eq_mutation_group_all_nested(state->program, action)) {
         lql_json_spool group_value;
         int group_value_present;
-        status = lql_json_spool_init(&group_value, error);
+        status = lql_json_spool_init_with_allocator(
+            &group_value, state->program->allocator, error);
         if (status != LQL_STATUS_OK)
           return status;
         status = lql_flat_eq_mutation_emit_existing_group(
@@ -3875,7 +3830,8 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
           !lql_flat_eq_mutation_group_is_top_set(state->program, action)) {
         lql_json_spool group_value;
         int group_value_present;
-        status = lql_json_spool_init(&group_value, error);
+        status = lql_json_spool_init_with_allocator(
+            &group_value, state->program->allocator, error);
         if (status != LQL_STATUS_OK)
           return status;
         status = lql_flat_eq_mutation_emit_missing_group(
@@ -4104,7 +4060,8 @@ static lql_status lql_flat_eq_projection_then_mutation_emit(
   lql_status status;
   if (!lql_flat_eq_projection_found(state, spool))
     return LQL_STATUS_OK;
-  status = lql_json_spool_init(&projected, error);
+  status = lql_json_spool_init_with_allocator(&projected,
+                                              state->program->allocator, error);
   if (status != LQL_STATUS_OK)
     return status;
   saved_writer = state->writer;
@@ -4530,7 +4487,8 @@ static lql_status lql_flat_eq_scan_capture_batch(const lql_json_spool *source,
       count > LQL_FLAT_EQ_TERM_CAPACITY) {
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  status = lql_json_spool_init(&capture_spool, error);
+  status = lql_json_spool_init_with_allocator(&capture_spool,
+                                              program->allocator, error);
   if (status != LQL_STATUS_OK) {
     return status;
   }
@@ -4707,13 +4665,8 @@ lql_status lql_stream_execute_flat_eq(lql *self,
                        capture_capacity > LQL_FLAT_EQ_TERM_CAPACITY)) {
     return LQL_STATUS_OK;
   }
-  if (!lql_flat_eq_program_memory_fits(term_capacity, capture_capacity,
-                                       mutation_capacity)) {
-    lql_set_error(error, LQL_STATUS_NO_MEMORY,
-                  "stream execution plan exceeds the 8 MiB memory budget");
-    return LQL_STATUS_NO_MEMORY;
-  }
-  if (!lql_flat_eq_program_init(&program, term_capacity, capture_capacity,
+  if (!lql_flat_eq_program_init(&program, lql_allocator_from_receiver(self),
+                                term_capacity, capture_capacity,
                                 mutation_capacity)) {
     lql_set_error(error, LQL_STATUS_NO_MEMORY,
                   "unable to allocate stream selector state");
@@ -4788,7 +4741,8 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   }
   memset(&spool, 0, sizeof(spool));
   if (capture) {
-    status = lql_json_spool_init(&spool, error);
+    status =
+        lql_json_spool_init_with_allocator(&spool, program.allocator, error);
     if (status != LQL_STATUS_OK) {
       lql_flat_eq_program_cleanup(&program);
       return status;
@@ -4812,14 +4766,14 @@ lql_status lql_stream_execute_flat_eq(lql *self,
       if (scan_hit_word_count == 0u) {
         scan_hit_word_count = 1u;
       }
-      batched_scan_hits =
-          calloc(scan_hit_word_count, sizeof(*batched_scan_hits));
+      batched_scan_hits = program.allocator->calloc(
+          program.allocator, scan_hit_word_count, sizeof(*batched_scan_hits));
     }
     if (!aliased && batched_scan_hits == NULL) {
       if (capture) {
         lql_json_spool_cleanup(&spool);
       }
-      free(batched_scan_hits);
+      program.allocator->destroy(program.allocator, batched_scan_hits);
       lql_flat_eq_program_cleanup(&program);
       lql_set_error(error, LQL_STATUS_NO_MEMORY,
                     "unable to allocate stream selector hit state");
@@ -4865,7 +4819,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   if (capture) {
     lql_json_spool_cleanup(&spool);
   }
-  free(batched_scan_hits);
+  program.allocator->destroy(program.allocator, batched_scan_hits);
   lql_flat_eq_program_cleanup(&program);
   if (status == LQL_STATUS_STOP && !result->stopped_early &&
       request->limits.max_records != 0u &&

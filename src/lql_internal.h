@@ -15,6 +15,8 @@ typedef struct lql_impl lql_impl;
 typedef struct lql_stream_program lql_stream_program;
 typedef struct lql_projection_capture lql_projection_capture;
 
+#define LQL_INSTANCE_MEMORY_LIMIT_BYTES (8u * 1024u * 1024u)
+
 #define LQL_STREAM_VALUE_JSON_SPOOL 2
 #define LQL_STREAM_VALUE_SOURCE_RANGE 3
 
@@ -37,10 +39,14 @@ struct lql_allocator {
 };
 
 struct lql_impl {
-  lql_allocator *allocator;
+  lql_allocator *upstream_allocator;
+  lql_allocator allocator;
+  size_t live_bytes;
 };
 
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
+LQL_INTERNAL_SYMBOL void lql_allocator_instance_init(lql_impl *impl,
+                                                      lql_allocator *upstream);
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_from_receiver(const lql *self);
 LQL_INTERNAL_SYMBOL void *lql_receiver_alloc(lql *self, size_t size);
 LQL_INTERNAL_SYMBOL void *lql_receiver_calloc(lql *self, size_t count,

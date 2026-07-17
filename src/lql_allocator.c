@@ -3,6 +3,114 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef union lql_quota_header {
+  size_t size;
+  long double alignment;
+  void *pointer;
+} lql_quota_header;
+
+static void *quota_alloc(lql_allocator *self, size_t size) {
+  lql_impl *impl;
+  lql_quota_header *header;
+  size_t charge;
+  if (self == NULL || self->impl == NULL ||
+      size > (size_t)-1 - sizeof(*header)) {
+    return NULL;
+  }
+  impl = (lql_impl *)self->impl;
+  charge = sizeof(*header) + size;
+  if (charge > LQL_INSTANCE_MEMORY_LIMIT_BYTES - impl->live_bytes) {
+    return NULL;
+  }
+  header = (lql_quota_header *)impl->upstream_allocator->alloc(
+      impl->upstream_allocator, charge);
+  if (header == NULL) {
+    return NULL;
+  }
+  header->size = size;
+  impl->live_bytes += charge;
+  return header + 1;
+}
+
+static void *quota_calloc(lql_allocator *self, size_t count, size_t size) {
+  void *out;
+  if (count != 0u && size > (size_t)-1 / count) {
+    return NULL;
+  }
+  out = quota_alloc(self, count * size);
+  if (out != NULL) {
+    memset(out, 0, count * size);
+  }
+  return out;
+}
+
+static void *quota_realloc(lql_allocator *self, void *ptr, size_t size) {
+  lql_impl *impl;
+  lql_quota_header *header;
+  lql_quota_header *next;
+  size_t old_size;
+  size_t old_charge;
+  size_t new_charge;
+  if (ptr == NULL) {
+    return quota_alloc(self, size);
+  }
+  if (self == NULL || self->impl == NULL ||
+      size > (size_t)-1 - sizeof(*header)) {
+    return NULL;
+  }
+  impl = (lql_impl *)self->impl;
+  header = ((lql_quota_header *)ptr) - 1;
+  old_size = header->size;
+  old_charge = sizeof(*header) + old_size;
+  new_charge = sizeof(*header) + size;
+  if (new_charge > old_charge &&
+      new_charge - old_charge >
+          LQL_INSTANCE_MEMORY_LIMIT_BYTES - impl->live_bytes) {
+    return NULL;
+  }
+  next = (lql_quota_header *)impl->upstream_allocator->realloc(
+      impl->upstream_allocator, header, new_charge);
+  if (next == NULL && size != 0u) {
+    return NULL;
+  }
+  if (size == 0u) {
+    impl->live_bytes -= old_charge;
+    return NULL;
+  }
+  next->size = size;
+  impl->live_bytes = impl->live_bytes - old_charge + new_charge;
+  return next + 1;
+}
+
+static void quota_destroy(lql_allocator *self, void *ptr) {
+  lql_impl *impl;
+  lql_quota_header *header;
+  if (self == NULL || self->impl == NULL || ptr == NULL) {
+    return;
+  }
+  impl = (lql_impl *)self->impl;
+  header = ((lql_quota_header *)ptr) - 1;
+  impl->live_bytes -= sizeof(*header) + header->size;
+  impl->upstream_allocator->destroy(impl->upstream_allocator, header);
+}
+
+static char *quota_strdup(lql_allocator *self, const char *text) {
+  size_t len;
+  char *out;
+  if (text == NULL) {
+    return NULL;
+  }
+  len = strlen(text);
+  if (len == (size_t)-1) {
+    return NULL;
+  }
+  out = (char *)quota_alloc(self, len + 1u);
+  if (out != NULL) {
+    memcpy(out, text, len + 1u);
+  }
+  return out;
+}
+
 static void *system_alloc(lql_allocator *self, size_t size) {
   (void)self;
   return malloc(size);
@@ -53,7 +161,18 @@ lql_allocator_from_receiver(const lql *self) {
     return NULL;
   }
   impl = (const lql_impl *)self->impl;
-  return impl->allocator;
+  return (lql_allocator *)&impl->allocator;
+}
+
+LQL_INTERNAL_SYMBOL void lql_allocator_instance_init(lql_impl *impl,
+                                                     lql_allocator *upstream) {
+  impl->upstream_allocator = upstream;
+  impl->allocator.impl = impl;
+  impl->allocator.alloc = quota_alloc;
+  impl->allocator.calloc = quota_calloc;
+  impl->allocator.realloc = quota_realloc;
+  impl->allocator.destroy = quota_destroy;
+  impl->allocator.strdup = quota_strdup;
 }
 
 LQL_INTERNAL_SYMBOL void *lql_receiver_alloc(lql *self, size_t size) {

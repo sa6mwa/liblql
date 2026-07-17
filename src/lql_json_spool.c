@@ -1,4 +1,5 @@
 #include "lql_json_spool.h"
+#include "lql_internal.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -16,13 +17,22 @@ static void lql_json_spool_error(lql_error *error, lql_status status,
 }
 
 lql_status lql_json_spool_init(lql_json_spool *spool, lql_error *error) {
-  if (spool == NULL) {
+  return lql_json_spool_init_with_allocator(spool, lql_allocator_default(),
+                                            error);
+}
+
+lql_status lql_json_spool_init_with_allocator(lql_json_spool *spool,
+                                              lql_allocator *allocator,
+                                              lql_error *error) {
+  if (spool == NULL || allocator == NULL) {
     lql_json_spool_error(error, LQL_STATUS_INVALID_ARGUMENT,
                          "JSON spool is required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   memset(spool, 0, sizeof(*spool));
-  spool->memory = (unsigned char *)malloc(LQL_JSON_SPOOL_MEMORY_BYTES);
+  spool->allocator = allocator;
+  spool->memory =
+      (unsigned char *)allocator->alloc(allocator, LQL_JSON_SPOOL_MEMORY_BYTES);
   if (spool->memory == NULL) {
     lql_json_spool_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
     return LQL_STATUS_NO_MEMORY;
@@ -49,7 +59,9 @@ void lql_json_spool_cleanup(lql_json_spool *spool) {
     return;
   }
   lql_json_spool_reset(spool);
-  free(spool->memory);
+  if (spool->allocator != NULL) {
+    spool->allocator->destroy(spool->allocator, spool->memory);
+  }
   spool->memory = NULL;
 }
 
@@ -202,10 +214,9 @@ lql_status lql_json_spool_byte_at(const lql_json_spool *spool, size_t offset,
   }
   mutable_spool = (lql_json_spool *)spool;
   if (offset >= mutable_spool->read_cache_offset &&
-      offset < mutable_spool->read_cache_offset +
-                   mutable_spool->read_cache_len) {
-    *out = mutable_spool
-               ->read_cache[offset - mutable_spool->read_cache_offset];
+      offset <
+          mutable_spool->read_cache_offset + mutable_spool->read_cache_len) {
+    *out = mutable_spool->read_cache[offset - mutable_spool->read_cache_offset];
     return LQL_STATUS_OK;
   }
   amount = spool->size - offset;

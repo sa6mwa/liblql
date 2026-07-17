@@ -1,5 +1,6 @@
 #include <lql/lql.h>
 
+#include <stdlib.h>
 #include <string.h>
 
 /* Historical semantic tests intentionally exercise the explicit spooled API. */
@@ -2200,8 +2201,7 @@ static int run_mutation_output(lql *ctx) {
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
       result.records_seen != 1u || result.records_matched != 1u ||
       writer.len != sizeof(same_top_increment_missing_output) - 1u ||
-      memcmp(writer.data, same_top_increment_missing_output, writer.len) !=
-          0) {
+      memcmp(writer.data, same_top_increment_missing_output, writer.len) != 0) {
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
     return 1;
@@ -2408,8 +2408,8 @@ static int run_mutation_output(lql *ctx) {
   }
   ctx->mutation_destroy(ctx, mutation);
   mutation = NULL;
-  if (ctx->mutation_parse(ctx, nested_array_increment, 1u, &mutation,
-                          &error) != LQL_STATUS_OK ||
+  if (ctx->mutation_parse(ctx, nested_array_increment, 1u, &mutation, &error) !=
+          LQL_STATUS_OK ||
       ctx->mutation_count(ctx, mutation) != 1u) {
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
@@ -3725,6 +3725,66 @@ static int run_wide_plan_stream_contract(lql *ctx) {
              : 1;
 }
 
+static int run_instance_memory_contract(void) {
+  lql *limited;
+  lql *independent;
+  lql_selector *selector;
+  lql_error error;
+  char *expr;
+  size_t len;
+  lql_status status;
+
+  len = 8u * 1024u * 1024u;
+  expr = (char *)malloc(len + 4u);
+  if (expr == NULL) {
+    return 1;
+  }
+  expr[0] = '/';
+  memset(expr + 1, 'k', len);
+  expr[len + 1u] = '=';
+  expr[len + 2u] = 'x';
+  expr[len + 3u] = '\0';
+  limited = NULL;
+  independent = NULL;
+  selector = NULL;
+  lql_error_init(&error);
+  if (lql_new(&limited, &error) != LQL_STATUS_OK) {
+    free(expr);
+    return 1;
+  }
+  status = limited->selector_parse(limited, expr, &selector, &error);
+  if (status != LQL_STATUS_NO_MEMORY || selector != NULL) {
+    limited->selector_destroy(limited, selector);
+    limited->destroy(limited);
+    free(expr);
+    return 1;
+  }
+  if (limited->selector_parse(limited, "/status=open", &selector, &error) !=
+      LQL_STATUS_OK) {
+    limited->destroy(limited);
+    free(expr);
+    return 1;
+  }
+  limited->selector_destroy(limited, selector);
+  selector = NULL;
+  if (lql_new(&independent, &error) != LQL_STATUS_OK ||
+      independent->selector_parse(independent, "/status=open", &selector,
+                                  &error) != LQL_STATUS_OK) {
+    limited->destroy(limited);
+    if (independent != NULL) {
+      independent->selector_destroy(independent, selector);
+      independent->destroy(independent);
+    }
+    free(expr);
+    return 1;
+  }
+  independent->selector_destroy(independent, selector);
+  independent->destroy(independent);
+  limited->destroy(limited);
+  free(expr);
+  return 0;
+}
+
 int main(void) {
   lql *ctx;
   lql_error error;
@@ -3752,7 +3812,8 @@ int main(void) {
       run_output_modes_skip_scalar_roots(ctx) || run_stop_and_root_array(ctx) ||
       run_record_limit(ctx) || run_byte_limit(ctx) ||
       run_unintentional_stop_status(ctx) || run_true_stream_contract(ctx) ||
-      run_wide_plan_stream_contract(ctx) || run_file_backed_mutations(ctx)) {
+      run_wide_plan_stream_contract(ctx) || run_instance_memory_contract() ||
+      run_file_backed_mutations(ctx)) {
     ctx->destroy(ctx);
     return match_all_status != 0 ? match_all_status : 1;
   }

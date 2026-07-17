@@ -527,10 +527,11 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
  * Compatibility entry point for `self->stream_execute_spooled(self, ...)`.
  * Executes strict NDJSON with materialized record handling. This explicit
  * compatibility API may retain one compact record and spill it to a temporary
- * file for selected output, callbacks, projection, or mutation. Its compiled
- * execution plan is capped below 8 MiB of live heap; larger plans fail before
- * input is consumed. Do not use it for sensitive inputs or where end-to-end
- * streaming is required.
+ * file for selected output, callbacks, projection, or mutation. Every receiver
+ * has one 8 MiB allocation budget shared by parsed handles, execution plans,
+ * and compatibility spools; requests fail with `NO_MEMORY` when that budget is
+ * exhausted. Do not use it for sensitive inputs or where end-to-end streaming
+ * is required.
  */
 lql_status lql_stream_execute_spooled(lql *self,
                                       const lql_stream_request *request,

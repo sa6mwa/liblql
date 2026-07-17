@@ -241,10 +241,12 @@ API.
 - Live heap is the primary embedded-memory invariant. Peak direct-executor
   heap must stay at or below 256 KiB and remain independent of total input
   bytes, record count, match count, result count, and repeated executions in
-  one process. The spooled compatibility executor caps its compiled program
-  below 8 MiB and spills the current record after its bounded in-memory spool.
-  It may scale only with program size, nesting depth, and bounded transport
-  buffers.
+  one process. Every `lql_new` receiver also has an independent 8 MiB
+  allocation budget shared by its parsed selector, projection, and mutation
+  handles plus its temporary execution plans and compatibility spools. The
+  spooled compatibility executor spills the current record after its bounded
+  in-memory spool. It may scale only with program size, nesting depth, and
+  bounded transport buffers.
 - The live-heap gate covers selection, projection, mutation, sparse matching,
   a 100 MiB JSON record, and repeated large records. It must prove that no
   temporary full-record allocation or retained spool grows across executions.
