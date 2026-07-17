@@ -28,8 +28,10 @@ performance claim with profiling and paired Go/C benchmarks.
 - `lql_stream_execute` is the sole true-streaming execution entry point.
   `lql_stream_execute_spooled` is an explicitly named compatibility API for
   operations that still require a current-record materialization.
-- Strict NDJSON only. Root arrays are hard errors. Scalar roots are validated
-  records and do not match a non-empty selector.
+- Strict NDJSON only. Root arrays are hard errors and are never flattened. This
+  intentionally diverges from Go lql's array-document stream behavior to
+  preserve the NDJSON contract. Scalar roots are validated records and do not
+  match a non-empty selector.
 - Input records may use any JSON-permitted whitespace around structural tokens;
   compact JSON is an output normalization, never an input precondition.
 - Every emitted record is compact JSON plus one newline.

@@ -511,14 +511,15 @@ const char *lql_status_string(lql_status status);
 
 /**
  * Compatibility entry point for `self->stream_execute(self, ...)`. Executes
- * strict NDJSON with real producer-to-consumer streaming. Root arrays
- * are rejected. Decision-only execution never retains a record. Selected
- * output and value callbacks require `input_is_compact` plus `range_writer`,
- * so liblql can replay caller-owned source ranges only after validation.
- * Projection and mutation output return LQL_STATUS_UNSUPPORTED until they have
- * an incremental emitter. Wide plans that exceed the bounded scanner return
- * LQL_STATUS_UNSUPPORTED before the reader is consumed. Invalid arguments
- * clear `result` before return.
+ * strict NDJSON with real producer-to-consumer streaming. Root arrays are
+ * rejected rather than flattened, intentionally diverging from Go lql to
+ * preserve NDJSON framing. Decision-only execution never retains a record.
+ * Selected output and value callbacks require `input_is_compact` plus
+ * `range_writer`, so liblql can replay caller-owned source ranges only after
+ * validation. Projection and mutation output return LQL_STATUS_UNSUPPORTED
+ * until they have an incremental emitter. Wide plans that exceed the bounded
+ * scanner return LQL_STATUS_UNSUPPORTED before the reader is consumed. Invalid
+ * arguments clear `result` before return.
  */
 lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
                               lql_stream_result *result, lql_error *error);

@@ -15,8 +15,10 @@ contract and completion gates are in
 [`docs/liblql-self-contained-execution-spec.md`](docs/liblql-self-contained-execution-spec.md).
 
 Streaming inputs are strict NDJSON. Root arrays are hard errors and are never
-flattened. Input may contain ordinary JSON whitespace; emitted records are
-compact JSON plus one newline.
+flattened. This intentionally diverges from Go lql's JSON-stream behavior:
+accepting an array document would weaken the NDJSON framing contract. Input may
+contain ordinary JSON whitespace; emitted records are compact JSON plus one
+newline.
 
 The implementation must prove Go behavioral parity on accepted parity rows and
 at least 1.0x GCC C/Go performance on every accepted benchmark row. JSON scalar

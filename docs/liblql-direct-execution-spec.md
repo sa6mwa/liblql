@@ -54,7 +54,9 @@ The only intentional parser/framing exclusions are:
 
 1. A root JSON array is a hard error at every liblql and clql NDJSON stream
    entry point. It is never flattened, recursively or otherwise. Root arrays
-   must not appear in Go/C parity or performance fixtures.
+   must not appear in Go/C parity or performance fixtures. This intentionally
+   diverges from Go lql, whose JSON stream APIs flatten array documents; liblql
+   preserves NDJSON framing instead.
 2. LoneJSON remains the strict JSON parser. Go decoder acceptance of malformed
    surrogate sequences or adjacent leading-zero numbers is not required.
 
