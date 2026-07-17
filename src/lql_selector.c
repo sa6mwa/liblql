@@ -659,9 +659,16 @@ static int set_range_bound(lql_selector_parser *ctx, lql_selector *selector,
   lql_temporal temporal;
   double number;
   int is_temporal;
+  char *trimmed;
 
-  is_temporal = lql_parse_temporal_literal(decoded, &temporal);
-  if (!is_temporal && !parse_number_literal(decoded, &number)) {
+  trimmed = trim_dup(ctx, decoded, strlen(decoded));
+  if (trimmed == NULL) {
+    lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+    return 0;
+  }
+  is_temporal = lql_parse_temporal_literal(trimmed, &temporal);
+  if (!is_temporal && !parse_number_literal(trimmed, &number)) {
+    ctx->allocator->destroy(ctx->allocator, trimmed);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "range selector bound invalid");
     return 0;
@@ -669,32 +676,38 @@ static int set_range_bound(lql_selector_parser *ctx, lql_selector *selector,
   if (is_temporal) {
     selector->range_is_temporal = 1;
     if (strcmp(key, "gt") == 0) {
-      if (!replace_selector_text(ctx, &selector->range_gt_text, decoded)) {
+      if (!replace_selector_text(ctx, &selector->range_gt_text, trimmed)) {
+        ctx->allocator->destroy(ctx->allocator, trimmed);
         return 0;
       }
       selector->temporal_gt = temporal;
       selector->has_temporal_gt = 1;
     } else if (strcmp(key, "gte") == 0) {
-      if (!replace_selector_text(ctx, &selector->range_gte_text, decoded)) {
+      if (!replace_selector_text(ctx, &selector->range_gte_text, trimmed)) {
+        ctx->allocator->destroy(ctx->allocator, trimmed);
         return 0;
       }
       selector->temporal_gte = temporal;
       selector->has_temporal_gte = 1;
     } else if (strcmp(key, "lt") == 0) {
-      if (!replace_selector_text(ctx, &selector->range_lt_text, decoded)) {
+      if (!replace_selector_text(ctx, &selector->range_lt_text, trimmed)) {
+        ctx->allocator->destroy(ctx->allocator, trimmed);
         return 0;
       }
       selector->temporal_lt = temporal;
       selector->has_temporal_lt = 1;
     } else {
-      if (!replace_selector_text(ctx, &selector->range_lte_text, decoded)) {
+      if (!replace_selector_text(ctx, &selector->range_lte_text, trimmed)) {
+        ctx->allocator->destroy(ctx->allocator, trimmed);
         return 0;
       }
       selector->temporal_lte = temporal;
       selector->has_temporal_lte = 1;
     }
+    ctx->allocator->destroy(ctx->allocator, trimmed);
     return 1;
   }
+  ctx->allocator->destroy(ctx->allocator, trimmed);
   if (strcmp(key, "gt") == 0) {
     selector->range_gt = number;
     selector->has_range_gt = 1;
@@ -941,15 +954,11 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
       ctx->allocator->destroy(ctx->allocator, decoded);
     } else if (key_is_value(key)) {
       ctx->allocator->destroy(ctx->allocator, selector->value);
-      if (decoded[0] == '\0' &&
+      if (decoded[0] == '\0' && (*seen_slot)[0] == '\0' &&
           (kind == LQL_SELECTOR_KIND_CONTAINS ||
            kind == LQL_SELECTOR_KIND_ICONTAINS ||
            kind == LQL_SELECTOR_KIND_PREFIX ||
            kind == LQL_SELECTOR_KIND_IPREFIX)) {
-        /*
-         * Go lql treats value= with an empty value the same as omitting the
-         * value for string-term selectors: assert that the path exists.
-         */
         ctx->allocator->destroy(ctx->allocator, decoded);
         selector->value = NULL;
         selector->value_set = 0;
@@ -3154,18 +3163,6 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
     return LQL_STATUS_PARSE_ERROR;
   }
   has_value = term->value_present || term->value.len != 0u;
-  if (term->value_present && term->value.len == 0u &&
-      (internal_kind == LQL_SELECTOR_KIND_CONTAINS ||
-       internal_kind == LQL_SELECTOR_KIND_ICONTAINS ||
-       internal_kind == LQL_SELECTOR_KIND_PREFIX ||
-       internal_kind == LQL_SELECTOR_KIND_IPREFIX)) {
-    /*
-     * Go lql treats value= with an empty value the same as an omitted value for
-     * string-term selectors: it is a path assertion, not an empty substring or
-     * prefix search.
-     */
-    has_value = 0;
-  }
   if (term->any_count != 0u) {
     if (any_values == NULL) {
       lql_selector_cleanup(ctx.receiver, &selector);
@@ -3604,6 +3601,23 @@ static lql_status append_plain_group_node(lql_selector_parser *ctx,
   return LQL_STATUS_OK;
 }
 
+static int append_finalized_indexed_selector(lql_selector_parser *ctx,
+                                             lql_selector *parent,
+                                             lql_selector *child) {
+  lql_selector *children;
+  if (child->kind == LQL_SELECTOR_KIND_AND && child->child_count == 1u) {
+    children = child->children;
+    if (!append_selector(ctx, parent, &child->children[0])) {
+      return 0;
+    }
+    child->children = NULL;
+    child->child_count = 0u;
+    ctx->allocator->destroy(ctx->allocator, children);
+    return 1;
+  }
+  return append_selector(ctx, parent, child);
+}
+
 static lql_status append_token_to_group(lql_selector_parser *ctx,
                                         indexed_group *group, const char *token,
                                         lql_error *error) {
@@ -3675,7 +3689,14 @@ static lql_status finalize_indexed_group(lql_selector_parser *ctx,
       return st;
     }
     if (!root_or_mode && group->groups[i].wrapper == LQL_SELECTOR_KIND_OR) {
-      if (!append_selector(ctx, &group->or_group, &group->groups[i].selector)) {
+      if (!append_finalized_indexed_selector(ctx, &group->or_group,
+                                             &group->groups[i].selector)) {
+        return LQL_STATUS_NO_MEMORY;
+      }
+    } else if (!group->indexed &&
+               group->groups[i].wrapper == LQL_SELECTOR_KIND_AND) {
+      if (!append_finalized_indexed_selector(ctx, &group->selector,
+                                             &group->groups[i].selector)) {
         return LQL_STATUS_NO_MEMORY;
       }
     } else if (!append_selector(ctx, &group->selector,
@@ -3684,7 +3705,11 @@ static lql_status finalize_indexed_group(lql_selector_parser *ctx,
     }
   }
   if (group->or_group.child_count != 0u) {
-    if (!append_selector(ctx, &group->selector, &group->or_group)) {
+    if (!group->indexed && group->selector.kind == LQL_SELECTOR_KIND_AND &&
+        group->selector.child_count == 0u) {
+      group->selector = group->or_group;
+      memset(&group->or_group, 0, sizeof(group->or_group));
+    } else if (!append_selector(ctx, &group->selector, &group->or_group)) {
       return LQL_STATUS_NO_MEMORY;
     }
   }
