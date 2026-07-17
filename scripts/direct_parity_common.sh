@@ -86,6 +86,7 @@ direct_parity_run_row() {
 
 direct_parity_validate() {
   "$validator" --forbid-unsupported --min-c-go-speedup=1.0 \
+    --require-c-rss-below-go \
     --speedup-submode steady_state <"$out"
   printf '%s: wrote %s\n' "$direct_parity_name" "$out"
 }

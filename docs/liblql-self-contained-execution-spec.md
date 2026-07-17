@@ -43,10 +43,12 @@ performance claim with profiling and paired Go/C benchmarks.
   mutation remain unavailable from the true-streaming API until they have
   incremental emitters; callers needing their existing semantics must opt into
   the named spooled API.
-- Live heap remains at or below 256 KiB, independent of total input, records,
-  matches, and repeated executions. The true-streaming API never materializes
-  a record or writes input to disk. The explicitly named spooled compatibility
-  API may retain one current record and spill it to a temporary file.
+- Live heap for `lql_stream_execute` remains at or below 256 KiB, independent
+  of total input, records, matches, and repeated executions. The true-streaming
+  API never materializes a record or writes input to disk. It rejects plans
+  wider than its bounded one-pass scanner before consuming input. The explicitly
+  named spooled compatibility API may retain one current record and spill it to
+  a temporary file; its compiled execution plan is capped below 8 MiB.
 - GCC Go/C speedup is at least 1.0x on every accepted row. Profile before
   optimizing; do not add caches or special cases based only on benchmark deltas.
 - `make direct-parity-smoke` is the fast executable GCC-only parity gate. It

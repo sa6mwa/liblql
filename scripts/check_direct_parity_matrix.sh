@@ -44,20 +44,19 @@ direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   and_status_open_region_west '/status="open",/region="us-west"' decision_only_selector /id
 
-# Above the scanner's machine-word batch width, repeated predicates must still
-# execute through the compiled alias path rather than becoming unsupported or
-# paying one full input pass per logically duplicate clause.
-wide_selector=''
+# Above the scanner's machine-word batch width, validate a genuinely distinct
+# miss rather than only the duplicate-alias fast path.
+wide_miss_selector=''
 wide_index=0
 while [ "$wide_index" -lt 129 ]; do
-  if [ -n "$wide_selector" ]; then
-    wide_selector="$wide_selector,"
+  if [ -n "$wide_miss_selector" ]; then
+    wide_miss_selector="$wide_miss_selector,"
   fi
-  wide_selector="${wide_selector}/status=\"open\""
+  wide_miss_selector="${wide_miss_selector}/status=\"open-${wide_index}\""
   wide_index=$((wide_index + 1))
 done
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
-  wide_129_status_open "$wide_selector" decision_only_selector /id
+  wide_129_distinct_miss "$wide_miss_selector" decision_only_selector /id
 
 direct_parity_run_row build/direct-probe/scalar-100k.ndjson scalar_100k \
   code_eq_one '/code=1' decision_only_selector /id

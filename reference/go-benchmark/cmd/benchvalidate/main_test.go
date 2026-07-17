@@ -103,3 +103,29 @@ func TestValidateSpeedupSubmodeIgnoresWarmupSpeed(t *testing.T) {
 		t.Fatalf("validate() error = %v", err)
 	}
 }
+
+func TestValidateRequiresCRSSBelowGo(t *testing.T) {
+	goWarmup := completeComparisonRecord("go", "warmup_included", 10)
+	cWarmup := completeComparisonRecord("c", "warmup_included", 10)
+	goSteady := completeComparisonRecord("go", "steady_state", 10)
+	cSteady := completeComparisonRecord("c", "steady_state", 10)
+	goRSS := int64(100)
+	cRSS := int64(100)
+	goWarmup.PeakRSSBytes = &goRSS
+	cWarmup.PeakRSSBytes = &cRSS
+	goSteady.PeakRSSBytes = &goRSS
+	cSteady.PeakRSSBytes = &cRSS
+	input := strings.Join([]string{
+		benchmarkRecordLine(t, goWarmup),
+		benchmarkRecordLine(t, cWarmup),
+		benchmarkRecordLine(t, goSteady),
+		benchmarkRecordLine(t, cSteady),
+	}, "\n") + "\n"
+	err := validate(strings.NewReader(input), validateOptions{
+		RequireCRSSBelowGo: true,
+		ForbidUnsupported:  true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "peak_rss_bytes must be below Go") {
+		t.Fatalf("validate() error = %v, want C RSS comparison failure", err)
+	}
+}

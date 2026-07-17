@@ -196,13 +196,18 @@ def main():
         [f"/k{i}={i}" for i in range(wide_count - 1)] + ["/k128=missing"],
     )
     assert_case(
+        "wide shared in disjunct",
+        compact({"status": "open"}) + "\n",
+        [f"in{{field=/status,any=open|other-{i}}}" for i in range(wide_count)],
+    )
+    assert_case(
         "projection beyond one machine word",
         wide_input,
         sum((["-f", f"/k{i}"] for i in range(wide_count)), [])
         + ["/id=wide"],
     )
 
-    print(f"clql selector parity: {len(cases) + 3} cases passed")
+    print(f"clql selector parity: {len(cases) + 4} cases passed")
 
 
 if __name__ == "__main__":

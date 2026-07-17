@@ -3676,6 +3676,55 @@ static int run_file_backed_mutations(lql *ctx) {
   return 0;
 }
 
+static int run_wide_plan_stream_contract(lql *ctx) {
+  char expr[2048];
+  size_t len;
+  size_t i;
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  lql_status status;
+
+  len = 0u;
+  for (i = 0u; i < 65u; ++i) {
+    int written;
+    written = sprintf(expr + len, "%sexists{/k%lu}", i == 0u ? "" : ",",
+                      (unsigned long)i);
+    if (written < 0 || (size_t)written >= sizeof(expr) - len) {
+      return 1;
+    }
+    len += (size_t)written;
+  }
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, expr, &selector, &error) != LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)"{}\n";
+  reader.len = 3u;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  status = ctx->stream_execute(ctx, &request, &result, &error);
+  if (status != LQL_STATUS_UNSUPPORTED || reader.offset != 0u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)"{}\n";
+  reader.len = 3u;
+  status = ctx->stream_execute_spooled(ctx, &request, &result, &error);
+  ctx->selector_destroy(ctx, selector);
+  return status == LQL_STATUS_OK && result.records_seen == 1u &&
+                 result.records_matched == 0u
+             ? 0
+             : 1;
+}
+
 int main(void) {
   lql *ctx;
   lql_error error;
@@ -3703,7 +3752,7 @@ int main(void) {
       run_output_modes_skip_scalar_roots(ctx) || run_stop_and_root_array(ctx) ||
       run_record_limit(ctx) || run_byte_limit(ctx) ||
       run_unintentional_stop_status(ctx) || run_true_stream_contract(ctx) ||
-      run_file_backed_mutations(ctx)) {
+      run_wide_plan_stream_contract(ctx) || run_file_backed_mutations(ctx)) {
     ctx->destroy(ctx);
     return match_all_status != 0 ? match_all_status : 1;
   }

@@ -396,6 +396,9 @@ struct lql {
    * Executes strict NDJSON with real producer-to-consumer streaming. Selected
    * output requires caller-owned compact source-range replay; projection and
    * mutation require incremental emitters and otherwise return UNSUPPORTED.
+   * Wide selector or projection plans that cannot fit the bounded one-pass
+   * scanner also return UNSUPPORTED before reading input; use the separately
+   * named spooled API for compatibility execution.
    */
   lql_status (*stream_execute)(lql *self, const lql_stream_request *request,
                                lql_stream_result *result, lql_error *error);
@@ -513,7 +516,9 @@ const char *lql_status_string(lql_status status);
  * output and value callbacks require `input_is_compact` plus `range_writer`,
  * so liblql can replay caller-owned source ranges only after validation.
  * Projection and mutation output return LQL_STATUS_UNSUPPORTED until they have
- * an incremental emitter. Invalid arguments clear `result` before return.
+ * an incremental emitter. Wide plans that exceed the bounded scanner return
+ * LQL_STATUS_UNSUPPORTED before the reader is consumed. Invalid arguments
+ * clear `result` before return.
  */
 lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
                               lql_stream_result *result, lql_error *error);
@@ -522,8 +527,10 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
  * Compatibility entry point for `self->stream_execute_spooled(self, ...)`.
  * Executes strict NDJSON with materialized record handling. This explicit
  * compatibility API may retain one compact record and spill it to a temporary
- * file for selected output, callbacks, projection, or mutation. Do not use it
- * for sensitive inputs or where end-to-end streaming is required.
+ * file for selected output, callbacks, projection, or mutation. Its compiled
+ * execution plan is capped below 8 MiB of live heap; larger plans fail before
+ * input is consumed. Do not use it for sensitive inputs or where end-to-end
+ * streaming is required.
  */
 lql_status lql_stream_execute_spooled(lql *self,
                                       const lql_stream_request *request,

@@ -23,15 +23,20 @@ at least 1.0x GCC C/Go performance on every accepted benchmark row. JSON scalar
 equality intentionally uses liblql's typed JSON semantics instead of the pinned
 Go library's selector-string coercion: unquoted numbers, booleans, and null are
 typed, quoted values are strings, and numeric equality compares JSON numbers by
-numeric value rather than by source spelling. Live heap, not RSS, is the
-primary embedded-memory invariant and must remain at or below 256 KiB,
-including the 100 MiB current-record gate.
+numeric value rather than by source spelling. `lql_stream_execute` live heap,
+not RSS, is the primary embedded-memory invariant and must remain at or below
+256 KiB, including the 100 MiB current-record gate. The explicitly spooled
+compatibility executor has a hard 8 MiB compiled-plan budget and a 64 KiB
+in-memory current-record spool before it spills to disk.
 
 ## Execution Contracts
 
 `lql_stream_execute` is the public true-streaming API. It validates arbitrary
 whitespace-tolerant NDJSON with bounded internal state. Decision callbacks work
-with any valid input. Selected-record output and value callbacks require the
+with any valid input supported by its bounded one-pass scanner. Plans wider
+than that scanner return `LQL_STATUS_UNSUPPORTED` before input is consumed;
+use the separately named compatibility API when arbitrary-width execution is
+required. Selected-record output and value callbacks require the
 caller to provide compact input and a `range_writer` that can replay the
 validated source range. Missing compact-source configuration returns
 `LQL_STATUS_UNSUPPORTED` before consuming input; a false compact-input

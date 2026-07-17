@@ -238,9 +238,11 @@ API.
   released before processing the next record.
 - Compiled selector/projection/mutation programs and bounded parser/writer
   stacks are allowed. They are not input/result caches.
-- Live heap is the primary embedded-memory invariant. Peak live heap must stay
-  at or below 256 KiB and remain independent of total input bytes, record
-  count, match count, result count, and repeated executions in one process.
+- Live heap is the primary embedded-memory invariant. Peak direct-executor
+  heap must stay at or below 256 KiB and remain independent of total input
+  bytes, record count, match count, result count, and repeated executions in
+  one process. The spooled compatibility executor caps its compiled program
+  below 8 MiB and spills the current record after its bounded in-memory spool.
   It may scale only with program size, nesting depth, and bounded transport
   buffers.
 - The live-heap gate covers selection, projection, mutation, sparse matching,

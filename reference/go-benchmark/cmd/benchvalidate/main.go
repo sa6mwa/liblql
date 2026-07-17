@@ -36,6 +36,7 @@ func main() {
 	flag.Int64Var(&opts.MaxCPeakRSSBytes, "max-c-peak-rss-bytes", 0, "fail supported C records whose peak_rss_bytes exceeds this value")
 	flag.Int64Var(&opts.MaxCSteadyStateNsPerByte, "max-c-steady-state-ns-per-byte", 0, "fail supported C steady_state records whose ns_per_op/bytes_per_iter exceeds this value")
 	flag.Float64Var(&opts.MinCGoSpeedup, "min-c-go-speedup", 0, "fail matched supported C/Go records whose Go/C speedup is below this value")
+	flag.BoolVar(&opts.RequireCRSSBelowGo, "require-c-rss-below-go", false, "fail matched supported C/Go records unless C peak_rss_bytes is below Go")
 	flag.StringVar(&opts.SpeedupSubmode, "speedup-submode", "", "when set, apply --min-c-go-speedup only to this submode")
 	flag.Int64Var(&opts.MaxLuaPeakRSSBytes, "max-lua-peak-rss-bytes", 0, "fail supported Lua records whose peak_rss_bytes exceeds this value")
 	flag.BoolVar(&opts.RequireLuaPeakRSS, "require-lua-peak-rss", false, "fail supported Lua records that do not report peak_rss_bytes")
@@ -51,6 +52,7 @@ type validateOptions struct {
 	MaxCPeakRSSBytes         int64
 	MaxCSteadyStateNsPerByte int64
 	MinCGoSpeedup            float64
+	RequireCRSSBelowGo       bool
 	SpeedupSubmode           string
 	MaxLuaPeakRSSBytes       int64
 	RequireLuaPeakRSS        bool
@@ -84,7 +86,7 @@ func validate(r io.Reader, opts validateOptions) error {
 		if err := validateRecord(line, rec, opts); err != nil {
 			return err
 		}
-		if opts.MinCGoSpeedup > 0 && !rec.Unsupported && rec.NsPerOp != nil &&
+		if (opts.MinCGoSpeedup > 0 || opts.RequireCRSSBelowGo) && !rec.Unsupported && rec.NsPerOp != nil &&
 			(opts.SpeedupSubmode == "" || rec.Submode == opts.SpeedupSubmode) &&
 			(rec.Impl == "go" || rec.Impl == "c") {
 			key := comparisonKey(rec)
@@ -117,7 +119,7 @@ func validate(r io.Reader, opts validateOptions) error {
 			return fmt.Errorf("benchmark tuple %q must include warmup_included and steady_state records", key)
 		}
 	}
-	if opts.MinCGoSpeedup > 0 {
+	if opts.MinCGoSpeedup > 0 || opts.RequireCRSSBelowGo {
 		for _, pair := range comparisons {
 			if pair.goRecord == nil || pair.cRecord == nil {
 				return fmt.Errorf("missing supported Go/C benchmark counterpart for %s", pair.name)
@@ -125,10 +127,17 @@ func validate(r io.Reader, opts validateOptions) error {
 			if err := validateComparison(*pair.goRecord, *pair.cRecord); err != nil {
 				return err
 			}
-			goNS := *pair.goRecord.record.NsPerOp
-			cNS := *pair.cRecord.record.NsPerOp
-			if cNS <= 0 || float64(goNS)/float64(cNS) < opts.MinCGoSpeedup {
-				return fmt.Errorf("line %d: c/go speedup %.3fx below %.3fx for %s/%s/%s/%s/%s (go=%d ns, c=%d ns)", pair.cRecord.line, float64(goNS)/float64(cNS), opts.MinCGoSpeedup, pair.cRecord.record.Dataset, pair.cRecord.record.Selector, pair.cRecord.record.Mode, pair.cRecord.record.Submode, pair.cRecord.record.Expr, goNS, cNS)
+			if opts.MinCGoSpeedup > 0 {
+				goNS := *pair.goRecord.record.NsPerOp
+				cNS := *pair.cRecord.record.NsPerOp
+				if cNS <= 0 || float64(goNS)/float64(cNS) < opts.MinCGoSpeedup {
+					return fmt.Errorf("line %d: c/go speedup %.3fx below %.3fx for %s/%s/%s/%s/%s (go=%d ns, c=%d ns)", pair.cRecord.line, float64(goNS)/float64(cNS), opts.MinCGoSpeedup, pair.cRecord.record.Dataset, pair.cRecord.record.Selector, pair.cRecord.record.Mode, pair.cRecord.record.Submode, pair.cRecord.record.Expr, goNS, cNS)
+				}
+			}
+			if opts.RequireCRSSBelowGo &&
+				(pair.goRecord.record.PeakRSSBytes == nil || pair.cRecord.record.PeakRSSBytes == nil ||
+					*pair.cRecord.record.PeakRSSBytes >= *pair.goRecord.record.PeakRSSBytes) {
+				return fmt.Errorf("line %d: c peak_rss_bytes must be below Go for %s (go=%v c=%v)", pair.cRecord.line, pair.name, pair.goRecord.record.PeakRSSBytes, pair.cRecord.record.PeakRSSBytes)
 			}
 		}
 	}
