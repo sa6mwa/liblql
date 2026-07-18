@@ -68,6 +68,19 @@ if [ "$listed" != "$release_artifacts" ]; then
   printf 'listed:\n%s\nartifacts:\n%s\n' "$listed" "$release_artifacts" >&2
   exit 1
 fi
+expected_uploads=$(mktemp "${TMPDIR:-/tmp}/liblql-release-uploads.XXXXXX")
+actual_uploads=$(mktemp "${TMPDIR:-/tmp}/liblql-release-uploads.XXXXXX")
+trap 'rm -f "$expected_uploads" "$actual_uploads"' EXIT HUP INT TERM
+{
+  printf '%s\n' "$manifest"
+  printf '%s\n' "$listed" | sed "s#^#$dist_dir/#"
+} | sort >"$expected_uploads"
+sh scripts/print_release_uploads.sh | sort >"$actual_uploads"
+if ! cmp -s "$expected_uploads" "$actual_uploads"; then
+  printf 'package verify: release upload list must include checksum manifest and listed artifacts only\n' >&2
+  diff -u "$expected_uploads" "$actual_uploads" >&2 || true
+  exit 1
+fi
 
 sh scripts/remove_path.sh "$work"
 mkdir -p "$work/extract"

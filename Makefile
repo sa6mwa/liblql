@@ -1,4 +1,4 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check lifecycle-version-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all print-test-all-gates test-all-timed test-all-gates direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check lifecycle-version-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify release-upload-list verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all print-test-all-gates test-all-timed test-all-gates direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
 TEST_ALL_GATES := lifecycle-check target-tool-check direct-reset direct-no-lonejson test mutation-literal-parity shared-only-smoke lua-test lua-cli-smoke lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-selector-parity clql-mutation-parity package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
 
@@ -42,9 +42,10 @@ help:
 	  'make package-source build source archive and append checksum manifest' \
 	  'make package-source-smoke verify source archive from checksum manifest' \
 	  'make source-manifest-exactness verify source archive payload matches RELEASE_MANIFEST' \
-	  'make package-checksums verify the release checksum manifest' \
-	  'make package-verify verify checksum-listed host package artifacts' \
-	  'make verify-release-archives verify checksum-listed release archives' \
+		  'make package-checksums verify the release checksum manifest' \
+		  'make package-verify verify checksum-listed host package artifacts' \
+		  'make release-upload-list print manifest-selected release upload files' \
+		  'make verify-release-archives verify checksum-listed release archives' \
 	  'make verify-release-privacy verify release artifact privacy/relocatability' \
 	  'make release-matrix build and verify all available SDK target packages' \
 	  'make prerelease    run the full release proof graph without cleaning first' \
@@ -213,6 +214,9 @@ package-checksums:
 
 package-verify: package-clql
 	@sh scripts/package-verify.sh all
+
+release-upload-list:
+	@sh scripts/print_release_uploads.sh
 
 verify-release-archives:
 	@sh scripts/verify_release_artifacts.sh
