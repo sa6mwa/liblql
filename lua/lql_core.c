@@ -611,10 +611,15 @@ static int lua_lql_core_version(lua_State *lua) {
   return 1;
 }
 
+static int lua_lql_core_has_core(lua_State *lua) {
+  lua_pushboolean(lua, 1);
+  return 1;
+}
+
 static const luaL_Reg lua_lql_module_functions[] = {
     {"new", lua_lql_new},
     {"version", lua_lql_core_version},
-    {"has_core", lua_lql_core_version},
+    {"has_core", lua_lql_core_has_core},
     {NULL, NULL}};
 
 static const luaL_Reg lua_lql_client_methods[] = {

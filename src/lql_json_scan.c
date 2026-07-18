@@ -68,6 +68,7 @@ typedef struct lql_json_scan {
   size_t offset;
   size_t length;
   size_t bytes_read;
+  int eof;
   size_t depth;
   lql_error *error;
   int flat_eq_active;
@@ -3047,6 +3048,9 @@ static lql_status lql_json_refill(lql_json_scan *scan) {
   if (scan->offset < scan->length) {
     return LQL_STATUS_OK;
   }
+  if (scan->eof) {
+    return LQL_STATUS_OK;
+  }
   if (scan->cancelled != NULL && scan->cancelled(scan->cancel_user)) {
     if (scan->out_cancelled != NULL)
       *scan->out_cancelled = 1;
@@ -3069,6 +3073,9 @@ static lql_status lql_json_refill(lql_json_scan *scan) {
   }
   scan->length = amount;
   scan->bytes_read += amount;
+  if (amount == 0u) {
+    scan->eof = 1;
+  }
   return LQL_STATUS_OK;
 }
 

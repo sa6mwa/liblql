@@ -13,6 +13,9 @@ typedef struct test_reader {
   size_t offset;
   size_t chunk_size;
   size_t range_writes;
+  size_t calls;
+  int eof_seen;
+  int fail_after_eof;
 } test_reader;
 
 typedef struct test_file_source {
@@ -81,7 +84,16 @@ static lql_status test_read(void *user, unsigned char *buffer, size_t capacity,
   if (reader == NULL || buffer == NULL) {
     return LQL_STATUS_INVALID_ARGUMENT;
   }
+  if (reader->eof_seen && reader->fail_after_eof) {
+    if (error != NULL) {
+      error->code = LQL_STATUS_INVALID_ARGUMENT;
+      strcpy(error->message, "reader called after EOF");
+    }
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  ++reader->calls;
   if (reader->offset == reader->len) {
+    reader->eof_seen = 1;
     return LQL_STATUS_OK;
   }
   remaining = reader->len - reader->offset;
@@ -1251,6 +1263,39 @@ static int run_conjunction_selection(lql *ctx) {
   request.selector = selector;
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
       result.records_seen != 3u || result.records_matched != 1u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
+static int run_direct_reader_eof_contract(lql *ctx) {
+  static const char input[] = "{\"status\":\"open\"}\n";
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = sizeof(input) - 1u;
+  reader.fail_after_eof = 1;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  if (ctx->stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      !reader.eof_seen || reader.calls != 2u) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
@@ -5962,6 +6007,7 @@ int main(void) {
   RUN_CTX_TEST(run_recursive_wildcard_selector_regression);
   RUN_CTX_TEST(run_escaped_pointer_selection);
   RUN_CTX_TEST(run_conjunction_selection);
+  RUN_CTX_TEST(run_direct_reader_eof_contract);
   RUN_CTX_TEST(run_or_selection);
   RUN_CTX_TEST(run_post_hit_validation);
   RUN_CTX_TEST(run_not_selection);
