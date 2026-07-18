@@ -162,8 +162,8 @@ static int lql_number_plain_integer(const char *text, size_t len,
 }
 
 static int lql_number_compare_plain_integer(const char *left, size_t left_len,
-                                            const char *right,
-                                            size_t right_len, int *out) {
+                                            const char *right, size_t right_len,
+                                            int *out) {
   const char *left_digits;
   const char *right_digits;
   size_t left_digits_len;
@@ -185,8 +185,7 @@ static int lql_number_compare_plain_integer(const char *left, size_t left_len,
     return 1;
   }
   if (left_zero != right_zero) {
-    *out = left_zero ? (right_negative ? 1 : -1)
-                     : (left_negative ? -1 : 1);
+    *out = left_zero ? (right_negative ? 1 : -1) : (left_negative ? -1 : 1);
     return 1;
   }
   if (left_negative != right_negative) {
@@ -200,9 +199,8 @@ static int lql_number_compare_plain_integer(const char *left, size_t left_len,
 }
 
 static char *lql_number_add_digits(lql_allocator *allocator, const char *left,
-                                   size_t left_len,
-                                   const char *right, size_t right_len,
-                                   int negative) {
+                                   size_t left_len, const char *right,
+                                   size_t right_len, int negative) {
   size_t max_len;
   size_t out_pos;
   size_t li;
@@ -246,9 +244,8 @@ static char *lql_number_add_digits(lql_allocator *allocator, const char *left,
 }
 
 static char *lql_number_sub_digits(lql_allocator *allocator, const char *left,
-                                   size_t left_len,
-                                   const char *right, size_t right_len,
-                                   int negative) {
+                                   size_t left_len, const char *right,
+                                   size_t right_len, int negative) {
   size_t out_pos;
   size_t li;
   size_t ri;
@@ -336,7 +333,8 @@ static char *lql_number_adjusted_exponent(lql_allocator *allocator,
                                  small_len, base_negative);
   }
   right_digits = small_digits;
-  cmp = lql_number_compare_digits(base_digits, base_len, right_digits, small_len);
+  cmp =
+      lql_number_compare_digits(base_digits, base_len, right_digits, small_len);
   if (cmp == 0) {
     return lql_number_sub_digits(allocator, "0", 1u, "0", 1u, 0);
   }
@@ -366,7 +364,8 @@ static int lql_number_compare_signed_decimal(const char *left,
   if (left_negative != right_negative) {
     return left_negative ? -1 : 1;
   }
-  cmp = lql_number_compare_digits(left_digits, left_len, right_digits, right_len);
+  cmp =
+      lql_number_compare_digits(left_digits, left_len, right_digits, right_len);
   return left_negative ? -cmp : cmp;
 }
 
@@ -422,8 +421,8 @@ static int lql_number_decimal_parse(const char *text, size_t len,
   } else {
     out->fraction = text + pos;
   }
-  if (!lql_number_parse_exponent(text, len, &pos, &exponent_negative,
-                                 &exponent, &exponent_len) ||
+  if (!lql_number_parse_exponent(text, len, &pos, &exponent_negative, &exponent,
+                                 &exponent_len) ||
       pos != len) {
     return 0;
   }
@@ -456,9 +455,8 @@ static int lql_number_decimal_parse(const char *text, size_t len,
   lql_number_size_to_long(out->coeff_len, &coeff_len);
   lql_number_size_to_long(out->fraction_len, &fraction_len);
   lql_number_size_to_long(total_digits - 1u - last_nonzero, &trailing_zeroes);
-  out->decimal_adjust =
-      lql_number_clamp_add(lql_number_clamp_add(coeff_len, -fraction_len),
-                           trailing_zeroes);
+  out->decimal_adjust = lql_number_clamp_add(
+      lql_number_clamp_add(coeff_len, -fraction_len), trailing_zeroes);
   return 1;
 }
 
@@ -489,8 +487,8 @@ static int lql_number_compare_abs(lql_allocator *allocator,
     *out = 1;
     return 1;
   }
-  max_digits = left->coeff_len > right->coeff_len ? left->coeff_len
-                                                  : right->coeff_len;
+  max_digits =
+      left->coeff_len > right->coeff_len ? left->coeff_len : right->coeff_len;
   for (i = 0u; i < max_digits; ++i) {
     char a;
     char b;

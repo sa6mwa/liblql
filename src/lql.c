@@ -413,8 +413,9 @@ static lql_selector_node_kind selector_cursor_kind(lql_selector_kind kind) {
   case LQL_SELECTOR_KIND_NOT:
     return LQL_SELECTOR_NODE_NOT;
   case LQL_SELECTOR_KIND_EQ:
-  case LQL_SELECTOR_KIND_NE:
     return LQL_SELECTOR_NODE_EQ;
+  case LQL_SELECTOR_KIND_NE:
+    return LQL_SELECTOR_NODE_NOT;
   case LQL_SELECTOR_KIND_CONTAINS:
     return LQL_SELECTOR_NODE_CONTAINS;
   case LQL_SELECTOR_KIND_ICONTAINS:
@@ -507,6 +508,10 @@ static lql_status selector_node_child_count_method(const lql *self,
       node.kind != LQL_SELECTOR_NODE_NOT) {
     return LQL_STATUS_OK;
   }
+  if (internal->kind == LQL_SELECTOR_KIND_NE) {
+    *out_count = 1u;
+    return LQL_STATUS_OK;
+  }
   *out_count = internal->child_count;
   return LQL_STATUS_OK;
 }
@@ -531,6 +536,16 @@ static lql_status selector_node_child_method(const lql *self,
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "selector node has no children");
     return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (internal->kind == LQL_SELECTOR_KIND_NE) {
+    if (index != 0u) {
+      lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                    "selector child index out of range");
+      return LQL_STATUS_INVALID_ARGUMENT;
+    }
+    out->kind = LQL_SELECTOR_NODE_EQ;
+    out->impl = internal;
+    return LQL_STATUS_OK;
   }
   if (index >= internal->child_count) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -560,8 +575,8 @@ selector_node_string_term_method(const lql *self, lql_selector_node node,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   out->field = lql_view_cstr(internal->field);
-  out->value_present =
-      internal->value_set || (internal->value != NULL && internal->value_len != 0u);
+  out->value_present = internal->value_set ||
+                       (internal->value != NULL && internal->value_len != 0u);
   out->value.data = internal->value;
   out->value.len = internal->value == NULL ? 0u : internal->value_len;
   out->ignore_case = internal->ignore_case;
@@ -1400,7 +1415,14 @@ static void selector_capabilities_visit(lql_selector_capabilities *out,
     out->not_ = 1;
     break;
   case LQL_SELECTOR_KIND_EQ:
+    out->eq = 1;
+    break;
   case LQL_SELECTOR_KIND_NE:
+    /*
+     * `!=` is exposed through selector inspection as NOT(EQ(...)); report both
+     * flags so capability consumers see the same node kinds they will traverse.
+     */
+    out->not_ = 1;
     out->eq = 1;
     break;
   case LQL_SELECTOR_KIND_CONTAINS:

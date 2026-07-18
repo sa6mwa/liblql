@@ -16,7 +16,8 @@ size_t lql_stream_value_size(const lql_stream_value *value) {
   if (value->storage_kind == LQL_STREAM_VALUE_SOURCE_RANGE) {
     return value->range_len;
   }
-  if (value->storage_kind == LQL_STREAM_VALUE_JSON_SPOOL && value->spool != NULL) {
+  if (value->storage_kind == LQL_STREAM_VALUE_JSON_SPOOL &&
+      value->spool != NULL) {
     return lql_json_spool_size((const lql_json_spool *)value->spool);
   }
   return 0u;
@@ -50,9 +51,10 @@ lql_status lql_stream_value_write_to(const lql_stream_value *value,
   return LQL_STATUS_INVALID_ARGUMENT;
 }
 
-static lql_status lql_stream_execute_common(
-    lql *self, const lql_stream_request *request, lql_stream_result *result,
-    lql_error *error, int allow_spool) {
+static lql_status lql_stream_execute_common(lql *self,
+                                            const lql_stream_request *request,
+                                            lql_stream_result *result,
+                                            lql_error *error, int allow_spool) {
   lql_status status;
   int handled;
   if (result != NULL) {
@@ -108,8 +110,9 @@ static lql_status lql_stream_execute_common(
       (request->output_mode == LQL_STREAM_OUTPUT_PROJECTION ||
        request->output_mode == LQL_STREAM_OUTPUT_MUTATION ||
        request->output_mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION)) {
-    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                  "streaming projection and mutation require an incremental emitter");
+    lql_set_error(
+        error, LQL_STATUS_UNSUPPORTED,
+        "streaming projection and mutation require an incremental emitter");
     return LQL_STATUS_UNSUPPORTED;
   }
   if (!allow_spool &&
@@ -117,12 +120,13 @@ static lql_status lql_stream_execute_common(
        request->on_value != NULL) &&
       (!request->input_is_compact || request->range_writer == NULL)) {
     lql_set_error(error, LQL_STATUS_UNSUPPORTED,
-                  "streaming selected values require compact input and a source range writer");
+                  "streaming selected values require compact input and a "
+                  "source range writer");
     return LQL_STATUS_UNSUPPORTED;
   }
   handled = 0;
-  status = lql_stream_execute_flat_eq(self, request, result, error,
-                                      allow_spool, &handled);
+  status = lql_stream_execute_flat_eq(self, request, result, error, allow_spool,
+                                      &handled);
   if (handled) {
     return status;
   }

@@ -207,8 +207,7 @@ static int parse_temporal_fast(const char *raw, lql_temporal *out) {
     off_sign = *p == '-' ? -1 : 1;
     ++p;
     if (strlen(p) < 5u || !parse_2_at(p, &off_h) || p[2] != ':' ||
-        !parse_2_at(p + 3, &off_m) ||
-        off_h > 23 || off_m > 59) {
+        !parse_2_at(p + 3, &off_m) || off_h > 23 || off_m > 59) {
       return 0;
     }
     p += 5;

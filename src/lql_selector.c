@@ -1290,7 +1290,6 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
     int op2;
     char op0;
     const char *bound_key;
-    lql_selector child;
     op2 = (op[1] == '=' || op[0] == '!') ? 1 : 0;
     op0 = op[0];
     value = op + 1 + (size_t)op2;
@@ -1322,21 +1321,8 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
       return LQL_STATUS_NO_MEMORY;
     }
     if (op0 == '!') {
-      memset(&child, 0, sizeof(child));
-      child = *out;
-      child.kind = LQL_SELECTOR_KIND_EQ;
-      prepare_selector_value_temporal(&child);
-      memset(out, 0, sizeof(*out));
-      out->children = (lql_selector *)ctx->allocator->calloc(
-          ctx->allocator, 1u, sizeof(lql_selector));
-      if (out->children == NULL) {
-        lql_selector_cleanup(ctx->receiver, &child);
-        ctx->allocator->destroy(ctx->allocator, copy);
-        return LQL_STATUS_NO_MEMORY;
-      }
-      out->kind = LQL_SELECTOR_KIND_NOT;
-      out->children[0] = child;
-      out->child_count = 1u;
+      out->kind = LQL_SELECTOR_KIND_NE;
+      prepare_selector_value_temporal(out);
     } else if (strchr("><", op0) != NULL || op2) {
       if (op0 == '>') {
         bound_key = op2 ? "gte" : "gt";

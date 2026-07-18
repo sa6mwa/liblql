@@ -22,9 +22,9 @@ typedef struct lql_json_spool_reader {
 } lql_json_spool_reader;
 
 lql_status lql_json_spool_init(lql_json_spool *spool, lql_error *error);
-lql_status lql_json_spool_init_with_allocator(
-    lql_json_spool *spool, struct lql_allocator *allocator,
-    lql_error *error);
+lql_status lql_json_spool_init_with_allocator(lql_json_spool *spool,
+                                              struct lql_allocator *allocator,
+                                              lql_error *error);
 void lql_json_spool_reset(lql_json_spool *spool);
 void lql_json_spool_cleanup(lql_json_spool *spool);
 lql_status lql_json_spool_append(lql_json_spool *spool, const void *data,

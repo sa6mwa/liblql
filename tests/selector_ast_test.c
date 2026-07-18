@@ -549,6 +549,11 @@ static void test_shorthand_and_capabilities(lql *ctx) {
                   &root)) {
       child_at(ctx, "shorthand_not_eq", root, 0u, LQL_SELECTOR_NODE_EQ, &child);
     }
+    memset(&caps, 0, sizeof(caps));
+    ctx->selector_capabilities_get(ctx, selector, &caps);
+    if (!caps.not_ || !caps.eq) {
+      fail("shorthand_not_eq", "!= must report both not and eq capabilities");
+    }
     ctx->selector_destroy(ctx, selector);
   }
 

@@ -99,6 +99,7 @@ typedef struct lql_json_flat_eq_term {
   size_t range_lte_text_len;
   unsigned long range_lte_unsigned;
   int range_lte_unsigned_ready;
+  int field_plain;
 } lql_json_flat_eq_term;
 
 typedef struct lql_json_capture_key {

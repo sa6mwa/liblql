@@ -19,6 +19,8 @@ typedef struct test_file_source {
   const unsigned char *data;
   size_t len;
   size_t chunk_size;
+  const char *expected_path;
+  size_t expected_path_len;
   test_reader reader;
   size_t opens;
   size_t closes;
@@ -112,8 +114,8 @@ static lql_status test_file_open(void *user, lql_string_view path,
   (void)error;
   source = (test_file_source *)user;
   if (source == NULL || out_reader == NULL || out_reader_user == NULL ||
-      path.len != strlen("virtual:payload") ||
-      memcmp(path.data, "virtual:payload", path.len) != 0) {
+      path.len != source->expected_path_len ||
+      memcmp(path.data, source->expected_path, path.len) != 0) {
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   memset(&source->reader, 0, sizeof(source->reader));
@@ -353,6 +355,18 @@ static int run_scalar_json_semantic_regressions(lql *ctx) {
                                            "{\"v\":9007199254740993}\n"
                                            "{\"v\":9007199254740992.0}\n"
                                            "{\"v\":9.007199254740993e15}\n";
+  static const char numeric_container_input[] =
+      "{\"a\":{\"b\":3}}\n"
+      "{\"a\":{\"b\":null}}\n"
+      "{\"a\":{\"b\":false}}\n"
+      "{\"a\":[3]}\n";
+  static const char terminal_recursive_input[] =
+      "{\"c\":\"\"}\n"
+      "{\"a\":{\"c\":\"\"}}\n"
+      "{\"a\":[{\"c\":\"\"}]}\n"
+      "{\"c\":\"x\"}\n"
+      "{\"a\":\"\"}\n"
+      "{\"a\":[\"\",{\"b\":\"x\"}]}\n";
   static const char numeric_object_key_input[] = "{\"a\":{\"0\":\"x\"}}\n"
                                                  "{\"a\":[\"x\"]}\n"
                                                  "{\"a\":{\"1\":\"x\"}}\n";
@@ -427,8 +441,19 @@ static int run_scalar_json_semantic_regressions(lql *ctx) {
                     exact_number_input, 4u, 2u)) {
     return 1;
   }
+  if (run_selection(ctx, "/a>=2", numeric_container_input, 4u, 0u) ||
+      run_selection(ctx, "/a=2", numeric_container_input, 4u, 0u) ||
+      run_selection(ctx, "range{field=/a,gte=2}", numeric_container_input, 4u,
+                    0u)) {
+    return 1;
+  }
   if (run_selection(ctx, "/a/0=\"x\"", numeric_object_key_input, 3u, 2u) ||
       run_selection(ctx, "exists{/a/0}", numeric_object_key_input, 3u, 2u)) {
+    return 1;
+  }
+  if (run_selection(ctx, "/...=\"\"", terminal_recursive_input, 6u, 5u) ||
+      run_selection(ctx, "/**=\"\"", terminal_recursive_input, 6u, 2u) ||
+      run_selection(ctx, "/a/...=\"\"", terminal_recursive_input, 6u, 4u)) {
     return 1;
   }
   if (run_json_selector_selection(ctx, nul_string_eq_selector, nul_string_input,
@@ -812,7 +837,8 @@ static int run_escaped_pointer_selection(lql *ctx) {
   memset(&reader, 0, sizeof(reader));
   reader.data = (const unsigned char *)input;
   reader.len = sizeof(input) - 1u;
-  reader.chunk_size = 2u;
+  /* Bulk reads prove bytes_consumed reports reader advancement, not parse head. */
+  reader.chunk_size = 0u;
   memset(&request, 0, sizeof(request));
   request.reader = test_read;
   request.reader_user = &reader;
@@ -2177,6 +2203,581 @@ static int run_nested_projection_output(lql *ctx) {
   return 0;
 }
 
+static int run_mutation_case(lql *ctx, const char *const *mutations,
+                             size_t mutation_count, const char *input,
+                             const char *expected_output) {
+  lql_mutation *mutation;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+
+  mutation = NULL;
+  lql_error_init(&error);
+  if (ctx->mutation_parse(ctx, mutations, mutation_count, &mutation, &error) !=
+      LQL_STATUS_OK) {
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = strlen(input);
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != strlen(expected_output) ||
+      memcmp(writer.data, expected_output, writer.len) != 0) {
+    fprintf(stderr, "mutation case failed: %s\nexpected: %sactual: %.*s\n",
+            mutations[0], expected_output, (int)writer.len, writer.data);
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  return 0;
+}
+
+static int run_selector_selected_record_case(lql *ctx, const char *selector_text,
+                                             const char *input) {
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, selector_text, &selector, &error) !=
+      LQL_STATUS_OK)
+    return 1;
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = strlen(input);
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = selector;
+  request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != strlen(input) ||
+      memcmp(writer.data, input, writer.len) != 0) {
+    fprintf(stderr, "selector case failed: %s\n", selector_text);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
+static int run_selector_no_selected_record_case(lql *ctx,
+                                                const char *selector_text,
+                                                const char *input) {
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, selector_text, &selector, &error) !=
+      LQL_STATUS_OK)
+    return 1;
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = strlen(input);
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.selector = selector;
+  request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 0u ||
+      writer.len != 0u) {
+    fprintf(stderr, "selector non-match case failed: %s\n", selector_text);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->selector_destroy(ctx, selector);
+  return 0;
+}
+
+static int run_recursive_wildcard_selector_regression(lql *ctx) {
+  static const char terminal_recursive_root_input[] = "{}\n";
+  static const char terminal_recursive_null_child_input[] = "{\"a\":null}\n";
+  static const char recursive_any_input[] =
+      "{\"0\":{\"a\":[1,{\"n\":2}]},\"items\":\"1\",\"a\":[1,2]}\n";
+  static const char recursive_object_wildcard_input[] = "{\"a\":\"\"}\n";
+  static const char recursive_array_index_input[] = "{\"a\":[\"\"]}\n";
+  static const char repeated_recursive_input[] = "{\"a\":{\"b\":1}}\n";
+  static const char recursive_array_wildcard_input[] =
+      "{\"x\":{\"a\":1,\"z\":[1]}}\n";
+  static const char recursive_object_numeric_key_wildcard_input[] =
+      "{\"0\":{\"a\":\"\"}}\n";
+  static const char recursive_nested_numeric_key_wildcard_input[] =
+      "{\"x\":[{\"0\":{\"a\":\"\"}},\"\"]}\n";
+  static const char recursive_array_branch_state_input[] =
+      "{\"a\":{\"star\":[{\"star\":[1,true]},[null]]}}\n";
+  static const char recursive_object_sibling_state_input[] =
+      "{\"a\":{\"0\":{\"a\":\"x\",\"0\":{\"0\":\"y\"}}}}\n";
+  if (run_selector_selected_record_case(ctx, "exists{/...}",
+                                        terminal_recursive_root_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "exists{/...}",
+                                        terminal_recursive_null_child_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "prefix{field=/...}",
+                                        terminal_recursive_root_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "contains{field=/...}",
+                                        terminal_recursive_null_child_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "/*/...=1",
+                                        recursive_any_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "/.../*=\"\"",
+                                        recursive_object_wildcard_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "/a/.../0=\"\"",
+                                        recursive_array_index_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "/a/.../[]=\"\"",
+                                        recursive_array_index_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "/.../...=1",
+                                        repeated_recursive_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "/.../.../b=\"y\"",
+                                        "{\"b\":\"y\"}\n"))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "/.../*/...=1",
+                                        repeated_recursive_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "/x/.../**/[]=1",
+                                        recursive_array_wildcard_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "/.../0/*=\"\"",
+                                        recursive_object_numeric_key_wildcard_input))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "/.../0/*=\"\"",
+                                        recursive_nested_numeric_key_wildcard_input))
+    return 1;
+  if (run_selection(ctx, "/a/.../[]/0=1",
+                    recursive_array_branch_state_input, 1u, 0u))
+    return 1;
+  if (run_selection(ctx, "/a/.../[]/0!=1",
+                    recursive_array_branch_state_input, 1u, 1u))
+    return 1;
+  if (run_selector_selected_record_case(ctx, "/.../0/0=\"y\"",
+                                        recursive_object_sibling_state_input))
+    return 1;
+  if (run_selector_no_selected_record_case(ctx, "/a!=true", "1\n"))
+    return 1;
+  return 0;
+}
+
+static int run_wildcard_mutation_review_regressions(lql *ctx) {
+  static const char *const terminal_object_wildcard_increment[] = {
+      "/a/*/**=+1"};
+  static const char terminal_object_wildcard_increment_input[] =
+      "{\"a\":{\"x\":{\"n\":1}}}\n";
+  static const char terminal_object_wildcard_increment_output[] =
+      "{\"a\":{\"x\":{\"n\":2}}}\n";
+  static const char *const terminal_ellipsis_increment[] = {"/a/*/...=+1"};
+  static const char *const repeated_recursive_increment[] = {"/a/**/**=+1"};
+  static const char *const wildcarded_array_increment[] = {"/b/x/*=+1"};
+  static const char wildcarded_array_increment_input[] = "{\"b\":[1,2]}\n";
+  static const char wildcarded_array_increment_output[] = "{\"b\":[1,2]}\n";
+  static const char *const recursive_after_wildcard_set[] = {"/*/.../b=x"};
+  static const char recursive_after_wildcard_set_input[] = "{\"b\":{\"b\":1}}\n";
+  static const char recursive_after_wildcard_set_output[] =
+      "{\"b\":{\"b\":\"x\"}}\n";
+  static const char *const recursive_after_wildcard_array_set[] = {
+      "/*/.../0=x"};
+  static const char recursive_after_wildcard_array_set_input[] =
+      "{\"a\":[[false,0,null]],\"b\":[]}\n";
+  static const char recursive_after_wildcard_array_set_output[] =
+      "{\"a\":[\"x\"],\"b\":[]}\n";
+  static const char *const consecutive_recursive_set[] = {"/.../.../b=x"};
+  static const char consecutive_recursive_set_input[] =
+      "{\"b\":{\"a\":false}}\n";
+  static const char consecutive_recursive_set_output[] = "{\"b\":\"x\"}\n";
+  static const char *const missing_increment_array_wildcard[] = {
+      "/b/0/[]=+1"};
+  static const char *const missing_increment_object_wildcard[] = {
+      "/b/0/*=+1"};
+  static const char *const missing_increment_any_wildcard[] = {"/b/0/**=+1"};
+  static const char *const missing_increment_recursive_wildcard[] = {
+      "/b/0/...=+1"};
+  static const char missing_increment_wildcard_input[] = "{\"b\":{}}\n";
+  static const char missing_increment_wildcard_output[] = "{\"b\":{}}\n";
+  static const char *const numeric_increment_materializes_object[] = {
+      "/a/0=+1"};
+  static const char numeric_increment_materializes_object_input[] =
+      "{\"0\":{},\"a\":[{\"a\":false,\"0\":\"\"}]}\n";
+  static const char numeric_increment_materializes_object_output[] =
+      "{\"0\":{},\"a\":{\"0\":1}}\n";
+  static const char *const recursive_object_wildcard_suffix_set[] = {
+      "/.../*/a=null"};
+  static const char recursive_object_wildcard_suffix_set_input[] =
+      "{\"r\":{\"x\":{\"a\":\"x\"}}}\n";
+  static const char recursive_object_wildcard_suffix_set_output[] =
+      "{\"r\":{\"x\":{\"a\":null}}}\n";
+  static const char *const recursive_any_wildcard_suffix_set[] = {
+      "/.../**/a=null"};
+  static const char recursive_any_wildcard_suffix_set_input[] =
+      "{\"r\":[{\"a\":\"x\"}]}\n";
+  static const char recursive_any_wildcard_suffix_set_output[] =
+      "{\"r\":[{\"a\":null}]}\n";
+  static const char *const recursive_after_object_wildcard_noop[] = {
+      "/x/.../*/*=v"};
+  static const char recursive_after_object_wildcard_noop_input[] =
+      "{\"x\":{\"z\":[1,{\"a\":2}]}}\n";
+  static const char recursive_after_object_wildcard_noop_output[] =
+      "{\"x\":{\"z\":[1,{\"a\":2}]}}\n";
+  static const char *const wildcard_before_concrete_set[] = {"/*=1", "/a=2"};
+  static const char wildcard_order_input[] = "{\"a\":0,\"b\":0}\n";
+  static const char wildcard_before_concrete_set_output[] =
+      "{\"a\":2,\"b\":1}\n";
+  static const char *const concrete_before_wildcard_set[] = {"/a=2", "/*=1"};
+  static const char concrete_before_wildcard_set_output[] =
+      "{\"a\":1,\"b\":1}\n";
+  static const char *const missing_concrete_before_wildcard_set[] = {"/a=2",
+                                                                     "/*=1"};
+  static const char missing_concrete_before_wildcard_set_input[] = "{}\n";
+  static const char missing_concrete_before_wildcard_set_output[] =
+      "{\"a\":1}\n";
+  static const char *const concrete_before_wildcard_remove[] = {"/a=2",
+                                                                "rm:/*"};
+  static const char concrete_before_wildcard_remove_output[] = "{}\n";
+  static const char *const leading_recursive_wildcard_set[] = {"/.../*/b=9"};
+  static const char leading_recursive_wildcard_input[] = "{\"a\":{\"b\":2}}\n";
+  static const char leading_recursive_wildcard_set_output[] =
+      "{\"a\":{\"b\":9}}\n";
+  static const char *const leading_recursive_wildcard_increment[] = {
+      "/.../*/b++"};
+  static const char leading_recursive_wildcard_increment_output[] =
+      "{\"a\":{\"b\":3}}\n";
+  static const char *const leading_recursive_wildcard_remove[] = {
+      "rm:/.../*/b"};
+  static const char leading_recursive_wildcard_remove_output[] = "{\"a\":{}}\n";
+  static const char *const missing_wildcard_before_increment[] = {"/a/*=x",
+                                                                  "/a++"};
+  static const char missing_wildcard_before_increment_input[] = "{}\n";
+  static const char missing_wildcard_before_increment_output[] = "{\"a\":1}\n";
+  static const char *const wildcard_set_before_recursive_increment[] = {
+      "/**=5", "/...=+1"};
+  static const char wildcard_set_before_recursive_increment_input[] =
+      "{\"r\":\"x\"}\n";
+  static const char wildcard_set_before_recursive_increment_output[] =
+      "{\"r\":6}\n";
+  static const char *const recursive_concrete_on_scalar_noop[] = {
+      "/.../a/1=+1"};
+  static const char recursive_concrete_on_scalar_noop_input[] = "{\"a\":-1}\n";
+  static const char recursive_concrete_on_scalar_noop_output[] = "{\"a\":-1}\n";
+  static const char *const recursive_applies_to_created_key[] = {"/b=+1",
+                                                                 "/.../...=5"};
+  static const char recursive_applies_to_created_key_input[] = "{}\n";
+  static const char recursive_applies_to_created_key_output[] = "{\"b\":5}\n";
+  static const char *const repeated_ellipsis_array_set[] = {"/.../.../[]=5"};
+  static const char repeated_ellipsis_array_set_input[] =
+      "{\"0\":[true,{\"a\":1}]}\n";
+  static const char repeated_ellipsis_array_set_output[] = "{\"0\":[5,5]}\n";
+  static const char *const wildcard_nested_before_concrete_nested[] = {
+      "/*/x=1", "/a/y=2"};
+  static const char wildcard_nested_before_concrete_nested_input[] =
+      "{\"a\":{}}\n";
+  static const char wildcard_nested_before_concrete_nested_output[] =
+      "{\"a\":{\"x\":1,\"y\":2}}\n";
+  static const char *const remove_before_wildcard_nested[] = {"rm:/a",
+                                                              "/*/x=1"};
+  static const char remove_before_wildcard_nested_output[] = "{}\n";
+  static const char *const repeated_terminal_ellipsis_increment[] = {
+      "/obj/.../...++"};
+  static const char repeated_terminal_ellipsis_increment_input[] =
+      "{\"obj\":{\"a\":1}}\n";
+  static const char repeated_terminal_ellipsis_increment_output[] =
+      "{\"obj\":{\"a\":2}}\n";
+  static const char repeated_terminal_ellipsis_increment_scalar_input[] =
+      "{\"obj\":1}\n";
+  static const char repeated_terminal_ellipsis_increment_scalar_output[] =
+      "{\"obj\":1}\n";
+
+  if (run_mutation_case(ctx, terminal_object_wildcard_increment, 1u,
+                        terminal_object_wildcard_increment_input,
+                        terminal_object_wildcard_increment_output))
+    return 1;
+  if (run_mutation_case(ctx, terminal_ellipsis_increment, 1u,
+                        terminal_object_wildcard_increment_input,
+                        terminal_object_wildcard_increment_output))
+    return 1;
+  if (run_mutation_case(ctx, repeated_recursive_increment, 1u,
+                        terminal_object_wildcard_increment_input,
+                        terminal_object_wildcard_increment_output))
+    return 1;
+  if (run_mutation_case(ctx, wildcarded_array_increment, 1u,
+                        wildcarded_array_increment_input,
+                        wildcarded_array_increment_output))
+    return 1;
+  if (run_mutation_case(ctx, recursive_after_wildcard_set, 1u,
+                        recursive_after_wildcard_set_input,
+                        recursive_after_wildcard_set_output))
+    return 1;
+  if (run_mutation_case(ctx, recursive_after_wildcard_array_set, 1u,
+                        recursive_after_wildcard_array_set_input,
+                        recursive_after_wildcard_array_set_output))
+    return 1;
+  if (run_mutation_case(ctx, consecutive_recursive_set, 1u,
+                        consecutive_recursive_set_input,
+                        consecutive_recursive_set_output))
+    return 1;
+  if (run_mutation_case(ctx, missing_increment_array_wildcard, 1u,
+                        missing_increment_wildcard_input,
+                        missing_increment_wildcard_output))
+    return 1;
+  if (run_mutation_case(ctx, missing_increment_object_wildcard, 1u,
+                        missing_increment_wildcard_input,
+                        missing_increment_wildcard_output))
+    return 1;
+  if (run_mutation_case(ctx, missing_increment_any_wildcard, 1u,
+                        missing_increment_wildcard_input,
+                        missing_increment_wildcard_output))
+    return 1;
+  if (run_mutation_case(ctx, missing_increment_recursive_wildcard, 1u,
+                        missing_increment_wildcard_input,
+                        missing_increment_wildcard_output))
+    return 1;
+  if (run_mutation_case(ctx, numeric_increment_materializes_object, 1u,
+                        numeric_increment_materializes_object_input,
+                        numeric_increment_materializes_object_output))
+    return 1;
+  if (run_mutation_case(ctx, recursive_object_wildcard_suffix_set, 1u,
+                        recursive_object_wildcard_suffix_set_input,
+                        recursive_object_wildcard_suffix_set_output))
+    return 1;
+  if (run_mutation_case(ctx, recursive_any_wildcard_suffix_set, 1u,
+                        recursive_any_wildcard_suffix_set_input,
+                        recursive_any_wildcard_suffix_set_output))
+    return 1;
+  if (run_mutation_case(ctx, recursive_after_object_wildcard_noop, 1u,
+                        recursive_after_object_wildcard_noop_input,
+                        recursive_after_object_wildcard_noop_output))
+    return 1;
+  if (run_mutation_case(ctx, wildcard_before_concrete_set, 2u,
+                        wildcard_order_input,
+                        wildcard_before_concrete_set_output))
+    return 1;
+  if (run_mutation_case(ctx, concrete_before_wildcard_set, 2u,
+                        wildcard_order_input,
+                        concrete_before_wildcard_set_output))
+    return 1;
+  if (run_mutation_case(ctx, missing_concrete_before_wildcard_set, 2u,
+                        missing_concrete_before_wildcard_set_input,
+                        missing_concrete_before_wildcard_set_output))
+    return 1;
+  if (run_mutation_case(ctx, concrete_before_wildcard_remove, 2u,
+                        wildcard_order_input,
+                        concrete_before_wildcard_remove_output))
+    return 1;
+  if (run_mutation_case(ctx, leading_recursive_wildcard_set, 1u,
+                        leading_recursive_wildcard_input,
+                        leading_recursive_wildcard_set_output))
+    return 1;
+  if (run_mutation_case(ctx, leading_recursive_wildcard_increment, 1u,
+                        leading_recursive_wildcard_input,
+                        leading_recursive_wildcard_increment_output))
+    return 1;
+  if (run_mutation_case(ctx, leading_recursive_wildcard_remove, 1u,
+                        leading_recursive_wildcard_input,
+                        leading_recursive_wildcard_remove_output))
+    return 1;
+  if (run_mutation_case(ctx, missing_wildcard_before_increment, 2u,
+                        missing_wildcard_before_increment_input,
+                        missing_wildcard_before_increment_output))
+    return 1;
+  if (run_mutation_case(ctx, wildcard_set_before_recursive_increment, 2u,
+                        wildcard_set_before_recursive_increment_input,
+                        wildcard_set_before_recursive_increment_output))
+    return 1;
+  if (run_mutation_case(ctx, recursive_concrete_on_scalar_noop, 1u,
+                        recursive_concrete_on_scalar_noop_input,
+                        recursive_concrete_on_scalar_noop_output))
+    return 1;
+  if (run_mutation_case(ctx, recursive_applies_to_created_key, 2u,
+                        recursive_applies_to_created_key_input,
+                        recursive_applies_to_created_key_output))
+    return 1;
+  if (run_mutation_case(ctx, repeated_ellipsis_array_set, 1u,
+                        repeated_ellipsis_array_set_input,
+                        repeated_ellipsis_array_set_output))
+    return 1;
+  if (run_mutation_case(ctx, wildcard_nested_before_concrete_nested, 2u,
+                        wildcard_nested_before_concrete_nested_input,
+                        wildcard_nested_before_concrete_nested_output))
+    return 1;
+  if (run_mutation_case(ctx, remove_before_wildcard_nested, 2u,
+                        wildcard_nested_before_concrete_nested_input,
+                        remove_before_wildcard_nested_output))
+    return 1;
+  if (run_mutation_case(ctx, repeated_terminal_ellipsis_increment, 1u,
+                        repeated_terminal_ellipsis_increment_input,
+                        repeated_terminal_ellipsis_increment_output))
+    return 1;
+  if (run_mutation_case(ctx, repeated_terminal_ellipsis_increment, 1u,
+                        repeated_terminal_ellipsis_increment_scalar_input,
+                        repeated_terminal_ellipsis_increment_scalar_output))
+    return 1;
+  return 0;
+}
+
+static int run_mutation_error_case_is_atomic(lql *ctx,
+                                             const char *const *mutations,
+                                             size_t mutation_count,
+                                             const char *input) {
+  lql_mutation *mutation;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+  lql_status status;
+
+  mutation = NULL;
+  lql_error_init(&error);
+  if (ctx->mutation_parse(ctx, mutations, mutation_count, &mutation, &error) !=
+      LQL_STATUS_OK) {
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  request.matched_only = 1;
+  status = lql_stream_execute(ctx, &request, &result, &error);
+  ctx->mutation_destroy(ctx, mutation);
+  if (status != LQL_STATUS_JSON_ERROR || writer.len != 0u)
+    return 1;
+  return 0;
+}
+
+static int run_mutation_error_output_is_atomic(lql *ctx) {
+  static const char existing_bad_input[] = "{\"a\":\"x\"}\n";
+  static const char missing_bad_input[] = "{}\n";
+  static const char existing_prefix_input[] = "{\"x\":1}\n";
+  static const char *const existing_bad_increment[] = {"/a=+1"};
+  static const char *const missing_create_then_bad_increment[] = {"/a/b=1",
+                                                                  "/a++"};
+  static const char *const missing_bad_nested_then_bad_increment[] = {
+      "/a/b++", "/a++"};
+  if (run_mutation_error_case_is_atomic(ctx, existing_bad_increment, 1u,
+                                        existing_bad_input))
+    return 1;
+  if (run_mutation_error_case_is_atomic(ctx, missing_create_then_bad_increment,
+                                        2u, missing_bad_input))
+    return 1;
+  if (run_mutation_error_case_is_atomic(ctx, missing_create_then_bad_increment,
+                                        2u, existing_prefix_input))
+    return 1;
+  if (run_mutation_error_case_is_atomic(
+          ctx, missing_bad_nested_then_bad_increment, 2u, missing_bad_input))
+    return 1;
+  return 0;
+}
+
+static int run_wide_direct_mutation_action_state(lql *ctx) {
+  enum { WIDE_COUNT = 70 };
+  char storage[WIDE_COUNT][32];
+  const char *mutations[WIDE_COUNT];
+  char expected[4096];
+  lql_mutation *mutation;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+  size_t i;
+  size_t offset;
+
+  mutation = NULL;
+  offset = 0u;
+  for (i = 0u; i < WIDE_COUNT; ++i) {
+    sprintf(storage[i], "/k%lu=%lu", (unsigned long)i, (unsigned long)i);
+    mutations[i] = storage[i];
+  }
+  lql_error_init(&error);
+  if (ctx->mutation_parse(ctx, mutations, WIDE_COUNT, &mutation, &error) !=
+      LQL_STATUS_OK) {
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  expected[offset++] = '{';
+  for (i = 0u; i < WIDE_COUNT; ++i) {
+    if (i != 0u)
+      expected[offset++] = ',';
+    offset += (size_t)sprintf(expected + offset, "\"k%lu\":%lu",
+                              (unsigned long)i, (unsigned long)i);
+  }
+  expected[offset++] = '}';
+  expected[offset++] = '\n';
+  expected[offset] = '\0';
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)"{\"k0\":0}\n";
+  reader.len = strlen((const char *)reader.data);
+  reader.chunk_size = 3u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != strlen(expected) ||
+      memcmp(writer.data, expected, writer.len) != 0) {
+    fprintf(stderr, "wide mutation action state failed\nexpected: %sactual: %.*s\n",
+            expected, (int)writer.len, writer.data);
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  return 0;
+}
+
 static int run_mutation_output(lql *ctx) {
   static const char input[] = "{\"status\":\"open\",\"n\":1}\n"
                               "{\"status\":\"closed\",\"n\":2}\n";
@@ -2349,14 +2950,134 @@ static int run_mutation_output(lql *ctx) {
   static const char nested_brace_input[] = "{\"status\":\"open\"}\n";
   static const char nested_brace_output[] =
       "{\"status\":\"open\",\"a\":{\"b\":{\"c\":1,\"d\":2},\"e\":3}}\n";
+  static const char *const empty_set[] = {"/empty="};
+  static const char empty_set_output[] =
+      "{\"status\":\"open\",\"n\":1,\"empty\":\"\"}\n";
+  static const char *const bracket_value[] = {"/payload=[1,2]"};
+  static const char bracket_value_output[] =
+      "{\"status\":\"open\",\"n\":1,\"payload\":\"[1,2]\"}\n";
+  static const char *const wildcard_increment_scalar[] = {"/items[]/z=+1"};
+  static const char wildcard_increment_scalar_input[] =
+      "{\"status\":\"open\",\"items\":[1,2,{\"z\":3}]}\n";
+  static const char wildcard_increment_scalar_output[] =
+      "{\"status\":\"open\",\"items\":[1,2,{\"z\":4}]}\n";
+  static const char *const wildcard_increment_array_child[] = {"/items[]/z=+1"};
+  static const char wildcard_increment_array_child_input[] =
+      "{\"status\":\"open\",\"items\":[[1,2],{\"z\":3}]}\n";
+  static const char wildcard_increment_array_child_output[] =
+      "{\"status\":\"open\",\"items\":[[1,2],{\"z\":4}]}\n";
+  static const char *const wildcard_increment_index_child[] = {"/items[]/0=+1"};
+  static const char wildcard_increment_index_child_input[] =
+      "{\"status\":\"open\",\"items\":[{\"0\":2},[2]]}\n";
+  static const char wildcard_increment_index_child_output[] =
+      "{\"status\":\"open\",\"items\":[{\"0\":3},[3]]}\n";
+  static const char *const wildcard_increment_array_wildcard_child[] = {
+      "/items[]/[]=+1"};
+  static const char wildcard_increment_array_wildcard_child_input[] =
+      "{\"status\":\"open\",\"items\":[[2],{\"z\":3}]}\n";
+  static const char wildcard_increment_array_wildcard_child_output[] =
+      "{\"status\":\"open\",\"items\":[[3],{\"z\":3}]}\n";
+  static const char *const wildcard_increment_deep_object[] = {
+      "/items[]/a/n=+1"};
+  static const char wildcard_increment_deep_object_input[] =
+      "{\"items\":[{\"a\":{\"n\":1}},{\"a\":{\"n\":2}}]}\n";
+  static const char wildcard_increment_deep_object_output[] =
+      "{\"items\":[{\"a\":{\"n\":2}},{\"a\":{\"n\":3}}]}\n";
+  static const char *const wildcard_increment_deep_array[] = {
+      "/items[]/0/n=+1"};
+  static const char wildcard_increment_deep_array_input[] =
+      "{\"items\":[[{\"n\":1}],[{\"n\":2}]]}\n";
+  static const char wildcard_increment_deep_array_output[] =
+      "{\"items\":[[{\"n\":2}],[{\"n\":3}]]}\n";
+  static const char *const wildcard_set_array_index[] = {"/items[]/0=5"};
+  static const char wildcard_set_array_index_input[] = "{\"items\":[[1,2]]}\n";
+  static const char wildcard_set_array_index_output[] = "{\"items\":[[5,2]]}\n";
+  static const char *const wildcard_set_deep_array[] = {"/items[]/0/n=5"};
+  static const char wildcard_set_deep_array_input[] =
+      "{\"items\":[[{\"n\":1}]]}\n";
+  static const char wildcard_set_deep_array_output[] =
+      "{\"items\":[[{\"n\":5}]]}\n";
+  static const char *const wildcard_remove_array_index[] = {"rm:/items[]/0"};
+  static const char wildcard_remove_array_index_input[] = "{\"items\":[[1,2]]}\n";
+  static const char wildcard_remove_array_index_output[] =
+      "{\"items\":[[null,2]]}\n";
+  static const char *const missing_recursive_wildcard_set[] = {"/obj/**/n=5"};
+  static const char missing_recursive_wildcard_set_input[] = "{}\n";
+  static const char missing_recursive_wildcard_set_output[] = "{}\n";
+  static const char *const missing_ellipsis_wildcard_set[] = {"/obj/.../n=5"};
+  static const char *const scalar_object_wildcard_set[] = {"/a/*/n=x"};
+  static const char *const scalar_array_wildcard_set[] = {"/a/[]/n=x"};
+  static const char *const scalar_recursive_wildcard_set[] = {"/a/**/n=x"};
+  static const char scalar_wildcard_input[] = "{\"a\":1}\n";
+  static const char scalar_wildcard_output[] = "{\"a\":1}\n";
+  static const char *const wildcard_then_top_set[] = {"/a/*/n=x", "/a=2"};
+  static const char wildcard_then_top_set_output[] = "{\"a\":2}\n";
+  static const char *const wildcard_then_nested_set[] = {"/a/*/n=x", "/a/b=2"};
+  static const char wildcard_then_nested_set_output[] = "{\"a\":{\"b\":2}}\n";
+  static const char *const top_object_wildcard_set[] = {"/*=3"};
+  static const char top_object_wildcard_set_input[] = "{\"a\":1,\"b\":2}\n";
+  static const char top_object_wildcard_set_output[] = "{\"a\":3,\"b\":3}\n";
+  static const char *const top_object_wildcard_increment[] = {"/*=+1"};
+  static const char top_object_wildcard_increment_output[] =
+      "{\"a\":2,\"b\":3}\n";
+  static const char *const top_object_wildcard_remove[] = {"rm:/*"};
+  static const char top_object_wildcard_remove_output[] = "{}\n";
+  static const char *const scalar_late_object_wildcard_set[] = {"/a/0/*=x"};
+  static const char *const scalar_late_object_wildcard_increment[] = {
+      "/a/0/*=+1"};
+  static const char *const scalar_late_array_wildcard_set[] = {"/a/x/[]/n=1"};
+  static const char *const scalar_late_recursive_wildcard_set[] = {
+      "/a/x/**/n=1"};
+  static const char scalar_late_wildcard_input[] = "{\"a\":true}\n";
+  static const char scalar_late_wildcard_output[] = "{\"a\":true}\n";
+  static const char *const terminal_ellipsis_set[] = {"/a/...=3"};
+  static const char terminal_ellipsis_input[] = "{\"a\":{\"x\":1,\"y\":2}}\n";
+  static const char terminal_ellipsis_set_output[] =
+      "{\"a\":{\"x\":3,\"y\":3}}\n";
+  static const char *const top_wildcard_nested_scalar_set[] = {"/*/n=5"};
+  static const char top_wildcard_nested_scalar_input[] = "{\"a\":1}\n";
+  static const char top_wildcard_nested_scalar_output[] = "{\"a\":1}\n";
+  static const char *const top_wildcard_nested_set[] = {"/*/a/n=5"};
+  static const char top_wildcard_nested_input[] =
+      "{\"x\":{\"a\":{\"n\":1}},\"y\":[{\"a\":{\"n\":2}}],\"z\":1}\n";
+  static const char top_wildcard_nested_set_output[] =
+      "{\"x\":{\"a\":{\"n\":5}},\"y\":[{\"a\":{\"n\":2}}],\"z\":1}\n";
+  static const char *const top_wildcard_nested_increment[] = {"/*/a/n=+1"};
+  static const char top_wildcard_nested_increment_output[] =
+      "{\"x\":{\"a\":{\"n\":2}},\"y\":[{\"a\":{\"n\":2}}],\"z\":1}\n";
+  static const char *const top_ellipsis_nested_set[] = {"/.../n=5"};
+  static const char top_ellipsis_nested_set_output[] =
+      "{\"x\":{\"a\":{\"n\":5}},\"y\":[{\"a\":{\"n\":5}}],\"z\":1}\n";
+  static const char *const top_ellipsis_root_key_set[] = {"/.../b=5"};
+  static const char top_ellipsis_root_key_input[] = "{\"b\":{\"b\":1}}\n";
+  static const char top_ellipsis_root_key_set_output[] = "{\"b\":5}\n";
+  static const char *const top_ellipsis_root_key_increment[] = {"/.../b=+1"};
+  static const char top_ellipsis_root_key_increment_input[] = "{\"b\":1}\n";
+  static const char top_ellipsis_root_key_increment_output[] = "{\"b\":2}\n";
+  static const char *const top_ellipsis_root_key_remove[] = {"rm:/.../b"};
+  static const char top_ellipsis_root_key_remove_output[] = "{}\n";
+  static const char *const ellipsis_array_index_set[] = {"/a/.../0=5"};
+  static const char ellipsis_array_index_input[] = "{\"a\":{\"b\":[[],[0]]}}\n";
+  static const char ellipsis_array_index_set_output[] =
+      "{\"a\":{\"b\":[5,[5]]}}\n";
+  static const char *const ellipsis_array_index_remove[] = {"rm:/a/.../0"};
+  static const char ellipsis_array_index_remove_output[] =
+      "{\"a\":{\"b\":[null,[null]]}}\n";
+  static const char *const consecutive_ellipsis_set[] = {"/.../...=5"};
+  static const char consecutive_ellipsis_input[] = "{\"a\":{\"x\":1}}\n";
+  static const char consecutive_ellipsis_set_output[] = "{\"a\":5}\n";
+  static const char *const consecutive_ellipsis_remove[] = {"rm:/.../..."};
+  static const char consecutive_ellipsis_remove_output[] = "{}\n";
   static const char *const invalid_root[] = {"/=value"};
   static const char *const invalid_json_numbers[] = {
-      "/n=01", "/n=nan", "/n=inf", "/n=+nan", "/n=+inf", "/n=+0", "/n=1e9999"};
+      "/n=01",   "/n=nan", "/n=inf", "/n=+nan",
+      "/n=+inf", "/n=+0",  "/n=-0",  "/n=1e9999"};
   lql_selector *selector;
   lql_mutation *mutation;
   lql_stream_request request;
   lql_stream_result result;
   lql_error error;
+  lql_status status;
   test_reader reader;
   test_writer writer;
   size_t invalid_number_index;
@@ -3155,10 +3876,17 @@ static int run_mutation_output(lql *ctx) {
   memset(&writer, 0, sizeof(writer));
   request.mutation = mutation;
   request.matched_only = 1;
-  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
-      result.records_seen != 2u || result.records_matched != 1u ||
+  status = lql_stream_execute(ctx, &request, &result, &error);
+  if (status != LQL_STATUS_OK || result.records_seen != 2u ||
+      result.records_matched != 1u ||
       writer.len != sizeof(multiline_list_output) - 1u ||
       memcmp(writer.data, multiline_list_output, writer.len) != 0) {
+    fprintf(stderr,
+            "multiline mutation failed: status=%d seen=%lu matched=%lu\n"
+            "expected: %sactual: %.*s\n",
+            (int)status, (unsigned long)result.records_seen,
+            (unsigned long)result.records_matched, multiline_list_output,
+            (int)writer.len, writer.data);
     ctx->mutation_destroy(ctx, mutation);
     ctx->selector_destroy(ctx, selector);
     return 1;
@@ -3190,6 +3918,261 @@ static int run_mutation_output(lql *ctx) {
     return 1;
   }
   ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, empty_set, 1u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(empty_set_output) - 1u ||
+      memcmp(writer.data, empty_set_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, bracket_value, 1u, &mutation, &error) !=
+          LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = sizeof(input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(bracket_value_output) - 1u ||
+      memcmp(writer.data, bracket_value_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, wildcard_increment_scalar, 1u, &mutation,
+                          &error) != LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)wildcard_increment_scalar_input;
+  reader.len = sizeof(wildcard_increment_scalar_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(wildcard_increment_scalar_output) - 1u ||
+      memcmp(writer.data, wildcard_increment_scalar_output, writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, wildcard_increment_array_child, 1u, &mutation,
+                          &error) != LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)wildcard_increment_array_child_input;
+  reader.len = sizeof(wildcard_increment_array_child_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(wildcard_increment_array_child_output) - 1u ||
+      memcmp(writer.data, wildcard_increment_array_child_output, writer.len) !=
+          0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, wildcard_increment_index_child, 1u, &mutation,
+                          &error) != LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)wildcard_increment_index_child_input;
+  reader.len = sizeof(wildcard_increment_index_child_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(wildcard_increment_index_child_output) - 1u ||
+      memcmp(writer.data, wildcard_increment_index_child_output, writer.len) !=
+          0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
+  mutation = NULL;
+  if (ctx->mutation_parse(ctx, wildcard_increment_array_wildcard_child, 1u,
+                          &mutation, &error) != LQL_STATUS_OK ||
+      ctx->mutation_count(ctx, mutation) != 1u) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data =
+      (const unsigned char *)wildcard_increment_array_wildcard_child_input;
+  reader.len = sizeof(wildcard_increment_array_wildcard_child_input) - 1u;
+  reader.chunk_size = 2u;
+  memset(&writer, 0, sizeof(writer));
+  request.reader_user = &reader;
+  request.writer_user = &writer;
+  request.mutation = mutation;
+  request.matched_only = 1;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      writer.len != sizeof(wildcard_increment_array_wildcard_child_output) - 1u ||
+      memcmp(writer.data, wildcard_increment_array_wildcard_child_output,
+             writer.len) != 0) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  if (run_mutation_case(ctx, wildcard_increment_deep_object, 1u,
+                        wildcard_increment_deep_object_input,
+                        wildcard_increment_deep_object_output) ||
+      run_mutation_case(ctx, wildcard_increment_deep_array, 1u,
+                        wildcard_increment_deep_array_input,
+                        wildcard_increment_deep_array_output) ||
+      run_mutation_case(ctx, wildcard_set_array_index, 1u,
+                        wildcard_set_array_index_input,
+                        wildcard_set_array_index_output) ||
+      run_mutation_case(ctx, wildcard_set_deep_array, 1u,
+                        wildcard_set_deep_array_input,
+                        wildcard_set_deep_array_output) ||
+      run_mutation_case(ctx, wildcard_remove_array_index, 1u,
+                        wildcard_remove_array_index_input,
+                        wildcard_remove_array_index_output) ||
+      run_mutation_case(ctx, missing_recursive_wildcard_set, 1u,
+                        missing_recursive_wildcard_set_input,
+                        missing_recursive_wildcard_set_output) ||
+      run_mutation_case(ctx, missing_ellipsis_wildcard_set, 1u,
+                        missing_recursive_wildcard_set_input,
+                        missing_recursive_wildcard_set_output) ||
+      run_mutation_case(ctx, scalar_object_wildcard_set, 1u,
+                        scalar_wildcard_input, scalar_wildcard_output) ||
+      run_mutation_case(ctx, scalar_array_wildcard_set, 1u,
+                        scalar_wildcard_input, scalar_wildcard_output) ||
+      run_mutation_case(ctx, scalar_recursive_wildcard_set, 1u,
+                        scalar_wildcard_input, scalar_wildcard_output) ||
+      run_mutation_case(ctx, wildcard_then_top_set, 2u,
+                        missing_recursive_wildcard_set_input,
+                        wildcard_then_top_set_output) ||
+      run_mutation_case(ctx, wildcard_then_nested_set, 2u,
+                        missing_recursive_wildcard_set_input,
+                        wildcard_then_nested_set_output) ||
+      run_mutation_case(ctx, top_object_wildcard_set, 1u,
+                        top_object_wildcard_set_input,
+                        top_object_wildcard_set_output) ||
+      run_mutation_case(ctx, top_object_wildcard_increment, 1u,
+                        top_object_wildcard_set_input,
+                        top_object_wildcard_increment_output) ||
+      run_mutation_case(ctx, top_object_wildcard_remove, 1u,
+                        top_object_wildcard_set_input,
+                        top_object_wildcard_remove_output) ||
+      run_mutation_case(ctx, scalar_late_object_wildcard_set, 1u,
+                        scalar_late_wildcard_input,
+                        scalar_late_wildcard_output) ||
+      run_mutation_case(ctx, scalar_late_object_wildcard_increment, 1u,
+                        scalar_late_wildcard_input,
+                        scalar_late_wildcard_output) ||
+      run_mutation_case(ctx, scalar_late_array_wildcard_set, 1u,
+                        scalar_late_wildcard_input,
+                        scalar_late_wildcard_output) ||
+      run_mutation_case(ctx, scalar_late_recursive_wildcard_set, 1u,
+                        scalar_late_wildcard_input,
+                        scalar_late_wildcard_output) ||
+      run_mutation_case(ctx, terminal_ellipsis_set, 1u,
+                        terminal_ellipsis_input,
+                        terminal_ellipsis_set_output) ||
+      run_mutation_case(ctx, top_wildcard_nested_scalar_set, 1u,
+                        top_wildcard_nested_scalar_input,
+                        top_wildcard_nested_scalar_output) ||
+      run_mutation_case(ctx, top_wildcard_nested_set, 1u,
+                        top_wildcard_nested_input,
+                        top_wildcard_nested_set_output) ||
+      run_mutation_case(ctx, top_wildcard_nested_increment, 1u,
+                        top_wildcard_nested_input,
+                        top_wildcard_nested_increment_output) ||
+      run_mutation_case(ctx, top_ellipsis_nested_set, 1u,
+                        top_wildcard_nested_input,
+                        top_ellipsis_nested_set_output) ||
+      run_mutation_case(ctx, top_ellipsis_root_key_set, 1u,
+                        top_ellipsis_root_key_input,
+                        top_ellipsis_root_key_set_output) ||
+      run_mutation_case(ctx, top_ellipsis_root_key_increment, 1u,
+                        top_ellipsis_root_key_increment_input,
+                        top_ellipsis_root_key_increment_output) ||
+      run_mutation_case(ctx, top_ellipsis_root_key_remove, 1u,
+                        top_ellipsis_root_key_input,
+                        top_ellipsis_root_key_remove_output) ||
+      run_mutation_case(ctx, ellipsis_array_index_set, 1u,
+                        ellipsis_array_index_input,
+                        ellipsis_array_index_set_output) ||
+      run_mutation_case(ctx, ellipsis_array_index_remove, 1u,
+                        ellipsis_array_index_input,
+                        ellipsis_array_index_remove_output) ||
+      run_mutation_case(ctx, consecutive_ellipsis_set, 1u,
+                        consecutive_ellipsis_input,
+                        consecutive_ellipsis_set_output) ||
+      run_mutation_case(ctx, consecutive_ellipsis_remove, 1u,
+                        consecutive_ellipsis_input,
+                        consecutive_ellipsis_remove_output) ||
+      run_wide_direct_mutation_action_state(ctx)) {
+    ctx->mutation_destroy(ctx, mutation);
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  ctx->mutation_destroy(ctx, mutation);
   ctx->selector_destroy(ctx, selector);
   return 0;
 }
@@ -3210,6 +4193,16 @@ static int run_mutation_literal_parity(lql *ctx) {
   static const char unicode_output[] =
       "{\"status\":\"open\",\"japanese\":\"日本語\",\"emoji\":\"😀\","
       "\"supplementary\":\"𐐷\"}\n";
+  static const char *const literal_punctuation[] = {
+      "/quote=don't,/double=a\"b,/a{=x,/a}=y,/a[=x,/b=2,"
+      "/rawbrace=x{y,/rawclose=x}y,/brackets=x[y,z],/braces=x{y,z},"
+      "/rawquote=foo\"bar,baz"};
+  static const char literal_punctuation_output[] =
+      "{\"status\":\"open\",\"quote\":\"don't\",\"double\":\"a\\\"b\","
+      "\"a{\":\"x\",\"a}\":\"y\",\"a[\":\"x\",\"b\":2,"
+      "\"rawbrace\":\"x{y\",\"rawclose\":\"x}y\","
+      "\"brackets\":\"x[y,z]\",\"braces\":\"x{y,z}\","
+      "\"rawquote\":\"foo\\\"bar,baz\"}\n";
   lql_mutation *mutation;
   lql_stream_request request;
   lql_stream_result result;
@@ -3269,6 +4262,9 @@ static int run_mutation_literal_parity(lql *ctx) {
     return 1;
   }
   ctx->mutation_destroy(ctx, mutation);
+  if (run_mutation_case(ctx, literal_punctuation, 1u, input,
+                        literal_punctuation_output))
+    return 1;
   return 0;
 }
 
@@ -3830,7 +4826,8 @@ static int run_stop_and_root_array(lql *ctx) {
   request.decision_user = &decisions;
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
       !result.stopped_early || result.stop_reason != LQL_STREAM_STOP_CALLBACK ||
-      result.records_seen != 1u || decisions.count != 1u) {
+      result.records_seen != 1u || result.bytes_consumed != reader.len ||
+      decisions.count != 1u) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
@@ -4304,6 +5301,7 @@ static int run_file_backed_mutations(lql *ctx) {
   static const char binary_path[] = "liblql-file-value-binary.tmp";
   static const char invalid_path[] = "liblql-file-value-invalid.tmp";
   static const char nul_path[] = "liblql-file-value-nul.tmp";
+  static const char spaced_path[] = " liblql-file-value-spaced.tmp ";
   static const unsigned char text_payload[] = "hello world";
   static const unsigned char utf8_payload[] = "日本語 😀 こんにちは";
   static const unsigned char binary_payload[] = {0x00u, 0x01u, 0x02u};
@@ -4319,11 +5317,13 @@ static int run_file_backed_mutations(lql *ctx) {
   remove(binary_path);
   remove(invalid_path);
   remove(nul_path);
+  remove(spaced_path);
   if (write_test_file(text_path, text_payload, sizeof(text_payload) - 1u) ||
       write_test_file(utf8_path, utf8_payload, sizeof(utf8_payload) - 1u) ||
       write_test_file(binary_path, binary_payload, sizeof(binary_payload)) ||
       write_test_file(invalid_path, invalid_payload, sizeof(invalid_payload)) ||
-      write_test_file(nul_path, nul_payload, sizeof(nul_payload)))
+      write_test_file(nul_path, nul_payload, sizeof(nul_payload)) ||
+      write_test_file(spaced_path, text_payload, sizeof(text_payload) - 1u))
     return 1;
 
   memset(&options, 0, sizeof(options));
@@ -4337,6 +5337,7 @@ static int run_file_backed_mutations(lql *ctx) {
     remove(binary_path);
     remove(invalid_path);
     remove(nul_path);
+    remove(spaced_path);
     ctx->mutation_destroy(ctx, mutation);
     return 1;
   }
@@ -4346,6 +5347,9 @@ static int run_file_backed_mutations(lql *ctx) {
       run_file_backed_mutation_case(
           ctx, "textfile:/payload=liblql-file-value-utf8.tmp", LQL_STATUS_OK,
           "{\"payload\":\"日本語 😀 こんにちは\"}\n") ||
+      run_file_backed_mutation_case(
+          ctx, "textfile:/payload=\" liblql-file-value-spaced.tmp \"",
+          LQL_STATUS_OK, "{\"payload\":\"hello world\"}\n") ||
       run_file_backed_mutation_case(
           ctx, "base64file:/payload=liblql-file-value-binary.tmp",
           LQL_STATUS_OK, "{\"payload\":\"AAEC\"}\n") ||
@@ -4365,6 +5369,7 @@ static int run_file_backed_mutations(lql *ctx) {
     remove(binary_path);
     remove(invalid_path);
     remove(nul_path);
+    remove(spaced_path);
     return 1;
   }
 
@@ -4373,6 +5378,7 @@ static int run_file_backed_mutations(lql *ctx) {
   remove(binary_path);
   remove(invalid_path);
   remove(nul_path);
+  remove(spaced_path);
   return 0;
 }
 
@@ -4380,7 +5386,8 @@ static int run_virtual_file_source(lql *ctx) {
   static const char input[] = "{}\n";
   static const unsigned char payload[] = {0x00u, 0x01u, 0x02u};
   static const char expected[] = "{\"payload\":\"AAEC\"}\n";
-  static const char *const expressions[] = {"file:/payload=virtual:payload"};
+  static const char expected_path[] = " virtual:payload ";
+  static const char *const expressions[] = {"file:/payload=\" virtual:payload \""};
   lql_mutation_parse_options options;
   lql_mutation *mutation;
   lql_stream_request request;
@@ -4394,6 +5401,8 @@ static int run_virtual_file_source(lql *ctx) {
   source.data = payload;
   source.len = sizeof(payload);
   source.chunk_size = 1u;
+  source.expected_path = expected_path;
+  source.expected_path_len = sizeof(expected_path) - 1u;
   memset(&options, 0, sizeof(options));
   options.enable_file_values = 1;
   options.file_value_open = test_file_open;
@@ -4676,6 +5685,8 @@ static int run_option_failure_contract(lql *ctx) {
   mutation = NULL;
   memset(&source, 0, sizeof(source));
   source.oversize_read = 1;
+  source.expected_path = "virtual:payload";
+  source.expected_path_len = strlen(source.expected_path);
   memset(&options, 0, sizeof(options));
   options.enable_file_values = 1;
   options.file_value_open = test_file_open;
@@ -4875,39 +5886,76 @@ int main(void) {
   lql *ctx;
   lql_error error;
   int match_all_status;
+#define RUN_CTX_TEST(fn)                                                       \
+  do {                                                                         \
+    if (fn(ctx)) {                                                             \
+      fprintf(stderr, "%s failed\n", #fn);                                     \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+  } while (0)
+#define RUN_NOCTX_TEST(fn)                                                     \
+  do {                                                                         \
+    if (fn()) {                                                                \
+      fprintf(stderr, "%s failed\n", #fn);                                     \
+      ctx->destroy(ctx);                                                       \
+      return 1;                                                                \
+    }                                                                          \
+  } while (0)
 
   lql_error_init(&error);
   if (lql_new(&ctx, &error) != LQL_STATUS_OK) {
     return 1;
   }
   match_all_status = 0;
-  if (run_projection_parse(ctx) || run_selector_json_write(ctx) ||
-      run_scalar_json_semantic_regressions(ctx) || run_status_selection(ctx) ||
-      run_long_numeric_selector_regression(ctx) ||
-      run_huge_numeric_selector_regression(ctx) ||
-      run_escaped_pointer_selection(ctx) || run_conjunction_selection(ctx) ||
-      run_or_selection(ctx) || run_post_hit_validation(ctx) ||
-      run_not_selection(ctx) || run_mapped_string_predicates(ctx) ||
-      run_long_contains_regression(ctx) ||
-      ((match_all_status = run_match_all(ctx)) != 0) ||
-      run_root_wildcard_array_error(ctx) || run_selected_record_output(ctx) ||
-      run_value_callback(ctx) || run_value_callback_control(ctx) ||
-      run_nested_projection_output(ctx) || run_mutation_output(ctx) ||
-      run_mutation_literal_parity(ctx) ||
-      run_long_number_mutation_regression(ctx) ||
-      run_projection_then_mutation_output(ctx) ||
-      run_output_modes_preserve_completed_before_malformed(ctx) ||
-      run_completed_record_before_root_array_error(ctx) ||
-      run_output_modes_skip_scalar_roots(ctx) || run_stop_and_root_array(ctx) ||
-      run_record_limit(ctx) || run_byte_limit(ctx) ||
-      run_unintentional_stop_status(ctx) || run_true_stream_contract(ctx) ||
-      run_wide_plan_stream_contract(ctx) || run_instance_memory_contract() ||
-      run_file_backed_mutations(ctx) || run_virtual_file_source(ctx) ||
-      run_clock_contract(ctx) || run_option_failure_contract(ctx) ||
-      run_cancellation_contract(ctx)) {
+  RUN_CTX_TEST(run_projection_parse);
+  RUN_CTX_TEST(run_selector_json_write);
+  RUN_CTX_TEST(run_scalar_json_semantic_regressions);
+  RUN_CTX_TEST(run_status_selection);
+  RUN_CTX_TEST(run_long_numeric_selector_regression);
+  RUN_CTX_TEST(run_huge_numeric_selector_regression);
+  RUN_CTX_TEST(run_recursive_wildcard_selector_regression);
+  RUN_CTX_TEST(run_escaped_pointer_selection);
+  RUN_CTX_TEST(run_conjunction_selection);
+  RUN_CTX_TEST(run_or_selection);
+  RUN_CTX_TEST(run_post_hit_validation);
+  RUN_CTX_TEST(run_not_selection);
+  RUN_CTX_TEST(run_mapped_string_predicates);
+  RUN_CTX_TEST(run_long_contains_regression);
+  match_all_status = run_match_all(ctx);
+  if (match_all_status != 0) {
+    fprintf(stderr, "run_match_all failed\n");
     ctx->destroy(ctx);
-    return match_all_status != 0 ? match_all_status : 1;
+    return match_all_status;
   }
+  RUN_CTX_TEST(run_root_wildcard_array_error);
+  RUN_CTX_TEST(run_selected_record_output);
+  RUN_CTX_TEST(run_value_callback);
+  RUN_CTX_TEST(run_value_callback_control);
+  RUN_CTX_TEST(run_nested_projection_output);
+  RUN_CTX_TEST(run_mutation_output);
+  RUN_CTX_TEST(run_mutation_literal_parity);
+  RUN_CTX_TEST(run_wildcard_mutation_review_regressions);
+  RUN_CTX_TEST(run_mutation_error_output_is_atomic);
+  RUN_CTX_TEST(run_long_number_mutation_regression);
+  RUN_CTX_TEST(run_projection_then_mutation_output);
+  RUN_CTX_TEST(run_output_modes_preserve_completed_before_malformed);
+  RUN_CTX_TEST(run_completed_record_before_root_array_error);
+  RUN_CTX_TEST(run_output_modes_skip_scalar_roots);
+  RUN_CTX_TEST(run_stop_and_root_array);
+  RUN_CTX_TEST(run_record_limit);
+  RUN_CTX_TEST(run_byte_limit);
+  RUN_CTX_TEST(run_unintentional_stop_status);
+  RUN_CTX_TEST(run_true_stream_contract);
+  RUN_CTX_TEST(run_wide_plan_stream_contract);
+  RUN_NOCTX_TEST(run_instance_memory_contract);
+  RUN_CTX_TEST(run_file_backed_mutations);
+  RUN_CTX_TEST(run_virtual_file_source);
+  RUN_CTX_TEST(run_clock_contract);
+  RUN_CTX_TEST(run_option_failure_contract);
+  RUN_CTX_TEST(run_cancellation_contract);
   ctx->destroy(ctx);
+#undef RUN_NOCTX_TEST
+#undef RUN_CTX_TEST
   return 0;
 }

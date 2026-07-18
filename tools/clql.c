@@ -274,6 +274,192 @@ static int starts_with_option(const char *arg, const char *name,
   return 0;
 }
 
+static int parse_bool_text(const char *text, int *out) {
+  if (text == NULL || out == NULL) {
+    return 0;
+  }
+  if (strcmp(text, "true") == 0 || strcmp(text, "True") == 0 ||
+      strcmp(text, "TRUE") == 0 || strcmp(text, "t") == 0 ||
+      strcmp(text, "T") == 0 || strcmp(text, "1") == 0) {
+    *out = 1;
+    return 1;
+  }
+  if (strcmp(text, "false") == 0 || strcmp(text, "False") == 0 ||
+      strcmp(text, "FALSE") == 0 || strcmp(text, "f") == 0 ||
+      strcmp(text, "F") == 0 || strcmp(text, "0") == 0) {
+    *out = 0;
+    return 1;
+  }
+  return 0;
+}
+
+static int parse_long_bool_option(const char *arg, const char *name,
+                                  int *target, int *matched) {
+  size_t len;
+  if (matched == NULL) {
+    return 0;
+  }
+  *matched = 0;
+  if (arg == NULL || name == NULL || target == NULL) {
+    return 0;
+  }
+  len = strlen(name);
+  if (strncmp(arg, name, len) != 0 || arg[len] != '=') {
+    return 1;
+  }
+  *matched = 1;
+  return parse_bool_text(arg + len + 1u, target);
+}
+
+static int parse_short_bool_value(const char *arg, size_t pos, int *target) {
+  if (arg[pos + 1u] != '=') {
+    return 0;
+  }
+  if (!parse_bool_text(arg + pos + 2u, target)) {
+    fprintf(stderr, "clql: invalid boolean value for short option: %c\n",
+            arg[pos]);
+    return -1;
+  }
+  return 1;
+}
+
+static int parse_short_option_cluster(int argc, char **argv, int *arg,
+                                      clql_config *cfg) {
+  const char *option;
+  size_t pos;
+  int bool_status;
+  int terminal_action;
+  if (arg == NULL || cfg == NULL || *arg >= argc) {
+    return 0;
+  }
+  option = argv[*arg];
+  if (option == NULL || option[0] != '-' || option[1] == '-' ||
+      option[1] == '\0' || option[2] == '\0') {
+    return 0;
+  }
+  terminal_action = 0;
+  pos = 1u;
+  while (option[pos] != '\0') {
+    switch (option[pos]) {
+    case 'O':
+      bool_status = parse_short_bool_value(option, pos, &cfg->or_mode);
+      if (bool_status != 0) {
+        return bool_status > 0 ? 1 : -1;
+      }
+      cfg->or_mode = 1;
+      ++pos;
+      break;
+    case 'M':
+      bool_status = parse_short_bool_value(option, pos, &cfg->matches_only);
+      if (bool_status != 0) {
+        return bool_status > 0 ? 1 : -1;
+      }
+      cfg->matches_only = 1;
+      ++pos;
+      break;
+    case 'c':
+      bool_status = parse_short_bool_value(option, pos, &cfg->compact);
+      if (bool_status != 0) {
+        return bool_status > 0 ? 1 : -1;
+      }
+      cfg->compact = 1;
+      ++pos;
+      break;
+    case 'i':
+    case 'w':
+      bool_status = parse_short_bool_value(option, pos, &cfg->inline_write);
+      if (bool_status != 0) {
+        return bool_status > 0 ? 1 : -1;
+      }
+      cfg->inline_write = 1;
+      ++pos;
+      break;
+    case 'F':
+      bool_status =
+          parse_short_bool_value(option, pos, &cfg->enable_file_mutations);
+      if (bool_status != 0) {
+        return bool_status > 0 ? 1 : -1;
+      }
+      cfg->enable_file_mutations = 1;
+      ++pos;
+      break;
+    case 'h':
+      terminal_action = 'h';
+      ++pos;
+      break;
+    case 'v':
+      if (terminal_action != 'h') {
+        terminal_action = 'v';
+      }
+      ++pos;
+      break;
+    case 'm':
+      if (option[pos + 1u] == '=') {
+        if (!string_list_push_copy(&cfg->mutations, option + pos + 2u)) {
+          fprintf(stderr, "clql: --mutate requires a value\n");
+          return -1;
+        }
+      } else if (option[pos + 1u] != '\0') {
+        if (!string_list_push_copy(&cfg->mutations, option + pos + 1u)) {
+          fprintf(stderr, "clql: --mutate requires a value\n");
+          return -1;
+        }
+      } else {
+        const char *value;
+        value = NULL;
+        if (!take_option_value(argc, argv, arg, NULL, &value) ||
+            !string_list_push_copy(&cfg->mutations, value)) {
+          fprintf(stderr, "clql: --mutate requires a value\n");
+          return -1;
+        }
+      }
+      return 1;
+    case 'f':
+      if (option[pos + 1u] == '=') {
+        if (!string_list_push_copy(&cfg->fields, option + pos + 2u)) {
+          fprintf(stderr, "clql: --field requires a value\n");
+          return -1;
+        }
+      } else if (option[pos + 1u] != '\0') {
+        if (!string_list_push_copy(&cfg->fields, option + pos + 1u)) {
+          fprintf(stderr, "clql: --field requires a value\n");
+          return -1;
+        }
+      } else {
+        const char *value;
+        value = NULL;
+        if (!take_option_value(argc, argv, arg, NULL, &value) ||
+            !string_list_push_copy(&cfg->fields, value)) {
+          fprintf(stderr, "clql: --field requires a value\n");
+          return -1;
+        }
+      }
+      return 1;
+    case 't':
+      if (option[pos + 1u] == '\0') {
+        if (*arg + 1 >= argc) {
+          fprintf(stderr, "clql: --theme requires a value\n");
+          return -1;
+        }
+        ++*arg;
+      }
+      fprintf(stderr, "clql: --theme is unsupported; prettyx is not linked\n");
+      return -1;
+    default:
+      return 0;
+    }
+  }
+  if (terminal_action == 'h') {
+    usage(stdout);
+    return 2;
+  }
+  if (terminal_action == 'v') {
+    puts(LQL_VERSION);
+    return 2;
+  }
+  return 1;
+}
+
 static char *join_selector_list(const clql_string_list *list,
                                 const char *separator) {
   size_t len;
@@ -320,6 +506,9 @@ static int parse_args(int argc, char **argv, clql_config *cfg,
   arg = 1;
   while (arg < argc) {
     const char *inline_value;
+    int bool_status;
+    int matched;
+    int cluster_status;
     inline_value = NULL;
     if (strcmp(argv[arg], "--") == 0) {
       ++arg;
@@ -345,13 +534,46 @@ static int parse_args(int argc, char **argv, clql_config *cfg,
       ++arg;
       continue;
     }
+    matched = 0;
+    bool_status = parse_long_bool_option(argv[arg], "--count", &cfg->count_only,
+                                         &matched);
+    if (matched) {
+      if (!bool_status) {
+        fprintf(stderr, "clql: invalid boolean value for --count\n");
+        return -1;
+      }
+      ++arg;
+      continue;
+    }
     if (strcmp(argv[arg], "-O") == 0 || strcmp(argv[arg], "--or") == 0) {
       cfg->or_mode = 1;
       ++arg;
       continue;
     }
+    matched = 0;
+    bool_status =
+        parse_long_bool_option(argv[arg], "--or", &cfg->or_mode, &matched);
+    if (matched) {
+      if (!bool_status) {
+        fprintf(stderr, "clql: invalid boolean value for --or\n");
+        return -1;
+      }
+      ++arg;
+      continue;
+    }
     if (strcmp(argv[arg], "-c") == 0 || strcmp(argv[arg], "--compact") == 0) {
       cfg->compact = 1;
+      ++arg;
+      continue;
+    }
+    matched = 0;
+    bool_status =
+        parse_long_bool_option(argv[arg], "--compact", &cfg->compact, &matched);
+    if (matched) {
+      if (!bool_status) {
+        fprintf(stderr, "clql: invalid boolean value for --compact\n");
+        return -1;
+      }
       ++arg;
       continue;
     }
@@ -361,15 +583,60 @@ static int parse_args(int argc, char **argv, clql_config *cfg,
       ++arg;
       continue;
     }
+    matched = 0;
+    bool_status = parse_long_bool_option(argv[arg], "--matches-only",
+                                         &cfg->matches_only, &matched);
+    if (matched) {
+      if (!bool_status) {
+        fprintf(stderr, "clql: invalid boolean value for --matches-only\n");
+        return -1;
+      }
+      ++arg;
+      continue;
+    }
     if (strcmp(argv[arg], "-i") == 0 || strcmp(argv[arg], "--inline") == 0 ||
         strcmp(argv[arg], "-w") == 0 || strcmp(argv[arg], "--write") == 0) {
       cfg->inline_write = 1;
       ++arg;
       continue;
     }
+    matched = 0;
+    bool_status = parse_long_bool_option(argv[arg], "--inline",
+                                         &cfg->inline_write, &matched);
+    if (matched) {
+      if (!bool_status) {
+        fprintf(stderr, "clql: invalid boolean value for --inline\n");
+        return -1;
+      }
+      ++arg;
+      continue;
+    }
+    matched = 0;
+    bool_status = parse_long_bool_option(argv[arg], "--write",
+                                         &cfg->inline_write, &matched);
+    if (matched) {
+      if (!bool_status) {
+        fprintf(stderr, "clql: invalid boolean value for --write\n");
+        return -1;
+      }
+      ++arg;
+      continue;
+    }
     if (strcmp(argv[arg], "-F") == 0 ||
         strcmp(argv[arg], "--enable-file-mutations") == 0) {
       cfg->enable_file_mutations = 1;
+      ++arg;
+      continue;
+    }
+    matched = 0;
+    bool_status = parse_long_bool_option(argv[arg], "--enable-file-mutations",
+                                         &cfg->enable_file_mutations, &matched);
+    if (matched) {
+      if (!bool_status) {
+        fprintf(stderr,
+                "clql: invalid boolean value for --enable-file-mutations\n");
+        return -1;
+      }
       ++arg;
       continue;
     }
@@ -401,6 +668,17 @@ static int parse_args(int argc, char **argv, clql_config *cfg,
       }
       fprintf(stderr, "clql: --theme is unsupported; prettyx is not linked\n");
       return -1;
+    }
+    cluster_status = parse_short_option_cluster(argc, argv, &arg, cfg);
+    if (cluster_status != 0) {
+      if (cluster_status < 0) {
+        return -1;
+      }
+      if (cluster_status == 2) {
+        return 1;
+      }
+      ++arg;
+      continue;
     }
     if (argv[arg][0] == '-') {
       fprintf(stderr, "clql: unknown flag: %s\n", argv[arg]);
@@ -721,8 +999,8 @@ static int inline_xattr_set_error_ignorable(const char *name, int error_code) {
   if (name == NULL) {
     return 0;
   }
-  if (error_code != EPERM && error_code != EACCES &&
-      error_code != ENOTSUP && error_code != EOPNOTSUPP) {
+  if (error_code != EPERM && error_code != EACCES && error_code != ENOTSUP &&
+      error_code != EOPNOTSUPP) {
     return 0;
   }
   /*

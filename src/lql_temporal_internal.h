@@ -12,10 +12,8 @@
 
 __extension__ typedef signed long long lql_int64;
 
-#define LQL_INT64_MAX_VALUE \
-  __extension__ 9223372036854775807LL
-#define LQL_INT64_MIN_VALUE \
-  (-LQL_INT64_MAX_VALUE - __extension__ 1LL)
+#define LQL_INT64_MAX_VALUE __extension__ 9223372036854775807LL
+#define LQL_INT64_MIN_VALUE (-LQL_INT64_MAX_VALUE - __extension__ 1LL)
 
 typedef struct lql_temporal {
   lql_int64 seconds;

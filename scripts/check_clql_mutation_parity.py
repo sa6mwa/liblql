@@ -145,6 +145,19 @@ def main():
             compact({}),
             ["/a{/b{/c=1,/d=2},/e=3}"],
         ),
+        ("empty set value", compact({}), ["/a="]),
+        ("bracket comma value", compact({}), ["/a=[1,2]"]),
+        ("bracket spaced comma value", compact({}), ["/a=[1, 2]"]),
+        ("raw text bracket comma value", compact({}), ["/a=x[y,z]"]),
+        ("raw text brace comma value", compact({}), ["/a=x{y,z}"]),
+        ("raw text quote comma value", compact({}), ['/a=foo"bar,baz']),
+        ("raw apostrophe value", compact({}), ["/a=don't"]),
+        ("raw double quote value", compact({}), ['/a=a"b']),
+        ("literal open brace path", compact({}), ["/a{=x"]),
+        ("literal close brace path", compact({}), ["/a}=x"]),
+        ("literal bracket path", compact({}), ["/a[=x"]),
+        ("literal raw open brace value", compact({}), ["/a=x{y"]),
+        ("literal raw close brace value", compact({}), ["/a=x}y"]),
         (
             "brace shorthand quoted comma",
             compact({"state": {"details": {"owner": "bob"}, "metrics": 1}}),
@@ -171,6 +184,311 @@ def main():
             "array wildcard increment",
             compact({"items": [{"n": 1}, {"n": 2}]}),
             ["/items/[]/n=+1"],
+        ),
+        (
+            "array wildcard increment preserves scalar elements",
+            compact({"items": [1, 2, {"n": 3}]}),
+            ["/items[]/n=+1"],
+        ),
+        (
+            "array wildcard increment preserves array elements",
+            compact({"items": [[1, 2], {"n": 3}]}),
+            ["/items[]/n=+1"],
+        ),
+        (
+            "array wildcard increment indexes nested arrays",
+            compact({"items": [{"0": 2}, [2]]}),
+            ["/items[]/0=+1"],
+        ),
+        (
+            "numeric nested increment materializes object key over array parent",
+            compact({"0": {}, "a": [{"a": False, "0": ""}]}),
+            ["/a/0=+1"],
+        ),
+        (
+            "array wildcard increment applies nested array wildcard only to arrays",
+            compact({"items": [[2], {"n": 3}]}),
+            ["/items[]/[]=+1"],
+        ),
+        (
+            "array wildcard increment recurses through object children",
+            compact({"items": [{"a": {"n": 1}}, {"a": {"n": 2}}]}),
+            ["/items[]/a/n=+1"],
+        ),
+        (
+            "array wildcard increment recurses through array indexes",
+            compact({"items": [[{"n": 1}], [{"n": 2}]]}),
+            ["/items[]/0/n=+1"],
+        ),
+        (
+            "array wildcard set updates nested array index",
+            compact({"items": [[1, 2]]}),
+            ["/items[]/0=5"],
+        ),
+        (
+            "array wildcard set recurses through array indexes",
+            compact({"items": [[{"n": 1}]]}),
+            ["/items[]/0/n=5"],
+        ),
+        (
+            "array wildcard remove preserves indexed array shape",
+            compact({"items": [[1, 2]]}),
+            ["rm:/items[]/0"],
+        ),
+        (
+            "missing recursive wildcard set is no-op",
+            compact({}),
+            ["/obj/**/n=5"],
+        ),
+        (
+            "missing ellipsis wildcard set is no-op",
+            compact({}),
+            ["/obj/.../n=5"],
+        ),
+        (
+            "top object wildcard set",
+            compact({"a": 1, "b": 2}),
+            ["/*=3"],
+        ),
+        (
+            "top object wildcard increment",
+            compact({"a": 1, "b": 2}),
+            ["/*=+1"],
+        ),
+        (
+            "top object wildcard remove",
+            compact({"a": 1, "b": 2}),
+            ["rm:/*"],
+        ),
+        (
+            "top object wildcard nested set preserves scalar",
+            compact({"a": 1}),
+            ["/*/n=5"],
+        ),
+        (
+            "top object wildcard nested set existing only",
+            compact({"x": {"a": {"n": 1}}, "y": [{"a": {"n": 2}}], "z": 1}),
+            ["/*/a/n=5"],
+        ),
+        (
+            "top object wildcard nested increment existing only",
+            compact({"x": {"a": {"n": 1}}, "y": [{"a": {"n": 2}}], "z": 1}),
+            ["/*/a/n=+1"],
+        ),
+        (
+            "top ellipsis nested set recurses existing only",
+            compact({"x": {"a": {"n": 1}}, "y": [{"a": {"n": 2}}], "z": 1}),
+            ["/.../n=5"],
+        ),
+        (
+            "top ellipsis set applies root key before descendants",
+            compact({"b": {"b": 1}}),
+            ["/.../b=5"],
+        ),
+        (
+            "top ellipsis increment applies root key before descendants",
+            compact({"b": 1}),
+            ["/.../b=+1"],
+        ),
+        (
+            "top ellipsis remove applies root key before descendants",
+            compact({"b": {"b": 1}}),
+            ["rm:/.../b"],
+        ),
+        (
+            "ellipsis numeric segment selects array index before descendants",
+            compact({"a": {"b": [[], [0]]}}),
+            ["/a/.../0=5"],
+        ),
+        (
+            "ellipsis numeric remove preserves array shape",
+            compact({"a": {"b": [[], [0]]}}),
+            ["rm:/a/.../0"],
+        ),
+        (
+            "consecutive ellipsis set treats second ellipsis as wildcard",
+            compact({"a": {"x": 1}}),
+            ["/.../...=5"],
+        ),
+        (
+            "consecutive ellipsis set collapses before named key",
+            compact({"b": {"a": False}}),
+            ["/.../.../b=x"],
+        ),
+        (
+            "consecutive ellipsis remove treats second ellipsis as wildcard",
+            compact({"a": {"x": 1}}),
+            ["rm:/.../..."],
+        ),
+        (
+            "ellipsis after wildcard set matches current object",
+            compact({"b": {"b": 1}}),
+            ["/*/.../b=x"],
+        ),
+        (
+            "ellipsis after wildcard set matches current array index",
+            compact({"a": [[False, 0, None]], "b": []}),
+            ["/*/.../0=x"],
+        ),
+        (
+            "recursive object wildcard set continues into descendants",
+            compact({"r": {"x": {"a": "x"}}}),
+            ["/.../*/a=null"],
+        ),
+        (
+            "leading recursive object wildcard set matches zero depth",
+            compact({"a": {"b": 2}}),
+            ["/.../*/b=9"],
+        ),
+        (
+            "leading recursive object wildcard increment matches zero depth",
+            compact({"a": {"b": 2}}),
+            ["/.../*/b++"],
+        ),
+        (
+            "leading recursive object wildcard remove matches zero depth",
+            compact({"a": {"b": 2}}),
+            ["rm:/.../*/b"],
+        ),
+        (
+            "recursive any wildcard set continues into array descendants",
+            compact({"r": [{"a": "x"}]}),
+            ["/.../**/a=null"],
+        ),
+        (
+            "recursive object wildcard does not carry recursion after star",
+            compact({"x": {"z": [1, {"a": 2}]}}),
+            ["/x/.../*/*=v"],
+        ),
+        (
+            "top wildcard before concrete set preserves mutation order",
+            compact({"a": 0, "b": 0}),
+            ["/*=1", "/a=2"],
+        ),
+        (
+            "top concrete before wildcard set preserves mutation order",
+            compact({"a": 0, "b": 0}),
+            ["/a=2", "/*=1"],
+        ),
+        (
+            "missing concrete key is affected by later wildcard set",
+            compact({}),
+            ["/a=2", "/*=1"],
+        ),
+        (
+            "created concrete key is removed by later wildcard remove",
+            compact({"a": 0, "b": 0}),
+            ["/a=2", "rm:/*"],
+        ),
+        (
+            "wildcard set replaces before later recursive increment validation",
+            compact({"r": "x"}),
+            ["/**=5", "/...=+1"],
+        ),
+        (
+            "recursive concrete suffix does not materialize scalar parent",
+            compact({"a": -1}),
+            ["/.../a/1=+1"],
+        ),
+        (
+            "later recursive terminal applies to earlier created key",
+            compact({}),
+            ["/b=+1", "/.../...=5"],
+        ),
+        (
+            "repeated recursive segment before array wildcard stays meaningful",
+            compact({"0": [True, {"a": 1}]}),
+            ["/.../.../[]=5"],
+        ),
+        (
+            "top wildcard nested action applies under matched key",
+            compact({"a": {}}),
+            ["/*/x=1", "/a/y=2"],
+        ),
+        (
+            "top wildcard nested action does not recreate removed key",
+            compact({"a": {}}),
+            ["rm:/a", "/*/x=1"],
+        ),
+        (
+            "terminal repeated ellipsis increment preserves recursion",
+            compact({"obj": {"a": 1}}),
+            ["/obj/.../...++"],
+        ),
+        (
+            "terminal repeated ellipsis increment ignores scalar anchor",
+            compact({"obj": 1}),
+            ["/obj/.../...++"],
+        ),
+        (
+            "missing increment array wildcard suffix is no-op",
+            compact({"b": {}}),
+            ["/b/0/[]=+1"],
+        ),
+        (
+            "missing increment object wildcard suffix is no-op",
+            compact({"b": {}}),
+            ["/b/0/*=+1"],
+        ),
+        (
+            "missing increment any wildcard suffix is no-op",
+            compact({"b": {}}),
+            ["/b/0/**=+1"],
+        ),
+        (
+            "missing increment ellipsis suffix is no-op",
+            compact({"b": {}}),
+            ["/b/0/...=+1"],
+        ),
+        (
+            "scalar parent object wildcard set is no-op",
+            compact({"a": 1}),
+            ["/a/*/n=x"],
+        ),
+        (
+            "scalar parent array wildcard set is no-op",
+            compact({"a": 1}),
+            ["/a/[]/n=x"],
+        ),
+        (
+            "scalar parent recursive wildcard set is no-op",
+            compact({"a": 1}),
+            ["/a/**/n=x"],
+        ),
+        (
+            "scalar parent later object wildcard set is no-op",
+            compact({"a": True}),
+            ["/a/0/*=x"],
+        ),
+        (
+            "scalar parent later object wildcard increment is no-op",
+            compact({"a": True}),
+            ["/a/0/*=+1"],
+        ),
+        (
+            "scalar parent later array wildcard set is no-op",
+            compact({"a": True}),
+            ["/a/x/[]/n=1"],
+        ),
+        (
+            "scalar parent later recursive wildcard set is no-op",
+            compact({"a": True}),
+            ["/a/x/**/n=1"],
+        ),
+        (
+            "skipped wildcard permits later top set",
+            compact({}),
+            ["/a/*/n=x", "/a=2"],
+        ),
+        (
+            "skipped wildcard permits later nested set",
+            compact({}),
+            ["/a/*/n=x", "/a/b=2"],
+        ),
+        (
+            "skipped wildcard permits later increment",
+            compact({}),
+            ["/a/*=x", "/a++"],
         ),
         (
             "array star wildcard increment",
@@ -211,6 +529,51 @@ def main():
             "ellipsis recursive wildcard increment",
             compact({"items": [{"parts": [{"n": 1}], "n": 2}]}),
             ["/items/.../n=+1"],
+        ),
+        (
+            "terminal ellipsis recursive wildcard set",
+            compact({"a": {"x": 1, "y": 2}}),
+            ["/a/...=3"],
+        ),
+        (
+            "terminal object wildcard increment",
+            compact({"a": {"x": {"n": 1}}}),
+            ["/a/*/**=+1"],
+        ),
+        (
+            "terminal ellipsis wildcard increment",
+            compact({"a": {"x": {"n": 1}}}),
+            ["/a/*/...=+1"],
+        ),
+        (
+            "terminal repeated recursive wildcard increment",
+            compact({"a": {"x": {"n": 1}}}),
+            ["/a/**/**=+1"],
+        ),
+        (
+            "preserve array for later object wildcard increment",
+            compact({"b": [1, 2]}),
+            ["/b/x/*=+1"],
+        ),
+        (
+            "preserve array for later array wildcard increment",
+            compact({"b": [1, 2]}),
+            ["/b/x/[]=+1"],
+        ),
+        (
+            "preserve array for later recursive wildcard increment",
+            compact({"b": [1, 2]}),
+            ["/b/x/**=+1"],
+        ),
+        (
+            "preserve array for later ellipsis wildcard increment",
+            compact({"b": [1, 2]}),
+            ["/b/x/...=+1"],
+        ),
+        (
+            "signed negative zero increment is rejected",
+            compact({"n": 1}),
+            ["/n=-0"],
         ),
         (
             "wildcard remove",
@@ -255,6 +618,11 @@ def main():
     assert_case(
         "mutations beyond one machine word",
         compact({}),
+        [f"/k{i}={i}" for i in range(wide_count)],
+    )
+    assert_case(
+        "mutations beyond one machine word with existing first key",
+        compact({"k0": 0}),
         [f"/k{i}={i}" for i in range(wide_count)],
     )
 

@@ -41,6 +41,7 @@ typedef struct lql_flat_eq_program {
   int stop_matching_on_hit;
   unsigned long stop_hit_mask;
   const lql_mutation_action **direct_mutation_actions;
+  unsigned char *direct_mutation_found;
   size_t direct_mutation_action_count;
 } lql_flat_eq_program;
 
@@ -79,6 +80,8 @@ static void lql_flat_eq_program_cleanup(lql_flat_eq_program *program) {
     }
     program->allocator->destroy(program->allocator,
                                 program->direct_mutation_actions);
+    program->allocator->destroy(program->allocator,
+                                program->direct_mutation_found);
     program->allocator->destroy(program->allocator,
                                 program->selector_group_table);
     program->allocator->destroy(program->allocator, program->selector_groups);
@@ -132,7 +135,10 @@ static int lql_flat_eq_program_init(lql_flat_eq_program *program,
   if (mutation_count != 0u) {
     program->direct_mutation_actions = allocator->calloc(
         allocator, mutation_count, sizeof(*program->direct_mutation_actions));
-    if (program->direct_mutation_actions == NULL) {
+    program->direct_mutation_found = allocator->calloc(
+        allocator, mutation_count, sizeof(*program->direct_mutation_found));
+    if (program->direct_mutation_actions == NULL ||
+        program->direct_mutation_found == NULL) {
       lql_flat_eq_program_cleanup(program);
       return 0;
     }
@@ -411,11 +417,7 @@ static int lql_flat_eq_literal_object_path(
       }
     }
     if (segment_len == 0u ||
-        segment_count >= sizeof(unsigned long) * CHAR_BIT ||
-        ((segment_len == 2u && segment[0] == '*' && segment[1] == '*') &&
-         slash == NULL) ||
-        ((segment_len == 3u && memcmp(segment, "...", 3u) == 0) &&
-         slash == NULL)) {
+        segment_count >= sizeof(unsigned long) * CHAR_BIT) {
       return 0;
     }
     if (segment_count == 0u) {
@@ -444,19 +446,6 @@ static int lql_flat_eq_literal_object_path(
   *out_object_wildcards = object_wildcards;
   *out_array_wildcards = array_wildcards;
   *out_any_wildcards = any_wildcards;
-  if (recursive_segments != 0ul) {
-    size_t recursive_index;
-    recursive_index = 0u;
-    while ((recursive_segments & (1ul << recursive_index)) == 0ul) {
-      ++recursive_index;
-    }
-    if ((recursive_segments & (recursive_segments - 1ul)) != 0ul ||
-        array_segments != 0ul || object_wildcards != 0ul ||
-        array_wildcards != 0ul || any_wildcards != 0ul ||
-        recursive_index + 2u != segment_count) {
-      return 0;
-    }
-  }
   *out_recursive_segments = recursive_segments;
   return 1;
 }
@@ -608,6 +597,7 @@ static void lql_flat_eq_cache_recursive_match(lql_json_flat_eq_term *term) {
   const char *segment;
   const char *slash;
   size_t recursive_segment;
+  size_t match_segment;
   size_t i;
   if (term == NULL || term->path == NULL ||
       term->path_recursive_segments == 0ul) {
@@ -625,14 +615,46 @@ static void lql_flat_eq_cache_recursive_match(lql_json_flat_eq_term *term) {
     }
     segment = slash + 1;
   }
+  match_segment = recursive_segment + 1u;
+  while (match_segment < term->path_segment_count &&
+         match_segment < sizeof(unsigned long) * CHAR_BIT &&
+         (term->path_recursive_segments & (1ul << match_segment)) != 0ul) {
+    slash = strchr(segment, '/');
+    if (slash == NULL) {
+      term->path_recursive_match = NULL;
+      term->path_recursive_match_len = 0u;
+      term->path_recursive_match_segment = 0u;
+      return;
+    }
+    segment = slash + 1;
+    ++match_segment;
+  }
+  if (match_segment >= term->path_segment_count) {
+    term->path_recursive_match = NULL;
+    term->path_recursive_match_len = 0u;
+    term->path_recursive_match_segment = 0u;
+    return;
+  }
   slash = strchr(segment, '/');
   term->path_recursive_match = segment;
   term->path_recursive_match_len =
       slash == NULL ? strlen(segment) : (size_t)(slash - segment);
-  term->path_recursive_match_segment = recursive_segment + 1u;
+  term->path_recursive_match_segment = match_segment;
+}
+
+static int lql_flat_eq_plain_segment(const char *segment, size_t segment_len) {
+  size_t i;
+  if (segment == NULL)
+    return 0;
+  for (i = 0u; i < segment_len; ++i) {
+    if (segment[i] == '~')
+      return 0;
+  }
+  return 1;
 }
 
 static void lql_flat_eq_cache_paths(lql_json_flat_eq_term *term) {
+  term->field_plain = lql_flat_eq_plain_segment(term->field, term->field_len);
   lql_flat_eq_cache_array_indexes(term);
   lql_flat_eq_cache_recursive_match(term);
 }
@@ -950,6 +972,7 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     return 1;
   }
   if ((selector->kind != LQL_SELECTOR_KIND_EQ &&
+       selector->kind != LQL_SELECTOR_KIND_NE &&
        selector->kind != LQL_SELECTOR_KIND_EXISTS &&
        selector->kind != LQL_SELECTOR_KIND_PREFIX &&
        selector->kind != LQL_SELECTOR_KIND_IPREFIX) ||
@@ -976,7 +999,8 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   term->path_recursive_segments = path_recursive_segments;
   if (selector->kind == LQL_SELECTOR_KIND_EXISTS) {
     term->kind = LQL_JSON_FLAT_TERM_EXISTS;
-  } else if (selector->kind == LQL_SELECTOR_KIND_EQ &&
+  } else if ((selector->kind == LQL_SELECTOR_KIND_EQ ||
+              selector->kind == LQL_SELECTOR_KIND_NE) &&
              selector->value_is_temporal) {
     term->kind = LQL_JSON_FLAT_TERM_TEMPORAL_RANGE;
     term->temporal_eq = selector->temporal_eq;
@@ -994,7 +1018,8 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
   }
   if (term->kind != LQL_JSON_FLAT_TERM_EXISTS) {
     if (!selector->value_set) {
-      if (selector->kind == LQL_SELECTOR_KIND_EQ) {
+      if (selector->kind == LQL_SELECTOR_KIND_EQ ||
+          selector->kind == LQL_SELECTOR_KIND_NE) {
         return 1;
       }
       term->kind = LQL_JSON_FLAT_TERM_EXISTS;
@@ -1066,19 +1091,61 @@ static int lql_flat_eq_matches(const lql_flat_eq_program *program,
   }
   {
     const lql_flat_eq_selector_group *group;
+    int hit;
     group = lql_flat_eq_selector_group_find(program, selector);
     if (group == NULL) {
-      return 0;
+      return selector->kind == LQL_SELECTOR_KIND_NE;
     }
+    hit = 0;
     for (i = group->first; i < group->first + group->count; ++i) {
       size_t source;
       source = program->term_sources == NULL ? i : program->term_sources[i];
       if (lql_flat_eq_hit(hits, source)) {
-        return 1;
+        hit = 1;
+        break;
       }
     }
+    if (selector->kind == LQL_SELECTOR_KIND_NE)
+      return !hit;
+    return hit;
   }
-  return 0;
+}
+
+static int lql_flat_eq_matches_record(const lql_flat_eq_program *program,
+                                      const lql_selector *selector,
+                                      const unsigned long *hits,
+                                      int root_is_object) {
+  size_t i;
+  if (selector == NULL || selector->kind == LQL_SELECTOR_KIND_ALL)
+    return 1;
+  if (selector->kind == LQL_SELECTOR_KIND_AND) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      if (!lql_flat_eq_matches_record(program, &selector->children[i], hits,
+                                      root_is_object))
+        return 0;
+    }
+    return 1;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_OR) {
+    for (i = 0u; i < selector->child_count; ++i) {
+      if (lql_flat_eq_matches_record(program, &selector->children[i], hits,
+                                     root_is_object))
+        return 1;
+    }
+    return 0;
+  }
+  if (selector->kind == LQL_SELECTOR_KIND_NOT) {
+    return selector->child_count == 1u &&
+           !lql_flat_eq_matches_record(program, &selector->children[0], hits,
+                                       root_is_object);
+  }
+  /*
+   * Field inequality is a field predicate, not a scalar-root selector. Keep
+   * explicit logical NOT independent so "not./a=x" retains its selector logic.
+   */
+  if (!root_is_object && selector->kind == LQL_SELECTOR_KIND_NE)
+    return 0;
+  return lql_flat_eq_matches(program, selector, hits);
 }
 
 static int lql_flat_eq_required_eq_count(const lql_selector *selector,
@@ -1961,6 +2028,112 @@ lql_flat_eq_mutation_increment(lql_flat_eq_state *state,
                                const lql_json_spool *spool, size_t value_start,
                                size_t value_end, int present, lql_error *error);
 
+static int lql_flat_eq_mutation_segment_is_wildcard(const char *segment) {
+  return segment != NULL &&
+         (strcmp(segment, "*") == 0 || strcmp(segment, "[]") == 0 ||
+          strcmp(segment, "**") == 0 || strcmp(segment, "...") == 0);
+}
+
+static int
+lql_flat_eq_mutation_segment_matches_any_object_key(const char *segment) {
+  return segment != NULL &&
+         (strcmp(segment, "*") == 0 || strcmp(segment, "**") == 0 ||
+          strcmp(segment, "...") == 0);
+}
+
+static int
+lql_flat_eq_mutation_segment_matches_any_array_index(const char *segment) {
+  return segment != NULL &&
+         (strcmp(segment, "[]") == 0 || strcmp(segment, "**") == 0 ||
+          strcmp(segment, "...") == 0);
+}
+
+static lql_status lql_flat_eq_mutation_object_key_matches_segment(
+    const lql_json_spool *spool, size_t key_start, size_t size,
+    const char *segment, int *out_match, lql_error *error) {
+  if (lql_flat_eq_mutation_segment_matches_any_object_key(segment)) {
+    *out_match = 1;
+    return LQL_STATUS_OK;
+  }
+  if (segment != NULL && strcmp(segment, "[]") == 0) {
+    *out_match = 0;
+    return LQL_STATUS_OK;
+  }
+  return lql_flat_eq_key_equals(spool, key_start, size, segment, out_match,
+                                error);
+}
+
+static int
+lql_flat_eq_mutation_suffix_has_wildcard(const lql_mutation_action *action,
+                                         size_t depth) {
+  size_t i;
+  if (action == NULL) {
+    return 0;
+  }
+  for (i = depth; i < action->segment_count; ++i) {
+    if (lql_flat_eq_mutation_segment_is_wildcard(action->segments[i])) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static size_t
+lql_flat_eq_mutation_collapse_ellipsis(const lql_mutation_action *action,
+                                       size_t depth) {
+  if (action == NULL)
+    return depth;
+  /*
+   * The language treats repeated recursive segments as one recursive segment:
+   * /.../.../b reaches the same set of b fields as /.../b. Keep the collapse
+   * in the executor so public parsing can stay syntax-preserving.
+   */
+  while (
+      depth + 1u < action->segment_count &&
+      strcmp(action->segments[depth], "...") == 0 &&
+      strcmp(action->segments[depth + 1u], "...") == 0 &&
+      depth + 2u < action->segment_count &&
+      !lql_flat_eq_mutation_segment_is_wildcard(action->segments[depth + 2u])) {
+    ++depth;
+  }
+  return depth;
+}
+
+static int lql_flat_eq_mutation_terminal_repeated_ellipsis(
+    const lql_mutation_action *action, size_t depth) {
+  return action != NULL && depth + 2u == action->segment_count &&
+         strcmp(action->segments[depth], "...") == 0 &&
+         strcmp(action->segments[depth + 1u], "...") == 0;
+}
+
+static int lql_flat_eq_spooled_value_is_container(const lql_json_spool *spool,
+                                                  size_t value_start,
+                                                  lql_error *error) {
+  unsigned char ch;
+  if (spool == NULL)
+    return 0;
+  if (lql_flat_eq_spool_byte(spool, value_start, &ch, error) != LQL_STATUS_OK)
+    return 0;
+  return ch == (unsigned char)'{' || ch == (unsigned char)'[';
+}
+
+static int lql_flat_eq_spooled_value_accepts_segment(
+    const lql_json_spool *spool, size_t value_start, const char *segment,
+    lql_error *error) {
+  unsigned char ch;
+  size_t index;
+  if (spool == NULL || segment == NULL)
+    return 0;
+  if (lql_flat_eq_spool_byte(spool, value_start, &ch, error) != LQL_STATUS_OK)
+    return 0;
+  if (ch == (unsigned char)'{')
+    return strcmp(segment, "[]") != 0;
+  if (ch == (unsigned char)'[')
+    return lql_flat_eq_mutation_segment_matches_any_array_index(segment) ||
+           lql_flat_eq_projection_segment_index(segment, &index);
+  return 0;
+}
+
 static lql_status
 lql_flat_eq_mutation_object_chain(lql_flat_eq_state *state,
                                   const lql_mutation_action *action,
@@ -2067,29 +2240,169 @@ static lql_status lql_flat_eq_mutation_increment(
   return lql_flat_eq_mutation_number(state, next, error);
 }
 
-static lql_status lql_flat_eq_mutation_set_existing_key(
+static lql_status lql_flat_eq_mutation_validate_increment_path(
     lql_flat_eq_state *state, const lql_mutation_action *action,
     const lql_json_spool *spool, size_t value_start, size_t value_end,
-    size_t key_depth, lql_error *error) {
-  size_t pos;
-  int first;
+    size_t depth, lql_error *error);
+
+static int lql_flat_eq_mutation_same_path(const lql_mutation_action *left,
+                                          const lql_mutation_action *right) {
+  size_t i;
+  if (left == NULL || right == NULL ||
+      left->segment_count != right->segment_count)
+    return 0;
+  for (i = 0u; i < left->segment_count; ++i)
+    if (strcmp(left->segments[i], right->segments[i]) != 0)
+      return 0;
+  return 1;
+}
+
+static int lql_flat_eq_mutation_path_prefix(const lql_mutation_action *prefix,
+                                            const lql_mutation_action *action) {
+  size_t i;
+  if (prefix == NULL || action == NULL ||
+      prefix->segment_count >= action->segment_count)
+    return 0;
+  for (i = 0u; i < prefix->segment_count; ++i)
+    if (strcmp(prefix->segments[i], action->segments[i]) != 0)
+      return 0;
+  return 1;
+}
+
+static int lql_flat_eq_mutation_segment_may_overlap(const char *left,
+                                                    const char *right) {
+  if (left == NULL || right == NULL)
+    return 0;
+  return strcmp(left, right) == 0 ||
+         lql_flat_eq_mutation_segment_is_wildcard(left) ||
+         lql_flat_eq_mutation_segment_is_wildcard(right);
+}
+
+static int
+lql_flat_eq_mutation_path_may_overlap(const lql_mutation_action *left,
+                                      const lql_mutation_action *right) {
+  size_t i;
+  size_t count;
+  if (left == NULL || right == NULL || left->segment_count == 0u ||
+      right->segment_count == 0u)
+    return 0;
+  count = left->segment_count < right->segment_count ? left->segment_count
+                                                     : right->segment_count;
+  for (i = 0u; i < count; ++i) {
+    if (!lql_flat_eq_mutation_segment_may_overlap(left->segments[i],
+                                                  right->segments[i]))
+      return 0;
+    if (strcmp(left->segments[i], "...") == 0 ||
+        strcmp(right->segments[i], "...") == 0)
+      return 1;
+  }
+  return 1;
+}
+
+static lql_status lql_flat_eq_mutation_increment_replaced_before(
+    lql_flat_eq_state *state, size_t action_index, int *out_replaced,
+    lql_error *error) {
+  const lql_mutation_action *action;
+  size_t i;
+  if (state == NULL || state->program == NULL || out_replaced == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  *out_replaced = 0;
+  action = state->program->direct_mutation_actions[action_index];
+  for (i = action_index; i > 0u; --i) {
+    const lql_mutation_action *previous;
+    previous = state->program->direct_mutation_actions[i - 1u];
+    if (!lql_flat_eq_mutation_same_path(previous, action) &&
+        !lql_flat_eq_mutation_path_prefix(previous, action) &&
+        !lql_flat_eq_mutation_path_may_overlap(previous, action))
+      continue;
+    if (previous->kind == LQL_MUTATION_SET &&
+        lql_flat_eq_mutation_same_path(previous, action)) {
+      *out_replaced = 1;
+      if (previous->value_kind != LQL_MUTATION_VALUE_NUMBER) {
+        lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                      "increment target number is invalid");
+        return LQL_STATUS_JSON_ERROR;
+      }
+      return LQL_STATUS_OK;
+    }
+    if (previous->kind == LQL_MUTATION_SET ||
+        previous->kind == LQL_MUTATION_REMOVE) {
+      *out_replaced = 1;
+      return LQL_STATUS_OK;
+    }
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status lql_flat_eq_mutation_validate_increment_number(
+    lql_flat_eq_state *state, const lql_json_spool *spool, size_t value_start,
+    size_t value_end, lql_error *error) {
+  char stack_number[128];
+  char *number;
+  double parsed;
+  size_t len;
+  size_t i;
   unsigned char ch;
   lql_status status;
-  if (key_depth >= action->segment_count)
-    return LQL_STATUS_INVALID_ARGUMENT;
+  if (state == NULL || spool == NULL || value_end <= value_start) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "increment target number is invalid");
+    return LQL_STATUS_JSON_ERROR;
+  }
   status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
   if (status != LQL_STATUS_OK)
     return status;
-  if (ch != (unsigned char)'{') {
-    return lql_json_spool_write_slice(spool, value_start,
-                                      value_end - value_start, state->writer,
-                                      state->writer_user, error);
+  if (ch != (unsigned char)'-' &&
+      (ch < (unsigned char)'0' || ch > (unsigned char)'9')) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "increment target number is invalid");
+    return LQL_STATUS_JSON_ERROR;
   }
-  status = lql_flat_eq_write(state, "{", 1u, error);
-  if (status != LQL_STATUS_OK)
-    return status;
+  len = value_end - value_start;
+  number = len < sizeof(stack_number) ? stack_number : NULL;
+  if (number == NULL) {
+    number = (char *)state->program->allocator->alloc(state->program->allocator,
+                                                      len + 1u);
+    if (number == NULL) {
+      lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
+      return LQL_STATUS_NO_MEMORY;
+    }
+  }
+  for (i = 0u; i < len; ++i) {
+    status = lql_flat_eq_spool_byte(spool, value_start + i, &ch, error);
+    if (status != LQL_STATUS_OK) {
+      if (number != stack_number)
+        state->program->allocator->destroy(state->program->allocator, number);
+      return status;
+    }
+    number[i] = (char)ch;
+  }
+  number[len] = '\0';
+  if (!lql_number_parse_json(number, len, &parsed)) {
+    if (number != stack_number)
+      state->program->allocator->destroy(state->program->allocator, number);
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "increment target number is invalid");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (number != stack_number)
+    state->program->allocator->destroy(state->program->allocator, number);
+  return LQL_STATUS_OK;
+}
+
+static lql_status lql_flat_eq_mutation_validate_increment_object(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t depth, lql_error *error) {
+  size_t pos;
+  unsigned char ch;
+  lql_status status;
+  const char *segment;
+  int terminal_repeated_ellipsis;
+  segment = action->segments[depth];
+  terminal_repeated_ellipsis =
+      lql_flat_eq_mutation_terminal_repeated_ellipsis(action, depth);
   pos = value_start + 1u;
-  first = 1;
   status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
   if (status != LQL_STATUS_OK)
     return status;
@@ -2099,11 +2412,6 @@ static lql_status lql_flat_eq_mutation_set_existing_key(
     size_t child_value_end;
     int same_key;
     key_start = pos;
-    status =
-        lql_flat_eq_key_equals(spool, key_start, value_end,
-                               action->segments[key_depth], &same_key, error);
-    if (status != LQL_STATUS_OK)
-      return status;
     key_end = pos;
     status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
     if (status != LQL_STATUS_OK)
@@ -2117,24 +2425,45 @@ static lql_status lql_flat_eq_mutation_set_existing_key(
     status = lql_flat_eq_skip_value(spool, &child_value_end, value_end, error);
     if (status != LQL_STATUS_OK)
       return status;
-    if (!first &&
-        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
-      return status;
-    status =
-        lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
-                                   state->writer, state->writer_user, error);
-    if (status == LQL_STATUS_OK) {
+    if (strcmp(segment, "...") == 0 && depth + 1u < action->segment_count &&
+        !terminal_repeated_ellipsis) {
+      status = lql_flat_eq_mutation_object_key_matches_segment(
+          spool, key_start, value_end, action->segments[depth + 1u], &same_key,
+          error);
+      if (status != LQL_STATUS_OK)
+        return status;
       if (same_key) {
-        status = lql_flat_eq_mutation_value(state, action, error);
-      } else {
-        status = lql_json_spool_write_slice(
-            spool, key_end + 1u, child_value_end - key_end - 1u, state->writer,
-            state->writer_user, error);
+        if (depth + 2u == action->segment_count)
+          status = lql_flat_eq_mutation_validate_increment_number(
+              state, spool, key_end + 1u, child_value_end, error);
+        else
+          status = lql_flat_eq_mutation_validate_increment_path(
+              state, action, spool, key_end + 1u, child_value_end, depth + 2u,
+              error);
+        if (status != LQL_STATUS_OK)
+          return status;
+      }
+      status = lql_flat_eq_mutation_validate_increment_path(
+          state, action, spool, key_end + 1u, child_value_end, depth, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    } else {
+      status = lql_flat_eq_mutation_object_key_matches_segment(
+          spool, key_start, value_end, segment, &same_key, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (same_key) {
+        if (depth + 1u == action->segment_count || terminal_repeated_ellipsis)
+          status = lql_flat_eq_mutation_validate_increment_number(
+              state, spool, key_end + 1u, child_value_end, error);
+        else
+          status = lql_flat_eq_mutation_validate_increment_path(
+              state, action, spool, key_end + 1u, child_value_end, depth + 1u,
+              error);
+        if (status != LQL_STATUS_OK)
+          return status;
       }
     }
-    if (status != LQL_STATUS_OK)
-      return status;
-    first = 0;
     pos = child_value_end;
     status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
     if (status != LQL_STATUS_OK)
@@ -2146,8 +2475,147 @@ static lql_status lql_flat_eq_mutation_set_existing_key(
         return status;
     }
   }
-  return lql_flat_eq_write(state, "}", 1u, error);
+  return LQL_STATUS_OK;
 }
+
+static lql_status lql_flat_eq_mutation_validate_increment_array(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t depth, lql_error *error) {
+  size_t pos;
+  size_t index;
+  unsigned char ch;
+  lql_status status;
+  const char *segment;
+  int all_indexes;
+  int terminal_repeated_ellipsis;
+  size_t target_index;
+  segment = action->segments[depth];
+  terminal_repeated_ellipsis =
+      lql_flat_eq_mutation_terminal_repeated_ellipsis(action, depth);
+  target_index = 0u;
+  all_indexes = lql_flat_eq_mutation_segment_matches_any_array_index(segment);
+  pos = value_start + 1u;
+  index = 0u;
+  status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  while (pos + 1u < value_end && ch != (unsigned char)']') {
+    size_t element_start;
+    size_t element_end;
+    int selected;
+    element_start = pos;
+    element_end = pos;
+    status = lql_flat_eq_skip_value(spool, &element_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (strcmp(segment, "...") == 0 && depth + 1u < action->segment_count &&
+        !terminal_repeated_ellipsis) {
+      selected = lql_flat_eq_mutation_segment_matches_any_array_index(
+                     action->segments[depth + 1u]) ||
+                 (lql_flat_eq_projection_segment_index(
+                      action->segments[depth + 1u], &target_index) &&
+                  target_index == index);
+      if (selected) {
+        if (depth + 2u == action->segment_count)
+          status = lql_flat_eq_mutation_validate_increment_number(
+              state, spool, element_start, element_end, error);
+        else
+          status = lql_flat_eq_mutation_validate_increment_path(
+              state, action, spool, element_start, element_end, depth + 2u,
+              error);
+        if (status != LQL_STATUS_OK)
+          return status;
+      }
+      status = lql_flat_eq_mutation_validate_increment_path(
+          state, action, spool, element_start, element_end, depth, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    } else if (all_indexes) {
+      if (depth + 1u == action->segment_count || terminal_repeated_ellipsis)
+        status = lql_flat_eq_mutation_validate_increment_number(
+            state, spool, element_start, element_end, error);
+      else
+        status = lql_flat_eq_mutation_validate_increment_path(
+            state, action, spool, element_start, element_end, depth + 1u,
+            error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
+    pos = element_end;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch == (unsigned char)',') {
+      ++pos;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
+    ++index;
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status lql_flat_eq_mutation_validate_increment_path(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t depth, lql_error *error) {
+  unsigned char ch;
+  lql_status status;
+  if (action == NULL || action->kind != LQL_MUTATION_INCREMENT ||
+      depth >= action->segment_count)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  if (ch == (unsigned char)'{')
+    return lql_flat_eq_mutation_validate_increment_object(
+        state, action, spool, value_start, value_end, depth, error);
+  if (ch == (unsigned char)'[')
+    return lql_flat_eq_mutation_validate_increment_array(
+        state, action, spool, value_start, value_end, depth, error);
+  return LQL_STATUS_OK;
+}
+
+static lql_status lql_flat_eq_mutation_validate_increment_targets(
+    lql_flat_eq_state *state, const lql_json_spool *spool, lql_error *error) {
+  size_t i;
+  lql_status status;
+  if (state == NULL || state->program == NULL || spool == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  for (i = 0u; i < state->program->direct_mutation_action_count; ++i) {
+    const lql_mutation_action *action;
+    int replaced;
+    action = state->program->direct_mutation_actions[i];
+    if (action->kind != LQL_MUTATION_INCREMENT)
+      continue;
+    status = lql_flat_eq_mutation_increment_replaced_before(state, i, &replaced,
+                                                            error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (replaced)
+      continue;
+    status = lql_flat_eq_mutation_validate_increment_path(
+        state, action, spool, 0u, lql_json_spool_size(spool), 0u, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+  }
+  return LQL_STATUS_OK;
+}
+
+static lql_status lql_flat_eq_mutation_set_existing_path(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t depth, lql_error *error);
+static lql_status lql_flat_eq_mutation_increment_existing_path(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t depth, lql_error *error);
+static lql_status lql_flat_eq_mutation_nested_remove(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t depth, lql_error *error);
 
 static lql_status lql_flat_eq_mutation_set_recursive_key(
     lql_flat_eq_state *state, const lql_mutation_action *action,
@@ -2155,16 +2623,39 @@ static lql_status lql_flat_eq_mutation_set_recursive_key(
     size_t key_depth, lql_error *error) {
   size_t pos;
   int first;
+  int terminal_repeated_ellipsis;
   unsigned char ch;
   lql_status status;
+  key_depth = lql_flat_eq_mutation_collapse_ellipsis(action, key_depth);
+  terminal_repeated_ellipsis =
+      lql_flat_eq_mutation_terminal_repeated_ellipsis(action, key_depth);
+  if (key_depth >= action->segment_count)
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
   status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
   if (status != LQL_STATUS_OK)
     return status;
+  if ((key_depth + 1u == action->segment_count || terminal_repeated_ellipsis) &&
+      lql_flat_eq_mutation_segment_matches_any_array_index(
+          action->segments[key_depth])) {
+    return lql_flat_eq_mutation_value(state, action, error);
+  }
   if (ch == (unsigned char)'[') {
+    size_t index;
+    size_t target_index;
+    int all_indexes;
+    int has_target_index;
+    all_indexes = lql_flat_eq_mutation_segment_matches_any_array_index(
+        action->segments[key_depth]);
+    target_index = 0u;
+    has_target_index = lql_flat_eq_projection_segment_index(
+        action->segments[key_depth], &target_index);
     status = lql_flat_eq_write(state, "[", 1u, error);
     if (status != LQL_STATUS_OK)
       return status;
     pos = value_start + 1u;
+    index = 0u;
     first = 1;
     status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
     if (status != LQL_STATUS_OK)
@@ -2172,6 +2663,7 @@ static lql_status lql_flat_eq_mutation_set_recursive_key(
     while (pos + 1u < value_end && ch != (unsigned char)']') {
       size_t element_start;
       size_t element_end;
+      int selected;
       element_start = pos;
       element_end = pos;
       status = lql_flat_eq_skip_value(spool, &element_end, value_end, error);
@@ -2180,8 +2672,24 @@ static lql_status lql_flat_eq_mutation_set_recursive_key(
       if (!first &&
           (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
         return status;
-      status = lql_flat_eq_mutation_set_recursive_key(
-          state, action, spool, element_start, element_end, key_depth, error);
+      selected = all_indexes || (has_target_index && index == target_index);
+      if (selected && (key_depth + 1u == action->segment_count ||
+                       terminal_repeated_ellipsis)) {
+        status = lql_flat_eq_mutation_value(state, action, error);
+      } else if (selected) {
+        if (all_indexes) {
+          status = lql_flat_eq_mutation_set_recursive_key(
+              state, action, spool, element_start, element_end, key_depth + 1u,
+              error);
+        } else {
+          status = lql_flat_eq_mutation_set_existing_path(
+              state, action, spool, element_start, element_end, key_depth + 1u,
+              error);
+        }
+      } else {
+        status = lql_flat_eq_mutation_set_recursive_key(
+            state, action, spool, element_start, element_end, key_depth, error);
+      }
       if (status != LQL_STATUS_OK)
         return status;
       first = 0;
@@ -2195,10 +2703,17 @@ static lql_status lql_flat_eq_mutation_set_recursive_key(
         if (status != LQL_STATUS_OK)
           return status;
       }
+      ++index;
     }
     return lql_flat_eq_write(state, "]", 1u, error);
   }
   if (ch != (unsigned char)'{') {
+    if ((key_depth + 1u == action->segment_count ||
+         terminal_repeated_ellipsis) &&
+        lql_flat_eq_mutation_segment_matches_any_array_index(
+            action->segments[key_depth])) {
+      return lql_flat_eq_mutation_value(state, action, error);
+    }
     return lql_json_spool_write_slice(spool, value_start,
                                       value_end - value_start, state->writer,
                                       state->writer_user, error);
@@ -2217,11 +2732,18 @@ static lql_status lql_flat_eq_mutation_set_recursive_key(
     size_t child_value_end;
     int same_key;
     key_start = pos;
-    status =
-        lql_flat_eq_key_equals(spool, key_start, value_end,
-                               action->segments[key_depth], &same_key, error);
-    if (status != LQL_STATUS_OK)
-      return status;
+    if (lql_flat_eq_mutation_segment_matches_any_object_key(
+            action->segments[key_depth])) {
+      same_key = 1;
+    } else if (strcmp(action->segments[key_depth], "[]") == 0) {
+      same_key = 0;
+    } else {
+      status =
+          lql_flat_eq_key_equals(spool, key_start, value_end,
+                                 action->segments[key_depth], &same_key, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
     key_end = pos;
     status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
     if (status != LQL_STATUS_OK)
@@ -2242,8 +2764,19 @@ static lql_status lql_flat_eq_mutation_set_recursive_key(
         lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
                                    state->writer, state->writer_user, error);
     if (status == LQL_STATUS_OK) {
-      if (same_key) {
+      if (same_key && (key_depth + 1u == action->segment_count ||
+                       terminal_repeated_ellipsis)) {
         status = lql_flat_eq_mutation_value(state, action, error);
+      } else if (same_key) {
+        if (strcmp(action->segments[key_depth], "...") == 0) {
+          status = lql_flat_eq_mutation_set_recursive_key(
+              state, action, spool, key_end + 1u, child_value_end,
+              key_depth + 1u, error);
+        } else {
+          status = lql_flat_eq_mutation_set_existing_path(
+              state, action, spool, key_end + 1u, child_value_end,
+              key_depth + 1u, error);
+        }
       } else {
         status = lql_flat_eq_mutation_set_recursive_key(
             state, action, spool, key_end + 1u, child_value_end, key_depth,
@@ -2265,6 +2798,178 @@ static lql_status lql_flat_eq_mutation_set_recursive_key(
     }
   }
   return lql_flat_eq_write(state, "}", 1u, error);
+}
+
+static lql_status lql_flat_eq_mutation_set_existing_path(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t depth, lql_error *error) {
+  size_t target_index;
+  size_t index;
+  size_t pos;
+  int first;
+  int all_indexes;
+  int terminal_repeated_ellipsis;
+  unsigned char ch;
+  lql_status status;
+  if (depth >= action->segment_count)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  depth = lql_flat_eq_mutation_collapse_ellipsis(action, depth);
+  terminal_repeated_ellipsis =
+      lql_flat_eq_mutation_terminal_repeated_ellipsis(action, depth);
+  if (strcmp(action->segments[depth], "...") == 0 &&
+      depth + 1u < action->segment_count && !terminal_repeated_ellipsis) {
+    return lql_flat_eq_mutation_set_recursive_key(
+        state, action, spool, value_start, value_end, depth + 1u, error);
+  }
+  status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  if (ch == (unsigned char)'{') {
+    if (strcmp(action->segments[depth], "[]") == 0)
+      return lql_json_spool_write_slice(spool, value_start,
+                                        value_end - value_start, state->writer,
+                                        state->writer_user, error);
+    status = lql_flat_eq_write(state, "{", 1u, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    pos = value_start + 1u;
+    first = 1;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    while (pos + 1u < value_end && ch != (unsigned char)'}') {
+      size_t key_start;
+      size_t key_end;
+      size_t child_value_end;
+      int same_key;
+      key_start = pos;
+      same_key = 0;
+      if (strcmp(action->segments[depth], "*") == 0 ||
+          strcmp(action->segments[depth], "**") == 0 ||
+          strcmp(action->segments[depth], "...") == 0) {
+        same_key = 1;
+      } else {
+        status =
+            lql_flat_eq_key_equals(spool, key_start, value_end,
+                                   action->segments[depth], &same_key, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+      }
+      key_end = pos;
+      status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      status = lql_flat_eq_spool_byte(spool, key_end, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch != (unsigned char)':')
+        return LQL_STATUS_JSON_ERROR;
+      child_value_end = key_end + 1u;
+      status =
+          lql_flat_eq_skip_value(spool, &child_value_end, value_end, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (!first &&
+          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+        return status;
+      status =
+          lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
+                                     state->writer, state->writer_user, error);
+      if (status == LQL_STATUS_OK) {
+        if (same_key && (depth + 1u == action->segment_count ||
+                         terminal_repeated_ellipsis)) {
+          status = lql_flat_eq_mutation_value(state, action, error);
+        } else if (same_key) {
+          status = lql_flat_eq_mutation_set_existing_path(
+              state, action, spool, key_end + 1u, child_value_end, depth + 1u,
+              error);
+        } else {
+          status = lql_json_spool_write_slice(
+              spool, key_end + 1u, child_value_end - key_end - 1u,
+              state->writer, state->writer_user, error);
+        }
+      }
+      if (status != LQL_STATUS_OK)
+        return status;
+      first = 0;
+      pos = child_value_end;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch == (unsigned char)',') {
+        ++pos;
+        status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+      }
+    }
+    return lql_flat_eq_write(state, "}", 1u, error);
+  }
+  if (ch != (unsigned char)'[' || strcmp(action->segments[depth], "*") == 0) {
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
+  }
+  all_indexes = strcmp(action->segments[depth], "[]") == 0 ||
+                strcmp(action->segments[depth], "**") == 0 ||
+                strcmp(action->segments[depth], "...") == 0;
+  target_index = 0u;
+  if (!all_indexes && !lql_flat_eq_projection_segment_index(
+                          action->segments[depth], &target_index)) {
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
+  }
+  status = lql_flat_eq_write(state, "[", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  pos = value_start + 1u;
+  index = 0u;
+  first = 1;
+  status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  while (pos + 1u < value_end && ch != (unsigned char)']') {
+    size_t element_start;
+    size_t element_end;
+    int selected;
+    element_start = pos;
+    element_end = pos;
+    status = lql_flat_eq_skip_value(spool, &element_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    selected = all_indexes || index == target_index;
+    if (!first &&
+        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+      return status;
+    if (selected &&
+        (depth + 1u == action->segment_count || terminal_repeated_ellipsis)) {
+      status = lql_flat_eq_mutation_value(state, action, error);
+    } else if (selected) {
+      status = lql_flat_eq_mutation_set_existing_path(
+          state, action, spool, element_start, element_end, depth + 1u, error);
+    } else {
+      status = lql_json_spool_write_slice(
+          spool, element_start, element_end - element_start, state->writer,
+          state->writer_user, error);
+    }
+    if (status != LQL_STATUS_OK)
+      return status;
+    first = 0;
+    pos = element_end;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch == (unsigned char)',') {
+      ++pos;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
+    ++index;
+  }
+  return lql_flat_eq_write(state, "]", 1u, error);
 }
 
 static lql_status lql_flat_eq_mutation_increment_existing_key(
@@ -2299,9 +3004,9 @@ static lql_status lql_flat_eq_mutation_increment_existing_key(
     size_t child_value_end;
     int same_key;
     key_start = pos;
-    status =
-        lql_flat_eq_key_equals(spool, key_start, value_end,
-                               action->segments[key_depth], &same_key, error);
+    status = lql_flat_eq_mutation_object_key_matches_segment(
+        spool, key_start, value_end, action->segments[key_depth], &same_key,
+        error);
     if (status != LQL_STATUS_OK)
       return status;
     key_end = pos;
@@ -2358,14 +3063,35 @@ static lql_status lql_flat_eq_mutation_increment_recursive_key(
   int first;
   unsigned char ch;
   lql_status status;
+  key_depth = lql_flat_eq_mutation_collapse_ellipsis(action, key_depth);
+  if (key_depth >= action->segment_count)
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
   status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
   if (status != LQL_STATUS_OK)
     return status;
+  if (key_depth + 1u == action->segment_count &&
+      lql_flat_eq_mutation_segment_matches_any_array_index(
+          action->segments[key_depth])) {
+    return lql_flat_eq_mutation_increment(state, action, spool, value_start,
+                                          value_end, 1, error);
+  }
   if (ch == (unsigned char)'[') {
+    size_t index;
+    size_t target_index;
+    int all_indexes;
+    int has_target_index;
+    all_indexes = lql_flat_eq_mutation_segment_matches_any_array_index(
+        action->segments[key_depth]);
+    target_index = 0u;
+    has_target_index = lql_flat_eq_projection_segment_index(
+        action->segments[key_depth], &target_index);
     status = lql_flat_eq_write(state, "[", 1u, error);
     if (status != LQL_STATUS_OK)
       return status;
     pos = value_start + 1u;
+    index = 0u;
     first = 1;
     status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
     if (status != LQL_STATUS_OK)
@@ -2373,6 +3099,7 @@ static lql_status lql_flat_eq_mutation_increment_recursive_key(
     while (pos + 1u < value_end && ch != (unsigned char)']') {
       size_t element_start;
       size_t element_end;
+      int selected;
       element_start = pos;
       element_end = pos;
       status = lql_flat_eq_skip_value(spool, &element_end, value_end, error);
@@ -2381,8 +3108,24 @@ static lql_status lql_flat_eq_mutation_increment_recursive_key(
       if (!first &&
           (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
         return status;
-      status = lql_flat_eq_mutation_increment_recursive_key(
-          state, action, spool, element_start, element_end, key_depth, error);
+      selected = all_indexes || (has_target_index && index == target_index);
+      if (selected && key_depth + 1u == action->segment_count) {
+        status = lql_flat_eq_mutation_increment(
+            state, action, spool, element_start, element_end, 1, error);
+      } else if (selected) {
+        if (all_indexes) {
+          status = lql_flat_eq_mutation_increment_recursive_key(
+              state, action, spool, element_start, element_end, key_depth + 1u,
+              error);
+        } else {
+          status = lql_flat_eq_mutation_increment_existing_path(
+              state, action, spool, element_start, element_end, key_depth + 1u,
+              error);
+        }
+      } else {
+        status = lql_flat_eq_mutation_increment_recursive_key(
+            state, action, spool, element_start, element_end, key_depth, error);
+      }
       if (status != LQL_STATUS_OK)
         return status;
       first = 0;
@@ -2396,10 +3139,17 @@ static lql_status lql_flat_eq_mutation_increment_recursive_key(
         if (status != LQL_STATUS_OK)
           return status;
       }
+      ++index;
     }
     return lql_flat_eq_write(state, "]", 1u, error);
   }
   if (ch != (unsigned char)'{') {
+    if (key_depth + 1u == action->segment_count &&
+        lql_flat_eq_mutation_segment_matches_any_array_index(
+            action->segments[key_depth])) {
+      return lql_flat_eq_mutation_increment(state, action, spool, value_start,
+                                            value_end, 1, error);
+    }
     return lql_json_spool_write_slice(spool, value_start,
                                       value_end - value_start, state->writer,
                                       state->writer_user, error);
@@ -2418,11 +3168,18 @@ static lql_status lql_flat_eq_mutation_increment_recursive_key(
     size_t child_value_end;
     int same_key;
     key_start = pos;
-    status =
-        lql_flat_eq_key_equals(spool, key_start, value_end,
-                               action->segments[key_depth], &same_key, error);
-    if (status != LQL_STATUS_OK)
-      return status;
+    if (lql_flat_eq_mutation_segment_matches_any_object_key(
+            action->segments[key_depth])) {
+      same_key = 1;
+    } else if (strcmp(action->segments[key_depth], "[]") == 0) {
+      same_key = 0;
+    } else {
+      status =
+          lql_flat_eq_key_equals(spool, key_start, value_end,
+                                 action->segments[key_depth], &same_key, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
     key_end = pos;
     status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
     if (status != LQL_STATUS_OK)
@@ -2443,9 +3200,20 @@ static lql_status lql_flat_eq_mutation_increment_recursive_key(
         lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
                                    state->writer, state->writer_user, error);
     if (status == LQL_STATUS_OK) {
-      if (same_key) {
+      if (same_key && key_depth + 1u == action->segment_count) {
         status = lql_flat_eq_mutation_increment(
             state, action, spool, key_end + 1u, child_value_end, 1, error);
+      } else if (same_key) {
+        if (lql_flat_eq_mutation_segment_matches_any_object_key(
+                action->segments[key_depth])) {
+          status = lql_flat_eq_mutation_increment_recursive_key(
+              state, action, spool, key_end + 1u, child_value_end,
+              key_depth + 1u, error);
+        } else {
+          status = lql_flat_eq_mutation_increment_existing_path(
+              state, action, spool, key_end + 1u, child_value_end,
+              key_depth + 1u, error);
+        }
       } else {
         status = lql_flat_eq_mutation_increment_recursive_key(
             state, action, spool, key_end + 1u, child_value_end, key_depth,
@@ -2482,6 +3250,7 @@ static lql_status lql_flat_eq_mutation_nested_set(
       depth >= action->segment_count || spool == NULL ||
       value_start >= value_end)
     return LQL_STATUS_INVALID_ARGUMENT;
+  depth = lql_flat_eq_mutation_collapse_ellipsis(action, depth);
   status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
   if (status != LQL_STATUS_OK)
     return status;
@@ -2492,7 +3261,8 @@ static lql_status lql_flat_eq_mutation_nested_set(
   }
   if (ch == (unsigned char)'[' &&
       (strcmp(action->segments[depth], "[]") == 0 ||
-       strcmp(action->segments[depth], "**") == 0)) {
+       strcmp(action->segments[depth], "**") == 0 ||
+       strcmp(action->segments[depth], "...") == 0)) {
     size_t pos;
     int first;
     status = lql_flat_eq_write(state, "[", 1u, error);
@@ -2514,16 +3284,16 @@ static lql_status lql_flat_eq_mutation_nested_set(
       if (!first &&
           (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
         return status;
+      /*
+       * Once [] selected the parent element, Go lql only mutates compatible
+       * existing descendants. It does not synthesize wildcard-selected parents.
+       */
       if (depth + 1u == action->segment_count) {
         status = lql_flat_eq_mutation_value(state, action, error);
-      } else if (depth + 2u == action->segment_count) {
-        status = lql_flat_eq_mutation_set_existing_key(
+      } else {
+        status = lql_flat_eq_mutation_set_existing_path(
             state, action, spool, element_start, element_end, depth + 1u,
             error);
-      } else {
-        status = lql_json_spool_write_slice(
-            spool, element_start, element_end - element_start, state->writer,
-            state->writer_user, error);
       }
       if (status != LQL_STATUS_OK)
         return status;
@@ -2546,10 +3316,22 @@ static lql_status lql_flat_eq_mutation_nested_set(
                                       value_end - value_start, state->writer,
                                       state->writer_user, error);
   }
-  if (ch != (unsigned char)'{')
+  if (ch != (unsigned char)'{') {
+    if (lql_flat_eq_mutation_suffix_has_wildcard(action, depth)) {
+      return lql_json_spool_write_slice(spool, value_start,
+                                        value_end - value_start, state->writer,
+                                        state->writer_user, error);
+    }
     return lql_flat_eq_mutation_object_chain(state, action, depth, error);
+  }
+  if (strcmp(action->segments[depth], "[]") == 0) {
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
+  }
   if (strcmp(action->segments[depth], "*") == 0 ||
-      strcmp(action->segments[depth], "**") == 0) {
+      strcmp(action->segments[depth], "**") == 0 ||
+      strcmp(action->segments[depth], "...") == 0) {
     status = lql_flat_eq_write(state, "{", 1u, error);
     if (status != LQL_STATUS_OK)
       return status;
@@ -2586,14 +3368,10 @@ static lql_status lql_flat_eq_mutation_nested_set(
       if (status == LQL_STATUS_OK) {
         if (depth + 1u == action->segment_count) {
           status = lql_flat_eq_mutation_value(state, action, error);
-        } else if (depth + 2u == action->segment_count) {
-          status = lql_flat_eq_mutation_set_existing_key(
+        } else {
+          status = lql_flat_eq_mutation_set_existing_path(
               state, action, spool, key_end + 1u, child_value_end, depth + 1u,
               error);
-        } else {
-          status = lql_json_spool_write_slice(
-              spool, key_end + 1u, child_value_end - key_end - 1u,
-              state->writer, state->writer_user, error);
         }
       }
       if (status != LQL_STATUS_OK)
@@ -2681,6 +3459,9 @@ static lql_status lql_flat_eq_mutation_nested_set(
     }
   }
   if (!found) {
+    if (lql_flat_eq_mutation_suffix_has_wildcard(action, depth + 1u)) {
+      return lql_flat_eq_write(state, "}", 1u, error);
+    }
     if (!first &&
         (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
       return status;
@@ -2712,14 +3493,34 @@ static lql_status lql_flat_eq_mutation_remove_recursive_key(
   int first;
   unsigned char ch;
   lql_status status;
+  key_depth = lql_flat_eq_mutation_collapse_ellipsis(action, key_depth);
+  if (key_depth >= action->segment_count)
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
   status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
   if (status != LQL_STATUS_OK)
     return status;
+  if (key_depth + 1u == action->segment_count &&
+      lql_flat_eq_mutation_segment_matches_any_array_index(
+          action->segments[key_depth])) {
+    return lql_flat_eq_write(state, "null", 4u, error);
+  }
   if (ch == (unsigned char)'[') {
+    size_t index;
+    size_t target_index;
+    int all_indexes;
+    int has_target_index;
+    all_indexes = lql_flat_eq_mutation_segment_matches_any_array_index(
+        action->segments[key_depth]);
+    target_index = 0u;
+    has_target_index = lql_flat_eq_projection_segment_index(
+        action->segments[key_depth], &target_index);
     status = lql_flat_eq_write(state, "[", 1u, error);
     if (status != LQL_STATUS_OK)
       return status;
     pos = value_start + 1u;
+    index = 0u;
     first = 1;
     status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
     if (status != LQL_STATUS_OK)
@@ -2727,6 +3528,7 @@ static lql_status lql_flat_eq_mutation_remove_recursive_key(
     while (pos + 1u < value_end && ch != (unsigned char)']') {
       size_t element_start;
       size_t element_end;
+      int selected;
       element_start = pos;
       element_end = pos;
       status = lql_flat_eq_skip_value(spool, &element_end, value_end, error);
@@ -2735,8 +3537,23 @@ static lql_status lql_flat_eq_mutation_remove_recursive_key(
       if (!first &&
           (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
         return status;
-      status = lql_flat_eq_mutation_remove_recursive_key(
-          state, action, spool, element_start, element_end, key_depth, error);
+      selected = all_indexes || (has_target_index && index == target_index);
+      if (selected && key_depth + 1u == action->segment_count) {
+        status = lql_flat_eq_write(state, "null", 4u, error);
+      } else if (selected) {
+        if (all_indexes) {
+          status = lql_flat_eq_mutation_remove_recursive_key(
+              state, action, spool, element_start, element_end, key_depth + 1u,
+              error);
+        } else {
+          status = lql_flat_eq_mutation_nested_remove(
+              state, action, spool, element_start, element_end, key_depth + 1u,
+              error);
+        }
+      } else {
+        status = lql_flat_eq_mutation_remove_recursive_key(
+            state, action, spool, element_start, element_end, key_depth, error);
+      }
       if (status != LQL_STATUS_OK)
         return status;
       first = 0;
@@ -2750,10 +3567,16 @@ static lql_status lql_flat_eq_mutation_remove_recursive_key(
         if (status != LQL_STATUS_OK)
           return status;
       }
+      ++index;
     }
     return lql_flat_eq_write(state, "]", 1u, error);
   }
   if (ch != (unsigned char)'{') {
+    if (key_depth + 1u == action->segment_count &&
+        lql_flat_eq_mutation_segment_matches_any_array_index(
+            action->segments[key_depth])) {
+      return lql_flat_eq_write(state, "null", 4u, error);
+    }
     return lql_json_spool_write_slice(spool, value_start,
                                       value_end - value_start, state->writer,
                                       state->writer_user, error);
@@ -2772,11 +3595,18 @@ static lql_status lql_flat_eq_mutation_remove_recursive_key(
     size_t child_value_end;
     int same_key;
     key_start = pos;
-    status =
-        lql_flat_eq_key_equals(spool, key_start, value_end,
-                               action->segments[key_depth], &same_key, error);
-    if (status != LQL_STATUS_OK)
-      return status;
+    if (lql_flat_eq_mutation_segment_matches_any_object_key(
+            action->segments[key_depth])) {
+      same_key = 1;
+    } else if (strcmp(action->segments[key_depth], "[]") == 0) {
+      same_key = 0;
+    } else {
+      status =
+          lql_flat_eq_key_equals(spool, key_start, value_end,
+                                 action->segments[key_depth], &same_key, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
     key_end = pos;
     status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
     if (status != LQL_STATUS_OK)
@@ -2790,7 +3620,7 @@ static lql_status lql_flat_eq_mutation_remove_recursive_key(
     status = lql_flat_eq_skip_value(spool, &child_value_end, value_end, error);
     if (status != LQL_STATUS_OK)
       return status;
-    if (!same_key) {
+    if (!same_key || key_depth + 1u < action->segment_count) {
       if (!first &&
           (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
         return status;
@@ -2798,9 +3628,22 @@ static lql_status lql_flat_eq_mutation_remove_recursive_key(
           lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
                                      state->writer, state->writer_user, error);
       if (status == LQL_STATUS_OK) {
-        status = lql_flat_eq_mutation_remove_recursive_key(
-            state, action, spool, key_end + 1u, child_value_end, key_depth,
-            error);
+        if (same_key) {
+          if (lql_flat_eq_mutation_segment_matches_any_object_key(
+                  action->segments[key_depth])) {
+            status = lql_flat_eq_mutation_remove_recursive_key(
+                state, action, spool, key_end + 1u, child_value_end,
+                key_depth + 1u, error);
+          } else {
+            status = lql_flat_eq_mutation_nested_remove(
+                state, action, spool, key_end + 1u, child_value_end,
+                key_depth + 1u, error);
+          }
+        } else {
+          status = lql_flat_eq_mutation_remove_recursive_key(
+              state, action, spool, key_end + 1u, child_value_end, key_depth,
+              error);
+        }
       }
       if (status != LQL_STATUS_OK)
         return status;
@@ -2832,7 +3675,8 @@ static lql_status lql_flat_eq_mutation_nested_remove_array(
   unsigned char ch;
   lql_status status;
   all_indexes = strcmp(action->segments[depth], "[]") == 0 ||
-                strcmp(action->segments[depth], "**") == 0;
+                strcmp(action->segments[depth], "**") == 0 ||
+                strcmp(action->segments[depth], "...") == 0;
   target_index = 0u;
   if (!all_indexes && !lql_flat_eq_projection_segment_index(
                           action->segments[depth], &target_index)) {
@@ -2866,6 +3710,12 @@ static lql_status lql_flat_eq_mutation_nested_remove_array(
       status = lql_json_spool_write_slice(
           spool, element_start, element_end - element_start, state->writer,
           state->writer_user, error);
+      wrote_element = 1;
+    } else if (depth + 1u == action->segment_count) {
+      if (!first &&
+          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+        return status;
+      status = lql_flat_eq_write(state, "null", 4u, error);
       wrote_element = 1;
     } else if (depth + 1u < action->segment_count) {
       if (!first &&
@@ -2906,6 +3756,7 @@ static lql_status lql_flat_eq_mutation_nested_remove(
       depth >= action->segment_count || spool == NULL ||
       value_start >= value_end)
     return LQL_STATUS_INVALID_ARGUMENT;
+  depth = lql_flat_eq_mutation_collapse_ellipsis(action, depth);
   status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
   if (status != LQL_STATUS_OK)
     return status;
@@ -2931,7 +3782,8 @@ static lql_status lql_flat_eq_mutation_nested_remove(
   if (status != LQL_STATUS_OK)
     return status;
   if (strcmp(action->segments[depth], "*") == 0 ||
-      strcmp(action->segments[depth], "**") == 0) {
+      strcmp(action->segments[depth], "**") == 0 ||
+      strcmp(action->segments[depth], "...") == 0) {
     if (depth + 1u == action->segment_count) {
       while (pos + 1u < value_end && ch != (unsigned char)'}') {
         size_t child_value_end;
@@ -3072,6 +3924,175 @@ static lql_status lql_flat_eq_mutation_nested_remove(
   return lql_flat_eq_write(state, "}", 1u, error);
 }
 
+static lql_status lql_flat_eq_mutation_increment_existing_path(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *spool, size_t value_start, size_t value_end,
+    size_t depth, lql_error *error) {
+  size_t target_index;
+  size_t index;
+  size_t pos;
+  int first;
+  int all_indexes;
+  unsigned char ch;
+  lql_status status;
+  if (depth >= action->segment_count)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  depth = lql_flat_eq_mutation_collapse_ellipsis(action, depth);
+  if (strcmp(action->segments[depth], "...") == 0 &&
+      depth + 1u < action->segment_count) {
+    return lql_flat_eq_mutation_increment_recursive_key(
+        state, action, spool, value_start, value_end, depth + 1u, error);
+  }
+  status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  if (ch == (unsigned char)'{') {
+    if (strcmp(action->segments[depth], "[]") == 0)
+      return lql_json_spool_write_slice(spool, value_start,
+                                        value_end - value_start, state->writer,
+                                        state->writer_user, error);
+    status = lql_flat_eq_write(state, "{", 1u, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    pos = value_start + 1u;
+    first = 1;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    while (pos + 1u < value_end && ch != (unsigned char)'}') {
+      size_t key_start;
+      size_t key_end;
+      size_t child_value_end;
+      int same_key;
+      key_start = pos;
+      same_key = 0;
+      if (strcmp(action->segments[depth], "*") == 0 ||
+          strcmp(action->segments[depth], "**") == 0 ||
+          strcmp(action->segments[depth], "...") == 0) {
+        same_key = 1;
+      } else {
+        status =
+            lql_flat_eq_key_equals(spool, key_start, value_end,
+                                   action->segments[depth], &same_key, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+      }
+      key_end = pos;
+      status = lql_flat_eq_skip_string(spool, &key_end, value_end, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      status = lql_flat_eq_spool_byte(spool, key_end, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch != (unsigned char)':')
+        return LQL_STATUS_JSON_ERROR;
+      child_value_end = key_end + 1u;
+      status =
+          lql_flat_eq_skip_value(spool, &child_value_end, value_end, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (!first &&
+          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+        return status;
+      status =
+          lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
+                                     state->writer, state->writer_user, error);
+      if (status == LQL_STATUS_OK) {
+        if (same_key && depth + 1u == action->segment_count) {
+          status = lql_flat_eq_mutation_increment(
+              state, action, spool, key_end + 1u, child_value_end, 1, error);
+        } else if (same_key) {
+          status = lql_flat_eq_mutation_increment_existing_path(
+              state, action, spool, key_end + 1u, child_value_end, depth + 1u,
+              error);
+        } else {
+          status = lql_json_spool_write_slice(
+              spool, key_end + 1u, child_value_end - key_end - 1u,
+              state->writer, state->writer_user, error);
+        }
+      }
+      if (status != LQL_STATUS_OK)
+        return status;
+      first = 0;
+      pos = child_value_end;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch == (unsigned char)',') {
+        ++pos;
+        status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+      }
+    }
+    return lql_flat_eq_write(state, "}", 1u, error);
+  }
+  if (ch != (unsigned char)'[' || strcmp(action->segments[depth], "*") == 0) {
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
+  }
+  all_indexes = strcmp(action->segments[depth], "[]") == 0 ||
+                strcmp(action->segments[depth], "**") == 0 ||
+                strcmp(action->segments[depth], "...") == 0;
+  target_index = 0u;
+  if (!all_indexes && !lql_flat_eq_projection_segment_index(
+                          action->segments[depth], &target_index)) {
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
+  }
+  status = lql_flat_eq_write(state, "[", 1u, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  pos = value_start + 1u;
+  index = 0u;
+  first = 1;
+  status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  while (pos + 1u < value_end && ch != (unsigned char)']') {
+    size_t element_start;
+    size_t element_end;
+    int selected;
+    element_start = pos;
+    element_end = pos;
+    status = lql_flat_eq_skip_value(spool, &element_end, value_end, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (!first &&
+        (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
+      return status;
+    selected = all_indexes || index == target_index;
+    if (selected && depth + 1u == action->segment_count) {
+      status = lql_flat_eq_mutation_increment(
+          state, action, spool, element_start, element_end, 1, error);
+    } else if (selected) {
+      status = lql_flat_eq_mutation_increment_existing_path(
+          state, action, spool, element_start, element_end, depth + 1u, error);
+    } else {
+      status = lql_json_spool_write_slice(
+          spool, element_start, element_end - element_start, state->writer,
+          state->writer_user, error);
+    }
+    if (status != LQL_STATUS_OK)
+      return status;
+    first = 0;
+    pos = element_end;
+    status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (ch == (unsigned char)',') {
+      ++pos;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
+    ++index;
+  }
+  return lql_flat_eq_write(state, "]", 1u, error);
+}
+
 static lql_status lql_flat_eq_mutation_nested_increment_array(
     lql_flat_eq_state *state, const lql_mutation_action *action,
     const lql_json_spool *spool, size_t value_start, size_t value_end,
@@ -3084,12 +4105,16 @@ static lql_status lql_flat_eq_mutation_nested_increment(
   size_t pos;
   int first;
   int found;
+  int terminal_repeated_ellipsis;
   unsigned char ch;
   lql_status status;
   if (action == NULL || action->kind != LQL_MUTATION_INCREMENT ||
       depth >= action->segment_count || spool == NULL ||
       value_start >= value_end)
     return LQL_STATUS_INVALID_ARGUMENT;
+  depth = lql_flat_eq_mutation_collapse_ellipsis(action, depth);
+  terminal_repeated_ellipsis =
+      lql_flat_eq_mutation_terminal_repeated_ellipsis(action, depth);
   status = lql_flat_eq_spool_byte(spool, value_start, &ch, error);
   if (status != LQL_STATUS_OK)
     return status;
@@ -3100,17 +4125,29 @@ static lql_status lql_flat_eq_mutation_nested_increment(
    * literal "*" or "[]" object keys.
    */
   if (strcmp(action->segments[depth], "...") == 0 &&
-      depth + 1u < action->segment_count) {
+      depth + 1u < action->segment_count && !terminal_repeated_ellipsis) {
     return lql_flat_eq_mutation_increment_recursive_key(
         state, action, spool, value_start, value_end, depth + 1u, error);
   }
   if (ch == (unsigned char)'[')
     return lql_flat_eq_mutation_nested_increment_array(
         state, action, spool, value_start, value_end, depth, error);
-  if (ch != (unsigned char)'{')
+  if (ch != (unsigned char)'{') {
+    if (lql_flat_eq_mutation_suffix_has_wildcard(action, depth)) {
+      return lql_json_spool_write_slice(spool, value_start,
+                                        value_end - value_start, state->writer,
+                                        state->writer_user, error);
+    }
     return lql_flat_eq_mutation_object_chain(state, action, depth, error);
+  }
+  if (strcmp(action->segments[depth], "[]") == 0) {
+    return lql_json_spool_write_slice(spool, value_start,
+                                      value_end - value_start, state->writer,
+                                      state->writer_user, error);
+  }
   if (strcmp(action->segments[depth], "*") == 0 ||
-      strcmp(action->segments[depth], "**") == 0) {
+      strcmp(action->segments[depth], "**") == 0 ||
+      strcmp(action->segments[depth], "...") == 0) {
     status = lql_flat_eq_write(state, "{", 1u, error);
     if (status != LQL_STATUS_OK)
       return status;
@@ -3145,7 +4182,7 @@ static lql_status lql_flat_eq_mutation_nested_increment(
           lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
                                      state->writer, state->writer_user, error);
       if (status == LQL_STATUS_OK) {
-        if (depth + 1u == action->segment_count) {
+        if (depth + 1u == action->segment_count || terminal_repeated_ellipsis) {
           status = lql_flat_eq_mutation_increment(
               state, action, spool, key_end + 1u, child_value_end, 1, error);
         } else if (depth + 2u == action->segment_count) {
@@ -3244,6 +4281,14 @@ static lql_status lql_flat_eq_mutation_nested_increment(
     }
   }
   if (!found) {
+    if (lql_flat_eq_mutation_suffix_has_wildcard(action, depth + 1u)) {
+      /*
+       * Missing ordinary parents may be synthesized for increments, but a
+       * wildcard in the remaining suffix means the request can only visit an
+       * existing compatible child. Preserve the object unchanged.
+       */
+      return lql_flat_eq_write(state, "}", 1u, error);
+    }
     if (!first &&
         (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
       return status;
@@ -3269,10 +4314,21 @@ static lql_status lql_flat_eq_mutation_nested_increment_array(
     size_t depth, lql_error *error) {
   size_t pos;
   int first;
+  int all_indexes;
+  int terminal_repeated_ellipsis;
   unsigned char ch;
   lql_status status;
-  if (strcmp(action->segments[depth], "[]") != 0 &&
-      strcmp(action->segments[depth], "**") != 0) {
+  terminal_repeated_ellipsis =
+      lql_flat_eq_mutation_terminal_repeated_ellipsis(action, depth);
+  all_indexes = strcmp(action->segments[depth], "[]") == 0 ||
+                strcmp(action->segments[depth], "**") == 0 ||
+                strcmp(action->segments[depth], "...") == 0;
+  if (!all_indexes) {
+    if (lql_flat_eq_mutation_suffix_has_wildcard(action, depth)) {
+      return lql_json_spool_write_slice(spool, value_start,
+                                        value_end - value_start, state->writer,
+                                        state->writer_user, error);
+    }
     if (strcmp(action->segments[depth], "*") != 0)
       return lql_flat_eq_mutation_object_chain(state, action, depth, error);
     return lql_json_spool_write_slice(spool, value_start,
@@ -3298,11 +4354,19 @@ static lql_status lql_flat_eq_mutation_nested_increment_array(
     if (!first &&
         (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
       return status;
-    if (depth + 1u == action->segment_count) {
+    if (depth + 1u == action->segment_count || terminal_repeated_ellipsis) {
       status = lql_flat_eq_mutation_increment(
           state, action, spool, element_start, element_end, 1, error);
-    } else {
+    } else if (!all_indexes) {
       status = lql_flat_eq_mutation_nested_increment(
+          state, action, spool, element_start, element_end, depth + 1u, error);
+    } else {
+      /*
+       * Wildcards only visit compatible existing children. Preserve scalars and
+       * incompatible containers; do not synthesize object parents under
+       * wildcard-selected elements.
+       */
+      status = lql_flat_eq_mutation_increment_existing_path(
           state, action, spool, element_start, element_end, depth + 1u, error);
     }
     if (status != LQL_STATUS_OK)
@@ -3322,28 +4386,47 @@ static lql_status lql_flat_eq_mutation_nested_increment_array(
   return lql_flat_eq_write(state, "]", 1u, error);
 }
 
-static lql_status
-lql_flat_eq_mutation_key_value(lql_flat_eq_state *state,
-                               const lql_mutation_action *action,
-                               int include_key, lql_error *error) {
-  lql_status status;
-  if (include_key) {
-    status = lql_flat_eq_projection_key(state, action->segments[0], error);
-    if (status != LQL_STATUS_OK)
-      return status;
+static int
+lql_flat_eq_mutation_nonrecursive_wildcard(const lql_mutation_action *action);
+static int
+lql_flat_eq_mutation_top_matches_object_key(const lql_mutation_action *action);
+
+static int
+lql_flat_eq_mutation_exact_top_key(const lql_mutation_action *action) {
+  return action != NULL && action->segment_count != 0u &&
+         action->segments[0] != NULL &&
+         !lql_flat_eq_mutation_segment_matches_any_object_key(
+             action->segments[0]);
+}
+
+static int lql_flat_eq_mutation_program_has_top_object_wildcard(
+    const lql_flat_eq_program *program) {
+  size_t i;
+  if (program == NULL)
+    return 0;
+  for (i = 0u; i < program->direct_mutation_action_count; ++i) {
+    if (lql_flat_eq_mutation_top_matches_object_key(
+            program->direct_mutation_actions[i])) {
+      return 1;
+    }
   }
-  if ((action->kind == LQL_MUTATION_SET ||
-       action->kind == LQL_MUTATION_INCREMENT) &&
-      action->segment_count > 1u)
-    return lql_flat_eq_mutation_object_chain(state, action, 1u, error);
-  if (action->kind == LQL_MUTATION_INCREMENT)
-    return lql_flat_eq_mutation_increment(state, action, NULL, 0u, 0u, 0,
-                                          error);
-  return lql_flat_eq_mutation_value(state, action, error);
+  return 0;
 }
 
 static int
-lql_flat_eq_mutation_nonrecursive_wildcard(const lql_mutation_action *action);
+lql_flat_eq_mutation_top_matches_object_key(const lql_mutation_action *action) {
+  if (action == NULL || action->segment_count == 0u ||
+      action->segments[0] == NULL) {
+    return 0;
+  }
+  /*
+   * Top-level NDJSON records are objects. "*" selects each object member, and
+   * recursive aliases also select existing object members at this boundary.
+   * "[]" is intentionally not included because it is an array wildcard.
+   */
+  return lql_flat_eq_mutation_segment_matches_any_object_key(
+      action->segments[0]);
+}
 
 static lql_status lql_flat_eq_mutation_find_action(
     const lql_flat_eq_program *program, const lql_json_spool *spool,
@@ -3362,10 +4445,14 @@ static lql_status lql_flat_eq_mutation_find_action(
   for (i = 0u; i < program->direct_mutation_action_count; ++i) {
     const lql_mutation_action *action;
     action = program->direct_mutation_actions[i];
-    status = lql_flat_eq_key_equals(spool, key_start, size, action->segments[0],
-                                    &same_key, error);
-    if (status != LQL_STATUS_OK)
-      return status;
+    if (lql_flat_eq_mutation_top_matches_object_key(action)) {
+      same_key = 1;
+    } else {
+      status = lql_flat_eq_key_equals(spool, key_start, size,
+                                      action->segments[0], &same_key, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
     if (same_key) {
       *out_index = i;
       *out_action = action;
@@ -3396,7 +4483,9 @@ lql_flat_eq_mutation_nonrecursive_wildcard(const lql_mutation_action *action) {
     return 0;
   for (i = 0u; i < action->segment_count; ++i) {
     if (strcmp(action->segments[i], "*") == 0 ||
-        strcmp(action->segments[i], "[]") == 0)
+        strcmp(action->segments[i], "[]") == 0 ||
+        strcmp(action->segments[i], "**") == 0 ||
+        strcmp(action->segments[i], "...") == 0)
       return 1;
   }
   return 0;
@@ -3439,13 +4528,15 @@ lql_flat_eq_mutation_group_count(const lql_flat_eq_program *program,
 
 static int lql_flat_eq_mutation_group_seen(const lql_flat_eq_program *program,
                                            const lql_mutation_action *action,
+                                           const unsigned char *found,
                                            size_t before) {
   size_t i;
-  if (program == NULL || action == NULL)
+  if (program == NULL || action == NULL || found == NULL)
     return 0;
   for (i = 0u; i < before; ++i) {
     if (lql_flat_eq_mutation_same_top(program->direct_mutation_actions[i],
-                                      action))
+                                      action) &&
+        found[i] != 0u)
       return 1;
   }
   return 0;
@@ -3468,17 +4559,18 @@ static int lql_flat_eq_mutation_group_has_value_creator(
 }
 
 static int
-lql_flat_eq_mutation_group_all_nested(const lql_flat_eq_program *program,
+lql_flat_eq_mutation_group_is_top_set(const lql_flat_eq_program *program,
                                       const lql_mutation_action *action) {
   size_t i;
-  if (program == NULL || action == NULL)
+  if (program == NULL || action == NULL || action->kind != LQL_MUTATION_SET ||
+      action->segment_count != 1u)
     return 0;
   for (i = 0u; i < program->direct_mutation_action_count; ++i) {
     const lql_mutation_action *candidate;
     candidate = program->direct_mutation_actions[i];
     if (!lql_flat_eq_mutation_same_top(candidate, action))
       continue;
-    if (candidate->segment_count <= 1u)
+    if (candidate->kind != LQL_MUTATION_SET || candidate->segment_count != 1u)
       return 0;
   }
   return 1;
@@ -3504,39 +4596,26 @@ lql_flat_eq_mutation_group_is_top_increment(const lql_flat_eq_program *program,
 }
 
 static int
-lql_flat_eq_mutation_group_is_top_set(const lql_flat_eq_program *program,
-                                      const lql_mutation_action *action) {
+lql_flat_eq_mutation_group_is_exact_nested(const lql_flat_eq_program *program,
+                                           const lql_mutation_action *action) {
   size_t i;
-  if (program == NULL || action == NULL || action->kind != LQL_MUTATION_SET ||
-      action->segment_count != 1u)
+  if (program == NULL || action == NULL ||
+      !lql_flat_eq_mutation_exact_top_key(action) ||
+      action->segment_count <= 1u)
     return 0;
   for (i = 0u; i < program->direct_mutation_action_count; ++i) {
     const lql_mutation_action *candidate;
     candidate = program->direct_mutation_actions[i];
     if (!lql_flat_eq_mutation_same_top(candidate, action))
       continue;
-    if (candidate->kind != LQL_MUTATION_SET || candidate->segment_count != 1u)
+    if (!lql_flat_eq_mutation_exact_top_key(candidate) ||
+        candidate->segment_count <= 1u ||
+        (candidate->kind != LQL_MUTATION_SET &&
+         candidate->kind != LQL_MUTATION_REMOVE &&
+         candidate->kind != LQL_MUTATION_INCREMENT))
       return 0;
   }
   return 1;
-}
-
-static const lql_mutation_action *
-lql_flat_eq_mutation_group_last_set(const lql_flat_eq_program *program,
-                                    const lql_mutation_action *group) {
-  size_t i;
-  const lql_mutation_action *last;
-  if (program == NULL || group == NULL ||
-      !lql_flat_eq_mutation_group_is_top_set(program, group))
-    return NULL;
-  last = NULL;
-  for (i = 0u; i < program->direct_mutation_action_count; ++i) {
-    const lql_mutation_action *candidate;
-    candidate = program->direct_mutation_actions[i];
-    if (lql_flat_eq_mutation_same_top(candidate, group))
-      last = candidate;
-  }
-  return last;
 }
 
 static lql_status
@@ -3545,8 +4624,7 @@ lql_flat_eq_mutation_group_increment_action(const lql_flat_eq_program *program,
                                             lql_mutation_action *out) {
   size_t i;
   double delta;
-  if (program == NULL || group == NULL || out == NULL ||
-      !lql_flat_eq_mutation_group_is_top_increment(program, group))
+  if (program == NULL || group == NULL || out == NULL)
     return LQL_STATUS_INVALID_ARGUMENT;
   *out = *group;
   delta = 0.0;
@@ -3560,26 +4638,113 @@ lql_flat_eq_mutation_group_increment_action(const lql_flat_eq_program *program,
   return LQL_STATUS_OK;
 }
 
-static void lql_flat_eq_mutation_group_mark(const lql_flat_eq_program *program,
-                                            const lql_mutation_action *action,
-                                            unsigned long *found) {
+static const lql_mutation_action *
+lql_flat_eq_mutation_group_last_set(const lql_flat_eq_program *program,
+                                    const lql_mutation_action *group) {
   size_t i;
-  if (program == NULL || action == NULL || found == NULL)
+  const lql_mutation_action *last;
+  if (program == NULL || group == NULL)
+    return NULL;
+  last = NULL;
+  for (i = 0u; i < program->direct_mutation_action_count; ++i) {
+    const lql_mutation_action *candidate;
+    candidate = program->direct_mutation_actions[i];
+    if (lql_flat_eq_mutation_same_top(candidate, group))
+      last = candidate;
+  }
+  return last;
+}
+
+static int lql_flat_eq_mutation_program_needs_atomic_output(
+    const lql_flat_eq_program *program) {
+  size_t i;
+  size_t j;
+  if (program == NULL)
+    return 0;
+  for (i = 0u; i < program->direct_mutation_action_count; ++i) {
+    const lql_mutation_action *creator;
+    creator = program->direct_mutation_actions[i];
+    if (creator == NULL || creator->segment_count <= 1u ||
+        creator->kind == LQL_MUTATION_REMOVE)
+      continue;
+    for (j = i + 1u; j < program->direct_mutation_action_count; ++j) {
+      const lql_mutation_action *increment;
+      increment = program->direct_mutation_actions[j];
+      if (increment != NULL && increment->kind == LQL_MUTATION_INCREMENT &&
+          increment->segment_count == 1u &&
+          lql_flat_eq_mutation_same_top(creator, increment))
+        return 1;
+    }
+  }
+  return 0;
+}
+
+static lql_status lql_flat_eq_mutation_action_matches_spooled_key(
+    const lql_mutation_action *action, const lql_json_spool *spool,
+    size_t key_start, size_t size, int *out_matches, lql_error *error) {
+  lql_status status;
+  if (out_matches != NULL)
+    *out_matches = 0;
+  if (action == NULL || spool == NULL || out_matches == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  if (lql_flat_eq_mutation_top_matches_object_key(action)) {
+    *out_matches = 1;
+    return LQL_STATUS_OK;
+  }
+  status = lql_flat_eq_key_equals(spool, key_start, size, action->segments[0],
+                                  out_matches, error);
+  return status;
+}
+
+static int lql_flat_eq_mutation_action_matches_missing_key(
+    const lql_mutation_action *action, const char *key) {
+  if (action == NULL || key == NULL || action->segment_count == 0u ||
+      action->segments[0] == NULL)
+    return 0;
+  if (lql_flat_eq_mutation_top_matches_object_key(action))
+    return 1;
+  return strcmp(action->segments[0], key) == 0;
+}
+
+static void lql_flat_eq_mutation_key_mark_spooled(
+    const lql_flat_eq_program *program, const lql_json_spool *spool,
+    size_t key_start, size_t size, unsigned char *found, lql_error *error) {
+  size_t i;
+  if (program == NULL || spool == NULL || found == NULL)
     return;
   for (i = 0u; i < program->direct_mutation_action_count; ++i) {
-    if (lql_flat_eq_mutation_same_top(program->direct_mutation_actions[i],
-                                      action))
-      *found |= 1ul << i;
+    int matches;
+    if (lql_flat_eq_mutation_action_matches_spooled_key(
+            program->direct_mutation_actions[i], spool, key_start, size,
+            &matches, error) == LQL_STATUS_OK &&
+        matches) {
+      found[i] = 1u;
+    }
+  }
+}
+
+static void
+lql_flat_eq_mutation_key_mark_missing(const lql_flat_eq_program *program,
+                                      const char *key, unsigned char *found) {
+  size_t i;
+  if (program == NULL || key == NULL || found == NULL)
+    return;
+  for (i = 0u; i < program->direct_mutation_action_count; ++i) {
+    if (lql_flat_eq_mutation_action_matches_missing_key(
+            program->direct_mutation_actions[i], key)) {
+      found[i] = 1u;
+    }
   }
 }
 
 static lql_status lql_flat_eq_mutation_apply_nested_to_spool(
     lql_flat_eq_state *state, const lql_mutation_action *action,
     const lql_json_spool *source, size_t value_start, size_t value_end,
-    lql_json_spool *target, lql_error *error) {
+    int top_wildcard_consumed, lql_json_spool *target, lql_error *error) {
   lql_stream_writer_fn saved_writer;
   void *saved_writer_user;
   lql_status status;
+  int top_wildcard_suffix;
   if (state == NULL || action == NULL || source == NULL || target == NULL)
     return LQL_STATUS_INVALID_ARGUMENT;
   lql_json_spool_reset(target);
@@ -3587,130 +4752,143 @@ static lql_status lql_flat_eq_mutation_apply_nested_to_spool(
   saved_writer_user = state->writer_user;
   state->writer = lql_flat_eq_spool_writer;
   state->writer_user = target;
+  top_wildcard_suffix = top_wildcard_consumed && action->segment_count > 1u &&
+                        strcmp(action->segments[0], "...") != 0 &&
+                        lql_flat_eq_mutation_top_matches_object_key(action);
+  if (top_wildcard_suffix &&
+      !lql_flat_eq_spooled_value_accepts_segment(source, value_start,
+                                                 action->segments[1], error)) {
+    status =
+        lql_json_spool_write_slice(source, value_start, value_end - value_start,
+                                   state->writer, state->writer_user, error);
+    goto done;
+  }
   if (action->kind == LQL_MUTATION_SET) {
-    status = lql_flat_eq_mutation_nested_set(state, action, source, value_start,
-                                             value_end, 1u, error);
+    if (action->segment_count > 1u && strcmp(action->segments[0], "...") == 0) {
+      status = lql_flat_eq_mutation_set_recursive_key(
+          state, action, source, value_start, value_end, 1u, error);
+    } else if (action->segment_count > 1u &&
+               lql_flat_eq_mutation_top_matches_object_key(action)) {
+      if (top_wildcard_consumed) {
+        status = lql_flat_eq_mutation_nested_set(
+            state, action, source, value_start, value_end, 1u, error);
+      } else {
+        status = lql_flat_eq_mutation_set_existing_path(
+            state, action, source, value_start, value_end, 1u, error);
+      }
+    } else {
+      status = lql_flat_eq_mutation_nested_set(
+          state, action, source, value_start, value_end, 1u, error);
+    }
   } else if (action->kind == LQL_MUTATION_REMOVE) {
-    status = lql_flat_eq_mutation_nested_remove(
-        state, action, source, value_start, value_end, 1u, error);
+    if (action->segment_count > 1u && strcmp(action->segments[0], "...") == 0) {
+      status = lql_flat_eq_mutation_remove_recursive_key(
+          state, action, source, value_start, value_end, 1u, error);
+    } else if (action->segment_count > 1u &&
+               lql_flat_eq_mutation_top_matches_object_key(action)) {
+      status = lql_flat_eq_mutation_nested_remove(
+          state, action, source, value_start, value_end, 1u, error);
+    } else {
+      status = lql_flat_eq_mutation_nested_remove(
+          state, action, source, value_start, value_end, 1u, error);
+    }
   } else if (action->kind == LQL_MUTATION_INCREMENT) {
-    status = lql_flat_eq_mutation_nested_increment(
-        state, action, source, value_start, value_end, 1u, error);
+    if (action->segment_count > 1u && strcmp(action->segments[0], "...") == 0) {
+      status = lql_flat_eq_mutation_increment_recursive_key(
+          state, action, source, value_start, value_end, 1u, error);
+    } else if (action->segment_count > 1u &&
+               lql_flat_eq_mutation_top_matches_object_key(action)) {
+      if (top_wildcard_consumed) {
+        status = lql_flat_eq_mutation_nested_increment(
+            state, action, source, value_start, value_end, 1u, error);
+      } else {
+        status = lql_flat_eq_mutation_increment_existing_path(
+            state, action, source, value_start, value_end, 1u, error);
+      }
+    } else {
+      status = lql_flat_eq_mutation_nested_increment(
+          state, action, source, value_start, value_end, 1u, error);
+    }
   } else {
     status = LQL_STATUS_INVALID_ARGUMENT;
   }
+done:
   state->writer = saved_writer;
   state->writer_user = saved_writer_user;
   return status;
 }
 
-static lql_status lql_flat_eq_mutation_emit_existing_group(
-    lql_flat_eq_state *state, const lql_json_spool *spool,
-    const lql_mutation_action *group, size_t value_start, size_t value_end,
-    lql_json_spool *out, int *out_present, lql_error *error) {
-  lql_json_spool first;
-  lql_json_spool second;
-  const lql_json_spool *source;
-  lql_json_spool *target;
-  size_t source_start;
-  size_t source_end;
-  size_t i;
-  int initialized_first;
-  int initialized_second;
-  int present;
+static lql_status lql_flat_eq_mutation_apply_ordered_key_action(
+    lql_flat_eq_state *state, const lql_mutation_action *action,
+    const lql_json_spool *source, size_t source_start, size_t source_end,
+    int present, int allow_create, int top_wildcard_consumed,
+    lql_json_spool *target, int *out_present, lql_error *error) {
+  lql_stream_writer_fn saved_writer;
+  void *saved_writer_user;
   lql_status status;
-  if (out_present != NULL)
-    *out_present = 0;
-  if (out == NULL || out_present == NULL)
+  if (state == NULL || action == NULL || target == NULL || out_present == NULL)
     return LQL_STATUS_INVALID_ARGUMENT;
-  initialized_first = 0;
-  initialized_second = 0;
-  status = lql_json_spool_init_with_allocator(&first, state->program->allocator,
-                                              error);
-  if (status != LQL_STATUS_OK)
-    return status;
-  initialized_first = 1;
-  status = lql_json_spool_init_with_allocator(&second,
-                                              state->program->allocator, error);
-  if (status != LQL_STATUS_OK)
-    goto done;
-  initialized_second = 1;
-  source = spool;
-  source_start = value_start;
-  source_end = value_end;
-  target = &first;
-  present = 1;
-  for (i = 0u; i < state->program->direct_mutation_action_count; ++i) {
-    const lql_mutation_action *action;
-    action = state->program->direct_mutation_actions[i];
-    if (!lql_flat_eq_mutation_same_top(action, group))
-      continue;
-    if (action->segment_count == 1u) {
-      if (action->kind == LQL_MUTATION_REMOVE) {
-        present = 0;
-        continue;
-      }
-      {
-        lql_stream_writer_fn saved_writer;
-        void *saved_writer_user;
-        lql_json_spool_reset(target);
-        saved_writer = state->writer;
-        saved_writer_user = state->writer_user;
-        state->writer = lql_flat_eq_spool_writer;
-        state->writer_user = target;
-        if (action->kind == LQL_MUTATION_SET) {
-          status = lql_flat_eq_mutation_value(state, action, error);
-        } else if (action->kind == LQL_MUTATION_INCREMENT) {
-          status = lql_flat_eq_mutation_increment(
-              state, action, present ? source : NULL,
-              present ? source_start : 0u, present ? source_end : 0u, present,
-              error);
-        } else {
-          status = LQL_STATUS_INVALID_ARGUMENT;
-        }
-        state->writer = saved_writer;
-        state->writer_user = saved_writer_user;
-      }
-    } else {
-      if (!present) {
-        if (action->kind == LQL_MUTATION_REMOVE)
-          continue;
-        lql_json_spool_reset(target);
-        status = lql_json_spool_append(target, "{}", 2u, error);
-        if (status != LQL_STATUS_OK)
-          goto done;
-        source = target;
-        source_start = 0u;
-        source_end = lql_json_spool_size(source);
-        target = target == &first ? &second : &first;
-        present = 1;
-      }
-      status = lql_flat_eq_mutation_apply_nested_to_spool(
-          state, action, source, source_start, source_end, target, error);
-    }
-    if (status != LQL_STATUS_OK)
-      goto done;
-    present = 1;
-    source = target;
-    source_start = 0u;
-    source_end = lql_json_spool_size(source);
-    target = target == &first ? &second : &first;
-  }
-  if (present) {
-    lql_json_spool_reset(out);
-    status = lql_json_spool_write_slice(source, source_start,
-                                        source_end - source_start,
-                                        lql_flat_eq_spool_writer, out, error);
-    if (status != LQL_STATUS_OK)
-      goto done;
-  }
   *out_present = present;
-  status = LQL_STATUS_OK;
-done:
-  if (initialized_second)
-    lql_json_spool_cleanup(&second);
-  if (initialized_first)
-    lql_json_spool_cleanup(&first);
+  if (!present && !allow_create)
+    return LQL_STATUS_OK;
+  if (action->segment_count == 1u) {
+    if (action->kind == LQL_MUTATION_REMOVE) {
+      *out_present = 0;
+      return LQL_STATUS_OK;
+    }
+    lql_json_spool_reset(target);
+    saved_writer = state->writer;
+    saved_writer_user = state->writer_user;
+    state->writer = lql_flat_eq_spool_writer;
+    state->writer_user = target;
+    if (action->kind == LQL_MUTATION_SET) {
+      status = lql_flat_eq_mutation_value(state, action, error);
+    } else if (action->kind == LQL_MUTATION_INCREMENT) {
+      status = lql_flat_eq_mutation_increment(
+          state, action, present ? source : NULL, present ? source_start : 0u,
+          present ? source_end : 0u, present, error);
+    } else {
+      status = LQL_STATUS_INVALID_ARGUMENT;
+    }
+    state->writer = saved_writer;
+    state->writer_user = saved_writer_user;
+  } else {
+    if (!present) {
+      lql_json_spool created;
+      int created_initialized;
+      if (action->kind == LQL_MUTATION_REMOVE)
+        return LQL_STATUS_OK;
+      if (lql_flat_eq_mutation_suffix_has_wildcard(action, 1u))
+        return LQL_STATUS_OK;
+      created_initialized = 0;
+      status = lql_json_spool_init_with_allocator(
+          &created, state->program->allocator, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      created_initialized = 1;
+      status = lql_json_spool_append(&created, "{}", 2u, error);
+      if (status != LQL_STATUS_OK) {
+        lql_json_spool_cleanup(&created);
+        return status;
+      }
+      source = &created;
+      source_start = 0u;
+      source_end = lql_json_spool_size(source);
+      status = lql_flat_eq_mutation_apply_nested_to_spool(
+          state, action, source, source_start, source_end,
+          top_wildcard_consumed, target, error);
+      if (created_initialized)
+        lql_json_spool_cleanup(&created);
+      if (status == LQL_STATUS_OK)
+        *out_present = 1;
+      return status;
+    }
+    status = lql_flat_eq_mutation_apply_nested_to_spool(
+        state, action, source, source_start, source_end, top_wildcard_consumed,
+        target, error);
+  }
+  if (status == LQL_STATUS_OK)
+    *out_present = 1;
   return status;
 }
 
@@ -3728,6 +4906,8 @@ static lql_status lql_flat_eq_mutation_emit_existing_nested_group(
   int initialized_first;
   int initialized_second;
   lql_status status;
+  if (state == NULL || spool == NULL || group == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
   initialized_first = 0;
   initialized_second = 0;
   status = lql_json_spool_init_with_allocator(&first, state->program->allocator,
@@ -3750,7 +4930,7 @@ static lql_status lql_flat_eq_mutation_emit_existing_nested_group(
     if (!lql_flat_eq_mutation_same_top(action, group))
       continue;
     status = lql_flat_eq_mutation_apply_nested_to_spool(
-        state, action, source, source_start, source_end, target, error);
+        state, action, source, source_start, source_end, 0, target, error);
     if (status != LQL_STATUS_OK)
       goto done;
     source = target;
@@ -3768,13 +4948,16 @@ done:
   return status;
 }
 
-static lql_status lql_flat_eq_mutation_emit_missing_group(
-    lql_flat_eq_state *state, const lql_mutation_action *group,
-    lql_json_spool *out, int *out_present, lql_error *error) {
+static lql_status lql_flat_eq_mutation_emit_existing_key_group(
+    lql_flat_eq_state *state, const lql_json_spool *spool, size_t key_start,
+    size_t size, size_t value_start, size_t value_end, lql_json_spool *out,
+    int *out_present, lql_error *error) {
   lql_json_spool first;
   lql_json_spool second;
   const lql_json_spool *source;
   lql_json_spool *target;
+  size_t source_start;
+  size_t source_end;
   size_t i;
   int initialized_first;
   int initialized_second;
@@ -3782,7 +4965,7 @@ static lql_status lql_flat_eq_mutation_emit_missing_group(
   lql_status status;
   if (out_present != NULL)
     *out_present = 0;
-  if (out == NULL || out_present == NULL)
+  if (state == NULL || spool == NULL || out == NULL || out_present == NULL)
     return LQL_STATUS_INVALID_ARGUMENT;
   initialized_first = 0;
   initialized_second = 0;
@@ -3796,63 +4979,218 @@ static lql_status lql_flat_eq_mutation_emit_missing_group(
   if (status != LQL_STATUS_OK)
     goto done;
   initialized_second = 1;
-  status = lql_json_spool_append(&first, "{}", 2u, error);
+  source = spool;
+  source_start = value_start;
+  source_end = value_end;
+  target = &first;
+  present = 1;
+  for (i = 0u; i < state->program->direct_mutation_action_count; ++i) {
+    const lql_mutation_action *action;
+    const lql_mutation_action *recursive_after_action;
+    lql_mutation_action root_action;
+    int apply_recursive_after;
+    int original_top_wildcard;
+    int matches;
+    action = state->program->direct_mutation_actions[i];
+    recursive_after_action = action;
+    apply_recursive_after = 0;
+    original_top_wildcard = strcmp(action->segments[0], "...") != 0 &&
+                            lql_flat_eq_mutation_top_matches_object_key(action);
+    status = lql_flat_eq_mutation_action_matches_spooled_key(
+        action, spool, key_start, size, &matches, error);
+    if (status != LQL_STATUS_OK)
+      goto done;
+    if (!matches)
+      continue;
+    if (action->segment_count > 1u && strcmp(action->segments[0], "...") == 0) {
+      int same_recursive_key;
+      size_t target_depth;
+      target_depth = 1u;
+      while (target_depth < action->segment_count &&
+             strcmp(action->segments[target_depth], "...") == 0) {
+        ++target_depth;
+      }
+      if (target_depth >= action->segment_count) {
+        root_action = *action;
+        root_action.segment_count = 1u;
+        action = &root_action;
+        goto apply_action;
+      }
+      status = lql_flat_eq_mutation_object_key_matches_segment(
+          spool, key_start, size, action->segments[target_depth],
+          &same_recursive_key, error);
+      if (status != LQL_STATUS_OK)
+        goto done;
+      if (same_recursive_key) {
+        root_action = *action;
+        if (target_depth + 1u == action->segment_count) {
+          root_action.segment_count = 1u;
+        } else {
+          if (!lql_flat_eq_spooled_value_is_container(source, source_start,
+                                                      error)) {
+            continue;
+          }
+          root_action.segments = action->segments + target_depth;
+          root_action.segment_count = action->segment_count - target_depth;
+          apply_recursive_after = 1;
+        }
+        action = &root_action;
+      }
+    }
+  apply_action:
+    status = lql_flat_eq_mutation_apply_ordered_key_action(
+        state, action, source, source_start, source_end, present,
+        present || !original_top_wildcard, original_top_wildcard, target,
+        &present, error);
+    if (status != LQL_STATUS_OK)
+      goto done;
+    if (present) {
+      source = target;
+      source_start = 0u;
+      source_end = lql_json_spool_size(source);
+      target = target == &first ? &second : &first;
+    }
+    if (apply_recursive_after && present) {
+      status = lql_flat_eq_mutation_apply_ordered_key_action(
+          state, recursive_after_action, source, source_start, source_end,
+          present, 1, 0, target, &present, error);
+      if (status != LQL_STATUS_OK)
+        goto done;
+      if (present) {
+        source = target;
+        source_start = 0u;
+        source_end = lql_json_spool_size(source);
+        target = target == &first ? &second : &first;
+      }
+    }
+  }
+  if (present) {
+    lql_json_spool_reset(out);
+    status = lql_json_spool_write_slice(source, source_start,
+                                        source_end - source_start,
+                                        lql_flat_eq_spool_writer, out, error);
+    if (status != LQL_STATUS_OK)
+      goto done;
+  }
+  *out_present = present;
+  status = LQL_STATUS_OK;
+done:
+  if (initialized_second)
+    lql_json_spool_cleanup(&second);
+  if (initialized_first)
+    lql_json_spool_cleanup(&first);
+  return status;
+}
+
+static lql_status lql_flat_eq_mutation_emit_missing_key_group(
+    lql_flat_eq_state *state, const lql_mutation_action *group,
+    lql_json_spool *out, int *out_present, lql_error *error) {
+  lql_json_spool first;
+  lql_json_spool second;
+  const lql_json_spool *source;
+  lql_json_spool *target;
+  size_t source_start;
+  size_t source_end;
+  size_t i;
+  int initialized_first;
+  int initialized_second;
+  int present;
+  lql_status status;
+  if (out_present != NULL)
+    *out_present = 0;
+  if (state == NULL || group == NULL || group->segment_count == 0u ||
+      out == NULL || out_present == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  initialized_first = 0;
+  initialized_second = 0;
+  status = lql_json_spool_init_with_allocator(&first, state->program->allocator,
+                                              error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  initialized_first = 1;
+  status = lql_json_spool_init_with_allocator(&second,
+                                              state->program->allocator, error);
   if (status != LQL_STATUS_OK)
     goto done;
+  initialized_second = 1;
   source = &first;
-  target = &second;
+  source_start = 0u;
+  source_end = 0u;
+  target = &first;
   present = 0;
   for (i = 0u; i < state->program->direct_mutation_action_count; ++i) {
     const lql_mutation_action *action;
+    const lql_mutation_action *recursive_after_action;
+    lql_mutation_action root_action;
+    int apply_recursive_after;
+    int allow_create;
     action = state->program->direct_mutation_actions[i];
-    if (!lql_flat_eq_mutation_same_top(action, group))
+    recursive_after_action = action;
+    apply_recursive_after = 0;
+    if (!lql_flat_eq_mutation_action_matches_missing_key(action,
+                                                         group->segments[0]))
       continue;
-    if (action->segment_count == 1u) {
-      if (action->kind == LQL_MUTATION_REMOVE) {
-        present = 0;
-        continue;
+    if (present && action->segment_count > 1u &&
+        strcmp(action->segments[0], "...") == 0) {
+      int same_recursive_key;
+      size_t target_depth;
+      target_depth = 1u;
+      while (target_depth < action->segment_count &&
+             strcmp(action->segments[target_depth], "...") == 0) {
+        ++target_depth;
       }
-      {
-        lql_stream_writer_fn saved_writer;
-        void *saved_writer_user;
-        lql_json_spool_reset(target);
-        saved_writer = state->writer;
-        saved_writer_user = state->writer_user;
-        state->writer = lql_flat_eq_spool_writer;
-        state->writer_user = target;
-        if (action->kind == LQL_MUTATION_SET) {
-          status = lql_flat_eq_mutation_value(state, action, error);
-        } else if (action->kind == LQL_MUTATION_INCREMENT) {
-          status = lql_flat_eq_mutation_increment(
-              state, action, present ? source : NULL, 0u,
-              present ? lql_json_spool_size(source) : 0u, present, error);
+      if (target_depth >= action->segment_count) {
+        root_action = *action;
+        root_action.segment_count = 1u;
+        action = &root_action;
+        goto apply_missing_action;
+      }
+      same_recursive_key =
+          strcmp(action->segments[target_depth], group->segments[0]) == 0 ||
+          lql_flat_eq_mutation_segment_matches_any_object_key(
+              action->segments[target_depth]);
+      if (same_recursive_key) {
+        root_action = *action;
+        if (target_depth + 1u == action->segment_count) {
+          root_action.segment_count = 1u;
         } else {
-          status = LQL_STATUS_INVALID_ARGUMENT;
+          if (!lql_flat_eq_spooled_value_is_container(source, source_start,
+                                                      error)) {
+            continue;
+          }
+          root_action.segments = action->segments + target_depth;
+          root_action.segment_count = action->segment_count - target_depth;
+          apply_recursive_after = 1;
         }
-        state->writer = saved_writer;
-        state->writer_user = saved_writer_user;
+        action = &root_action;
       }
-    } else {
-      if (!present) {
-        if (action->kind == LQL_MUTATION_REMOVE)
-          continue;
-        lql_json_spool_reset(target);
-        status = lql_json_spool_append(target, "{}", 2u, error);
-        if (status != LQL_STATUS_OK)
-          goto done;
-        source = target;
-        target = target == &first ? &second : &first;
-        present = 1;
-      }
-      status = lql_flat_eq_mutation_apply_nested_to_spool(
-          state, action, source, 0u, lql_json_spool_size(source), target,
-          error);
     }
+  apply_missing_action:
+    allow_create = !lql_flat_eq_mutation_top_matches_object_key(action);
+    status = lql_flat_eq_mutation_apply_ordered_key_action(
+        state, action, source, source_start, source_end, present, allow_create,
+        0, target, &present, error);
     if (status != LQL_STATUS_OK)
       goto done;
-    present = 1;
-    source = target;
-    target = target == &first ? &second : &first;
+    if (present) {
+      source = target;
+      source_start = 0u;
+      source_end = lql_json_spool_size(source);
+      target = target == &first ? &second : &first;
+    }
+    if (apply_recursive_after && present) {
+      status = lql_flat_eq_mutation_apply_ordered_key_action(
+          state, recursive_after_action, source, source_start, source_end,
+          present, 1, 0, target, &present, error);
+      if (status != LQL_STATUS_OK)
+        goto done;
+      if (present) {
+        source = target;
+        source_start = 0u;
+        source_end = lql_json_spool_size(source);
+        target = target == &first ? &second : &first;
+      }
+    }
   }
   if (present) {
     lql_json_spool_reset(out);
@@ -3876,7 +5214,7 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
                                             lql_error *error) {
   size_t pos;
   size_t size;
-  unsigned long found;
+  unsigned char *found;
   int first;
   unsigned char ch;
   lql_status status;
@@ -3890,11 +5228,15 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
     return status;
   if (ch != (unsigned char)'{')
     return LQL_STATUS_JSON_ERROR;
+  status = lql_flat_eq_mutation_validate_increment_targets(state, spool, error);
+  if (status != LQL_STATUS_OK)
+    return status;
   status = lql_flat_eq_write(state, "{", 1u, error);
   if (status != LQL_STATUS_OK)
     return status;
   pos = 1u;
-  found = 0;
+  found = state->program->direct_mutation_found;
+  memset(found, 0, state->program->direct_mutation_action_count);
   first = 1;
   status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
   if (status != LQL_STATUS_OK)
@@ -3928,12 +5270,30 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
     if (action != NULL) {
       size_t group_count;
       group_count = lql_flat_eq_mutation_group_count(state->program, action);
-      if (group_count > 1u)
-        lql_flat_eq_mutation_group_mark(state->program, action, &found);
-      else
-        found |= 1ul << action_index;
-      if (action->kind == LQL_MUTATION_REMOVE && action->segment_count == 1u &&
-          group_count <= 1u) {
+      if (group_count > 1u && lql_flat_eq_mutation_exact_top_key(action) &&
+          !lql_flat_eq_mutation_program_has_top_object_wildcard(
+              state->program) &&
+          lql_flat_eq_mutation_group_is_top_increment(state->program, action)) {
+        lql_mutation_action grouped_increment;
+        status = lql_flat_eq_mutation_group_increment_action(
+            state->program, action, &grouped_increment);
+        if (status != LQL_STATUS_OK)
+          return status;
+        if (!first && (status = lql_flat_eq_write(state, ",", 1u, error)) !=
+                          LQL_STATUS_OK)
+          return status;
+        status = lql_json_spool_write_slice(
+            spool, key_start, key_end - key_start + 1u, state->writer,
+            state->writer_user, error);
+        if (status == LQL_STATUS_OK)
+          status =
+              lql_flat_eq_mutation_increment(state, &grouped_increment, spool,
+                                             key_end + 1u, value_end, 1, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+        lql_flat_eq_mutation_key_mark_spooled(state->program, spool, key_start,
+                                              size, found, error);
+        first = 0;
         pos = value_end;
         status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
         if (status != LQL_STATUS_OK)
@@ -3946,98 +5306,175 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
         }
         continue;
       }
-      if (group_count > 1u &&
-          !lql_flat_eq_mutation_group_is_top_increment(state->program,
-                                                       action) &&
-          !lql_flat_eq_mutation_group_is_top_set(state->program, action) &&
-          !lql_flat_eq_mutation_group_all_nested(state->program, action)) {
+      if (group_count > 1u && lql_flat_eq_mutation_exact_top_key(action) &&
+          !lql_flat_eq_mutation_program_has_top_object_wildcard(
+              state->program) &&
+          lql_flat_eq_mutation_group_is_top_set(state->program, action)) {
+        const lql_mutation_action *last_set;
+        last_set = lql_flat_eq_mutation_group_last_set(state->program, action);
+        if (last_set == NULL)
+          return LQL_STATUS_INVALID_ARGUMENT;
+        if (!first && (status = lql_flat_eq_write(state, ",", 1u, error)) !=
+                          LQL_STATUS_OK)
+          return status;
+        status = lql_json_spool_write_slice(
+            spool, key_start, key_end - key_start + 1u, state->writer,
+            state->writer_user, error);
+        if (status == LQL_STATUS_OK)
+          status = lql_flat_eq_mutation_value(state, last_set, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+        lql_flat_eq_mutation_key_mark_spooled(state->program, spool, key_start,
+                                              size, found, error);
+        first = 0;
+        pos = value_end;
+        status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+        if (ch == (unsigned char)',') {
+          ++pos;
+          status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+          if (status != LQL_STATUS_OK)
+            return status;
+        }
+        continue;
+      }
+      if (group_count > 1u && lql_flat_eq_mutation_exact_top_key(action) &&
+          !lql_flat_eq_mutation_program_has_top_object_wildcard(
+              state->program) &&
+          lql_flat_eq_mutation_group_is_exact_nested(state->program, action)) {
+        /*
+         * Ordered key groups are required when top wildcards can interleave
+         * with concrete keys. Exact same-top nested groups have no such
+         * cross-key interaction, so they can keep the streaming direct path.
+         */
+        if (!first && (status = lql_flat_eq_write(state, ",", 1u, error)) !=
+                          LQL_STATUS_OK)
+          return status;
+        status = lql_json_spool_write_slice(
+            spool, key_start, key_end - key_start + 1u, state->writer,
+            state->writer_user, error);
+        if (status == LQL_STATUS_OK)
+          status = lql_flat_eq_mutation_emit_existing_nested_group(
+              state, spool, action, key_end + 1u, value_end, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+        lql_flat_eq_mutation_key_mark_spooled(state->program, spool, key_start,
+                                              size, found, error);
+        first = 0;
+        pos = value_end;
+        status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+        if (ch == (unsigned char)',') {
+          ++pos;
+          status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+          if (status != LQL_STATUS_OK)
+            return status;
+        }
+        continue;
+      }
+      if (group_count == 1u && lql_flat_eq_mutation_exact_top_key(action) &&
+          !lql_flat_eq_mutation_program_has_top_object_wildcard(
+              state->program)) {
+        found[action_index] = 1u;
+        if (action->kind == LQL_MUTATION_REMOVE &&
+            action->segment_count == 1u) {
+          pos = value_end;
+          status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+          if (status != LQL_STATUS_OK)
+            return status;
+          if (ch == (unsigned char)',') {
+            ++pos;
+            status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+            if (status != LQL_STATUS_OK)
+              return status;
+          }
+          continue;
+        }
+        if (!first && (status = lql_flat_eq_write(state, ",", 1u, error)) !=
+                          LQL_STATUS_OK)
+          return status;
+        status = lql_json_spool_write_slice(
+            spool, key_start, key_end - key_start + 1u, state->writer,
+            state->writer_user, error);
+        if (status == LQL_STATUS_OK) {
+          if (action->kind == LQL_MUTATION_INCREMENT &&
+              action->segment_count == 1u) {
+            status = lql_flat_eq_mutation_increment(
+                state, action, spool, key_end + 1u, value_end, 1, error);
+          } else if (action->kind == LQL_MUTATION_INCREMENT) {
+            status = lql_flat_eq_mutation_nested_increment(
+                state, action, spool, key_end + 1u, value_end, 1u, error);
+          } else if (action->kind == LQL_MUTATION_SET &&
+                     action->segment_count > 1u) {
+            status = lql_flat_eq_mutation_nested_set(
+                state, action, spool, key_end + 1u, value_end, 1u, error);
+          } else if (action->kind == LQL_MUTATION_REMOVE &&
+                     action->segment_count > 1u) {
+            status = lql_flat_eq_mutation_nested_remove(
+                state, action, spool, key_end + 1u, value_end, 1u, error);
+          } else {
+            status = lql_flat_eq_mutation_value(state, action, error);
+          }
+        }
+        if (status != LQL_STATUS_OK)
+          return status;
+        first = 0;
+        pos = value_end;
+        status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+        if (ch == (unsigned char)',') {
+          ++pos;
+          status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+          if (status != LQL_STATUS_OK)
+            return status;
+        }
+        continue;
+      }
+      {
         lql_json_spool group_value;
         int group_value_present;
+        (void)action_index;
         status = lql_json_spool_init_with_allocator(
             &group_value, state->program->allocator, error);
         if (status != LQL_STATUS_OK)
           return status;
-        status = lql_flat_eq_mutation_emit_existing_group(
-            state, spool, action, key_end + 1u, value_end, &group_value,
-            &group_value_present, error);
+        status = lql_flat_eq_mutation_emit_existing_key_group(
+            state, spool, key_start, size, key_end + 1u, value_end,
+            &group_value, &group_value_present, error);
         if (status == LQL_STATUS_OK && group_value_present) {
-          if (!first) {
+          if (!first)
             status = lql_flat_eq_write(state, ",", 1u, error);
-          }
-          if (status == LQL_STATUS_OK) {
+          if (status == LQL_STATUS_OK)
             status = lql_json_spool_write_slice(
                 spool, key_start, key_end - key_start + 1u, state->writer,
                 state->writer_user, error);
-          }
-          if (status == LQL_STATUS_OK) {
+          if (status == LQL_STATUS_OK)
             status = lql_json_spool_write_to(&group_value, state->writer,
                                              state->writer_user, error);
-          }
           if (status == LQL_STATUS_OK)
             first = 0;
         }
+        if (status == LQL_STATUS_OK)
+          lql_flat_eq_mutation_key_mark_spooled(state->program, spool,
+                                                key_start, size, found, error);
         lql_json_spool_cleanup(&group_value);
         if (status != LQL_STATUS_OK)
           return status;
-        pos = value_end;
+      }
+      pos = value_end;
+      status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+      if (ch == (unsigned char)',') {
+        ++pos;
         status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
         if (status != LQL_STATUS_OK)
           return status;
-        if (ch == (unsigned char)',') {
-          ++pos;
-          status = lql_flat_eq_spool_byte(spool, pos, &ch, error);
-          if (status != LQL_STATUS_OK)
-            return status;
-        }
-        continue;
       }
-      if (!first &&
-          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
-        return status;
-      status =
-          lql_json_spool_write_slice(spool, key_start, key_end - key_start + 1u,
-                                     state->writer, state->writer_user, error);
-      if (status == LQL_STATUS_OK) {
-        if (group_count > 1u && lql_flat_eq_mutation_group_is_top_increment(
-                                    state->program, action)) {
-          lql_mutation_action grouped_increment;
-          status = lql_flat_eq_mutation_group_increment_action(
-              state->program, action, &grouped_increment);
-          if (status == LQL_STATUS_OK)
-            status = lql_flat_eq_mutation_increment(state, &grouped_increment,
-                                                    spool, key_end + 1u,
-                                                    value_end, 1, error);
-        } else if (group_count > 1u && lql_flat_eq_mutation_group_is_top_set(
-                                           state->program, action)) {
-          const lql_mutation_action *last_set;
-          last_set =
-              lql_flat_eq_mutation_group_last_set(state->program, action);
-          if (last_set == NULL)
-            status = LQL_STATUS_INVALID_ARGUMENT;
-          else
-            status = lql_flat_eq_mutation_value(state, last_set, error);
-        } else if (group_count > 1u) {
-          status = lql_flat_eq_mutation_emit_existing_nested_group(
-              state, spool, action, key_end + 1u, value_end, error);
-        } else if (action->kind == LQL_MUTATION_INCREMENT &&
-                   action->segment_count == 1u) {
-          status = lql_flat_eq_mutation_increment(
-              state, action, spool, key_end + 1u, value_end, 1, error);
-        } else if (action->kind == LQL_MUTATION_INCREMENT) {
-          status = lql_flat_eq_mutation_nested_increment(
-              state, action, spool, key_end + 1u, value_end, 1u, error);
-        } else if (action->kind == LQL_MUTATION_SET &&
-                   action->segment_count > 1u) {
-          status = lql_flat_eq_mutation_nested_set(
-              state, action, spool, key_end + 1u, value_end, 1u, error);
-        } else if (action->kind == LQL_MUTATION_REMOVE &&
-                   action->segment_count > 1u) {
-          status = lql_flat_eq_mutation_nested_remove(
-              state, action, spool, key_end + 1u, value_end, 1u, error);
-        } else {
-          status = lql_flat_eq_mutation_value(state, action, error);
-        }
-      }
+      continue;
     } else {
       if (!first &&
           (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
@@ -4068,29 +5505,95 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
       action = state->program->direct_mutation_actions[i];
       group_count = lql_flat_eq_mutation_group_count(state->program, action);
       if (lql_flat_eq_mutation_nonrecursive_wildcard(action) ||
-          (found & (1ul << i)) != 0ul ||
+          found[i] != 0u ||
           (group_count <= 1u && action->kind == LQL_MUTATION_REMOVE) ||
           (group_count > 1u &&
-           lql_flat_eq_mutation_group_seen(state->program, action, i)) ||
+           lql_flat_eq_mutation_group_seen(state->program, action, found, i)) ||
           (group_count > 1u && !lql_flat_eq_mutation_group_has_value_creator(
                                    state->program, action)))
         continue;
-      if (group_count > 1u &&
-          !lql_flat_eq_mutation_group_is_top_increment(state->program,
-                                                       action) &&
-          !lql_flat_eq_mutation_group_is_top_set(state->program, action)) {
+      if (group_count == 1u && lql_flat_eq_mutation_exact_top_key(action) &&
+          !lql_flat_eq_mutation_program_has_top_object_wildcard(
+              state->program)) {
+        if (!first && (status = lql_flat_eq_write(state, ",", 1u, error)) !=
+                          LQL_STATUS_OK)
+          return status;
+        status = lql_flat_eq_projection_key(state, action->segments[0], error);
+        if (status == LQL_STATUS_OK) {
+          if ((action->kind == LQL_MUTATION_SET ||
+               action->kind == LQL_MUTATION_INCREMENT) &&
+              action->segment_count > 1u) {
+            status =
+                lql_flat_eq_mutation_object_chain(state, action, 1u, error);
+          } else if (action->kind == LQL_MUTATION_INCREMENT) {
+            status = lql_flat_eq_mutation_increment(state, action, NULL, 0u, 0u,
+                                                    0, error);
+          } else {
+            status = lql_flat_eq_mutation_value(state, action, error);
+          }
+        }
+        if (status != LQL_STATUS_OK)
+          return status;
+        found[i] = 1u;
+        first = 0;
+        continue;
+      }
+      if (group_count > 1u && lql_flat_eq_mutation_exact_top_key(action) &&
+          !lql_flat_eq_mutation_program_has_top_object_wildcard(
+              state->program) &&
+          lql_flat_eq_mutation_group_is_top_increment(state->program, action)) {
+        lql_mutation_action grouped_increment;
+        status = lql_flat_eq_mutation_group_increment_action(
+            state->program, action, &grouped_increment);
+        if (status != LQL_STATUS_OK)
+          return status;
+        if (!first && (status = lql_flat_eq_write(state, ",", 1u, error)) !=
+                          LQL_STATUS_OK)
+          return status;
+        status = lql_flat_eq_projection_key(state, action->segments[0], error);
+        if (status == LQL_STATUS_OK)
+          status = lql_flat_eq_mutation_increment(state, &grouped_increment,
+                                                  NULL, 0u, 0u, 0, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+        lql_flat_eq_mutation_key_mark_missing(state->program,
+                                              action->segments[0], found);
+        first = 0;
+        continue;
+      }
+      if (group_count > 1u && lql_flat_eq_mutation_exact_top_key(action) &&
+          !lql_flat_eq_mutation_program_has_top_object_wildcard(
+              state->program) &&
+          lql_flat_eq_mutation_group_is_top_set(state->program, action)) {
+        const lql_mutation_action *last_set;
+        last_set = lql_flat_eq_mutation_group_last_set(state->program, action);
+        if (last_set == NULL)
+          return LQL_STATUS_INVALID_ARGUMENT;
+        if (!first && (status = lql_flat_eq_write(state, ",", 1u, error)) !=
+                          LQL_STATUS_OK)
+          return status;
+        status = lql_flat_eq_projection_key(state, action->segments[0], error);
+        if (status == LQL_STATUS_OK)
+          status = lql_flat_eq_mutation_value(state, last_set, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+        lql_flat_eq_mutation_key_mark_missing(state->program,
+                                              action->segments[0], found);
+        first = 0;
+        continue;
+      }
+      {
         lql_json_spool group_value;
         int group_value_present;
         status = lql_json_spool_init_with_allocator(
             &group_value, state->program->allocator, error);
         if (status != LQL_STATUS_OK)
           return status;
-        status = lql_flat_eq_mutation_emit_missing_group(
+        status = lql_flat_eq_mutation_emit_missing_key_group(
             state, action, &group_value, &group_value_present, error);
         if (status == LQL_STATUS_OK && group_value_present) {
-          if (!first) {
+          if (!first)
             status = lql_flat_eq_write(state, ",", 1u, error);
-          }
           if (status == LQL_STATUS_OK)
             status =
                 lql_flat_eq_projection_key(state, action->segments[0], error);
@@ -4100,43 +5603,43 @@ static lql_status lql_flat_eq_mutation_emit(lql_flat_eq_state *state,
           if (status == LQL_STATUS_OK)
             first = 0;
         }
+        if (status == LQL_STATUS_OK)
+          lql_flat_eq_mutation_key_mark_missing(state->program,
+                                                action->segments[0], found);
         lql_json_spool_cleanup(&group_value);
         if (status != LQL_STATUS_OK)
           return status;
-        continue;
       }
-      if (!first &&
-          (status = lql_flat_eq_write(state, ",", 1u, error)) != LQL_STATUS_OK)
-        return status;
-      status = lql_flat_eq_projection_key(state, action->segments[0], error);
-      if (status == LQL_STATUS_OK) {
-        if (group_count > 1u && lql_flat_eq_mutation_group_is_top_increment(
-                                    state->program, action)) {
-          lql_mutation_action grouped_increment;
-          status = lql_flat_eq_mutation_group_increment_action(
-              state->program, action, &grouped_increment);
-          if (status == LQL_STATUS_OK)
-            status = lql_flat_eq_mutation_increment(state, &grouped_increment,
-                                                    NULL, 0u, 0u, 0, error);
-        } else if (group_count > 1u && lql_flat_eq_mutation_group_is_top_set(
-                                           state->program, action)) {
-          const lql_mutation_action *last_set;
-          last_set =
-              lql_flat_eq_mutation_group_last_set(state->program, action);
-          if (last_set == NULL)
-            status = LQL_STATUS_INVALID_ARGUMENT;
-          else
-            status = lql_flat_eq_mutation_value(state, last_set, error);
-        } else {
-          status = lql_flat_eq_mutation_key_value(state, action, 0, error);
-        }
-      }
-      if (status != LQL_STATUS_OK)
-        return status;
-      first = 0;
     }
   }
   status = lql_flat_eq_write(state, "}\n", 2u, error);
+  return status;
+}
+
+static lql_status lql_flat_eq_mutation_emit_atomic(lql_flat_eq_state *state,
+                                                   const lql_json_spool *spool,
+                                                   lql_error *error) {
+  lql_json_spool rendered;
+  lql_stream_writer_fn saved_writer;
+  void *saved_writer_user;
+  lql_status status;
+  if (state == NULL || spool == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  status = lql_json_spool_init_with_allocator(&rendered,
+                                              state->program->allocator, error);
+  if (status != LQL_STATUS_OK)
+    return status;
+  saved_writer = state->writer;
+  saved_writer_user = state->writer_user;
+  state->writer = lql_flat_eq_spool_writer;
+  state->writer_user = &rendered;
+  status = lql_flat_eq_mutation_emit(state, spool, error);
+  state->writer = saved_writer;
+  state->writer_user = saved_writer_user;
+  if (status == LQL_STATUS_OK)
+    status = lql_json_spool_write_to(&rendered, state->writer,
+                                     state->writer_user, error);
+  lql_json_spool_cleanup(&rendered);
   return status;
 }
 
@@ -4329,8 +5832,12 @@ static lql_status lql_flat_eq_projection_then_mutation_emit(
   status = lql_flat_eq_projection_object(state, spool, 0u, 0u, error);
   state->writer = saved_writer;
   state->writer_user = saved_writer_user;
-  if (status == LQL_STATUS_OK)
-    status = lql_flat_eq_mutation_emit(state, &projected, error);
+  if (status == LQL_STATUS_OK) {
+    if (lql_flat_eq_mutation_program_needs_atomic_output(state->program))
+      status = lql_flat_eq_mutation_emit_atomic(state, &projected, error);
+    else
+      status = lql_flat_eq_mutation_emit(state, &projected, error);
+  }
   lql_json_spool_cleanup(&projected);
   return status;
 }
@@ -4387,7 +5894,8 @@ lql_flat_eq_record_words(void *user, size_t record_index, int root_is_object,
                   "flat equality scanner callback is unavailable");
     return LQL_STATUS_CALLBACK_ERROR;
   }
-  matched = lql_flat_eq_matches(state->program, state->request->selector, hits);
+  matched = lql_flat_eq_matches_record(state->program, state->request->selector,
+                                       hits, root_is_object);
   ++state->result->records_seen;
   if (matched) {
     ++state->result->records_matched;
@@ -4480,7 +5988,10 @@ lql_flat_eq_record_words(void *user, size_t record_index, int root_is_object,
                     "mutation input must be a JSON object");
       return LQL_STATUS_JSON_ERROR;
     }
-    status = lql_flat_eq_mutation_emit(state, spool, error);
+    if (lql_flat_eq_mutation_program_needs_atomic_output(state->program))
+      status = lql_flat_eq_mutation_emit_atomic(state, spool, error);
+    else
+      status = lql_flat_eq_mutation_emit(state, spool, error);
     if (status != LQL_STATUS_OK)
       return status;
   } else if (state->request->output_mode == LQL_STREAM_OUTPUT_MUTATION &&

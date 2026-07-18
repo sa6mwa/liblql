@@ -82,12 +82,23 @@ printf '2\n' | cmp -s - "$tmp.out"
 printf '%s\n%s\n' '{"status":"open","n":1}' '{"status":"open","n":3}' |
   cmp -s - "$tmp.out"
 
+compare_go_lql 'clustered compact matches-only flags' \
+  -cM '/status="open"' "$fixture"
+
+"$clql" --compact=false --matches-only=false '/status="open"' "$fixture" \
+  >"$tmp.out"
+printf '%s\n%s\n' '{"status":"open","n":1}' '{"status":"open","n":3}' |
+  cmp -s - "$tmp.out"
+
 "$clql" -O '/status="open"' '/status="closed"' "$fixture" >"$tmp.out"
 printf '%s\n%s\n%s\n' \
   '{"status":"open","n":1}' \
   '{"status":"closed","n":2}' \
   '{"status":"open","n":3}' |
   cmp -s - "$tmp.out"
+
+"$clql" --or=false '/status="open"' '/n=3' "$fixture" >"$tmp.out"
+printf '%s\n' '{"status":"open","n":3}' | cmp -s - "$tmp.out"
 
 "$clql" '/status="open"' '/n=3' "$fixture" >"$tmp.out"
 printf '%s\n' '{"status":"open","n":3}' | cmp -s - "$tmp.out"
@@ -101,6 +112,9 @@ EOF
 "$clql" -f /id '/status="new"' "$tmpdir/input.ndjson" >"$tmp.out"
 printf '%s\n' '{"id":"a"}' | cmp -s - "$tmp.out"
 
+"$clql" -f/id '/status="new"' "$tmpdir/input.ndjson" >"$tmp.out"
+printf '%s\n' '{"id":"a"}' | cmp -s - "$tmp.out"
+
 "$clql" '/status="new"' -f /id "$tmpdir/input.ndjson" >"$tmp.out"
 printf '%s\n' '{"id":"a"}' | cmp -s - "$tmp.out"
 
@@ -109,6 +123,12 @@ compare_go_lql 'mixed numeric projection on array' \
   -c -f /a/0 -f /a/x "$tmpdir/mixed-array.ndjson"
 
 "$clql" -m '/status=ready' '/id="b"' "$tmpdir/input.ndjson" >"$tmp.out"
+printf '%s\n%s\n' \
+  '{"id":"a","status":"new","keep":1}' \
+  '{"id":"b","status":"ready","keep":2}' |
+  cmp -s - "$tmp.out"
+
+"$clql" -m/status=ready '/id="b"' "$tmpdir/input.ndjson" >"$tmp.out"
 printf '%s\n%s\n' \
   '{"id":"a","status":"new","keep":1}' \
   '{"id":"b","status":"ready","keep":2}' |
@@ -145,6 +165,11 @@ compare_go_lql 'textfile mutation values' \
 printf '日本語 😀 こんにちは' >"$tmpdir/blob-utf8.txt"
 compare_go_lql 'UTF-8 textfile mutation values' \
   -c -F -M -m "textfile:/payload=$tmpdir/blob-utf8.txt" \
+  '/id="a"' "$tmpdir/input.ndjson"
+
+printf 'hello file' >"$tmpdir/ lql spaced value "
+compare_go_lql 'quoted textfile mutation path with spaces' \
+  -c -F -M -m "textfile:/payload=\"$tmpdir/ lql spaced value \"" \
   '/id="a"' "$tmpdir/input.ndjson"
 
 printf 'a\000b' >"$tmpdir/blob-nul.txt"
@@ -270,11 +295,34 @@ if "$clql" -m 'file:/payload=blob.txt' "$tmpdir/input.ndjson" \
 fi
 grep 'file-backed mutations are disabled' "$tmp.err" >/dev/null
 
+if printf '{"a":"x"}\n' | "$clql" -m '/a=+1' >"$tmp.out" 2>"$tmp.err"; then
+  printf 'clql smoke: invalid increment mutation unexpectedly succeeded\n' >&2
+  exit 1
+fi
+test ! -s "$tmp.out"
+grep 'increment target number is invalid' "$tmp.err" >/dev/null
+
 if "$clql" -t jq '/status="open"' "$fixture" >"$tmp.out" 2>"$tmp.err"; then
   printf 'clql smoke: theme flag unexpectedly succeeded\n' >&2
   exit 1
 fi
 grep 'prettyx is not linked' "$tmp.err" >/dev/null
+
+if "$clql" -hZ >"$tmp.out" 2>"$tmp.err"; then
+  printf 'clql smoke: invalid help cluster unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep 'unknown flag: -hZ' "$tmp.err" >/dev/null
+
+if "$clql" -vZ >"$tmp.out" 2>"$tmp.err"; then
+  printf 'clql smoke: invalid version cluster unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep 'unknown flag: -vZ' "$tmp.err" >/dev/null
+
+"$clql" -vh >"$tmp.out" 2>"$tmp.err"
+grep 'usage: clql' "$tmp.out" >/dev/null
+test ! -s "$tmp.err"
 
 if "$clql" '/status="open"' - >"$tmp.out" 2>"$tmp.err" <<'EOF'
 [{"status":"open"}]

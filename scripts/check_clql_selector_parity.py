@@ -146,6 +146,20 @@ def main():
             "values": [],
         },
         {
+            "status": "open",
+            "timestamp": "2026-03-11T00:11:28.123Z",
+            "service": "misc",
+            "msg": "terminal ellipsis anchor",
+            "greeting": "other",
+            "region": "eu",
+            "state": "enabled",
+            "metadata": {},
+            "labels": {},
+            "items": ["ABC-123", {"sku": "other"}],
+            "values": [],
+            "a": "",
+        },
+        {
             "id": "e",
             "status": "time",
             "single": "true",
@@ -194,6 +208,15 @@ def main():
         ("array wildcard shorthand", ["/items[]/sku=\"ABC-123\""]),
         ("recursive wildcard shorthand", ["/items/**/sku=\"ABC-123\""]),
         ("ellipsis wildcard shorthand", ["/items/.../sku=\"ABC-123\""]),
+        ("terminal recursive wildcard shorthand", ["/**=\"\""]),
+        ("terminal ellipsis wildcard shorthand", ["/...=\"\""]),
+        ("terminal ellipsis anchor shorthand", ["/a/...=\"\""]),
+        ("nested terminal ellipsis wildcard shorthand", ["/items/...=\"ABC-123\""]),
+        ("ellipsis followed by object wildcard", ["/.../*=\"\""]),
+        ("ellipsis followed by array index", ["/items/.../0=\"ABC-123\""]),
+        ("ellipsis followed by array wildcard", ["/items/.../[]=\"ABC-123\""]),
+        ("repeated ellipsis selector", ["/.../...=\"ABC-123\""]),
+        ("wildcard between repeated ellipsis selector", ["/.../*/...=\"ABC-123\""]),
         ("contains value", ["contains{field=/msg,value=timeout}"]),
         ("contains value assignment order", ["contains{value=timeout,field=/msg}"]),
         ("contains value multiline assignments", ["contains{\nfield=/msg\nvalue=timeout\n}"]),
@@ -244,6 +267,95 @@ def main():
     for name, args in cases:
         assert_case(name, input_text, args)
 
+    numeric_container_input = "\n".join(
+        compact(record)
+        for record in [
+            {"a": {"b": 3}},
+            {"a": {"b": None}},
+            {"a": {"b": False}},
+            {"a": [3]},
+        ]
+    ) + "\n"
+    assert_case("numeric shorthand ignores container", numeric_container_input, ["/a>=2"])
+    assert_case(
+        "numeric range ignores container",
+        numeric_container_input,
+        ["range{field=/a,gte=2}"],
+    )
+    recursive_wildcard_input = (
+        compact({"0": {"a": [1, {"n": 2}]}, "items": "1", "a": [1, 2]}) + "\n"
+    )
+    assert_case(
+        "recursive selector after object wildcard",
+        recursive_wildcard_input,
+        ["/*/...=1"],
+    )
+    assert_case(
+        "recursive selector after array wildcard",
+        compact({"items": [{"a": [None]}, {"a": [1]}]}) + "\n",
+        ["/items[]/...=1"],
+    )
+    assert_case(
+        "recursive selector through any and array wildcards",
+        compact({"x": {"a": 1, "z": [1]}}) + "\n",
+        ["/x/.../**/[]=1"],
+    )
+    assert_case(
+        "recursive selector after named path does not overmatch",
+        compact({"x": {"b": 1}}) + "\n",
+        ["/.../x/b/...=1"],
+    )
+    assert_case(
+        "recursive selector numeric object key before object wildcard",
+        compact({"0": {"a": ""}}) + "\n",
+        ["/.../0/*=\"\""],
+    )
+    assert_case(
+        "recursive selector numeric object key nested below array",
+        compact({"x": [{"0": {"a": ""}}, ""]}) + "\n",
+        ["/.../0/*=\"\""],
+    )
+    assert_case(
+        "recursive selector branch state does not leak into sibling values",
+        compact({"a": {"star": [{"star": [1, True]}, [None]]}}) + "\n",
+        ["/a/.../[]/0!=1"],
+    )
+    assert_case(
+        "recursive selector preserves branch state across object siblings",
+        compact({"a": {"0": {"a": "x", "0": {"0": "y"}}}}) + "\n",
+        ["/.../0/0=\"y\""],
+    )
+    assert_case(
+        "consecutive recursive selector keeps zero-depth match",
+        compact({"b": "y"}) + "\n",
+        ["/.../.../b=\"y\""],
+    )
+    assert_case(
+        "terminal recursive exists includes empty root object",
+        compact({}) + "\n",
+        ["exists{/...}"],
+    )
+    assert_case(
+        "terminal recursive exists includes root object with null child",
+        compact({"a": None}) + "\n",
+        ["exists{/...}"],
+    )
+    assert_case(
+        "terminal recursive omitted prefix includes root object",
+        compact({}) + "\n",
+        ["prefix{field=/...}"],
+    )
+    assert_case(
+        "terminal recursive omitted contains includes root object",
+        compact({"a": None}) + "\n",
+        ["contains{field=/...}"],
+    )
+    assert_case(
+        "scalar root does not satisfy field inequality",
+        "1\n" + compact({"a": False}) + "\n",
+        ["/a!=true"],
+    )
+
     # Scanner term state used to be represented by one machine word. Keep this
     # above both 32- and 64-bit widths so selector and projection parity cannot
     # regress to an implementation-only execution limit.
@@ -285,7 +397,7 @@ def main():
         [f'icontains{{field=/msg,value="{long_needle.upper()}"}}'],
     )
 
-    print(f"clql selector parity: {len(cases) + 6} cases passed")
+    print(f"clql selector parity: {len(cases) + 13} cases passed")
 
 
 if __name__ == "__main__":

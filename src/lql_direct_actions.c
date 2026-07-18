@@ -129,9 +129,9 @@ static lql_status mutation_resolve_file_path(
   mutation_trim(&begin, &end);
   if ((size_t)(end - begin) >= 2u && ((begin[0] == '"' && end[-1] == '"') ||
                                       (begin[0] == '\'' && end[-1] == '\''))) {
+    /* Quoted file paths are path data; preserve spaces inside the quotes. */
     ++begin;
     --end;
-    mutation_trim(&begin, &end);
   }
   if (begin == end) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
@@ -350,14 +350,12 @@ static lql_status mutation_parse_value(lql_allocator *allocator,
   size_t value_len;
 
   mutation_trim(&begin, &end);
-  if (begin == end) {
-    lql_set_error(error, LQL_STATUS_PARSE_ERROR, "mutation value is required");
-    return LQL_STATUS_PARSE_ERROR;
-  }
   value_begin = begin;
   value_len = (size_t)(end - begin);
-  if (value_len >= 2u && ((begin[0] == '"' && end[-1] == '"') ||
-                          (begin[0] == '\'' && end[-1] == '\''))) {
+  if (value_len == 0u) {
+    action->value_kind = LQL_MUTATION_VALUE_STRING;
+  } else if (value_len >= 2u && ((begin[0] == '"' && end[-1] == '"') ||
+                                 (begin[0] == '\'' && end[-1] == '\''))) {
     value_begin = begin + 1;
     value_len -= 2u;
     action->value_kind = LQL_MUTATION_VALUE_STRING;
@@ -572,9 +570,9 @@ mutation_parse_file_set(lql_allocator *allocator, const char *begin,
     if ((size_t)(path_end - path_begin) >= 2u &&
         ((path_begin[0] == '"' && path_end[-1] == '"') ||
          (path_begin[0] == '\'' && path_end[-1] == '\''))) {
+      /* Quoted file paths are path data; preserve spaces inside the quotes. */
       ++path_begin;
       --path_end;
-      mutation_trim(&path_begin, &path_end);
     }
     if (path_begin == path_end) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
@@ -685,12 +683,17 @@ static lql_status mutation_parse_one(lql_allocator *allocator, const char *raw,
   }
   delta_text = equal + 1;
   mutation_trim(&delta_text, &end);
-  if (delta_text < end && (*delta_text == '+' || *delta_text == '-') &&
-      lql_number_parse_json(
-          *delta_text == '+' ? delta_text + 1 : delta_text,
-          (size_t)(end - (*delta_text == '+' ? delta_text + 1 : delta_text)),
-          &delta) &&
-      delta != 0.0 && mutation_finite(delta)) {
+  if (delta_text < end && (*delta_text == '+' || *delta_text == '-')) {
+    const char *number_text;
+    number_text = *delta_text == '+' ? delta_text + 1 : delta_text;
+    if (!lql_number_parse_json(number_text, (size_t)(end - number_text),
+                               &delta) ||
+        delta == 0.0 || !mutation_finite(delta)) {
+      mutation_action_cleanup(allocator, action);
+      lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                    "increment mutation requires non-zero JSON number delta");
+      return LQL_STATUS_PARSE_ERROR;
+    }
     action->kind = LQL_MUTATION_INCREMENT;
     action->delta = delta;
     return LQL_STATUS_OK;
@@ -779,12 +782,44 @@ static int mutation_find_brace(const char *begin, const char *end,
       break;
     }
     if (*cursor == '{') {
+      const char *next;
+      next = cursor + 1u;
+      while (next < end && mutation_space((unsigned char)*next)) {
+        ++next;
+      }
+      if (next == end || *next == '=' || *next == ',' || *next == '\n') {
+        ++cursor;
+        continue;
+      }
       *open_brace = cursor;
       return equal == NULL && cursor > begin;
     }
     ++cursor;
   }
   return 0;
+}
+
+static int mutation_brace_shorthand_start(const char *cursor, const char *end) {
+  const char *next;
+  next = cursor + 1u;
+  while (next < end && mutation_space((unsigned char)*next)) {
+    ++next;
+  }
+  return next < end && *next != '=' && *next != ',' && *next != '\n';
+}
+
+static int mutation_comma_starts_expression(const char *cursor,
+                                            const char *end) {
+  while (cursor < end && mutation_space((unsigned char)*cursor)) {
+    ++cursor;
+  }
+  if (cursor >= end) {
+    return 0;
+  }
+  return *cursor == '/' || mutation_has_prefix(cursor, end, "rm:") ||
+         mutation_has_prefix(cursor, end, "del:") ||
+         mutation_has_prefix(cursor, end, "delete:") ||
+         mutation_has_prefix(cursor, end, "time:");
 }
 
 static lql_status
@@ -816,9 +851,17 @@ mutation_parse_expression(lql_allocator *allocator, const char *raw,
       const char *part_end;
       const char *scan;
       int quote;
+      int quote_strict;
+      int in_value;
+      int value_started;
       size_t brace_depth;
+      size_t bracket_depth;
       quote = 0;
+      quote_strict = 0;
+      in_value = 0;
+      value_started = 0;
       brace_depth = 0u;
+      bracket_depth = 0u;
       scan = part;
       while (scan < content_end) {
         if (quote != 0) {
@@ -827,24 +870,46 @@ mutation_parse_expression(lql_allocator *allocator, const char *raw,
           } else if (*scan == (char)quote) {
             quote = 0;
           }
-        } else if (*scan == '"' || *scan == '\'') {
+        } else if (brace_depth != 0u) {
+          if (*scan == '{') {
+            ++brace_depth;
+          } else if (*scan == '}') {
+            --brace_depth;
+          }
+        } else if (!in_value && *scan == '=') {
+          in_value = 1;
+          value_started = 0;
+        } else if (in_value && !value_started &&
+                   mutation_space((unsigned char)*scan)) {
+          ;
+        } else if (in_value && !value_started &&
+                   (*scan == '"' || *scan == '\'')) {
           quote = (unsigned char)*scan;
-        } else if (*scan == '{') {
+          quote_strict = !value_started;
+          value_started = 1;
+        } else if (!in_value && *scan == '{' &&
+                   mutation_brace_shorthand_start(scan, content_end)) {
           ++brace_depth;
         } else if (*scan == '}') {
-          if (brace_depth == 0u) {
-            mutation_action_cleanup(allocator, &prefix);
-            lql_set_error(error, LQL_STATUS_PARSE_ERROR,
-                          "unmatched mutation brace");
-            return LQL_STATUS_PARSE_ERROR;
-          }
-          --brace_depth;
-        } else if (brace_depth == 0u && (*scan == ',' || *scan == '\n')) {
+          ;
+        } else if (in_value && *scan == '[') {
+          ++bracket_depth;
+          value_started = 1;
+        } else if (*scan == ']' && bracket_depth != 0u) {
+          --bracket_depth;
+        } else if ((*scan == '\n' && brace_depth == 0u &&
+                    bracket_depth == 0u) ||
+                   (*scan == ',' &&
+                    mutation_comma_starts_expression(scan + 1u, content_end))) {
+          brace_depth = 0u;
+          bracket_depth = 0u;
           break;
+        } else if (in_value) {
+          value_started = 1;
         }
         ++scan;
       }
-      if (quote != 0) {
+      if (quote != 0 && quote_strict) {
         mutation_action_cleanup(allocator, &prefix);
         lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                       "unterminated quoted mutation value");
@@ -920,7 +985,11 @@ mutation_parse_expression_list(lql_allocator *allocator, const char *raw,
   const char *part;
   const char *scan;
   int quote;
+  int quote_strict;
+  int in_value;
+  int value_started;
   size_t brace_depth;
+  size_t bracket_depth;
   lql_status status;
 
   begin = raw;
@@ -929,7 +998,11 @@ mutation_parse_expression_list(lql_allocator *allocator, const char *raw,
   part = begin;
   scan = begin;
   quote = 0;
+  quote_strict = 0;
+  in_value = 0;
+  value_started = 0;
   brace_depth = 0u;
+  bracket_depth = 0u;
   while (scan < end) {
     if (quote != 0) {
       if (*scan == '\\' && scan + 1u < end) {
@@ -937,18 +1010,35 @@ mutation_parse_expression_list(lql_allocator *allocator, const char *raw,
       } else if (*scan == (char)quote) {
         quote = 0;
       }
-    } else if (*scan == '"' || *scan == '\'') {
+    } else if (brace_depth != 0u) {
+      if (*scan == '{') {
+        ++brace_depth;
+      } else if (*scan == '}') {
+        --brace_depth;
+      }
+    } else if (!in_value && *scan == '=') {
+      in_value = 1;
+      value_started = 0;
+    } else if (in_value && !value_started &&
+               mutation_space((unsigned char)*scan)) {
+      ;
+    } else if (in_value && !value_started && (*scan == '"' || *scan == '\'')) {
       quote = (unsigned char)*scan;
-    } else if (*scan == '{') {
+      quote_strict = !value_started;
+      value_started = 1;
+    } else if (!in_value && *scan == '{' &&
+               mutation_brace_shorthand_start(scan, end)) {
       ++brace_depth;
     } else if (*scan == '}') {
-      if (brace_depth == 0u) {
-        lql_set_error(error, LQL_STATUS_PARSE_ERROR,
-                      "unmatched mutation brace");
-        return LQL_STATUS_PARSE_ERROR;
-      }
-      --brace_depth;
-    } else if (brace_depth == 0u && (*scan == ',' || *scan == '\n')) {
+      ;
+    } else if (in_value && *scan == '[') {
+      ++bracket_depth;
+      value_started = 1;
+    } else if (*scan == ']' && bracket_depth != 0u) {
+      --bracket_depth;
+    } else if ((*scan == '\n' && brace_depth == 0u && bracket_depth == 0u) ||
+               (*scan == ',' &&
+                mutation_comma_starts_expression(scan + 1u, end))) {
       const char *part_end;
       part_end = scan;
       mutation_trim(&part, &part_end);
@@ -967,10 +1057,18 @@ mutation_parse_expression_list(lql_allocator *allocator, const char *raw,
         }
       }
       part = scan + 1u;
+      in_value = 0;
+      value_started = 0;
+      quote = 0;
+      quote_strict = 0;
+      brace_depth = 0u;
+      bracket_depth = 0u;
+    } else if (in_value) {
+      value_started = 1;
     }
     ++scan;
   }
-  if (quote != 0) {
+  if (quote != 0 && quote_strict) {
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "unterminated quoted mutation value");
     return LQL_STATUS_PARSE_ERROR;
