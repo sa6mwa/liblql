@@ -9,8 +9,8 @@ verify=$work/verify
 cache=$(mktemp -d "${TMPDIR:-/tmp}/liblql-shared-dependency-cache.XXXXXX")
 project=liblql
 
-trap 'rm -rf "$cache"' EXIT HUP INT TERM
-rm -rf "$work"
+trap 'sh "$root/scripts/remove_path.sh" "$cache"' EXIT HUP INT TERM
+sh "$root/scripts/remove_path.sh" "$work"
 mkdir -p "$stage"
 
 (

@@ -1,9 +1,17 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <lql/lql.h>
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/xattr.h>
+#endif
+#include <unistd.h>
 
 typedef struct clql_reader {
   FILE *file;
@@ -315,7 +323,14 @@ static int parse_args(int argc, char **argv, clql_config *cfg,
     inline_value = NULL;
     if (strcmp(argv[arg], "--") == 0) {
       ++arg;
-      break;
+      while (arg < argc) {
+        if (!string_list_push_copy(positionals, argv[arg])) {
+          fprintf(stderr, "clql: out of memory\n");
+          return -1;
+        }
+        ++arg;
+      }
+      return 0;
     }
     if (strcmp(argv[arg], "-h") == 0 || strcmp(argv[arg], "--help") == 0) {
       usage(stdout);
@@ -392,9 +407,6 @@ static int parse_args(int argc, char **argv, clql_config *cfg,
       usage(stderr);
       return -1;
     }
-    break;
-  }
-  while (arg < argc) {
     if (!string_list_push_copy(positionals, argv[arg])) {
       fprintf(stderr, "clql: out of memory\n");
       return -1;
@@ -465,6 +477,365 @@ static int open_input_path(const char *path, FILE **out) {
   return 1;
 }
 
+static int inline_lock_source(int fd) {
+  struct flock lock;
+  memset(&lock, 0, sizeof(lock));
+  lock.l_type = F_WRLCK;
+  lock.l_whence = SEEK_SET;
+  return fcntl(fd, F_SETLKW, &lock) == 0;
+}
+
+static char *inline_temp_path(const char *path) {
+  static const char template_name[] = ".clql.tmp.XXXXXX";
+  const char *slash;
+  size_t dir_len;
+  char *out;
+  slash = strrchr(path, '/');
+  if (slash == NULL) {
+    dir_len = 0u;
+  } else if (slash == path) {
+    dir_len = 1u;
+  } else {
+    dir_len = (size_t)(slash - path);
+  }
+  out = (char *)malloc(dir_len + (dir_len == 0u ? 0u : 1u) +
+                       sizeof(template_name));
+  if (out == NULL) {
+    return NULL;
+  }
+  if (dir_len == 0u) {
+    memcpy(out, template_name, sizeof(template_name));
+  } else if (dir_len == 1u && path[0] == '/') {
+    out[0] = '/';
+    memcpy(out + 1u, template_name, sizeof(template_name));
+  } else {
+    memcpy(out, path, dir_len);
+    out[dir_len] = '/';
+    memcpy(out + dir_len + 1u, template_name, sizeof(template_name));
+  }
+  return out;
+}
+
+static int inline_open_source(const char *path, int *out_fd,
+                              struct stat *out_st) {
+  struct stat link_st;
+  int flags;
+  int fd;
+  if (path == NULL || out_fd == NULL || out_st == NULL) {
+    errno = EINVAL;
+    return 0;
+  }
+  if (lstat(path, &link_st) != 0) {
+    return 0;
+  }
+  if (S_ISLNK(link_st.st_mode)) {
+    fputs("clql: inline mode does not rewrite symlink paths\n", stderr);
+    errno = 0;
+    return 0;
+  }
+  if (!S_ISREG(link_st.st_mode)) {
+    fputs("clql: inline mode requires a regular file\n", stderr);
+    errno = 0;
+    return 0;
+  }
+  flags = O_RDWR;
+#ifdef O_NOFOLLOW
+  flags |= O_NOFOLLOW;
+#endif
+  fd = open(path, flags);
+  if (fd < 0) {
+#ifdef ELOOP
+    if (errno == ELOOP) {
+      fputs("clql: inline mode does not rewrite symlink paths\n", stderr);
+      errno = 0;
+    }
+#endif
+    return 0;
+  }
+  /*
+   * Inline replacement is protected by a cooperative advisory lock held from
+   * before the source metadata snapshot until after rename. POSIX path
+   * replacement has no portable compare-and-swap primitive; non-cooperating
+   * writers that ignore advisory locks cannot be made safe here.
+   */
+  if (!inline_lock_source(fd)) {
+    close(fd);
+    return 0;
+  }
+  if (fstat(fd, out_st) != 0) {
+    close(fd);
+    return 0;
+  }
+  if (!S_ISREG(out_st->st_mode) || out_st->st_dev != link_st.st_dev ||
+      out_st->st_ino != link_st.st_ino) {
+    close(fd);
+    fputs("clql: inline input file changed during rewrite\n", stderr);
+    errno = 0;
+    return 0;
+  }
+  *out_fd = fd;
+  return 1;
+}
+
+static long stat_mtime_nsec(const struct stat *st) {
+#if defined(__APPLE__)
+  return st->st_mtimensec;
+#elif defined(__linux__)
+  return st->st_mtim.tv_nsec;
+#else
+  (void)st;
+  return 0L;
+#endif
+}
+
+static long stat_ctime_nsec(const struct stat *st) {
+#if defined(__APPLE__)
+  return st->st_ctimensec;
+#elif defined(__linux__)
+  return st->st_ctim.tv_nsec;
+#else
+  (void)st;
+  return 0L;
+#endif
+}
+
+static int inline_source_path_still_matches(const char *path, int source_fd,
+                                            const struct stat *st) {
+  struct stat current_path;
+  struct stat current_source;
+  if (lstat(path, &current_path) != 0 ||
+      fstat(source_fd, &current_source) != 0) {
+    return 0;
+  }
+  /*
+   * The final rename must not discard a concurrent in-place edit.  dev/ino
+   * catches path replacement, while the open fd metadata catches writes,
+   * truncation, chmod/chown, and other ctime-moving changes to the same inode.
+   */
+  return current_path.st_dev == st->st_dev &&
+         current_path.st_ino == st->st_ino &&
+         current_source.st_dev == st->st_dev &&
+         current_source.st_ino == st->st_ino &&
+         current_source.st_size == st->st_size &&
+         current_source.st_mode == st->st_mode &&
+         current_source.st_uid == st->st_uid &&
+         current_source.st_gid == st->st_gid &&
+         current_source.st_mtime == st->st_mtime &&
+         stat_mtime_nsec(&current_source) == stat_mtime_nsec(st) &&
+         current_source.st_ctime == st->st_ctime &&
+         stat_ctime_nsec(&current_source) == stat_ctime_nsec(st);
+}
+
+static int sync_parent_dir(const char *path) {
+  const char *slash;
+  char *dir;
+  int fd;
+  int ok;
+  slash = strrchr(path, '/');
+  if (slash == NULL) {
+    dir = strdup(".");
+  } else if (slash == path) {
+    dir = strdup("/");
+  } else {
+    dir = (char *)malloc((size_t)(slash - path) + 1u);
+    if (dir != NULL) {
+      memcpy(dir, path, (size_t)(slash - path));
+      dir[slash - path] = '\0';
+    }
+  }
+  if (dir == NULL) {
+    return 0;
+  }
+  fd = open(dir, O_RDONLY);
+  free(dir);
+  if (fd < 0) {
+    return 0;
+  }
+  ok = fsync(fd) == 0;
+  if (close(fd) != 0) {
+    ok = 0;
+  }
+  return ok;
+}
+
+static int preserve_inline_owner(int fd, const struct stat *st) {
+  struct stat tmp_st;
+  int saved_errno;
+  if (fchown(fd, st->st_uid, st->st_gid) == 0) {
+    return 1;
+  }
+  saved_errno = errno;
+  /*
+   * Unprivileged users can rewrite group-writable files they do not own, but
+   * cannot assign the replacement inode back to that foreign uid. Keep inline
+   * rewrite usable in that POSIX case while preserving ownership whenever the
+   * platform allows it.
+   */
+  if (saved_errno != EPERM && saved_errno != EINVAL) {
+    errno = saved_errno;
+    return 0;
+  }
+  if (fstat(fd, &tmp_st) != 0) {
+    return 0;
+  }
+  if (tmp_st.st_uid != geteuid()) {
+    errno = saved_errno;
+    return 0;
+  }
+  if (fchown(fd, (uid_t)-1, st->st_gid) != 0 && errno != EPERM &&
+      errno != EINVAL) {
+    return 0;
+  }
+  return 1;
+}
+
+#if defined(__linux__) || defined(__APPLE__)
+static ssize_t inline_listxattr_fd(int fd, char *names, size_t size) {
+#if defined(__APPLE__)
+  return flistxattr(fd, names, size, 0);
+#else
+  return flistxattr(fd, names, size);
+#endif
+}
+
+static ssize_t inline_getxattr_fd(int fd, const char *name, void *value,
+                                  size_t size) {
+#if defined(__APPLE__)
+  return fgetxattr(fd, name, value, size, 0, 0);
+#else
+  return fgetxattr(fd, name, value, size);
+#endif
+}
+
+static int inline_setxattr(int fd, const char *name, const void *value,
+                           size_t size) {
+#if defined(__APPLE__)
+  return fsetxattr(fd, name, value, size, 0, 0);
+#else
+  return fsetxattr(fd, name, value, size, 0);
+#endif
+}
+
+static int inline_xattr_set_error_ignorable(const char *name, int error_code) {
+#if defined(__linux__)
+  if (name == NULL) {
+    return 0;
+  }
+  if (error_code != EPERM && error_code != EACCES &&
+      error_code != ENOTSUP && error_code != EOPNOTSUPP) {
+    return 0;
+  }
+  /*
+   * SELinux and other kernel-owned namespaces can be visible on ordinary
+   * files while remaining non-restorable by an unprivileged rewriting process.
+   * Leaving the platform to relabel the replacement is preferable to making
+   * otherwise permitted inline rewrites unusable.
+   */
+  return strncmp(name, "security.", 9u) == 0 ||
+         strncmp(name, "system.", 7u) == 0;
+#else
+  (void)name;
+  (void)error_code;
+  return 0;
+#endif
+}
+
+static int copy_inline_xattrs(int source_fd, int fd) {
+  char stack_names[4096];
+  char *names;
+  ssize_t names_len;
+  ssize_t need;
+  size_t offset;
+  names = stack_names;
+  names_len = inline_listxattr_fd(source_fd, names, sizeof(stack_names));
+  if (names_len < 0 && errno == ERANGE) {
+    need = inline_listxattr_fd(source_fd, NULL, 0u);
+    if (need < 0) {
+      return 0;
+    }
+    if (need == 0) {
+      return 1;
+    }
+    names = (char *)malloc((size_t)need);
+    if (names == NULL) {
+      return 0;
+    }
+    names_len = inline_listxattr_fd(source_fd, names, (size_t)need);
+  }
+  if (names_len < 0) {
+    return errno == ENOTSUP || errno == EOPNOTSUPP;
+  }
+  offset = 0u;
+  while (offset < (size_t)names_len) {
+    const char *name;
+    char stack_value[4096];
+    char *value;
+    ssize_t value_len;
+    name = names + offset;
+    offset += strlen(name) + 1u;
+    value = stack_value;
+    value_len = inline_getxattr_fd(source_fd, name, value, sizeof(stack_value));
+    if (value_len < 0 && errno == ERANGE) {
+      need = inline_getxattr_fd(source_fd, name, NULL, 0u);
+      if (need < 0) {
+        if (names != stack_names) {
+          free(names);
+        }
+        return 0;
+      }
+      value = (char *)malloc((size_t)need);
+      if (value == NULL) {
+        if (names != stack_names) {
+          free(names);
+        }
+        return 0;
+      }
+      value_len = inline_getxattr_fd(source_fd, name, value, (size_t)need);
+    }
+    if (value_len < 0) {
+      if (value != stack_value) {
+        free(value);
+      }
+      if (errno == ENODATA) {
+        continue;
+      }
+      if (names != stack_names) {
+        free(names);
+      }
+      return 0;
+    }
+    if (inline_setxattr(fd, name, value, (size_t)value_len) != 0) {
+      int set_errno;
+      set_errno = errno;
+      if (value != stack_value) {
+        free(value);
+      }
+      if (inline_xattr_set_error_ignorable(name, set_errno)) {
+        continue;
+      }
+      if (names != stack_names) {
+        free(names);
+      }
+      errno = set_errno;
+      return 0;
+    }
+    if (value != stack_value) {
+      free(value);
+    }
+  }
+  if (names != stack_names) {
+    free(names);
+  }
+  return 1;
+}
+#else
+static int copy_inline_xattrs(int source_fd, int fd) {
+  (void)source_fd;
+  (void)fd;
+  return 1;
+}
+#endif
+
 static int execute_stream(lql *ctx, FILE *input, FILE *output,
                           const lql_selector *selector,
                           const lql_projection *projection,
@@ -485,8 +856,8 @@ static int execute_stream(lql *ctx, FILE *input, FILE *output,
   request.reader = clql_read;
   request.reader_user = &reader;
   request.selector = selector;
-  request.projection = projection;
-  request.mutation = mutation;
+  request.projection = count_only ? NULL : projection;
+  request.mutation = count_only ? NULL : mutation;
   request.matched_only = matched_only;
   if (!count_only) {
     request.writer = clql_write;
@@ -508,7 +879,7 @@ static int execute_stream(lql *ctx, FILE *input, FILE *output,
 static int run_to_output(lql *ctx, const clql_config *cfg,
                          const clql_string_list *selectors,
                          const clql_string_list *inputs, const char *input_path,
-                         FILE *output) {
+                         FILE *input_override, FILE *output) {
   char *expr;
   lql_selector *selector;
   lql_projection *projection;
@@ -592,22 +963,31 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
     }
   } else {
     FILE *input;
-    if (!open_input_path(input_path, &input)) {
-      status = LQL_STATUS_IO_ERROR;
-      goto fail;
+    if (input_override != NULL) {
+      input = input_override;
+    } else {
+      if (!open_input_path(input_path, &input)) {
+        status = LQL_STATUS_IO_ERROR;
+        goto fail;
+      }
     }
     if (execute_stream(ctx, input, output, selector, projection, mutation,
                        output_mode, mutation != NULL ? cfg->matches_only : 1,
                        cfg->count_only, &aggregate) != 0) {
-      if (input != stdin) {
+      if (input_override == NULL && input != stdin) {
         fclose(input);
       }
       status = LQL_STATUS_IO_ERROR;
       goto fail;
     }
-    if (input != stdin) {
+    if (input_override == NULL && input != stdin) {
       fclose(input);
     }
+  }
+  if (mutation != NULL && aggregate.records_seen == 0u) {
+    fputs("clql: no JSON input\n", stderr);
+    status = LQL_STATUS_JSON_ERROR;
+    goto fail;
   }
   if (cfg->count_only) {
     fprintf(output, "%lu\n", (unsigned long)aggregate.records_matched);
@@ -627,52 +1007,128 @@ fail:
 static int run_inline(lql *ctx, const clql_config *cfg,
                       const clql_string_list *selectors,
                       const clql_string_list *inputs) {
+  FILE *source;
   FILE *tmp;
-  FILE *replacement;
+  char *tmp_path;
+  struct stat st;
+  int source_fd;
+  int source_check_fd;
+  int fd;
   int rc;
-  char buffer[8192];
-  size_t amount;
+  int saved_errno;
   if (inputs->count != 1u || strcmp(inputs->items[0], "-") == 0) {
     fputs("clql: inline mode requires a single JSON file\n", stderr);
     return 2;
   }
-  tmp = tmpfile();
-  if (tmp == NULL) {
-    fprintf(stderr, "clql: unable to create inline temp file\n");
+  source_fd = -1;
+  source_check_fd = -1;
+  if (!inline_open_source(inputs->items[0], &source_fd, &st)) {
+    if (errno != 0) {
+      fprintf(stderr, "clql: unable to open input file: %s\n",
+              inputs->items[0]);
+    }
     return 1;
   }
-  rc = run_to_output(ctx, cfg, selectors, NULL, inputs->items[0], tmp);
+  source_check_fd = dup(source_fd);
+  if (source_check_fd < 0) {
+    fprintf(stderr, "clql: unable to monitor inline input file: %s\n",
+            strerror(errno));
+    close(source_fd);
+    return 1;
+  }
+  source = fdopen(source_fd, "rb");
+  if (source == NULL) {
+    fprintf(stderr, "clql: unable to open input stream: %s\n", strerror(errno));
+    close(source_fd);
+    close(source_check_fd);
+    return 1;
+  }
+  tmp_path = inline_temp_path(inputs->items[0]);
+  if (tmp_path == NULL) {
+    fputs("clql: out of memory\n", stderr);
+    fclose(source);
+    close(source_check_fd);
+    return 1;
+  }
+  fd = mkstemp(tmp_path);
+  if (fd < 0) {
+    fprintf(stderr, "clql: unable to create inline temp file: %s\n",
+            strerror(errno));
+    fclose(source);
+    close(source_check_fd);
+    free(tmp_path);
+    return 1;
+  }
+  if (!preserve_inline_owner(fd, &st)) {
+    fprintf(stderr, "clql: unable to set inline temp ownership: %s\n",
+            strerror(errno));
+    close(fd);
+    unlink(tmp_path);
+    fclose(source);
+    close(source_check_fd);
+    free(tmp_path);
+    return 1;
+  }
+  tmp = fdopen(fd, "wb");
+  if (tmp == NULL) {
+    fprintf(stderr, "clql: unable to open inline temp stream: %s\n",
+            strerror(errno));
+    close(fd);
+    unlink(tmp_path);
+    fclose(source);
+    close(source_check_fd);
+    free(tmp_path);
+    return 1;
+  }
+  rc = run_to_output(ctx, cfg, selectors, NULL, inputs->items[0], source, tmp);
+  saved_errno = errno;
+  errno = saved_errno;
   if (fflush(tmp) != 0 && rc == 0) {
     rc = 1;
   }
-  if (rc != 0) {
-    fclose(tmp);
-    return rc;
+  if (rc == 0 && fchmod(fileno(tmp), st.st_mode & 07777) != 0) {
+    fprintf(stderr, "clql: unable to set inline temp mode: %s\n",
+            strerror(errno));
+    rc = 1;
   }
-  if (fseek(tmp, 0L, SEEK_SET) != 0) {
-    fclose(tmp);
-    return 1;
+  if (rc == 0 && !copy_inline_xattrs(source_check_fd, fileno(tmp))) {
+    fprintf(stderr, "clql: unable to preserve inline file metadata: %s\n",
+            strerror(errno));
+    rc = 1;
   }
-  replacement = fopen(inputs->items[0], "wb");
-  if (replacement == NULL) {
-    fclose(tmp);
-    fprintf(stderr, "clql: unable to replace input file: %s\n",
-            inputs->items[0]);
-    return 1;
+  if (rc == 0 && fsync(fileno(tmp)) != 0) {
+    rc = 1;
   }
-  while ((amount = fread(buffer, 1u, sizeof(buffer), tmp)) != 0u) {
-    if (fwrite(buffer, 1u, amount, replacement) != amount) {
+  if (fclose(tmp) != 0) {
+    rc = 1;
+  }
+  if (rc == 0) {
+    if (!inline_source_path_still_matches(inputs->items[0], source_check_fd,
+                                          &st)) {
+      fputs("clql: inline input file changed during rewrite\n", stderr);
       rc = 1;
-      break;
+    } else if (rename(tmp_path, inputs->items[0]) != 0) {
+      fprintf(stderr, "clql: unable to replace input file: %s\n",
+              inputs->items[0]);
+      rc = 1;
+    } else if (!sync_parent_dir(inputs->items[0])) {
+      fprintf(stderr,
+              "clql: inline replacement committed but parent directory sync "
+              "failed: %s\n",
+              strerror(errno));
+      rc = 1;
     }
   }
-  if (ferror(tmp)) {
+  if (rc != 0) {
+    unlink(tmp_path);
+  }
+  if (fclose(source) != 0 && rc == 0) {
     rc = 1;
   }
-  if (fclose(replacement) != 0) {
+  if (close(source_check_fd) != 0 && rc == 0) {
     rc = 1;
   }
-  fclose(tmp);
+  free(tmp_path);
   return rc;
 }
 
@@ -715,10 +1171,15 @@ int main(int argc, char **argv) {
       rc = 1;
       goto done;
     }
+    if (cfg.inline_write && cfg.count_only) {
+      fputs("clql: inline mutation cannot be combined with --count\n", stderr);
+      rc = 2;
+      goto done;
+    }
     if (cfg.inline_write) {
       rc = run_inline(ctx, &cfg, &selectors, &inputs);
     } else {
-      rc = run_to_output(ctx, &cfg, &selectors, &inputs, "", stdout);
+      rc = run_to_output(ctx, &cfg, &selectors, &inputs, "", NULL, stdout);
     }
   } else {
     if (cfg.inline_write) {
@@ -730,7 +1191,7 @@ int main(int argc, char **argv) {
       rc = 1;
       goto done;
     }
-    rc = run_to_output(ctx, &cfg, &selectors, NULL, input_path, stdout);
+    rc = run_to_output(ctx, &cfg, &selectors, NULL, input_path, NULL, stdout);
   }
   if (rc == 0 && fflush(stdout) != 0) {
     fputs("clql: unable to flush stdout\n", stderr);

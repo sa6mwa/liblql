@@ -8,7 +8,7 @@ binary=${LQL_DIRECT_BENCH_PATH:-build/release/lql_direct_bench}
 massif_out=${TMPDIR:-/tmp}/liblql-direct-live-heap.$$
 
 cleanup() {
-  rm -f "$massif_out"
+  sh scripts/remove_path.sh "$massif_out"
 }
 trap cleanup EXIT HUP INT TERM
 

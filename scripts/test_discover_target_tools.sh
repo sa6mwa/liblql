@@ -4,7 +4,7 @@ set -eu
 tmp=${TMPDIR:-/tmp}/liblql-discover-tools.$$
 
 cleanup() {
-  rm -rf "$tmp"
+  sh scripts/remove_path.sh "$tmp"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -36,7 +36,7 @@ scripts/discover_target_tools.sh "$tmp/build" x86_64-linux-gnu >"$tmp/out"
 grep "CC=$tmp/toolchain/bin/x86_64-linux-gcc" "$tmp/out" >/dev/null
 grep "READELF=$tmp/toolchain/bin/x86_64-linux-readelf" "$tmp/out" >/dev/null
 
-rm -f "$tmp/toolchain/bin/x86_64-linux-readelf"
+sh scripts/remove_path.sh "$tmp/toolchain/bin/x86_64-linux-readelf"
 touch_exec "$tmp/path/readelf"
 PATH="$tmp/path:$PATH" scripts/discover_target_tools.sh \
   "$tmp/build" x86_64-linux-gnu >"$tmp/out"

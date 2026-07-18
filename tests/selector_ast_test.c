@@ -58,6 +58,11 @@ static int view_eq(lql_string_view got, const char *want) {
   return got.len == len && (len == 0u || memcmp(got.data, want, len) == 0);
 }
 
+static int view_mem_eq(lql_string_view got, const char *want, size_t want_len) {
+  return got.len == want_len &&
+         (want_len == 0u || memcmp(got.data, want, want_len) == 0);
+}
+
 static int expect_ok(const char *name, lql_status st, lql_error *error) {
   if (st == LQL_STATUS_OK) {
     return 1;
@@ -259,6 +264,28 @@ static void test_empty_and_wrappers(lql *ctx) {
   }
 
   selector = NULL;
+  if (parse_selector(ctx, "quoted_operator_value", "/v=\"a!=b\"", 0,
+                     &selector)) {
+    if (root_kind(ctx, "quoted_operator_value", selector, LQL_SELECTOR_NODE_EQ,
+                  &root)) {
+      expect_string_term(ctx, "quoted_operator_value", root, "/v", 1, "a!=b", 0,
+                         0u);
+    }
+    ctx->selector_destroy(ctx, selector);
+  }
+
+  selector = NULL;
+  if (parse_selector(ctx, "quoted_backslash_value", "/v='a\\b'", 0,
+                     &selector)) {
+    if (root_kind(ctx, "quoted_backslash_value", selector, LQL_SELECTOR_NODE_EQ,
+                  &root)) {
+      expect_string_term(ctx, "quoted_backslash_value", root, "/v", 1, "a\\b",
+                         0, 0u);
+    }
+    ctx->selector_destroy(ctx, selector);
+  }
+
+  selector = NULL;
   if (parse_selector(ctx, "implicit_and",
                      "eq{f=/status,v=open},prefix{f=/id,v=req-}", 0,
                      &selector)) {
@@ -400,8 +427,8 @@ static void test_string_terms(lql *ctx) {
   selector = NULL;
   if (parse_selector(ctx, "eq_single_quoted_comma",
                      "eq{field=/status,value='open,closed'}", 0, &selector)) {
-    if (root_kind(ctx, "eq_single_quoted_comma", selector,
-                  LQL_SELECTOR_NODE_EQ, &root)) {
+    if (root_kind(ctx, "eq_single_quoted_comma", selector, LQL_SELECTOR_NODE_EQ,
+                  &root)) {
       expect_string_term(ctx, "eq_single_quoted_comma", root, "/status", 1,
                          "open,closed", 0, 0u);
     }
@@ -610,10 +637,36 @@ static void test_range_date_in_exists(lql *ctx) {
       if (!view_eq(range.field, "/progress") ||
           range.gte.kind != LQL_SELECTOR_BOUND_NUMBER ||
           range.lt.kind != LQL_SELECTOR_BOUND_NUMBER ||
+          !view_eq(range.gte.number_text, "10") ||
+          !view_eq(range.lt.number_text, "20") ||
           fabs(range.gte.number - 10.0) > 0.000001 ||
           fabs(range.lt.number - 20.0) > 0.000001) {
         fail("range_numeric", "unexpected numeric range");
       }
+    }
+    ctx->selector_destroy(ctx, selector);
+  }
+
+  selector = NULL;
+  if (parse_selector(ctx, "range_huge_number", "range{f=/v,gt=1e400}", 0,
+                     &selector)) {
+    char *json;
+    if (root_kind(ctx, "range_huge_number", selector, LQL_SELECTOR_NODE_RANGE,
+                  &root) &&
+        expect_ok("range_huge_number",
+                  ctx->selector_node_range_term(ctx, root, &range, &error),
+                  &error)) {
+      if (range.gt.kind != LQL_SELECTOR_BOUND_NUMBER ||
+          !view_eq(range.gt.number_text, "1e400")) {
+        fail("range_huge_number", "unexpected huge numeric range");
+      }
+    }
+    json = selector_json(ctx, "range_huge_number_json", selector);
+    if (json != NULL) {
+      if (strstr(json, "\"gt\":1e400") == NULL) {
+        fail("range_huge_number_json", "huge number was not preserved");
+      }
+      free(json);
     }
     ctx->selector_destroy(ctx, selector);
   }
@@ -673,8 +726,8 @@ static void test_range_date_in_exists(lql *ctx) {
   }
 
   selector = NULL;
-  if (parse_selector(ctx, "date_value", "date{field=/timestamp,value=2025-01-01}",
-                     0, &selector)) {
+  if (parse_selector(ctx, "date_value",
+                     "date{field=/timestamp,value=2025-01-01}", 0, &selector)) {
     if (root_kind(ctx, "date_value", selector, LQL_SELECTOR_NODE_DATE, &root) &&
         expect_ok("date_value",
                   ctx->selector_node_date_term(ctx, root, &date, &error),
@@ -691,13 +744,13 @@ static void test_range_date_in_exists(lql *ctx) {
   if (parse_selector(ctx, "date_gte_lt",
                      "date{field=/timestamp,gte=2025-01-01,lt=2025-01-03}", 0,
                      &selector)) {
-    if (root_kind(ctx, "date_gte_lt", selector, LQL_SELECTOR_NODE_DATE, &root) &&
+    if (root_kind(ctx, "date_gte_lt", selector, LQL_SELECTOR_NODE_DATE,
+                  &root) &&
         expect_ok("date_gte_lt",
                   ctx->selector_node_date_term(ctx, root, &date, &error),
                   &error)) {
       if (!view_eq(date.field, "/timestamp") ||
-          !view_eq(date.gte, "2025-01-01") ||
-          !view_eq(date.lt, "2025-01-03")) {
+          !view_eq(date.gte, "2025-01-01") || !view_eq(date.lt, "2025-01-03")) {
         fail("date_gte_lt", "unexpected date range aliases");
       }
     }
@@ -859,6 +912,9 @@ static void test_builders(lql *ctx) {
   lql_selector_date_term date;
   lql_selector_in_term in_term;
   lql_string_view any_values[2];
+  char bad_number_text[9];
+  char bad_path[9];
+  char nul_value[3];
   char *json;
   memset(&term, 0, sizeof(term));
   term.field = sv("/status");
@@ -899,6 +955,39 @@ static void test_builders(lql *ctx) {
   ctx->selector_destroy(ctx, exists);
   ctx->selector_destroy(ctx, eq);
 
+  nul_value[0] = 'a';
+  nul_value[1] = '\0';
+  nul_value[2] = 'b';
+  memset(&term, 0, sizeof(term));
+  term.field = sv("/payload");
+  term.value_present = 1;
+  term.value.data = nul_value;
+  term.value.len = sizeof(nul_value);
+  eq = NULL;
+  if (expect_ok("builder_eq_nul_string",
+                ctx->selector_build_string(ctx, LQL_SELECTOR_NODE_EQ, &term,
+                                           NULL, &eq, &error),
+                &error)) {
+    if (root_kind(ctx, "builder_eq_nul_string", eq, LQL_SELECTOR_NODE_EQ,
+                  &root) &&
+        expect_ok("builder_eq_nul_string",
+                  ctx->selector_node_string_term(ctx, root, &term, &error),
+                  &error)) {
+      if (!view_eq(term.field, "/payload") ||
+          !view_mem_eq(term.value, nul_value, sizeof(nul_value))) {
+        fail("builder_eq_nul_string", "unexpected NUL string term");
+      }
+    }
+    json = selector_json(ctx, "builder_eq_nul_string_json", eq);
+    if (json != NULL) {
+      if (!contains_text(json, "\\u0000")) {
+        fail("builder_eq_nul_string_json", "expected escaped NUL");
+      }
+      free(json);
+    }
+    ctx->selector_destroy(ctx, eq);
+  }
+
   memset(&term, 0, sizeof(term));
   term.field = sv("/msg");
   term.any_count = 2u;
@@ -937,6 +1026,91 @@ static void test_builders(lql *ctx) {
         fail("builder_range_datetime", "unexpected datetime bounds");
       }
     }
+    ctx->selector_destroy(ctx, eq);
+  }
+
+  memset(&range, 0, sizeof(range));
+  range.field = sv("/v");
+  range.gt.kind = LQL_SELECTOR_BOUND_NUMBER;
+  range.gt.number_text = sv("1e400");
+  eq = NULL;
+  if (expect_ok("builder_range_huge_number",
+                ctx->selector_build_range(ctx, &range, &eq, &error), &error)) {
+    if (root_kind(ctx, "builder_range_huge_number", eq, LQL_SELECTOR_NODE_RANGE,
+                  &root) &&
+        expect_ok("builder_range_huge_number",
+                  ctx->selector_node_range_term(ctx, root, &range, &error),
+                  &error)) {
+      if (!view_eq(range.gt.number_text, "1e400")) {
+        fail("builder_range_huge_number", "unexpected numeric text");
+      }
+    }
+    ctx->selector_destroy(ctx, eq);
+  }
+
+  memcpy(bad_number_text, "1\0garbage", sizeof(bad_number_text));
+  memset(&range, 0, sizeof(range));
+  range.field = sv("/v");
+  range.gt.kind = LQL_SELECTOR_BOUND_NUMBER;
+  range.gt.number_text.data = bad_number_text;
+  range.gt.number_text.len = sizeof(bad_number_text);
+  eq = NULL;
+  if (expect_fail("builder_range_nul_number_text",
+                  ctx->selector_build_range(ctx, &range, &eq, &error))) {
+    ctx->selector_destroy(ctx, eq);
+  }
+
+  memcpy(bad_path, "/admin\0/x", sizeof(bad_path));
+  memset(&term, 0, sizeof(term));
+  term.field.data = bad_path;
+  term.field.len = sizeof(bad_path);
+  term.value_present = 1;
+  term.value = sv("yes");
+  eq = NULL;
+  if (expect_fail("builder_eq_nul_field",
+                  ctx->selector_build_string(ctx, LQL_SELECTOR_NODE_EQ, &term,
+                                             NULL, &eq, &error))) {
+    ctx->selector_destroy(ctx, eq);
+  }
+
+  memset(&range, 0, sizeof(range));
+  range.field.data = bad_path;
+  range.field.len = sizeof(bad_path);
+  range.gt.kind = LQL_SELECTOR_BOUND_NUMBER;
+  range.gt.number_text = sv("1");
+  eq = NULL;
+  if (expect_fail("builder_range_nul_field",
+                  ctx->selector_build_range(ctx, &range, &eq, &error))) {
+    ctx->selector_destroy(ctx, eq);
+  }
+
+  memset(&date, 0, sizeof(date));
+  date.field.data = bad_path;
+  date.field.len = sizeof(bad_path);
+  date.since_kind = LQL_SELECTOR_SINCE_TODAY;
+  eq = NULL;
+  if (expect_fail("builder_date_nul_field",
+                  ctx->selector_build_date(ctx, &date, &eq, &error))) {
+    ctx->selector_destroy(ctx, eq);
+  }
+
+  memset(&in_term, 0, sizeof(in_term));
+  in_term.field.data = bad_path;
+  in_term.field.len = sizeof(bad_path);
+  in_term.any_count = 1u;
+  any_values[0] = sv("prod");
+  eq = NULL;
+  if (expect_fail(
+          "builder_in_nul_field",
+          ctx->selector_build_in(ctx, &in_term, any_values, &eq, &error))) {
+    ctx->selector_destroy(ctx, eq);
+  }
+
+  eq = NULL;
+  term.field.data = bad_path;
+  term.field.len = sizeof(bad_path);
+  if (expect_fail("builder_exists_nul_path",
+                  ctx->selector_build_exists(ctx, term.field, &eq, &error))) {
     ctx->selector_destroy(ctx, eq);
   }
 
@@ -996,9 +1170,12 @@ static void test_invalid_cases(lql *ctx) {
       "range{gte=10}",
       "range{field=/progress,gte=10,lt=2025-01-01}",
       "range{field=/timestamp,gte=yesterday}",
+      "range{field=/timestamp,gte=2025-01-01T00:00:00+12:}",
       "date{field=/timestamp,since=yesterday,after=2025-01-01}",
       "date{field=/timestamp,after=2025-01-01,gt=2025-01-02}",
       "date{field=/timestamp,before=2025-01-03,lt=2025-01-02}",
+      "date{field=/timestamp,value=2025-01-01T00:00:00+12:}",
+      "date{field=/timestamp,value=2}",
       "date{after=2025-01-01}",
       "date{field=/timestamp,since=tomorrowish}",
       "exists{}",
@@ -1017,11 +1194,33 @@ static void test_invalid_cases(lql *ctx) {
       "eq{field=/status,value=\"open}",
       "eq{field=/status,value=open}}",
       "/count>="};
+  static const char *bad_json[] = {
+      "{\"eq\\u0000junk\":{\"field\":\"/x\",\"value\":\"a\"}}",
+      "{\"eq\":{\"field\\u0000junk\":\"/x\",\"value\":\"a\"}}",
+      "{\"eq\":{\"field\":\"/admin\\u0000/x\",\"value\":\"yes\"}}",
+      "{\"exists\":\"/admin\\u0000/x\"}",
+      "{\"contains\":{\"field\":\"/v\",\"any\":\"a\\u0000b\"}}",
+      "{\"in\":{\"field\":\"/v\",\"any\":\"a\\u0000b\"}}",
+      "{\"contains\":{\"field\":\"/v\",\"ignoreCase\":\"t\\u0000junk\","
+      "\"value\":\"A\"}}",
+      "{\"eq\":{\"field\":\"/v\",\"value\":\"\xc0\x80\"}}",
+      "{\"eq\":{\"field\":\"/v\",\"value\":\"\xe2\x28\xa1\"}}",
+      "{\"eq\":{\"field\":\"/v\",\"value\":\"\xf4\x90\x80\x80\"}}",
+      "{\"range\":{\"field\":\"/x\",\"gte\":\"1\\u0000junk\"}}",
+      "{\"date\":{\"field\":\"/timestamp\",\"since\":\"today\\u0000junk\"}}"};
   size_t i;
   for (i = 0u; i < sizeof(bad_exprs) / sizeof(bad_exprs[0]); ++i) {
     selector = NULL;
     if (expect_fail("invalid_expr", ctx->selector_parse(ctx, bad_exprs[i],
                                                         &selector, &error))) {
+      ctx->selector_destroy(ctx, selector);
+    }
+  }
+  for (i = 0u; i < sizeof(bad_json) / sizeof(bad_json[0]); ++i) {
+    selector = NULL;
+    if (expect_fail("invalid_json", ctx->selector_parse_json(
+                                        ctx, bad_json[i], strlen(bad_json[i]),
+                                        &selector, &error))) {
       ctx->selector_destroy(ctx, selector);
     }
   }

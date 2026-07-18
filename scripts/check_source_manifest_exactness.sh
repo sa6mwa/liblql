@@ -26,7 +26,7 @@ if [ ! -f "$archive" ]; then
   exit 1
 fi
 
-rm -rf "$work"
+sh "$root/scripts/remove_path.sh" "$work"
 mkdir -p "$work/extract"
 tar -xzf "$archive" -C "$work/extract"
 prefix=$work/extract/$archive_root

@@ -15,8 +15,6 @@
 #include <string.h>
 
 #define LQL_FLAT_EQ_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
-#define LQL_FLAT_CONTAINS_NEEDLE_MAX 256u
-#define LQL_FLAT_ICONTAINS_NEEDLE_MAX (LQL_FLAT_CONTAINS_NEEDLE_MAX * 2u)
 typedef struct lql_flat_eq_selector_group {
   const lql_selector *selector;
   size_t first;
@@ -37,8 +35,8 @@ typedef struct lql_flat_eq_program {
   lql_json_capture_key *capture_keys;
   lql_json_capture_span *capture_spans;
   size_t capture_key_count;
-  size_t (*contains_failures)[LQL_FLAT_ICONTAINS_NEEDLE_MAX];
-  char (*icontains_needles)[LQL_FLAT_ICONTAINS_NEEDLE_MAX];
+  size_t **contains_failures;
+  char **icontains_needles;
   size_t term_count;
   int stop_matching_on_hit;
   unsigned long stop_hit_mask;
@@ -68,6 +66,17 @@ static void lql_flat_eq_program_cleanup(lql_flat_eq_program *program) {
     return;
   }
   if (program->allocator != NULL) {
+    size_t i;
+    for (i = 0u; i < program->term_count; ++i) {
+      if (program->contains_failures != NULL) {
+        program->allocator->destroy(program->allocator,
+                                    program->contains_failures[i]);
+      }
+      if (program->icontains_needles != NULL) {
+        program->allocator->destroy(program->allocator,
+                                    program->icontains_needles[i]);
+      }
+    }
     program->allocator->destroy(program->allocator,
                                 program->direct_mutation_actions);
     program->allocator->destroy(program->allocator,
@@ -456,23 +465,62 @@ static int lql_flat_eq_contains_failure(lql_flat_eq_program *program,
                                         lql_json_flat_eq_term *term) {
   size_t i;
   size_t matched;
-  if (program == NULL || term == NULL || term->value == NULL ||
-      term->value_len == 0u ||
-      term->value_len > LQL_FLAT_ICONTAINS_NEEDLE_MAX) {
+  size_t *failure;
+  if (program == NULL || term == NULL || term->value == NULL) {
     return 0;
   }
-  term->contains_failure = program->contains_failures[program->term_count];
-  term->contains_failure[0] = 0u;
+  if (term->value_len == 0u) {
+    term->contains_failure = NULL;
+    return 1;
+  }
+  failure = (size_t *)program->allocator->calloc(
+      program->allocator, term->value_len, sizeof(*failure));
+  if (failure == NULL) {
+    return 0;
+  }
+  program->contains_failures[program->term_count] = failure;
+  term->contains_failure = failure;
   matched = 0u;
   for (i = 1u; i < term->value_len; ++i) {
     while (matched != 0u && term->value[i] != term->value[matched]) {
-      matched = term->contains_failure[matched - 1u];
+      matched = failure[matched - 1u];
     }
     if (term->value[i] == term->value[matched]) {
       ++matched;
     }
-    term->contains_failure[i] = matched;
+    failure[i] = matched;
   }
+  return 1;
+}
+
+static int lql_flat_eq_lower_value(lql_flat_eq_program *program,
+                                   const char *value, size_t value_len,
+                                   const char **out_value,
+                                   size_t *out_value_len) {
+  char *lowered;
+  size_t capacity;
+  size_t lowered_len;
+
+  if (program == NULL || out_value == NULL || out_value_len == NULL ||
+      (value == NULL && value_len != 0u)) {
+    return 0;
+  }
+  if (value_len > ((size_t)-1 - 1u) / 2u) {
+    return 0;
+  }
+  capacity = value_len * 2u + 1u;
+  lowered = (char *)program->allocator->alloc(program->allocator, capacity);
+  if (lowered == NULL) {
+    return 0;
+  }
+  if (!lql_unicode_utf8_lower(value == NULL ? "" : value, value_len, lowered,
+                              capacity, &lowered_len)) {
+    program->allocator->destroy(program->allocator, lowered);
+    return 0;
+  }
+  program->icontains_needles[program->term_count] = lowered;
+  *out_value = lowered;
+  *out_value_len = lowered_len;
   return 1;
 }
 
@@ -501,6 +549,40 @@ static int lql_flat_eq_path_segment_index(const char *path, size_t segment,
     if (value > ((size_t)-1 - digit) / 10u)
       return 0;
     value = value * 10u + digit;
+  }
+  *out = value;
+  return 1;
+}
+
+static int lql_flat_eq_parse_unsigned_integer_token(const char *text,
+                                                    size_t len,
+                                                    unsigned long *out) {
+  unsigned long value;
+  unsigned long digit;
+  size_t i;
+  if (text == NULL || len == 0u || out == NULL) {
+    return 0;
+  }
+  if (text[0] == '0') {
+    if (len != 1u) {
+      return 0;
+    }
+    *out = 0ul;
+    return 1;
+  }
+  if (text[0] < '1' || text[0] > '9') {
+    return 0;
+  }
+  value = 0ul;
+  for (i = 0u; i < len; ++i) {
+    if (text[i] < '0' || text[i] > '9') {
+      return 0;
+    }
+    digit = (unsigned long)(text[i] - '0');
+    if (value > (ULONG_MAX - digit) / 10ul) {
+      return 0;
+    }
+    value = value * 10ul + digit;
   }
   *out = value;
   return 1;
@@ -607,10 +689,9 @@ static int lql_flat_eq_append_contains(
       value_len = selector->any_lens[i];
     } else {
       value = selector->value;
-      value_len = strlen(value);
+      value_len = selector->value_len;
     }
-    if (value == NULL || value_len == 0u ||
-        value_len > LQL_FLAT_CONTAINS_NEEDLE_MAX) {
+    if (value == NULL) {
       return 0;
     }
     term = &program->terms[program->term_count];
@@ -619,13 +700,10 @@ static int lql_flat_eq_append_contains(
     term->field = field + 1;
     term->field_len = first_segment_len;
     if (ignore_case) {
-      if (!lql_unicode_utf8_lower(
-              value, value_len, program->icontains_needles[program->term_count],
-              LQL_FLAT_ICONTAINS_NEEDLE_MAX, &term->value_len) ||
-          term->value_len == 0u) {
+      if (!lql_flat_eq_lower_value(program, value, value_len, &term->value,
+                                   &term->value_len)) {
         return 0;
       }
-      term->value = program->icontains_needles[program->term_count];
     } else {
       term->value = value;
       term->value_len = value_len;
@@ -639,6 +717,12 @@ static int lql_flat_eq_append_contains(
     term->path_any_wildcards = path_any_wildcards;
     term->path_recursive_segments = path_recursive_segments;
     if (!lql_flat_eq_contains_failure(program, term)) {
+      if (program->icontains_needles[program->term_count] != NULL) {
+        program->allocator->destroy(
+            program->allocator,
+            program->icontains_needles[program->term_count]);
+        program->icontains_needles[program->term_count] = NULL;
+      }
       return 0;
     }
     lql_flat_eq_cache_paths(term);
@@ -765,6 +849,30 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     term->range_gte = selector->range_gte;
     term->range_lt = selector->range_lt;
     term->range_lte = selector->range_lte;
+    term->range_gt_text = selector->range_gt_text;
+    term->range_gt_text_len =
+        selector->range_gt_text == NULL ? 0u : strlen(selector->range_gt_text);
+    term->range_gt_unsigned_ready = lql_flat_eq_parse_unsigned_integer_token(
+        term->range_gt_text, term->range_gt_text_len, &term->range_gt_unsigned);
+    term->range_gte_text = selector->range_gte_text;
+    term->range_gte_text_len = selector->range_gte_text == NULL
+                                   ? 0u
+                                   : strlen(selector->range_gte_text);
+    term->range_gte_unsigned_ready = lql_flat_eq_parse_unsigned_integer_token(
+        term->range_gte_text, term->range_gte_text_len,
+        &term->range_gte_unsigned);
+    term->range_lt_text = selector->range_lt_text;
+    term->range_lt_text_len =
+        selector->range_lt_text == NULL ? 0u : strlen(selector->range_lt_text);
+    term->range_lt_unsigned_ready = lql_flat_eq_parse_unsigned_integer_token(
+        term->range_lt_text, term->range_lt_text_len, &term->range_lt_unsigned);
+    term->range_lte_text = selector->range_lte_text;
+    term->range_lte_text_len = selector->range_lte_text == NULL
+                                   ? 0u
+                                   : strlen(selector->range_lte_text);
+    term->range_lte_unsigned_ready = lql_flat_eq_parse_unsigned_integer_token(
+        term->range_lte_text, term->range_lte_text_len,
+        &term->range_lte_unsigned);
     term->has_range_gt = selector->has_range_gt;
     term->has_range_gte = selector->has_range_gte;
     term->has_range_lt = selector->has_range_lt;
@@ -902,17 +1010,14 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
       term->value = NULL;
       term->value_len = 0u;
     } else if (term->kind == LQL_JSON_FLAT_TERM_IPREFIX) {
-      if (!lql_unicode_utf8_lower(
-              selector->value, strlen(selector->value),
-              program->icontains_needles[program->term_count],
-              LQL_FLAT_ICONTAINS_NEEDLE_MAX, &term->value_len) ||
-          term->value_len == 0u) {
+      if (!lql_flat_eq_lower_value(program, selector->value,
+                                   selector->value_len, &term->value,
+                                   &term->value_len)) {
         return 0;
       }
-      term->value = program->icontains_needles[program->term_count];
     } else {
       term->value = selector->value;
-      term->value_len = strlen(selector->value);
+      term->value_len = selector->value_len;
     }
   }
   lql_flat_eq_cache_paths(term);
@@ -1158,18 +1263,31 @@ static int lql_flat_eq_projection_segment_index(const char *segment,
 }
 
 static int
-lql_flat_eq_projection_child_array(const lql_flat_eq_program *program,
-                                   size_t anchor, size_t depth) {
+lql_flat_eq_projection_child_shape(const lql_flat_eq_program *program,
+                                   size_t anchor, size_t depth,
+                                   int *out_array) {
   size_t i;
   size_t index;
+  int have_array;
+  int have_object;
+  have_array = 0;
+  have_object = 0;
   for (i = 0u; i < program->capture_key_count; ++i) {
     if (program->capture_spans[i].found &&
         program->capture_keys[i].segment_count > depth &&
-        lql_flat_eq_projection_prefix(program, anchor, i, depth))
-      return lql_flat_eq_projection_segment_index(
-          program->capture_keys[i].segments[depth], &index);
+        lql_flat_eq_projection_prefix(program, anchor, i, depth)) {
+      if (lql_flat_eq_projection_segment_index(
+              program->capture_keys[i].segments[depth], &index)) {
+        have_array = 1;
+      } else {
+        have_object = 1;
+      }
+    }
   }
-  return 0;
+  if (have_array && have_object)
+    return 0;
+  *out_array = have_array;
+  return 1;
 }
 
 static lql_status lql_flat_eq_json_string(lql_flat_eq_state *state,
@@ -1426,14 +1544,16 @@ done:
 static lql_status
 lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
                                   const lql_mutation_action *action,
-                                  lql_error *error) {
+                                  int validate_utf8, lql_error *error) {
   static const char hex[] = "0123456789abcdef";
   unsigned char buffer[4096];
+  lql_flat_eq_utf8_state utf8;
   lql_flat_eq_file_stream stream;
   size_t amount;
   size_t i;
   lql_status status;
 
+  memset(&utf8, 0, sizeof(utf8));
   status = lql_flat_eq_file_open(action, &stream, error);
   if (status != LQL_STATUS_OK)
     return status;
@@ -1448,6 +1568,20 @@ lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
     for (i = 0u; i < amount; ++i) {
       unsigned char ch;
       ch = buffer[i];
+      if (validate_utf8) {
+        if (ch == 0u) {
+          lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                        "textfile mutation value contains NUL byte");
+          status = LQL_STATUS_JSON_ERROR;
+          goto done;
+        }
+        if (!lql_flat_eq_utf8_accept(&utf8, ch)) {
+          lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                        "textfile mutation value is not valid UTF-8");
+          status = LQL_STATUS_JSON_ERROR;
+          goto done;
+        }
+      }
       if (ch == (unsigned char)'"' || ch == (unsigned char)'\\') {
         status = lql_flat_eq_write(state, "\\", 1u, error);
         if (status == LQL_STATUS_OK)
@@ -1467,6 +1601,11 @@ lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
       if (status != LQL_STATUS_OK)
         goto done;
     }
+  }
+  if (status == LQL_STATUS_OK && validate_utf8 && utf8.remaining != 0) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "textfile mutation value is not valid UTF-8");
+    status = LQL_STATUS_JSON_ERROR;
   }
   if (status == LQL_STATUS_OK)
     status = lql_flat_eq_write(state, "\"", 1u, error);
@@ -1580,13 +1719,46 @@ static lql_status lql_flat_eq_file_value(lql_flat_eq_state *state,
     status = lql_flat_eq_file_textlike(action, 1, &textlike, error);
     if (status != LQL_STATUS_OK)
       return status;
-    return lql_flat_eq_file_text_json_string(state, action, error);
+    /*
+     * Explicit textfile: values must fail before any record bytes are emitted.
+     * The emit pass still validates as a race guard if the file changes between
+     * validation and streaming, but the ordinary invalid-input path is clean.
+     */
+    return lql_flat_eq_file_text_json_string(state, action, 1, error);
   }
   status = lql_flat_eq_file_textlike(action, 0, &textlike, error);
   if (status != LQL_STATUS_OK)
     return status;
-  return textlike ? lql_flat_eq_file_text_json_string(state, action, error)
+  return textlike ? lql_flat_eq_file_text_json_string(state, action, 1, error)
                   : lql_flat_eq_file_base64_json_string(state, action, error);
+}
+
+static lql_status
+lql_flat_eq_preflight_file_mutations(const lql_flat_eq_program *program,
+                                     lql_error *error) {
+  size_t i;
+  int textlike;
+  lql_status status;
+
+  if (program == NULL)
+    return LQL_STATUS_INVALID_ARGUMENT;
+  for (i = 0u; i < program->direct_mutation_action_count; ++i) {
+    const lql_mutation_action *action;
+    action = program->direct_mutation_actions[i];
+    if (action->kind == LQL_MUTATION_SET &&
+        action->value_kind == LQL_MUTATION_VALUE_FILE_TEXT) {
+      /*
+       * Explicit textfile: mutations are deterministic input validation, so
+       * fail before scanning starts. That preserves the stream contract:
+       * invalid mutation inputs never leave consumers with a valid-looking
+       * prefix.
+       */
+      status = lql_flat_eq_file_textlike(action, 1, &textlike, error);
+      if (status != LQL_STATUS_OK)
+        return status;
+    }
+  }
+  return LQL_STATUS_OK;
 }
 
 static lql_status lql_flat_eq_projection_key(lql_flat_eq_state *state,
@@ -4105,7 +4277,14 @@ static lql_status lql_flat_eq_projection_node(lql_flat_eq_state *state,
                                               const lql_json_spool *spool,
                                               size_t anchor, size_t depth,
                                               lql_error *error) {
-  if (lql_flat_eq_projection_child_array(state->program, anchor, depth))
+  int child_array;
+  if (!lql_flat_eq_projection_child_shape(state->program, anchor, depth,
+                                          &child_array)) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "projection paths conflict for JSON object");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (child_array)
     return lql_flat_eq_projection_array(state, spool, anchor, depth, error);
   return lql_flat_eq_projection_object(state, spool, anchor, depth, error);
 }
@@ -4182,9 +4361,7 @@ lql_flat_eq_projection_paths_compatible(const lql_projection *projection) {
                                                           &left_index);
         right_array = lql_flat_eq_projection_segment_index(
             right->segments[depth], &right_index);
-        if (left_array != right_array)
-          return 0;
-        if (left_array && left_index == right_index &&
+        if (left_array && right_array && left_index == right_index &&
             strcmp(left->segments[depth], right->segments[depth]) != 0)
           return 0;
       }
@@ -4541,6 +4718,7 @@ static lql_status lql_flat_eq_scan_term_batch(
   batch.hits = hits;
   batch.term_offset = offset;
   batch.term_count = count;
+  request.allocator = program->allocator;
   request.reader = lql_json_spool_read;
   request.reader_user = &reader;
   request.terms = program->scan_terms + offset;
@@ -4577,6 +4755,7 @@ static lql_status lql_flat_eq_scan_capture_batch(const lql_json_spool *source,
   batch.target = program->capture_spans + offset;
   batch.source = spans;
   batch.count = count;
+  request.allocator = program->allocator;
   request.reader = lql_json_spool_read;
   request.reader_user = &reader;
   request.spool = &capture_spool;
@@ -4696,6 +4875,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   lql_flat_eq_batched_state batched_state;
   lql_flat_eq_alias_state alias_state;
   int cancelled;
+  int limit_stop;
   int batched;
   int aliased;
   int all_terms_required;
@@ -4714,15 +4894,27 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   time_bounds_ptr = NULL;
   if (lql_flat_eq_selector_needs_time(request->selector)) {
     time_t now;
+    lql_int64 now_seconds;
+    int default_clock_failed;
     memset(&time_bounds, 0, sizeof(time_bounds));
-    now = request->time_now != NULL ? request->time_now(request->time_user)
-                                    : time(NULL);
-    time_bounds.now_ready = lql_temporal_from_time_t(now, 0, &time_bounds.now);
+    if (request->time_now != NULL) {
+      now = request->time_now(request->time_user);
+      default_clock_failed = 0;
+    } else {
+      now = time(NULL);
+      default_clock_failed = now == (time_t)-1;
+    }
+    time_bounds.now_ready = !default_clock_failed &&
+                            lql_temporal_from_time_t(now, 0, &time_bounds.now);
     time_bounds.today_ready =
+        !default_clock_failed &&
         lql_temporal_from_time_t(now, 1, &time_bounds.today);
+    now_seconds = (lql_int64)now;
     time_bounds.yesterday_ready =
-        now != (time_t)-1 && lql_temporal_from_time_t(now - (time_t)86400, 1,
-                                                      &time_bounds.yesterday);
+        !default_clock_failed &&
+        now_seconds >= LQL_INT64_MIN_VALUE + (lql_int64)86400 &&
+        lql_temporal_from_seconds(now_seconds - (lql_int64)86400, 1,
+                                  &time_bounds.yesterday);
     time_bounds_ptr = &time_bounds;
   }
   if (!lql_flat_eq_selector_term_count(request->selector, &term_capacity)) {
@@ -4773,6 +4965,14 @@ lql_status lql_stream_execute_flat_eq(lql *self,
       !lql_flat_eq_mutation_append(&program, request->mutation)) {
     lql_flat_eq_program_cleanup(&program);
     return LQL_STATUS_OK;
+  }
+  if (mutation_capacity != 0u) {
+    status = lql_flat_eq_preflight_file_mutations(&program, error);
+    if (status != LQL_STATUS_OK) {
+      *out_handled = 1;
+      lql_flat_eq_program_cleanup(&program);
+      return status;
+    }
   }
   if (!lql_flat_eq_program_build_selector_index(&program)) {
     lql_flat_eq_program_cleanup(&program);
@@ -4875,6 +5075,7 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   }
   memset(&scan_request, 0, sizeof(scan_request));
   cancelled = 0;
+  scan_request.allocator = program.allocator;
   scan_request.reader = request->reader;
   scan_request.reader_user = request->reader_user;
   scan_request.terms =
@@ -4896,6 +5097,8 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   scan_request.cancelled = request->cancelled;
   scan_request.cancel_user = request->cancel_user;
   scan_request.out_cancelled = &cancelled;
+  limit_stop = 0;
+  scan_request.out_limit_stop = &limit_stop;
   scan_request.record = batched ? (aliased ? lql_flat_eq_alias_record
                                            : lql_flat_eq_batched_record)
                                 : lql_flat_eq_record;
@@ -4910,13 +5113,13 @@ lql_status lql_stream_execute_flat_eq(lql *self,
   }
   program.allocator->destroy(program.allocator, batched_scan_hits);
   lql_flat_eq_program_cleanup(&program);
-  if (status == LQL_STATUS_STOP && !result->stopped_early &&
+  if (status == LQL_STATUS_STOP && !result->stopped_early && limit_stop &&
       request->limits.max_records != 0u &&
       result->records_seen >= request->limits.max_records) {
     result->stopped_early = 1;
     result->stop_reason = LQL_STREAM_STOP_RECORD_LIMIT;
   }
-  if (status == LQL_STATUS_STOP && !result->stopped_early &&
+  if (status == LQL_STATUS_STOP && !result->stopped_early && limit_stop &&
       request->limits.max_bytes != 0u &&
       result->bytes_consumed >= request->limits.max_bytes) {
     result->stopped_early = 1;

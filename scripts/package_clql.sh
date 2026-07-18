@@ -37,10 +37,10 @@ stage=build/package/$root_name
 archive=$dist_dir/$root_name.tar.gz
 checksums=$dist_dir/$library_project-$version-CHECKSUMS
 
-rm -rf "$stage"
+sh scripts/remove_path.sh "$stage"
 mkdir -p "$stage/bin" "$stage/share/doc/clql" "$dist_dir"
 if [ "$checksum_mode" != "append" ]; then
-  rm -f "$dist_dir"/$library_project-*.tar.gz \
+  sh scripts/remove_path.sh "$dist_dir"/$library_project-*.tar.gz \
     "$dist_dir"/clql-*.tar.gz \
     "$dist_dir"/$library_project-*-1.rockspec \
     "$dist_dir"/$library_project-*-1.src.rock \

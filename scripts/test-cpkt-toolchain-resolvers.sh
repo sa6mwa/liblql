@@ -4,7 +4,7 @@ set -euo pipefail
 skill_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 bootlin_resolver="$skill_dir/scripts/cpkt-toolchains.sh"
 cache=$(mktemp -d "${TMPDIR:-/tmp}/cpkt-toolchain-test.XXXXXX")
-trap 'rm -rf "$cache"' EXIT HUP INT TERM
+trap 'sh "$skill_dir/scripts/remove_path.sh" "$cache"' EXIT HUP INT TERM
 
 fail() {
   printf 'test-cpkt-toolchain-resolvers: %s\n' "$*" >&2

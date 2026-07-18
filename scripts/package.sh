@@ -47,10 +47,10 @@ stage=build/package/$root_name
 archive=$dist_dir/$root_name.tar.gz
 checksums=$dist_dir/$project-$version-CHECKSUMS
 
-rm -rf "$stage"
+sh scripts/remove_path.sh "$stage"
 mkdir -p "$dist_dir" "$(dirname "$stage")"
 if [ "$checksum_mode" != "append" ]; then
-  rm -f "$dist_dir"/$project-*.tar.gz \
+  sh scripts/remove_path.sh "$dist_dir"/$project-*.tar.gz \
     "$dist_dir"/clql-*.tar.gz \
     "$dist_dir"/$project-*-1.rockspec \
     "$dist_dir"/$project-*-1.src.rock \

@@ -39,6 +39,8 @@ local selector = assert_no_error(client:selector_parse('/status="open"'), nil,
                                  "selector parse")
 assert_equal(selector:is_empty(), false, "non-empty selector")
 assert_equal(selector:capabilities().eq, true, "selector eq capability")
+assert_equal(client.__gc, nil, "client finalizer is not callable")
+assert_equal(selector.__gc, nil, "selector finalizer is not callable")
 assert_equal(client:selector_capabilities(selector).eq, true,
              "client selector capability from userdata")
 assert_equal(client:selector_capabilities('/status="open"').eq, true,

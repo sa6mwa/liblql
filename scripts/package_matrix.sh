@@ -16,7 +16,7 @@ else
 fi
 
 mkdir -p "$dist_dir"
-rm -f "$dist_dir"/$project-*.tar.gz "$dist_dir"/clql-*.tar.gz \
+sh scripts/remove_path.sh "$dist_dir"/$project-*.tar.gz "$dist_dir"/clql-*.tar.gz \
   "$dist_dir"/$project-*-CHECKSUMS
 
 mode=reset

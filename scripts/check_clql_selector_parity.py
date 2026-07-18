@@ -203,10 +203,13 @@ def main():
         ("contains alias any", ["contains{field=/msg,a=timeout|degraded}"]),
         ("contains ignore case bool alias", ["contains{field=/msg,value=TIMEOUT,ignoreCase=t}"]),
         ("contains omitted value", ["contains{field=/msg}"]),
+        ("contains empty value", ['contains{field=/msg,value=""}']),
+        ("icontains empty value", ['icontains{field=/msg,value=""}']),
         ("icontains value", ["icontains{field=/service,value=edge}"]),
         ("icontains alias any", ["icontains{field=/service,a=AUTH|EDGE}"]),
         ("prefix value", ["prefix{field=/service,value=AUTH}"]),
         ("iprefix value", ["iprefix{field=/service,value=auth}"]),
+        ("iprefix empty value", ['iprefix{field=/service,value=""}']),
         ("prefix omitted value", ["prefix{field=/service}"]),
         ("range full", ["range{field=/progress,gte=50,lt=80}"]),
         ("date after before", ["date{field=/timestamp,after=2025-01-01,before=2025-02-01}"]),
@@ -269,8 +272,20 @@ def main():
         sum((["-f", f"/k{i}"] for i in range(wide_count)), [])
         + ["/id=wide"],
     )
+    long_needle = "a" * 300
+    long_input = compact({"id": "long", "msg": "x" + long_needle + "y"}) + "\n"
+    assert_case(
+        "contains needle beyond old fast-path capacity",
+        long_input,
+        [f'contains{{field=/msg,value="{long_needle}"}}'],
+    )
+    assert_case(
+        "icontains needle beyond old fast-path capacity",
+        long_input,
+        [f'icontains{{field=/msg,value="{long_needle.upper()}"}}'],
+    )
 
-    print(f"clql selector parity: {len(cases) + 4} cases passed")
+    print(f"clql selector parity: {len(cases) + 6} cases passed")
 
 
 if __name__ == "__main__":

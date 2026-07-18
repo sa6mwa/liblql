@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 
 # Resolve only lifecycle-pinned compiler collections. Linux must never fall
 # back to a host-installed compiler or binutils collection.
@@ -187,7 +188,7 @@ install_bootlin_locked() {
     actual=$(sha256_file "$archive")
     if [[ "$actual" != "$sha256" ]]; then
       printf 'cpkt-toolchains: discarding corrupt cached archive: %s\n' "$archive" >&2
-      rm -f -- "$archive"
+      sh "$script_dir/scripts/remove_path.sh" "$archive"
     fi
   fi
   if [[ ! -f "$archive" ]]; then
@@ -205,9 +206,9 @@ install_bootlin_locked() {
   mkdir -p "$extract"
   tar -C "$extract" -xf "$archive"
   [[ -d "$extract/$name/bin" ]] || die "unexpected archive layout for $name.tar.xz"
-  rm -rf "$root"
+  sh "$script_dir/scripts/remove_path.sh" "$root"
   mv "$extract/$name" "$root"
-  rm -rf "$extract"
+  sh "$script_dir/scripts/remove_path.sh" "$extract"
   trap - EXIT HUP INT TERM
   bootlin_ready "$root" "$prefix" "$root/$sysroot_rel" || die "incomplete extracted Bootlin toolchain: $root"
 }

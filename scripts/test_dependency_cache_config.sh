@@ -3,7 +3,7 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/liblql-dependency-cache.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+trap 'sh "$root/scripts/remove_path.sh" "$tmp"' EXIT HUP INT TERM
 test_script=$root/tests/dependency_cache_config.cmake
 
 env CPKT_DEPENDENCY_CACHE="$tmp/environment" XDG_CACHE_HOME="$tmp/xdg" \

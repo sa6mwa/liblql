@@ -424,7 +424,11 @@ static unsigned long peak_rss_bytes(void) {
   if (getrusage(RUSAGE_SELF, &usage) != 0 || usage.ru_maxrss < 0L) {
     return 0ul;
   }
+#if defined(__APPLE__) && defined(__MACH__)
+  return (unsigned long)usage.ru_maxrss;
+#else
   return (unsigned long)usage.ru_maxrss * 1024ul;
+#endif
 }
 
 static void json_string(const char *text) {

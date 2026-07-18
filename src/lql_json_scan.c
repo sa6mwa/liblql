@@ -3,9 +3,7 @@
 #include "lql_unicode_lower.h"
 
 #include <errno.h>
-#include <float.h>
 #include <limits.h>
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -19,11 +17,46 @@
 #define LQL_JSON_EMIT_BUFFER_SIZE 65536u
 #define LQL_JSON_MAX_DEPTH 128u
 #define LQL_JSON_FLAT_TERM_CAPACITY (sizeof(unsigned long) * CHAR_BIT)
-#define LQL_JSON_NUMBER_MATCH_BYTES 128u
+#define LQL_JSON_NUMBER_MATCH_BYTES 8192u
+#define LQL_JSON_NUMBER_MATCH_HEAP_LIMIT (128u * 1024u)
+#define LQL_JSON_NUMBER_COEFF_PREFIX_BYTES 1024u
+#define LQL_JSON_NUMBER_EXP_PREFIX_BYTES 1024u
+#define LQL_JSON_NUMBER_EMIT_COEFF 1
+#define LQL_JSON_NUMBER_EMIT_EXPONENT 2
+
+typedef struct lql_json_number_summary {
+  char coeff_prefix[LQL_JSON_NUMBER_COEFF_PREFIX_BYTES];
+  char exponent_prefix[LQL_JSON_NUMBER_EXP_PREFIX_BYTES];
+  size_t coeff_prefix_len;
+  size_t exponent_prefix_len;
+  size_t coeff_len_raw;
+  size_t exponent_digit_count;
+  size_t trailing_zeroes;
+  size_t fraction_digits;
+  long exponent;
+  int negative;
+  int zero;
+  int in_fraction;
+  int in_exponent;
+  int exponent_sign_allowed;
+  int exponent_negative;
+  int exponent_started;
+  int exponent_clamped;
+} lql_json_number_summary;
+
+typedef struct lql_json_number_digit_cursor {
+  size_t pos;
+  size_t index;
+  int started;
+  int done;
+  int in_exponent;
+  int sign_allowed;
+} lql_json_number_digit_cursor;
 
 typedef struct lql_json_scan {
   lql_stream_reader_fn reader;
   void *reader_user;
+  lql_allocator *allocator;
   lql_stream_cancel_fn cancelled;
   void *cancel_user;
   int *out_cancelled;
@@ -64,16 +97,48 @@ typedef struct lql_json_scan {
   size_t match_term_segment[LQL_JSON_FLAT_TERM_CAPACITY];
   size_t key_term_segment[LQL_JSON_FLAT_TERM_CAPACITY];
   unsigned long number_range_active;
-  unsigned long number_range_failed;
-  char number_match[LQL_JSON_NUMBER_MATCH_BYTES];
+  char number_match_stack[LQL_JSON_NUMBER_MATCH_BYTES];
+  char *number_match_heap;
+  char *number_match;
+  size_t number_match_cap;
+  size_t number_match_limit;
   size_t number_match_len;
-  long double number_value;
-  long double number_fraction_scale;
-  int number_negative;
-  int number_stage;
-  int number_exp_negative;
-  int number_exponent;
-  int number_accumulator_failed;
+  size_t number_token_len;
+  unsigned long number_unsigned;
+  int number_match_error;
+  int number_match_overflow;
+  int number_unsigned_ready;
+  int number_unsigned_overflow;
+  int number_summary_active;
+  int number_coeff_cmp[LQL_JSON_FLAT_TERM_CAPACITY];
+  int number_exp_cmp[LQL_JSON_FLAT_TERM_CAPACITY];
+  int number_range_gt_cmp[LQL_JSON_FLAT_TERM_CAPACITY];
+  int number_range_gt_exp_cmp[LQL_JSON_FLAT_TERM_CAPACITY];
+  int number_range_gte_cmp[LQL_JSON_FLAT_TERM_CAPACITY];
+  int number_range_gte_exp_cmp[LQL_JSON_FLAT_TERM_CAPACITY];
+  int number_range_lt_cmp[LQL_JSON_FLAT_TERM_CAPACITY];
+  int number_range_lt_exp_cmp[LQL_JSON_FLAT_TERM_CAPACITY];
+  int number_range_lte_cmp[LQL_JSON_FLAT_TERM_CAPACITY];
+  int number_range_lte_exp_cmp[LQL_JSON_FLAT_TERM_CAPACITY];
+  lql_json_number_digit_cursor number_coeff_cursor[LQL_JSON_FLAT_TERM_CAPACITY];
+  lql_json_number_digit_cursor number_exp_cursor[LQL_JSON_FLAT_TERM_CAPACITY];
+  lql_json_number_digit_cursor
+      number_range_gt_cursor[LQL_JSON_FLAT_TERM_CAPACITY];
+  lql_json_number_digit_cursor
+      number_range_gt_exp_cursor[LQL_JSON_FLAT_TERM_CAPACITY];
+  lql_json_number_digit_cursor
+      number_range_gte_cursor[LQL_JSON_FLAT_TERM_CAPACITY];
+  lql_json_number_digit_cursor
+      number_range_gte_exp_cursor[LQL_JSON_FLAT_TERM_CAPACITY];
+  lql_json_number_digit_cursor
+      number_range_lt_cursor[LQL_JSON_FLAT_TERM_CAPACITY];
+  lql_json_number_digit_cursor
+      number_range_lt_exp_cursor[LQL_JSON_FLAT_TERM_CAPACITY];
+  lql_json_number_digit_cursor
+      number_range_lte_cursor[LQL_JSON_FLAT_TERM_CAPACITY];
+  lql_json_number_digit_cursor
+      number_range_lte_exp_cursor[LQL_JSON_FLAT_TERM_CAPACITY];
+  lql_json_number_summary number_summary;
   unsigned long temporal_range_active;
   unsigned long temporal_range_failed;
   char temporal_match[LQL_JSON_NUMBER_MATCH_BYTES];
@@ -192,102 +257,1124 @@ LQL_JSON_INLINE int lql_json_stop_hit_ready(const lql_json_scan *scan) {
   return (scan->flat_eq_hits & mask) == mask;
 }
 
-static void lql_json_number_range_start(lql_json_scan *scan,
-                                        unsigned long active) {
-  scan->number_range_active = active;
-  scan->number_range_failed = 0ul;
-  scan->number_match_len = 0u;
-  scan->number_value = 0.0L;
-  scan->number_fraction_scale = 0.1L;
-  scan->number_negative = 0;
-  scan->number_stage = 0;
-  scan->number_exp_negative = 0;
-  scan->number_exponent = 0;
-  scan->number_accumulator_failed = 0;
+static long lql_json_clamp_add_long(long left, long right) {
+  if (right > 0 && left > LONG_MAX - right)
+    return LONG_MAX;
+  if (right < 0 && left < LONG_MIN - right)
+    return LONG_MIN;
+  return left + right;
 }
 
-LQL_JSON_INLINE void lql_json_number_range_byte(lql_json_scan *scan,
-                                                unsigned char value) {
+static void lql_json_number_summary_start(lql_json_number_summary *summary) {
+  memset(summary, 0, sizeof(*summary));
+}
+
+static int lql_json_number_summary_digit(lql_json_number_summary *summary,
+                                         unsigned char value, size_t *out_index,
+                                         char *out_digit, int *out_kind) {
+  if (out_index != NULL) {
+    *out_index = 0u;
+  }
+  if (out_digit != NULL) {
+    *out_digit = '0';
+  }
+  if (out_kind != NULL) {
+    *out_kind = 0;
+  }
+  if (summary->in_exponent) {
+    if (value == (unsigned char)'0' && !summary->exponent_started) {
+      return 0;
+    }
+    if (out_index != NULL) {
+      *out_index = summary->exponent_digit_count;
+    }
+    if (out_digit != NULL) {
+      *out_digit = (char)value;
+    }
+    if (out_kind != NULL) {
+      *out_kind = LQL_JSON_NUMBER_EMIT_EXPONENT;
+    }
+    ++summary->exponent_digit_count;
+    summary->exponent_started = 1;
+    if (!summary->exponent_clamped) {
+      long digit;
+      digit = (long)(value - (unsigned char)'0');
+      if (summary->exponent > (LONG_MAX - digit) / 10L) {
+        summary->exponent = LONG_MAX;
+        summary->exponent_clamped = 1;
+      } else {
+        summary->exponent = summary->exponent * 10L + digit;
+      }
+    }
+    if (summary->exponent_prefix_len < sizeof(summary->exponent_prefix)) {
+      summary->exponent_prefix[summary->exponent_prefix_len++] = (char)value;
+    }
+    return 1;
+  }
+  if (summary->in_fraction) {
+    ++summary->fraction_digits;
+  }
+  if (value != (unsigned char)'0' || summary->coeff_len_raw != 0u) {
+    if (out_index != NULL) {
+      *out_index = summary->coeff_len_raw;
+    }
+    if (out_digit != NULL) {
+      *out_digit = (char)value;
+    }
+    if (out_kind != NULL) {
+      *out_kind = LQL_JSON_NUMBER_EMIT_COEFF;
+    }
+    ++summary->coeff_len_raw;
+    if (summary->coeff_prefix_len < sizeof(summary->coeff_prefix)) {
+      summary->coeff_prefix[summary->coeff_prefix_len++] = (char)value;
+    }
+    if (value == (unsigned char)'0') {
+      ++summary->trailing_zeroes;
+    } else {
+      summary->trailing_zeroes = 0u;
+    }
+    return 1;
+  }
+  return 0;
+}
+
+static int lql_json_number_summary_byte(lql_json_number_summary *summary,
+                                        unsigned char value, size_t *out_index,
+                                        char *out_digit, int *out_kind) {
+  if (out_kind != NULL) {
+    *out_kind = 0;
+  }
+  if (value >= (unsigned char)'0' && value <= (unsigned char)'9') {
+    int emitted;
+    emitted = lql_json_number_summary_digit(summary, value, out_index,
+                                            out_digit, out_kind);
+    summary->exponent_sign_allowed = 0;
+    return emitted;
+  }
+  if (value == (unsigned char)'-' && summary->coeff_len_raw == 0u &&
+      !summary->in_fraction && !summary->in_exponent) {
+    summary->negative = 1;
+    return 0;
+  }
+  if (value == (unsigned char)'.') {
+    summary->in_fraction = 1;
+    return 0;
+  }
+  if (value == (unsigned char)'e' || value == (unsigned char)'E') {
+    summary->in_exponent = 1;
+    summary->exponent_sign_allowed = 1;
+    return 0;
+  }
+  if (summary->in_exponent && summary->exponent_sign_allowed &&
+      value == (unsigned char)'-') {
+    summary->exponent_negative = 1;
+    summary->exponent_sign_allowed = 0;
+    return 0;
+  }
+  if (summary->in_exponent && summary->exponent_sign_allowed &&
+      value == (unsigned char)'+') {
+    summary->exponent_sign_allowed = 0;
+  }
+  return 0;
+}
+
+static int lql_json_number_summary_finish(lql_json_number_summary *summary) {
+  if (summary->coeff_len_raw == 0u) {
+    summary->zero = 1;
+    summary->negative = 0;
+    summary->exponent = 0;
+    summary->exponent_negative = 0;
+    return 1;
+  }
+  if (summary->exponent_negative && summary->exponent != LONG_MAX) {
+    summary->exponent = -summary->exponent;
+  } else if (summary->exponent_negative) {
+    summary->exponent = LONG_MIN;
+  }
+  return 1;
+}
+
+static long
+lql_json_number_summary_adjusted(const lql_json_number_summary *summary) {
+  size_t coeff_len;
+  long adjust;
+  if (summary->zero) {
+    return 0;
+  }
+  coeff_len = summary->coeff_len_raw - summary->trailing_zeroes;
+  adjust = coeff_len > (size_t)LONG_MAX ? LONG_MAX : (long)coeff_len;
+  adjust = lql_json_clamp_add_long(adjust,
+                                   summary->fraction_digits > (size_t)LONG_MAX
+                                       ? LONG_MIN
+                                       : -(long)summary->fraction_digits);
+  adjust = lql_json_clamp_add_long(adjust,
+                                   summary->trailing_zeroes > (size_t)LONG_MAX
+                                       ? LONG_MAX
+                                       : (long)summary->trailing_zeroes);
+  return lql_json_clamp_add_long(adjust, summary->exponent);
+}
+
+static long
+lql_json_number_summary_delta(const lql_json_number_summary *summary) {
+  long delta;
+  delta = summary->coeff_len_raw > (size_t)LONG_MAX
+              ? LONG_MAX
+              : (long)summary->coeff_len_raw;
+  return lql_json_clamp_add_long(delta,
+                                 summary->fraction_digits > (size_t)LONG_MAX
+                                     ? LONG_MIN
+                                     : -(long)summary->fraction_digits);
+}
+
+static int lql_json_decimal_cmp(const char *left, size_t left_len,
+                                const char *right, size_t right_len) {
+  while (left_len > 1u && left[0] == '0') {
+    ++left;
+    --left_len;
+  }
+  while (right_len > 1u && right[0] == '0') {
+    ++right;
+    --right_len;
+  }
+  if (left_len != right_len) {
+    return left_len < right_len ? -1 : 1;
+  }
+  if (left_len == 0u) {
+    return right_len == 0u ? 0 : -1;
+  }
+  {
+    int cmp;
+    cmp = memcmp(left, right, left_len);
+    return cmp < 0 ? -1 : (cmp > 0 ? 1 : 0);
+  }
+}
+
+static size_t lql_json_ulong_to_decimal(unsigned long value, char *out) {
+  char tmp[32];
+  size_t len;
+  len = 0u;
+  do {
+    tmp[len++] = (char)('0' + (value % 10ul));
+    value /= 10ul;
+  } while (value != 0ul);
+  {
+    size_t i;
+    for (i = 0u; i < len; ++i) {
+      out[i] = tmp[len - i - 1u];
+    }
+  }
+  return len;
+}
+
+static unsigned long lql_json_number_summary_exponent_magnitude(
+    const lql_json_number_summary *summary) {
+  if (!summary->exponent_negative) {
+    return (unsigned long)summary->exponent;
+  }
+  return summary->exponent == LONG_MIN ? (unsigned long)LONG_MAX + 1ul
+                                       : (unsigned long)(-summary->exponent);
+}
+
+static size_t lql_json_decimal_add_ulong(const char *digits, size_t digits_len,
+                                         unsigned long value, char *out) {
+  char addend[32];
+  char rev[LQL_JSON_NUMBER_EXP_PREFIX_BYTES + 32u];
+  size_t add_len;
+  size_t i;
+  size_t j;
+  size_t out_len;
+  unsigned int carry;
+  add_len = lql_json_ulong_to_decimal(value, addend);
+  i = digits_len;
+  j = add_len;
+  out_len = 0u;
+  carry = 0u;
+  while (i != 0u || j != 0u || carry != 0u) {
+    unsigned int sum;
+    sum = carry;
+    if (i != 0u) {
+      sum += (unsigned int)(digits[--i] - '0');
+    }
+    if (j != 0u) {
+      sum += (unsigned int)(addend[--j] - '0');
+    }
+    rev[out_len++] = (char)('0' + (sum % 10u));
+    carry = sum / 10u;
+  }
+  for (i = 0u; i < out_len; ++i) {
+    out[i] = rev[out_len - i - 1u];
+  }
+  return out_len;
+}
+
+static size_t lql_json_decimal_sub_ulong(const char *digits, size_t digits_len,
+                                         unsigned long value, char *out) {
+  char subtrahend[32];
+  char rev[LQL_JSON_NUMBER_EXP_PREFIX_BYTES + 32u];
+  size_t sub_len;
+  size_t i;
+  size_t j;
+  size_t out_len;
+  int borrow;
+  sub_len = lql_json_ulong_to_decimal(value, subtrahend);
+  i = digits_len;
+  j = sub_len;
+  out_len = 0u;
+  borrow = 0;
+  while (i != 0u) {
+    int digit;
+    digit = (int)(digits[--i] - '0') - borrow;
+    if (j != 0u) {
+      digit -= (int)(subtrahend[--j] - '0');
+    }
+    if (digit < 0) {
+      digit += 10;
+      borrow = 1;
+    } else {
+      borrow = 0;
+    }
+    rev[out_len++] = (char)('0' + digit);
+  }
+  while (out_len > 1u && rev[out_len - 1u] == '0') {
+    --out_len;
+  }
+  for (i = 0u; i < out_len; ++i) {
+    out[i] = rev[out_len - i - 1u];
+  }
+  return out_len;
+}
+
+static int
+lql_json_number_summary_adjusted_decimal(const lql_json_number_summary *summary,
+                                         int *negative, char *digits,
+                                         size_t *digits_len) {
+  char delta_digits[32];
+  size_t delta_len;
+  unsigned long delta_mag;
+  long delta;
+  int delta_negative;
+  int cmp;
+  if (summary->exponent_digit_count > sizeof(summary->exponent_prefix) ||
+      negative == NULL || digits == NULL || digits_len == NULL) {
+    return 0;
+  }
+  delta = lql_json_number_summary_delta(summary);
+  if (delta == LONG_MIN) {
+    return 0;
+  }
+  delta_negative = delta < 0;
+  delta_mag = delta_negative ? (unsigned long)(-delta) : (unsigned long)delta;
+  if (summary->exponent_digit_count == 0u) {
+    delta_len = lql_json_ulong_to_decimal(delta_mag, digits);
+    *negative = delta_negative && delta_mag != 0ul;
+    *digits_len = delta_len;
+    return 1;
+  }
+  if (!summary->exponent_negative && !delta_negative) {
+    *negative = 0;
+    *digits_len = lql_json_decimal_add_ulong(summary->exponent_prefix,
+                                             summary->exponent_prefix_len,
+                                             delta_mag, digits);
+    return 1;
+  }
+  if (summary->exponent_negative && delta_negative) {
+    *negative = 1;
+    *digits_len = lql_json_decimal_add_ulong(summary->exponent_prefix,
+                                             summary->exponent_prefix_len,
+                                             delta_mag, digits);
+    return 1;
+  }
+  delta_len = lql_json_ulong_to_decimal(delta_mag, delta_digits);
+  cmp = lql_json_decimal_cmp(summary->exponent_prefix,
+                             summary->exponent_prefix_len, delta_digits,
+                             delta_len);
+  if (cmp == 0) {
+    *negative = 0;
+    digits[0] = '0';
+    *digits_len = 1u;
+    return 1;
+  }
+  if (!summary->exponent_negative) {
+    *negative = cmp < 0 ? 1 : 0;
+    if (cmp > 0) {
+      *digits_len = lql_json_decimal_sub_ulong(summary->exponent_prefix,
+                                               summary->exponent_prefix_len,
+                                               delta_mag, digits);
+    } else {
+      *digits_len = lql_json_decimal_sub_ulong(
+          delta_digits, delta_len, (unsigned long)summary->exponent, digits);
+    }
+    return 1;
+  }
+  *negative = cmp > 0 ? 1 : 0;
+  if (cmp > 0) {
+    *digits_len = lql_json_decimal_sub_ulong(summary->exponent_prefix,
+                                             summary->exponent_prefix_len,
+                                             delta_mag, digits);
+  } else {
+    *digits_len = lql_json_decimal_sub_ulong(
+        delta_digits, delta_len,
+        lql_json_number_summary_exponent_magnitude(summary), digits);
+  }
+  return 1;
+}
+
+static int lql_json_number_summary_compare_adjusted_decimal(
+    const lql_json_number_summary *left, const lql_json_number_summary *right,
+    int *out) {
+  char left_digits[LQL_JSON_NUMBER_EXP_PREFIX_BYTES + 32u];
+  char right_digits[LQL_JSON_NUMBER_EXP_PREFIX_BYTES + 32u];
+  size_t left_len;
+  size_t right_len;
+  int left_negative;
+  int right_negative;
+  int cmp;
+  if (!lql_json_number_summary_adjusted_decimal(left, &left_negative,
+                                                left_digits, &left_len) ||
+      !lql_json_number_summary_adjusted_decimal(right, &right_negative,
+                                                right_digits, &right_len)) {
+    return 0;
+  }
+  if (left_negative != right_negative) {
+    *out = left_negative ? -1 : 1;
+    return 1;
+  }
+  cmp = lql_json_decimal_cmp(left_digits, left_len, right_digits, right_len);
+  *out = left_negative ? -cmp : cmp;
+  return 1;
+}
+
+static int lql_json_number_summary_compare_clamped_adjusted(
+    const lql_json_number_summary *left, const lql_json_number_summary *right,
+    int exp_cmp, int *out) {
+  int cmp;
+  long left_delta;
+  long right_delta;
+  if (!left->exponent_clamped && !right->exponent_clamped) {
+    return 0;
+  }
+  if (lql_json_number_summary_compare_adjusted_decimal(left, right, out)) {
+    return 1;
+  }
+  if (left->exponent_negative != right->exponent_negative) {
+    *out = left->exponent_negative ? -1 : 1;
+    return 1;
+  }
+  if (left->exponent_negative &&
+      left->exponent_digit_count + 1u < right->exponent_digit_count) {
+    *out = 1;
+    return 1;
+  }
+  if (left->exponent_negative &&
+      right->exponent_digit_count + 1u < left->exponent_digit_count) {
+    *out = -1;
+    return 1;
+  }
+  if (left->exponent_digit_count != right->exponent_digit_count) {
+    cmp = left->exponent_digit_count < right->exponent_digit_count ? -1 : 1;
+  } else if (exp_cmp != 0) {
+    cmp = exp_cmp;
+  } else {
+    left_delta = lql_json_number_summary_delta(left);
+    right_delta = lql_json_number_summary_delta(right);
+    cmp = left_delta < right_delta ? -1 : (left_delta > right_delta ? 1 : 0);
+  }
+  if (left->exponent_negative) {
+    cmp = -cmp;
+  }
+  *out = cmp;
+  return 1;
+}
+
+static int lql_json_number_summary_parse(const char *text, size_t len,
+                                         lql_json_number_summary *out) {
+  size_t i;
+  if (!lql_number_is_json(text, len)) {
+    return 0;
+  }
+  lql_json_number_summary_start(out);
+  for (i = 0u; i < len; ++i) {
+    lql_json_number_summary_byte(out, (unsigned char)text[i], NULL, NULL, NULL);
+  }
+  return lql_json_number_summary_finish(out);
+}
+
+static void
+lql_json_number_digit_cursor_start(lql_json_number_digit_cursor *cursor) {
+  memset(cursor, 0, sizeof(*cursor));
+}
+
+static int
+lql_json_number_coeff_digit_next(const char *text, size_t len,
+                                 lql_json_number_digit_cursor *cursor,
+                                 size_t index, char *out) {
+  if (out == NULL || cursor == NULL) {
+    return 0;
+  }
+  *out = '0';
+  if (text == NULL || cursor->done) {
+    cursor->index = index + 1u;
+    return 1;
+  }
+  if (cursor->pos == 0u && cursor->pos < len && text[cursor->pos] == '-') {
+    ++cursor->pos;
+  }
+  while (cursor->pos < len) {
+    unsigned char ch;
+    ch = (unsigned char)text[cursor->pos++];
+    if (ch == (unsigned char)'e' || ch == (unsigned char)'E') {
+      break;
+    }
+    if (ch < (unsigned char)'0' || ch > (unsigned char)'9') {
+      continue;
+    }
+    if (!cursor->started && ch == (unsigned char)'0') {
+      continue;
+    }
+    cursor->started = 1;
+    if (cursor->index == index) {
+      *out = (char)ch;
+      ++cursor->index;
+      return 1;
+    }
+    ++cursor->index;
+  }
+  cursor->done = 1;
+  if (index >= cursor->index) {
+    cursor->index = index + 1u;
+    return 1;
+  }
+  return 0;
+}
+
+static int
+lql_json_number_exponent_digit_next(const char *text, size_t len,
+                                    lql_json_number_digit_cursor *cursor,
+                                    size_t index, char *out) {
+  if (out == NULL || cursor == NULL) {
+    return 0;
+  }
+  *out = '0';
+  if (text == NULL || cursor->done) {
+    cursor->index = index + 1u;
+    return 1;
+  }
+  while (cursor->pos < len) {
+    unsigned char ch;
+    ch = (unsigned char)text[cursor->pos++];
+    if (!cursor->in_exponent) {
+      if (ch == (unsigned char)'e' || ch == (unsigned char)'E') {
+        cursor->in_exponent = 1;
+        cursor->sign_allowed = 1;
+      }
+      continue;
+    }
+    if (cursor->sign_allowed &&
+        (ch == (unsigned char)'+' || ch == (unsigned char)'-')) {
+      cursor->sign_allowed = 0;
+      continue;
+    }
+    cursor->sign_allowed = 0;
+    if (ch < (unsigned char)'0' || ch > (unsigned char)'9') {
+      break;
+    }
+    if (!cursor->started && ch == (unsigned char)'0') {
+      continue;
+    }
+    cursor->started = 1;
+    if (cursor->index == index) {
+      *out = (char)ch;
+      ++cursor->index;
+      return 1;
+    }
+    ++cursor->index;
+  }
+  cursor->done = 1;
+  if (index >= cursor->index) {
+    cursor->index = index + 1u;
+    return 1;
+  }
+  return 0;
+}
+
+static void lql_json_number_track_one_cmp(int *slot, const char *right,
+                                          size_t right_len,
+                                          lql_json_number_digit_cursor *cursor,
+                                          size_t index, char digit) {
+  char other;
+  if (*slot != 0 || right == NULL ||
+      !lql_json_number_coeff_digit_next(right, right_len, cursor, index,
+                                        &other)) {
+    return;
+  }
+  if (digit != other) {
+    *slot = digit < other ? -1 : 1;
+  }
+}
+
+static void lql_json_number_track_one_exp_cmp(
+    int *slot, const char *right, size_t right_len,
+    lql_json_number_digit_cursor *cursor, size_t index, char digit) {
+  char other;
+  if (*slot != 0 || right == NULL ||
+      !lql_json_number_exponent_digit_next(right, right_len, cursor, index,
+                                           &other)) {
+    return;
+  }
+  if (digit != other) {
+    *slot = digit < other ? -1 : 1;
+  }
+}
+
+static void lql_json_number_track_coeff_digit(lql_json_scan *scan, size_t index,
+                                              char digit) {
+  size_t i;
   if (scan->number_range_active == 0ul) {
     return;
   }
-  if (scan->number_match_len + 1u < sizeof(scan->number_match)) {
-    scan->number_match[scan->number_match_len++] = (char)value;
-  }
-  if (scan->number_accumulator_failed) {
-    return;
-  }
-  if (value == (unsigned char)'-' && scan->number_stage == 0 &&
-      scan->number_match_len <= 1u) {
-    scan->number_negative = 1;
-    return;
-  }
-  if (value == (unsigned char)'.' && scan->number_stage == 0) {
-    scan->number_stage = 1;
-    return;
-  }
-  if ((value == (unsigned char)'e' || value == (unsigned char)'E') &&
-      scan->number_stage != 2) {
-    scan->number_stage = 2;
-    return;
-  }
-  if ((value == (unsigned char)'+' || value == (unsigned char)'-') &&
-      scan->number_stage == 2 && scan->number_exponent == 0) {
-    scan->number_exp_negative = value == (unsigned char)'-';
-    return;
-  }
-  if (value < (unsigned char)'0' || value > (unsigned char)'9') {
-    scan->number_accumulator_failed = 1;
-    scan->number_range_failed |= scan->number_range_active;
-    return;
-  }
-  if (scan->number_stage == 0) {
-    if (scan->number_value > (LDBL_MAX - 9.0L) / 10.0L) {
-      scan->number_accumulator_failed = 1;
-      scan->number_range_failed |= scan->number_range_active;
-      return;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    unsigned long bit;
+    const lql_json_flat_eq_term *term;
+    bit = 1ul << i;
+    if ((scan->number_range_active & bit) == 0ul) {
+      continue;
     }
-    scan->number_value =
-        scan->number_value * 10.0L + (long double)(value - (unsigned char)'0');
-  } else if (scan->number_stage == 1) {
-    scan->number_value +=
-        (long double)(value - (unsigned char)'0') * scan->number_fraction_scale;
-    scan->number_fraction_scale *= 0.1L;
-  } else {
-    if (scan->number_exponent > 10000) {
-      scan->number_accumulator_failed = 1;
-      scan->number_range_failed |= scan->number_range_active;
-      return;
+    term = &scan->flat_terms[i];
+    if (term->kind == LQL_JSON_FLAT_TERM_NUMBER_EQ) {
+      lql_json_number_track_one_cmp(
+          &scan->number_coeff_cmp[i], term->value, term->value_len,
+          &scan->number_coeff_cursor[i], index, digit);
+    } else if (term->kind == LQL_JSON_FLAT_TERM_NUMBER_RANGE) {
+      if (term->has_range_gt && term->range_gt_text != NULL) {
+        lql_json_number_track_one_cmp(
+            &scan->number_range_gt_cmp[i], term->range_gt_text,
+            term->range_gt_text_len, &scan->number_range_gt_cursor[i], index,
+            digit);
+      }
+      if (term->has_range_gte && term->range_gte_text != NULL) {
+        lql_json_number_track_one_cmp(
+            &scan->number_range_gte_cmp[i], term->range_gte_text,
+            term->range_gte_text_len, &scan->number_range_gte_cursor[i], index,
+            digit);
+      }
+      if (term->has_range_lt && term->range_lt_text != NULL) {
+        lql_json_number_track_one_cmp(
+            &scan->number_range_lt_cmp[i], term->range_lt_text,
+            term->range_lt_text_len, &scan->number_range_lt_cursor[i], index,
+            digit);
+      }
+      if (term->has_range_lte && term->range_lte_text != NULL) {
+        lql_json_number_track_one_cmp(
+            &scan->number_range_lte_cmp[i], term->range_lte_text,
+            term->range_lte_text_len, &scan->number_range_lte_cursor[i], index,
+            digit);
+      }
     }
-    scan->number_exponent =
-        scan->number_exponent * 10 + (int)(value - (unsigned char)'0');
   }
 }
 
-static int lql_json_number_pow10(int exponent, long double *out) {
-  long double result;
-  long double factor;
-  unsigned int power;
-  result = 1.0L;
-  factor = 10.0L;
-  power = exponent < 0 ? (unsigned int)(-exponent) : (unsigned int)exponent;
-  while (power != 0u) {
-    if ((power & 1u) != 0u) {
-      result *= factor;
-      if (result > LDBL_MAX / 2.0L) {
-        return 0;
-      }
+static void lql_json_number_track_exponent_digit(lql_json_scan *scan,
+                                                 size_t index, char digit) {
+  size_t i;
+  if (scan->number_range_active == 0ul) {
+    return;
+  }
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    unsigned long bit;
+    const lql_json_flat_eq_term *term;
+    bit = 1ul << i;
+    if ((scan->number_range_active & bit) == 0ul) {
+      continue;
     }
-    power >>= 1;
-    if (power != 0u) {
-      factor *= factor;
-      if (factor > LDBL_MAX / 2.0L) {
-        return 0;
+    term = &scan->flat_terms[i];
+    if (term->kind == LQL_JSON_FLAT_TERM_NUMBER_EQ) {
+      lql_json_number_track_one_exp_cmp(
+          &scan->number_exp_cmp[i], term->value, term->value_len,
+          &scan->number_exp_cursor[i], index, digit);
+    } else if (term->kind == LQL_JSON_FLAT_TERM_NUMBER_RANGE) {
+      if (term->has_range_gt && term->range_gt_text != NULL) {
+        lql_json_number_track_one_exp_cmp(
+            &scan->number_range_gt_exp_cmp[i], term->range_gt_text,
+            term->range_gt_text_len, &scan->number_range_gt_exp_cursor[i],
+            index, digit);
+      }
+      if (term->has_range_gte && term->range_gte_text != NULL) {
+        lql_json_number_track_one_exp_cmp(
+            &scan->number_range_gte_exp_cmp[i], term->range_gte_text,
+            term->range_gte_text_len, &scan->number_range_gte_exp_cursor[i],
+            index, digit);
+      }
+      if (term->has_range_lt && term->range_lt_text != NULL) {
+        lql_json_number_track_one_exp_cmp(
+            &scan->number_range_lt_exp_cmp[i], term->range_lt_text,
+            term->range_lt_text_len, &scan->number_range_lt_exp_cursor[i],
+            index, digit);
+      }
+      if (term->has_range_lte && term->range_lte_text != NULL) {
+        lql_json_number_track_one_exp_cmp(
+            &scan->number_range_lte_exp_cmp[i], term->range_lte_text,
+            term->range_lte_text_len, &scan->number_range_lte_exp_cursor[i],
+            index, digit);
       }
     }
   }
-  *out = exponent < 0 ? 1.0L / result : result;
+}
+
+static void lql_json_number_track_summary_digit(lql_json_scan *scan, int kind,
+                                                size_t index, char digit) {
+  if (kind == LQL_JSON_NUMBER_EMIT_COEFF) {
+    lql_json_number_track_coeff_digit(scan, index, digit);
+  } else if (kind == LQL_JSON_NUMBER_EMIT_EXPONENT) {
+    lql_json_number_track_exponent_digit(scan, index, digit);
+  }
+}
+
+static int lql_json_number_summary_compare_with_coeff_cmp(
+    const lql_json_number_summary *left, const lql_json_number_summary *right,
+    int coeff_cmp, int exp_cmp, int *out) {
+  long left_adjusted;
+  long right_adjusted;
+  if (left->zero && right->zero) {
+    *out = 0;
+    return 1;
+  }
+  if (left->zero != right->zero) {
+    *out = left->zero ? (right->negative ? 1 : -1) : (left->negative ? -1 : 1);
+    return 1;
+  }
+  if (left->negative != right->negative) {
+    *out = left->negative ? -1 : 1;
+    return 1;
+  }
+  if (lql_json_number_summary_compare_clamped_adjusted(left, right, exp_cmp,
+                                                       out)) {
+    if (left->negative) {
+      *out = -*out;
+    }
+    return 1;
+  }
+  left_adjusted = lql_json_number_summary_adjusted(left);
+  right_adjusted = lql_json_number_summary_adjusted(right);
+  if (left_adjusted != right_adjusted) {
+    *out = left_adjusted < right_adjusted ? -1 : 1;
+    if (left->negative) {
+      *out = -*out;
+    }
+    return 1;
+  }
+  if (coeff_cmp != 0) {
+    *out = left->negative ? -coeff_cmp : coeff_cmp;
+    return 1;
+  }
+  if (left->coeff_len_raw < right->coeff_len_raw &&
+      right->coeff_len_raw - right->trailing_zeroes > left->coeff_len_raw) {
+    *out = left->negative ? 1 : -1;
+    return 1;
+  }
+  *out = 0;
   return 1;
+}
+
+static void lql_json_number_range_start(lql_json_scan *scan,
+                                        unsigned long active) {
+  size_t i;
+  size_t limit;
+  scan->number_range_active = active;
+  if (active == 0ul) {
+    scan->number_match_len = 0u;
+    scan->number_token_len = 0u;
+    scan->number_match_error = 0;
+    scan->number_match_overflow = 0;
+    scan->number_summary_active = 0;
+    return;
+  }
+  if (scan->number_match == NULL) {
+    scan->number_match = scan->number_match_stack;
+    scan->number_match_cap = sizeof(scan->number_match_stack);
+  }
+  limit = 0u;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    const lql_json_flat_eq_term *term;
+    size_t len;
+    if ((active & (1ul << i)) == 0ul) {
+      continue;
+    }
+    scan->number_coeff_cmp[i] = 0;
+    scan->number_exp_cmp[i] = 0;
+    scan->number_range_gt_cmp[i] = 0;
+    scan->number_range_gt_exp_cmp[i] = 0;
+    scan->number_range_gte_cmp[i] = 0;
+    scan->number_range_gte_exp_cmp[i] = 0;
+    scan->number_range_lt_cmp[i] = 0;
+    scan->number_range_lt_exp_cmp[i] = 0;
+    scan->number_range_lte_cmp[i] = 0;
+    scan->number_range_lte_exp_cmp[i] = 0;
+    lql_json_number_digit_cursor_start(&scan->number_coeff_cursor[i]);
+    lql_json_number_digit_cursor_start(&scan->number_exp_cursor[i]);
+    lql_json_number_digit_cursor_start(&scan->number_range_gt_cursor[i]);
+    lql_json_number_digit_cursor_start(&scan->number_range_gt_exp_cursor[i]);
+    lql_json_number_digit_cursor_start(&scan->number_range_gte_cursor[i]);
+    lql_json_number_digit_cursor_start(&scan->number_range_gte_exp_cursor[i]);
+    lql_json_number_digit_cursor_start(&scan->number_range_lt_cursor[i]);
+    lql_json_number_digit_cursor_start(&scan->number_range_lt_exp_cursor[i]);
+    lql_json_number_digit_cursor_start(&scan->number_range_lte_cursor[i]);
+    lql_json_number_digit_cursor_start(&scan->number_range_lte_exp_cursor[i]);
+    term = &scan->flat_terms[i];
+    len = 0u;
+    if (term->kind == LQL_JSON_FLAT_TERM_NUMBER_EQ) {
+      len = term->value_len;
+    } else if (term->kind == LQL_JSON_FLAT_TERM_NUMBER_RANGE) {
+      if (term->range_gt_text_len > len)
+        len = term->range_gt_text_len;
+      if (term->range_gte_text_len > len)
+        len = term->range_gte_text_len;
+      if (term->range_lt_text_len > len)
+        len = term->range_lt_text_len;
+      if (term->range_lte_text_len > len)
+        len = term->range_lte_text_len;
+    }
+    if (len > limit) {
+      limit = len;
+    }
+  }
+  /*
+   * Keep enough source bytes to compare selector-length numeric tokens plus a
+   * bounded decimal-adjustment window exactly.  Coefficient shifts such as
+   * 0.1e1000 == 1e999 legitimately make the input token a few bytes longer
+   * than the selector token; falling into the summary-only path there loses
+   * enough suffix information to make near-power exponent cases ambiguous.
+   */
+  limit += 64u;
+  if (limit < sizeof(scan->number_match_stack)) {
+    limit = sizeof(scan->number_match_stack);
+  }
+  if (limit > LQL_JSON_NUMBER_MATCH_HEAP_LIMIT) {
+    limit = LQL_JSON_NUMBER_MATCH_HEAP_LIMIT;
+  }
+  scan->number_match_limit = limit;
+  scan->number_match_len = 0u;
+  scan->number_token_len = 0u;
+  scan->number_match_error = 0;
+  scan->number_match_overflow = 0;
+  scan->number_unsigned = 0ul;
+  scan->number_unsigned_ready = 1;
+  scan->number_unsigned_overflow = 0;
+  scan->number_summary_active = 0;
+  lql_json_number_summary_start(&scan->number_summary);
+}
+
+static void lql_json_number_dispose(lql_json_scan *scan) {
+  lql_allocator *allocator;
+  allocator =
+      scan->allocator == NULL ? lql_allocator_default() : scan->allocator;
+  allocator->destroy(allocator, scan->number_match_heap);
+  scan->number_match_heap = NULL;
+  scan->number_match = scan->number_match_stack;
+  scan->number_match_cap = sizeof(scan->number_match_stack);
+  scan->number_match_limit = sizeof(scan->number_match_stack);
+  scan->number_match_len = 0u;
+  scan->number_token_len = 0u;
+}
+
+LQL_JSON_INLINE lql_status lql_json_number_range_byte(lql_json_scan *scan,
+                                                      unsigned char value) {
+  size_t next_cap;
+  unsigned long digit;
+  char *next;
+  if (scan->number_range_active == 0ul) {
+    return LQL_STATUS_OK;
+  }
+  ++scan->number_token_len;
+  if (scan->number_unsigned_ready) {
+    if (value >= (unsigned char)'0' && value <= (unsigned char)'9') {
+      digit = (unsigned long)(value - (unsigned char)'0');
+      if (scan->number_unsigned > (ULONG_MAX - digit) / 10ul) {
+        scan->number_unsigned_overflow = 1;
+      } else if (!scan->number_unsigned_overflow) {
+        scan->number_unsigned = scan->number_unsigned * 10ul + digit;
+      }
+    } else {
+      scan->number_unsigned_ready = 0;
+    }
+  }
+  if (scan->number_match_overflow) {
+    if (scan->number_summary_active) {
+      size_t digit_index;
+      char digit;
+      int digit_kind;
+      if (lql_json_number_summary_byte(&scan->number_summary, value,
+                                       &digit_index, &digit, &digit_kind)) {
+        lql_json_number_track_summary_digit(scan, digit_kind, digit_index,
+                                            digit);
+      }
+    }
+    return LQL_STATUS_OK;
+  }
+  if (scan->number_match_len + 1u >= scan->number_match_cap) {
+    if (scan->number_match_len + 1u >= scan->number_match_limit) {
+      size_t i;
+      lql_json_number_summary_start(&scan->number_summary);
+      for (i = 0u; i < scan->number_match_len; ++i) {
+        size_t digit_index;
+        char digit;
+        int digit_kind;
+        if (lql_json_number_summary_byte(&scan->number_summary,
+                                         (unsigned char)scan->number_match[i],
+                                         &digit_index, &digit, &digit_kind)) {
+          lql_json_number_track_summary_digit(scan, digit_kind, digit_index,
+                                              digit);
+        }
+      }
+      {
+        size_t digit_index;
+        char digit;
+        int digit_kind;
+        if (lql_json_number_summary_byte(&scan->number_summary, value,
+                                         &digit_index, &digit, &digit_kind)) {
+          lql_json_number_track_summary_digit(scan, digit_kind, digit_index,
+                                              digit);
+        }
+      }
+      scan->number_summary_active = 1;
+      scan->number_match_overflow = 1;
+      return LQL_STATUS_OK;
+    }
+    next_cap = scan->number_match_cap * 2u;
+    if (next_cap <= scan->number_match_cap ||
+        next_cap > scan->number_match_limit) {
+      next_cap = scan->number_match_limit;
+    }
+    if (next_cap <= scan->number_match_len + 1u) {
+      next_cap = scan->number_match_len + 2u;
+    }
+    next = (char *)scan->allocator->realloc(scan->allocator,
+                                            scan->number_match_heap, next_cap);
+    if (next == NULL) {
+      scan->number_match_error = 1;
+      lql_json_error(scan, "out of memory");
+      return LQL_STATUS_NO_MEMORY;
+    }
+    if (scan->number_match_heap == NULL && scan->number_match_len != 0u) {
+      memcpy(next, scan->number_match_stack, scan->number_match_len);
+    }
+    scan->number_match_heap = next;
+    scan->number_match = next;
+    scan->number_match_cap = next_cap;
+  }
+  scan->number_match[scan->number_match_len++] = (char)value;
+  return LQL_STATUS_OK;
+}
+
+static int lql_json_number_overflow_integer_cmp(const lql_json_scan *scan,
+                                                int coeff_cmp, int exp_cmp,
+                                                const char *right,
+                                                size_t right_len, int *out) {
+  lql_json_number_summary left;
+  lql_json_number_summary right_summary;
+  left = scan->number_summary;
+  if (!lql_json_number_summary_finish(&left) ||
+      !lql_json_number_summary_parse(right, right_len, &right_summary)) {
+    return 0;
+  }
+  return lql_json_number_summary_compare_with_coeff_cmp(
+      &left, &right_summary, coeff_cmp, exp_cmp, out);
+}
+
+LQL_JSON_INLINE int lql_json_parse_unsigned_integer_token(const char *text,
+                                                          size_t len,
+                                                          unsigned long *out) {
+  unsigned long value;
+  unsigned long digit;
+  size_t i;
+  if (text == NULL || len == 0u || out == NULL) {
+    return 0;
+  }
+  if (text[0] == '0') {
+    if (len != 1u) {
+      return 0;
+    }
+    *out = 0ul;
+    return 1;
+  }
+  if (text[0] < '1' || text[0] > '9') {
+    return 0;
+  }
+  value = 0ul;
+  for (i = 0u; i < len; ++i) {
+    if (text[i] < '0' || text[i] > '9') {
+      return 0;
+    }
+    digit = (unsigned long)(text[i] - '0');
+    if (value > (ULONG_MAX - digit) / 10ul) {
+      return 0;
+    }
+    value = value * 10ul + digit;
+  }
+  *out = value;
+  return 1;
+}
+
+static int lql_json_plain_integer_span(const char *text, size_t len,
+                                       const char **digits, size_t *digits_len,
+                                       int *negative, int *zero) {
+  size_t pos;
+  if (text == NULL || len == 0u || digits == NULL || digits_len == NULL ||
+      negative == NULL || zero == NULL) {
+    return 0;
+  }
+  pos = 0u;
+  *negative = 0;
+  if (text[pos] == '-') {
+    *negative = 1;
+    ++pos;
+    if (pos == len) {
+      return 0;
+    }
+  }
+  *digits = text + pos;
+  if (text[pos] == '0') {
+    ++pos;
+    if (pos != len) {
+      return 0;
+    }
+    *digits_len = 1u;
+    *negative = 0;
+    *zero = 1;
+    return 1;
+  }
+  if (text[pos] < '1' || text[pos] > '9') {
+    return 0;
+  }
+  do {
+    ++pos;
+  } while (pos < len && text[pos] >= '0' && text[pos] <= '9');
+  if (pos != len) {
+    return 0;
+  }
+  *digits_len = (size_t)((text + pos) - *digits);
+  *zero = 0;
+  return 1;
+}
+
+LQL_JSON_INLINE int lql_json_compare_unsigned_integer_tokens(const char *left,
+                                                             size_t left_len,
+                                                             const char *right,
+                                                             size_t right_len,
+                                                             int *out) {
+  size_t i;
+  int cmp;
+  if (left == NULL || right == NULL || left_len == 0u || right_len == 0u) {
+    return 0;
+  }
+  if (left[0] == '0') {
+    if (left_len != 1u) {
+      return 0;
+    }
+  } else if (left[0] < '1' || left[0] > '9') {
+    return 0;
+  }
+  if (right[0] == '0') {
+    if (right_len != 1u) {
+      return 0;
+    }
+  } else if (right[0] < '1' || right[0] > '9') {
+    return 0;
+  }
+  for (i = 1u; i < left_len; ++i) {
+    if (left[i] < '0' || left[i] > '9') {
+      return 0;
+    }
+  }
+  for (i = 1u; i < right_len; ++i) {
+    if (right[i] < '0' || right[i] > '9') {
+      return 0;
+    }
+  }
+  if (left_len < right_len) {
+    *out = -1;
+    return 1;
+  }
+  if (left_len > right_len) {
+    *out = 1;
+    return 1;
+  }
+  cmp = memcmp(left, right, left_len);
+  *out = cmp < 0 ? -1 : (cmp > 0 ? 1 : 0);
+  return 1;
+}
+
+LQL_JSON_INLINE int
+lql_json_compare_plain_integers(const char *left, size_t left_len,
+                                const char *right, size_t right_len, int *out) {
+  const char *left_digits;
+  const char *right_digits;
+  size_t left_digits_len;
+  size_t right_digits_len;
+  int left_negative;
+  int right_negative;
+  int left_zero;
+  int right_zero;
+  int cmp;
+  if (!lql_json_plain_integer_span(left, left_len, &left_digits,
+                                   &left_digits_len, &left_negative,
+                                   &left_zero) ||
+      !lql_json_plain_integer_span(right, right_len, &right_digits,
+                                   &right_digits_len, &right_negative,
+                                   &right_zero)) {
+    return 0;
+  }
+  if (left_zero && right_zero) {
+    *out = 0;
+    return 1;
+  }
+  if (left_zero != right_zero) {
+    *out = left_zero ? (right_negative ? 1 : -1) : (left_negative ? -1 : 1);
+    return 1;
+  }
+  if (left_negative != right_negative) {
+    *out = left_negative ? -1 : 1;
+    return 1;
+  }
+  if (left_digits_len < right_digits_len) {
+    cmp = -1;
+  } else if (left_digits_len > right_digits_len) {
+    cmp = 1;
+  } else {
+    cmp = memcmp(left_digits, right_digits, left_digits_len);
+    cmp = cmp < 0 ? -1 : (cmp > 0 ? 1 : 0);
+  }
+  *out = left_negative ? -cmp : cmp;
+  return 1;
+}
+
+static int lql_json_number_compare_current(const lql_json_scan *scan,
+                                           int coeff_cmp, int exp_cmp,
+                                           const char *right, size_t right_len,
+                                           int *out) {
+  unsigned long right_unsigned;
+  if (scan->number_match_overflow) {
+    return lql_json_number_overflow_integer_cmp(scan, coeff_cmp, exp_cmp, right,
+                                                right_len, out);
+  }
+  if (scan->number_unsigned_ready && !scan->number_unsigned_overflow) {
+    if (lql_json_parse_unsigned_integer_token(right, right_len,
+                                              &right_unsigned)) {
+      *out = scan->number_unsigned < right_unsigned
+                 ? -1
+                 : (scan->number_unsigned > right_unsigned ? 1 : 0);
+      return 1;
+    }
+  }
+  if (lql_json_compare_unsigned_integer_tokens(
+          scan->number_match, scan->number_match_len, right, right_len, out)) {
+    return 1;
+  }
+  if (lql_json_compare_plain_integers(
+          scan->number_match, scan->number_match_len, right, right_len, out)) {
+    return 1;
+  }
+  return lql_number_compare_json(scan->allocator, scan->number_match,
+                                 scan->number_match_len, right, right_len, out);
 }
 
 static void lql_json_temporal_range_start(lql_json_scan *scan,
@@ -330,148 +1417,223 @@ static void lql_json_temporal_range_bytes(lql_json_scan *scan,
   scan->temporal_match_len += len;
 }
 
-static int lql_json_number_match_integer(const char *text, size_t len,
-                                         double *out) {
-  unsigned long value;
-  unsigned long limit;
-  size_t pos;
-  int negative;
-  if (text == NULL || len == 0u || out == NULL) {
-    return 0;
-  }
-  pos = 0u;
-  negative = 0;
-  if (text[pos] == '-') {
-    negative = 1;
-    ++pos;
-    if (pos == len) {
-      return 0;
-    }
-  }
-  value = 0ul;
-  limit = negative ? (unsigned long)LONG_MAX + 1ul : (unsigned long)LONG_MAX;
-  for (; pos < len; ++pos) {
-    unsigned long digit;
-    if (text[pos] < '0' || text[pos] > '9') {
-      return 0;
-    }
-    digit = (unsigned long)(text[pos] - '0');
-    if (value > (limit - digit) / 10ul) {
-      return 0;
-    }
-    value = value * 10ul + digit;
-  }
-  if (negative) {
-    *out = value == (unsigned long)LONG_MAX + 1ul ? (double)LONG_MIN
-                                                  : -(double)value;
-  } else {
-    *out = (double)value;
-  }
-  return 1;
-}
-
-static int lql_json_number_complete_value(lql_json_scan *scan, double *out) {
-  long double value_ld;
-  long double multiplier;
-  double value;
-  if (scan->number_range_active == 0ul || scan->number_accumulator_failed) {
-    return 0;
-  }
-  if (scan->number_match_len + 1u < sizeof(scan->number_match)) {
-    scan->number_match[scan->number_match_len] = '\0';
-    if (!lql_json_number_match_integer(scan->number_match,
-                                       scan->number_match_len, &value) &&
-        !lql_number_parse_json(scan->number_match, scan->number_match_len,
-                               &value)) {
-      return 0;
-    }
-  } else {
-    value_ld = scan->number_value;
-    if (scan->number_stage == 2 && scan->number_exponent != 0) {
-      if (!lql_json_number_pow10(scan->number_exp_negative
-                                     ? -scan->number_exponent
-                                     : scan->number_exponent,
-                                 &multiplier)) {
-        return 0;
-      }
-      value_ld *= multiplier;
-    }
-    if (scan->number_negative) {
-      value_ld = -value_ld;
-    }
-    value = (double)value_ld;
-    if (!(value == value) || value == HUGE_VAL || value == -HUGE_VAL) {
-      return 0;
-    }
-  }
-  *out = value;
-  return 1;
-}
-
-static unsigned long lql_json_number_range_complete(lql_json_scan *scan) {
-  double value;
+static lql_status lql_json_number_range_complete(lql_json_scan *scan,
+                                                 unsigned long *out_hits) {
   unsigned long hits;
   size_t i;
-  if (!lql_json_number_complete_value(scan, &value)) {
-    return 0ul;
+  double value;
+  int value_ready;
+  if (out_hits != NULL) {
+    *out_hits = 0ul;
   }
+  if (scan->number_range_active == 0ul) {
+    return LQL_STATUS_OK;
+  }
+  if (scan->number_match_error) {
+    return LQL_STATUS_NO_MEMORY;
+  }
+  if (!scan->number_match_overflow) {
+    scan->number_match[scan->number_match_len] = '\0';
+  }
+  value_ready = 0;
   hits = 0ul;
   for (i = 0u; i < scan->flat_term_count; ++i) {
     const lql_json_flat_eq_term *term;
     unsigned long bit;
+    int cmp;
     bit = 1ul << i;
-    if ((scan->number_range_active & bit) == 0ul ||
-        (scan->number_range_failed & bit) != 0ul) {
+    if ((scan->number_range_active & bit) == 0ul) {
       continue;
     }
     term = &scan->flat_terms[i];
     if (term->kind != LQL_JSON_FLAT_TERM_NUMBER_RANGE) {
       continue;
     }
-    if (term->has_range_gt && value <= term->range_gt) {
-      continue;
+    if (term->has_range_gt) {
+      if (scan->number_unsigned_ready && !scan->number_unsigned_overflow &&
+          term->range_gt_unsigned_ready) {
+        if (scan->number_unsigned <= term->range_gt_unsigned) {
+          continue;
+        }
+      } else if (term->range_gt_text != NULL) {
+        if (!lql_json_number_compare_current(scan, scan->number_range_gt_cmp[i],
+                                             scan->number_range_gt_exp_cmp[i],
+                                             term->range_gt_text,
+                                             term->range_gt_text_len, &cmp)) {
+          if (!scan->number_match_overflow) {
+            lql_set_error(scan->error, LQL_STATUS_NO_MEMORY,
+                          "unable to compare JSON numbers");
+            return LQL_STATUS_NO_MEMORY;
+          }
+          continue;
+        }
+        if (cmp <= 0) {
+          continue;
+        }
+      } else {
+        if (!value_ready &&
+            !lql_number_parse_json(scan->number_match, scan->number_match_len,
+                                   &value)) {
+          continue;
+        }
+        value_ready = 1;
+        if (value <= term->range_gt) {
+          continue;
+        }
+      }
     }
-    if (term->has_range_gte && value < term->range_gte) {
-      continue;
+    if (term->has_range_gte) {
+      if (scan->number_unsigned_ready && !scan->number_unsigned_overflow &&
+          term->range_gte_unsigned_ready) {
+        if (scan->number_unsigned < term->range_gte_unsigned) {
+          continue;
+        }
+      } else if (term->range_gte_text != NULL) {
+        if (!lql_json_number_compare_current(
+                scan, scan->number_range_gte_cmp[i],
+                scan->number_range_gte_exp_cmp[i], term->range_gte_text,
+                term->range_gte_text_len, &cmp)) {
+          if (!scan->number_match_overflow) {
+            lql_set_error(scan->error, LQL_STATUS_NO_MEMORY,
+                          "unable to compare JSON numbers");
+            return LQL_STATUS_NO_MEMORY;
+          }
+          continue;
+        }
+        if (cmp < 0) {
+          continue;
+        }
+      } else {
+        if (!value_ready &&
+            !lql_number_parse_json(scan->number_match, scan->number_match_len,
+                                   &value)) {
+          continue;
+        }
+        value_ready = 1;
+        if (value < term->range_gte) {
+          continue;
+        }
+      }
     }
-    if (term->has_range_lt && value >= term->range_lt) {
-      continue;
+    if (term->has_range_lt) {
+      if (scan->number_unsigned_ready && !scan->number_unsigned_overflow &&
+          term->range_lt_unsigned_ready) {
+        if (scan->number_unsigned >= term->range_lt_unsigned) {
+          continue;
+        }
+      } else if (term->range_lt_text != NULL) {
+        if (!lql_json_number_compare_current(scan, scan->number_range_lt_cmp[i],
+                                             scan->number_range_lt_exp_cmp[i],
+                                             term->range_lt_text,
+                                             term->range_lt_text_len, &cmp)) {
+          if (!scan->number_match_overflow) {
+            lql_set_error(scan->error, LQL_STATUS_NO_MEMORY,
+                          "unable to compare JSON numbers");
+            return LQL_STATUS_NO_MEMORY;
+          }
+          continue;
+        }
+        if (cmp >= 0) {
+          continue;
+        }
+      } else {
+        if (!value_ready &&
+            !lql_number_parse_json(scan->number_match, scan->number_match_len,
+                                   &value)) {
+          continue;
+        }
+        value_ready = 1;
+        if (value >= term->range_lt) {
+          continue;
+        }
+      }
     }
-    if (term->has_range_lte && value > term->range_lte) {
-      continue;
+    if (term->has_range_lte) {
+      if (scan->number_unsigned_ready && !scan->number_unsigned_overflow &&
+          term->range_lte_unsigned_ready) {
+        if (scan->number_unsigned > term->range_lte_unsigned) {
+          continue;
+        }
+      } else if (term->range_lte_text != NULL) {
+        if (!lql_json_number_compare_current(
+                scan, scan->number_range_lte_cmp[i],
+                scan->number_range_lte_exp_cmp[i], term->range_lte_text,
+                term->range_lte_text_len, &cmp)) {
+          if (!scan->number_match_overflow) {
+            lql_set_error(scan->error, LQL_STATUS_NO_MEMORY,
+                          "unable to compare JSON numbers");
+            return LQL_STATUS_NO_MEMORY;
+          }
+          continue;
+        }
+        if (cmp > 0) {
+          continue;
+        }
+      } else {
+        if (!value_ready &&
+            !lql_number_parse_json(scan->number_match, scan->number_match_len,
+                                   &value)) {
+          continue;
+        }
+        value_ready = 1;
+        if (value > term->range_lte) {
+          continue;
+        }
+      }
     }
     hits |= bit;
   }
-  return hits;
+  if (out_hits != NULL) {
+    *out_hits = hits;
+  }
+  return LQL_STATUS_OK;
 }
 
-static unsigned long lql_json_number_eq_complete(lql_json_scan *scan,
-                                                 unsigned long terms) {
-  double value;
+static lql_status lql_json_number_eq_complete(lql_json_scan *scan,
+                                              unsigned long terms,
+                                              unsigned long *out_hits) {
   unsigned long hits;
   size_t i;
-  if (terms == 0ul || !lql_json_number_complete_value(scan, &value)) {
-    return 0ul;
+  if (out_hits != NULL) {
+    *out_hits = 0ul;
+  }
+  if (terms == 0ul || scan->number_match_error) {
+    return scan->number_match_error ? LQL_STATUS_NO_MEMORY : LQL_STATUS_OK;
+  }
+  if (!scan->number_match_overflow) {
+    scan->number_match[scan->number_match_len] = '\0';
   }
   hits = 0ul;
   for (i = 0u; i < scan->flat_term_count; ++i) {
     const lql_json_flat_eq_term *term;
     unsigned long bit;
-    double expected;
+    int cmp;
     bit = 1ul << i;
-    if ((terms & bit) == 0ul || (scan->number_range_failed & bit) != 0ul) {
+    if ((terms & bit) == 0ul) {
       continue;
     }
     term = &scan->flat_terms[i];
-    if (term->kind != LQL_JSON_FLAT_TERM_NUMBER_EQ ||
-        !lql_number_parse_json(term->value, term->value_len, &expected)) {
+    if (term->kind != LQL_JSON_FLAT_TERM_NUMBER_EQ) {
       continue;
     }
-    if (value == expected) {
+    if (!lql_json_number_compare_current(scan, scan->number_coeff_cmp[i],
+                                         scan->number_exp_cmp[i], term->value,
+                                         term->value_len, &cmp)) {
+      if (!scan->number_match_overflow) {
+        lql_set_error(scan->error, LQL_STATUS_NO_MEMORY,
+                      "unable to compare JSON numbers");
+        return LQL_STATUS_NO_MEMORY;
+      }
+      continue;
+    }
+    if (cmp == 0) {
       hits |= bit;
     }
   }
-  return hits;
+  if (out_hits != NULL) {
+    *out_hits = hits;
+  }
+  return LQL_STATUS_OK;
 }
 
 static unsigned long lql_json_temporal_range_complete(lql_json_scan *scan) {
@@ -795,6 +1957,10 @@ static void lql_json_match_icontains_bytes(lql_json_scan *scan,
           ++pos;
         continue;
       }
+      if (term->value_len == 0u) {
+        scan->match_contains |= bit;
+        continue;
+      }
       if (term->contains_failure == NULL) {
         scan->match_failed |= bit;
         break;
@@ -844,6 +2010,10 @@ static void lql_json_match_icontains_ascii_span(lql_json_scan *scan,
           ++pos;
         continue;
       }
+      if (term->value_len == 0u) {
+        scan->match_contains |= bit;
+        continue;
+      }
       if (term->contains_failure == NULL) {
         scan->match_failed |= bit;
         break;
@@ -879,8 +2049,15 @@ static void lql_json_match_contains_ascii_span(lql_json_scan *scan,
       continue;
     }
     term = &scan->flat_terms[i];
-    if (term->kind != LQL_JSON_FLAT_TERM_CONTAINS ||
-        term->contains_failure == NULL || term->value_len == 0u) {
+    if (term->kind != LQL_JSON_FLAT_TERM_CONTAINS) {
+      scan->match_failed |= bit;
+      continue;
+    }
+    if (term->value_len == 0u) {
+      scan->match_contains |= bit;
+      continue;
+    }
+    if (term->contains_failure == NULL) {
       scan->match_failed |= bit;
       continue;
     }
@@ -1143,7 +2320,11 @@ static void lql_json_match_byte(lql_json_scan *scan, unsigned char value) {
       }
       if (!scan->match_key && term->kind == LQL_JSON_FLAT_TERM_CONTAINS) {
         size_t pos;
-        if (target_len == 0u || term->contains_failure == NULL) {
+        if (target_len == 0u) {
+          scan->match_contains |= bit;
+          continue;
+        }
+        if (term->contains_failure == NULL) {
           scan->match_failed |= bit;
           continue;
         }
@@ -1341,8 +2522,7 @@ static unsigned long lql_json_match_object_terms(const lql_json_scan *scan,
     bit = 1ul << i;
     if ((active & bit) != 0ul &&
         (path_segment >= sizeof(unsigned long) * CHAR_BIT ||
-         ((scan->flat_terms[i].path_array_segments |
-           scan->flat_terms[i].path_object_wildcards |
+         ((scan->flat_terms[i].path_object_wildcards |
            scan->flat_terms[i].path_array_wildcards |
            scan->flat_terms[i].path_any_wildcards |
            scan->flat_terms[i].path_recursive_segments) &
@@ -1514,6 +2694,9 @@ static lql_status lql_json_refill(lql_json_scan *scan) {
   status = scan->reader(scan->reader_user, scan->buffer, sizeof(scan->buffer),
                         &amount, scan->error);
   if (status != LQL_STATUS_OK) {
+    if (scan->error != NULL && scan->error->code == LQL_STATUS_OK) {
+      lql_set_error(scan->error, status, "JSON reader failed");
+    }
     return status;
   }
   if (amount > sizeof(scan->buffer)) {
@@ -1644,12 +2827,16 @@ LQL_JSON_INLINE lql_status lql_json_copy_byte(lql_json_scan *scan, int value) {
 
 LQL_JSON_INLINE lql_status lql_json_match_copy_byte(lql_json_scan *scan,
                                                     int value) {
+  lql_status status;
   if ((scan->match_active & ~scan->match_failed) != 0ul ||
       (scan->capture_active & ~scan->capture_failed) != 0ul ||
       (scan->temporal_range_active & ~scan->temporal_range_failed) != 0ul) {
     lql_json_match_byte(scan, (unsigned char)value);
   }
-  lql_json_number_range_byte(scan, (unsigned char)value);
+  status = lql_json_number_range_byte(scan, (unsigned char)value);
+  if (status != LQL_STATUS_OK) {
+    return status;
+  }
   return lql_json_copy_byte(scan, value);
 }
 
@@ -2178,9 +3365,17 @@ static lql_status lql_json_matched_scalar_value(lql_json_scan *scan,
     lql_json_number_range_start(scan, range_terms | number_eq_terms);
     status = lql_json_value(scan);
     if (status == LQL_STATUS_OK) {
+      unsigned long number_hits;
       scan->flat_eq_hits |= lql_json_match_complete(scan);
-      scan->flat_eq_hits |= lql_json_number_range_complete(scan);
-      scan->flat_eq_hits |= lql_json_number_eq_complete(scan, number_eq_terms);
+      status = lql_json_number_range_complete(scan, &number_hits);
+      if (status == LQL_STATUS_OK) {
+        scan->flat_eq_hits |= number_hits;
+        status =
+            lql_json_number_eq_complete(scan, number_eq_terms, &number_hits);
+      }
+      if (status == LQL_STATUS_OK) {
+        scan->flat_eq_hits |= number_hits;
+      }
     }
     lql_json_number_range_start(scan, 0ul);
     lql_json_match_start(scan, 0ul, 0, 0u);
@@ -2499,10 +3694,17 @@ static lql_status lql_json_object(lql_json_scan *scan) {
         lql_json_number_range_start(scan, range_terms | number_eq_terms);
         status = lql_json_value(scan);
         if (status == LQL_STATUS_OK) {
+          unsigned long number_hits;
           scan->flat_eq_hits |= lql_json_match_complete(scan);
-          scan->flat_eq_hits |= lql_json_number_range_complete(scan);
-          scan->flat_eq_hits |=
-              lql_json_number_eq_complete(scan, number_eq_terms);
+          status = lql_json_number_range_complete(scan, &number_hits);
+          if (status == LQL_STATUS_OK) {
+            scan->flat_eq_hits |= number_hits;
+            status = lql_json_number_eq_complete(scan, number_eq_terms,
+                                                 &number_hits);
+          }
+          if (status == LQL_STATUS_OK) {
+            scan->flat_eq_hits |= number_hits;
+          }
         }
         lql_json_number_range_start(scan, 0ul);
         lql_json_match_start(scan, 0ul, 0, 0u);
@@ -2979,6 +4181,7 @@ lql_status lql_json_normalize_ndjson(const lql_json_normalize_request *request,
   if (out_bytes_read != NULL) {
     *out_bytes_read = scan.bytes_read;
   }
+  lql_json_number_dispose(&scan);
   return status;
 }
 
@@ -3021,11 +4224,15 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   memset(&scan, 0, sizeof(scan));
   scan.reader = request->reader;
   scan.reader_user = request->reader_user;
+  scan.allocator =
+      request->allocator == NULL ? lql_allocator_default() : request->allocator;
   scan.cancelled = request->cancelled;
   scan.cancel_user = request->cancel_user;
   scan.out_cancelled = request->out_cancelled;
   if (scan.out_cancelled != NULL)
     *scan.out_cancelled = 0;
+  if (request->out_limit_stop != NULL)
+    *request->out_limit_stop = 0;
   scan.writer = request->capture ? lql_json_spool_write : NULL;
   scan.writer_user = request->spool;
   scan.error = error;
@@ -3064,6 +4271,8 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
       break;
     }
     if (request->max_records != 0u && records >= request->max_records) {
+      if (request->out_limit_stop != NULL)
+        *request->out_limit_stop = 1;
       status = LQL_STATUS_STOP;
       break;
     }
@@ -3123,6 +4332,8 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
     }
     if (request->max_bytes != 0u &&
         lql_json_consumed(&scan) >= request->max_bytes) {
+      if (request->out_limit_stop != NULL)
+        *request->out_limit_stop = 1;
       status = LQL_STATUS_STOP;
       break;
     }
@@ -3133,5 +4344,6 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   if (out_bytes_read != NULL) {
     *out_bytes_read = lql_json_consumed(&scan);
   }
+  lql_json_number_dispose(&scan);
   return status;
 }

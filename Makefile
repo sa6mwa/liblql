@@ -1,4 +1,6 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check lifecycle-version-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression lifecycle-check lifecycle-version-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all print-test-all-gates test-all-timed test-all-gates direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+
+TEST_ALL_GATES := lifecycle-check target-tool-check direct-reset direct-no-lonejson test mutation-literal-parity shared-only-smoke lua-test lua-cli-smoke lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-selector-parity clql-mutation-parity package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
 
 help:
 	@printf '%s\n' \
@@ -50,7 +52,7 @@ help:
 	  'make prerelease-live fail-closed placeholder for opt-in live checks' \
 	  'make release       verify version contract, clean, then run the full release proof graph' \
 	  'make print-release-version print the version used by package/release targets' \
-	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates' \
+	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates with elapsed time' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
 	  'make direct-no-lonejson  verify liblql has no LoneJSON runtime dependency' \
 	  'make direct-probe  build the optimized direct-execution probe' \
@@ -102,7 +104,7 @@ lifecycle-version-contract:
 	@sh scripts/check_lifecycle_version_contract.sh
 
 target-tool-check:
-	@python3 -m py_compile scripts/discover_target_tools.py
+	@python3 -c 'import ast,pathlib; ast.parse(pathlib.Path("scripts/discover_target_tools.py").read_text(), "scripts/discover_target_tools.py")'
 	@sh scripts/test_discover_target_tools.sh
 	@sh scripts/check_darwin_linker_route.sh
 
@@ -118,7 +120,7 @@ build-release:
 build-debug-lua:
 	@cmake --preset release
 	@cmake --build --preset release
-	@rm -rf build/lua-sdk
+	@sh scripts/remove_path.sh build/lua-sdk
 	@cmake --install build/release --prefix build/lua-sdk
 	@cmake --preset debug-lua
 	@cmake --build --preset debug-lua --target lql_lua_core
@@ -221,7 +223,9 @@ verify-release-privacy:
 release-matrix:
 	@sh scripts/run_linux_release_matrix.sh
 
-release-pipeline: test-all release-matrix
+release-pipeline:
+	@$(MAKE) --no-print-directory -f Makefile test-all
+	@$(MAKE) --no-print-directory -f Makefile release-matrix
 
 prerelease: release-pipeline
 
@@ -238,7 +242,17 @@ release:
 print-release-version:
 	@sh scripts/release_version.sh
 
-test-all: lifecycle-check target-tool-check direct-reset direct-no-lonejson test mutation-literal-parity shared-only-smoke lua-test lua-cli-smoke lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-selector-parity clql-mutation-parity package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
+test-all:
+	@$(MAKE) --no-print-directory -f Makefile test-all-timed
+
+test-all-timed:
+	@sh scripts/test_all.sh
+
+print-test-all-gates:
+	@printf '%s\n' '$(TEST_ALL_GATES)'
+
+test-all-gates:
+	@TEST_ALL_GATES='$(TEST_ALL_GATES)' sh scripts/test_all.sh
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh

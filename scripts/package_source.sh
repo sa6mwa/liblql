@@ -11,7 +11,28 @@ build_dir=${LQL_SOURCE_PACKAGE_BUILD_DIR:-build/package-source}
 version_build=build/package-source-version
 version_header=$version_build/generated/include/lql/version.h
 
-rm -rf "$version_build"
+remove_path() {
+  path=$1
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    return 0
+  fi
+  if [ -d "$path" ] && [ ! -L "$path" ]; then
+    find "$path" ! -type d -exec rm -- {} \;
+    find "$path" -depth -type d -exec rmdir -- {} \;
+  else
+    rm -- "$path"
+  fi
+}
+
+remove_matching_files() {
+  for path in "$@"; do
+    if [ -e "$path" ]; then
+      rm -- "$path"
+    fi
+  done
+}
+
+remove_path "$version_build"
 cmake -S . -B "$version_build" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE=cmake/cpkt-toolchain.cmake \
   -DLQL_TARGET_ID=x86_64-linux-gnu \
@@ -35,10 +56,39 @@ archive=$dist_dir/$root_name.tar.gz
 checksums=$dist_dir/$project-$version-CHECKSUMS
 manifest_tmp=$build_dir/source-files.txt
 
-rm -rf "$stage"
+exact_lightweight_version() {
+  tags=$(git tag --points-at HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' | sort)
+  found=
+  for tag in $tags; do
+    if ! printf '%s\n' "$tag" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' >/dev/null; then
+      continue
+    fi
+    type=$(git cat-file -t "refs/tags/$tag" 2>/dev/null || true)
+    if [ "$type" != commit ]; then
+      continue
+    fi
+    candidate=${tag#v}
+    if [ -n "$found" ] && [ "$found" != "$candidate" ]; then
+      printf 'package source: multiple lightweight release tags point at HEAD: %s and %s\n' \
+        "$found" "$candidate" >&2
+      exit 1
+    fi
+    found=$candidate
+  done
+  printf '%s\n' "$found"
+}
+
+exact_version=$(exact_lightweight_version)
+if [ -n "$exact_version" ] && ! git diff-index --quiet HEAD --; then
+  printf 'package source: exact tagged release v%s requires a clean tracked worktree\n' \
+    "$exact_version" >&2
+  exit 1
+fi
+
+remove_path "$stage"
 mkdir -p "$stage" "$dist_dir" "$build_dir"
 if [ "$checksum_mode" != "append" ]; then
-  rm -f "$dist_dir"/$project-*.tar.gz \
+  remove_matching_files "$dist_dir"/$project-*.tar.gz \
     "$dist_dir"/clql-*.tar.gz \
     "$dist_dir"/$project-*-1.rockspec \
     "$dist_dir"/$project-*-1.src.rock \
@@ -47,7 +97,12 @@ fi
 
 git ls-files --cached --modified |
   sed '/^dist\//d;/^build\//d;/^VERSION$/d;/^RELEASE_MANIFEST$/d' |
-  sort -u >"$manifest_tmp"
+  sort -u |
+  while IFS= read -r path; do
+    if [ -n "$path" ] && [ -f "$path" ]; then
+      printf '%s\n' "$path"
+    fi
+  done >"$manifest_tmp"
 
 while IFS= read -r path; do
   if [ -z "$path" ] || [ ! -f "$path" ]; then

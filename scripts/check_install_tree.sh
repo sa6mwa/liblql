@@ -22,7 +22,7 @@ if [ ! -x "$cc" ]; then
   exit 1
 fi
 
-rm -rf "$work"
+sh scripts/remove_path.sh "$work"
 mkdir -p "$work/cmake" "$work/pkgconfig"
 
 cat >"$work/smoke.c" <<'SMOKE'

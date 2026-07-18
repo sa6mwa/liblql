@@ -35,7 +35,7 @@ expect_verify_failure() {
 build_case() {
   name=$1
   dist=$work/$name/dist
-  rm -rf "$work/$name"
+  sh "$root/scripts/remove_path.sh" "$work/$name"
   mkdir -p "$dist"
   LQL_DIST_DIR="$dist" sh "$root/scripts/package_lua.sh" >/dev/null
   version=$(artifact_version "$dist")

@@ -422,10 +422,15 @@ mutation_parse_time_value(lql_allocator *allocator, const char *begin,
   }
   if (mutation_equal_ci(value_begin, value_len, "NOW")) {
     time_t now;
-    now = options != NULL && options->time_now != NULL
-              ? options->time_now(options->time_user)
-              : time(NULL);
-    if (!lql_temporal_from_time_t(now, 0, &temporal)) {
+    int default_clock_failed;
+    if (options != NULL && options->time_now != NULL) {
+      now = options->time_now(options->time_user);
+      default_clock_failed = 0;
+    } else {
+      now = time(NULL);
+      default_clock_failed = now == (time_t)-1;
+    }
+    if (default_clock_failed || !lql_temporal_from_time_t(now, 0, &temporal)) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "time mutation NOW value is invalid");
       return LQL_STATUS_PARSE_ERROR;
@@ -811,7 +816,9 @@ mutation_parse_expression(lql_allocator *allocator, const char *raw,
       const char *part_end;
       const char *scan;
       int quote;
+      size_t brace_depth;
       quote = 0;
+      brace_depth = 0u;
       scan = part;
       while (scan < content_end) {
         if (quote != 0) {
@@ -822,33 +829,66 @@ mutation_parse_expression(lql_allocator *allocator, const char *raw,
           }
         } else if (*scan == '"' || *scan == '\'') {
           quote = (unsigned char)*scan;
-        } else if (*scan == ',' || *scan == '\n') {
+        } else if (*scan == '{') {
+          ++brace_depth;
+        } else if (*scan == '}') {
+          if (brace_depth == 0u) {
+            mutation_action_cleanup(allocator, &prefix);
+            lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                          "unmatched mutation brace");
+            return LQL_STATUS_PARSE_ERROR;
+          }
+          --brace_depth;
+        } else if (brace_depth == 0u && (*scan == ',' || *scan == '\n')) {
           break;
         }
         ++scan;
+      }
+      if (quote != 0) {
+        mutation_action_cleanup(allocator, &prefix);
+        lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                      "unterminated quoted mutation value");
+        return LQL_STATUS_PARSE_ERROR;
+      }
+      if (brace_depth != 0u) {
+        mutation_action_cleanup(allocator, &prefix);
+        lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                      "unterminated mutation brace");
+        return LQL_STATUS_PARSE_ERROR;
       }
       part_end = scan;
       mutation_trim(&part, &part_end);
       if (part < part_end) {
         char *sub;
+        lql_mutation child;
+        size_t child_capacity;
+        size_t child_index;
         sub = mutation_copy(allocator, part, (size_t)(part_end - part));
         if (sub == NULL) {
           mutation_action_cleanup(allocator, &prefix);
           lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
           return LQL_STATUS_NO_MEMORY;
         }
-        memset(&action, 0, sizeof(action));
-        status = mutation_parse_one(allocator, sub, options, &action, error);
+        memset(&child, 0, sizeof(child));
+        child_capacity = 0u;
+        status = mutation_parse_expression(allocator, sub, options, &child,
+                                           &child_capacity, error);
         allocator->destroy(allocator, sub);
-        if (status == LQL_STATUS_OK) {
-          status =
-              mutation_prepend_segments(allocator, &prefix, &action, error);
+        for (child_index = 0u;
+             status == LQL_STATUS_OK && child_index < child.action_count;
+             ++child_index) {
+          status = mutation_prepend_segments(
+              allocator, &prefix, &child.actions[child_index], error);
+          if (status == LQL_STATUS_OK) {
+            status = mutation_append_action(allocator, mutation, capacity,
+                                            &child.actions[child_index], error);
+          }
         }
-        if (status == LQL_STATUS_OK) {
-          status = mutation_append_action(allocator, mutation, capacity,
-                                          &action, error);
+        for (child_index = 0u; child_index < child.action_count;
+             ++child_index) {
+          mutation_action_cleanup(allocator, &child.actions[child_index]);
         }
-        mutation_action_cleanup(allocator, &action);
+        allocator->destroy(allocator, child.actions);
         if (status != LQL_STATUS_OK) {
           mutation_action_cleanup(allocator, &prefix);
           return status;

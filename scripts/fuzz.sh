@@ -18,7 +18,7 @@ cache_file="$root/build/fuzz/CMakeCache.txt"
 if [ -f "$cache_file" ]; then
   configured_cc=$(sed -n 's/^CMAKE_C_COMPILER:[^=]*=//p' "$cache_file")
   if [ "$configured_cc" != "$afl_cc" ]; then
-    rm -rf "$root/build/fuzz"
+    sh "$root/scripts/remove_path.sh" "$root/build/fuzz"
   fi
 fi
 

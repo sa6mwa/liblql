@@ -560,9 +560,10 @@ selector_node_string_term_method(const lql *self, lql_selector_node node,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   out->field = lql_view_cstr(internal->field);
-  out->value_present = internal->value_set ||
-                       (internal->value != NULL && internal->value[0] != '\0');
-  out->value = lql_view_cstr(internal->value);
+  out->value_present =
+      internal->value_set || (internal->value != NULL && internal->value_len != 0u);
+  out->value.data = internal->value;
+  out->value.len = internal->value == NULL ? 0u : internal->value_len;
   out->ignore_case = internal->ignore_case;
   out->any_count = internal->any_count;
   return LQL_STATUS_OK;
@@ -597,11 +598,13 @@ static lql_status selector_node_string_term_any_method(const lql *self,
   return LQL_STATUS_OK;
 }
 
-static lql_selector_range_bound range_number_bound(double number) {
+static lql_selector_range_bound range_number_bound(double number,
+                                                   const char *number_text) {
   lql_selector_range_bound out;
   memset(&out, 0, sizeof(out));
   out.kind = LQL_SELECTOR_BOUND_NUMBER;
   out.number = number;
+  out.number_text = lql_view_cstr(number_text);
   return out;
 }
 
@@ -635,22 +638,24 @@ static lql_status selector_node_range_term_method(const lql *self,
   if (internal->has_temporal_gt) {
     out->gt = range_datetime_bound(internal->range_gt_text);
   } else if (internal->has_range_gt) {
-    out->gt = range_number_bound(internal->range_gt);
+    out->gt = range_number_bound(internal->range_gt, internal->range_gt_text);
   }
   if (internal->has_temporal_gte) {
     out->gte = range_datetime_bound(internal->range_gte_text);
   } else if (internal->has_range_gte) {
-    out->gte = range_number_bound(internal->range_gte);
+    out->gte =
+        range_number_bound(internal->range_gte, internal->range_gte_text);
   }
   if (internal->has_temporal_lt) {
     out->lt = range_datetime_bound(internal->range_lt_text);
   } else if (internal->has_range_lt) {
-    out->lt = range_number_bound(internal->range_lt);
+    out->lt = range_number_bound(internal->range_lt, internal->range_lt_text);
   }
   if (internal->has_temporal_lte) {
     out->lte = range_datetime_bound(internal->range_lte_text);
   } else if (internal->has_range_lte) {
-    out->lte = range_number_bound(internal->range_lte);
+    out->lte =
+        range_number_bound(internal->range_lte, internal->range_lte_text);
   }
   return LQL_STATUS_OK;
 }
@@ -893,6 +898,20 @@ static lql_status selector_json_number(FILE *out, double value,
   return LQL_STATUS_OK;
 }
 
+static lql_status selector_json_number_text(FILE *out, lql_string_view value,
+                                            lql_error *error) {
+  if (value.data == NULL || value.len == 0u) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR,
+                  "selector JSON number text is empty");
+    return LQL_STATUS_JSON_ERROR;
+  }
+  if (fwrite(value.data, 1u, value.len, out) != value.len) {
+    lql_set_error(error, LQL_STATUS_IO_ERROR, "selector JSON write failed");
+    return LQL_STATUS_IO_ERROR;
+  }
+  return LQL_STATUS_OK;
+}
+
 static lql_status write_selector_json(FILE *out, const lql_selector *selector,
                                       lql_error *error);
 
@@ -929,13 +948,13 @@ static lql_status write_string_predicate_json(FILE *out,
     return status;
   }
   if (selector->value_set ||
-      (selector->value != NULL && selector->value[0] != '\0')) {
+      (selector->value != NULL && selector->value_len != 0u)) {
     status = selector_json_comma(out, &first, error);
     if (status != LQL_STATUS_OK ||
         (status = selector_json_key(out, "value", error)) != LQL_STATUS_OK ||
         (status = write_selector_literal_json(
              out, selector->value == NULL ? "" : selector->value,
-             selector->value == NULL ? 0u : strlen(selector->value),
+             selector->value == NULL ? 0u : selector->value_len,
              selector->value_kind, error)) != LQL_STATUS_OK) {
       return status;
     }
@@ -980,6 +999,9 @@ static lql_status write_range_bound_json(FILE *out,
                                          const lql_selector_range_bound *b,
                                          lql_error *error) {
   if (b->kind == LQL_SELECTOR_BOUND_NUMBER) {
+    if (b->number_text.data != NULL) {
+      return selector_json_number_text(out, b->number_text, error);
+    }
     return selector_json_number(out, b->number, error);
   }
   if (b->kind == LQL_SELECTOR_BOUND_DATETIME) {
@@ -1020,22 +1042,22 @@ static lql_status write_range_predicate_json(FILE *out,
   if (selector->has_temporal_gt) {
     gt = range_datetime_bound(selector->range_gt_text);
   } else if (selector->has_range_gt) {
-    gt = range_number_bound(selector->range_gt);
+    gt = range_number_bound(selector->range_gt, selector->range_gt_text);
   }
   if (selector->has_temporal_gte) {
     gte = range_datetime_bound(selector->range_gte_text);
   } else if (selector->has_range_gte) {
-    gte = range_number_bound(selector->range_gte);
+    gte = range_number_bound(selector->range_gte, selector->range_gte_text);
   }
   if (selector->has_temporal_lt) {
     lt = range_datetime_bound(selector->range_lt_text);
   } else if (selector->has_range_lt) {
-    lt = range_number_bound(selector->range_lt);
+    lt = range_number_bound(selector->range_lt, selector->range_lt_text);
   }
   if (selector->has_temporal_lte) {
     lte = range_datetime_bound(selector->range_lte_text);
   } else if (selector->has_range_lte) {
-    lte = range_number_bound(selector->range_lte);
+    lte = range_number_bound(selector->range_lte, selector->range_lte_text);
   }
 
   first = 1;

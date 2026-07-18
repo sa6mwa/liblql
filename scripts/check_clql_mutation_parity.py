@@ -141,6 +141,11 @@ def main():
             ["/tags{/kind=document,/source=local}"],
         ),
         (
+            "nested brace shorthand mutation",
+            compact({}),
+            ["/a{/b{/c=1,/d=2},/e=3}"],
+        ),
+        (
             "brace shorthand quoted comma",
             compact({"state": {"details": {"owner": "bob"}, "metrics": 1}}),
             [

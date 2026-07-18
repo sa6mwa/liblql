@@ -10,7 +10,7 @@ version_header=$root/build/release/generated/include/lql/version.h
 
 cmake --preset release
 cmake --build --preset release
-rm -rf "$sdk_prefix" "$tree" "$rockspec_dir" "$source_dir"
+sh "$root/scripts/remove_path.sh" "$sdk_prefix" "$tree" "$rockspec_dir" "$source_dir"
 cmake --install "$root/build/release" --prefix "$sdk_prefix"
 
 if [ ! -f "$version_header" ]; then

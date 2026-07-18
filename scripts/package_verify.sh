@@ -69,7 +69,7 @@ if [ "$listed" != "$release_artifacts" ]; then
   exit 1
 fi
 
-rm -rf "$work"
+sh scripts/remove_path.sh "$work"
 mkdir -p "$work/extract"
 
 verify_privacy() {
@@ -573,7 +573,7 @@ verify_lua_src_rock() {
     printf 'package verify: missing Lua source rock: %s\n' "$rock" >&2
     exit 1
   fi
-  rm -rf "$extract_dir"
+  sh scripts/remove_path.sh "$extract_dir"
   mkdir -p "$extract_dir"
   unzip -q "$rock" -d "$extract_dir"
   for path in "$project-$version-1.rockspec" "$project-lua-$version.tar.gz"; do

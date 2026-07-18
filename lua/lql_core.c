@@ -618,7 +618,6 @@ static const luaL_Reg lua_lql_module_functions[] = {
     {NULL, NULL}};
 
 static const luaL_Reg lua_lql_client_methods[] = {
-    {"__gc", lua_lql_client_gc},
     {"version", lua_lql_client_version},
     {"capabilities", lua_lql_client_capabilities},
     {"selector_parse", lua_lql_client_selector_parse},
@@ -630,23 +629,28 @@ static const luaL_Reg lua_lql_client_methods[] = {
     {NULL, NULL}};
 
 static const luaL_Reg lua_lql_selector_methods[] = {
-    {"__gc", lua_lql_selector_gc},
     {"capabilities", lua_lql_selector_capabilities},
     {"is_empty", lua_lql_selector_is_empty},
     {NULL, NULL}};
 
 static void lua_lql_register_type(lua_State *lua, const char *name,
-                                  const luaL_Reg *methods) {
+                                  lua_CFunction gc, const luaL_Reg *methods) {
   luaL_newmetatable(lua, name);
+  if (gc != NULL) {
+    lua_pushcfunction(lua, gc);
+    lua_setfield(lua, -2, "__gc");
+  }
+  lua_newtable(lua);
   luaL_setfuncs(lua, methods, 0);
-  lua_pushvalue(lua, -1);
   lua_setfield(lua, -2, "__index");
   lua_pop(lua, 1);
 }
 
 int luaopen_lql_core(lua_State *lua) {
-  lua_lql_register_type(lua, LUA_LQL_CLIENT, lua_lql_client_methods);
-  lua_lql_register_type(lua, LUA_LQL_SELECTOR, lua_lql_selector_methods);
+  lua_lql_register_type(lua, LUA_LQL_CLIENT, lua_lql_client_gc,
+                        lua_lql_client_methods);
+  lua_lql_register_type(lua, LUA_LQL_SELECTOR, lua_lql_selector_gc,
+                        lua_lql_selector_methods);
   lua_newtable(lua);
   luaL_setfuncs(lua, lua_lql_module_functions, 0);
   lua_pushboolean(lua, 1);

@@ -12,6 +12,11 @@
 
 __extension__ typedef signed long long lql_int64;
 
+#define LQL_INT64_MAX_VALUE \
+  __extension__ 9223372036854775807LL
+#define LQL_INT64_MIN_VALUE \
+  (-LQL_INT64_MAX_VALUE - __extension__ 1LL)
+
 typedef struct lql_temporal {
   lql_int64 seconds;
   int nanoseconds;
@@ -35,5 +40,7 @@ LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_today(lql_temporal *out);
 LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_yesterday(lql_temporal *out);
 LQL_TEMPORAL_INTERNAL_SYMBOL int
 lql_temporal_from_time_t(time_t value, int date_only, lql_temporal *out);
+LQL_TEMPORAL_INTERNAL_SYMBOL int
+lql_temporal_from_seconds(lql_int64 seconds, int date_only, lql_temporal *out);
 
 #endif

@@ -19,7 +19,7 @@ if [ ! -x "$afl_showmap" ]; then
   exit 1
 fi
 
-rm -rf "$out_dir"
+sh scripts/remove_path.sh "$out_dir"
 mkdir -p "$out_dir"
 
 count=0

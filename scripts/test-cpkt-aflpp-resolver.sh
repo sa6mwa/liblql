@@ -10,7 +10,7 @@ bash -n "$resolver"
 grep -Fq 'version=5.02c' "$resolver" || fail 'AFL++ version is not pinned'
 grep -Fq 'archive_sha256=' "$resolver" || fail 'AFL++ checksum is not pinned'
 grep -Fq 'cpkt-toolchains.sh' "$resolver" || fail 'resolver does not use the embedded Bootlin resolver'
-grep -Fq 'install_cleanup_trap -rf "$tmp"' "$resolver" || fail 'resolver does not clean failed staging state'
+grep -Fq 'remove_path.sh' "$resolver" || fail 'resolver does not use remove_path cleanup'
 grep -Fq 'with_cache_lock "$c/locks/aflplusplus-${version}-x86_64-linux-gnu.lock" ensure_locked' "$resolver" || fail 'resolver does not serialize shared AFL++ publication'
 grep -Fq 'collection_id()' "$resolver" || fail 'resolver does not key AFL++ caches by Bootlin collection identity'
 grep -Fq '.cpkt-aflpp-revision-$revision-$id' "$resolver" || fail 'resolver readiness marker is not tied to the Bootlin collection identity'
@@ -18,7 +18,7 @@ grep -Fq 'ready "$r" "$id" && return' "$resolver" || fail 'resolver does not rec
 grep -Fq '"-DAFL_PATH=\"$helper\""' "$resolver" || fail 'resolver does not preserve AFL++ cache paths as one compiler argument'
 
 fake_bin=$(mktemp -d "${TMPDIR:-/tmp}/cpkt-aflpp-test.XXXXXX")
-trap 'rm -rf "$fake_bin"' EXIT HUP INT TERM
+trap 'sh "$skill_dir/scripts/remove_path.sh" "$fake_bin"' EXIT HUP INT TERM
 printf '#!/bin/sh\nprintf "aarch64\\n"\n' > "$fake_bin/uname"
 chmod +x "$fake_bin/uname"
 if PATH="$fake_bin:$PATH" "$resolver" ensure >/dev/null 2>&1; then

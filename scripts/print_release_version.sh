@@ -4,7 +4,7 @@ set -eu
 build_dir=${LQL_VERSION_BUILD_DIR:-build/print-release-version}
 version_header=$build_dir/generated/include/lql/version.h
 
-rm -rf "$build_dir"
+sh scripts/remove_path.sh "$build_dir"
 cmake -S . -B "$build_dir" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE=cmake/cpkt-toolchain.cmake \
   -DLQL_TARGET_ID=x86_64-linux-gnu \

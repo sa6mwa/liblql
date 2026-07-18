@@ -10,10 +10,10 @@ case "$root" in
 esac
 case "${1:-all}" in
   all)
-    rm -rf "$root/build" "$root/dist"
+    sh "$root/scripts/remove_path.sh" "$root/build" "$root/dist"
     ;;
   dist)
-    rm -rf "$root/dist"
+    sh "$root/scripts/remove_path.sh" "$root/dist"
     ;;
   *)
     printf '%s\n' "clean: unsupported scope: $1" >&2

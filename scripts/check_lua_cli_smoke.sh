@@ -14,7 +14,7 @@ fi
 
 tmp=${TMPDIR:-/tmp}/liblql-lua-cli.$$
 cleanup() {
-  rm -f "$tmp.out" "$tmp.err"
+  sh "$root/scripts/remove_path.sh" "$tmp.out" "$tmp.err"
 }
 trap cleanup EXIT HUP INT TERM
 

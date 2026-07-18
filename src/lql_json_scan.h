@@ -83,6 +83,22 @@ typedef struct lql_json_flat_eq_term {
   /* Optional cached numeric path segment indexes. */
   unsigned long path_array_index_cache;
   size_t path_array_index_values[LQL_JSON_PATH_SEGMENT_CAPACITY];
+  const char *range_gt_text;
+  size_t range_gt_text_len;
+  unsigned long range_gt_unsigned;
+  int range_gt_unsigned_ready;
+  const char *range_gte_text;
+  size_t range_gte_text_len;
+  unsigned long range_gte_unsigned;
+  int range_gte_unsigned_ready;
+  const char *range_lt_text;
+  size_t range_lt_text_len;
+  unsigned long range_lt_unsigned;
+  int range_lt_unsigned_ready;
+  const char *range_lte_text;
+  size_t range_lte_text_len;
+  unsigned long range_lte_unsigned;
+  int range_lte_unsigned_ready;
 } lql_json_flat_eq_term;
 
 typedef struct lql_json_capture_key {
@@ -102,6 +118,7 @@ typedef lql_status (*lql_json_flat_eq_record_fn)(
     int source_compact, lql_error *error);
 
 typedef struct lql_json_flat_eq_request {
+  struct lql_allocator *allocator;
   lql_stream_reader_fn reader;
   void *reader_user;
   const lql_json_flat_eq_term *terms;
@@ -118,6 +135,7 @@ typedef struct lql_json_flat_eq_request {
   lql_stream_cancel_fn cancelled;
   void *cancel_user;
   int *out_cancelled;
+  int *out_limit_stop;
   lql_json_flat_eq_record_fn record;
   void *record_user;
 } lql_json_flat_eq_request;

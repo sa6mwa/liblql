@@ -94,6 +94,7 @@ struct lql_selector {
   lql_selector_kind kind;
   char *field;
   char *value;
+  size_t value_len;
   int value_set;
   int value_is_string;
   int value_from_json;
@@ -190,6 +191,12 @@ LQL_INTERNAL_SYMBOL void lql_set_error(lql_error *error, lql_status status,
                                        const char *message);
 LQL_INTERNAL_SYMBOL int lql_number_parse_json(const char *text, size_t len,
                                               double *out);
+LQL_INTERNAL_SYMBOL int lql_number_compare_json(lql_allocator *allocator,
+                                                const char *left,
+                                                size_t left_len,
+                                                const char *right,
+                                                size_t right_len, int *out);
+LQL_INTERNAL_SYMBOL int lql_number_is_json(const char *text, size_t len);
 LQL_INTERNAL_SYMBOL int lql_number_format_json(double value, char *out,
                                                size_t cap);
 LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,

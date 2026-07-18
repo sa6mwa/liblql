@@ -12,8 +12,8 @@ require_line() {
   fi
 }
 
-require_line '^release-pipeline: test-all release-matrix$' \
-  'release-pipeline must run ordinary gates before release-matrix'
+require_line '^release-pipeline:$' \
+  'release-pipeline target is missing'
 require_line '^prerelease: release-pipeline$' \
   'prerelease must share release-pipeline'
 require_line '^lifecycle-version-contract:$' \
@@ -42,6 +42,10 @@ if grep -E "(^|[^[:alnum:]_-])(${old_phase}-parity|${old_phase}-profile|debug-${
 fi
 
 release_line=$(grep -n '^release:$' "$makefile" | cut -d: -f1 | head -1)
+pipeline_target_line=$(grep -n '^release-pipeline:$' "$makefile" |
+  cut -d: -f1 | head -1)
+pipeline_test_line=$((pipeline_target_line + 1))
+pipeline_matrix_line=$((pipeline_target_line + 2))
 version_line=$((release_line + 1))
 clean_line=$((release_line + 2))
 pipeline_line=$((release_line + 3))
@@ -49,6 +53,18 @@ version_cmd=$(sed -n "${version_line}p" "$makefile")
 clean_cmd=$(sed -n "${clean_line}p" "$makefile")
 pipeline_cmd=$(sed -n "${pipeline_line}p" "$makefile")
 tab=$(printf '\t')
+pipeline_test_cmd=$(sed -n "${pipeline_test_line}p" "$makefile")
+pipeline_matrix_cmd=$(sed -n "${pipeline_matrix_line}p" "$makefile")
+
+if [ "$pipeline_test_cmd" != "${tab}@\$(MAKE) --no-print-directory -f Makefile test-all" ]; then
+  printf 'release target check: release-pipeline must run test-all first\n' >&2
+  exit 1
+fi
+
+if [ "$pipeline_matrix_cmd" != "${tab}@\$(MAKE) --no-print-directory -f Makefile release-matrix" ]; then
+  printf 'release target check: release-pipeline must run release-matrix after test-all\n' >&2
+  exit 1
+fi
 
 if [ "$version_cmd" != "${tab}@\$(MAKE) lifecycle-version-contract" ]; then
   printf 'release target check: release must run lifecycle-version-contract first\n' >&2

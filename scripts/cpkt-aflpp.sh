@@ -12,8 +12,10 @@ die() { printf 'cpkt-aflpp: %s\n' "$*" >&2; exit 1; }
 install_cleanup_trap() {
   local remove_option=$1 cleanup='status=$?;' path
   shift
+  : "$remove_option"
   for path in "$@"; do
-    printf -v cleanup '%s rm %s -- %q || :;' "$cleanup" "$remove_option" "$path"
+    printf -v cleanup '%s sh %q %q || :;' "$cleanup" \
+      "$skill_dir/scripts/remove_path.sh" "$path"
   done
   cleanup+=' trap - EXIT HUP INT TERM; exit "$status"'
   trap "$cleanup" EXIT
@@ -79,13 +81,13 @@ ensure_locked() {
   [[ -x "$cc" && -x "$cxx" && -f "$br/include/gmp.h" ]] || die 'Bootlin GCC plugin headers are incomplete'
   mkdir -p "$c/archives"
   if ! [[ -f "$archive" ]] || ! printf '%s  %s\n' "$archive_sha256" "$archive" | sha256sum -c - >/dev/null 2>&1; then
-    rm -f "$archive"; dl="$archive.tmp.$$"
+    sh "$skill_dir/scripts/remove_path.sh" "$archive"; dl="$archive.tmp.$$"
     if command -v curl >/dev/null; then
-      curl -fL --retry 3 --connect-timeout 20 -o "$dl" "https://github.com/AFLplusplus/AFLplusplus/archive/refs/tags/v${version}.tar.gz" || { rm -f "$dl"; die 'AFL++ download failed'; }
+      curl -fL --retry 3 --connect-timeout 20 -o "$dl" "https://github.com/AFLplusplus/AFLplusplus/archive/refs/tags/v${version}.tar.gz" || { sh "$skill_dir/scripts/remove_path.sh" "$dl"; die 'AFL++ download failed'; }
     elif command -v wget >/dev/null; then
-      wget -O "$dl" "https://github.com/AFLplusplus/AFLplusplus/archive/refs/tags/v${version}.tar.gz" || { rm -f "$dl"; die 'AFL++ download failed'; }
+      wget -O "$dl" "https://github.com/AFLplusplus/AFLplusplus/archive/refs/tags/v${version}.tar.gz" || { sh "$skill_dir/scripts/remove_path.sh" "$dl"; die 'AFL++ download failed'; }
     else die 'curl or wget is required to download AFL++'; fi
-    printf '%s  %s\n' "$archive_sha256" "$dl" | sha256sum -c - >/dev/null || { rm -f "$dl"; die 'AFL++ checksum mismatch'; }
+    printf '%s  %s\n' "$archive_sha256" "$dl" | sha256sum -c - >/dev/null || { sh "$skill_dir/scripts/remove_path.sh" "$dl"; die 'AFL++ checksum mismatch'; }
     mv "$dl" "$archive"
   fi
   tmp="$c/.aflplusplus.$$"; install_cleanup_trap -rf "$tmp"
@@ -107,7 +109,7 @@ ensure_locked() {
   printf '#!/usr/bin/env bash\nexport AFL_PATH=%q\nexport AFL_CC=%q\nexec %q "$@"\n' "$r/lib/afl" "$cc" "$r/bin/afl-gcc-fast" > "$tmp/root/bin/cpkt-afl-gcc"
   printf '#!/usr/bin/env bash\nexport AFL_PATH=%q\nexport AFL_CC=%q\nexport AFL_CXX=%q\nexec %q "$@"\n' "$r/lib/afl" "$cc" "$cxx" "$r/bin/afl-g++-fast" > "$tmp/root/bin/cpkt-afl-g++"
   chmod +x "$tmp/root/bin/cpkt-afl-gcc" "$tmp/root/bin/cpkt-afl-g++"; touch "$tmp/root/.cpkt-aflpp-revision-$revision-$id"
-  ready "$tmp/root" "$id" || die 'incomplete AFL++ build'; rm -rf "$r"; mv "$tmp/root" "$r"; rm -rf "$tmp"; trap - EXIT HUP INT TERM
+  ready "$tmp/root" "$id" || die 'incomplete AFL++ build'; sh "$skill_dir/scripts/remove_path.sh" "$r"; mv "$tmp/root" "$r"; sh "$skill_dir/scripts/remove_path.sh" "$tmp"; trap - EXIT HUP INT TERM
 }
 
 report() { local d br id r; ensure; d=$(bootlin_description); br=$(value root "$d"); id=$(collection_id "$br"); r=$(root "$id"); printf 'version=%s\ncache=%s\nsource=aflplusplus\nroot=%s\nafl_fuzz=%s\nafl_showmap=%s\ncc=%s\ncxx=%s\nhelper=%s\n' "$version" "$(cache)" "$r" "$r/bin/afl-fuzz" "$r/bin/afl-showmap" "$r/bin/cpkt-afl-gcc" "$r/bin/cpkt-afl-g++" "$r/lib/afl"; }

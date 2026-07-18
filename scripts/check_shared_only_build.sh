@@ -5,7 +5,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 build_dir=${LQL_SHARED_ONLY_BUILD_DIR:-"$root/build/shared-only"}
 install_dir=$build_dir/install
 
-rm -rf "$build_dir"
+sh "$root/scripts/remove_path.sh" "$build_dir"
 cmake -S "$root" -B "$build_dir" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$root/cmake/cpkt-toolchain.cmake" \
   -DLQL_TARGET_ID=x86_64-linux-gnu \

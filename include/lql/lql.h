@@ -332,10 +332,17 @@ typedef struct lql_selector_string_term {
   size_t any_count;
 } lql_selector_string_term;
 
-/** One numeric or datetime range bound; ABSENT ignores its other fields. */
+/**
+ * One numeric or datetime range bound; ABSENT ignores its other fields.
+ * For NUMBER bounds, `number_text` is the authoritative borrowed JSON number
+ * spelling when present. `number` is a finite convenience value when the bound
+ * fits in double precision; valid JSON numbers outside that range still execute
+ * and round-trip through `number_text`.
+ */
 typedef struct lql_selector_range_bound {
   lql_selector_bound_kind kind;
   double number;
+  lql_string_view number_text;
   lql_string_view datetime;
 } lql_selector_range_bound;
 

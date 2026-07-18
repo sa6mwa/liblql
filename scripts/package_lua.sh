@@ -11,7 +11,7 @@ build_dir=${LQL_LUA_PACKAGE_BUILD_DIR:-build/package-lua}
 version_build=build/package-lua-version
 version_header=$version_build/generated/include/lql/version.h
 
-rm -rf "$version_build"
+sh scripts/remove_path.sh "$version_build"
 cmake -S . -B "$version_build" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE=cmake/cpkt-toolchain.cmake \
   -DLQL_TARGET_ID=x86_64-linux-gnu \
@@ -36,10 +36,10 @@ rockspec=$dist_dir/$project-$version-1.rockspec
 src_rock=$dist_dir/$project-$version-1.src.rock
 checksums=$dist_dir/$project-$version-CHECKSUMS
 
-rm -rf "$stage" "$build_dir/rockpack"
+sh scripts/remove_path.sh "$stage" "$build_dir/rockpack"
 mkdir -p "$dist_dir"
 if [ "$checksum_mode" != "append" ]; then
-  rm -f "$dist_dir"/$project-*.tar.gz \
+  sh scripts/remove_path.sh "$dist_dir"/$project-*.tar.gz \
     "$dist_dir"/clql-*.tar.gz \
     "$dist_dir"/$project-*-1.rockspec \
     "$dist_dir"/$project-*-1.src.rock \
@@ -60,7 +60,7 @@ fi
 
 mkdir -p "$build_dir/rockpack"
 cp "$rockspec" "$source_archive" "$build_dir/rockpack/"
-rm -f "$src_rock"
+sh scripts/remove_path.sh "$src_rock"
 (
   cd "$build_dir/rockpack"
   zip -X -q "../$(basename "$src_rock")" \

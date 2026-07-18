@@ -13,7 +13,7 @@ rockspec=$4
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 project=liblql
 
-rm -rf "$stage"
+sh "$root/scripts/remove_path.sh" "$stage"
 mkdir -p "$stage/lua/bin" "$stage/lua/lql" "$stage/include/lql" "$stage/scripts"
 
 cp "$root/LICENSE" "$root/README.md" "$stage/"

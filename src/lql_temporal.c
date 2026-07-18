@@ -16,15 +16,21 @@ static int parse_ndigits(const char **p, int n, int *out) {
   int i;
   int v;
   int digit;
+  const char *q;
   v = 0;
+  q = *p;
   for (i = 0; i < n; ++i) {
-    digit = digit_value((unsigned char)(*p)[i]);
+    if (*q == '\0') {
+      return 0;
+    }
+    digit = digit_value((unsigned char)*q);
     if (digit < 0) {
       return 0;
     }
     v = (v * 10) + digit;
+    ++q;
   }
-  *p += n;
+  *p = q;
   *out = v;
   return 1;
 }
@@ -87,7 +93,7 @@ static lql_int64 days_from_civil(int y, int m, int d) {
   return era * (lql_int64)146097 + (lql_int64)doe - (lql_int64)719468;
 }
 
-static void civil_from_days(lql_int64 z, int *out_y, int *out_m, int *out_d) {
+static int civil_from_days(lql_int64 z, int *out_y, int *out_m, int *out_d) {
   lql_int64 era;
   unsigned doe;
   unsigned yoe;
@@ -106,13 +112,17 @@ static void civil_from_days(lql_int64 z, int *out_y, int *out_m, int *out_d) {
   m = mp + (mp < 10 ? 3 : (unsigned)-9);
   y = (lql_int64)yoe + era * (lql_int64)400;
   y += m <= 2 ? 1 : 0;
+  if (y < 0 || y > 9999) {
+    return 0;
+  }
   *out_y = (int)y;
   *out_m = (int)m;
   *out_d = (int)d;
+  return 1;
 }
 
-static void temporal_from_seconds(lql_int64 seconds, int date_only,
-                                  lql_temporal *out) {
+static int temporal_from_seconds(lql_int64 seconds, int date_only,
+                                 lql_temporal *out) {
   lql_int64 days;
   lql_int64 rem;
   days = seconds / (lql_int64)86400;
@@ -121,10 +131,13 @@ static void temporal_from_seconds(lql_int64 seconds, int date_only,
     rem += (lql_int64)86400;
     --days;
   }
-  civil_from_days(days, &out->year, &out->month, &out->day);
+  if (!civil_from_days(days, &out->year, &out->month, &out->day)) {
+    return 0;
+  }
   out->seconds = date_only ? days * (lql_int64)86400 : seconds;
   out->nanoseconds = 0;
   out->date_only = date_only;
+  return 1;
 }
 
 static int parse_temporal_fast(const char *raw, lql_temporal *out) {
@@ -193,7 +206,8 @@ static int parse_temporal_fast(const char *raw, lql_temporal *out) {
   } else if (*p == '+' || *p == '-') {
     off_sign = *p == '-' ? -1 : 1;
     ++p;
-    if (!parse_2_at(p, &off_h) || p[2] != ':' || !parse_2_at(p + 3, &off_m) ||
+    if (strlen(p) < 5u || !parse_2_at(p, &off_h) || p[2] != ':' ||
+        !parse_2_at(p + 3, &off_m) ||
         off_h > 23 || off_m > 59) {
       return 0;
     }
@@ -252,6 +266,14 @@ LQL_INTERNAL_SYMBOL int lql_parse_temporal_literal(const char *raw,
   s = 0;
   offset = 0;
   nanos = 0;
+  if (*p != '\0' && isspace((unsigned char)*p)) {
+    do {
+      ++p;
+    } while (isspace((unsigned char)*p));
+    if (*p != '\0') {
+      return 0;
+    }
+  }
   if (*p == '\0') {
     out->seconds = days_from_civil(y, mo, d) * (lql_int64)86400;
     out->nanoseconds = 0;
@@ -356,7 +378,9 @@ lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
     rem += (lql_int64)86400;
     --days;
   }
-  civil_from_days(days, &y, &m, &d);
+  if (!civil_from_days(days, &y, &m, &d)) {
+    return 0;
+  }
   h = (int)(rem / (lql_int64)3600);
   rem %= (lql_int64)3600;
   mi = (int)(rem / (lql_int64)60);
@@ -378,12 +402,18 @@ lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
 LQL_INTERNAL_SYMBOL int lql_temporal_now(lql_temporal *out) {
   time_t value;
   value = time(NULL);
+  if (value == (time_t)-1) {
+    return 0;
+  }
   return lql_temporal_from_time_t(value, 0, out);
 }
 
 LQL_INTERNAL_SYMBOL int lql_temporal_today(lql_temporal *out) {
   time_t value;
   value = time(NULL);
+  if (value == (time_t)-1) {
+    return 0;
+  }
   return lql_temporal_from_time_t(value, 1, out);
 }
 
@@ -392,14 +422,19 @@ LQL_INTERNAL_SYMBOL int lql_temporal_yesterday(lql_temporal *out) {
   value = time(NULL);
   if (value == (time_t)-1 || out == NULL)
     return 0;
-  temporal_from_seconds((lql_int64)value - (lql_int64)86400, 1, out);
-  return 1;
+  return temporal_from_seconds((lql_int64)value - (lql_int64)86400, 1, out);
 }
 
 LQL_INTERNAL_SYMBOL int lql_temporal_from_time_t(time_t value, int date_only,
                                                  lql_temporal *out) {
-  if (out == NULL || value == (time_t)-1)
+  if (out == NULL)
     return 0;
-  temporal_from_seconds((lql_int64)value, date_only, out);
-  return 1;
+  return temporal_from_seconds((lql_int64)value, date_only, out);
+}
+
+LQL_INTERNAL_SYMBOL int
+lql_temporal_from_seconds(lql_int64 seconds, int date_only, lql_temporal *out) {
+  if (out == NULL)
+    return 0;
+  return temporal_from_seconds(seconds, date_only, out);
 }

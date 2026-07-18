@@ -68,15 +68,14 @@ static int token_list_push(lql_selector_parser *ctx, lql_token_list *list,
   return 1;
 }
 
-static int selector_any_push(lql_selector_parser *ctx, lql_selector *selector,
-                             char *item, lql_selector_literal_kind kind,
-                             int from_json) {
+static int selector_any_push_len(lql_selector_parser *ctx,
+                                 lql_selector *selector, char *item, size_t len,
+                                 lql_selector_literal_kind kind,
+                                 int from_json) {
   char **next;
   size_t *next_lens;
   lql_selector_literal_kind *next_kinds;
   int *next_from_json;
-  size_t len;
-  len = strlen(item);
   next = (char **)ctx->allocator->realloc(ctx->allocator, selector->any,
                                           sizeof(char *) *
                                               (selector->any_count + 1u));
@@ -113,6 +112,24 @@ static int selector_any_push(lql_selector_parser *ctx, lql_selector *selector,
   return 1;
 }
 
+static int selector_any_push(lql_selector_parser *ctx, lql_selector *selector,
+                             char *item, lql_selector_literal_kind kind,
+                             int from_json) {
+  return selector_any_push_len(ctx, selector, item, strlen(item), kind,
+                               from_json);
+}
+
+static int selector_set_value_len(lql_selector_parser *ctx,
+                                  lql_selector *selector, char *value,
+                                  size_t len, lql_selector_literal_kind kind) {
+  ctx->allocator->destroy(ctx->allocator, selector->value);
+  selector->value = value;
+  selector->value_len = len;
+  selector->value_set = 1;
+  selector->value_kind = kind;
+  return 1;
+}
+
 static lql_status split_top(lql_selector_parser *ctx, const char *expr,
                             lql_token_list *out, lql_error *error) {
   const char *start;
@@ -127,10 +144,10 @@ static lql_status split_top(lql_selector_parser *ctx, const char *expr,
   quote = 0;
   for (p = expr; *p != '\0'; ++p) {
     if (quote != 0) {
-      if (*p == quote) {
-        quote = 0;
-      } else if (*p == '\\' && p[1] != '\0') {
+      if (*p == '\\' && p[1] != '\0') {
         ++p;
+      } else if (*p == quote) {
+        quote = 0;
       }
       continue;
     }
@@ -222,10 +239,10 @@ static lql_status split_assignments(lql_selector_parser *ctx, const char *expr,
   quote = 0;
   for (p = expr; *p != '\0'; ++p) {
     if (quote != 0) {
-      if (*p == quote) {
-        quote = 0;
-      } else if (*p == '\\' && p[1] != '\0') {
+      if (*p == '\\' && p[1] != '\0') {
         ++p;
+      } else if (*p == quote) {
+        quote = 0;
       }
       continue;
     }
@@ -280,27 +297,39 @@ static lql_status split_assignments(lql_selector_parser *ctx, const char *expr,
 
 static char *unquote(lql_selector_parser *ctx, char *value) {
   size_t len;
-  char *out;
-  char *w;
-  char *r;
   len = strlen(value);
   if (len >= 2u && ((value[0] == '"' && value[len - 1u] == '"') ||
                     (value[0] == '\'' && value[len - 1u] == '\''))) {
-    out = lql_strndup_local(ctx, value + 1, len - 2u);
-    if (out == NULL) {
-      return NULL;
-    }
-    w = out;
-    for (r = out; *r != '\0'; ++r) {
-      if (*r == '\\' && r[1] != '\0') {
-        ++r;
-      }
-      *w++ = *r;
-    }
-    *w = '\0';
-    return out;
+    return lql_strndup_local(ctx, value + 1, len - 2u);
   }
   return ctx->allocator->strdup(ctx->allocator, value);
+}
+
+static char *find_shorthand_operator(char *expr) {
+  char *p;
+  int quote;
+  quote = 0;
+  for (p = expr; *p != '\0'; ++p) {
+    if (quote != 0) {
+      if (*p == '\\' && p[1] != '\0') {
+        ++p;
+      } else if (*p == quote) {
+        quote = 0;
+      }
+      continue;
+    }
+    if (*p == '"' || *p == '\'') {
+      quote = *p;
+      continue;
+    }
+    if ((*p == '!' || *p == '>' || *p == '<') && p[1] == '=') {
+      return p;
+    }
+    if (*p == '=' || *p == '>' || *p == '<') {
+      return p;
+    }
+  }
+  return NULL;
 }
 
 static int append_text(lql_selector_parser *ctx, char **buf, size_t *len,
@@ -542,7 +571,6 @@ static lql_selector_kind kind_from_name(const char *name) {
 static int parse_number_literal(const char *decoded, double *out);
 
 static lql_selector_literal_kind selector_literal_kind(const char *raw) {
-  double number;
   if (raw == NULL) {
     return LQL_SELECTOR_LITERAL_STRING;
   }
@@ -552,8 +580,8 @@ static lql_selector_literal_kind selector_literal_kind(const char *raw) {
   if (strcmp(raw, "null") == 0) {
     return LQL_SELECTOR_LITERAL_NULL;
   }
-  return parse_number_literal(raw, &number) ? LQL_SELECTOR_LITERAL_NUMBER
-                                            : LQL_SELECTOR_LITERAL_STRING;
+  return lql_number_is_json(raw, strlen(raw)) ? LQL_SELECTOR_LITERAL_NUMBER
+                                              : LQL_SELECTOR_LITERAL_STRING;
 }
 
 static int parse_any_values(lql_selector_parser *ctx, char *decoded,
@@ -667,11 +695,14 @@ static int set_range_bound(lql_selector_parser *ctx, lql_selector *selector,
     return 0;
   }
   is_temporal = lql_parse_temporal_literal(trimmed, &temporal);
-  if (!is_temporal && !parse_number_literal(trimmed, &number)) {
+  if (!is_temporal && !lql_number_is_json(trimmed, strlen(trimmed))) {
     ctx->allocator->destroy(ctx->allocator, trimmed);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "range selector bound invalid");
     return 0;
+  }
+  if (!is_temporal && !parse_number_literal(trimmed, &number)) {
+    number = 0.0;
   }
   if (is_temporal) {
     selector->range_is_temporal = 1;
@@ -707,20 +738,36 @@ static int set_range_bound(lql_selector_parser *ctx, lql_selector *selector,
     ctx->allocator->destroy(ctx->allocator, trimmed);
     return 1;
   }
-  ctx->allocator->destroy(ctx->allocator, trimmed);
   if (strcmp(key, "gt") == 0) {
+    if (!replace_selector_text(ctx, &selector->range_gt_text, trimmed)) {
+      ctx->allocator->destroy(ctx->allocator, trimmed);
+      return 0;
+    }
     selector->range_gt = number;
     selector->has_range_gt = 1;
   } else if (strcmp(key, "gte") == 0) {
+    if (!replace_selector_text(ctx, &selector->range_gte_text, trimmed)) {
+      ctx->allocator->destroy(ctx->allocator, trimmed);
+      return 0;
+    }
     selector->range_gte = number;
     selector->has_range_gte = 1;
   } else if (strcmp(key, "lt") == 0) {
+    if (!replace_selector_text(ctx, &selector->range_lt_text, trimmed)) {
+      ctx->allocator->destroy(ctx->allocator, trimmed);
+      return 0;
+    }
     selector->range_lt = number;
     selector->has_range_lt = 1;
   } else {
+    if (!replace_selector_text(ctx, &selector->range_lte_text, trimmed)) {
+      ctx->allocator->destroy(ctx->allocator, trimmed);
+      return 0;
+    }
     selector->range_lte = number;
     selector->has_range_lte = 1;
   }
+  ctx->allocator->destroy(ctx->allocator, trimmed);
   return 1;
 }
 
@@ -953,20 +1000,20 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
       }
       ctx->allocator->destroy(ctx->allocator, decoded);
     } else if (key_is_value(key)) {
-      ctx->allocator->destroy(ctx->allocator, selector->value);
       if (decoded[0] == '\0' && (*seen_slot)[0] == '\0' &&
           (kind == LQL_SELECTOR_KIND_CONTAINS ||
            kind == LQL_SELECTOR_KIND_ICONTAINS ||
            kind == LQL_SELECTOR_KIND_PREFIX ||
            kind == LQL_SELECTOR_KIND_IPREFIX)) {
+        ctx->allocator->destroy(ctx->allocator, selector->value);
         ctx->allocator->destroy(ctx->allocator, decoded);
         selector->value = NULL;
+        selector->value_len = 0u;
         selector->value_set = 0;
         selector->value_kind = LQL_SELECTOR_LITERAL_STRING;
       } else {
-        selector->value = decoded;
-        selector->value_set = 1;
-        selector->value_kind = selector_literal_kind(*seen_slot);
+        selector_set_value_len(ctx, selector, decoded, strlen(decoded),
+                               selector_literal_kind(*seen_slot));
       }
     } else if (kind == LQL_SELECTOR_KIND_DATE &&
                (key_is_after(key) || key_is_before(key) || key_is_since(key))) {
@@ -1120,7 +1167,7 @@ static int string_predicate_is_match_all_alias(lql_selector_kind kind,
   }
   empty_value = (!selector->value_set && selector->value == NULL) ||
                 (selector->value_set && selector->value != NULL &&
-                 selector->value[0] == '\0');
+                 selector->value_len == 0u);
   if (!empty_value) {
     return 0;
   }
@@ -1141,6 +1188,7 @@ static void prepare_selector_value_temporal(lql_selector *selector) {
   if ((selector->kind == LQL_SELECTOR_KIND_EQ ||
        selector->kind == LQL_SELECTOR_KIND_NE) &&
       selector->value != NULL &&
+      selector->value_len == strlen(selector->value) &&
       lql_parse_temporal_literal(selector->value, &selector->temporal_eq)) {
     selector->value_is_temporal = 1;
   }
@@ -1237,22 +1285,7 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
     return LQL_STATUS_OK;
   }
 
-  op = strstr(copy, "!=");
-  if (op == NULL) {
-    op = strstr(copy, ">=");
-  }
-  if (op == NULL) {
-    op = strstr(copy, "<=");
-  }
-  if (op == NULL) {
-    op = strchr(copy, '=');
-  }
-  if (op == NULL) {
-    op = strchr(copy, '>');
-  }
-  if (op == NULL) {
-    op = strchr(copy, '<');
-  }
+  op = find_shorthand_operator(copy);
   if (copy[0] == '/' && op != NULL) {
     int op2;
     char op0;
@@ -1282,6 +1315,7 @@ static lql_status parse_one(lql_selector_parser *ctx, const char *expr,
                                            : selector_literal_kind(out->value);
     ctx->allocator->destroy(ctx->allocator, raw_field);
     ctx->allocator->destroy(ctx->allocator, raw_value);
+    out->value_len = out->value == NULL ? 0u : strlen(out->value);
     out->value_set = 1;
     if (out->field == NULL || out->value == NULL) {
       ctx->allocator->destroy(ctx->allocator, copy);
@@ -1603,30 +1637,30 @@ static int selector_json_store_field(selector_json_state *state,
 
 static int selector_json_store_value(selector_json_state *state,
                                      lql_selector *selector, const char *value,
+                                     size_t value_len,
                                      lql_selector_literal_kind kind) {
   char *copy;
-  copy = state->parser.allocator->strdup(state->parser.allocator, value);
+  copy = lql_strndup_local(&state->parser, value, value_len);
   if (copy == NULL) {
     return 0;
   }
-  state->parser.allocator->destroy(state->parser.allocator, selector->value);
-  selector->value = copy;
-  selector->value_set = 1;
+  selector_set_value_len(&state->parser, selector, copy, value_len, kind);
   selector->value_is_string = kind == LQL_SELECTOR_LITERAL_STRING;
   selector->value_from_json = 1;
-  selector->value_kind = kind;
   return 1;
 }
 
 static int selector_json_push_any(selector_json_state *state,
                                   lql_selector *selector, const char *value,
+                                  size_t value_len,
                                   lql_selector_literal_kind kind) {
   char *copy;
-  copy = state->parser.allocator->strdup(state->parser.allocator, value);
+  copy = lql_strndup_local(&state->parser, value, value_len);
   if (copy == NULL) {
     return 0;
   }
-  if (!selector_any_push(&state->parser, selector, copy, kind, 1)) {
+  if (!selector_any_push_len(&state->parser, selector, copy, value_len, kind,
+                             1)) {
     state->parser.allocator->destroy(state->parser.allocator, copy);
     return 0;
   }
@@ -1635,28 +1669,29 @@ static int selector_json_push_any(selector_json_state *state,
 
 static int selector_json_store_scalar(selector_json_state *state,
                                       selector_json_frame *frame,
-                                      const char *value,
+                                      const char *value, size_t value_len,
                                       lql_selector_literal_kind kind) {
-  double number;
   if (frame == NULL) {
     lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                   "unexpected selector JSON scalar");
     return 0;
   }
   if (kind == LQL_SELECTOR_LITERAL_NUMBER &&
-      !lql_number_parse_json(value, strlen(value), &number)) {
+      !lql_number_is_json(value, value_len)) {
     lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
-                  "selector JSON number must be finite");
+                  "selector JSON number is invalid");
     return 0;
   }
   if (frame->kind == SELECTOR_JSON_FRAME_PREDICATE &&
       frame->pending_key != NULL && key_is_value(frame->pending_key) &&
       frame->selector != NULL &&
       frame->selector->kind != LQL_SELECTOR_KIND_DATE) {
-    return selector_json_store_value(state, frame->selector, value, kind);
+    return selector_json_store_value(state, frame->selector, value, value_len,
+                                     kind);
   }
   if (frame->kind == SELECTOR_JSON_FRAME_ANY_ARRAY && frame->selector != NULL) {
-    return selector_json_push_any(state, frame->selector, value, kind);
+    return selector_json_push_any(state, frame->selector, value, value_len,
+                                  kind);
   }
   lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                 "unexpected selector JSON scalar");
@@ -1778,6 +1813,11 @@ static lql_status selector_json_end_key(void *user, lql_error *error) {
   lql_selector_kind kind;
   state = (selector_json_state *)user;
   frame = selector_json_top(state);
+  if (state->text_len != 0u &&
+      memchr(state->text, '\0', state->text_len) != NULL) {
+    return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
+                              "selector JSON key contains NUL");
+  }
   if (frame == NULL || frame->kind == SELECTOR_JSON_FRAME_CHILD_ARRAY ||
       frame->kind == SELECTOR_JSON_FRAME_ANY_ARRAY) {
     return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
@@ -2015,30 +2055,61 @@ static lql_status selector_json_store_predicate_string(
   selector = frame->selector;
   ok = 1;
   if (key_is_field(key)) {
+    if (state->text_len != 0u &&
+        memchr(state->text, '\0', state->text_len) != NULL) {
+      return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
+                                "selector field contains NUL");
+    }
     ok = selector_json_store_field(state, selector, state->text);
   } else if (selector->kind == LQL_SELECTOR_KIND_DATE && key_is_value(key)) {
+    if (state->text_len != 0u &&
+        memchr(state->text, '\0', state->text_len) != NULL) {
+      return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
+                                "date selector bound contains NUL");
+    }
     ok = set_date_bound(&state->parser, selector, "value", state->text,
                         state->error);
   } else if (key_is_value(key)) {
-    ok = selector_json_store_value(state, selector, state->text,
-                                   LQL_SELECTOR_LITERAL_STRING);
+    ok =
+        selector_json_store_value(state, selector, state->text, state->text_len,
+                                  LQL_SELECTOR_LITERAL_STRING);
   } else if (selector->kind == LQL_SELECTOR_KIND_DATE &&
              (key_is_after(key) || key_is_before(key) || key_is_since(key))) {
+    if (state->text_len != 0u &&
+        memchr(state->text, '\0', state->text_len) != NULL) {
+      return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
+                                "date selector bound contains NUL");
+    }
     ok = set_date_bound(&state->parser, selector,
                         key_is_after(key)    ? "after"
                         : key_is_before(key) ? "before"
                                              : "since",
                         state->text, state->error);
   } else if (key_is_any(key)) {
+    if (state->text_len != 0u &&
+        memchr(state->text, '\0', state->text_len) != NULL) {
+      return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
+                                "selector any contains NUL");
+    }
     ok = parse_any_values(&state->parser, state->text, selector,
                           selector->kind == LQL_SELECTOR_KIND_IN, state->error);
   } else if (key_is_ignore_case(key)) {
+    if (state->text_len != 0u &&
+        memchr(state->text, '\0', state->text_len) != NULL) {
+      return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
+                                "selector ignoreCase contains NUL");
+    }
     ok = parse_bool_value(state->text, &selector->ignore_case);
     if (!ok) {
       lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
                     "selector ignoreCase must be true/false/t/f");
     }
   } else if (key_is_range_bound(key)) {
+    if (state->text_len != 0u &&
+        memchr(state->text, '\0', state->text_len) != NULL) {
+      return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
+                                "range selector bound contains NUL");
+    }
     if (selector->kind == LQL_SELECTOR_KIND_DATE) {
       ok = set_date_bound(&state->parser, selector, key, state->text,
                           state->error);
@@ -2078,6 +2149,11 @@ static lql_status selector_json_string_end(void *user, lql_error *error) {
       return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
                                 "exists selector requires exactly one path");
     }
+    if (state->text_len != 0u &&
+        memchr(state->text, '\0', state->text_len) != NULL) {
+      return selector_json_fail(state, error, LQL_STATUS_PARSE_ERROR,
+                                "exists selector path contains NUL");
+    }
     if (!selector_json_store_field(state, frame->selector, state->text)) {
       return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                                 "out of memory");
@@ -2093,7 +2169,7 @@ static lql_status selector_json_string_end(void *user, lql_error *error) {
   }
   if (frame->kind == SELECTOR_JSON_FRAME_ANY_ARRAY && frame->selector != NULL) {
     if (!selector_json_push_any(state, frame->selector, state->text,
-                                LQL_SELECTOR_LITERAL_STRING)) {
+                                state->text_len, LQL_SELECTOR_LITERAL_STRING)) {
       return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
                                 "out of memory");
     }
@@ -2125,7 +2201,7 @@ static lql_status selector_json_number_end(void *user, lql_error *error) {
     ok = set_range_bound(&state->parser, frame->selector, frame->pending_key,
                          state->text, state->error);
   } else {
-    ok = selector_json_store_scalar(state, frame, state->text,
+    ok = selector_json_store_scalar(state, frame, state->text, state->text_len,
                                     LQL_SELECTOR_LITERAL_NUMBER);
   }
   if (!ok) {
@@ -2157,7 +2233,7 @@ static lql_status selector_json_boolean(void *user, int value,
     frame->selector->ignore_case = value ? 1 : 0;
   } else {
     literal = value ? "true" : "false";
-    ok = selector_json_store_scalar(state, frame, literal,
+    ok = selector_json_store_scalar(state, frame, literal, strlen(literal),
                                     LQL_SELECTOR_LITERAL_BOOL);
     if (!ok) {
       return selector_json_fail(
@@ -2181,7 +2257,7 @@ static lql_status selector_json_null(void *user, lql_error *error) {
   int ok;
   state = (selector_json_state *)user;
   frame = selector_json_top(state);
-  ok = selector_json_store_scalar(state, frame, "null",
+  ok = selector_json_store_scalar(state, frame, "null", 4u,
                                   LQL_SELECTOR_LITERAL_NULL);
   if (!ok) {
     return selector_json_fail(
@@ -2323,7 +2399,10 @@ static lql_status selector_json_scan_string(selector_json_scanner *scanner,
   unsigned char c;
   unsigned long cp;
   unsigned long low;
+  size_t remaining;
   const unsigned char *chunk;
+  unsigned char continuation_min;
+  unsigned char continuation_max;
   char out[4];
   size_t chunk_start;
   size_t out_len;
@@ -2360,7 +2439,41 @@ static lql_status selector_json_scan_string(selector_json_scanner *scanner,
                                      "JSON string contains control byte");
     }
     if (c != (unsigned char)'\\') {
+      if (c < 0x80u) {
+        ++scanner->pos;
+        continue;
+      }
+      if (c >= 0xc2u && c <= 0xdfu) {
+        remaining = 1u;
+        continuation_min = 0x80u;
+        continuation_max = 0xbfu;
+      } else if (c >= 0xe0u && c <= 0xefu) {
+        remaining = 2u;
+        continuation_min = c == 0xe0u ? 0xa0u : 0x80u;
+        continuation_max = c == 0xedu ? 0x9fu : 0xbfu;
+      } else if (c >= 0xf0u && c <= 0xf4u) {
+        remaining = 3u;
+        continuation_min = c == 0xf0u ? 0x90u : 0x80u;
+        continuation_max = c == 0xf4u ? 0x8fu : 0xbfu;
+      } else {
+        return selector_json_scan_fail(scanner, "invalid UTF-8 in JSON string");
+      }
       ++scanner->pos;
+      while (remaining != 0u) {
+        if (scanner->pos >= scanner->len) {
+          return selector_json_scan_fail(scanner,
+                                         "invalid UTF-8 in JSON string");
+        }
+        c = scanner->data[scanner->pos];
+        if (c < continuation_min || c > continuation_max) {
+          return selector_json_scan_fail(scanner,
+                                         "invalid UTF-8 in JSON string");
+        }
+        ++scanner->pos;
+        --remaining;
+        continuation_min = 0x80u;
+        continuation_max = 0xbfu;
+      }
       continue;
     }
     st = selector_json_emit_string_chunk(
@@ -2795,7 +2908,6 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
   dst->date_lt_text = NULL;
   dst->date_lte_text = NULL;
   if (!clone_string(ctx, src->field, &dst->field) ||
-      !clone_string(ctx, src->value, &dst->value) ||
       !clone_string(ctx, src->range_gt_text, &dst->range_gt_text) ||
       !clone_string(ctx, src->range_gte_text, &dst->range_gte_text) ||
       !clone_string(ctx, src->range_lt_text, &dst->range_lt_text) ||
@@ -2810,13 +2922,20 @@ static int clone_selector_payload(lql_selector_parser *ctx, lql_selector *dst,
       !clone_string(ctx, src->date_lte_text, &dst->date_lte_text)) {
     return 0;
   }
+  if (src->value != NULL) {
+    dst->value = lql_strndup_local(ctx, src->value, src->value_len);
+    if (dst->value == NULL) {
+      return 0;
+    }
+    dst->value_len = src->value_len;
+  }
   for (i = 0u; i < src->any_count; ++i) {
     char *copy;
     copy = lql_strndup_local(ctx, src->any[i], src->any_lens[i]);
     if (copy == NULL ||
-        !selector_any_push(ctx, dst, copy, src->any_kinds[i],
-                           src->any_from_json != NULL ? src->any_from_json[i]
-                                                      : 0)) {
+        !selector_any_push_len(
+            ctx, dst, copy, src->any_lens[i], src->any_kinds[i],
+            src->any_from_json != NULL ? src->any_from_json[i] : 0)) {
       ctx->allocator->destroy(ctx->allocator, copy);
       return 0;
     }
@@ -2885,6 +3004,11 @@ static int view_has_value(lql_string_view view) {
   return view.data != NULL || view.len != 0u;
 }
 
+static int view_contains_nul(lql_string_view view) {
+  return view.len != 0u && view.data != NULL &&
+         memchr(view.data, '\0', view.len) != NULL;
+}
+
 static int view_to_cstr(lql_selector_parser *ctx, lql_string_view view,
                         int allow_empty, char **out) {
   if (view.data == NULL && view.len != 0u) {
@@ -2933,6 +3057,9 @@ static int build_field(lql_selector_parser *ctx, lql_string_view view,
   char *raw;
   char *normalized;
   raw = NULL;
+  if (view_contains_nul(view)) {
+    return 0;
+  }
   if (!view_to_cstr(ctx, view, 0, &raw)) {
     return 0;
   }
@@ -2954,8 +3081,8 @@ static int build_any_values(lql_selector_parser *ctx, lql_selector *selector,
     if (!view_to_cstr(ctx, values[i], 0, &copy)) {
       return 0;
     }
-    if (!selector_any_push(ctx, selector, copy, LQL_SELECTOR_LITERAL_STRING,
-                           0)) {
+    if (!selector_any_push_len(ctx, selector, copy, values[i].len,
+                               LQL_SELECTOR_LITERAL_STRING, 0)) {
       ctx->allocator->destroy(ctx->allocator, copy);
       return 0;
     }
@@ -2968,10 +3095,31 @@ static int build_range_bound(lql_selector_parser *ctx, lql_selector *selector,
                              lql_error *error) {
   char number_buf[64];
   char *text;
+  text = NULL;
   if (bound.kind == LQL_SELECTOR_BOUND_ABSENT) {
     return 1;
   }
   if (bound.kind == LQL_SELECTOR_BOUND_NUMBER) {
+    if (view_has_value(bound.number_text)) {
+      if (view_contains_nul(bound.number_text)) {
+        lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                      "range selector numeric bound text invalid");
+        return 0;
+      }
+      if (!view_to_trimmed_cstr(ctx, bound.number_text, 0, &text) ||
+          !lql_number_is_json(text, strlen(text))) {
+        ctx->allocator->destroy(ctx->allocator, text);
+        lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                      "range selector numeric bound text invalid");
+        return 0;
+      }
+      if (!set_range_bound(ctx, selector, key, text, error)) {
+        ctx->allocator->destroy(ctx->allocator, text);
+        return 0;
+      }
+      ctx->allocator->destroy(ctx->allocator, text);
+      return 1;
+    }
     if (!lql_number_format_json(bound.number, number_buf, sizeof(number_buf))) {
       lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                     "range selector numeric bound must be finite");
@@ -3202,6 +3350,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_string_internal(
       return LQL_STATUS_PARSE_ERROR;
     }
     selector.value_set = term->value_present ? 1 : 0;
+    selector.value_len = term->value.len;
     selector.value_is_string = 1;
     selector.value_kind = LQL_SELECTOR_LITERAL_STRING;
   }
