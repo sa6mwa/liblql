@@ -706,6 +706,50 @@ static int run_long_numeric_selector_regression(lql *ctx) {
   return failed;
 }
 
+static int run_array_depth_state_regression(lql *ctx) {
+  enum { array_count = 127 };
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  char input[sizeof("{\"a\":") - 1u + array_count + sizeof("0") - 1u +
+             array_count + sizeof("}\n")];
+  size_t pos;
+  size_t i;
+  lql_status status;
+
+  pos = 0u;
+  memcpy(input + pos, "{\"a\":", sizeof("{\"a\":") - 1u);
+  pos += sizeof("{\"a\":") - 1u;
+  for (i = 0u; i < array_count; ++i)
+    input[pos++] = '[';
+  input[pos++] = '0';
+  for (i = 0u; i < array_count; ++i)
+    input[pos++] = ']';
+  input[pos++] = '}';
+  input[pos++] = '\n';
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/...=0", &selector, &error) != LQL_STATUS_OK)
+    return 1;
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = pos;
+  reader.chunk_size = 5u;
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  lql_error_init(&error);
+  status = lql_stream_execute(ctx, &request, &result, &error);
+  ctx->selector_destroy(ctx, selector);
+  return status != LQL_STATUS_JSON_ERROR || result.records_seen != 0u ||
+         result.records_matched != 0u;
+}
+
 static int run_huge_numeric_selector_regression(lql *ctx) {
   size_t digits_len;
   size_t prefix_len;
@@ -5913,6 +5957,7 @@ int main(void) {
   RUN_CTX_TEST(run_scalar_json_semantic_regressions);
   RUN_CTX_TEST(run_status_selection);
   RUN_CTX_TEST(run_long_numeric_selector_regression);
+  RUN_CTX_TEST(run_array_depth_state_regression);
   RUN_CTX_TEST(run_huge_numeric_selector_regression);
   RUN_CTX_TEST(run_recursive_wildcard_selector_regression);
   RUN_CTX_TEST(run_escaped_pointer_selection);

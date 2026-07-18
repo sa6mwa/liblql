@@ -4358,6 +4358,11 @@ static lql_status lql_json_array(lql_json_scan *scan) {
     --scan->depth;
     return status;
   }
+  if (scan->depth >= LQL_JSON_MAX_DEPTH) {
+    lql_json_error(scan, "JSON nesting exceeds the scanner limit");
+    --scan->depth;
+    return LQL_STATUS_JSON_ERROR;
+  }
   index = 0u;
   for (;;) {
     size_t i;
