@@ -216,6 +216,7 @@ expect_deleted_manifest_excluded() {
   added_deleted_path=0
 }
 
+git tag -d "$reserved_tag" >/dev/null 2>&1 || true
 exact_version=$(exact_lightweight_version)
 if [ -n "$exact_version" ]; then
   expect_version "$exact_version"
@@ -225,7 +226,6 @@ if [ -n "$exact_version" ]; then
   exit 0
 fi
 
-git tag -d "$reserved_tag" >/dev/null 2>&1 || true
 if [ -e VERSION ]; then
   fail 'refusing to overwrite existing VERSION in git worktree'
 fi
@@ -237,14 +237,27 @@ expect_version 98.97.96 98.97.96
 expect_release_candidate_artifacts 98.97.96
 expect_deleted_manifest_excluded 98.97.96
 
-git tag "$invalid_reserved_tag"
+git -c tag.gpgSign=false tag "$invalid_reserved_tag"
 created_invalid_reserved_tag=1
 expect_version 0.0.0
 git tag -d "$invalid_reserved_tag" >/dev/null
 created_invalid_reserved_tag=0
 
-git tag "$reserved_tag"
+git -c tag.gpgSign=false tag -a "$reserved_tag" \
+  -m "lifecycle version contract annotated tag"
 created_reserved_tag=1
+if [ "$(git cat-file -t "refs/tags/$reserved_tag")" != tag ]; then
+  fail "annotated reserved tag $reserved_tag is not a tag object"
+fi
+expect_version 0.0.0
+git tag -d "$reserved_tag" >/dev/null
+created_reserved_tag=0
+
+git -c tag.gpgSign=false tag "$reserved_tag"
+created_reserved_tag=1
+if [ "$(git cat-file -t "refs/tags/$reserved_tag")" != commit ]; then
+  fail "reserved release tag $reserved_tag is not lightweight"
+fi
 expect_version 99.99.99
 expect_version 99.99.99 98.97.96
 expect_exact_tag_dirty_source_rejected
@@ -252,4 +265,4 @@ git tag -d "$reserved_tag" >/dev/null
 created_reserved_tag=0
 
 expect_version 0.0.0
-printf 'lifecycle version contract: untagged, override, exact-tag, dirty-tag, and VERSION-ignore checks passed\n'
+printf 'lifecycle version contract: untagged, override, annotated-tag rejection, exact-tag, dirty-tag, and VERSION-ignore checks passed\n'
