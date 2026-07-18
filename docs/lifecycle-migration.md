@@ -67,9 +67,9 @@ release documentation after the migration is complete.
    stream harness and smoke instrumentation gate; add more harnesses as the
    CLI/Lua/package surfaces return.
 4. Restore `clql` and executable examples. Selection/count CLI, Go-compatible
-   selection flags, AND/OR selector arguments, and fixture smoke are in place.
-   Mutation/projection/theme flags fail explicitly until those stream engine
-   paths exist.
+   selection flags, AND/OR selector arguments, projection, mutation, file-backed
+   mutation values, and fixture smoke are in place. Theme/prettyx remains
+   explicitly unsupported.
 5. Restore Lua facade, development rock, Lua tests, and release Lua artifacts.
    Initial Lua 5.5 facade, smoke coverage, source package, rendered rockspec,
    source rock, and repo-local development rock install workflow are in place.

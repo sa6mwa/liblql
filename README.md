@@ -107,8 +107,9 @@ untagged release-candidate builds, and otherwise `0.0.0`; `/VERSION` is used
 only by source archives outside git. `make prerelease` runs the shared release
 proof graph without cleaning first. `make release` runs the version contract
 first, then cleans generated state and runs the same proof graph.
-Release uploads are selected from `dist/liblql-<version>-CHECKSUMS`, not from a
-`dist/` glob.
+`make release-upload-list` prints `dist/liblql-<version>-CHECKSUMS` followed by
+the artifacts listed in that manifest. Release uploads use that manifest-derived
+list, not a `dist/` glob.
 
 Each target produces two C artifacts. `liblql-<version>-<target>.tar.gz` is a
 library-only SDK containing headers, `liblql.a`, shared-library ABI files,
