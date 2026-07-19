@@ -19,6 +19,15 @@ fi
 check_pair() {
   shared=$1
   static=$2
+  allowed='
+lql_error_init
+lql_new
+lql_status_string
+lql_stream_execute
+lql_stream_execute_spooled
+lql_stream_value_size
+lql_stream_value_write_to
+'
 
   if [ ! -f "$shared" ]; then
     printf 'missing shared liblql artifact: %s\n' "$shared" >&2
@@ -40,6 +49,23 @@ check_pair() {
   if nm -D "$shared" | grep -i 'lonejson' >/dev/null 2>&1; then
     printf 'shared liblql exports or imports LoneJSON symbols: %s\n' "$shared" >&2
     nm -D "$shared" | grep -i 'lonejson' >&2
+    exit 1
+  fi
+
+  unexpected=$(nm -D --defined-only "$shared" |
+    awk '{print $3}' |
+    while IFS= read -r symbol; do
+      case "$symbol" in
+        lql_*)
+          if ! printf '%s\n' "$allowed" | grep -Fx "$symbol" >/dev/null; then
+            printf '%s\n' "$symbol"
+          fi
+          ;;
+      esac
+    done)
+  if [ -n "$unexpected" ]; then
+    printf 'shared liblql exports private symbols: %s\n' "$shared" >&2
+    printf '%s\n' "$unexpected" >&2
     exit 1
   fi
 

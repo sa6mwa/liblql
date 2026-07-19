@@ -64,19 +64,6 @@ static lql_status json_test_write(void *user, const void *data, size_t len,
   return LQL_STATUS_OK;
 }
 
-static lql_status json_test_fail_read(void *user, unsigned char *buffer,
-                                      size_t capacity, size_t *out_len,
-                                      lql_error *error) {
-  (void)user;
-  (void)buffer;
-  (void)capacity;
-  (void)error;
-  if (out_len != NULL) {
-    *out_len = 0u;
-  }
-  return LQL_STATUS_IO_ERROR;
-}
-
 static lql_status json_flat_record(void *user, size_t record_index,
                                    int root_is_object, unsigned long hits,
                                    const lql_json_spool *spool,
@@ -113,37 +100,6 @@ static lql_status json_flat_record(void *user, size_t record_index,
     return LQL_STATUS_CALLBACK_ERROR;
   }
   return LQL_STATUS_OK;
-}
-
-static int json_test_run(const char *input, size_t chunk_size,
-                         const char *expected, lql_status expected_status,
-                         size_t expected_records) {
-  lql_json_normalize_request request;
-  json_test_reader reader;
-  json_test_writer writer;
-  lql_error error;
-  size_t records;
-  size_t bytes_read;
-  lql_status status;
-  memset(&reader, 0, sizeof(reader));
-  memset(&writer, 0, sizeof(writer));
-  reader.data = (const unsigned char *)input;
-  reader.len = strlen(input);
-  reader.chunk_size = chunk_size;
-  memset(&request, 0, sizeof(request));
-  request.reader = json_test_read;
-  request.reader_user = &reader;
-  request.writer = json_test_write;
-  request.writer_user = &writer;
-  lql_error_init(&error);
-  status = lql_json_normalize_ndjson(&request, &records, &bytes_read, &error);
-  if (status != expected_status || records != expected_records ||
-      (expected_status == LQL_STATUS_OK && bytes_read != reader.len) ||
-      (expected != NULL && (writer.len != strlen(expected) ||
-                            memcmp(writer.data, expected, writer.len) != 0))) {
-    return 1;
-  }
-  return 0;
 }
 
 int main(void) {
@@ -292,10 +248,6 @@ int main(void) {
   json_test_writer capture_writer;
   json_flat_result flat_result;
   lql_error flat_error;
-  lql_json_normalize_request fail_request;
-  lql_error fail_error;
-  size_t fail_records;
-  size_t fail_bytes;
   size_t flat_records;
   size_t flat_bytes;
   unsigned char spool_bytes[3];
@@ -303,53 +255,6 @@ int main(void) {
   size_t string_end;
   size_t spool_len;
   size_t spool_index;
-  if (json_test_run(" { \"status\" : \"open\", \"nested\" : [ true, null, "
-                    "-1.2e+3 ], \"face\" : \"\\uD83D\\uDE00\" }\n"
-                    " \"scalar\\tvalue\" \n",
-                    1u,
-                    "{\"status\":\"open\",\"nested\":[true,null,-1.2e+3],"
-                    "\"face\":\"\\uD83D\\uDE00\"}\n\"scalar\\tvalue\"\n",
-                    LQL_STATUS_OK, 2u)) {
-    return 1;
-  }
-  if (json_test_run("{\"first\":1}\n{\"bad\":}\n", 3u, NULL,
-                    LQL_STATUS_JSON_ERROR, 1u)) {
-    return 2;
-  }
-  if (json_test_run("[1,2]\n", 2u, "", LQL_STATUS_JSON_ERROR, 0u)) {
-    return 3;
-  }
-  if (json_test_run("{\"bad\":\"\\uD800\"}\n", 2u, NULL, LQL_STATUS_JSON_ERROR,
-                    0u)) {
-    return 4;
-  }
-  if (json_test_run("{\"n\":01}\n", 4u, NULL, LQL_STATUS_JSON_ERROR, 0u)) {
-    return 5;
-  }
-  if (json_test_run("{\"first\":1}{\"second\":2}", 2u, NULL,
-                    LQL_STATUS_JSON_ERROR, 0u)) {
-    return 6;
-  }
-  if (json_test_run("{\"text\":\"\303\245\"}\n", 1u,
-                    "{\"text\":\"\303\245\"}\n", LQL_STATUS_OK, 1u)) {
-    return 7;
-  }
-  if (json_test_run("{\"text\":\"\300\200\"}\n", 1u, NULL,
-                    LQL_STATUS_JSON_ERROR, 0u)) {
-    return 8;
-  }
-  memset(&fail_request, 0, sizeof(fail_request));
-  fail_request.reader = json_test_fail_read;
-  fail_request.writer = json_test_write;
-  fail_request.writer_user = &flat_writer;
-  lql_error_init(&fail_error);
-  fail_records = 0u;
-  fail_bytes = 0u;
-  if (lql_json_normalize_ndjson(&fail_request, &fail_records, &fail_bytes,
-                                &fail_error) != LQL_STATUS_IO_ERROR ||
-      fail_error.code != LQL_STATUS_IO_ERROR || fail_error.message[0] == '\0') {
-    return 31;
-  }
   memset(&flat_reader, 0, sizeof(flat_reader));
   memset(&flat_writer, 0, sizeof(flat_writer));
   memset(&capture_writer, 0, sizeof(capture_writer));

@@ -3,12 +3,6 @@
 
 #include <string.h>
 
-LQL_INTERNAL_SYMBOL void lql_stream_program_destroy(lql *self,
-                                                    lql_selector *selector) {
-  (void)self;
-  (void)selector;
-}
-
 size_t lql_stream_value_size(const lql_stream_value *value) {
   if (value == NULL) {
     return 0u;

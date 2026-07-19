@@ -12,7 +12,6 @@
 
 typedef struct lql_allocator lql_allocator;
 typedef struct lql_impl lql_impl;
-typedef struct lql_stream_program lql_stream_program;
 typedef struct lql_projection_capture lql_projection_capture;
 
 #define LQL_INSTANCE_MEMORY_LIMIT_BYTES (8u * 1024u * 1024u)
@@ -48,16 +47,6 @@ LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
 LQL_INTERNAL_SYMBOL void lql_allocator_instance_init(lql_impl *impl,
                                                      lql_allocator *upstream);
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_from_receiver(const lql *self);
-LQL_INTERNAL_SYMBOL void *lql_receiver_alloc(lql *self, size_t size);
-LQL_INTERNAL_SYMBOL void *lql_receiver_calloc(lql *self, size_t count,
-                                              size_t size);
-LQL_INTERNAL_SYMBOL void *lql_receiver_realloc(lql *self, void *ptr,
-                                               size_t size);
-LQL_INTERNAL_SYMBOL char *lql_receiver_strdup(lql *self, const char *text);
-LQL_INTERNAL_SYMBOL void lql_receiver_destroy(lql *self, void *ptr);
-LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
-                                                      lql_allocator *allocator,
-                                                      lql_error *error);
 
 typedef enum lql_selector_kind {
   LQL_SELECTOR_KIND_ALL = 0,
@@ -140,7 +129,6 @@ struct lql_selector {
   lql_since_macro since_macro;
   struct lql_selector *children;
   size_t child_count;
-  lql_stream_program *stream_program;
 };
 
 typedef struct lql_projection_path {
@@ -245,8 +233,6 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_in_internal(
     const lql_string_view *any_values, lql_selector **out, lql_error *error);
 LQL_INTERNAL_SYMBOL lql_status lql_selector_build_exists_internal(
     lql *self, lql_string_view path, lql_selector **out, lql_error *error);
-LQL_INTERNAL_SYMBOL void lql_stream_program_destroy(lql *self,
-                                                    lql_selector *selector);
 LQL_INTERNAL_SYMBOL lql_status lql_stream_execute_flat_eq(
     lql *self, const lql_stream_request *request, lql_stream_result *result,
     lql_error *error, int allow_spool, int *out_handled);

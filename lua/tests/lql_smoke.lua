@@ -1,5 +1,4 @@
 local lql = require("lql")
-local core = require("lql.core")
 
 local function fail(message)
   io.stderr:write(message .. "\n")
@@ -25,10 +24,6 @@ local function assert_no_error(value, err, message)
   end
   return value
 end
-
-assert_equal(lql.has_core(), true, "core module loaded")
-assert_equal(core.has_core(), true, "core module reports loaded")
-assert_equal(type(core.version()), "string", "core module version")
 
 local client = assert_no_error(lql.new(), nil, "new client")
 assert_truthy(type(client:version()) == "string", "client version")

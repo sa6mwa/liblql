@@ -75,6 +75,9 @@ add_library(lql_common OBJECT
   src/lql_temporal.c
   src/lql_unicode_lower.c)
 set_target_properties(lql_common PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+  set_target_properties(lql_common PROPERTIES C_VISIBILITY_PRESET hidden)
+endif()
 target_include_directories(lql_common PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>")

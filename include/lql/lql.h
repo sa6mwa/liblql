@@ -7,6 +7,14 @@
 #include <stdio.h>
 #include <time.h>
 
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define LQL_API
+#elif defined(__GNUC__)
+#define LQL_API __attribute__((visibility("default")))
+#else
+#define LQL_API
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -556,12 +564,12 @@ struct lql {
 };
 
 /** Allocates and initializes a receiver; caller releases it with `destroy`. */
-lql_status lql_new(lql **out, lql_error *error);
+LQL_API lql_status lql_new(lql **out, lql_error *error);
 /** Clears an error object to LQL_STATUS_OK and an empty message. */
-void lql_error_init(lql_error *error);
+LQL_API void lql_error_init(lql_error *error);
 /** Returns a static, non-owning string for `status`, including unknown values.
  */
-const char *lql_status_string(lql_status status);
+LQL_API const char *lql_status_string(lql_status status);
 
 /**
  * Compatibility entry point for `self->stream_execute(self, ...)`. Executes
@@ -575,8 +583,10 @@ const char *lql_status_string(lql_status status);
  * scanner return LQL_STATUS_UNSUPPORTED before the reader is consumed. Invalid
  * arguments clear `result` before return.
  */
-lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
-                              lql_stream_result *result, lql_error *error);
+LQL_API lql_status lql_stream_execute(lql *self,
+                                      const lql_stream_request *request,
+                                      lql_stream_result *result,
+                                      lql_error *error);
 
 /**
  * Compatibility entry point for `self->stream_execute_spooled(self, ...)`.
@@ -588,17 +598,18 @@ lql_status lql_stream_execute(lql *self, const lql_stream_request *request,
  * exhausted. Do not use it for sensitive inputs or where end-to-end streaming
  * is required.
  */
-lql_status lql_stream_execute_spooled(lql *self,
-                                      const lql_stream_request *request,
-                                      lql_stream_result *result,
-                                      lql_error *error);
+LQL_API lql_status lql_stream_execute_spooled(lql *self,
+                                              const lql_stream_request *request,
+                                              lql_stream_result *result,
+                                              lql_error *error);
 
 /** Returns the compact JSON size of one callback-scoped value. */
-size_t lql_stream_value_size(const lql_stream_value *value);
+LQL_API size_t lql_stream_value_size(const lql_stream_value *value);
 /** Streams one callback-scoped value through a caller writer. */
-lql_status lql_stream_value_write_to(const lql_stream_value *value,
-                                     lql_stream_writer_fn writer,
-                                     void *writer_user, lql_error *error);
+LQL_API lql_status lql_stream_value_write_to(const lql_stream_value *value,
+                                             lql_stream_writer_fn writer,
+                                             void *writer_user,
+                                             lql_error *error);
 
 #ifdef __cplusplus
 }

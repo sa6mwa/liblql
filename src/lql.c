@@ -108,12 +108,7 @@ static int selector_segment_is(const char *start, size_t len,
                                const char *literal);
 
 lql_status lql_new(lql **out, lql_error *error) {
-  return lql_new_with_allocator(out, lql_allocator_default(), error);
-}
-
-LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
-                                                      lql_allocator *allocator,
-                                                      lql_error *error) {
+  lql_allocator *allocator;
   lql *ctx;
   lql_impl *impl;
 
@@ -122,10 +117,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_new_with_allocator(lql **out,
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   *out = NULL;
-  if (allocator == NULL) {
-    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "allocator required");
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
+  allocator = lql_allocator_default();
   impl = (lql_impl *)allocator->calloc(allocator, 1u, sizeof(*impl));
   if (impl == NULL) {
     lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
@@ -298,7 +290,6 @@ LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,
   allocator->destroy(allocator, selector->date_gte_text);
   allocator->destroy(allocator, selector->date_lt_text);
   allocator->destroy(allocator, selector->date_lte_text);
-  lql_stream_program_destroy(self, selector);
   for (i = 0u; i < selector->child_count; ++i) {
     lql_selector_cleanup(self, &selector->children[i]);
   }

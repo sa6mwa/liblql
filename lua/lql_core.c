@@ -611,16 +611,8 @@ static int lua_lql_core_version(lua_State *lua) {
   return 1;
 }
 
-static int lua_lql_core_has_core(lua_State *lua) {
-  lua_pushboolean(lua, 1);
-  return 1;
-}
-
 static const luaL_Reg lua_lql_module_functions[] = {
-    {"new", lua_lql_new},
-    {"version", lua_lql_core_version},
-    {"has_core", lua_lql_core_has_core},
-    {NULL, NULL}};
+    {"new", lua_lql_new}, {"version", lua_lql_core_version}, {NULL, NULL}};
 
 static const luaL_Reg lua_lql_client_methods[] = {
     {"version", lua_lql_client_version},
@@ -658,7 +650,5 @@ int luaopen_lql_core(lua_State *lua) {
                         lua_lql_selector_methods);
   lua_newtable(lua);
   luaL_setfuncs(lua, lua_lql_module_functions, 0);
-  lua_pushboolean(lua, 1);
-  lua_setfield(lua, -2, "core_loaded");
   return 1;
 }
