@@ -40,12 +40,15 @@ struct lql_impl {
   lql_allocator *upstream_allocator;
   lql_allocator allocator;
   size_t live_bytes;
+  size_t quota_allocation_count;
+  int receiver_destroyed;
 };
 
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_default(void);
 LQL_INTERNAL_SYMBOL void lql_allocator_instance_init(lql_impl *impl,
                                                      lql_allocator *upstream);
 LQL_INTERNAL_SYMBOL lql_allocator *lql_allocator_from_receiver(const lql *self);
+LQL_INTERNAL_SYMBOL void lql_allocator_instance_release_if_idle(lql_impl *impl);
 
 typedef enum lql_selector_kind {
   LQL_SELECTOR_KIND_ALL = 0,

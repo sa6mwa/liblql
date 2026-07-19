@@ -253,9 +253,8 @@ static void receiver_destroy(lql *self) {
     return;
   }
   impl->allocator.destroy(&impl->allocator, self);
-  if (impl != NULL) {
-    impl->upstream_allocator->destroy(impl->upstream_allocator, impl);
-  }
+  impl->receiver_destroyed = 1;
+  lql_allocator_instance_release_if_idle(impl);
 }
 
 LQL_INTERNAL_SYMBOL void lql_selector_cleanup(lql *self,

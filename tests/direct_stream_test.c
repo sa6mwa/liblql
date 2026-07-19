@@ -6116,6 +6116,7 @@ static int run_instance_memory_contract(void) {
   lql *limited;
   lql *independent;
   lql *other;
+  lql *owner;
   lql_selector *selector;
   lql_projection *projection;
   lql_mutation *mutation;
@@ -6140,6 +6141,7 @@ static int run_instance_memory_contract(void) {
   limited = NULL;
   independent = NULL;
   other = NULL;
+  owner = NULL;
   selector = NULL;
   projection = NULL;
   mutation = NULL;
@@ -6220,6 +6222,43 @@ static int run_instance_memory_contract(void) {
     free(expr);
     return 1;
   }
+  other->destroy(other);
+  other = NULL;
+  if (lql_new(&owner, &error) != LQL_STATUS_OK ||
+      lql_new(&other, &error) != LQL_STATUS_OK) {
+    if (other != NULL) {
+      other->destroy(other);
+    }
+    if (owner != NULL) {
+      owner->destroy(owner);
+    }
+    limited->destroy(limited);
+    free(expr);
+    return 1;
+  }
+  if (owner->selector_parse(owner, "/status=open", &selector, &error) !=
+          LQL_STATUS_OK ||
+      owner->projection_parse(owner, small_projection_paths, 1u, &projection,
+                              &error) != LQL_STATUS_OK ||
+      owner->mutation_parse(owner, small_mutations, 1u, &mutation, &error) !=
+          LQL_STATUS_OK) {
+    owner->selector_destroy(owner, selector);
+    owner->projection_destroy(owner, projection);
+    owner->mutation_destroy(owner, mutation);
+    other->destroy(other);
+    owner->destroy(owner);
+    limited->destroy(limited);
+    free(expr);
+    return 1;
+  }
+  owner->destroy(owner);
+  owner = NULL;
+  other->selector_destroy(other, selector);
+  selector = NULL;
+  other->projection_destroy(other, projection);
+  projection = NULL;
+  other->mutation_destroy(other, mutation);
+  mutation = NULL;
   other->destroy(other);
   other = NULL;
   if (lql_new(&independent, &error) != LQL_STATUS_OK ||

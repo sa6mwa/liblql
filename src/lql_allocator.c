@@ -33,6 +33,7 @@ static void *quota_alloc(lql_allocator *self, size_t size) {
   header->quota.size = size;
   header->quota.owner = impl;
   impl->live_bytes += charge;
+  impl->quota_allocation_count += 1u;
   return header + 1;
 }
 
@@ -70,6 +71,13 @@ static void *quota_realloc(lql_allocator *self, void *ptr, size_t size) {
   old_size = header->quota.size;
   old_charge = sizeof(*header) + old_size;
   new_charge = sizeof(*header) + size;
+  if (size == 0u) {
+    impl->live_bytes -= old_charge;
+    impl->quota_allocation_count -= 1u;
+    impl->upstream_allocator->destroy(impl->upstream_allocator, header);
+    lql_allocator_instance_release_if_idle(impl);
+    return NULL;
+  }
   if (new_charge > old_charge &&
       new_charge - old_charge >
           LQL_INSTANCE_MEMORY_LIMIT_BYTES - impl->live_bytes) {
@@ -78,10 +86,6 @@ static void *quota_realloc(lql_allocator *self, void *ptr, size_t size) {
   next = (lql_quota_header *)impl->upstream_allocator->realloc(
       impl->upstream_allocator, header, new_charge);
   if (next == NULL && size != 0u) {
-    return NULL;
-  }
-  if (size == 0u) {
-    impl->live_bytes -= old_charge;
     return NULL;
   }
   next->quota.size = size;
@@ -101,8 +105,16 @@ static void quota_destroy(lql_allocator *self, void *ptr) {
   if (impl == NULL) {
     return;
   }
+  /*
+   * The receiver passed to a destroy method may be different from the receiver
+   * that created the handle. Quota accounting belongs to the allocation owner
+   * stored in the header, and that owner remains alive until this final
+   * release.
+   */
   impl->live_bytes -= sizeof(*header) + header->quota.size;
+  impl->quota_allocation_count -= 1u;
   impl->upstream_allocator->destroy(impl->upstream_allocator, header);
+  lql_allocator_instance_release_if_idle(impl);
 }
 
 static char *quota_strdup(lql_allocator *self, const char *text) {
@@ -184,4 +196,12 @@ LQL_INTERNAL_SYMBOL void lql_allocator_instance_init(lql_impl *impl,
   impl->allocator.realloc = quota_realloc;
   impl->allocator.destroy = quota_destroy;
   impl->allocator.strdup = quota_strdup;
+}
+
+LQL_INTERNAL_SYMBOL void
+lql_allocator_instance_release_if_idle(lql_impl *impl) {
+  if (impl != NULL && impl->receiver_destroyed &&
+      impl->quota_allocation_count == 0u) {
+    impl->upstream_allocator->destroy(impl->upstream_allocator, impl);
+  }
 }
