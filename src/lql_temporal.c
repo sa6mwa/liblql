@@ -398,32 +398,6 @@ lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
   return 1;
 }
 
-LQL_INTERNAL_SYMBOL int lql_temporal_now(lql_temporal *out) {
-  time_t value;
-  value = time(NULL);
-  if (value == (time_t)-1) {
-    return 0;
-  }
-  return lql_temporal_from_time_t(value, 0, out);
-}
-
-LQL_INTERNAL_SYMBOL int lql_temporal_today(lql_temporal *out) {
-  time_t value;
-  value = time(NULL);
-  if (value == (time_t)-1) {
-    return 0;
-  }
-  return lql_temporal_from_time_t(value, 1, out);
-}
-
-LQL_INTERNAL_SYMBOL int lql_temporal_yesterday(lql_temporal *out) {
-  time_t value;
-  value = time(NULL);
-  if (value == (time_t)-1 || out == NULL)
-    return 0;
-  return temporal_from_seconds((lql_int64)value - (lql_int64)86400, 1, out);
-}
-
 LQL_INTERNAL_SYMBOL int lql_temporal_from_time_t(time_t value, int date_only,
                                                  lql_temporal *out) {
   if (out == NULL)

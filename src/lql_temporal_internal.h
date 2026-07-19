@@ -33,9 +33,6 @@ LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_equal(const lql_temporal *left,
 LQL_TEMPORAL_INTERNAL_SYMBOL int
 lql_temporal_format_rfc3339_nano(const lql_temporal *value, char *buf,
                                  size_t buf_len);
-LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_now(lql_temporal *out);
-LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_today(lql_temporal *out);
-LQL_TEMPORAL_INTERNAL_SYMBOL int lql_temporal_yesterday(lql_temporal *out);
 LQL_TEMPORAL_INTERNAL_SYMBOL int
 lql_temporal_from_time_t(time_t value, int date_only, lql_temporal *out);
 LQL_TEMPORAL_INTERNAL_SYMBOL int
