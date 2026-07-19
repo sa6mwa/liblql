@@ -1511,6 +1511,10 @@ static int run_mapped_string_predicates(lql *ctx) {
   static const char null_input[] = "{\"empty\":null,\"code\":1}\n"
                                    "{\"empty\":false,\"code\":2}\n"
                                    "{\"empty\":\"null\",\"code\":3}\n";
+  static const char valueless_input[] = "{\"x\":null,\"status\":\"\"}\n"
+                                        "{\"x\":\"v\",\"status\":\"open\"}\n"
+                                        "{\"status\":\"\"}\n"
+                                        "{\"x\":{},\"status\":null}\n";
   static const char root_wildcard_input[] =
       "{\"alpha\":{\"state\":\"open\"},\"beta\":{\"state\":\"closed\"}}\n"
       "{\"alpha\":{\"state\":\"closed\"}}\n"
@@ -1566,6 +1570,15 @@ static int run_mapped_string_predicates(lql *ctx) {
       run_selection(ctx, "iprefix{f=/service,v=\"\"}", input, 3u, 3u) ||
       run_selection(ctx, "contains{f=/a,v=\"\"}", input, 3u, 0u)) {
     return 111;
+  }
+  if (run_selection(ctx, "eq{f=/status}", valueless_input, 4u, 2u) ||
+      run_selection(ctx, "not.eq{f=/status}", valueless_input, 4u, 2u) ||
+      run_selection(ctx, "contains{f=/x}", valueless_input, 4u, 3u) ||
+      run_selection(ctx, "prefix{f=/x}", valueless_input, 4u, 3u) ||
+      run_selection(ctx, "icontains{f=/x}", valueless_input, 4u, 3u) ||
+      run_selection(ctx, "iprefix{f=/x}", valueless_input, 4u, 3u) ||
+      run_selection(ctx, "exists{/x}", valueless_input, 4u, 2u)) {
+    return 112;
   }
   if (run_selection(ctx, "in{f=/env,a=prod|stage}", input, 3u, 2u)) {
     return 3;

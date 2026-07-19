@@ -675,7 +675,7 @@ static int lql_flat_eq_append_contains(
   count = selector->any_count == 0u ? 1u : selector->any_count;
   if (selector->any_count == 0u && !selector->value_set) {
     term = &program->terms[program->term_count];
-    term->kind = LQL_JSON_FLAT_TERM_EXISTS;
+    term->kind = LQL_JSON_FLAT_TERM_VALUELESS_PRESENT;
     term->field = field + 1;
     term->field_len = first_segment_len;
     term->path = field;
@@ -1020,9 +1020,14 @@ static int lql_flat_eq_append(lql_flat_eq_program *program,
     if (!selector->value_set) {
       if (selector->kind == LQL_SELECTOR_KIND_EQ ||
           selector->kind == LQL_SELECTOR_KIND_NE) {
+        term->value = "";
+        term->value_len = 0u;
+        lql_flat_eq_cache_paths(term);
+        program->selectors[program->term_count] = selector;
+        ++program->term_count;
         return 1;
       }
-      term->kind = LQL_JSON_FLAT_TERM_EXISTS;
+      term->kind = LQL_JSON_FLAT_TERM_VALUELESS_PRESENT;
     } else if ((selector->value_is_temporal &&
                 term->kind != LQL_JSON_FLAT_TERM_TEMPORAL_RANGE) ||
                selector->value == NULL ||

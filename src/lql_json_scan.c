@@ -81,6 +81,7 @@ typedef struct lql_json_scan {
   unsigned long flat_eq_leading_recursive_terms;
   unsigned long flat_eq_terminal_recursive_terms;
   unsigned long flat_eq_terminal_recursive_root_exists_terms;
+  unsigned long flat_eq_valueless_present_terms;
   const lql_json_flat_eq_term *flat_terms;
   size_t flat_term_count;
   const lql_json_capture_key *capture_keys;
@@ -2584,6 +2585,27 @@ static unsigned long lql_json_match_exists(const lql_json_scan *scan,
   return hits;
 }
 
+static unsigned long lql_json_match_valueless_present(const lql_json_scan *scan,
+                                                      unsigned long keys) {
+  unsigned long hits;
+  size_t i;
+  keys &= scan->flat_eq_valueless_present_terms;
+  if (keys == 0ul)
+    return 0ul;
+  hits = 0ul;
+  for (i = 0u; i < scan->flat_term_count; ++i) {
+    unsigned long bit;
+    bit = 1ul << i;
+    if ((keys & bit) != 0ul &&
+        lql_json_term_value_at(&scan->flat_terms[i],
+                               scan->key_term_segment[i]) &&
+        scan->flat_terms[i].kind == LQL_JSON_FLAT_TERM_VALUELESS_PRESENT) {
+      hits |= bit;
+    }
+  }
+  return hits;
+}
+
 static unsigned long
 lql_json_match_terms_for_kind(const lql_json_scan *scan, unsigned long keys,
                               lql_json_flat_term_kind kind) {
@@ -2760,7 +2782,8 @@ lql_json_match_root_terminal_recursive_exists(lql_json_scan *scan) {
       scan->key_term_segment[i] = scan->match_term_segment[i];
     }
   }
-  return lql_json_match_exists(scan, matches);
+  return lql_json_match_exists(scan, matches) |
+         lql_json_match_valueless_present(scan, matches);
 }
 
 static unsigned long lql_json_match_terminal_recursive_anchor_terms(
@@ -3620,6 +3643,7 @@ static lql_status lql_json_matched_scalar_value(lql_json_scan *scan,
                                                 int value) {
   lql_status status;
   (void)path_segment;
+  scan->flat_eq_hits |= lql_json_match_valueless_present(scan, matches);
   if (value != 'n') {
     size_t i;
     for (i = 0u; i < scan->flat_term_count; ++i) {
@@ -4094,6 +4118,10 @@ static lql_status lql_json_object(lql_json_scan *scan) {
     }
     exists_terms =
         key_matches == 0ul ? 0ul : lql_json_match_exists(scan, key_matches);
+    scan->flat_eq_hits |=
+        key_matches == 0ul
+            ? 0ul
+            : lql_json_match_valueless_present(scan, key_matches);
     lql_json_match_start(scan, 0ul, 0, 0u);
     if (status != LQL_STATUS_OK ||
         (status = lql_json_skip_space(scan)) != LQL_STATUS_OK ||
@@ -4799,7 +4827,9 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
       scan.flat_eq_has_recursive_terms = 1;
       if ((scan.flat_terms[records].path_recursive_segments & 1ul) != 0ul) {
         scan.flat_eq_leading_recursive_terms |= 1ul << records;
-        if (scan.flat_terms[records].kind == LQL_JSON_FLAT_TERM_EXISTS &&
+        if ((scan.flat_terms[records].kind == LQL_JSON_FLAT_TERM_EXISTS ||
+             scan.flat_terms[records].kind ==
+                 LQL_JSON_FLAT_TERM_VALUELESS_PRESENT) &&
             scan.flat_terms[records].path_segment_count == 1u) {
           scan.flat_eq_terminal_recursive_root_exists_terms |= 1ul << records;
         }
@@ -4816,6 +4846,9 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
            (scan.flat_terms[records].path_recursive_segments - 1ul)) != 0ul) {
         scan.flat_eq_has_repeated_recursive_terms = 1;
       }
+    }
+    if (scan.flat_terms[records].kind == LQL_JSON_FLAT_TERM_VALUELESS_PRESENT) {
+      scan.flat_eq_valueless_present_terms |= 1ul << records;
     }
     if (scan.flat_terms[records].path_array_segments != 0ul ||
         scan.flat_terms[records].path_object_wildcards != 0ul ||
