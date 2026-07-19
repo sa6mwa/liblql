@@ -6099,11 +6099,14 @@ static int run_wide_plan_stream_contract(lql *ctx) {
 static int run_instance_memory_contract(void) {
   lql *limited;
   lql *independent;
+  lql *other;
   lql_selector *selector;
   lql_projection *projection;
   lql_mutation *mutation;
   lql_error error;
   char *expr;
+  const char *small_projection_paths[1];
+  const char *small_mutations[1];
   const char *paths[1];
   size_t len;
   lql_status status;
@@ -6120,6 +6123,7 @@ static int run_instance_memory_contract(void) {
   expr[len + 3u] = '\0';
   limited = NULL;
   independent = NULL;
+  other = NULL;
   selector = NULL;
   projection = NULL;
   mutation = NULL;
@@ -6158,6 +6162,50 @@ static int run_instance_memory_contract(void) {
   }
   limited->selector_destroy(limited, selector);
   selector = NULL;
+  if (lql_new(&other, &error) != LQL_STATUS_OK) {
+    limited->destroy(limited);
+    free(expr);
+    return 1;
+  }
+  if (limited->selector_parse(limited, "/status=open", &selector, &error) !=
+      LQL_STATUS_OK) {
+    other->destroy(other);
+    limited->destroy(limited);
+    free(expr);
+    return 1;
+  }
+  other->selector_destroy(other, selector);
+  selector = NULL;
+  small_projection_paths[0] = "/status";
+  if (limited->projection_parse(limited, small_projection_paths, 1u,
+                                &projection, &error) != LQL_STATUS_OK) {
+    other->destroy(other);
+    limited->destroy(limited);
+    free(expr);
+    return 1;
+  }
+  other->projection_destroy(other, projection);
+  projection = NULL;
+  small_mutations[0] = "/status=open";
+  if (limited->mutation_parse(limited, small_mutations, 1u, &mutation,
+                              &error) != LQL_STATUS_OK) {
+    other->destroy(other);
+    limited->destroy(limited);
+    free(expr);
+    return 1;
+  }
+  other->mutation_destroy(other, mutation);
+  mutation = NULL;
+  status = other->selector_parse(other, expr, &selector, NULL);
+  if (status != LQL_STATUS_NO_MEMORY || selector != NULL) {
+    other->selector_destroy(other, selector);
+    other->destroy(other);
+    limited->destroy(limited);
+    free(expr);
+    return 1;
+  }
+  other->destroy(other);
+  other = NULL;
   if (lql_new(&independent, &error) != LQL_STATUS_OK ||
       independent->selector_parse(independent, "/status=open", &selector,
                                   &error) != LQL_STATUS_OK) {

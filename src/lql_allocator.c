@@ -4,7 +4,10 @@
 #include <string.h>
 
 typedef union lql_quota_header {
-  size_t size;
+  struct {
+    size_t size;
+    lql_impl *owner;
+  } quota;
   long double alignment;
   void *pointer;
 } lql_quota_header;
@@ -27,7 +30,8 @@ static void *quota_alloc(lql_allocator *self, size_t size) {
   if (header == NULL) {
     return NULL;
   }
-  header->size = size;
+  header->quota.size = size;
+  header->quota.owner = impl;
   impl->live_bytes += charge;
   return header + 1;
 }
@@ -60,7 +64,10 @@ static void *quota_realloc(lql_allocator *self, void *ptr, size_t size) {
   }
   impl = (lql_impl *)self->impl;
   header = ((lql_quota_header *)ptr) - 1;
-  old_size = header->size;
+  if (header->quota.owner != impl) {
+    return NULL;
+  }
+  old_size = header->quota.size;
   old_charge = sizeof(*header) + old_size;
   new_charge = sizeof(*header) + size;
   if (new_charge > old_charge &&
@@ -77,7 +84,8 @@ static void *quota_realloc(lql_allocator *self, void *ptr, size_t size) {
     impl->live_bytes -= old_charge;
     return NULL;
   }
-  next->size = size;
+  next->quota.size = size;
+  next->quota.owner = impl;
   impl->live_bytes = impl->live_bytes - old_charge + new_charge;
   return next + 1;
 }
@@ -88,9 +96,12 @@ static void quota_destroy(lql_allocator *self, void *ptr) {
   if (self == NULL || self->impl == NULL || ptr == NULL) {
     return;
   }
-  impl = (lql_impl *)self->impl;
   header = ((lql_quota_header *)ptr) - 1;
-  impl->live_bytes -= sizeof(*header) + header->size;
+  impl = header->quota.owner;
+  if (impl == NULL) {
+    return;
+  }
+  impl->live_bytes -= sizeof(*header) + header->quota.size;
   impl->upstream_allocator->destroy(impl->upstream_allocator, header);
 }
 
