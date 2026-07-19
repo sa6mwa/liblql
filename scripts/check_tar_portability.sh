@@ -11,8 +11,9 @@ archive=$tmp/out.tar.gz
 real_tar=$(command -v tar)
 
 sh scripts/remove_path.sh "$tmp"
-mkdir -p "$fakebin" "$base/root"
+mkdir -p "$fakebin" "$base/root/nested"
 printf '%s\n' payload >"$base/root/file.txt"
+printf '%s\n' nested >"$base/root/nested/file.txt"
 
 cat >"$fakebin/tar" <<'EOF'
 #!/usr/bin/env bash
@@ -71,6 +72,10 @@ if [ ! -f "$archive" ]; then
 fi
 if ! tar -xOf "$archive" root/file.txt | grep -Fx payload >/dev/null; then
   printf 'tar portability: archive payload was not readable\n' >&2
+  exit 1
+fi
+if tar -tzf "$archive" | sort | uniq -d | grep . >/dev/null; then
+  printf 'tar portability: archive contains duplicate members\n' >&2
   exit 1
 fi
 first_hash=$(sha256sum "$archive" | sed 's/ .*//')

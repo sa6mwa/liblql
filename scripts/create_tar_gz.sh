@@ -26,7 +26,7 @@ if printf '%s\n' "$tar_version" | grep 'GNU tar' >/dev/null 2>&1; then
     --mtime='UTC 1970-01-01' -cf "$tmp_tar" "$root_name"
 elif printf '%s\n' "$tar_version" | grep -Ei 'bsdtar|libarchive' \
     >/dev/null 2>&1; then
-  find "$base_dir/$root_name" -print |
+  find "$base_dir/$root_name" \( -type f -o -type l \) -print |
     sed "s#^$base_dir/##" |
     LC_ALL=C sort >"$tmp_list"
   tar -C "$base_dir" --uid 0 --gid 0 --uname root --gname root \
