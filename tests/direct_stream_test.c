@@ -6100,8 +6100,11 @@ static int run_instance_memory_contract(void) {
   lql *limited;
   lql *independent;
   lql_selector *selector;
+  lql_projection *projection;
+  lql_mutation *mutation;
   lql_error error;
   char *expr;
+  const char *paths[1];
   size_t len;
   lql_status status;
 
@@ -6118,6 +6121,8 @@ static int run_instance_memory_contract(void) {
   limited = NULL;
   independent = NULL;
   selector = NULL;
+  projection = NULL;
+  mutation = NULL;
   lql_error_init(&error);
   if (lql_new(&limited, &error) != LQL_STATUS_OK) {
     free(expr);
@@ -6126,6 +6131,21 @@ static int run_instance_memory_contract(void) {
   status = limited->selector_parse(limited, expr, &selector, &error);
   if (status != LQL_STATUS_NO_MEMORY || selector != NULL) {
     limited->selector_destroy(limited, selector);
+    limited->destroy(limited);
+    free(expr);
+    return 1;
+  }
+  paths[0] = expr;
+  status = limited->projection_parse(limited, paths, 1u, &projection, NULL);
+  if (status != LQL_STATUS_NO_MEMORY || projection != NULL) {
+    limited->projection_destroy(limited, projection);
+    limited->destroy(limited);
+    free(expr);
+    return 1;
+  }
+  status = limited->mutation_parse(limited, paths, 1u, &mutation, NULL);
+  if (status != LQL_STATUS_NO_MEMORY || mutation != NULL) {
+    limited->mutation_destroy(limited, mutation);
     limited->destroy(limited);
     free(expr);
     return 1;

@@ -42,6 +42,7 @@ static lql_status projection_decode_path(lql_allocator *allocator,
   size_t decoded_len;
   size_t i;
   char *decoded;
+  lql_status fail_status;
 
   if (allocator == NULL || path == NULL || out == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
@@ -54,6 +55,7 @@ static lql_status projection_decode_path(lql_allocator *allocator,
   segments = NULL;
   count = 0u;
   capacity = 0u;
+  fail_status = LQL_STATUS_PARSE_ERROR;
   for (;;) {
     slash = part;
     while (slash < end && *slash != '/') {
@@ -62,6 +64,7 @@ static lql_status projection_decode_path(lql_allocator *allocator,
     raw_len = (size_t)(slash - part);
     decoded = (char *)allocator->alloc(allocator, raw_len + 1u);
     if (decoded == NULL) {
+      fail_status = LQL_STATUS_NO_MEMORY;
       lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
       goto fail;
     }
@@ -84,6 +87,7 @@ static lql_status projection_decode_path(lql_allocator *allocator,
                                          next_capacity * sizeof(*segments));
       if (next == NULL) {
         allocator->destroy(allocator, decoded);
+        fail_status = LQL_STATUS_NO_MEMORY;
         lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
         goto fail;
       }
@@ -105,7 +109,8 @@ fail:
     allocator->destroy(allocator, segments[i]);
   }
   allocator->destroy(allocator, segments);
-  return error == NULL ? LQL_STATUS_PARSE_ERROR : error->code;
+  return error != NULL && error->code != LQL_STATUS_OK ? error->code
+                                                       : fail_status;
 }
 
 static int projection_leading_index(const lql_projection_path *path) {

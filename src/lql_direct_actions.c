@@ -227,6 +227,7 @@ static lql_status mutation_parse_path(lql_allocator *allocator,
   char *segment;
   char *decoded;
   size_t decoded_len;
+  lql_status fail_status;
 
   mutation_trim(&begin, &end);
   if (begin == end || *begin != '/') {
@@ -242,6 +243,7 @@ static lql_status mutation_parse_path(lql_allocator *allocator,
   segments = NULL;
   count = 0u;
   capacity = 0u;
+  fail_status = LQL_STATUS_PARSE_ERROR;
   part = begin + 1;
   for (;;) {
     slash = part;
@@ -251,12 +253,14 @@ static lql_status mutation_parse_path(lql_allocator *allocator,
     len = (size_t)(slash - part);
     segment = mutation_copy(allocator, part, len);
     if (segment == NULL) {
+      fail_status = LQL_STATUS_NO_MEMORY;
       lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
       goto fail;
     }
     decoded = (char *)allocator->alloc(allocator, len + 1u);
     if (decoded == NULL) {
       allocator->destroy(allocator, segment);
+      fail_status = LQL_STATUS_NO_MEMORY;
       lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
       goto fail;
     }
@@ -294,6 +298,7 @@ static lql_status mutation_parse_path(lql_allocator *allocator,
                                          next_capacity * sizeof(*segments));
       if (next == NULL) {
         allocator->destroy(allocator, decoded);
+        fail_status = LQL_STATUS_NO_MEMORY;
         lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
         goto fail;
       }
@@ -305,6 +310,7 @@ static lql_status mutation_parse_path(lql_allocator *allocator,
       char *wildcard;
       wildcard = mutation_copy(allocator, "[]", 2u);
       if (wildcard == NULL) {
+        fail_status = LQL_STATUS_NO_MEMORY;
         lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
         goto fail;
       }
@@ -316,6 +322,7 @@ static lql_status mutation_parse_path(lql_allocator *allocator,
                                            next_capacity * sizeof(*segments));
         if (next == NULL) {
           allocator->destroy(allocator, wildcard);
+          fail_status = LQL_STATUS_NO_MEMORY;
           lql_set_error(error, LQL_STATUS_NO_MEMORY, "out of memory");
           goto fail;
         }
@@ -338,7 +345,8 @@ fail:
     allocator->destroy(allocator, segments[i]);
   }
   allocator->destroy(allocator, segments);
-  return error == NULL ? LQL_STATUS_PARSE_ERROR : error->code;
+  return error != NULL && error->code != LQL_STATUS_OK ? error->code
+                                                       : fail_status;
 }
 
 static lql_status mutation_parse_value(lql_allocator *allocator,
