@@ -1,6 +1,15 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
+
 #include "lql_json_scan.h"
 
+#include <limits.h>
 #include <string.h>
+#include <sys/types.h>
 
 typedef struct json_test_reader {
   const unsigned char *data;
@@ -62,6 +71,40 @@ static lql_status json_test_write(void *user, const void *data, size_t len,
   memcpy(writer->data + writer->len, data, len);
   writer->len += len;
   return LQL_STATUS_OK;
+}
+
+static int json_test_large_file_spool_seek(lql_json_spool *spool,
+                                           lql_error *error) {
+  /*
+   * On 32-bit targets LONG_MAX is below valid size_t spool offsets.  The spool
+   * implementation must use the large-file stdio API instead of fseek(long).
+   */
+  if (LONG_MAX == 2147483647L) {
+    static const unsigned char marker = (unsigned char)'Z';
+    unsigned char byte;
+    json_test_writer writer;
+    size_t offset;
+
+    offset = (size_t)LONG_MAX + 32u;
+    spool->file = tmpfile();
+    if (spool->file == NULL) {
+      return 1;
+    }
+    if (fseeko(spool->file, (off_t)offset, SEEK_SET) != 0 ||
+        fwrite(&marker, 1u, 1u, spool->file) != 1u) {
+      return 1;
+    }
+    spool->size = offset + 1u;
+    memset(&writer, 0, sizeof(writer));
+    if (lql_json_spool_write_slice(spool, offset, 1u, json_test_write, &writer,
+                                   error) != LQL_STATUS_OK ||
+        writer.len != 1u || writer.data[0] != marker ||
+        lql_json_spool_byte_at(spool, offset, &byte, error) != LQL_STATUS_OK ||
+        byte != marker) {
+      return 1;
+    }
+  }
+  return 0;
 }
 
 static lql_status json_flat_record(void *user, size_t record_index,
@@ -762,6 +805,15 @@ int main(void) {
       flat_writer.data[2] != (unsigned char)'x') {
     lql_json_spool_cleanup(&flat_spool);
     return 29;
+  }
+  lql_json_spool_cleanup(&flat_spool);
+  lql_error_init(&flat_error);
+  if (lql_json_spool_init(&flat_spool, &flat_error) != LQL_STATUS_OK) {
+    return 33;
+  }
+  if (json_test_large_file_spool_seek(&flat_spool, &flat_error) != 0) {
+    lql_json_spool_cleanup(&flat_spool);
+    return 34;
   }
   lql_json_spool_cleanup(&flat_spool);
   memset(spool_fill, (int)'a', sizeof(spool_fill));

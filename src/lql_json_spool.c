@@ -1,9 +1,17 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
+
 #include "lql_json_spool.h"
 #include "lql_internal.h"
 
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 #define LQL_JSON_SPOOL_IO_BUFFER_BYTES 32768u
 
@@ -14,6 +22,15 @@ static void lql_json_spool_error(lql_error *error, lql_status status,
     strncpy(error->message, message, sizeof(error->message) - 1u);
     error->message[sizeof(error->message) - 1u] = '\0';
   }
+}
+
+static int lql_json_spool_seek(FILE *file, size_t offset) {
+  /*
+   * Supported 32-bit Linux targets need _FILE_OFFSET_BITS=64 plus fseeko here:
+   * long-backed fseek rejects valid spooled slices above LONG_MAX even when the
+   * spool and off_t can represent them.
+   */
+  return fseeko(file, (off_t)offset, SEEK_SET);
 }
 
 lql_status lql_json_spool_init(lql_json_spool *spool, lql_error *error) {
@@ -142,7 +159,7 @@ lql_status lql_json_spool_write_to(const lql_json_spool *spool,
   if (spool->file == NULL) {
     return writer(writer_user, spool->memory, spool->memory_len, error);
   }
-  if (fflush(spool->file) != 0 || fseek(spool->file, 0L, SEEK_SET) != 0) {
+  if (fflush(spool->file) != 0 || lql_json_spool_seek(spool->file, 0u) != 0) {
     lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
                          "unable to read JSON spool file");
     return LQL_STATUS_IO_ERROR;
@@ -176,8 +193,8 @@ lql_status lql_json_spool_write_slice(const lql_json_spool *spool,
   if (spool->file == NULL) {
     return writer(writer_user, spool->memory + offset, len, error);
   }
-  if (fflush(spool->file) != 0 || offset > (size_t)LONG_MAX ||
-      fseek(spool->file, (long)offset, SEEK_SET) != 0) {
+  if (fflush(spool->file) != 0 ||
+      lql_json_spool_seek(spool->file, offset) != 0) {
     lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
                          "unable to seek JSON spool slice");
     return LQL_STATUS_IO_ERROR;
@@ -222,8 +239,8 @@ lql_status lql_json_spool_byte_at(const lql_json_spool *spool, size_t offset,
   amount = spool->size - offset;
   if (amount > sizeof(mutable_spool->read_cache))
     amount = sizeof(mutable_spool->read_cache);
-  if (fflush(spool->file) != 0 || offset > (size_t)LONG_MAX ||
-      fseek(spool->file, (long)offset, SEEK_SET) != 0 ||
+  if (fflush(spool->file) != 0 ||
+      lql_json_spool_seek(spool->file, offset) != 0 ||
       fread(mutable_spool->read_cache, 1u, amount, spool->file) != amount) {
     mutable_spool->read_cache_len = 0u;
     lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
@@ -306,8 +323,7 @@ lql_status lql_json_spool_find_string_end(const lql_json_spool *spool,
     return LQL_STATUS_JSON_ERROR;
   }
   mutable_spool = (lql_json_spool *)spool;
-  if (fflush(spool->file) != 0 || pos > (size_t)LONG_MAX ||
-      fseek(spool->file, (long)pos, SEEK_SET) != 0) {
+  if (fflush(spool->file) != 0 || lql_json_spool_seek(spool->file, pos) != 0) {
     mutable_spool->read_cache_len = 0u;
     lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
                          "unable to scan JSON spool string");
@@ -347,7 +363,7 @@ void lql_json_spool_reader_init(lql_json_spool_reader *reader,
   reader->offset = 0u;
   if (spool != NULL && spool->file != NULL) {
     fflush(spool->file);
-    fseek(spool->file, 0L, SEEK_SET);
+    lql_json_spool_seek(spool->file, 0u);
   }
 }
 
