@@ -49,12 +49,7 @@ fi
 cp "$build_dir/clql" "$stage/bin/clql"
 cp LICENSE README.md "$stage/share/doc/clql/"
 
-tar_args='--sort=name --owner=0 --group=0 --numeric-owner'
-if tar --version >/dev/null 2>&1; then
-  tar -C build/package $tar_args -czf "$archive" "$root_name"
-else
-  tar -C build/package -czf "$archive" "$root_name"
-fi
+sh scripts/create_tar_gz.sh build/package "$archive" "$root_name"
 
 (
   cd "$dist_dir"

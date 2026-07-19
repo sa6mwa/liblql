@@ -118,12 +118,7 @@ printf '%s\n' "$version" >"$stage/VERSION"
   printf '%s\n' VERSION RELEASE_MANIFEST
 } | sort -u >"$stage/RELEASE_MANIFEST"
 
-tar_args='--sort=name --owner=0 --group=0 --numeric-owner'
-if tar --version >/dev/null 2>&1; then
-  tar -C "$build_dir" $tar_args -czf "$archive" "$root_name"
-else
-  tar -C "$build_dir" -czf "$archive" "$root_name"
-fi
+sh scripts/create_tar_gz.sh "$build_dir" "$archive" "$root_name"
 
 (
   cd "$dist_dir"

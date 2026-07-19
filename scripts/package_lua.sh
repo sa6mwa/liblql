@@ -51,12 +51,7 @@ sh scripts/render_release_rockspec.sh \
 sh scripts/stage_lua_rock_sources.sh \
   "$stage" "$version" "$version_header" "$rockspec"
 
-tar_args='--sort=name --owner=0 --group=0 --numeric-owner'
-if tar --version >/dev/null 2>&1; then
-  tar -C "$build_dir" $tar_args -czf "$source_archive" "$root_name"
-else
-  tar -C "$build_dir" -czf "$source_archive" "$root_name"
-fi
+sh scripts/create_tar_gz.sh "$build_dir" "$source_archive" "$root_name"
 
 mkdir -p "$build_dir/rockpack"
 cp "$rockspec" "$source_archive" "$build_dir/rockpack/"
