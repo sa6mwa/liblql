@@ -20,6 +20,7 @@ size_t lql_stream_value_size(const lql_stream_value *value) {
 lql_status lql_stream_value_write_to(const lql_stream_value *value,
                                      lql_stream_writer_fn writer,
                                      void *writer_user, lql_error *error) {
+  lql_status status;
   lql_error_init(error);
   if (value == NULL || writer == NULL ||
       (value->storage_kind != LQL_STREAM_VALUE_SOURCE_RANGE &&
@@ -34,12 +35,22 @@ lql_status lql_stream_value_write_to(const lql_stream_value *value,
                     "stream value source range is unavailable");
       return LQL_STATUS_INVALID_ARGUMENT;
     }
-    return value->range_writer(value->range_user, value->range_offset,
-                               value->range_len, writer, writer_user, error);
+    status = value->range_writer(value->range_user, value->range_offset,
+                                 value->range_len, writer, writer_user, error);
+    if (status != LQL_STATUS_OK && error != NULL &&
+        error->code == LQL_STATUS_OK) {
+      lql_set_error(error, status, "stream value range writer failed");
+    }
+    return status;
   }
   if (value->storage_kind == LQL_STREAM_VALUE_JSON_SPOOL) {
-    return lql_json_spool_write_to((const lql_json_spool *)value->spool, writer,
-                                   writer_user, error);
+    status = lql_json_spool_write_to((const lql_json_spool *)value->spool,
+                                     writer, writer_user, error);
+    if (status != LQL_STATUS_OK && error != NULL &&
+        error->code == LQL_STATUS_OK) {
+      lql_set_error(error, status, "stream value writer failed");
+    }
+    return status;
   }
   lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "invalid stream value");
   return LQL_STATUS_INVALID_ARGUMENT;

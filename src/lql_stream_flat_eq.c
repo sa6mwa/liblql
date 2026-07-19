@@ -1508,8 +1508,11 @@ static lql_status lql_flat_eq_file_open(const lql_mutation_action *action,
   path.len = strlen(action->value);
   status = action->file_value_open(action->file_value_user, path, &out->reader,
                                    &out->reader_user, error);
-  if (status != LQL_STATUS_OK)
+  if (status != LQL_STATUS_OK) {
+    if (error != NULL && error->code == LQL_STATUS_OK)
+      lql_set_error(error, status, "file value open callback failed");
     return status;
+  }
   out->close = action->file_value_close;
   out->close_user = action->file_value_user;
   if (out->reader == NULL || out->close == NULL) {
@@ -1539,8 +1542,11 @@ static lql_status lql_flat_eq_file_read(lql_flat_eq_file_stream *stream,
   *out_len = 0u;
   status =
       stream->reader(stream->reader_user, buffer, capacity, out_len, error);
-  if (status != LQL_STATUS_OK)
+  if (status != LQL_STATUS_OK) {
+    if (error != NULL && error->code == LQL_STATUS_OK)
+      lql_set_error(error, status, "file value reader failed");
     return status;
+  }
   if (*out_len > capacity) {
     lql_set_error(error, LQL_STATUS_CALLBACK_ERROR,
                   "file value reader exceeded its buffer capacity");
