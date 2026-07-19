@@ -1119,6 +1119,22 @@ static int run_projection_parse(lql *ctx) {
   return 0;
 }
 
+static int run_mutation_parse_invalid_arguments(lql *ctx) {
+  static const char *const null_expression[] = {NULL};
+  lql_mutation *mutation;
+  lql_error error;
+
+  mutation = NULL;
+  lql_error_init(&error);
+  if (ctx->mutation_parse(ctx, null_expression, 1u, &mutation, &error) !=
+          LQL_STATUS_INVALID_ARGUMENT ||
+      mutation != NULL) {
+    ctx->mutation_destroy(ctx, mutation);
+    return 1;
+  }
+  return 0;
+}
+
 static int run_selector_json_write(lql *ctx) {
   static const char expected[] = "{\"eq\":{\"field\":\"/status\","
                                  "\"value\":\"open\"}}";
@@ -6251,6 +6267,7 @@ int main(void) {
   }
   match_all_status = 0;
   RUN_CTX_TEST(run_projection_parse);
+  RUN_CTX_TEST(run_mutation_parse_invalid_arguments);
   RUN_CTX_TEST(run_selector_json_write);
   RUN_CTX_TEST(run_scalar_json_semantic_regressions);
   RUN_CTX_TEST(run_status_selection);

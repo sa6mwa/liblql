@@ -1131,6 +1131,13 @@ LQL_INTERNAL_SYMBOL lql_status lql_mutation_parse_internal_with_options(
                   "mutation expressions are required");
     return LQL_STATUS_PARSE_ERROR;
   }
+  for (i = 0u; i < expression_count; ++i) {
+    if (expressions[i] == NULL) {
+      lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                    "mutation expression entries are required");
+      return LQL_STATUS_INVALID_ARGUMENT;
+    }
+  }
   allocator = lql_allocator_from_receiver(self);
   if (allocator == NULL) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
