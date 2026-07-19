@@ -43,5 +43,15 @@ if ! tar -xOf "$archive" root/file.txt | grep -Fx payload >/dev/null; then
   printf 'tar portability: archive payload was not readable\n' >&2
   exit 1
 fi
+first_hash=$(sha256sum "$archive" | sed 's/ .*//')
+
+touch "$base/root/file.txt"
+LQL_REAL_TAR=$real_tar PATH=$fakebin:$PATH \
+  sh scripts/create_tar_gz.sh "$base" "$archive" root
+second_hash=$(sha256sum "$archive" | sed 's/ .*//')
+if [ "$first_hash" != "$second_hash" ]; then
+  printf 'tar portability: repeated archive hash changed\n' >&2
+  exit 1
+fi
 
 printf 'tar portability tests passed\n'
