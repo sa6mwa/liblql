@@ -12,7 +12,6 @@
 
 typedef struct lql_allocator lql_allocator;
 typedef struct lql_impl lql_impl;
-typedef struct lql_projection_capture lql_projection_capture;
 
 #define LQL_INSTANCE_MEMORY_LIMIT_BYTES (8u * 1024u * 1024u)
 
