@@ -23,6 +23,7 @@ if [[ "${1:-}" == "--version" ]]; then
 fi
 args=()
 saw_bsd_owner=0
+saw_file_list=0
 while (($#)); do
   case "$1" in
     --sort=* | --owner=* | --group=* | --numeric-owner)
@@ -37,6 +38,11 @@ while (($#)); do
       saw_bsd_owner=1
       shift
       ;;
+    -T)
+      saw_file_list=1
+      args+=("$1" "$2")
+      shift 2
+      ;;
     *)
       args+=("$1")
       shift
@@ -47,11 +53,16 @@ if [[ "${LQL_EXPECT_BSD_FLAGS:-}" == 1 && "$saw_bsd_owner" != 1 ]]; then
   printf 'fake tar: missing BSD ownership normalization flags\n' >&2
   exit 98
 fi
+if [[ "${LQL_EXPECT_SORTED_LIST:-}" == 1 && "$saw_file_list" != 1 ]]; then
+  printf 'fake tar: missing sorted file list\n' >&2
+  exit 97
+fi
 exec "$LQL_REAL_TAR" "${args[@]}"
 EOF
 chmod +x "$fakebin/tar"
 
-LQL_EXPECT_BSD_FLAGS=1 LQL_REAL_TAR=$real_tar PATH=$fakebin:$PATH \
+LQL_EXPECT_BSD_FLAGS=1 LQL_EXPECT_SORTED_LIST=1 \
+  LQL_REAL_TAR=$real_tar PATH=$fakebin:$PATH \
   sh scripts/create_tar_gz.sh "$base" "$archive" root
 
 if [ ! -f "$archive" ]; then
@@ -65,7 +76,8 @@ fi
 first_hash=$(sha256sum "$archive" | sed 's/ .*//')
 
 touch "$base/root/file.txt"
-LQL_EXPECT_BSD_FLAGS=1 LQL_REAL_TAR=$real_tar PATH=$fakebin:$PATH \
+LQL_EXPECT_BSD_FLAGS=1 LQL_EXPECT_SORTED_LIST=1 \
+  LQL_REAL_TAR=$real_tar PATH=$fakebin:$PATH \
   sh scripts/create_tar_gz.sh "$base" "$archive" root
 second_hash=$(sha256sum "$archive" | sed 's/ .*//')
 if [ "$first_hash" != "$second_hash" ]; then

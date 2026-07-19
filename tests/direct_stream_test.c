@@ -918,7 +918,7 @@ static int run_status_selection(lql *ctx) {
   }
   memset(&reader, 0, sizeof(reader));
   reader.data = (const unsigned char *)input;
-  reader.len = sizeof(input) - 1u;
+  reader.len = strlen(input);
   reader.chunk_size = 3u;
   memset(&decisions, 0, sizeof(decisions));
   memset(&request, 0, sizeof(request));
@@ -5574,6 +5574,9 @@ static int run_file_backed_mutations(lql *ctx) {
       run_file_backed_mutation_case(
           ctx, "file:/payload=liblql-file-value-binary.tmp", LQL_STATUS_OK,
           "{\"payload\":\"AAEC\"}\n") ||
+      run_file_backed_mutation_case(
+          ctx, "base64file:/payload=/definitely/not/here", LQL_STATUS_IO_ERROR,
+          "") ||
       run_file_backed_mutation_case(
           ctx, "textfile:/payload=liblql-file-value-invalid.tmp",
           LQL_STATUS_JSON_ERROR, "") ||

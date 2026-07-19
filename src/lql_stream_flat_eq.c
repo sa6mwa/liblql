@@ -4670,6 +4670,11 @@ static int lql_flat_eq_mutation_program_needs_atomic_output(
   for (i = 0u; i < program->direct_mutation_action_count; ++i) {
     const lql_mutation_action *creator;
     creator = program->direct_mutation_actions[i];
+    if (creator != NULL &&
+        (creator->value_kind == LQL_MUTATION_VALUE_FILE_AUTO ||
+         creator->value_kind == LQL_MUTATION_VALUE_FILE_TEXT ||
+         creator->value_kind == LQL_MUTATION_VALUE_FILE_BASE64))
+      return 1;
     if (creator == NULL || creator->segment_count <= 1u ||
         creator->kind == LQL_MUTATION_REMOVE)
       continue;
