@@ -43,7 +43,7 @@ sort "$prefix/RELEASE_MANIFEST" >"$work/manifest.txt"
 
 if ! cmp -s "$work/manifest.txt" "$work/actual.txt"; then
   printf 'source manifest exactness: payload differs from RELEASE_MANIFEST\n' >&2
-  printf '--- manifest-only / actual-only diff ---\n' >&2
+  printf '%s\n' '--- manifest-only / actual-only diff ---' >&2
   diff -u "$work/manifest.txt" "$work/actual.txt" >&2 || true
   exit 1
 fi

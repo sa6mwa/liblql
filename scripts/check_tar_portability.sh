@@ -15,24 +15,43 @@ mkdir -p "$fakebin" "$base/root"
 printf '%s\n' payload >"$base/root/file.txt"
 
 cat >"$fakebin/tar" <<'EOF'
-#!/bin/sh
-if [ "${1:-}" = "--version" ]; then
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "--version" ]]; then
   printf '%s\n' 'bsdtar 3.7.0 - libarchive'
   exit 0
 fi
-for arg in "$@"; do
-  case "$arg" in
+args=()
+saw_bsd_owner=0
+while (($#)); do
+  case "$1" in
     --sort=* | --owner=* | --group=* | --numeric-owner)
-      printf 'fake tar: rejected GNU-only option %s\n' "$arg" >&2
+      printf 'fake tar: rejected GNU-only option %s\n' "$1" >&2
       exit 99
+      ;;
+    --uid | --gid | --uname | --gname)
+      saw_bsd_owner=1
+      shift 2
+      ;;
+    --uid=* | --gid=* | --uname=* | --gname=*)
+      saw_bsd_owner=1
+      shift
+      ;;
+    *)
+      args+=("$1")
+      shift
       ;;
   esac
 done
-exec "$LQL_REAL_TAR" "$@"
+if [[ "${LQL_EXPECT_BSD_FLAGS:-}" == 1 && "$saw_bsd_owner" != 1 ]]; then
+  printf 'fake tar: missing BSD ownership normalization flags\n' >&2
+  exit 98
+fi
+exec "$LQL_REAL_TAR" "${args[@]}"
 EOF
 chmod +x "$fakebin/tar"
 
-LQL_REAL_TAR=$real_tar PATH=$fakebin:$PATH \
+LQL_EXPECT_BSD_FLAGS=1 LQL_REAL_TAR=$real_tar PATH=$fakebin:$PATH \
   sh scripts/create_tar_gz.sh "$base" "$archive" root
 
 if [ ! -f "$archive" ]; then
@@ -46,7 +65,7 @@ fi
 first_hash=$(sha256sum "$archive" | sed 's/ .*//')
 
 touch "$base/root/file.txt"
-LQL_REAL_TAR=$real_tar PATH=$fakebin:$PATH \
+LQL_EXPECT_BSD_FLAGS=1 LQL_REAL_TAR=$real_tar PATH=$fakebin:$PATH \
   sh scripts/create_tar_gz.sh "$base" "$archive" root
 second_hash=$(sha256sum "$archive" | sed 's/ .*//')
 if [ "$first_hash" != "$second_hash" ]; then
