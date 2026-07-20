@@ -19,8 +19,14 @@ if [ -z "$ld_path" ] || [ ! -x "$ld_path" ]; then
   exit 1
 fi
 
-cmake --preset arm64-apple-darwin-release >/dev/null
-cmake --build --preset arm64-apple-darwin-release >/dev/null
+if ! cmake --preset arm64-apple-darwin-release; then
+  printf 'darwin linker route: configure failed for %s\n' "$target" >&2
+  exit 1
+fi
+if ! cmake --build --preset arm64-apple-darwin-release; then
+  printf 'darwin linker route: build failed for %s\n' "$target" >&2
+  exit 1
+fi
 
 if grep -R -- '-fuse-ld=' "$cache" "$ninja" >/dev/null 2>&1; then
   printf 'darwin linker route: deprecated -fuse-ld=/path remains\n' >&2

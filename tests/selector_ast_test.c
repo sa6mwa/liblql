@@ -1206,8 +1206,8 @@ static void test_invalid_cases(lql *ctx) {
       "{\"exists\":\"/admin\\u0000/x\"}",
       "{\"contains\":{\"field\":\"/v\",\"any\":\"a\\u0000b\"}}",
       "{\"in\":{\"field\":\"/v\",\"any\":\"a\\u0000b\"}}",
-      "{\"contains\":{\"field\":\"/v\",\"ignoreCase\":\"t\\u0000junk\","
-      "\"value\":\"A\"}}",
+      ("{\"contains\":{\"field\":\"/v\",\"ignoreCase\":\"t\\u0000junk\","
+       "\"value\":\"A\"}}"),
       "{\"eq\":{\"field\":\"/v\",\"value\":\"\xc0\x80\"}}",
       "{\"eq\":{\"field\":\"/v\",\"value\":\"\xe2\x28\xa1\"}}",
       "{\"eq\":{\"field\":\"/v\",\"value\":\"\xf4\x90\x80\x80\"}}",
