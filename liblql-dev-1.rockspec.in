@@ -33,7 +33,6 @@ build = {
   },
   modules = {
     ["lql"] = "lua/lql/init.lua",
-    ["lql.cli"] = "lua/lql/cli.lua",
     ["lql.core"] = {
       sources = { "lua/lql_core.c" },
       incdirs = { "$(LIBLQL_INCDIR)" },

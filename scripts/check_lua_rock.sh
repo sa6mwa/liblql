@@ -36,6 +36,10 @@ if [ ! -x "$tree/bin/lql.lua" ]; then
   printf 'lua-rock: missing installed lql.lua CLI in %s\n' "$tree" >&2
   exit 1
 fi
+if [ -e "$tree/share/lua/5.5/lql/cli.lua" ]; then
+  printf 'lua-rock: lql.cli must not be installed as a Lua facade module\n' >&2
+  exit 1
+fi
 if [ -e "$root/lua/lql_core.o" ]; then
   printf 'lua-rock: LuaRocks generated object in source tree: lua/lql_core.o\n' >&2
   exit 1

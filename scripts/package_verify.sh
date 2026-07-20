@@ -430,7 +430,6 @@ verify_source_archive() {
     scripts/render_release_rockspec.sh \
     scripts/stage_lua_rock_sources.sh \
     lua/bin/lql.lua \
-    lua/lql/cli.lua \
     lua/lql_core.c \
     lua/lql/init.lua
   do
@@ -518,7 +517,6 @@ verify_lua_source_archive() {
     include/lql/version.h \
     liblql-dev-1.rockspec.in \
     lua/bin/lql.lua \
-    lua/lql/cli.lua \
     lua/lql_core.c \
     lua/lql/init.lua \
     scripts/build_lua_rock.sh \
@@ -609,8 +607,8 @@ verify_lua_src_rock() {
   mkdir -p "$nested"
   tar -xzf "$extract_dir/$project-lua-$version.tar.gz" -C "$nested"
   if [ ! -f "$nested/$project-lua-$version/lua/bin/lql.lua" ] ||
-    [ ! -f "$nested/$project-lua-$version/lua/lql/cli.lua" ]; then
-    printf 'package verify: source rock nested Lua source package omits lql.lua CLI\n' >&2
+    [ -e "$nested/$project-lua-$version/lua/lql/cli.lua" ]; then
+    printf 'package verify: source rock nested Lua source package has wrong lql.lua CLI layout\n' >&2
     exit 1
   fi
   if grep -R -a -n -F "$(pwd -P)" "$extract_dir" >/dev/null ||

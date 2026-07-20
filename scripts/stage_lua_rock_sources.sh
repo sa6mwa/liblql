@@ -21,7 +21,6 @@ cp "$root/liblql-dev-1.rockspec.in" "$stage/"
 cp "$root/lua/lql_core.c" "$stage/lua/"
 cp "$root/lua/bin/lql.lua" "$stage/lua/bin/"
 cp "$root/lua/lql/init.lua" "$stage/lua/lql/"
-cp "$root/lua/lql/cli.lua" "$stage/lua/lql/"
 cp "$root/include/lql/lql.h" "$stage/include/lql/"
 cp "$version_header" "$stage/include/lql/version.h"
 cp "$root/scripts/build_lua_rock.sh" "$stage/scripts/"
@@ -40,7 +39,6 @@ printf '%s\n' "$version" >"$stage/VERSION"
     include/lql/lql.h \
     include/lql/version.h \
     lua/bin/lql.lua \
-    lua/lql/cli.lua \
     lua/lql_core.c \
     lua/lql/init.lua \
     scripts/build_lua_rock.sh \

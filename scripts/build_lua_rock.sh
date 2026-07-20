@@ -27,7 +27,6 @@ mkdir -p "$rockspec_dir" "$source_dir/lua/bin" "$source_dir/lua/lql"
 cp "$root/lua/lql_core.c" "$source_dir/lua/"
 cp "$root/lua/bin/lql.lua" "$source_dir/lua/bin/"
 cp "$root/lua/lql/init.lua" "$source_dir/lua/lql/"
-cp "$root/lua/lql/cli.lua" "$source_dir/lua/lql/"
 rockspec=$rockspec_dir/liblql-$version-1.rockspec
 sed \
   -e "s|@LQL_ROCK_VERSION@|$version-1|g" \
