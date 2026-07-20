@@ -242,6 +242,13 @@ static void capabilities_fill(lql_capabilities *out) {
   memset(out, 0, sizeof(*out));
   out->selector_parse = 1;
   out->selector_inspection = 1;
+  out->path_is_regular_file = 1;
+  out->projection_parse = 1;
+  out->mutation_parse = 1;
+  out->stream_execute = 1;
+  out->stream_execute_spooled = 1;
+  out->filter_file_spooled = 1;
+  out->rewrite_file_inline_spooled = 1;
 }
 
 static const char *receiver_version(const lql *self) {

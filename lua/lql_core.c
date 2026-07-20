@@ -518,15 +518,15 @@ static int lua_lql_client_capabilities(lua_State *lua) {
   lua_setfield(lua, -2, "selector_inspection");
   lua_pushboolean(lua, 1);
   lua_setfield(lua, -2, "execute_string");
-  lua_pushboolean(lua, 1);
+  lua_pushboolean(lua, caps.filter_file_spooled);
   lua_setfield(lua, -2, "filter_file_spooled");
-  lua_pushboolean(lua, 1);
+  lua_pushboolean(lua, caps.rewrite_file_inline_spooled);
   lua_setfield(lua, -2, "rewrite_file_inline_spooled");
-  lua_pushboolean(lua, 1);
+  lua_pushboolean(lua, caps.path_is_regular_file);
   lua_setfield(lua, -2, "path_is_regular_file");
-  lua_pushboolean(lua, 1);
+  lua_pushboolean(lua, caps.projection_parse);
   lua_setfield(lua, -2, "projection_parse");
-  lua_pushboolean(lua, 1);
+  lua_pushboolean(lua, caps.mutation_parse);
   lua_setfield(lua, -2, "mutation_parse");
   return 1;
 }

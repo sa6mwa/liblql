@@ -52,8 +52,26 @@ typedef struct lql_stream_value lql_stream_value;
 
 /** Runtime capabilities of this liblql build; zero means unavailable. */
 typedef struct lql_capabilities {
+  /** Selector text and AST JSON parsing are available. */
   int selector_parse;
+  /** Selector cursor inspection and selector JSON serialization are available.
+   */
   int selector_inspection;
+  /** Non-opening regular-file classification is available. */
+  int path_is_regular_file;
+  /** Projection parsing and inspection are available. */
+  int projection_parse;
+  /** Mutation parsing, including opt-in file/time values, is available. */
+  int mutation_parse;
+  /** Real streaming execution is available for supported request shapes. */
+  int stream_execute;
+  /** Explicitly spooled compatibility execution is available. */
+  int stream_execute_spooled;
+  /** Liblql-owned file filtering through spooled execution is available. */
+  int filter_file_spooled;
+  /** Safe inline regular-file rewrite through spooled execution is available.
+   */
+  int rewrite_file_inline_spooled;
 } lql_capabilities;
 
 /** Selector features represented by one parsed or constructed selector. */

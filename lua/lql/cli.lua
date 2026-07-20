@@ -205,6 +205,9 @@ local function parse_short_cluster(argv, i, cfg)
       if pos == #a then
         local _
         _, i = take_value(argv, i, nil, "--theme")
+        if _ == nil then
+          return true, i, 2
+        end
       end
       io.stderr:write("lql.lua: --theme is unsupported; prettyx is not linked\n")
       return true, i, 2
@@ -310,10 +313,11 @@ local function parse_args(argv)
       cfg.inline = true
       i = i + 1
     elseif long_value(a, "--inline") ~= nil or long_value(a, "--write") ~= nil then
-      local text = long_value(a, "--inline") or long_value(a, "--write")
+      local name = long_value(a, "--inline") ~= nil and "--inline" or "--write"
+      local text = long_value(a, name)
       local value, ok = bool_value(text)
       if not ok then
-        io.stderr:write("lql.lua: invalid boolean value for --inline\n")
+        io.stderr:write("lql.lua: invalid boolean value for " .. name .. "\n")
         return nil, 2
       end
       cfg.inline = value
@@ -363,6 +367,9 @@ local function parse_args(argv)
       if long_value(a, "--theme") == nil then
         local _
         _, i = take_value(argv, i, nil, "--theme")
+        if _ == nil then
+          return nil, 2
+        end
       end
       io.stderr:write("lql.lua: --theme is unsupported; prettyx is not linked\n")
       return nil, 2

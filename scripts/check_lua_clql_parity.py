@@ -91,6 +91,32 @@ def assert_failure_contains(name, args, needles):
             )
 
 
+def assert_failure_excludes(name, args, needles, forbidden):
+    lua = run_lua(args)
+    clql = run_clql(args)
+    if lua.returncode == 0 or clql.returncode == 0:
+        fail(
+            f"{name} unexpectedly succeeded\n"
+            f"  args={args!r}\n"
+            f"  lua rc={lua.returncode} stderr={lua.stderr!r}\n"
+            f"  clql rc={clql.returncode} stderr={clql.stderr!r}"
+        )
+    for needle in needles:
+        if needle not in lua.stderr or needle not in clql.stderr:
+            fail(
+                f"{name} failure text mismatch for {needle!r}\n"
+                f"  lua stderr={lua.stderr!r}\n"
+                f"  clql stderr={clql.stderr!r}"
+            )
+    for text in forbidden:
+        if text in lua.stderr or text in clql.stderr:
+            fail(
+                f"{name} unexpected failure text {text!r}\n"
+                f"  lua stderr={lua.stderr!r}\n"
+                f"  clql stderr={clql.stderr!r}"
+            )
+
+
 def assert_help_cluster():
     lua = run_lua(["-vh"])
     clql = run_clql(["-vh"])
@@ -197,6 +223,17 @@ def main():
             ["--or=no", '/status="new"', fixture],
             ["invalid boolean value for --or"],
         )
+        assert_failure_contains(
+            "write boolean rejected",
+            ["--write=maybe", "-m", "/status=ready", '/id="b"', fixture],
+            ["invalid boolean value for --write"],
+        )
+        assert_failure_excludes(
+            "theme missing value",
+            ["-t"],
+            ["--theme requires a value"],
+            ["prettyx"],
+        )
         assert_failure_contains("theme unsupported", ["-t", "jq", fixture], ["prettyx"])
         assert_failure_contains(
             "file mutation disabled",
@@ -237,7 +274,7 @@ def main():
     finally:
         shutil.rmtree(tmpdir)
 
-    print("lua clql parity: 30 cases passed")
+    print("lua clql parity: 32 cases passed")
 
 
 if __name__ == "__main__":
