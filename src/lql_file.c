@@ -78,7 +78,7 @@ static int open_output_path(const char *path, FILE **out) {
 }
 
 static lql_stream_output_mode
-file_output_mode(const lql_file_request *request) {
+filter_file_output_mode(const lql_file_filter_request *request) {
   if (request->output_mode != LQL_STREAM_OUTPUT_DECISION_ONLY) {
     return request->output_mode;
   }
@@ -94,9 +94,11 @@ file_output_mode(const lql_file_request *request) {
   return LQL_STREAM_OUTPUT_SELECTED_RECORD;
 }
 
-static lql_status
-execute_open_stream(lql *self, const lql_file_request *request, FILE *input,
-                    FILE *output, lql_stream_result *result, lql_error *error) {
+static lql_status filter_open_stream(lql *self,
+                                     const lql_file_filter_request *request,
+                                     FILE *input, FILE *output,
+                                     lql_stream_result *result,
+                                     lql_error *error) {
   lql_file_reader reader;
   lql_file_writer writer;
   lql_stream_request stream;
@@ -117,7 +119,7 @@ execute_open_stream(lql *self, const lql_file_request *request, FILE *input,
   if (!request->count_only) {
     stream.writer = file_write;
     stream.writer_user = &writer;
-    stream.output_mode = file_output_mode(request);
+    stream.output_mode = filter_file_output_mode(request);
   }
   memset(&local_result, 0, sizeof(local_result));
   status = self->stream_execute_spooled(self, &stream, &local_result, error);
@@ -141,9 +143,10 @@ execute_open_stream(lql *self, const lql_file_request *request, FILE *input,
   return LQL_STATUS_OK;
 }
 
-lql_status lql_file_execute_internal(lql *self, const lql_file_request *request,
-                                     lql_stream_result *result,
-                                     lql_error *error) {
+lql_status
+lql_filter_file_spooled_internal(lql *self,
+                                 const lql_file_filter_request *request,
+                                 lql_stream_result *result, lql_error *error) {
   FILE *input;
   FILE *output;
   int close_input;
@@ -178,7 +181,7 @@ lql_status lql_file_execute_internal(lql *self, const lql_file_request *request,
     }
     close_output = output != stdout;
   }
-  status = execute_open_stream(self, request, input, output, result, error);
+  status = filter_open_stream(self, request, input, output, result, error);
   if (fflush(output) != 0 && status == LQL_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_IO_ERROR, "unable to flush output");
     status = LQL_STATUS_IO_ERROR;
@@ -541,10 +544,9 @@ static int copy_inline_xattrs(int source_fd, int fd) {
 }
 #endif
 
-lql_status lql_file_rewrite_inline_internal(lql *self,
-                                            const lql_file_request *request,
-                                            lql_stream_result *result,
-                                            lql_error *error) {
+lql_status lql_rewrite_file_inline_spooled_internal(
+    lql *self, const lql_file_filter_request *request,
+    lql_stream_result *result, lql_error *error) {
   FILE *source;
   FILE *tmp;
   char *tmp_path;
@@ -622,7 +624,7 @@ lql_status lql_file_rewrite_inline_internal(lql *self,
                   "unable to open inline temp stream");
     return LQL_STATUS_IO_ERROR;
   }
-  status = execute_open_stream(self, request, source, tmp, result, error);
+  status = filter_open_stream(self, request, source, tmp, result, error);
   if (fflush(tmp) != 0 && status == LQL_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_IO_ERROR, "unable to flush output");
     status = LQL_STATUS_IO_ERROR;
@@ -676,13 +678,16 @@ lql_status lql_file_rewrite_inline_internal(lql *self,
   return status;
 }
 
-lql_status lql_file_execute(lql *self, const lql_file_request *request,
-                            lql_stream_result *result, lql_error *error) {
-  return lql_file_execute_internal(self, request, result, error);
-}
-
-lql_status lql_file_rewrite_inline(lql *self, const lql_file_request *request,
+lql_status lql_filter_file_spooled(lql *self,
+                                   const lql_file_filter_request *request,
                                    lql_stream_result *result,
                                    lql_error *error) {
-  return lql_file_rewrite_inline_internal(self, request, result, error);
+  return lql_filter_file_spooled_internal(self, request, result, error);
+}
+
+lql_status
+lql_rewrite_file_inline_spooled(lql *self,
+                                const lql_file_filter_request *request,
+                                lql_stream_result *result, lql_error *error) {
+  return lql_rewrite_file_inline_spooled_internal(self, request, result, error);
 }

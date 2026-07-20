@@ -703,7 +703,7 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
   lql_mutation_parse_options mutation_options;
   lql_stream_output_mode output_mode;
   lql_stream_result aggregate;
-  lql_file_request file_request;
+  lql_file_filter_request file_request;
   lql_error error;
   lql_status status;
   size_t i;
@@ -770,7 +770,7 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
       file_request.output_mode = output_mode;
       file_request.matched_only = mutation != NULL ? cfg->matches_only : 1;
       file_request.count_only = cfg->count_only;
-      status = ctx->file_execute(ctx, &file_request, &result, &error);
+      status = ctx->filter_file_spooled(ctx, &file_request, &result, &error);
       if (status != LQL_STATUS_OK) {
         print_error("execute stream", status, &error);
         goto fail;
@@ -790,7 +790,7 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
     file_request.output_mode = output_mode;
     file_request.matched_only = mutation != NULL ? cfg->matches_only : 1;
     file_request.count_only = cfg->count_only;
-    status = ctx->file_execute(ctx, &file_request, &aggregate, &error);
+    status = ctx->filter_file_spooled(ctx, &file_request, &aggregate, &error);
     if (status != LQL_STATUS_OK) {
       print_error("execute stream", status, &error);
       goto fail;
@@ -817,7 +817,7 @@ static int run_inline(lql *ctx, const clql_config *cfg,
   lql_mutation *mutation;
   lql_mutation_parse_options mutation_options;
   lql_stream_output_mode output_mode;
-  lql_file_request request;
+  lql_file_filter_request request;
   lql_stream_result result;
   lql_error error;
   lql_status status;
@@ -879,7 +879,7 @@ static int run_inline(lql *ctx, const clql_config *cfg,
   request.mutation = mutation;
   request.output_mode = output_mode;
   request.matched_only = cfg->matches_only;
-  status = ctx->file_rewrite_inline(ctx, &request, &result, &error);
+  status = ctx->rewrite_file_inline_spooled(ctx, &request, &result, &error);
   ctx->mutation_destroy(ctx, mutation);
   ctx->projection_destroy(ctx, projection);
   ctx->selector_destroy(ctx, selector);

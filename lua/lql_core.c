@@ -915,14 +915,14 @@ static int lua_lql_execute_file(lua_State *lua) {
   const char *output_path;
   int count_only;
   int stdout_output;
-  int inline_rewrite;
+  int rewrite_inline;
   FILE *input;
   FILE *output_file;
   lql_error error;
   lql_status status;
   lql_stream_request request;
   lql_stream_result result;
-  lql_file_request file_request;
+  lql_file_filter_request file_request;
   lua_lql_file_reader reader;
   lua_lql_file_writer file_writer;
   lua_lql_buffer output;
@@ -933,7 +933,7 @@ static int lua_lql_execute_file(lua_State *lua) {
   output_path = NULL;
   count_only = 0;
   stdout_output = 0;
-  inline_rewrite = 0;
+  rewrite_inline = 0;
   wrote_to_stdout = 0;
   projection = NULL;
   mutation = NULL;
@@ -947,7 +947,7 @@ static int lua_lql_execute_file(lua_State *lua) {
     stdout_output = lua_toboolean(lua, -1);
     lua_pop(lua, 1);
     lua_getfield(lua, 4, "inline");
-    inline_rewrite = lua_toboolean(lua, -1);
+    rewrite_inline = lua_toboolean(lua, -1);
     lua_pop(lua, 1);
     lua_getfield(lua, 4, "output_path");
     if (lua_type(lua, -1) == LUA_TSTRING) {
@@ -986,7 +986,7 @@ static int lua_lql_execute_file(lua_State *lua) {
     }
   }
 
-  if (inline_rewrite) {
+  if (rewrite_inline) {
     memset(&file_request, 0, sizeof(file_request));
     file_request.input_path = path;
     file_request.selector = selector;
@@ -1010,8 +1010,8 @@ static int lua_lql_execute_file(lua_State *lua) {
       file_request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
     }
     memset(&result, 0, sizeof(result));
-    status = client->ctx->file_rewrite_inline(client->ctx, &file_request,
-                                              &result, &error);
+    status = client->ctx->rewrite_file_inline_spooled(
+        client->ctx, &file_request, &result, &error);
     if (mutation_owned) {
       client->ctx->mutation_destroy(client->ctx, mutation);
     }
@@ -1065,8 +1065,8 @@ static int lua_lql_execute_file(lua_State *lua) {
       file_request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
     }
     memset(&result, 0, sizeof(result));
-    status =
-        client->ctx->file_execute(client->ctx, &file_request, &result, &error);
+    status = client->ctx->filter_file_spooled(client->ctx, &file_request,
+                                              &result, &error);
     if (mutation_owned) {
       client->ctx->mutation_destroy(client->ctx, mutation);
     }

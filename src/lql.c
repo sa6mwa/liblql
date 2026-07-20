@@ -148,8 +148,8 @@ lql_status lql_new(lql **out, lql_error *error) {
   ctx->mutation_count = mutation_count_method;
   ctx->stream_execute = lql_stream_execute;
   ctx->stream_execute_spooled = lql_stream_execute_spooled;
-  ctx->file_execute = lql_file_execute_internal;
-  ctx->file_rewrite_inline = lql_file_rewrite_inline_internal;
+  ctx->filter_file_spooled = lql_filter_file_spooled_internal;
+  ctx->rewrite_file_inline_spooled = lql_rewrite_file_inline_spooled_internal;
   ctx->selector_is_empty = selector_is_empty_method;
   ctx->selector_capabilities_get = selector_capabilities_get_method;
   ctx->selector_root = selector_root_method;
