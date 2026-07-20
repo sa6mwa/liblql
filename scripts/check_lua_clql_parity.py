@@ -193,10 +193,26 @@ def main():
             ["--count", "-i", "-m", "/status=ready", '/id="b"', fixture],
             ["inline mutation cannot be combined with --count"],
         )
+        inline_target = os.path.join(tmpdir, "inline-target.ndjson")
+        inline_link = os.path.join(tmpdir, "inline-link.ndjson")
+        shutil.copyfile(fixture, inline_target)
+        os.symlink("inline-target.ndjson", inline_link)
+        assert_failure_contains(
+            "inline symlink rejected",
+            ["-i", "-m", "/status=ready", inline_link],
+            ["inline mode does not rewrite symlink paths"],
+        )
+        inline_fifo = os.path.join(tmpdir, "inline-fifo.ndjson")
+        os.mkfifo(inline_fifo)
+        assert_failure_contains(
+            "inline fifo rejected",
+            ["-i", "-m", "/status=ready", inline_fifo],
+            ["inline mode requires a regular file"],
+        )
     finally:
         shutil.rmtree(tmpdir)
 
-    print("lua clql parity: 25 cases passed")
+    print("lua clql parity: 27 cases passed")
 
 
 if __name__ == "__main__":

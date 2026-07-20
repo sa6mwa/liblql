@@ -289,6 +289,28 @@ typedef struct lql_stream_result {
   lql_stream_stop_reason stop_reason;
 } lql_stream_result;
 
+/**
+ * File-oriented compatibility execution request. Zero-initialization reads
+ * from stdin and writes to stdout. Set `input_path` to a file path or "-";
+ * alternatively set `input_file` to a caller-owned stream positioned at the
+ * desired start. Set `output_path` or `output_file` for non-count output;
+ * `count_only` writes the match count followed by '\n' to `output_file`,
+ * `output_path`, or stdout. File handles supplied by the caller are borrowed
+ * for the duration of the call and are not closed by liblql.
+ */
+typedef struct lql_file_request {
+  const char *input_path;
+  FILE *input_file;
+  const char *output_path;
+  FILE *output_file;
+  const lql_selector *selector;
+  const lql_projection *projection;
+  const lql_mutation *mutation;
+  lql_stream_output_mode output_mode;
+  int matched_only;
+  int count_only;
+} lql_file_request;
+
 /** Kinds exposed by the borrowed selector-node traversal API. */
 typedef enum lql_selector_node_kind {
   LQL_SELECTOR_NODE_ALL = 0,
@@ -472,6 +494,24 @@ struct lql {
                                        const lql_stream_request *request,
                                        lql_stream_result *result,
                                        lql_error *error);
+  /**
+   * Executes a strict NDJSON file request through liblql-owned FILE adapters.
+   * This is an explicitly spooled compatibility helper over
+   * `stream_execute_spooled`; it may spill the current record just like that
+   * API. It centralizes file opening, output flushing, count output, and
+   * shared diagnostics for downstream SDK consumers and facades.
+   */
+  lql_status (*file_execute)(lql *self, const lql_file_request *request,
+                             lql_stream_result *result, lql_error *error);
+  /**
+   * Safely rewrites one regular file in place using a same-directory temporary
+   * file, advisory locking, metadata preservation where the platform permits
+   * it, fsync discipline, and atomic rename. Symlink and non-regular paths are
+   * rejected. This helper is intentionally file-backed, not streaming.
+   */
+  lql_status (*file_rewrite_inline)(lql *self, const lql_file_request *request,
+                                    lql_stream_result *result,
+                                    lql_error *error);
   /** Returns non-zero when `selector` is the match-all selector. */
   int (*selector_is_empty)(const lql *self, const lql_selector *selector);
   /** Writes capability flags for `selector` to `out`; `out` is required. */
@@ -602,6 +642,17 @@ LQL_API lql_status lql_stream_execute_spooled(lql *self,
                                               const lql_stream_request *request,
                                               lql_stream_result *result,
                                               lql_error *error);
+
+/** Compatibility entry point for `self->file_execute(self, ...)`. */
+LQL_API lql_status lql_file_execute(lql *self, const lql_file_request *request,
+                                    lql_stream_result *result,
+                                    lql_error *error);
+
+/** Compatibility entry point for `self->file_rewrite_inline(self, ...)`. */
+LQL_API lql_status lql_file_rewrite_inline(lql *self,
+                                           const lql_file_request *request,
+                                           lql_stream_result *result,
+                                           lql_error *error);
 
 /** Returns the compact JSON size of one callback-scoped value. */
 LQL_API size_t lql_stream_value_size(const lql_stream_value *value);

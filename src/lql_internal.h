@@ -238,5 +238,11 @@ LQL_INTERNAL_SYMBOL lql_status lql_selector_build_exists_internal(
 LQL_INTERNAL_SYMBOL lql_status lql_stream_execute_flat_eq(
     lql *self, const lql_stream_request *request, lql_stream_result *result,
     lql_error *error, int allow_spool, int *out_handled);
+LQL_INTERNAL_SYMBOL lql_status
+lql_file_execute_internal(lql *self, const lql_file_request *request,
+                          lql_stream_result *result, lql_error *error);
+LQL_INTERNAL_SYMBOL lql_status
+lql_file_rewrite_inline_internal(lql *self, const lql_file_request *request,
+                                 lql_stream_result *result, lql_error *error);
 
 #endif

@@ -314,7 +314,7 @@ perf-gate: bench-gate
 finalize-slice: format test-debug
 
 format:
-	@clang-format -i include/lql/*.h src/*.c src/*.h tools/lql_direct_bench.c tools/clql.c fuzz/json_fuzz.c lua/lql_core.c
+	@clang-format -i include/lql/*.h src/*.c src/*.h tools/lql_direct_bench.c tools/clql.c fuzz/json_fuzz.c lua/lql_core.c examples/*.c
 
 clean-dist:
 	@./scripts/clean.sh dist

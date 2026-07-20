@@ -915,12 +915,14 @@ static int lua_lql_execute_file(lua_State *lua) {
   const char *output_path;
   int count_only;
   int stdout_output;
+  int inline_rewrite;
   FILE *input;
   FILE *output_file;
   lql_error error;
   lql_status status;
   lql_stream_request request;
   lql_stream_result result;
+  lql_file_request file_request;
   lua_lql_file_reader reader;
   lua_lql_file_writer file_writer;
   lua_lql_buffer output;
@@ -931,6 +933,7 @@ static int lua_lql_execute_file(lua_State *lua) {
   output_path = NULL;
   count_only = 0;
   stdout_output = 0;
+  inline_rewrite = 0;
   wrote_to_stdout = 0;
   projection = NULL;
   mutation = NULL;
@@ -942,6 +945,9 @@ static int lua_lql_execute_file(lua_State *lua) {
     lua_pop(lua, 1);
     lua_getfield(lua, 4, "stdout");
     stdout_output = lua_toboolean(lua, -1);
+    lua_pop(lua, 1);
+    lua_getfield(lua, 4, "inline");
+    inline_rewrite = lua_toboolean(lua, -1);
     lua_pop(lua, 1);
     lua_getfield(lua, 4, "output_path");
     if (lua_type(lua, -1) == LUA_TSTRING) {
@@ -978,6 +984,111 @@ static int lua_lql_execute_file(lua_State *lua) {
       }
       return lua_lql_return_error(lua, &error, status);
     }
+  }
+
+  if (inline_rewrite) {
+    memset(&file_request, 0, sizeof(file_request));
+    file_request.input_path = path;
+    file_request.selector = selector;
+    file_request.projection = projection;
+    file_request.mutation = mutation;
+    file_request.matched_only = mutation != NULL ? 0 : 1;
+    if (lua_istable(lua, 4)) {
+      lua_getfield(lua, 4, "matched_only");
+      if (!lua_isnil(lua, -1)) {
+        file_request.matched_only = lua_toboolean(lua, -1);
+      }
+      lua_pop(lua, 1);
+    }
+    if (projection != NULL && mutation != NULL) {
+      file_request.output_mode = LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION;
+    } else if (mutation != NULL) {
+      file_request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+    } else if (projection != NULL) {
+      file_request.output_mode = LQL_STREAM_OUTPUT_PROJECTION;
+    } else {
+      file_request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+    }
+    memset(&result, 0, sizeof(result));
+    status = client->ctx->file_rewrite_inline(client->ctx, &file_request,
+                                              &result, &error);
+    if (mutation_owned) {
+      client->ctx->mutation_destroy(client->ctx, mutation);
+    }
+    if (projection_owned) {
+      client->ctx->projection_destroy(client->ctx, projection);
+    }
+    if (owned) {
+      client->ctx->selector_destroy(client->ctx, selector);
+    }
+    if (status != LQL_STATUS_OK) {
+      return lua_lql_return_error(lua, &error, status);
+    }
+    lua_newtable(lua);
+    lua_pushinteger(lua, (lua_Integer)result.records_seen);
+    lua_setfield(lua, -2, "records_seen");
+    lua_pushinteger(lua, (lua_Integer)result.records_matched);
+    lua_setfield(lua, -2, "records_matched");
+    lua_pushinteger(lua, (lua_Integer)result.bytes_consumed);
+    lua_setfield(lua, -2, "bytes_consumed");
+    lua_pushboolean(lua, result.stopped_early);
+    lua_setfield(lua, -2, "stopped_early");
+    return 1;
+  }
+
+  if (stdout_output || output_path != NULL) {
+    memset(&file_request, 0, sizeof(file_request));
+    file_request.input_path = path;
+    file_request.output_path = output_path;
+    if (stdout_output && output_path == NULL) {
+      file_request.output_file = stdout;
+    }
+    file_request.selector = selector;
+    file_request.projection = projection;
+    file_request.mutation = mutation;
+    file_request.matched_only = mutation != NULL ? 0 : 1;
+    file_request.count_only = count_only;
+    if (lua_istable(lua, 4)) {
+      lua_getfield(lua, 4, "matched_only");
+      if (!lua_isnil(lua, -1)) {
+        file_request.matched_only = lua_toboolean(lua, -1);
+      }
+      lua_pop(lua, 1);
+    }
+    if (projection != NULL && mutation != NULL) {
+      file_request.output_mode = LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION;
+    } else if (mutation != NULL) {
+      file_request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+    } else if (projection != NULL) {
+      file_request.output_mode = LQL_STREAM_OUTPUT_PROJECTION;
+    } else {
+      file_request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+    }
+    memset(&result, 0, sizeof(result));
+    status =
+        client->ctx->file_execute(client->ctx, &file_request, &result, &error);
+    if (mutation_owned) {
+      client->ctx->mutation_destroy(client->ctx, mutation);
+    }
+    if (projection_owned) {
+      client->ctx->projection_destroy(client->ctx, projection);
+    }
+    if (owned) {
+      client->ctx->selector_destroy(client->ctx, selector);
+    }
+    if (status != LQL_STATUS_OK) {
+      return lua_lql_return_error(lua, &error, status);
+    }
+    lua_newtable(lua);
+    lua_pushinteger(lua, (lua_Integer)result.records_seen);
+    lua_setfield(lua, -2, "records_seen");
+    lua_pushinteger(lua, (lua_Integer)result.records_matched);
+    lua_setfield(lua, -2, "records_matched");
+    lua_pushinteger(lua, (lua_Integer)result.bytes_consumed);
+    lua_setfield(lua, -2, "bytes_consumed");
+    lua_pushboolean(lua, result.stopped_early);
+    lua_setfield(lua, -2, "stopped_early");
+    return 1;
   }
 
   input = stdin;

@@ -65,6 +65,7 @@ add_library(lql_common OBJECT
   src/lql.c
   src/lql_allocator.c
   src/lql_direct_actions.c
+  src/lql_file.c
   src/lql_json_scan.c
   src/lql_json_spool.c
   src/lql_number.c
@@ -113,6 +114,19 @@ else()
 endif()
 
 if(BUILD_TESTING)
+  add_executable(lql_file_execute_example examples/file_execute.c)
+  target_link_libraries(lql_file_execute_example PRIVATE ${LQL_INTERNAL_LIBRARY})
+  lql_configure_c89_target(lql_file_execute_example)
+  add_test(NAME lql.example.file_execute
+           COMMAND lql_file_execute_example
+                   "${CMAKE_CURRENT_SOURCE_DIR}/examples/status.ndjson")
+  add_executable(lql_inline_rewrite_example examples/inline_rewrite.c)
+  target_link_libraries(lql_inline_rewrite_example PRIVATE ${LQL_INTERNAL_LIBRARY})
+  lql_configure_c89_target(lql_inline_rewrite_example)
+  add_test(NAME lql.example.inline_rewrite
+           COMMAND sh -c
+                   "tmp=\"$PWD/lql-inline-example.$$\"; cp \"${CMAKE_CURRENT_SOURCE_DIR}/examples/status.ndjson\" \"$tmp\" && \"$1\" \"$tmp\" && grep '\"processed\":true' \"$tmp\" >/dev/null; rc=$?; rm \"$tmp\"; exit $rc"
+                   sh "$<TARGET_FILE:lql_inline_rewrite_example>")
   add_executable(lql_json_scan_test tests/json_scan_test.c)
   target_include_directories(lql_json_scan_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src")

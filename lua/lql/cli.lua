@@ -388,7 +388,15 @@ end
 local function split_inputs(cfg)
   local selectors = {}
   local inputs = {}
-  if #cfg.mutations == 0 then
+  if cfg.inline then
+    for i, item in ipairs(cfg.positionals) do
+      if i == #cfg.positionals then
+        inputs[#inputs + 1] = item
+      else
+        selectors[#selectors + 1] = item
+      end
+    end
+  elseif #cfg.mutations == 0 then
     for i, item in ipairs(cfg.positionals) do
       if i == #cfg.positionals and (item == "-" or exists_file(item)) then
         inputs[#inputs + 1] = item
@@ -486,20 +494,13 @@ function cli.main(argv)
   local seen = 0
   if cfg.inline then
     local path = inputs[1]
-    local tmp = path .. ".lql.lua.tmp"
     local result = run_once(client, selector, path, {
       projection = projection,
       mutation = mutation,
       matched_only = cfg.matches_only,
-      output_path = tmp,
+      inline = true,
     })
     if not result then
-      os.remove(tmp)
-      return 1
-    end
-    if not os.rename(tmp, path) then
-      os.remove(tmp)
-      io.stderr:write("lql.lua: unable to replace inline input file\n")
       return 1
     end
     return 0
