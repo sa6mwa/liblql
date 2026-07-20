@@ -96,6 +96,7 @@ make lifecycle-check
 make lifecycle-version-contract
 make test
 make lua-cli-smoke
+make lua-cli-clql-parity
 make lua-cli-parity
 make package-source-smoke
 make package-verify
@@ -130,6 +131,7 @@ to `liblql.so`; it does not compile private liblql sources or statically embed
 make lua-rock
 make lua-test
 make lua-cli-smoke
+make lua-cli-clql-parity
 make lua-cli-parity
 make lua-artifact-smoke
 ```
@@ -139,6 +141,7 @@ projection, mutation, file-backed mutation, count, and inline workflows, while
 keeping the same deliberate exclusions for prettyx/theme behavior. Its output
 workflow uses the explicitly spooled liblql API so it can normalize
 whitespace-tolerant input; it can therefore spill the current record to a
-temporary file. `make lua-cli-parity` compares `lql.lua` output against the
-pinned Go `lql` CLI for shared workflows; Lua itself does not parse or
-transform JSON in that comparison.
+temporary file. `make lua-cli-clql-parity` compares `lql.lua` output against
+`clql`; `make lua-cli-parity` compares `lql.lua` output against the pinned Go
+`lql` CLI for shared workflows. Lua itself does not parse or transform JSON in
+those comparisons.

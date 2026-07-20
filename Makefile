@@ -1,6 +1,6 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression tar-portability-check lifecycle-check lifecycle-version-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-cli-parity lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify release-upload-list verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all print-test-all-gates test-all-timed test-all-gates direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression tar-portability-check lifecycle-check lifecycle-version-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify release-upload-list verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all print-test-all-gates test-all-timed test-all-gates direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
-TEST_ALL_GATES := lifecycle-check target-tool-check direct-reset direct-no-lonejson test mutation-literal-parity shared-only-smoke lua-test lua-cli-smoke lua-cli-parity lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-selector-parity clql-mutation-parity package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
+TEST_ALL_GATES := lifecycle-check target-tool-check direct-reset direct-no-lonejson test mutation-literal-parity shared-only-smoke lua-test lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-selector-parity clql-mutation-parity package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
 
 help:
 	@printf '%s\n' \
@@ -28,6 +28,7 @@ help:
 	  'make lua-test      build and run Lua 5.5 facade smoke tests' \
 	  'make lua-rock      install Lua facade into repo-local LuaRocks tree' \
 	  'make lua-cli-smoke run installed lql.lua CLI smoke tests' \
+	  'make lua-cli-clql-parity compare lql.lua output against clql' \
 	  'make lua-cli-parity compare lql.lua output against Go lql' \
 	  'make lua-env       print environment for repo-local LuaRocks tree' \
 	  'make lua-artifact-smoke verify Lua release artifacts' \
@@ -157,6 +158,9 @@ lua-rock:
 
 lua-cli-smoke: lua-rock
 	@sh scripts/check_lua_cli_smoke.sh
+
+lua-cli-clql-parity: build-release lua-rock
+	@CLQL_PATH=build/release/clql LQL_LUA_CLI_PATH=build/luarocks/bin/lql.lua python3 scripts/check_lua_clql_parity.py
 
 lua-cli-parity: lua-rock
 	@mkdir -p build

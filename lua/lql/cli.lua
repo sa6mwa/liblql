@@ -95,13 +95,131 @@ local function bool_value(text)
   if text == nil then
     return true, true
   end
-  if text == "1" or text == "true" or text == "t" or text == "yes" then
+  if text == "1" or text == "true" or text == "True" or text == "TRUE" or
+      text == "t" or text == "T" or text == "yes" then
     return true, true
   end
-  if text == "0" or text == "false" or text == "f" or text == "no" then
+  if text == "0" or text == "false" or text == "False" or text == "FALSE" or
+      text == "f" or text == "F" or text == "no" then
     return false, true
   end
   return false, false
+end
+
+local function parse_long_bool(a, name, cfg, key)
+  local value = long_value(a, name)
+  if value == nil then
+    return false, nil
+  end
+  local parsed, ok = bool_value(value)
+  if not ok then
+    io.stderr:write("lql.lua: invalid boolean value for " .. name .. "\n")
+    return true, 2
+  end
+  cfg[key] = parsed
+  return true, nil
+end
+
+local function parse_short_bool_value(a, pos)
+  if a:sub(pos + 1, pos + 1) ~= "=" then
+    return nil, false, nil
+  end
+  local value, ok = bool_value(a:sub(pos + 2))
+  if not ok then
+    io.stderr:write("lql.lua: invalid boolean value for short option: " ..
+                    a:sub(pos, pos) .. "\n")
+    return nil, true, 2
+  end
+  return value, true, nil
+end
+
+local function parse_short_cluster(argv, i, cfg)
+  local a = argv[i]
+  if #a <= 2 or a:sub(1, 1) ~= "-" or a:sub(1, 2) == "--" then
+    return false, i, nil
+  end
+  local terminal
+  local pos = 2
+  while pos <= #a do
+    local ch = a:sub(pos, pos)
+    if ch == "O" or ch == "M" or ch == "c" or ch == "i" or ch == "w" or
+        ch == "F" then
+      local value, matched, err = parse_short_bool_value(a, pos)
+      if err then
+        return true, i, err
+      end
+      if matched then
+        if ch == "O" then
+          cfg.or_mode = value
+        elseif ch == "M" then
+          cfg.matches_only = value
+        elseif ch == "c" then
+          cfg.compact = value
+        elseif ch == "i" or ch == "w" then
+          cfg.inline = value
+        else
+          cfg.enable_file_mutations = value
+        end
+        return true, i, nil
+      end
+      if ch == "O" then
+        cfg.or_mode = true
+      elseif ch == "M" then
+        cfg.matches_only = true
+      elseif ch == "c" then
+        cfg.compact = true
+      elseif ch == "i" or ch == "w" then
+        cfg.inline = true
+      else
+        cfg.enable_file_mutations = true
+      end
+      pos = pos + 1
+    elseif ch == "h" then
+      terminal = "help"
+      pos = pos + 1
+    elseif ch == "v" then
+      if terminal ~= "help" then
+        terminal = "version"
+      end
+      pos = pos + 1
+    elseif ch == "m" or ch == "f" then
+      local value
+      if pos < #a and a:sub(pos + 1, pos + 1) == "=" then
+        value = a:sub(pos + 2)
+      elseif pos < #a then
+        value = a:sub(pos + 1)
+      else
+        value, i = take_value(argv, i, nil, ch == "m" and "--mutate" or "--field")
+        if value == nil then
+          return true, i, 2
+        end
+      end
+      if ch == "m" then
+        cfg.mutations[#cfg.mutations + 1] = value
+      else
+        cfg.fields[#cfg.fields + 1] = value
+      end
+      return true, i, nil
+    elseif ch == "t" then
+      if pos == #a then
+        local _
+        _, i = take_value(argv, i, nil, "--theme")
+      end
+      io.stderr:write("lql.lua: --theme is unsupported; prettyx is not linked\n")
+      return true, i, 2
+    else
+      return false, i, nil
+    end
+  end
+  if terminal == "help" then
+    usage(io.stdout)
+    return true, i, 0
+  end
+  if terminal == "version" then
+    io.stdout:write(lql.version() .. "\n")
+    return true, i, 0
+  end
+  return true, i, nil
 end
 
 local function print_error(context, err)
@@ -121,6 +239,7 @@ local function parse_args(argv)
     fields = {},
     positionals = {},
     inline = false,
+    compact = false,
     enable_file_mutations = false,
     count = false,
     or_mode = false,
@@ -131,6 +250,10 @@ local function parse_args(argv)
     local a = argv[i]
     if a == "--" then
       i = i + 1
+      while i <= #argv do
+        cfg.positionals[#cfg.positionals + 1] = argv[i]
+        i = i + 1
+      end
       break
     elseif a == "-h" or a == "--help" then
       usage(io.stdout)
@@ -139,13 +262,38 @@ local function parse_args(argv)
       io.stdout:write(lql.version() .. "\n")
       return nil, 0
     elseif a == "-c" or a == "--compact" then
+      cfg.compact = true
       i = i + 1
+    elseif long_value(a, "--compact") ~= nil then
+      local matched, err = parse_long_bool(a, "--compact", cfg, "compact")
+      if err then
+        return nil, err
+      end
+      if matched then
+        i = i + 1
+      end
     elseif a == "-O" or a == "--or" then
       cfg.or_mode = true
       i = i + 1
+    elseif long_value(a, "--or") ~= nil then
+      local matched, err = parse_long_bool(a, "--or", cfg, "or_mode")
+      if err then
+        return nil, err
+      end
+      if matched then
+        i = i + 1
+      end
     elseif a == "-M" or a == "--matches-only" then
       cfg.matches_only = true
       i = i + 1
+    elseif long_value(a, "--matches-only") ~= nil then
+      local matched, err = parse_long_bool(a, "--matches-only", cfg, "matches_only")
+      if err then
+        return nil, err
+      end
+      if matched then
+        i = i + 1
+      end
     elseif a == "--count" then
       cfg.count = true
       i = i + 1
@@ -189,7 +337,11 @@ local function parse_args(argv)
       cfg.mutations[#cfg.mutations + 1] = value
       i = i + 1
     elseif a:sub(1, 2) == "-m" and #a > 2 then
-      cfg.mutations[#cfg.mutations + 1] = a:sub(3)
+      if a:sub(3, 3) == "=" then
+        cfg.mutations[#cfg.mutations + 1] = a:sub(4)
+      else
+        cfg.mutations[#cfg.mutations + 1] = a:sub(3)
+      end
       i = i + 1
     elseif a == "-f" or a == "--field" or long_value(a, "--field") ~= nil then
       local value
@@ -200,27 +352,35 @@ local function parse_args(argv)
       cfg.fields[#cfg.fields + 1] = value
       i = i + 1
     elseif a:sub(1, 2) == "-f" and #a > 2 then
-      cfg.fields[#cfg.fields + 1] = a:sub(3)
+      if a:sub(3, 3) == "=" then
+        cfg.fields[#cfg.fields + 1] = a:sub(4)
+      else
+        cfg.fields[#cfg.fields + 1] = a:sub(3)
+      end
       i = i + 1
     elseif a == "-t" or a == "--theme" or long_value(a, "--theme") ~= nil then
       if long_value(a, "--theme") == nil then
         local _
         _, i = take_value(argv, i, nil, "--theme")
       end
-      io.stderr:write("lql.lua: unsupported Go lql flag in current engine: " ..
-                      a .. "\n")
+      io.stderr:write("lql.lua: --theme is unsupported; prettyx is not linked\n")
       return nil, 2
     elseif a:sub(1, 1) == "-" then
-      io.stderr:write("lql.lua: unknown flag: " .. a .. "\n")
-      usage(io.stderr)
-      return nil, 2
+      local matched, next_i, err = parse_short_cluster(argv, i, cfg)
+      if err ~= nil then
+        return nil, err
+      end
+      if matched then
+        i = next_i + 1
+      else
+        io.stderr:write("lql.lua: unknown flag: " .. a .. "\n")
+        usage(io.stderr)
+        return nil, 2
+      end
     else
-      break
+      cfg.positionals[#cfg.positionals + 1] = a
+      i = i + 1
     end
-  end
-  while i <= #argv do
-    cfg.positionals[#cfg.positionals + 1] = argv[i]
-    i = i + 1
   end
   return cfg, nil
 end
@@ -346,10 +506,14 @@ function cli.main(argv)
   end
 
   for _, input in ipairs(inputs) do
+    local matched_only = true
+    if mutation then
+      matched_only = cfg.matches_only
+    end
     local result = run_once(client, selector, input, {
       projection = projection,
       mutation = mutation,
-      matched_only = mutation and cfg.matches_only or true,
+      matched_only = matched_only,
       count = cfg.count,
       stdout = not cfg.count,
     })
