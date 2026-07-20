@@ -1496,6 +1496,9 @@ static int run_mapped_string_predicates(lql *ctx) {
       "\"tree\":{\"branch\":{\"sku\":\"other\"}}}\n"
       "{\"items\":[{\"sku\":\"C\"}],\"object\":{},\"array\":[],"
       "\"tree\":{}}\n";
+  static const char recursive_escape_input[] =
+      "{\"tree\":{\"branch\":{\"a/b\":true}}}\n"
+      "{\"tree\":{\"branch\":{\"a~b\":true}}}\n";
   static const char scalar_input[] =
       "{\"code\":1,\"enabled\":true}\n"
       "{\"code\":2,\"enabled\":false}\n"
@@ -1648,6 +1651,10 @@ static int run_mapped_string_predicates(lql *ctx) {
   if (run_selection(ctx, "/tree/**/sku=\"other\"", wildcard_input, 3u, 1u) ||
       run_selection(ctx, "/tree/.../sku=\"needle\"", wildcard_input, 3u, 1u)) {
     return 15;
+  }
+  if (run_selection(ctx, "/tree/.../a~1b=true", recursive_escape_input, 2u,
+                    1u)) {
+    return 111;
   }
   if (run_selection(ctx, "/status!=\"open\"", input, 3u, 2u)) {
     return 110;

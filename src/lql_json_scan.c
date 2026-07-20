@@ -2933,6 +2933,11 @@ static int lql_json_term_segment_matches_object_key(
   if (!lql_json_term_path_segment(term, segment, &target, &target_len)) {
     return 0;
   }
+  if (term->path_recursive_match != NULL &&
+      segment == term->path_recursive_match_segment &&
+      term->path_recursive_match_plain) {
+    return target_len == key_len && memcmp(target, key, key_len) == 0;
+  }
   return lql_json_pointer_segment_equal(target, target_len, key, key_len);
 }
 
@@ -3909,6 +3914,9 @@ static int lql_json_try_plain_key_match(
       }
       segment = lql_json_active_path_segment(scan, term, i, object_depth,
                                              recursive_next);
+      if (segment == recursive_next) {
+        continue;
+      }
     } else {
       segment = object_depth;
     }

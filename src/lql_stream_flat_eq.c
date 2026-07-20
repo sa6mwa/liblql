@@ -593,14 +593,19 @@ static void lql_flat_eq_cache_array_indexes(lql_json_flat_eq_term *term) {
   }
 }
 
+static int lql_flat_eq_plain_segment(const char *segment, size_t segment_len);
+
 static void lql_flat_eq_cache_recursive_match(lql_json_flat_eq_term *term) {
   const char *segment;
   const char *slash;
   size_t recursive_segment;
   size_t match_segment;
   size_t i;
-  if (term == NULL || term->path == NULL ||
-      term->path_recursive_segments == 0ul) {
+  if (term == NULL) {
+    return;
+  }
+  term->path_recursive_match_plain = 0;
+  if (term->path == NULL || term->path_recursive_segments == 0ul) {
     return;
   }
   recursive_segment = 0u;
@@ -633,6 +638,7 @@ static void lql_flat_eq_cache_recursive_match(lql_json_flat_eq_term *term) {
     term->path_recursive_match = NULL;
     term->path_recursive_match_len = 0u;
     term->path_recursive_match_segment = 0u;
+    term->path_recursive_match_plain = 0;
     return;
   }
   slash = strchr(segment, '/');
@@ -640,6 +646,9 @@ static void lql_flat_eq_cache_recursive_match(lql_json_flat_eq_term *term) {
   term->path_recursive_match_len =
       slash == NULL ? strlen(segment) : (size_t)(slash - segment);
   term->path_recursive_match_segment = match_segment;
+  term->path_recursive_match_plain =
+      lql_flat_eq_plain_segment(term->path_recursive_match,
+                                term->path_recursive_match_len);
 }
 
 static int lql_flat_eq_plain_segment(const char *segment, size_t segment_len) {

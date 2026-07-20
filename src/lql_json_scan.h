@@ -84,6 +84,7 @@ typedef struct lql_json_flat_eq_term {
   unsigned long range_lte_unsigned;
   int range_lte_unsigned_ready;
   int field_plain;
+  int path_recursive_match_plain;
 } lql_json_flat_eq_term;
 
 typedef struct lql_json_capture_key {
