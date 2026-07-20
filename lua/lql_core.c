@@ -19,6 +19,8 @@
 
 #define LUA_LQL_CLIENT "lql.client"
 #define LUA_LQL_SELECTOR "lql.selector"
+#define LUA_LQL_PROJECTION "lql.projection"
+#define LUA_LQL_MUTATION "lql.mutation"
 
 typedef struct lua_lql_client {
   lql *ctx;
@@ -28,6 +30,16 @@ typedef struct lua_lql_selector {
   lql *ctx;
   lql_selector *selector;
 } lua_lql_selector;
+
+typedef struct lua_lql_projection {
+  lql *ctx;
+  lql_projection *projection;
+} lua_lql_projection;
+
+typedef struct lua_lql_mutation {
+  lql *ctx;
+  lql_mutation *mutation;
+} lua_lql_mutation;
 
 typedef struct lua_lql_string_reader {
   const char *data;
@@ -204,6 +216,14 @@ static lua_lql_selector *lua_lql_test_selector(lua_State *lua, int index) {
   return (lua_lql_selector *)luaL_testudata(lua, index, LUA_LQL_SELECTOR);
 }
 
+static lua_lql_projection *lua_lql_test_projection(lua_State *lua, int index) {
+  return (lua_lql_projection *)luaL_testudata(lua, index, LUA_LQL_PROJECTION);
+}
+
+static lua_lql_mutation *lua_lql_test_mutation(lua_State *lua, int index) {
+  return (lua_lql_mutation *)luaL_testudata(lua, index, LUA_LQL_MUTATION);
+}
+
 static lua_lql_selector *lua_lql_check_selector(lua_State *lua, int index) {
   lua_lql_selector *selector;
   selector = (lua_lql_selector *)luaL_checkudata(lua, index, LUA_LQL_SELECTOR);
@@ -212,6 +232,27 @@ static lua_lql_selector *lua_lql_check_selector(lua_State *lua, int index) {
                     selector->selector != NULL,
                 index, "closed lql selector");
   return selector;
+}
+
+static lua_lql_projection *lua_lql_check_projection(lua_State *lua, int index) {
+  lua_lql_projection *projection;
+  projection =
+      (lua_lql_projection *)luaL_checkudata(lua, index, LUA_LQL_PROJECTION);
+  luaL_argcheck(lua,
+                projection != NULL && projection->ctx != NULL &&
+                    projection->projection != NULL,
+                index, "closed lql projection");
+  return projection;
+}
+
+static lua_lql_mutation *lua_lql_check_mutation(lua_State *lua, int index) {
+  lua_lql_mutation *mutation;
+  mutation = (lua_lql_mutation *)luaL_checkudata(lua, index, LUA_LQL_MUTATION);
+  luaL_argcheck(lua,
+                mutation != NULL && mutation->ctx != NULL &&
+                    mutation->mutation != NULL,
+                index, "closed lql mutation");
+  return mutation;
 }
 
 static int lua_lql_push_selector(lua_State *lua, lua_lql_client *client,
@@ -227,6 +268,32 @@ static int lua_lql_push_selector(lua_State *lua, lua_lql_client *client,
   return 1;
 }
 
+static int lua_lql_push_projection(lua_State *lua, lua_lql_client *client,
+                                   lql_projection *projection) {
+  lua_lql_projection *handle;
+  handle = (lua_lql_projection *)lua_newuserdatauv(lua, sizeof(*handle), 1);
+  handle->ctx = client->ctx;
+  handle->projection = projection;
+  luaL_getmetatable(lua, LUA_LQL_PROJECTION);
+  lua_setmetatable(lua, -2);
+  lua_pushvalue(lua, 1);
+  lua_setiuservalue(lua, -2, 1);
+  return 1;
+}
+
+static int lua_lql_push_mutation(lua_State *lua, lua_lql_client *client,
+                                 lql_mutation *mutation) {
+  lua_lql_mutation *handle;
+  handle = (lua_lql_mutation *)lua_newuserdatauv(lua, sizeof(*handle), 1);
+  handle->ctx = client->ctx;
+  handle->mutation = mutation;
+  luaL_getmetatable(lua, LUA_LQL_MUTATION);
+  lua_setmetatable(lua, -2);
+  lua_pushvalue(lua, 1);
+  lua_setiuservalue(lua, -2, 1);
+  return 1;
+}
+
 static lql_status lua_lql_selector_arg(lua_State *lua, lua_lql_client *client,
                                        int index, lql_selector **out,
                                        int *owned, lql_error *error) {
@@ -234,6 +301,9 @@ static lql_status lua_lql_selector_arg(lua_State *lua, lua_lql_client *client,
   const char *expr;
   *out = NULL;
   *owned = 0;
+  if (lua_isnoneornil(lua, index)) {
+    return LQL_STATUS_OK;
+  }
   handle = lua_lql_test_selector(lua, index);
   if (handle != NULL) {
     if (handle->ctx != client->ctx || handle->selector == NULL) {
@@ -247,6 +317,153 @@ static lql_status lua_lql_selector_arg(lua_State *lua, lua_lql_client *client,
   expr = luaL_checkstring(lua, index);
   *owned = 1;
   return client->ctx->selector_parse(client->ctx, expr, out, error);
+}
+
+static int lua_lql_string_list_arg(lua_State *lua, int index,
+                                   const char ***out_items, size_t *out_count) {
+  const char **items;
+  size_t count;
+  size_t i;
+  *out_items = NULL;
+  *out_count = 0u;
+  if (lua_type(lua, index) == LUA_TSTRING) {
+    items = (const char **)lua_lql_alloc(lua, NULL, 0u, sizeof(*items));
+    if (items == NULL) {
+      return 0;
+    }
+    items[0] = lua_tostring(lua, index);
+    *out_items = items;
+    *out_count = 1u;
+    return 1;
+  }
+  luaL_checktype(lua, index, LUA_TTABLE);
+  count = (size_t)lua_rawlen(lua, index);
+  if (count == 0u) {
+    return 1;
+  }
+  if (count > ((size_t)-1) / sizeof(*items)) {
+    return 0;
+  }
+  items = (const char **)lua_lql_alloc(lua, NULL, 0u, count * sizeof(*items));
+  if (items == NULL) {
+    return 0;
+  }
+  for (i = 0u; i < count; ++i) {
+    lua_rawgeti(lua, index, (lua_Integer)i + 1);
+    items[i] = luaL_checkstring(lua, -1);
+    lua_pop(lua, 1);
+  }
+  *out_items = items;
+  *out_count = count;
+  return 1;
+}
+
+static void lua_lql_string_list_free(lua_State *lua, const char **items,
+                                     size_t count) {
+  if (items != NULL) {
+    (void)lua_lql_alloc(lua, (void *)items, count * sizeof(*items), 0u);
+  }
+}
+
+static lql_status lua_lql_projection_arg(lua_State *lua, lua_lql_client *client,
+                                         int index, lql_projection **out,
+                                         int *owned, lql_error *error) {
+  lua_lql_projection *handle;
+  const char **items;
+  size_t count;
+  lql_status status;
+  *out = NULL;
+  *owned = 0;
+  if (lua_isnoneornil(lua, index)) {
+    return LQL_STATUS_OK;
+  }
+  handle = lua_lql_test_projection(lua, index);
+  if (handle != NULL) {
+    if (handle->ctx != client->ctx || handle->projection == NULL) {
+      error->code = LQL_STATUS_INVALID_ARGUMENT;
+      strcpy(error->message, "projection belongs to another lql client");
+      return LQL_STATUS_INVALID_ARGUMENT;
+    }
+    *out = handle->projection;
+    return LQL_STATUS_OK;
+  }
+  items = NULL;
+  count = 0u;
+  if (!lua_lql_string_list_arg(lua, index, &items, &count)) {
+    error->code = LQL_STATUS_NO_MEMORY;
+    strcpy(error->message, "out of memory");
+    return LQL_STATUS_NO_MEMORY;
+  }
+  *owned = 1;
+  status = client->ctx->projection_parse(client->ctx, items, count, out, error);
+  lua_lql_string_list_free(lua, items, count);
+  return status;
+}
+
+static void lua_lql_mutation_options(lua_State *lua, int index,
+                                     lql_mutation_parse_options *options) {
+  memset(options, 0, sizeof(*options));
+  if (!lua_istable(lua, index)) {
+    return;
+  }
+  lua_getfield(lua, index, "enable_file_mutations");
+  options->enable_file_values = lua_toboolean(lua, -1);
+  lua_pop(lua, 1);
+  lua_getfield(lua, index, "enable_file_values");
+  if (lua_toboolean(lua, -1)) {
+    options->enable_file_values = 1;
+  }
+  lua_pop(lua, 1);
+  lua_getfield(lua, index, "file_value_base_dir");
+  if (lua_type(lua, -1) == LUA_TSTRING) {
+    options->file_value_base_dir.data =
+        lua_tolstring(lua, -1, &options->file_value_base_dir.len);
+  }
+  lua_pop(lua, 1);
+  if (options->enable_file_values &&
+      options->file_value_base_dir.data == NULL) {
+    options->file_value_base_dir.data = ".";
+    options->file_value_base_dir.len = 1u;
+  }
+}
+
+static lql_status lua_lql_mutation_arg(lua_State *lua, lua_lql_client *client,
+                                       int index, int options_index,
+                                       lql_mutation **out, int *owned,
+                                       lql_error *error) {
+  lua_lql_mutation *handle;
+  const char **items;
+  size_t count;
+  lql_status status;
+  lql_mutation_parse_options options;
+  *out = NULL;
+  *owned = 0;
+  if (lua_isnoneornil(lua, index)) {
+    return LQL_STATUS_OK;
+  }
+  handle = lua_lql_test_mutation(lua, index);
+  if (handle != NULL) {
+    if (handle->ctx != client->ctx || handle->mutation == NULL) {
+      error->code = LQL_STATUS_INVALID_ARGUMENT;
+      strcpy(error->message, "mutation belongs to another lql client");
+      return LQL_STATUS_INVALID_ARGUMENT;
+    }
+    *out = handle->mutation;
+    return LQL_STATUS_OK;
+  }
+  items = NULL;
+  count = 0u;
+  if (!lua_lql_string_list_arg(lua, index, &items, &count)) {
+    error->code = LQL_STATUS_NO_MEMORY;
+    strcpy(error->message, "out of memory");
+    return LQL_STATUS_NO_MEMORY;
+  }
+  lua_lql_mutation_options(lua, options_index, &options);
+  *owned = 1;
+  status = client->ctx->mutation_parse_with_options(client->ctx, items, count,
+                                                    &options, out, error);
+  lua_lql_string_list_free(lua, items, count);
+  return status;
 }
 
 static int lua_lql_client_gc(lua_State *lua) {
@@ -268,6 +485,35 @@ static int lua_lql_selector_gc(lua_State *lua) {
   }
   if (selector != NULL) {
     selector->ctx = NULL;
+  }
+  return 0;
+}
+
+static int lua_lql_projection_gc(lua_State *lua) {
+  lua_lql_projection *projection;
+  projection =
+      (lua_lql_projection *)luaL_checkudata(lua, 1, LUA_LQL_PROJECTION);
+  if (projection != NULL && projection->ctx != NULL &&
+      projection->projection != NULL) {
+    projection->ctx->projection_destroy(projection->ctx,
+                                        projection->projection);
+    projection->projection = NULL;
+  }
+  if (projection != NULL) {
+    projection->ctx = NULL;
+  }
+  return 0;
+}
+
+static int lua_lql_mutation_gc(lua_State *lua) {
+  lua_lql_mutation *mutation;
+  mutation = (lua_lql_mutation *)luaL_checkudata(lua, 1, LUA_LQL_MUTATION);
+  if (mutation != NULL && mutation->ctx != NULL && mutation->mutation != NULL) {
+    mutation->ctx->mutation_destroy(mutation->ctx, mutation->mutation);
+    mutation->mutation = NULL;
+  }
+  if (mutation != NULL) {
+    mutation->ctx = NULL;
   }
   return 0;
 }
@@ -308,6 +554,10 @@ static int lua_lql_client_capabilities(lua_State *lua) {
   lua_setfield(lua, -2, "selector_inspection");
   lua_pushboolean(lua, 1);
   lua_setfield(lua, -2, "execute_string");
+  lua_pushboolean(lua, 1);
+  lua_setfield(lua, -2, "projection_parse");
+  lua_pushboolean(lua, 1);
+  lua_setfield(lua, -2, "mutation_parse");
   return 1;
 }
 
@@ -362,6 +612,62 @@ static int lua_lql_client_selector_parse_json(lua_State *lua) {
     return lua_lql_return_error(lua, &error, status);
   }
   return lua_lql_push_selector(lua, client, selector);
+}
+
+static int lua_lql_client_projection_parse(lua_State *lua) {
+  lua_lql_client *client;
+  const char **items;
+  size_t count;
+  lql_projection *projection;
+  lql_error error;
+  lql_status status;
+  client = lua_lql_check_client(lua, 1);
+  items = NULL;
+  count = 0u;
+  if (!lua_lql_string_list_arg(lua, 2, &items, &count)) {
+    lql_error_init(&error);
+    error.code = LQL_STATUS_NO_MEMORY;
+    strcpy(error.message, "out of memory");
+    return lua_lql_return_error(lua, &error, LQL_STATUS_NO_MEMORY);
+  }
+  projection = NULL;
+  lql_error_init(&error);
+  status = client->ctx->projection_parse(client->ctx, items, count, &projection,
+                                         &error);
+  lua_lql_string_list_free(lua, items, count);
+  if (status != LQL_STATUS_OK) {
+    return lua_lql_return_error(lua, &error, status);
+  }
+  return lua_lql_push_projection(lua, client, projection);
+}
+
+static int lua_lql_client_mutation_parse(lua_State *lua) {
+  lua_lql_client *client;
+  const char **items;
+  size_t count;
+  lql_mutation *mutation;
+  lql_mutation_parse_options options;
+  lql_error error;
+  lql_status status;
+  client = lua_lql_check_client(lua, 1);
+  items = NULL;
+  count = 0u;
+  if (!lua_lql_string_list_arg(lua, 2, &items, &count)) {
+    lql_error_init(&error);
+    error.code = LQL_STATUS_NO_MEMORY;
+    strcpy(error.message, "out of memory");
+    return lua_lql_return_error(lua, &error, LQL_STATUS_NO_MEMORY);
+  }
+  lua_lql_mutation_options(lua, 3, &options);
+  mutation = NULL;
+  lql_error_init(&error);
+  status = client->ctx->mutation_parse_with_options(
+      client->ctx, items, count, &options, &mutation, &error);
+  lua_lql_string_list_free(lua, items, count);
+  if (status != LQL_STATUS_OK) {
+    return lua_lql_return_error(lua, &error, status);
+  }
+  return lua_lql_push_mutation(lua, client, mutation);
 }
 
 static int lua_lql_push_selector_capabilities(lua_State *lua,
@@ -433,13 +739,56 @@ static int lua_lql_selector_is_empty(lua_State *lua) {
   return 1;
 }
 
+static int lua_lql_projection_path_count(lua_State *lua) {
+  lua_lql_projection *projection;
+  projection = lua_lql_check_projection(lua, 1);
+  lua_pushinteger(lua, (lua_Integer)projection->ctx->projection_path_count(
+                           projection->ctx, projection->projection));
+  return 1;
+}
+
+static int lua_lql_projection_path(lua_State *lua) {
+  lua_lql_projection *projection;
+  lua_Integer index;
+  lql_string_view view;
+  lql_error error;
+  lql_status status;
+  projection = lua_lql_check_projection(lua, 1);
+  index = luaL_checkinteger(lua, 2);
+  if (index < 1) {
+    luaL_argerror(lua, 2, "projection path index is 1-based");
+  }
+  lql_error_init(&error);
+  status =
+      projection->ctx->projection_path(projection->ctx, projection->projection,
+                                       (size_t)(index - 1), &view, &error);
+  if (status != LQL_STATUS_OK) {
+    return lua_lql_return_error(lua, &error, status);
+  }
+  lua_pushlstring(lua, view.data, view.len);
+  return 1;
+}
+
+static int lua_lql_mutation_count(lua_State *lua) {
+  lua_lql_mutation *mutation;
+  mutation = lua_lql_check_mutation(lua, 1);
+  lua_pushinteger(lua, (lua_Integer)mutation->ctx->mutation_count(
+                           mutation->ctx, mutation->mutation));
+  return 1;
+}
+
 static int lua_lql_execute_string(lua_State *lua) {
   lua_lql_client *client;
   lql_selector *selector;
+  lql_projection *projection;
+  lql_mutation *mutation;
   int owned;
+  int projection_owned;
+  int mutation_owned;
   const char *input;
   size_t input_len;
   int count_only;
+  int matched_only;
   lql_error error;
   lql_status status;
   lql_stream_request request;
@@ -450,15 +799,50 @@ static int lua_lql_execute_string(lua_State *lua) {
   client = lua_lql_check_client(lua, 1);
   input = luaL_checklstring(lua, 3, &input_len);
   count_only = 0;
+  matched_only = 1;
+  projection = NULL;
+  mutation = NULL;
+  projection_owned = 0;
+  mutation_owned = 0;
   if (lua_istable(lua, 4)) {
     lua_getfield(lua, 4, "count");
     count_only = lua_toboolean(lua, -1);
+    lua_pop(lua, 1);
+    lua_getfield(lua, 4, "matched_only");
+    if (!lua_isnil(lua, -1)) {
+      matched_only = lua_toboolean(lua, -1);
+    }
     lua_pop(lua, 1);
   }
   lql_error_init(&error);
   status = lua_lql_selector_arg(lua, client, 2, &selector, &owned, &error);
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
+  }
+  if (lua_istable(lua, 4)) {
+    lua_getfield(lua, 4, "projection");
+    status = lua_lql_projection_arg(lua, client, -1, &projection,
+                                    &projection_owned, &error);
+    lua_pop(lua, 1);
+    if (status != LQL_STATUS_OK) {
+      if (owned) {
+        client->ctx->selector_destroy(client->ctx, selector);
+      }
+      return lua_lql_return_error(lua, &error, status);
+    }
+    lua_getfield(lua, 4, "mutation");
+    status = lua_lql_mutation_arg(lua, client, -1, 4, &mutation,
+                                  &mutation_owned, &error);
+    lua_pop(lua, 1);
+    if (status != LQL_STATUS_OK) {
+      if (projection_owned) {
+        client->ctx->projection_destroy(client->ctx, projection);
+      }
+      if (owned) {
+        client->ctx->selector_destroy(client->ctx, selector);
+      }
+      return lua_lql_return_error(lua, &error, status);
+    }
   }
 
   memset(&reader, 0, sizeof(reader));
@@ -469,15 +853,31 @@ static int lua_lql_execute_string(lua_State *lua) {
   request.reader = lua_lql_string_read;
   request.reader_user = &reader;
   request.selector = selector;
-  request.matched_only = 1;
+  request.projection = count_only ? NULL : projection;
+  request.mutation = count_only ? NULL : mutation;
+  request.matched_only = mutation != NULL ? matched_only : 1;
   if (!count_only) {
     request.writer = lua_lql_buffer_write;
     request.writer_user = &output;
-    request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+    if (projection != NULL && mutation != NULL) {
+      request.output_mode = LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION;
+    } else if (mutation != NULL) {
+      request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+    } else if (projection != NULL) {
+      request.output_mode = LQL_STREAM_OUTPUT_PROJECTION;
+    } else {
+      request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+    }
   }
   memset(&result, 0, sizeof(result));
   status = client->ctx->stream_execute_spooled(client->ctx, &request, &result,
                                                &error);
+  if (mutation_owned) {
+    client->ctx->mutation_destroy(client->ctx, mutation);
+  }
+  if (projection_owned) {
+    client->ctx->projection_destroy(client->ctx, projection);
+  }
   if (owned) {
     client->ctx->selector_destroy(client->ctx, selector);
   }
@@ -506,11 +906,17 @@ static int lua_lql_execute_string(lua_State *lua) {
 static int lua_lql_execute_file(lua_State *lua) {
   lua_lql_client *client;
   lql_selector *selector;
+  lql_projection *projection;
+  lql_mutation *mutation;
   int owned;
+  int projection_owned;
+  int mutation_owned;
   const char *path;
+  const char *output_path;
   int count_only;
   int stdout_output;
   FILE *input;
+  FILE *output_file;
   lql_error error;
   lql_status status;
   lql_stream_request request;
@@ -518,11 +924,18 @@ static int lua_lql_execute_file(lua_State *lua) {
   lua_lql_file_reader reader;
   lua_lql_file_writer file_writer;
   lua_lql_buffer output;
+  int wrote_to_stdout;
 
   client = lua_lql_check_client(lua, 1);
   path = luaL_checkstring(lua, 3);
+  output_path = NULL;
   count_only = 0;
   stdout_output = 0;
+  wrote_to_stdout = 0;
+  projection = NULL;
+  mutation = NULL;
+  projection_owned = 0;
+  mutation_owned = 0;
   if (lua_istable(lua, 4)) {
     lua_getfield(lua, 4, "count");
     count_only = lua_toboolean(lua, -1);
@@ -530,11 +943,41 @@ static int lua_lql_execute_file(lua_State *lua) {
     lua_getfield(lua, 4, "stdout");
     stdout_output = lua_toboolean(lua, -1);
     lua_pop(lua, 1);
+    lua_getfield(lua, 4, "output_path");
+    if (lua_type(lua, -1) == LUA_TSTRING) {
+      output_path = lua_tostring(lua, -1);
+    }
+    lua_pop(lua, 1);
   }
   lql_error_init(&error);
   status = lua_lql_selector_arg(lua, client, 2, &selector, &owned, &error);
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
+  }
+  if (lua_istable(lua, 4)) {
+    lua_getfield(lua, 4, "projection");
+    status = lua_lql_projection_arg(lua, client, -1, &projection,
+                                    &projection_owned, &error);
+    lua_pop(lua, 1);
+    if (status != LQL_STATUS_OK) {
+      if (owned) {
+        client->ctx->selector_destroy(client->ctx, selector);
+      }
+      return lua_lql_return_error(lua, &error, status);
+    }
+    lua_getfield(lua, 4, "mutation");
+    status = lua_lql_mutation_arg(lua, client, -1, 4, &mutation,
+                                  &mutation_owned, &error);
+    lua_pop(lua, 1);
+    if (status != LQL_STATUS_OK) {
+      if (projection_owned) {
+        client->ctx->projection_destroy(client->ctx, projection);
+      }
+      if (owned) {
+        client->ctx->selector_destroy(client->ctx, selector);
+      }
+      return lua_lql_return_error(lua, &error, status);
+    }
   }
 
   input = stdin;
@@ -543,6 +986,12 @@ static int lua_lql_execute_file(lua_State *lua) {
     if (input == NULL) {
       if (owned) {
         client->ctx->selector_destroy(client->ctx, selector);
+      }
+      if (projection_owned) {
+        client->ctx->projection_destroy(client->ctx, projection);
+      }
+      if (mutation_owned) {
+        client->ctx->mutation_destroy(client->ctx, mutation);
       }
       error.code = LQL_STATUS_IO_ERROR;
       strcpy(error.message, "unable to open input file");
@@ -554,17 +1003,58 @@ static int lua_lql_execute_file(lua_State *lua) {
   reader.file = input;
   memset(&file_writer, 0, sizeof(file_writer));
   file_writer.file = stdout;
+  output_file = NULL;
+  if (output_path != NULL && !count_only) {
+    output_file = fopen(output_path, "wb");
+    if (output_file == NULL) {
+      if (input != stdin) {
+        fclose(input);
+      }
+      if (mutation_owned) {
+        client->ctx->mutation_destroy(client->ctx, mutation);
+      }
+      if (projection_owned) {
+        client->ctx->projection_destroy(client->ctx, projection);
+      }
+      if (owned) {
+        client->ctx->selector_destroy(client->ctx, selector);
+      }
+      error.code = LQL_STATUS_IO_ERROR;
+      strcpy(error.message, "unable to open output file");
+      return lua_lql_return_error(lua, &error, LQL_STATUS_IO_ERROR);
+    }
+    file_writer.file = output_file;
+    stdout_output = 1;
+  }
   lua_lql_buffer_init(&output, lua);
   memset(&request, 0, sizeof(request));
   request.reader = lua_lql_file_read;
   request.reader_user = &reader;
   request.selector = selector;
-  request.matched_only = 1;
+  request.projection = count_only ? NULL : projection;
+  request.mutation = count_only ? NULL : mutation;
+  request.matched_only = mutation != NULL ? 0 : 1;
+  if (lua_istable(lua, 4)) {
+    lua_getfield(lua, 4, "matched_only");
+    if (!lua_isnil(lua, -1)) {
+      request.matched_only = lua_toboolean(lua, -1);
+    }
+    lua_pop(lua, 1);
+  }
   if (!count_only) {
-    request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+    if (projection != NULL && mutation != NULL) {
+      request.output_mode = LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION;
+    } else if (mutation != NULL) {
+      request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+    } else if (projection != NULL) {
+      request.output_mode = LQL_STREAM_OUTPUT_PROJECTION;
+    } else {
+      request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+    }
     if (stdout_output) {
       request.writer = lua_lql_file_write;
       request.writer_user = &file_writer;
+      wrote_to_stdout = output_file == NULL;
     } else {
       request.writer = lua_lql_buffer_write;
       request.writer_user = &output;
@@ -573,13 +1063,25 @@ static int lua_lql_execute_file(lua_State *lua) {
   memset(&result, 0, sizeof(result));
   status = client->ctx->stream_execute_spooled(client->ctx, &request, &result,
                                                &error);
+  if (output_file != NULL && fclose(output_file) != 0 &&
+      status == LQL_STATUS_OK) {
+    status = LQL_STATUS_IO_ERROR;
+    error.code = LQL_STATUS_IO_ERROR;
+    strcpy(error.message, "unable to close output file");
+  }
+  if (mutation_owned) {
+    client->ctx->mutation_destroy(client->ctx, mutation);
+  }
+  if (projection_owned) {
+    client->ctx->projection_destroy(client->ctx, projection);
+  }
   if (owned) {
     client->ctx->selector_destroy(client->ctx, selector);
   }
   if (input != stdin) {
     fclose(input);
   }
-  if (status == LQL_STATUS_OK && stdout_output && fflush(stdout) != 0) {
+  if (status == LQL_STATUS_OK && wrote_to_stdout && fflush(stdout) != 0) {
     status = LQL_STATUS_IO_ERROR;
     error.code = LQL_STATUS_IO_ERROR;
     strcpy(error.message, "unable to flush stdout");
@@ -620,6 +1122,8 @@ static const luaL_Reg lua_lql_client_methods[] = {
     {"selector_parse", lua_lql_client_selector_parse},
     {"selector_parse_or", lua_lql_client_selector_parse_or},
     {"selector_parse_json", lua_lql_client_selector_parse_json},
+    {"projection_parse", lua_lql_client_projection_parse},
+    {"mutation_parse", lua_lql_client_mutation_parse},
     {"selector_capabilities", lua_lql_client_selector_capabilities},
     {"execute_string", lua_lql_execute_string},
     {"execute_file", lua_lql_execute_file},
@@ -629,6 +1133,14 @@ static const luaL_Reg lua_lql_selector_methods[] = {
     {"capabilities", lua_lql_selector_capabilities},
     {"is_empty", lua_lql_selector_is_empty},
     {NULL, NULL}};
+
+static const luaL_Reg lua_lql_projection_methods[] = {
+    {"path_count", lua_lql_projection_path_count},
+    {"path", lua_lql_projection_path},
+    {NULL, NULL}};
+
+static const luaL_Reg lua_lql_mutation_methods[] = {
+    {"count", lua_lql_mutation_count}, {NULL, NULL}};
 
 static void lua_lql_register_type(lua_State *lua, const char *name,
                                   lua_CFunction gc, const luaL_Reg *methods) {
@@ -648,6 +1160,10 @@ int luaopen_lql_core(lua_State *lua) {
                         lua_lql_client_methods);
   lua_lql_register_type(lua, LUA_LQL_SELECTOR, lua_lql_selector_gc,
                         lua_lql_selector_methods);
+  lua_lql_register_type(lua, LUA_LQL_PROJECTION, lua_lql_projection_gc,
+                        lua_lql_projection_methods);
+  lua_lql_register_type(lua, LUA_LQL_MUTATION, lua_lql_mutation_gc,
+                        lua_lql_mutation_methods);
   lua_newtable(lua);
   luaL_setfuncs(lua, lua_lql_module_functions, 0);
   return 1;

@@ -3,22 +3,60 @@ local lql = require("lql")
 local cli = {}
 
 local function usage(file)
-  file:write("usage: lql.lua [flags] selector... [data.json]\n")
+  file:write("usage: lql.lua [-m mutator...] [-f field...] selector... [data.json]\n")
   file:write("   or: lql.lua selector... < data.json\n")
   file:write("   or: cat data.json | lql.lua selector...\n\n")
-  file:write("Selection flags:\n")
-  file:write("  -c, --compact        compact output (currently always compact)\n")
-  file:write("  -O, --or             combine selector arguments with OR\n")
-  file:write("  -M, --matches-only   output only selector matches\n")
-  file:write("      --count          output only the number of matches\n")
+  file:write("Selectors:\n")
+  file:write("  LQL selector expressions (comma/newline separated).\n\n")
+  file:write("Mutations:\n")
+  file:write("  -m, --mutate expr    apply mutations to each JSON object in the input stream\n")
+  file:write("  -i, --inline         write mutation output inline to a single input file\n")
+  file:write("  -w, --write          alias of --inline\n")
+  file:write("  -F, --enable-file-mutations\n")
+  file:write("                       allow file:/textfile:/base64file: mutation values\n\n")
+  file:write("Output:\n")
+  file:write("  -f, --field /path    output only selected JSON Pointer fields (repeatable)\n")
+  file:write("  -c, --compact        compact output (always compact; prettyx unsupported)\n")
+  file:write("  -t, --theme theme    unsupported: lql.lua does not include prettyx themes\n")
   file:write("  -h, --help           show help\n")
-  file:write("  -v, --version        show version\n\n")
-  file:write("Unsupported Go lql flags fail explicitly until supported:\n")
-  file:write("  -m/--mutate, -f/--field, -t/--theme,\n")
-  file:write("  -i/--inline, -w/--write, -F/--enable-file-mutations.\n\n")
+  file:write("  -v, --version        show version\n")
+  file:write("  -O, --or             combine selector arguments with OR\n")
+  file:write("  -M, --matches-only   output only selector matches (even with -m)\n")
+  file:write("      --count          output only the number of selector matches\n\n")
+  file:write("Selector examples (shorthand):\n")
+  file:write("  /status=\"open\"\n")
+  file:write("  /status!=closed\n")
+  file:write("  /progress>=50\n")
+  file:write("  /timestamp>=\"2025-01-01T00:00:00Z\"\n")
+  file:write("  /devices/0/status=\"online\"\n")
+  file:write("  /labels/*=\"production\"\n")
+  file:write("  /items[]/sku=\"ABC-123\"\n")
+  file:write("  /items/**/sku=\"ABC-123\"\n")
+  file:write("  /items/.../sku=\"ABC-123\"\n\n")
+  file:write("Selector examples (full LQL):\n")
+  file:write("  eq{field=/status,value=open}\n")
+  file:write("  contains{field=/msg,value=timeout,ic=t}\n")
+  file:write("  contains{field=/msg,any=timeout|degraded}\n")
+  file:write("  icontains{field=/msg,value=timeout}\n")
+  file:write("  icontains{field=/service,a=AUTH|EDGE}\n")
+  file:write("  iprefix{field=/service,value=auth}\n")
+  file:write("  date{field=/timestamp,after=2025-01-01,before=2025-02-01}\n")
+  file:write("  date{f=/timestamp,since=yesterday}\n")
+  file:write("  and.eq{field=/status,value=open},and.range{field=/progress,gte=50}\n")
+  file:write("  or.eq{field=/region,value=us},or.eq{field=/region,value=eu}\n")
+  file:write("  not.eq{field=/state,value=disabled}\n")
+  file:write("  exists{/metadata/etag}\n\n")
+  file:write("Invocation examples:\n")
+  file:write("  lql.lua -O '/status=\"open\"' '/status=\"queued\"' data.json\n")
+  file:write("  lql.lua --count '/status=\"open\"' data.json\n")
+  file:write("  cat data.json | lql.lua '/items[]/sku=\"ABC-123\"'\n\n")
+  file:write("File-backed mutation example:\n")
+  file:write("  printf '{}\\n' | lql.lua -F \\\n")
+  file:write("    -m '/filename=notes.txt' -m '/tags/kind=document' \\\n")
+  file:write("    -m '/tags/source=local' -m 'textfile:/content=notes.txt'\n\n")
   file:write("Reads strict NDJSON from file or stdin and writes compact matching\n")
   file:write("records to stdout, one JSON value per line. Root arrays are errors.\n")
-  file:write("Selected output uses liblql's explicitly spooled compatibility path\n")
+  file:write("Projection and mutation output use liblql's explicitly spooled path\n")
   file:write("and may spill the current record to a temporary file.\n")
 end
 
@@ -34,16 +72,36 @@ local function exists_file(path)
   return true
 end
 
-local function unsupported_flag_with_value(arg)
-  return arg == "-m" or arg == "--mutate" or arg:match("^%-%-mutate=") or
-         arg == "-f" or arg == "--field" or arg:match("^%-%-field=") or
-         arg == "-t" or arg == "--theme" or arg:match("^%-%-theme=")
+local function take_value(argv, i, inline_value, flag)
+  if inline_value ~= nil then
+    return inline_value, i
+  end
+  if i + 1 > #argv then
+    io.stderr:write("lql.lua: " .. flag .. " requires a value\n")
+    return nil, i
+  end
+  return argv[i + 1], i + 1
 end
 
-local function unsupported_flag_no_value(arg)
-  return arg == "-i" or arg == "--inline" or
-         arg == "-w" or arg == "--write" or
-         arg == "-F" or arg == "--enable-file-mutations"
+local function long_value(arg, name)
+  local prefix = name .. "="
+  if arg:sub(1, #prefix) == prefix then
+    return arg:sub(#prefix + 1)
+  end
+  return nil
+end
+
+local function bool_value(text)
+  if text == nil then
+    return true, true
+  end
+  if text == "1" or text == "true" or text == "t" or text == "yes" then
+    return true, true
+  end
+  if text == "0" or text == "false" or text == "f" or text == "no" then
+    return false, true
+  end
+  return false, false
 end
 
 local function print_error(context, err)
@@ -57,9 +115,17 @@ local function print_error(context, err)
   end
 end
 
-function cli.main(argv)
-  local count_only = false
-  local or_mode = false
+local function parse_args(argv)
+  local cfg = {
+    mutations = {},
+    fields = {},
+    positionals = {},
+    inline = false,
+    enable_file_mutations = false,
+    count = false,
+    or_mode = false,
+    matches_only = false,
+  }
   local i = 1
   while i <= #argv do
     local a = argv[i]
@@ -68,54 +134,154 @@ function cli.main(argv)
       break
     elseif a == "-h" or a == "--help" then
       usage(io.stdout)
-      return 0
+      return nil, 0
     elseif a == "-v" or a == "--version" then
       io.stdout:write(lql.version() .. "\n")
-      return 0
-    elseif a == "--count" then
-      count_only = true
+      return nil, 0
+    elseif a == "-c" or a == "--compact" then
       i = i + 1
     elseif a == "-O" or a == "--or" then
-      or_mode = true
+      cfg.or_mode = true
       i = i + 1
-    elseif a == "-c" or a == "--compact" or a == "-M" or
-           a == "--matches-only" then
+    elseif a == "-M" or a == "--matches-only" then
+      cfg.matches_only = true
       i = i + 1
-    elseif unsupported_flag_no_value(a) or unsupported_flag_with_value(a) then
+    elseif a == "--count" then
+      cfg.count = true
+      i = i + 1
+    elseif long_value(a, "--count") ~= nil then
+      local value, ok = bool_value(long_value(a, "--count"))
+      if not ok then
+        io.stderr:write("lql.lua: invalid boolean value for --count\n")
+        return nil, 2
+      end
+      cfg.count = value
+      i = i + 1
+    elseif a == "-i" or a == "--inline" or a == "-w" or a == "--write" then
+      cfg.inline = true
+      i = i + 1
+    elseif long_value(a, "--inline") ~= nil or long_value(a, "--write") ~= nil then
+      local text = long_value(a, "--inline") or long_value(a, "--write")
+      local value, ok = bool_value(text)
+      if not ok then
+        io.stderr:write("lql.lua: invalid boolean value for --inline\n")
+        return nil, 2
+      end
+      cfg.inline = value
+      i = i + 1
+    elseif a == "-F" or a == "--enable-file-mutations" then
+      cfg.enable_file_mutations = true
+      i = i + 1
+    elseif long_value(a, "--enable-file-mutations") ~= nil then
+      local value, ok = bool_value(long_value(a, "--enable-file-mutations"))
+      if not ok then
+        io.stderr:write("lql.lua: invalid boolean value for --enable-file-mutations\n")
+        return nil, 2
+      end
+      cfg.enable_file_mutations = value
+      i = i + 1
+    elseif a == "-m" or a == "--mutate" or long_value(a, "--mutate") ~= nil then
+      local value
+      value, i = take_value(argv, i, long_value(a, "--mutate"), "--mutate")
+      if value == nil then
+        return nil, 2
+      end
+      cfg.mutations[#cfg.mutations + 1] = value
+      i = i + 1
+    elseif a:sub(1, 2) == "-m" and #a > 2 then
+      cfg.mutations[#cfg.mutations + 1] = a:sub(3)
+      i = i + 1
+    elseif a == "-f" or a == "--field" or long_value(a, "--field") ~= nil then
+      local value
+      value, i = take_value(argv, i, long_value(a, "--field"), "--field")
+      if value == nil then
+        return nil, 2
+      end
+      cfg.fields[#cfg.fields + 1] = value
+      i = i + 1
+    elseif a:sub(1, 2) == "-f" and #a > 2 then
+      cfg.fields[#cfg.fields + 1] = a:sub(3)
+      i = i + 1
+    elseif a == "-t" or a == "--theme" or long_value(a, "--theme") ~= nil then
+      if long_value(a, "--theme") == nil then
+        local _
+        _, i = take_value(argv, i, nil, "--theme")
+      end
       io.stderr:write("lql.lua: unsupported Go lql flag in current engine: " ..
                       a .. "\n")
-      return 2
+      return nil, 2
     elseif a:sub(1, 1) == "-" then
       io.stderr:write("lql.lua: unknown flag: " .. a .. "\n")
       usage(io.stderr)
-      return 2
+      return nil, 2
     else
       break
     end
   end
-
-  local remaining = #argv - i + 1
-  if remaining < 1 then
-    usage(io.stderr)
-    return 2
+  while i <= #argv do
+    cfg.positionals[#cfg.positionals + 1] = argv[i]
+    i = i + 1
   end
+  return cfg, nil
+end
 
-  local path = "-"
-  local selector_last = #argv
-  if exists_file(argv[#argv]) then
-    path = argv[#argv]
-    selector_last = #argv - 1
-  end
-  if selector_last < i then
-    usage(io.stderr)
-    return 2
-  end
-
+local function split_inputs(cfg)
   local selectors = {}
-  for j = i, selector_last do
-    selectors[#selectors + 1] = argv[j]
+  local inputs = {}
+  if #cfg.mutations == 0 then
+    for i, item in ipairs(cfg.positionals) do
+      if i == #cfg.positionals and (item == "-" or exists_file(item)) then
+        inputs[#inputs + 1] = item
+      else
+        selectors[#selectors + 1] = item
+      end
+    end
+  else
+    for _, item in ipairs(cfg.positionals) do
+      if item == "-" or exists_file(item) then
+        inputs[#inputs + 1] = item
+      else
+        selectors[#selectors + 1] = item
+      end
+    end
   end
-  local expr = table.concat(selectors, or_mode and "," or "\n")
+  if #inputs == 0 then
+    inputs[#inputs + 1] = "-"
+  end
+  return selectors, inputs
+end
+
+local function run_once(client, selector, input, options)
+  local result, err = client:execute_file(selector, input, options)
+  if err then
+    print_error("execute stream", err)
+    return nil
+  end
+  return result
+end
+
+function cli.main(argv)
+  local cfg, early = parse_args(argv)
+  if early ~= nil then
+    return early
+  end
+  local selectors, inputs = split_inputs(cfg)
+  if #selectors == 0 and #cfg.mutations == 0 and #cfg.fields == 0 then
+    usage(io.stderr)
+    return 2
+  end
+  if cfg.inline and #cfg.mutations == 0 then
+    io.stderr:write("lql.lua: inline mode requires mutations\n")
+    return 2
+  end
+  if cfg.inline and cfg.count then
+    io.stderr:write("lql.lua: inline mutation cannot be combined with --count\n")
+    return 2
+  end
+  if cfg.inline and (#inputs ~= 1 or inputs[1] == "-") then
+    io.stderr:write("lql.lua: inline mode requires a single JSON file\n")
+    return 2
+  end
 
   local client, err = lql.new()
   if err then
@@ -123,25 +289,82 @@ function cli.main(argv)
     return 1
   end
   local selector
-  if or_mode then
-    selector, err = client:selector_parse_or(expr)
-  else
-    selector, err = client:selector_parse(expr)
-  end
-  if err then
-    print_error("parse selector", err)
-    return 1
+  if #selectors ~= 0 then
+    local expr = table.concat(selectors, cfg.or_mode and "," or "\n")
+    if cfg.or_mode then
+      selector, err = client:selector_parse_or(expr)
+    else
+      selector, err = client:selector_parse(expr)
+    end
+    if err then
+      print_error("parse selector", err)
+      return 1
+    end
   end
 
-  local result
-  result, err = client:execute_file(selector, path,
-                                   { count = count_only, stdout = true })
-  if err then
-    print_error("execute stream", err)
+  local projection
+  if #cfg.fields ~= 0 then
+    projection, err = client:projection_parse(cfg.fields)
+    if err then
+      print_error("parse projection", err)
+      return 1
+    end
+  end
+  local mutation
+  if #cfg.mutations ~= 0 then
+    mutation, err = client:mutation_parse(cfg.mutations, {
+      enable_file_mutations = cfg.enable_file_mutations,
+      file_value_base_dir = ".",
+    })
+    if err then
+      print_error("parse mutation", err)
+      return 1
+    end
+  end
+
+  local matched = 0
+  local seen = 0
+  if cfg.inline then
+    local path = inputs[1]
+    local tmp = path .. ".lql.lua.tmp"
+    local result = run_once(client, selector, path, {
+      projection = projection,
+      mutation = mutation,
+      matched_only = cfg.matches_only,
+      output_path = tmp,
+    })
+    if not result then
+      os.remove(tmp)
+      return 1
+    end
+    if not os.rename(tmp, path) then
+      os.remove(tmp)
+      io.stderr:write("lql.lua: unable to replace inline input file\n")
+      return 1
+    end
+    return 0
+  end
+
+  for _, input in ipairs(inputs) do
+    local result = run_once(client, selector, input, {
+      projection = projection,
+      mutation = mutation,
+      matched_only = mutation and cfg.matches_only or true,
+      count = cfg.count,
+      stdout = not cfg.count,
+    })
+    if not result then
+      return 1
+    end
+    seen = seen + result.records_seen
+    matched = matched + result.records_matched
+  end
+  if mutation and seen == 0 then
+    io.stderr:write("lql.lua: no JSON input\n")
     return 1
   end
-  if count_only then
-    io.stdout:write(tostring(result.records_matched) .. "\n")
+  if cfg.count then
+    io.stdout:write(tostring(matched) .. "\n")
   end
   return 0
 end

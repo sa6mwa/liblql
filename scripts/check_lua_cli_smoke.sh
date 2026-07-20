@@ -14,7 +14,8 @@ fi
 
 tmp=${TMPDIR:-/tmp}/liblql-lua-cli.$$
 cleanup() {
-  sh "$root/scripts/remove_path.sh" "$tmp.out" "$tmp.err"
+  sh "$root/scripts/remove_path.sh" "$tmp.out" "$tmp.err" "$tmp.json" \
+    "$tmp.content"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -23,7 +24,7 @@ env \
   LUA_CPATH="$tree/lib/lua/5.5/?.so;$tree/lib/lua/5.5/?/core.so;;" \
   LD_LIBRARY_PATH="$sdk_prefix/lib:${LD_LIBRARY_PATH:-}" \
   "$lua_cli" --help >"$tmp.out"
-grep 'explicitly spooled compatibility path' "$tmp.out" >/dev/null
+grep 'explicitly spooled path' "$tmp.out" >/dev/null
 
 env \
   LUA_PATH="$tree/share/lua/5.5/?.lua;$tree/share/lua/5.5/?/init.lua;;" \
@@ -39,15 +40,36 @@ env \
   "$lua_cli" --count '/status="open"' "$fixture" >"$tmp.out"
 grep '^2$' "$tmp.out" >/dev/null
 
-if env \
+env \
   LUA_PATH="$tree/share/lua/5.5/?.lua;$tree/share/lua/5.5/?/init.lua;;" \
   LUA_CPATH="$tree/lib/lua/5.5/?.so;$tree/lib/lua/5.5/?/core.so;;" \
   LD_LIBRARY_PATH="$sdk_prefix/lib:${LD_LIBRARY_PATH:-}" \
-  "$lua_cli" -m '/status=ready' '/status="open"' "$fixture" \
-    >"$tmp.out" 2>"$tmp.err"; then
-  printf 'lua cli smoke: unsupported mutation flag unexpectedly succeeded\n' >&2
-  exit 1
-fi
-grep 'unsupported Go lql flag' "$tmp.err" >/dev/null
+  "$lua_cli" -f /status '/status="open"' "$fixture" >"$tmp.out"
+grep '^{"status":"open"}$' "$tmp.out" >/dev/null
 
-printf 'lua cli smoke: selected output, count, spill help, and unsupported flag passed\n'
+env \
+  LUA_PATH="$tree/share/lua/5.5/?.lua;$tree/share/lua/5.5/?/init.lua;;" \
+  LUA_CPATH="$tree/lib/lua/5.5/?.so;$tree/lib/lua/5.5/?/core.so;;" \
+  LD_LIBRARY_PATH="$sdk_prefix/lib:${LD_LIBRARY_PATH:-}" \
+  "$lua_cli" -m '/status=ready' -M '/status="open"' "$fixture" >"$tmp.out"
+grep '"status":"ready"' "$tmp.out" >/dev/null
+
+printf 'héllo' >"$tmp.content"
+printf '{}\n' >"$tmp.json"
+env \
+  LUA_PATH="$tree/share/lua/5.5/?.lua;$tree/share/lua/5.5/?/init.lua;;" \
+  LUA_CPATH="$tree/lib/lua/5.5/?.so;$tree/lib/lua/5.5/?/core.so;;" \
+  LD_LIBRARY_PATH="$sdk_prefix/lib:${LD_LIBRARY_PATH:-}" \
+  "$lua_cli" -F -m "textfile:/content=$tmp.content" "$tmp.json" \
+    >"$tmp.out"
+grep '"content":"héllo"' "$tmp.out" >/dev/null
+
+printf '{"status":"open"}\n' >"$tmp.json"
+env \
+  LUA_PATH="$tree/share/lua/5.5/?.lua;$tree/share/lua/5.5/?/init.lua;;" \
+  LUA_CPATH="$tree/lib/lua/5.5/?.so;$tree/lib/lua/5.5/?/core.so;;" \
+  LD_LIBRARY_PATH="$sdk_prefix/lib:${LD_LIBRARY_PATH:-}" \
+  "$lua_cli" -i -m '/status=ready' "$tmp.json"
+grep '"status":"ready"' "$tmp.json" >/dev/null
+
+printf 'lua cli smoke: selected output, count, projection, mutation, file-backed mutation, inline, and spill help passed\n'

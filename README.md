@@ -132,7 +132,9 @@ make lua-cli-smoke
 make lua-artifact-smoke
 ```
 
-The installed Lua CLI is `lql.lua`; it mirrors the supported `clql` selector
-workflow. Its selected-output workflow uses the explicitly spooled liblql API
-so it can normalize whitespace-tolerant input; it can therefore spill the
-current record to a temporary file.
+The installed Lua CLI is `lql.lua`; it mirrors the supported `clql` selection,
+projection, mutation, file-backed mutation, count, and inline workflows, while
+keeping the same deliberate exclusions for prettyx/theme behavior. Its output
+workflow uses the explicitly spooled liblql API so it can normalize
+whitespace-tolerant input; it can therefore spill the current record to a
+temporary file.
