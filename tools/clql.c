@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 typedef struct clql_string_list {
   char **items;
@@ -129,8 +128,7 @@ static int print_error(const char *context, lql_status status,
 }
 
 static int file_exists(const char *path) {
-  struct stat st;
-  return path != NULL && stat(path, &st) == 0 && !S_ISDIR(st.st_mode);
+  return lql_path_is_regular_file(NULL, path);
 }
 
 static void string_list_destroy(clql_string_list *list) {
@@ -772,7 +770,7 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
       file_request.count_only = cfg->count_only;
       status = ctx->filter_file_spooled(ctx, &file_request, &result, &error);
       if (status != LQL_STATUS_OK) {
-        print_error("execute stream", status, &error);
+        print_error("filter file", status, &error);
         goto fail;
       }
       aggregate.records_seen += result.records_seen;
@@ -792,7 +790,7 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
     file_request.count_only = cfg->count_only;
     status = ctx->filter_file_spooled(ctx, &file_request, &aggregate, &error);
     if (status != LQL_STATUS_OK) {
-      print_error("execute stream", status, &error);
+      print_error("filter file", status, &error);
       goto fail;
     }
   }
@@ -884,7 +882,7 @@ static int run_inline(lql *ctx, const clql_config *cfg,
   ctx->projection_destroy(ctx, projection);
   ctx->selector_destroy(ctx, selector);
   if (status != LQL_STATUS_OK) {
-    return print_error("execute stream", status, &error);
+    return print_error("rewrite file", status, &error);
   }
   return 0;
 }

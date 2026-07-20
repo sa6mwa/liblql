@@ -54,6 +54,12 @@ local function usage(file)
   file:write("  printf '{}\\n' | lql.lua -F \\\n")
   file:write("    -m '/filename=notes.txt' -m '/tags/kind=document' \\\n")
   file:write("    -m '/tags/source=local' -m 'textfile:/content=notes.txt'\n\n")
+  file:write("Notes:\n")
+  file:write("  contains/icontains accept value=... or any=/a=... (pipe-delimited).\n")
+  file:write("  range comparisons accept numeric or datetime literals.\n")
+  file:write("  date supports value/after/before/gt/gte/lt/lte; aliases a=after and b=before.\n")
+  file:write("  only date{...,since=...} supports relative macros (now, today, yesterday).\n")
+  file:write("  omitted values for contains/icontains/prefix/iprefix act as path assertions.\n\n")
   file:write("Reads strict NDJSON from file or stdin and writes compact matching\n")
   file:write("records to stdout, one JSON value per line. Root arrays are errors.\n")
   file:write("Projection and mutation output use liblql's explicitly spooled path\n")
@@ -64,12 +70,7 @@ local function exists_file(path)
   if path == "-" then
     return true
   end
-  local f = io.open(path, "rb")
-  if not f then
-    return false
-  end
-  f:close()
-  return true
+  return lql.path_is_regular_file(path)
 end
 
 local function take_value(argv, i, inline_value, flag)
@@ -96,11 +97,11 @@ local function bool_value(text)
     return true, true
   end
   if text == "1" or text == "true" or text == "True" or text == "TRUE" or
-      text == "t" or text == "T" or text == "yes" then
+      text == "t" or text == "T" then
     return true, true
   end
   if text == "0" or text == "false" or text == "False" or text == "FALSE" or
-      text == "f" or text == "F" or text == "no" then
+      text == "f" or text == "F" then
     return false, true
   end
   return false, false
@@ -388,15 +389,7 @@ end
 local function split_inputs(cfg)
   local selectors = {}
   local inputs = {}
-  if cfg.inline then
-    for i, item in ipairs(cfg.positionals) do
-      if i == #cfg.positionals then
-        inputs[#inputs + 1] = item
-      else
-        selectors[#selectors + 1] = item
-      end
-    end
-  elseif #cfg.mutations == 0 then
+  if #cfg.mutations == 0 then
     for i, item in ipairs(cfg.positionals) do
       if i == #cfg.positionals and (item == "-" or exists_file(item)) then
         inputs[#inputs + 1] = item

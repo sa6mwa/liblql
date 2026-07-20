@@ -272,7 +272,7 @@ if "$clql" -i -m '/status=ready' "$tmpdir/inline-fifo.ndjson" \
   printf 'clql smoke: inline FIFO mutation unexpectedly succeeded\n' >&2
   exit 1
 fi
-grep 'inline mode requires a regular file' "$tmp.err" >/dev/null
+grep 'inline mode requires a single JSON file' "$tmp.err" >/dev/null
 test -p "$tmpdir/inline-fifo.ndjson"
 
 cp "$tmpdir/input.ndjson" "$tmpdir/inline-readonly.ndjson"

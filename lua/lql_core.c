@@ -523,9 +523,20 @@ static int lua_lql_client_capabilities(lua_State *lua) {
   lua_pushboolean(lua, 1);
   lua_setfield(lua, -2, "rewrite_file_inline_spooled");
   lua_pushboolean(lua, 1);
+  lua_setfield(lua, -2, "path_is_regular_file");
+  lua_pushboolean(lua, 1);
   lua_setfield(lua, -2, "projection_parse");
   lua_pushboolean(lua, 1);
   lua_setfield(lua, -2, "mutation_parse");
+  return 1;
+}
+
+static int lua_lql_client_path_is_regular_file(lua_State *lua) {
+  lua_lql_client *client;
+  const char *path;
+  client = lua_lql_check_client(lua, 1);
+  path = luaL_checkstring(lua, 2);
+  lua_pushboolean(lua, client->ctx->path_is_regular_file(client->ctx, path));
   return 1;
 }
 
@@ -1044,8 +1055,26 @@ static int lua_lql_core_version(lua_State *lua) {
   return 1;
 }
 
+static int lua_lql_core_status_string(lua_State *lua) {
+  lql_status status;
+  status = (lql_status)luaL_checkinteger(lua, 1);
+  lua_pushstring(lua, lql_status_string(status));
+  return 1;
+}
+
+static int lua_lql_core_path_is_regular_file(lua_State *lua) {
+  const char *path;
+  path = luaL_checkstring(lua, 1);
+  lua_pushboolean(lua, lql_path_is_regular_file(NULL, path));
+  return 1;
+}
+
 static const luaL_Reg lua_lql_module_functions[] = {
-    {"new", lua_lql_new}, {"version", lua_lql_core_version}, {NULL, NULL}};
+    {"new", lua_lql_new},
+    {"version", lua_lql_core_version},
+    {"status_string", lua_lql_core_status_string},
+    {"path_is_regular_file", lua_lql_core_path_is_regular_file},
+    {NULL, NULL}};
 
 static const luaL_Reg lua_lql_client_methods[] = {
     {"version", lua_lql_client_version},
@@ -1053,6 +1082,7 @@ static const luaL_Reg lua_lql_client_methods[] = {
     {"selector_parse", lua_lql_client_selector_parse},
     {"selector_parse_or", lua_lql_client_selector_parse_or},
     {"selector_parse_json", lua_lql_client_selector_parse_json},
+    {"path_is_regular_file", lua_lql_client_path_is_regular_file},
     {"projection_parse", lua_lql_client_projection_parse},
     {"mutation_parse", lua_lql_client_mutation_parse},
     {"selector_capabilities", lua_lql_client_selector_capabilities},

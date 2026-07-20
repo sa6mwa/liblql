@@ -97,7 +97,12 @@ def assert_help_cluster():
     if lua.returncode != 0 or clql.returncode != 0:
         fail(f"-vh did not succeed\n  lua={lua!r}\n  clql={clql!r}")
     for text, label in ((lua.stdout, "lua"), (clql.stdout, "clql")):
-        if "usage:" not in text or "Selector examples (full LQL):" not in text:
+        if (
+            "usage:" not in text
+            or "Selector examples (full LQL):" not in text
+            or "Notes:" not in text
+            or "only date{...,since=...} supports relative macros" not in text
+        ):
             fail(f"-vh missing help sections in {label} stdout: {text!r}")
 
 
@@ -182,6 +187,16 @@ def main():
         assert_help_cluster()
         assert_failure_contains("invalid help cluster", ["-hZ"], ["unknown flag"])
         assert_failure_contains("invalid version cluster", ["-vZ"], ["unknown flag"])
+        assert_failure_contains(
+            "boolean yes rejected",
+            ["--compact=yes", '/status="new"', fixture],
+            ["invalid boolean value for --compact"],
+        )
+        assert_failure_contains(
+            "boolean no rejected",
+            ["--or=no", '/status="new"', fixture],
+            ["invalid boolean value for --or"],
+        )
         assert_failure_contains("theme unsupported", ["-t", "jq", fixture], ["prettyx"])
         assert_failure_contains(
             "file mutation disabled",
@@ -207,12 +222,22 @@ def main():
         assert_failure_contains(
             "inline fifo rejected",
             ["-i", "-m", "/status=ready", inline_fifo],
-            ["inline mode requires a regular file"],
+            ["inline mode requires a single JSON file"],
+        )
+        selector_path = os.path.join(tmpdir, "selector-looking-file")
+        with open(selector_path, "w", encoding="utf-8") as f:
+            f.write("not a selector\n")
+        inline_arg_target = os.path.join(tmpdir, "inline-arg-target.ndjson")
+        shutil.copyfile(fixture, inline_arg_target)
+        assert_failure_contains(
+            "inline existing selector path counted as input",
+            ["-i", "-m", "/status=ready", selector_path, inline_arg_target],
+            ["inline mode requires a single JSON file"],
         )
     finally:
         shutil.rmtree(tmpdir)
 
-    print("lua clql parity: 27 cases passed")
+    print("lua clql parity: 30 cases passed")
 
 
 if __name__ == "__main__":

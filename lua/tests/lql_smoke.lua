@@ -27,6 +27,19 @@ end
 
 local client = assert_no_error(lql.new(), nil, "new client")
 assert_truthy(type(client:version()) == "string", "client version")
+assert_equal(lql.status_string(0), "ok", "module status string")
+assert_equal(lql.status_string(999), "unknown", "unknown status string")
+local regular_file_probe = os.tmpname()
+local regular_file = assert(io.open(regular_file_probe, "wb"))
+regular_file:write("{}\n")
+regular_file:close()
+assert_equal(lql.path_is_regular_file(regular_file_probe), true,
+             "module regular file helper")
+assert_equal(client:path_is_regular_file(regular_file_probe), true,
+             "client regular file helper")
+os.remove(regular_file_probe)
+assert_equal(lql.path_is_regular_file(regular_file_probe), false,
+             "missing regular file helper")
 
 local caps = client:capabilities()
 assert_equal(caps.selector_parse, true, "selector_parse capability")
@@ -35,6 +48,7 @@ assert_equal(caps.execute_string, true, "execute_string capability")
 assert_equal(caps.filter_file_spooled, true, "filter_file_spooled capability")
 assert_equal(caps.rewrite_file_inline_spooled, true,
              "rewrite_file_inline_spooled capability")
+assert_equal(caps.path_is_regular_file, true, "path_is_regular_file capability")
 assert_equal(caps.projection_parse, true, "projection_parse capability")
 assert_equal(caps.mutation_parse, true, "mutation_parse capability")
 assert_equal(client.execute_file, nil, "stale execute_file facade removed")

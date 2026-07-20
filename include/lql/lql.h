@@ -421,6 +421,8 @@ struct lql {
   const char *(*version)(const lql *self);
   /** Writes build capabilities to `out`; `out` is required. */
   void (*capabilities_get)(const lql *self, lql_capabilities *out);
+  /** Returns non-zero when `path` names an existing regular file. */
+  int (*path_is_regular_file)(const lql *self, const char *path);
   /** Parses an AND-combined selector expression and transfers `*out` on
    * success. */
   lql_status (*selector_parse)(lql *self, const char *expr, lql_selector **out,
@@ -615,6 +617,8 @@ LQL_API void lql_error_init(lql_error *error);
 /** Returns a static, non-owning string for `status`, including unknown values.
  */
 LQL_API const char *lql_status_string(lql_status status);
+/** Returns non-zero when `path` names an existing regular file. */
+LQL_API int lql_path_is_regular_file(const lql *self, const char *path);
 
 /**
  * Compatibility entry point for `self->stream_execute(self, ...)`. Executes

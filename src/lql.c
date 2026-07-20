@@ -10,10 +10,12 @@
 #include <lql/version.h>
 
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 static const char *receiver_version(const lql *self);
 static void receiver_capabilities_get(const lql *self, lql_capabilities *out);
+static int receiver_path_is_regular_file(const lql *self, const char *path);
 static void receiver_destroy(lql *self);
 static void capabilities_fill(lql_capabilities *out);
 static lql_status selector_parse_method(lql *self, const char *expr,
@@ -134,6 +136,7 @@ lql_status lql_new(lql **out, lql_error *error) {
   ctx->impl = impl;
   ctx->version = receiver_version;
   ctx->capabilities_get = receiver_capabilities_get;
+  ctx->path_is_regular_file = receiver_path_is_regular_file;
   ctx->selector_parse = selector_parse_method;
   ctx->selector_parse_or = selector_parse_or_method;
   ctx->selector_parse_json = selector_parse_json_method;
@@ -226,6 +229,12 @@ const char *lql_status_string(lql_status status) {
   return "unknown";
 }
 
+int lql_path_is_regular_file(const lql *self, const char *path) {
+  struct stat st;
+  (void)self;
+  return path != NULL && stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
 static void capabilities_fill(lql_capabilities *out) {
   if (out == NULL) {
     return;
@@ -243,6 +252,10 @@ static const char *receiver_version(const lql *self) {
 static void receiver_capabilities_get(const lql *self, lql_capabilities *out) {
   (void)self;
   capabilities_fill(out);
+}
+
+static int receiver_path_is_regular_file(const lql *self, const char *path) {
+  return lql_path_is_regular_file(self, path);
 }
 
 static void receiver_destroy(lql *self) {

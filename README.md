@@ -92,7 +92,10 @@ creation, advisory locking, source identity checks, metadata preservation where
 the platform permits it, fsync discipline, and atomic rename. Symlink,
 non-regular, stdin, and count-only inline requests fail closed. See
 `examples/filter_file_spooled.c` and `examples/rewrite_file_inline_spooled.c` for public-header-only
-downstream usage.
+downstream usage. `ctx->path_is_regular_file(ctx, path)` and
+`lql_path_is_regular_file(NULL, path)` expose the same non-opening regular-file
+classification used by `clql` and `lql.lua` to avoid blocking on special files
+while deciding whether a positional argument is an input path.
 
 ## Lifecycle Surface
 

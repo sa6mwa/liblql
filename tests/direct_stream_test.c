@@ -5442,6 +5442,24 @@ static int write_test_file(const char *path, const unsigned char *data,
   return fclose(file) != 0;
 }
 
+static int run_path_is_regular_file(lql *ctx) {
+  static const char path[] = "liblql-regular-file-probe.tmp";
+  static const unsigned char payload[] = "{}\n";
+  remove(path);
+  if (lql_path_is_regular_file(NULL, path) ||
+      ctx->path_is_regular_file(ctx, path))
+    return 1;
+  if (write_test_file(path, payload, sizeof(payload) - 1u))
+    return 1;
+  if (!lql_path_is_regular_file(NULL, path) ||
+      !ctx->path_is_regular_file(ctx, path)) {
+    remove(path);
+    return 1;
+  }
+  remove(path);
+  return 0;
+}
+
 static int run_file_backed_mutation_case(lql *ctx, const char *expr,
                                          lql_status expected_status,
                                          const char *expected_output) {
@@ -6459,6 +6477,7 @@ int main(void) {
   RUN_CTX_TEST(run_true_stream_contract);
   RUN_CTX_TEST(run_wide_plan_stream_contract);
   RUN_NOCTX_TEST(run_instance_memory_contract);
+  RUN_CTX_TEST(run_path_is_regular_file);
   RUN_CTX_TEST(run_file_filter_callback_output);
   RUN_CTX_TEST(run_file_backed_mutations);
   RUN_CTX_TEST(run_virtual_file_source);
