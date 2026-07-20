@@ -4408,6 +4408,13 @@ static int run_mutation_literal_parity(lql *ctx) {
       "\"rawbrace\":\"x{y\",\"rawclose\":\"x}y\","
       "\"brackets\":\"x[y,z]\",\"braces\":\"x{y,z}\","
       "\"rawquote\":\"foo\\\"bar,baz\"}\n";
+  static const char escaped_key_input[] =
+      "{\"\\u00e9\":1,\"\\ud83d\\ude00\":2,\"keep\":3}\n";
+  static const char *const escaped_key_set[] = {"/é=4", "/😀=5"};
+  static const char escaped_key_set_output[] =
+      "{\"\\u00e9\":4,\"\\ud83d\\ude00\":5,\"keep\":3}\n";
+  static const char *const escaped_key_remove[] = {"rm:/é", "rm:/😀"};
+  static const char escaped_key_remove_output[] = "{\"keep\":3}\n";
   lql_mutation *mutation;
   lql_stream_request request;
   lql_stream_result result;
@@ -4469,6 +4476,11 @@ static int run_mutation_literal_parity(lql *ctx) {
   ctx->mutation_destroy(ctx, mutation);
   if (run_mutation_case(ctx, literal_punctuation, 1u, input,
                         literal_punctuation_output))
+    return 1;
+  if (run_mutation_case(ctx, escaped_key_set, 2u, escaped_key_input,
+                        escaped_key_set_output) ||
+      run_mutation_case(ctx, escaped_key_remove, 2u, escaped_key_input,
+                        escaped_key_remove_output))
     return 1;
   return 0;
 }

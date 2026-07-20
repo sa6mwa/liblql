@@ -1936,6 +1936,29 @@ static int lql_flat_eq_hex_value(unsigned char ch, unsigned char *out) {
   return 0;
 }
 
+static lql_status lql_flat_eq_read_hex4(const lql_json_spool *spool,
+                                        size_t offset, size_t end,
+                                        unsigned long *out, lql_error *error) {
+  unsigned long value;
+  size_t i;
+  if (spool == NULL || out == NULL || offset > end || end - offset < 4u)
+    return LQL_STATUS_JSON_ERROR;
+  value = 0ul;
+  for (i = 0u; i < 4u; ++i) {
+    unsigned char ch;
+    unsigned char digit;
+    lql_status status;
+    status = lql_flat_eq_spool_byte(spool, offset + i, &ch, error);
+    if (status != LQL_STATUS_OK)
+      return status;
+    if (!lql_flat_eq_hex_value(ch, &digit))
+      return LQL_STATUS_JSON_ERROR;
+    value = (value << 4u) | (unsigned long)digit;
+  }
+  *out = value;
+  return LQL_STATUS_OK;
+}
+
 static lql_status lql_flat_eq_key_equals(const lql_json_spool *spool,
                                          size_t offset, size_t end,
                                          const char *key, int *out,
@@ -1970,29 +1993,46 @@ static lql_status lql_flat_eq_key_equals(const lql_json_spool *spool,
         return status;
       ++offset;
       if (ch == (unsigned char)'u') {
-        unsigned char high;
-        unsigned char low;
-        unsigned char zero;
+        unsigned char encoded[4];
+        unsigned long codepoint;
+        size_t encoded_len;
         size_t i;
-        zero = 0u;
-        for (i = 0u; i < 2u; ++i) {
-          status = lql_flat_eq_spool_byte(spool, offset + i, &ch, error);
+        status = lql_flat_eq_read_hex4(spool, offset, end, &codepoint, error);
+        if (status != LQL_STATUS_OK)
+          return status;
+        offset += 4u;
+        if (codepoint >= 0xd800ul && codepoint <= 0xdbfful) {
+          unsigned long low;
+          status = lql_flat_eq_spool_byte(spool, offset, &ch, error);
           if (status != LQL_STATUS_OK)
             return status;
-          if (!lql_flat_eq_hex_value(ch, &high))
+          if (ch != (unsigned char)'\\')
             return LQL_STATUS_JSON_ERROR;
-          zero = (unsigned char)((zero << 4u) | high);
+          status = lql_flat_eq_spool_byte(spool, offset + 1u, &ch, error);
+          if (status != LQL_STATUS_OK)
+            return status;
+          if (ch != (unsigned char)'u')
+            return LQL_STATUS_JSON_ERROR;
+          status = lql_flat_eq_read_hex4(spool, offset + 2u, end, &low, error);
+          if (status != LQL_STATUS_OK)
+            return status;
+          if (low < 0xdc00ul || low > 0xdffful)
+            return LQL_STATUS_JSON_ERROR;
+          offset += 6u;
+          codepoint =
+              0x10000ul + (((codepoint - 0xd800ul) << 10u) | (low - 0xdc00ul));
+        } else if (codepoint >= 0xdc00ul && codepoint <= 0xdffful) {
+          return LQL_STATUS_JSON_ERROR;
         }
-        if (zero != 0u)
-          return LQL_STATUS_OK;
-        status = lql_flat_eq_spool_byte(spool, offset + 2u, &ch, error);
-        if (status != LQL_STATUS_OK || !lql_flat_eq_hex_value(ch, &high))
-          return status == LQL_STATUS_OK ? LQL_STATUS_JSON_ERROR : status;
-        status = lql_flat_eq_spool_byte(spool, offset + 3u, &ch, error);
-        if (status != LQL_STATUS_OK || !lql_flat_eq_hex_value(ch, &low))
-          return status == LQL_STATUS_OK ? LQL_STATUS_JSON_ERROR : status;
-        decoded = (unsigned char)((high << 4u) | low);
-        offset += 4u;
+        encoded_len = lql_unicode_utf8_encode(codepoint, encoded);
+        if (encoded_len == 0u)
+          return LQL_STATUS_JSON_ERROR;
+        for (i = 0u; i < encoded_len; ++i) {
+          if (key[key_pos] == '\0' || encoded[i] != (unsigned char)key[key_pos])
+            return LQL_STATUS_OK;
+          ++key_pos;
+        }
+        continue;
       } else if (ch == (unsigned char)'n') {
         decoded = (unsigned char)'\n';
       } else if (ch == (unsigned char)'r') {
