@@ -420,9 +420,14 @@ local function split_inputs(cfg)
 end
 
 local function run_once(client, selector, input, options)
-  local result, err = client:execute_file(selector, input, options)
+  local result, err
+  if options and options.inline then
+    result, err = client:rewrite_file_inline_spooled(selector, input, options)
+  else
+    result, err = client:filter_file_spooled(selector, input, options)
+  end
   if err then
-    print_error("execute stream", err)
+    print_error(options and options.inline and "rewrite file" or "filter file", err)
     return nil
   end
   return result

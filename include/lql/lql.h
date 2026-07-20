@@ -293,16 +293,19 @@ typedef struct lql_stream_result {
  * File-oriented compatibility filtering request. Zero-initialization reads
  * from stdin and writes to stdout. Set `input_path` to a file path or "-";
  * alternatively set `input_file` to a caller-owned stream positioned at the
- * desired start. Set `output_path` or `output_file` for non-count output;
- * `count_only` writes the match count followed by '\n' to `output_file`,
- * `output_path`, or stdout. File handles supplied by the caller are borrowed
- * for the duration of the call and are not closed by liblql.
+ * desired start. Set exactly one of `output_path`, `output_file`, or
+ * `output_writer` for non-count output; `count_only` writes the match count
+ * followed by '\n' to that sink or stdout. File handles and callback contexts
+ * supplied by the caller are borrowed for the duration of the call and are not
+ * closed or retained by liblql.
  */
 typedef struct lql_file_filter_request {
   const char *input_path;
   FILE *input_file;
   const char *output_path;
   FILE *output_file;
+  lql_stream_writer_fn output_writer;
+  void *output_user;
   const lql_selector *selector;
   const lql_projection *projection;
   const lql_mutation *mutation;

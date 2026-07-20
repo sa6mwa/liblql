@@ -5538,6 +5538,88 @@ static int run_file_backed_mutation_preflight_case(lql *ctx, const char *expr) {
   return status != LQL_STATUS_JSON_ERROR || writer.len != 0u;
 }
 
+static int run_file_filter_callback_output(lql *ctx) {
+  static const char path[] = "liblql-file-filter-callback.tmp";
+  static const unsigned char input[] =
+      "{\"status\":\"closed\",\"id\":1}\n{\"status\":\"open\",\"id\":2}\n";
+  static const char selected[] = "{\"status\":\"open\",\"id\":2}\n";
+  lql_file_filter_request request;
+  lql_stream_result result;
+  lql_selector *selector;
+  lql_error error;
+  test_writer writer;
+
+  remove(path);
+  if (write_test_file(path, input, sizeof(input) - 1u))
+    return 1;
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, "/status=\"open\"", &selector, &error) !=
+      LQL_STATUS_OK) {
+    remove(path);
+    return 1;
+  }
+
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.input_path = path;
+  request.output_writer = test_write;
+  request.output_user = &writer;
+  request.selector = selector;
+  request.matched_only = 1;
+  if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+          LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u ||
+      writer.len != sizeof(selected) - 1u ||
+      memcmp(writer.data, selected, writer.len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    remove(path);
+    return 1;
+  }
+
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.input_path = path;
+  request.output_writer = test_write;
+  request.output_user = &writer;
+  request.selector = selector;
+  request.count_only = 1;
+  if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+          LQL_STATUS_OK ||
+      writer.len != 2u || memcmp(writer.data, "1\n", 2u) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    remove(path);
+    return 1;
+  }
+
+  memset(&request, 0, sizeof(request));
+  request.input_path = path;
+  request.output_file = stdout;
+  request.output_writer = test_write;
+  request.output_user = &writer;
+  if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+      LQL_STATUS_INVALID_ARGUMENT) {
+    ctx->selector_destroy(ctx, selector);
+    remove(path);
+    return 1;
+  }
+
+  memset(&request, 0, sizeof(request));
+  request.input_path = path;
+  request.output_writer = test_write;
+  request.output_user = &writer;
+  if (ctx->rewrite_file_inline_spooled(ctx, &request, &result, &error) !=
+      LQL_STATUS_INVALID_ARGUMENT) {
+    ctx->selector_destroy(ctx, selector);
+    remove(path);
+    return 1;
+  }
+
+  ctx->selector_destroy(ctx, selector);
+  remove(path);
+  return 0;
+}
+
 static int run_file_backed_mutations(lql *ctx) {
   static const char text_path[] = "liblql-file-value-text.tmp";
   static const char utf8_path[] = "liblql-file-value-utf8.tmp";
@@ -6377,6 +6459,7 @@ int main(void) {
   RUN_CTX_TEST(run_true_stream_contract);
   RUN_CTX_TEST(run_wide_plan_stream_contract);
   RUN_NOCTX_TEST(run_instance_memory_contract);
+  RUN_CTX_TEST(run_file_filter_callback_output);
   RUN_CTX_TEST(run_file_backed_mutations);
   RUN_CTX_TEST(run_virtual_file_source);
   RUN_CTX_TEST(run_clock_contract);

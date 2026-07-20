@@ -32,8 +32,12 @@ local caps = client:capabilities()
 assert_equal(caps.selector_parse, true, "selector_parse capability")
 assert_equal(caps.selector_inspection, true, "selector_inspection capability")
 assert_equal(caps.execute_string, true, "execute_string capability")
+assert_equal(caps.filter_file_spooled, true, "filter_file_spooled capability")
+assert_equal(caps.rewrite_file_inline_spooled, true,
+             "rewrite_file_inline_spooled capability")
 assert_equal(caps.projection_parse, true, "projection_parse capability")
 assert_equal(caps.mutation_parse, true, "mutation_parse capability")
+assert_equal(client.execute_file, nil, "stale execute_file facade removed")
 
 local selector = assert_no_error(client:selector_parse('/status="open"'), nil,
                                  "selector parse")
@@ -130,14 +134,33 @@ local f = assert(io.open(fixture, "wb"))
 f:write('{"status":"closed","id":1}\n{"status":"open","id":2}\n')
 f:close()
 local streamed = assert_no_error(
-  client:execute_file('/status="open"', fixture),
+  client:filter_file_spooled('/status="open"', fixture),
   nil,
-  "execute file")
+  "filter file")
 assert_equal(streamed.records_seen, 2, "file records seen")
 assert_equal(streamed.records_matched, 1, "file records matched")
 assert_equal(streamed.output, '{"status":"open","id":2}\n',
              "file selected output")
 os.remove(fixture)
+
+local rewrite_fixture = os.tmpname()
+local rewrite = assert(io.open(rewrite_fixture, "wb"))
+rewrite:write('{"status":"open","id":2}\n')
+rewrite:close()
+local rewrite_mutation = assert_no_error(client:mutation_parse({"/done=true"}),
+                                         nil, "rewrite mutation parse")
+local rewritten = assert_no_error(
+  client:rewrite_file_inline_spooled('/status="open"', rewrite_fixture,
+                                     {mutation = rewrite_mutation}),
+  nil,
+  "rewrite file inline")
+assert_equal(rewritten.records_seen, 1, "rewrite records seen")
+local rewritten_file = assert(io.open(rewrite_fixture, "rb"))
+local rewritten_body = rewritten_file:read("*a")
+rewritten_file:close()
+assert_equal(rewritten_body, '{"status":"open","id":2,"done":true}\n',
+             "rewrite inline output")
+os.remove(rewrite_fixture)
 
 local invalid_selector, invalid_err = client:selector_parse('eq{bad')
 if invalid_selector ~= nil or not invalid_err or invalid_err.status == 0 then
@@ -158,8 +181,8 @@ if ok_missing_input then
 end
 
 local ok_missing_path = pcall(function()
-  client:execute_file('/status="open"')
+  client:filter_file_spooled('/status="open"')
 end)
 if ok_missing_path then
-  fail("expected execute_file missing path argument error")
+  fail("expected filter_file_spooled missing path argument error")
 end

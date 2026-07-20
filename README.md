@@ -149,10 +149,11 @@ make lua-artifact-smoke
 
 The installed Lua CLI is `lql.lua`; it mirrors the supported `clql` selection,
 projection, mutation, file-backed mutation, count, and inline workflows, while
-keeping the same deliberate exclusions for prettyx/theme behavior. Its output
-workflow uses the explicitly spooled liblql API so it can normalize
-whitespace-tolerant input; it can therefore spill the current record to a
-temporary file. `make lua-cli-clql-parity` compares `lql.lua` output against
+keeping the same deliberate exclusions for prettyx/theme behavior. Its file
+workflow goes through the same public liblql `filter_file_spooled` and
+`rewrite_file_inline_spooled` APIs as `clql`, so file opening, output flushing,
+safe inline rewrite, and temporary-file behavior stay in liblql. `make
+lua-cli-clql-parity` compares `lql.lua` output against
 `clql`; `make lua-cli-parity` compares `lql.lua` output against the pinned Go
 `lql` CLI for shared workflows. Lua itself does not parse or transform JSON in
 those comparisons.

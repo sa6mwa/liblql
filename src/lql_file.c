@@ -104,6 +104,8 @@ static lql_status filter_open_stream(lql *self,
   lql_stream_request stream;
   lql_status status;
   lql_stream_result local_result;
+  char count_buffer[64];
+  int count_len;
 
   memset(&reader, 0, sizeof(reader));
   reader.file = input;
@@ -117,8 +119,13 @@ static lql_status filter_open_stream(lql *self,
   stream.mutation = request->count_only ? NULL : request->mutation;
   stream.matched_only = request->matched_only;
   if (!request->count_only) {
-    stream.writer = file_write;
-    stream.writer_user = &writer;
+    if (request->output_writer != NULL) {
+      stream.writer = request->output_writer;
+      stream.writer_user = request->output_user;
+    } else {
+      stream.writer = file_write;
+      stream.writer_user = &writer;
+    }
     stream.output_mode = filter_file_output_mode(request);
   }
   memset(&local_result, 0, sizeof(local_result));
@@ -134,8 +141,18 @@ static lql_status filter_open_stream(lql *self,
     return LQL_STATUS_JSON_ERROR;
   }
   if (request->count_only) {
-    if (fprintf(output, "%lu\n", (unsigned long)local_result.records_matched) <
-        0) {
+    count_len = sprintf(count_buffer, "%lu\n",
+                        (unsigned long)local_result.records_matched);
+    if (count_len < 0) {
+      lql_set_error(error, LQL_STATUS_IO_ERROR, "unable to format count");
+      return LQL_STATUS_IO_ERROR;
+    }
+    if (request->output_writer != NULL) {
+      return request->output_writer(request->output_user, count_buffer,
+                                    (size_t)count_len, error);
+    }
+    if (fwrite(count_buffer, 1u, (size_t)count_len, output) !=
+        (size_t)count_len) {
       lql_set_error(error, LQL_STATUS_IO_ERROR, "unable to write count");
       return LQL_STATUS_IO_ERROR;
     }
@@ -164,6 +181,12 @@ lql_filter_file_spooled_internal(lql *self,
   output = request->output_file;
   close_input = 0;
   close_output = 0;
+  if (request->output_writer != NULL &&
+      (request->output_file != NULL || request->output_path != NULL)) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "file request has multiple output sinks");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
   if (input == NULL) {
     if (!open_input_path(request->input_path, &input)) {
       lql_set_error(error, LQL_STATUS_IO_ERROR, "unable to open input file");
@@ -171,7 +194,7 @@ lql_filter_file_spooled_internal(lql *self,
     }
     close_input = input != stdin;
   }
-  if (output == NULL) {
+  if (output == NULL && request->output_writer == NULL) {
     if (!open_output_path(request->output_path, &output)) {
       if (close_input) {
         fclose(input);
@@ -182,7 +205,7 @@ lql_filter_file_spooled_internal(lql *self,
     close_output = output != stdout;
   }
   status = filter_open_stream(self, request, input, output, result, error);
-  if (fflush(output) != 0 && status == LQL_STATUS_OK) {
+  if (output != NULL && fflush(output) != 0 && status == LQL_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_IO_ERROR, "unable to flush output");
     status = LQL_STATUS_IO_ERROR;
   }
@@ -562,7 +585,8 @@ lql_status lql_rewrite_file_inline_spooled_internal(
   if (self == NULL || request == NULL || request->input_path == NULL ||
       request->input_path[0] == '\0' || strcmp(request->input_path, "-") == 0 ||
       request->input_file != NULL || request->output_file != NULL ||
-      request->output_path != NULL || request->count_only) {
+      request->output_path != NULL || request->output_writer != NULL ||
+      request->count_only) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "inline rewrite requires one input path");
     return LQL_STATUS_INVALID_ARGUMENT;
