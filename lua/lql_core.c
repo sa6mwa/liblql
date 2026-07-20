@@ -874,6 +874,8 @@ static int lua_lql_execute_string(lua_State *lua) {
   lua_setfield(lua, -2, "bytes_consumed");
   lua_pushboolean(lua, result.stopped_early);
   lua_setfield(lua, -2, "stopped_early");
+  lua_pushinteger(lua, (lua_Integer)result.stop_reason);
+  lua_setfield(lua, -2, "stop_reason");
   if (!count_only) {
     lua_pushlstring(lua, output.data != NULL ? output.data : "", output.len);
     lua_setfield(lua, -2, "output");
@@ -893,6 +895,8 @@ static int lua_lql_file_result(lua_State *lua, const lql_stream_result *result,
   lua_setfield(lua, -2, "bytes_consumed");
   lua_pushboolean(lua, result->stopped_early);
   lua_setfield(lua, -2, "stopped_early");
+  lua_pushinteger(lua, (lua_Integer)result->stop_reason);
+  lua_setfield(lua, -2, "stop_reason");
   if (include_output) {
     lua_pushlstring(lua, output->data != NULL ? output->data : "", output->len);
     lua_setfield(lua, -2, "output");

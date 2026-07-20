@@ -162,8 +162,10 @@ in liblql. `make lua-cli-clql-parity` compares `lql.lua` output against
 `lql` CLI for shared workflows. Lua itself does not parse or transform JSON in
 those comparisons.
 
-The Lua module exposes the public liblql workflows that map safely to Lua:
-selector/projection/mutation parsing, string execution, spooled file filtering,
-inline spooled rewrite, status strings, and regular-file classification. Raw C
-callback surfaces such as `stream_execute` remain C-only because exposing them
-directly would force unsafe callback lifetime and ownership rules into Lua.
+The Lua module exposes `lql.core` as the native public facade; `require("lql")`
+is only a zero-policy alias to that same table. It exposes the public liblql
+workflows that map safely to Lua: selector/projection/mutation parsing, string
+execution, spooled file filtering, inline spooled rewrite, status strings, and
+regular-file classification. Raw C callback surfaces such as `stream_execute`
+remain C-only because exposing them directly would force unsafe callback
+lifetime and ownership rules into Lua.

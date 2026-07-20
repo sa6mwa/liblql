@@ -1,4 +1,5 @@
 local lql = require("lql")
+local core = require("lql.core")
 
 local function fail(message)
   io.stderr:write(message .. "\n")
@@ -26,6 +27,8 @@ local function assert_no_error(value, err, message)
 end
 
 local client = assert_no_error(lql.new(), nil, "new client")
+assert_equal(lql, core, "lql facade is lql.core")
+assert_equal(lql.core, core, "lql.core self reference")
 assert_truthy(type(client:version()) == "string", "client version")
 assert_equal(lql.status_string(0), "ok", "module status string")
 assert_equal(lql.status_string(999), "unknown", "unknown status string")
@@ -72,6 +75,8 @@ local result = assert_no_error(
   "execute string")
 assert_equal(result.records_seen, 2, "records seen")
 assert_equal(result.records_matched, 1, "records matched")
+assert_equal(result.stopped_early, false, "string stopped early")
+assert_equal(result.stop_reason, 0, "string stop reason")
 assert_equal(result.output, '{"status":"open","id":2}\n', "selected output")
 
 local count = assert_no_error(
@@ -153,6 +158,8 @@ local streamed = assert_no_error(
   "filter file")
 assert_equal(streamed.records_seen, 2, "file records seen")
 assert_equal(streamed.records_matched, 1, "file records matched")
+assert_equal(streamed.stopped_early, false, "file stopped early")
+assert_equal(streamed.stop_reason, 0, "file stop reason")
 assert_equal(streamed.output, '{"status":"open","id":2}\n',
              "file selected output")
 os.remove(fixture)
@@ -169,6 +176,8 @@ local rewritten = assert_no_error(
   nil,
   "rewrite file inline")
 assert_equal(rewritten.records_seen, 1, "rewrite records seen")
+assert_equal(rewritten.stopped_early, false, "rewrite stopped early")
+assert_equal(rewritten.stop_reason, 0, "rewrite stop reason")
 local rewritten_file = assert(io.open(rewrite_fixture, "rb"))
 local rewritten_body = rewritten_file:read("*a")
 rewritten_file:close()
