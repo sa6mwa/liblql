@@ -373,7 +373,7 @@ local function parse_args(argv)
       end
       io.stderr:write("lql.lua: --theme is unsupported; prettyx is not linked\n")
       return nil, 2
-    elseif a:sub(1, 1) == "-" then
+    elseif a ~= "-" and a:sub(1, 1) == "-" then
       local matched, next_i, err = parse_short_cluster(argv, i, cfg)
       if err ~= nil then
         return nil, err

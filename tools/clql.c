@@ -637,7 +637,7 @@ static int parse_args(int argc, char **argv, clql_config *cfg,
       ++arg;
       continue;
     }
-    if (argv[arg][0] == '-') {
+    if (strcmp(argv[arg], "-") != 0 && argv[arg][0] == '-') {
       fprintf(stderr, "clql: unknown flag: %s\n", argv[arg]);
       usage(stderr);
       return -1;

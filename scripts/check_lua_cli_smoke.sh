@@ -33,6 +33,13 @@ env \
   "$lua_cli" '/status="open"' "$fixture" >"$tmp.out"
 grep '"status":"open"' "$tmp.out" >/dev/null
 
+cat "$fixture" | env \
+  LUA_PATH="$tree/share/lua/5.5/?.lua;$tree/share/lua/5.5/?/init.lua;;" \
+  LUA_CPATH="$tree/lib/lua/5.5/?.so;$tree/lib/lua/5.5/?/core.so;;" \
+  LD_LIBRARY_PATH="$sdk_prefix/lib:${LD_LIBRARY_PATH:-}" \
+  "$lua_cli" '/status="open"' - >"$tmp.out"
+grep '"status":"open"' "$tmp.out" >/dev/null
+
 env \
   LUA_PATH="$tree/share/lua/5.5/?.lua;$tree/share/lua/5.5/?/init.lua;;" \
   LUA_CPATH="$tree/lib/lua/5.5/?.so;$tree/lib/lua/5.5/?/core.so;;" \

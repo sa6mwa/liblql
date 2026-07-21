@@ -75,6 +75,10 @@ grep '^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$' "$tmp.out" >/dev/null
 printf '%s\n%s\n' '{"status":"open","n":1}' '{"status":"open","n":3}' |
   cmp -s - "$tmp.out"
 
+cat "$fixture" | "$clql" '/status="open"' - >"$tmp.out"
+printf '%s\n%s\n' '{"status":"open","n":1}' '{"status":"open","n":3}' |
+  cmp -s - "$tmp.out"
+
 "$clql" --count '/status="open"' "$fixture" >"$tmp.out"
 printf '2\n' | cmp -s - "$tmp.out"
 

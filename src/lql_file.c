@@ -587,6 +587,9 @@ static int copy_inline_xattrs(int source_fd, int fd) {
     names_len = inline_listxattr_fd(source_fd, names, (size_t)need);
   }
   if (names_len < 0) {
+    if (names != stack_names) {
+      free(names);
+    }
     return errno == ENOTSUP || errno == EOPNOTSUPP;
   }
   offset = 0u;
