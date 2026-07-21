@@ -21,7 +21,10 @@ check_pair() {
   static=$2
   allowed='
 lql_error_init
+lql_filter_file_spooled
 lql_new
+lql_path_is_regular_file
+lql_rewrite_file_inline_spooled
 lql_status_string
 lql_stream_execute
 lql_stream_execute_spooled

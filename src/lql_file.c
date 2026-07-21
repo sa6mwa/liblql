@@ -115,6 +115,37 @@ static int same_open_file_identity(FILE *left, int right_fd, int *same) {
   return 1;
 }
 
+static int same_regular_file_stream_identity(FILE *left, FILE *right,
+                                             int *same) {
+  struct stat left_st;
+  struct stat right_st;
+  int left_fd;
+  int right_fd;
+  *same = 0;
+  if (left == NULL || right == NULL) {
+    errno = EINVAL;
+    return 0;
+  }
+  if (left == right) {
+    *same = 1;
+    return 1;
+  }
+  left_fd = fileno(left);
+  right_fd = fileno(right);
+  if (left_fd < 0 || right_fd < 0) {
+    return 1;
+  }
+  if (fstat(left_fd, &left_st) != 0 || fstat(right_fd, &right_st) != 0) {
+    return 0;
+  }
+  if (!S_ISREG(left_st.st_mode) || !S_ISREG(right_st.st_mode)) {
+    return 1;
+  }
+  *same =
+      left_st.st_dev == right_st.st_dev && left_st.st_ino == right_st.st_ino;
+  return 1;
+}
+
 static int open_output_path_checked(const char *path, FILE *input,
                                     FILE **out, int *same_input_output) {
   int fd;
@@ -124,6 +155,15 @@ static int open_output_path_checked(const char *path, FILE *input,
     *same_input_output = 0;
   }
   if (path_is_stdio(path)) {
+    if (!same_regular_file_stream_identity(input, stdout, &same)) {
+      return 0;
+    }
+    if (same) {
+      if (same_input_output != NULL) {
+        *same_input_output = 1;
+      }
+      return 0;
+    }
     *out = stdout;
     return 1;
   }
@@ -175,6 +215,44 @@ filter_file_output_mode(const lql_file_filter_request *request) {
   return LQL_STREAM_OUTPUT_SELECTED_RECORD;
 }
 
+static lql_status
+validate_filter_file_execution_request(const lql_file_filter_request *request,
+                                       lql_error *error) {
+  lql_stream_output_mode mode;
+  if (request->count_only) {
+    return LQL_STATUS_OK;
+  }
+  mode = filter_file_output_mode(request);
+  if ((mode != LQL_STREAM_OUTPUT_DECISION_ONLY &&
+       mode != LQL_STREAM_OUTPUT_SELECTED_RECORD &&
+       mode != LQL_STREAM_OUTPUT_PROJECTION &&
+       mode != LQL_STREAM_OUTPUT_MUTATION &&
+       mode != LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION) ||
+      (request->mutation != NULL && mode != LQL_STREAM_OUTPUT_MUTATION &&
+       mode != LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION)) {
+    lql_set_error(error, LQL_STATUS_UNSUPPORTED,
+                  "direct stream output mode is not implemented");
+    return LQL_STATUS_UNSUPPORTED;
+  }
+  if (mode == LQL_STREAM_OUTPUT_PROJECTION && request->projection == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "projection output requires a projection handle");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (mode == LQL_STREAM_OUTPUT_MUTATION && request->mutation == NULL) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "mutation output requires a mutation handle");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (mode == LQL_STREAM_OUTPUT_PROJECTION_THEN_MUTATION &&
+      (request->projection == NULL || request->mutation == NULL)) {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "combined output requires projection and mutation handles");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  return LQL_STATUS_OK;
+}
+
 static lql_status filter_open_stream(lql *self,
                                      const lql_file_filter_request *request,
                                      FILE *input, FILE *output,
@@ -217,10 +295,6 @@ static lql_status filter_open_stream(lql *self,
   if (status != LQL_STATUS_OK) {
     return status;
   }
-  if (request->mutation != NULL && local_result.records_seen == 0u) {
-    lql_set_error(error, LQL_STATUS_JSON_ERROR, "no JSON input");
-    return LQL_STATUS_JSON_ERROR;
-  }
   if (request->count_only) {
     count_len = sprintf(count_buffer, "%lu\n",
                         (unsigned long)local_result.records_matched);
@@ -258,6 +332,12 @@ lql_filter_file_spooled_internal(lql *self,
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT, "file request required");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
+  if (request->input_file != NULL && request->input_path != NULL &&
+      request->input_path[0] != '\0') {
+    lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                  "file request has multiple input sources");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
   input = request->input_file;
   output = request->output_file;
   close_input = 0;
@@ -267,12 +347,36 @@ lql_filter_file_spooled_internal(lql *self,
                   "file request has multiple output sinks");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
+  status = validate_filter_file_execution_request(request, error);
+  if (status != LQL_STATUS_OK) {
+    return status;
+  }
   if (input == NULL) {
     if (!open_input_path(request->input_path, &input)) {
       lql_set_error(error, LQL_STATUS_IO_ERROR, "unable to open input file");
       return LQL_STATUS_IO_ERROR;
     }
     close_input = input != stdin;
+  }
+  if (output != NULL) {
+    int same_input_output;
+    if (!same_regular_file_stream_identity(input, output, &same_input_output)) {
+      if (close_input) {
+        fclose(input);
+      }
+      lql_set_error(error, LQL_STATUS_IO_ERROR,
+                    "unable to inspect file streams");
+      return LQL_STATUS_IO_ERROR;
+    }
+    if (same_input_output) {
+      if (close_input) {
+        fclose(input);
+      }
+      lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                    "input and output streams identify the same file; use "
+                    "inline rewrite for in-place updates");
+      return LQL_STATUS_INVALID_ARGUMENT;
+    }
   }
   if (output == NULL && request->output_writer == NULL) {
     int same_input_output;
@@ -512,9 +616,18 @@ static int preserve_inline_owner(int fd, const struct stat *st) {
     errno = saved_errno;
     return 0;
   }
-  if (fchown(fd, (uid_t)-1, st->st_gid) != 0 && errno != EPERM &&
-      errno != EINVAL) {
-    return 0;
+  if (fchown(fd, (uid_t)-1, st->st_gid) != 0) {
+    saved_errno = errno;
+    if (saved_errno != EPERM && saved_errno != EINVAL) {
+      errno = saved_errno;
+      return 0;
+    }
+    /*
+     * Ownership preservation is best effort once the replacement is verified
+     * to remain owned by this process. Some valid rewrite targets have an
+     * original group the caller cannot assign; keep the temp file's current
+     * group instead of rejecting an otherwise safe rewrite.
+     */
   }
   return 1;
 }
@@ -673,6 +786,8 @@ lql_status lql_rewrite_file_inline_spooled_internal(
   int source_fd;
   int source_check_fd;
   int fd;
+  lql_stream_result local_result;
+  lql_stream_result *effective_result;
   lql_status status;
 
   if (result != NULL) {
@@ -744,7 +859,15 @@ lql_status lql_rewrite_file_inline_spooled_internal(
                   "unable to open inline temp stream");
     return LQL_STATUS_IO_ERROR;
   }
-  status = filter_open_stream(self, request, source, tmp, result, error);
+  effective_result = result;
+  if (effective_result == NULL) {
+    effective_result = &local_result;
+  }
+  status = filter_open_stream(self, request, source, tmp, effective_result, error);
+  if (status == LQL_STATUS_OK && effective_result->records_seen == 0u) {
+    lql_set_error(error, LQL_STATUS_JSON_ERROR, "no JSON input");
+    status = LQL_STATUS_JSON_ERROR;
+  }
   if (fflush(tmp) != 0 && status == LQL_STATUS_OK) {
     lql_set_error(error, LQL_STATUS_IO_ERROR, "unable to flush output");
     status = LQL_STATUS_IO_ERROR;

@@ -36,7 +36,7 @@ help:
 	  'make valgrind      run native Valgrind Memcheck gate' \
 	  'make fuzz-smoke    build AFL++ target and verify instrumentation' \
 	  'make fuzz          run the standard bounded AFL++ smoke gate' \
-	  'make install-smoke install SDK and build CMake/pkg-config consumers' \
+	  'make install-smoke install SDK and build CMake/pkg-config consumers, including multiarch pkg-config' \
 	  'make clql-smoke    build clql and run CLI smoke tests' \
 	  'make clql-selector-parity compare clql selector output against Go lql' \
 	  'make clql-mutation-parity compare clql mutation output against Go lql' \
@@ -192,6 +192,7 @@ fuzz: fuzz-smoke
 install-smoke: build-release
 	@cmake --install build/release --prefix build/install-smoke
 	@sh scripts/check_install_tree.sh
+	@sh scripts/check_pkgconfig_multiarch.sh
 
 clql-smoke: build-release
 	@mkdir -p build

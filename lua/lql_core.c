@@ -258,6 +258,9 @@ static int lua_lql_push_mutation(lua_State *lua, lua_lql_client *client,
   return 1;
 }
 
+static void lua_lql_string_list_free(lua_State *lua, const char **items,
+                                     size_t count);
+
 static lql_status lua_lql_selector_arg(lua_State *lua, lua_lql_client *client,
                                        int index, lql_selector **out,
                                        int *owned, lql_error *error) {
@@ -283,8 +286,9 @@ static lql_status lua_lql_selector_arg(lua_State *lua, lua_lql_client *client,
   return client->ctx->selector_parse(client->ctx, expr, out, error);
 }
 
-static int lua_lql_string_list_arg(lua_State *lua, int index,
-                                   const char ***out_items, size_t *out_count) {
+static lql_status lua_lql_string_list_arg(lua_State *lua, int index,
+                                          const char ***out_items,
+                                          size_t *out_count, lql_error *error) {
   const char **items;
   size_t count;
   size_t i;
@@ -293,33 +297,50 @@ static int lua_lql_string_list_arg(lua_State *lua, int index,
   if (lua_type(lua, index) == LUA_TSTRING) {
     items = (const char **)lua_lql_alloc(lua, NULL, 0u, sizeof(*items));
     if (items == NULL) {
-      return 0;
+      error->code = LQL_STATUS_NO_MEMORY;
+      strcpy(error->message, "out of memory");
+      return LQL_STATUS_NO_MEMORY;
     }
     items[0] = lua_tostring(lua, index);
     *out_items = items;
     *out_count = 1u;
-    return 1;
+    return LQL_STATUS_OK;
   }
-  luaL_checktype(lua, index, LUA_TTABLE);
+  if (lua_type(lua, index) != LUA_TTABLE) {
+    error->code = LQL_STATUS_INVALID_ARGUMENT;
+    strcpy(error->message, "string or string list required");
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
   count = (size_t)lua_rawlen(lua, index);
   if (count == 0u) {
-    return 1;
+    return LQL_STATUS_OK;
   }
   if (count > ((size_t)-1) / sizeof(*items)) {
-    return 0;
+    error->code = LQL_STATUS_NO_MEMORY;
+    strcpy(error->message, "out of memory");
+    return LQL_STATUS_NO_MEMORY;
   }
   items = (const char **)lua_lql_alloc(lua, NULL, 0u, count * sizeof(*items));
   if (items == NULL) {
-    return 0;
+    error->code = LQL_STATUS_NO_MEMORY;
+    strcpy(error->message, "out of memory");
+    return LQL_STATUS_NO_MEMORY;
   }
   for (i = 0u; i < count; ++i) {
     lua_rawgeti(lua, index, (lua_Integer)i + 1);
-    items[i] = luaL_checkstring(lua, -1);
+    if (lua_type(lua, -1) != LUA_TSTRING) {
+      lua_pop(lua, 1);
+      lua_lql_string_list_free(lua, items, count);
+      error->code = LQL_STATUS_INVALID_ARGUMENT;
+      strcpy(error->message, "string list entries must be strings");
+      return LQL_STATUS_INVALID_ARGUMENT;
+    }
+    items[i] = lua_tostring(lua, -1);
     lua_pop(lua, 1);
   }
   *out_items = items;
   *out_count = count;
-  return 1;
+  return LQL_STATUS_OK;
 }
 
 static void lua_lql_string_list_free(lua_State *lua, const char **items,
@@ -353,10 +374,9 @@ static lql_status lua_lql_projection_arg(lua_State *lua, lua_lql_client *client,
   }
   items = NULL;
   count = 0u;
-  if (!lua_lql_string_list_arg(lua, index, &items, &count)) {
-    error->code = LQL_STATUS_NO_MEMORY;
-    strcpy(error->message, "out of memory");
-    return LQL_STATUS_NO_MEMORY;
+  status = lua_lql_string_list_arg(lua, index, &items, &count, error);
+  if (status != LQL_STATUS_OK) {
+    return status;
   }
   *owned = 1;
   status = client->ctx->projection_parse(client->ctx, items, count, out, error);
@@ -417,10 +437,9 @@ static lql_status lua_lql_mutation_arg(lua_State *lua, lua_lql_client *client,
   }
   items = NULL;
   count = 0u;
-  if (!lua_lql_string_list_arg(lua, index, &items, &count)) {
-    error->code = LQL_STATUS_NO_MEMORY;
-    strcpy(error->message, "out of memory");
-    return LQL_STATUS_NO_MEMORY;
+  status = lua_lql_string_list_arg(lua, index, &items, &count, error);
+  if (status != LQL_STATUS_OK) {
+    return status;
   }
   lua_lql_mutation_options(lua, options_index, &options);
   *owned = 1;
@@ -603,14 +622,12 @@ static int lua_lql_client_projection_parse(lua_State *lua) {
   client = lua_lql_check_client(lua, 1);
   items = NULL;
   count = 0u;
-  if (!lua_lql_string_list_arg(lua, 2, &items, &count)) {
-    lql_error_init(&error);
-    error.code = LQL_STATUS_NO_MEMORY;
-    strcpy(error.message, "out of memory");
-    return lua_lql_return_error(lua, &error, LQL_STATUS_NO_MEMORY);
+  lql_error_init(&error);
+  status = lua_lql_string_list_arg(lua, 2, &items, &count, &error);
+  if (status != LQL_STATUS_OK) {
+    return lua_lql_return_error(lua, &error, status);
   }
   projection = NULL;
-  lql_error_init(&error);
   status = client->ctx->projection_parse(client->ctx, items, count, &projection,
                                          &error);
   lua_lql_string_list_free(lua, items, count);
@@ -631,15 +648,13 @@ static int lua_lql_client_mutation_parse(lua_State *lua) {
   client = lua_lql_check_client(lua, 1);
   items = NULL;
   count = 0u;
-  if (!lua_lql_string_list_arg(lua, 2, &items, &count)) {
-    lql_error_init(&error);
-    error.code = LQL_STATUS_NO_MEMORY;
-    strcpy(error.message, "out of memory");
-    return lua_lql_return_error(lua, &error, LQL_STATUS_NO_MEMORY);
+  lql_error_init(&error);
+  status = lua_lql_string_list_arg(lua, 2, &items, &count, &error);
+  if (status != LQL_STATUS_OK) {
+    return lua_lql_return_error(lua, &error, status);
   }
   lua_lql_mutation_options(lua, 3, &options);
   mutation = NULL;
-  lql_error_init(&error);
   status = client->ctx->mutation_parse_with_options(
       client->ctx, items, count, &options, &mutation, &error);
   lua_lql_string_list_free(lua, items, count);

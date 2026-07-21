@@ -4885,6 +4885,21 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
   }
   records = 0u;
   for (;;) {
+    if (request->max_records != 0u && records >= request->max_records) {
+      /*
+       * Public stream limits must stop before any refill, otherwise sockets and
+       * interactive readers can block after the requested record count. Internal
+       * single-record rescans use the same bound only as a parse cap, so they
+       * finish normally when no public limit-stop flag is requested.
+       */
+      if (request->out_limit_stop != NULL) {
+        *request->out_limit_stop = 1;
+        status = LQL_STATUS_STOP;
+      } else {
+        status = LQL_STATUS_OK;
+      }
+      break;
+    }
     status = lql_json_skip_space(&scan);
     if (status != LQL_STATUS_OK ||
         (status = lql_json_peek(&scan, &value)) != LQL_STATUS_OK) {
@@ -4892,12 +4907,6 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
     }
     if (value < 0) {
       status = LQL_STATUS_OK;
-      break;
-    }
-    if (request->max_records != 0u && records >= request->max_records) {
-      if (request->out_limit_stop != NULL)
-        *request->out_limit_stop = 1;
-      status = LQL_STATUS_STOP;
       break;
     }
     if (value == '[') {

@@ -100,6 +100,11 @@ local projection = assert_no_error(client:projection_parse({"/status"}), nil,
                                    "projection parse")
 assert_equal(projection:path_count(), 1, "projection path count")
 assert_equal(projection:path(1), "/status", "projection path")
+local bad_projection, bad_projection_err = client:projection_parse({1})
+if bad_projection ~= nil or not bad_projection_err or
+   bad_projection_err.status_string ~= "invalid argument" then
+  fail("expected structured projection string-list error")
+end
 local projected = assert_no_error(
   client:execute_string(nil,
                         '{"status":"open","id":1}\n' ..
@@ -113,6 +118,11 @@ assert_equal(projected.output, '{"status":"open"}\n{"status":"closed"}\n',
 local mutation = assert_no_error(client:mutation_parse({"/status=ready"}), nil,
                                  "mutation parse")
 assert_equal(mutation:count(), 1, "mutation count")
+local bad_mutation, bad_mutation_err = client:mutation_parse({{}})
+if bad_mutation ~= nil or not bad_mutation_err or
+   bad_mutation_err.status_string ~= "invalid argument" then
+  fail("expected structured mutation string-list error")
+end
 local mutated = assert_no_error(
   client:execute_string('/status="open"',
                         '{"status":"closed","id":1}\n' ..

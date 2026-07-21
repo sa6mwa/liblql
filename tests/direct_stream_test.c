@@ -3,6 +3,7 @@
 #endif
 #include <lql/lql.h>
 
+#include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,8 +20,10 @@ typedef struct test_reader {
   size_t chunk_size;
   size_t range_writes;
   size_t calls;
+  size_t fail_after_offset;
   int eof_seen;
   int fail_after_eof;
+  int fail_after_offset_enabled;
 } test_reader;
 
 typedef struct test_file_source {
@@ -95,6 +98,14 @@ static lql_status test_read(void *user, unsigned char *buffer, size_t capacity,
   }
   *out_len = 0u;
   if (reader == NULL || buffer == NULL) {
+    return LQL_STATUS_INVALID_ARGUMENT;
+  }
+  if (reader->fail_after_offset_enabled &&
+      reader->offset >= reader->fail_after_offset) {
+    if (error != NULL) {
+      error->code = LQL_STATUS_INVALID_ARGUMENT;
+      strcpy(error->message, "reader called after record limit");
+    }
     return LQL_STATUS_INVALID_ARGUMENT;
   }
   if (reader->eof_seen && reader->fail_after_eof) {
@@ -5079,6 +5090,8 @@ static int run_record_limit(lql *ctx) {
       "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n{\"status\":\"open\"}\n";
   static const char exact_input[] =
       "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n";
+  static const char next_read_fails_input[] =
+      "{\"status\":\"open\"}\n{\"status\":\"closed\"}\n";
   lql_selector *selector;
   lql_stream_request request;
   lql_stream_result result;
@@ -5120,9 +5133,28 @@ static int run_record_limit(lql *ctx) {
   memset(&decisions, 0, sizeof(decisions));
   request.reader_user = &reader;
   if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
-      result.stopped_early || result.stop_reason != LQL_STREAM_STOP_NONE ||
+      !result.stopped_early ||
+      result.stop_reason != LQL_STREAM_STOP_RECORD_LIMIT ||
       result.records_seen != 2u || result.records_matched != 1u ||
       decisions.count != 2u || decisions.matches != 1u) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)next_read_fails_input;
+  reader.len = sizeof(next_read_fails_input) - 1u;
+  reader.chunk_size = sizeof("{\"status\":\"open\"}\n") - 1u;
+  reader.fail_after_offset = sizeof("{\"status\":\"open\"}\n") - 1u;
+  reader.fail_after_offset_enabled = 1;
+  memset(&decisions, 0, sizeof(decisions));
+  request.reader_user = &reader;
+  request.limits.max_records = 1u;
+  if (lql_stream_execute(ctx, &request, &result, &error) != LQL_STATUS_OK ||
+      !result.stopped_early ||
+      result.stop_reason != LQL_STREAM_STOP_RECORD_LIMIT ||
+      result.records_seen != 1u || result.records_matched != 1u ||
+      decisions.count != 1u || decisions.matches != 1u) {
     ctx->selector_destroy(ctx, selector);
     return 1;
   }
@@ -5667,6 +5699,42 @@ static int run_file_filter_callback_output(lql *ctx) {
     return 1;
   }
 
+  {
+    static const char *const mutation_expr[] = {"/seen=true"};
+    lql_mutation *mutation;
+    mutation = NULL;
+    if (write_test_file(out_path, (const unsigned char *)"", 0u) ||
+        ctx->mutation_parse(ctx, mutation_expr, 1u, &mutation, &error) !=
+            LQL_STATUS_OK) {
+      ctx->mutation_destroy(ctx, mutation);
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+    memset(&writer, 0, sizeof(writer));
+    memset(&request, 0, sizeof(request));
+    request.input_path = out_path;
+    request.output_writer = test_write;
+    request.output_user = &writer;
+    request.mutation = mutation;
+    request.output_mode = LQL_STREAM_OUTPUT_MUTATION;
+    if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+            LQL_STATUS_OK ||
+        result.records_seen != 0u || writer.len != 0u) {
+      ctx->mutation_destroy(ctx, mutation);
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+    ctx->mutation_destroy(ctx, mutation);
+  }
+
   memset(&request, 0, sizeof(request));
   request.input_path = path;
   request.output_file = stdout;
@@ -5688,6 +5756,30 @@ static int run_file_filter_callback_output(lql *ctx) {
   request.output_path = out_path;
   if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
       LQL_STATUS_INVALID_ARGUMENT) {
+    ctx->selector_destroy(ctx, selector);
+    remove(path);
+    remove(out_path);
+    remove(mem_out_path);
+    remove(hardlink_path);
+    return 1;
+  }
+
+  if (write_test_file(out_path, (const unsigned char *)"KEEP", 4u)) {
+    ctx->selector_destroy(ctx, selector);
+    remove(path);
+    remove(out_path);
+    remove(mem_out_path);
+    remove(hardlink_path);
+    return 1;
+  }
+  memset(&request, 0, sizeof(request));
+  request.input_path = path;
+  request.output_path = out_path;
+  request.output_mode = LQL_STREAM_OUTPUT_PROJECTION;
+  if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+          LQL_STATUS_INVALID_ARGUMENT ||
+      read_test_file(out_path, preserved, sizeof(preserved), &preserved_len) ||
+      preserved_len != 4u || memcmp(preserved, "KEEP", preserved_len) != 0) {
     ctx->selector_destroy(ctx, selector);
     remove(path);
     remove(out_path);
@@ -5732,6 +5824,173 @@ static int run_file_filter_callback_output(lql *ctx) {
 
   memset(&request, 0, sizeof(request));
   request.input_path = path;
+  request.input_file = stdin;
+  if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+      LQL_STATUS_INVALID_ARGUMENT) {
+    ctx->selector_destroy(ctx, selector);
+    remove(path);
+    remove(out_path);
+    remove(mem_out_path);
+    remove(hardlink_path);
+    return 1;
+  }
+
+  {
+    FILE *same_file;
+    same_file = fopen(path, "r+b");
+    if (same_file == NULL) {
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+    memset(&request, 0, sizeof(request));
+    request.input_file = same_file;
+    request.output_file = same_file;
+    request.selector = selector;
+    request.matched_only = 1;
+    if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+            LQL_STATUS_INVALID_ARGUMENT ||
+        fclose(same_file) != 0 ||
+        read_test_file(path, preserved, sizeof(preserved), &preserved_len) ||
+        preserved_len != sizeof(input) - 1u ||
+        memcmp(preserved, input, preserved_len) != 0) {
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+  }
+
+  {
+    FILE *input_file;
+    FILE *output_file;
+    lql_status alias_status;
+    input_file = fopen(path, "rb");
+    output_file = fopen(path, "r+b");
+    if (input_file == NULL || output_file == NULL) {
+      if (input_file != NULL) {
+        fclose(input_file);
+      }
+      if (output_file != NULL) {
+        fclose(output_file);
+      }
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+    memset(&request, 0, sizeof(request));
+    request.input_file = input_file;
+    request.output_file = output_file;
+    request.selector = selector;
+    request.matched_only = 1;
+    alias_status = ctx->filter_file_spooled(ctx, &request, &result, &error);
+    if (fclose(input_file) != 0 || fclose(output_file) != 0 ||
+        alias_status != LQL_STATUS_INVALID_ARGUMENT ||
+        read_test_file(path, preserved, sizeof(preserved), &preserved_len) ||
+        preserved_len != sizeof(input) - 1u ||
+        memcmp(preserved, input, preserved_len) != 0) {
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+  }
+
+/*
+ * GCC's fd analyzer treats dup2(..., fileno(stdout)) as returning a new
+ * caller-owned descriptor. In this regression the descriptor is process stdout:
+ * it is intentionally restored and left open for the remaining test process.
+ */
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 10
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
+#endif
+  {
+    FILE *input_file;
+    int saved_stdout;
+    int output_fd;
+    int restore_status;
+    lql_status alias_status;
+    input_file = fopen(path, "rb");
+    saved_stdout = -1;
+    output_fd = -1;
+    restore_status = 0;
+    if (input_file != NULL && fflush(stdout) == 0) {
+      saved_stdout = dup(fileno(stdout));
+    }
+    if (saved_stdout >= 0) {
+      output_fd = open(path, O_RDWR);
+    }
+    if (input_file == NULL || saved_stdout < 0 || output_fd < 0 ||
+        dup2(output_fd, fileno(stdout)) < 0) {
+      if (output_fd >= 0) {
+        close(output_fd);
+      }
+      if (saved_stdout >= 0) {
+        close(saved_stdout);
+      }
+      if (input_file != NULL) {
+        fclose(input_file);
+      }
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+    close(output_fd);
+    memset(&request, 0, sizeof(request));
+    request.input_file = input_file;
+    request.output_path = "-";
+    request.selector = selector;
+    request.matched_only = 1;
+    alias_status = ctx->filter_file_spooled(ctx, &request, &result, &error);
+    fflush(stdout);
+    restore_status = dup2(saved_stdout, fileno(stdout));
+    if (close(saved_stdout) != 0 && restore_status == 0) {
+      restore_status = -1;
+    }
+    saved_stdout = -1;
+    if (restore_status < 0) {
+      fclose(input_file);
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+    close(saved_stdout);
+    if (fclose(input_file) != 0 ||
+        alias_status != LQL_STATUS_INVALID_ARGUMENT ||
+        read_test_file(path, preserved, sizeof(preserved), &preserved_len) ||
+        preserved_len != sizeof(input) - 1u ||
+        memcmp(preserved, input, preserved_len) != 0) {
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+  }
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 10
+#pragma GCC diagnostic pop
+#endif
+
+  memset(&request, 0, sizeof(request));
+  request.input_path = path;
   request.output_path = "/dev/null";
   request.selector = selector;
   request.matched_only = 1;
@@ -5772,6 +6031,37 @@ static int run_file_filter_callback_output(lql *ctx) {
                        &preserved_len) ||
         preserved_len != sizeof(selected) - 1u ||
         memcmp(preserved, selected, preserved_len) != 0) {
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+  }
+
+  {
+    char memory_input[] =
+        "{\"status\":\"closed\",\"id\":1}\n{\"status\":\"open\",\"id\":2}\n";
+    FILE *memory_file;
+    lql_status status;
+    memory_file = fmemopen(memory_input, sizeof(memory_input) - 1u, "r+");
+    if (memory_file == NULL) {
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+    memset(&request, 0, sizeof(request));
+    request.input_file = memory_file;
+    request.output_file = memory_file;
+    request.selector = selector;
+    request.matched_only = 1;
+    status = ctx->filter_file_spooled(ctx, &request, &result, &error);
+    if (fclose(memory_file) != 0 || status != LQL_STATUS_INVALID_ARGUMENT ||
+        memcmp(memory_input, input, sizeof(input) - 1u) != 0) {
       ctx->selector_destroy(ctx, selector);
       remove(path);
       remove(out_path);

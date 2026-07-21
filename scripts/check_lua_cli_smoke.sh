@@ -15,7 +15,7 @@ fi
 tmp=${TMPDIR:-/tmp}/liblql-lua-cli.$$
 cleanup() {
   sh "$root/scripts/remove_path.sh" "$tmp.out" "$tmp.err" "$tmp.json" \
-    "$tmp.content"
+    "$tmp.content" "$tmp.empty"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -59,6 +59,14 @@ env \
   LUA_CPATH="$tree/lib/lua/5.5/?.so;$tree/lib/lua/5.5/?/core.so;;" \
   LD_LIBRARY_PATH="$sdk_prefix/lib:${LD_LIBRARY_PATH:-}" \
   "$lua_cli" -m '/status=ready' -M '/status="open"' "$fixture" >"$tmp.out"
+grep '"status":"ready"' "$tmp.out" >/dev/null
+
+: >"$tmp.empty"
+env \
+  LUA_PATH="$tree/share/lua/5.5/?.lua;$tree/share/lua/5.5/?/init.lua;;" \
+  LUA_CPATH="$tree/lib/lua/5.5/?.so;$tree/lib/lua/5.5/?/core.so;;" \
+  LD_LIBRARY_PATH="$sdk_prefix/lib:${LD_LIBRARY_PATH:-}" \
+  "$lua_cli" -m '/status=ready' "$tmp.empty" "$fixture" >"$tmp.out"
 grep '"status":"ready"' "$tmp.out" >/dev/null
 
 printf 'héllo' >"$tmp.content"

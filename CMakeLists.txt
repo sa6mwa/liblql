@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
+if(POLICY CMP0177)
+  cmake_policy(SET CMP0177 NEW)
+endif()
+
 project(liblql VERSION 0.0.0 LANGUAGES C)
 
 include(CTest)
@@ -48,6 +52,55 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(LqlDependencyCache)
 include(LqlVersion)
+
+get_filename_component(LQL_INSTALL_PREFIX_ABS "${CMAKE_INSTALL_PREFIX}" ABSOLUTE)
+if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+  get_filename_component(LQL_INSTALL_LIBDIR_ABS "${CMAKE_INSTALL_LIBDIR}" ABSOLUTE)
+else()
+  get_filename_component(LQL_INSTALL_LIBDIR_ABS
+                         "${LQL_INSTALL_PREFIX_ABS}/${CMAKE_INSTALL_LIBDIR}"
+                         ABSOLUTE)
+endif()
+file(RELATIVE_PATH LQL_INSTALL_LIBDIR_FROM_PREFIX
+     "${LQL_INSTALL_PREFIX_ABS}" "${LQL_INSTALL_LIBDIR_ABS}")
+if(LQL_INSTALL_LIBDIR_FROM_PREFIX MATCHES "^\\.\\.")
+  set(LQL_PKGCONFIG_PREFIX_FROM_PCFILEDIR "${CMAKE_INSTALL_PREFIX}")
+  set(LQL_PKGCONFIG_LIBDIR "${LQL_INSTALL_LIBDIR_ABS}")
+else()
+  set(LQL_PKGCONFIG_PREFIX_FROM_PCFILEDIR "\${pcfiledir}/..")
+  string(REPLACE "/" ";" LQL_INSTALL_LIBDIR_COMPONENTS
+         "${LQL_INSTALL_LIBDIR_FROM_PREFIX}")
+  foreach(component IN LISTS LQL_INSTALL_LIBDIR_COMPONENTS)
+    if(NOT component STREQUAL "" AND NOT component STREQUAL ".")
+      string(APPEND LQL_PKGCONFIG_PREFIX_FROM_PCFILEDIR "/..")
+    endif()
+  endforeach()
+  if(LQL_INSTALL_LIBDIR_FROM_PREFIX STREQUAL "" OR
+     LQL_INSTALL_LIBDIR_FROM_PREFIX STREQUAL ".")
+    set(LQL_PKGCONFIG_LIBDIR "\${prefix}")
+  else()
+    set(LQL_PKGCONFIG_LIBDIR "\${prefix}/${LQL_INSTALL_LIBDIR_FROM_PREFIX}")
+  endif()
+endif()
+
+if(IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+  get_filename_component(LQL_INSTALL_INCLUDEDIR_ABS
+                         "${CMAKE_INSTALL_INCLUDEDIR}" ABSOLUTE)
+else()
+  get_filename_component(LQL_INSTALL_INCLUDEDIR_ABS
+                         "${LQL_INSTALL_PREFIX_ABS}/${CMAKE_INSTALL_INCLUDEDIR}"
+                         ABSOLUTE)
+endif()
+file(RELATIVE_PATH LQL_INSTALL_INCLUDEDIR_FROM_PREFIX
+     "${LQL_INSTALL_PREFIX_ABS}" "${LQL_INSTALL_INCLUDEDIR_ABS}")
+if(LQL_INSTALL_INCLUDEDIR_FROM_PREFIX MATCHES "^\\.\\.")
+  set(LQL_PKGCONFIG_INCLUDEDIR "${LQL_INSTALL_INCLUDEDIR_ABS}")
+elseif(LQL_INSTALL_INCLUDEDIR_FROM_PREFIX STREQUAL "" OR
+       LQL_INSTALL_INCLUDEDIR_FROM_PREFIX STREQUAL ".")
+  set(LQL_PKGCONFIG_INCLUDEDIR "\${prefix}")
+else()
+  set(LQL_PKGCONFIG_INCLUDEDIR "\${prefix}/${LQL_INSTALL_INCLUDEDIR_FROM_PREFIX}")
+endif()
 
 configure_file(cmake/lql_version.h.in
   "${CMAKE_CURRENT_BINARY_DIR}/generated/include/lql/version.h" @ONLY)

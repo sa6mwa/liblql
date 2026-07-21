@@ -812,6 +812,10 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
       goto fail;
     }
   }
+  if (mutation != NULL && aggregate.records_seen == 0u) {
+    fputs("clql: no JSON input\n", stderr);
+    goto fail;
+  }
   ctx->mutation_destroy(ctx, mutation);
   ctx->projection_destroy(ctx, projection);
   ctx->selector_destroy(ctx, selector);
