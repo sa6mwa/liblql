@@ -89,8 +89,11 @@ or path-backed inputs and outputs, filters through the explicitly spooled
 compatibility path, flushes output, and reports counters. `ctx->rewrite_file_inline_spooled`
 rewrites one regular file through liblql-owned same-directory temporary file
 creation, advisory locking, source identity checks, metadata preservation where
-the platform permits it, fsync discipline, and atomic rename. Symlink,
-non-regular, stdin, and count-only inline requests fail closed. See
+the platform permits it, fsync discipline, and atomic rename of the completed
+replacement. The lock and identity checks protect cooperative callers; POSIX
+does not provide a portable atomic pathname compare-and-swap against
+non-cooperating concurrent replacement. Symlink, non-regular, stdin, and
+count-only inline requests fail closed. See
 `examples/filter_file_spooled.c` and `examples/rewrite_file_inline_spooled.c` for public-header-only
 downstream usage. `ctx->path_is_regular_file(ctx, path)` and
 `lql_path_is_regular_file(NULL, path)` expose the same non-opening regular-file

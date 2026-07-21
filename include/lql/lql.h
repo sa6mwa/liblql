@@ -531,7 +531,10 @@ struct lql {
   /**
    * Safely rewrites one regular file in place using a same-directory temporary
    * file, advisory locking, metadata preservation where the platform permits
-   * it, fsync discipline, and atomic rename. Symlink and non-regular paths are
+   * it, fsync discipline, and atomic rename of the completed replacement.
+   * The lock and source identity checks protect cooperative callers; POSIX
+   * does not provide a portable atomic pathname compare-and-swap against
+   * non-cooperating concurrent replacement. Symlink and non-regular paths are
    * rejected. This helper is intentionally file-backed, not streaming.
    */
   lql_status (*rewrite_file_inline_spooled)(

@@ -127,6 +127,15 @@ static int print_error(const char *context, lql_status status,
   return 1;
 }
 
+static lql_status discard_output(void *user, const void *data, size_t len,
+                                 lql_error *error) {
+  (void)user;
+  (void)data;
+  (void)len;
+  (void)error;
+  return LQL_STATUS_OK;
+}
+
 static int file_exists(const char *path) {
   return lql_path_is_regular_file(NULL, path);
 }
@@ -761,7 +770,11 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
       lql_stream_result result;
       memset(&file_request, 0, sizeof(file_request));
       file_request.input_path = inputs->items[i];
-      file_request.output_file = output;
+      if (cfg->count_only) {
+        file_request.output_writer = discard_output;
+      } else {
+        file_request.output_file = output;
+      }
       file_request.selector = selector;
       file_request.projection = projection;
       file_request.mutation = mutation;
@@ -776,6 +789,11 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
       aggregate.records_seen += result.records_seen;
       aggregate.records_matched += result.records_matched;
       aggregate.bytes_consumed += result.bytes_consumed;
+    }
+    if (cfg->count_only &&
+        fprintf(output, "%lu\n", (unsigned long)aggregate.records_matched) < 0) {
+      fputs("clql: filter file: I/O error: unable to write count\n", stderr);
+      goto fail;
     }
   } else {
     memset(&file_request, 0, sizeof(file_request));

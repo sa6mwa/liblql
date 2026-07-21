@@ -1,6 +1,12 @@
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
+#ifndef _FILE_OFFSET_BITS
+#define _FILE_OFFSET_BITS 64
+#endif
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE
+#endif
 
 #include "lql_internal.h"
 
@@ -68,13 +74,88 @@ static int open_input_path(const char *path, FILE **out) {
   return *out != NULL;
 }
 
-static int open_output_path(const char *path, FILE **out) {
-  if (path == NULL || path[0] == '\0' || strcmp(path, "-") == 0) {
+static int path_is_stdio(const char *path) {
+  return path == NULL || path[0] == '\0' || strcmp(path, "-") == 0;
+}
+
+static int file_request_has_multiple_output_sinks(
+    const lql_file_filter_request *request) {
+  unsigned int sinks;
+  sinks = 0u;
+  if (request->output_writer != NULL) {
+    ++sinks;
+  }
+  if (request->output_file != NULL) {
+    ++sinks;
+  }
+  if (request->output_path != NULL) {
+    ++sinks;
+  }
+  return sinks > 1u;
+}
+
+static int same_open_file_identity(FILE *left, int right_fd, int *same) {
+  struct stat left_st;
+  struct stat right_st;
+  int left_fd;
+  *same = 0;
+  if (left == NULL || right_fd < 0) {
+    errno = EINVAL;
+    return 0;
+  }
+  left_fd = fileno(left);
+  if (left_fd < 0) {
+    return 1;
+  }
+  if (fstat(left_fd, &left_st) != 0 || fstat(right_fd, &right_st) != 0) {
+    return 0;
+  }
+  *same = left_st.st_dev == right_st.st_dev &&
+          left_st.st_ino == right_st.st_ino;
+  return 1;
+}
+
+static int open_output_path_checked(const char *path, FILE *input,
+                                    FILE **out, int *same_input_output) {
+  int fd;
+  int same;
+  struct stat output_st;
+  if (same_input_output != NULL) {
+    *same_input_output = 0;
+  }
+  if (path_is_stdio(path)) {
     *out = stdout;
     return 1;
   }
-  *out = fopen(path, "wb");
-  return *out != NULL;
+  fd = open(path, O_WRONLY | O_CREAT, 0666);
+  if (fd < 0) {
+    return 0;
+  }
+  if (!same_open_file_identity(input, fd, &same)) {
+    close(fd);
+    return 0;
+  }
+  if (same) {
+    if (same_input_output != NULL) {
+      *same_input_output = 1;
+    }
+    close(fd);
+    return 0;
+  }
+  if (fstat(fd, &output_st) != 0) {
+    close(fd);
+    return 0;
+  }
+  if (S_ISREG(output_st.st_mode) && ftruncate(fd, 0) != 0) {
+    close(fd);
+    return 0;
+  }
+  *out = fdopen(fd, "wb");
+  if (*out == NULL) {
+    close(fd);
+    return 0;
+  }
+  return 1;
 }
 
 static lql_stream_output_mode
@@ -181,8 +262,7 @@ lql_filter_file_spooled_internal(lql *self,
   output = request->output_file;
   close_input = 0;
   close_output = 0;
-  if (request->output_writer != NULL &&
-      (request->output_file != NULL || request->output_path != NULL)) {
+  if (file_request_has_multiple_output_sinks(request)) {
     lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
                   "file request has multiple output sinks");
     return LQL_STATUS_INVALID_ARGUMENT;
@@ -195,9 +275,17 @@ lql_filter_file_spooled_internal(lql *self,
     close_input = input != stdin;
   }
   if (output == NULL && request->output_writer == NULL) {
-    if (!open_output_path(request->output_path, &output)) {
+    int same_input_output;
+    if (!open_output_path_checked(request->output_path, input, &output,
+                                  &same_input_output)) {
       if (close_input) {
         fclose(input);
+      }
+      if (same_input_output) {
+        lql_set_error(error, LQL_STATUS_INVALID_ARGUMENT,
+                      "input and output paths identify the same file; use "
+                      "inline rewrite for in-place updates");
+        return LQL_STATUS_INVALID_ARGUMENT;
       }
       lql_set_error(error, LQL_STATUS_IO_ERROR, "unable to open output file");
       return LQL_STATUS_IO_ERROR;
@@ -327,7 +415,7 @@ static int inline_open_source(const char *path, int *out_fd,
 
 static long stat_mtime_nsec(const struct stat *st) {
 #if defined(__APPLE__)
-  return st->st_mtimensec;
+  return st->st_mtimespec.tv_nsec;
 #elif defined(__linux__)
   return st->st_mtim.tv_nsec;
 #else
@@ -338,13 +426,27 @@ static long stat_mtime_nsec(const struct stat *st) {
 
 static long stat_ctime_nsec(const struct stat *st) {
 #if defined(__APPLE__)
-  return st->st_ctimensec;
+  return st->st_ctimespec.tv_nsec;
 #elif defined(__linux__)
   return st->st_ctim.tv_nsec;
 #else
   (void)st;
   return 0L;
 #endif
+}
+
+static int inline_stat_equals_source(const struct stat *candidate,
+                                     const struct stat *source) {
+  return candidate->st_dev == source->st_dev &&
+         candidate->st_ino == source->st_ino &&
+         candidate->st_size == source->st_size &&
+         candidate->st_mode == source->st_mode &&
+         candidate->st_uid == source->st_uid &&
+         candidate->st_gid == source->st_gid &&
+         candidate->st_mtime == source->st_mtime &&
+         stat_mtime_nsec(candidate) == stat_mtime_nsec(source) &&
+         candidate->st_ctime == source->st_ctime &&
+         stat_ctime_nsec(candidate) == stat_ctime_nsec(source);
 }
 
 static int inline_source_path_still_matches(const char *path, int source_fd,
@@ -357,16 +459,7 @@ static int inline_source_path_still_matches(const char *path, int source_fd,
   }
   return current_path.st_dev == st->st_dev &&
          current_path.st_ino == st->st_ino &&
-         current_source.st_dev == st->st_dev &&
-         current_source.st_ino == st->st_ino &&
-         current_source.st_size == st->st_size &&
-         current_source.st_mode == st->st_mode &&
-         current_source.st_uid == st->st_uid &&
-         current_source.st_gid == st->st_gid &&
-         current_source.st_mtime == st->st_mtime &&
-         stat_mtime_nsec(&current_source) == stat_mtime_nsec(st) &&
-         current_source.st_ctime == st->st_ctime &&
-         stat_ctime_nsec(&current_source) == stat_ctime_nsec(st);
+         inline_stat_equals_source(&current_source, st);
 }
 
 static int sync_parent_dir(const char *path) {
@@ -672,6 +765,13 @@ lql_status lql_rewrite_file_inline_spooled_internal(
     status = LQL_STATUS_IO_ERROR;
   }
   if (status == LQL_STATUS_OK) {
+    /*
+     * The completed temp file is durable before rename, preserving the
+     * crash/failure atomicity expected from inline rewrite. The identity check
+     * detects cooperative changes through the held advisory lock; POSIX does
+     * not provide a portable atomic path-identity compare-and-swap for
+     * non-cooperating concurrent replacement.
+     */
     if (!inline_source_path_still_matches(request->input_path, source_check_fd,
                                           &st)) {
       lql_set_error(error, LQL_STATUS_IO_ERROR,

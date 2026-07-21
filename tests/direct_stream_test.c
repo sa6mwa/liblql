@@ -1,8 +1,13 @@
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
 #include <lql/lql.h>
 
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* Historical semantic tests intentionally exercise the explicit spooled API. */
 #define lql_stream_execute lql_stream_execute_spooled
@@ -5449,6 +5454,30 @@ static int write_test_file(const char *path, const unsigned char *data,
   return fclose(file) != 0;
 }
 
+static int read_test_file(const char *path, unsigned char *buffer,
+                          size_t capacity, size_t *out_len) {
+  FILE *file;
+  size_t amount;
+  if (path == NULL || buffer == NULL || capacity == 0u || out_len == NULL)
+    return 1;
+  file = fopen(path, "rb");
+  if (file == NULL)
+    return 1;
+  amount = fread(buffer, 1u, capacity, file);
+  if (ferror(file)) {
+    fclose(file);
+    return 1;
+  }
+  if (amount == capacity) {
+    fclose(file);
+    return 1;
+  }
+  if (fclose(file) != 0)
+    return 1;
+  *out_len = amount;
+  return 0;
+}
+
 static int run_path_is_regular_file(lql *ctx) {
   static const char path[] = "liblql-regular-file-probe.tmp";
   static const unsigned char payload[] = "{}\n";
@@ -5578,16 +5607,24 @@ static int run_file_backed_mutation_preflight_case(lql *ctx, const char *expr) {
 
 static int run_file_filter_callback_output(lql *ctx) {
   static const char path[] = "liblql-file-filter-callback.tmp";
+  static const char out_path[] = "liblql-file-filter-output.tmp";
+  static const char mem_out_path[] = "liblql-file-filter-memory-output.tmp";
+  static const char hardlink_path[] = "liblql-file-filter-hardlink.tmp";
   static const unsigned char input[] =
       "{\"status\":\"closed\",\"id\":1}\n{\"status\":\"open\",\"id\":2}\n";
   static const char selected[] = "{\"status\":\"open\",\"id\":2}\n";
+  unsigned char preserved[128];
   lql_file_filter_request request;
   lql_stream_result result;
   lql_selector *selector;
   lql_error error;
   test_writer writer;
+  size_t preserved_len;
 
   remove(path);
+  remove(out_path);
+  remove(mem_out_path);
+  remove(hardlink_path);
   if (write_test_file(path, input, sizeof(input) - 1u))
     return 1;
   selector = NULL;
@@ -5639,6 +5676,127 @@ static int run_file_filter_callback_output(lql *ctx) {
       LQL_STATUS_INVALID_ARGUMENT) {
     ctx->selector_destroy(ctx, selector);
     remove(path);
+    remove(out_path);
+    remove(mem_out_path);
+    remove(hardlink_path);
+    return 1;
+  }
+
+  memset(&request, 0, sizeof(request));
+  request.input_path = path;
+  request.output_file = stdout;
+  request.output_path = out_path;
+  if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+      LQL_STATUS_INVALID_ARGUMENT) {
+    ctx->selector_destroy(ctx, selector);
+    remove(path);
+    remove(out_path);
+    remove(mem_out_path);
+    remove(hardlink_path);
+    return 1;
+  }
+
+  memset(&request, 0, sizeof(request));
+  request.input_path = path;
+  request.output_path = path;
+  if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+          LQL_STATUS_INVALID_ARGUMENT ||
+      read_test_file(path, preserved, sizeof(preserved), &preserved_len) ||
+      preserved_len != sizeof(input) - 1u ||
+      memcmp(preserved, input, preserved_len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    remove(path);
+    remove(out_path);
+    remove(mem_out_path);
+    remove(hardlink_path);
+    return 1;
+  }
+
+  if (link(path, hardlink_path) == 0) {
+    memset(&request, 0, sizeof(request));
+    request.input_path = path;
+    request.output_path = hardlink_path;
+    if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+            LQL_STATUS_INVALID_ARGUMENT ||
+        read_test_file(path, preserved, sizeof(preserved), &preserved_len) ||
+        preserved_len != sizeof(input) - 1u ||
+        memcmp(preserved, input, preserved_len) != 0) {
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+  }
+
+  memset(&request, 0, sizeof(request));
+  request.input_path = path;
+  request.output_path = "/dev/null";
+  request.selector = selector;
+  request.matched_only = 1;
+  if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+          LQL_STATUS_OK ||
+      result.records_seen != 2u || result.records_matched != 1u) {
+    ctx->selector_destroy(ctx, selector);
+    remove(path);
+    remove(out_path);
+    remove(mem_out_path);
+    remove(hardlink_path);
+    return 1;
+  }
+
+#if defined(__linux__)
+  {
+    char memory_input[] =
+        "{\"status\":\"closed\",\"id\":1}\n{\"status\":\"open\",\"id\":2}\n";
+    FILE *memory_file;
+    lql_status status;
+    memory_file = fmemopen(memory_input, sizeof(memory_input) - 1u, "rb");
+    if (memory_file == NULL) {
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+    memset(&request, 0, sizeof(request));
+    request.input_file = memory_file;
+    request.output_path = mem_out_path;
+    request.selector = selector;
+    request.matched_only = 1;
+    status = ctx->filter_file_spooled(ctx, &request, &result, &error);
+    if (fclose(memory_file) != 0 || status != LQL_STATUS_OK ||
+        read_test_file(mem_out_path, preserved, sizeof(preserved),
+                       &preserved_len) ||
+        preserved_len != sizeof(selected) - 1u ||
+        memcmp(preserved, selected, preserved_len) != 0) {
+      ctx->selector_destroy(ctx, selector);
+      remove(path);
+      remove(out_path);
+      remove(mem_out_path);
+      remove(hardlink_path);
+      return 1;
+    }
+  }
+#endif
+
+  memset(&request, 0, sizeof(request));
+  request.input_path = path;
+  request.output_path = out_path;
+  request.selector = selector;
+  request.matched_only = 1;
+  if (ctx->filter_file_spooled(ctx, &request, &result, &error) !=
+          LQL_STATUS_OK ||
+      read_test_file(out_path, preserved, sizeof(preserved), &preserved_len) ||
+      preserved_len != sizeof(selected) - 1u ||
+      memcmp(preserved, selected, preserved_len) != 0) {
+    ctx->selector_destroy(ctx, selector);
+    remove(path);
+    remove(out_path);
+    remove(mem_out_path);
+    remove(hardlink_path);
     return 1;
   }
 
@@ -5655,6 +5813,9 @@ static int run_file_filter_callback_output(lql *ctx) {
 
   ctx->selector_destroy(ctx, selector);
   remove(path);
+  remove(out_path);
+  remove(mem_out_path);
+  remove(hardlink_path);
   return 0;
 }
 

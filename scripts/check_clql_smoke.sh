@@ -146,6 +146,10 @@ printf '%s\n' '{"id":"b","status":"ready","keep":2}' | cmp -s - "$tmp.out"
 "$clql" --count -m '/status=ready' '/id="b"' "$tmpdir/input.ndjson" >"$tmp.out"
 printf '1\n' | cmp -s - "$tmp.out"
 
+"$clql" --count -m '/status=ready' "$tmpdir/input.ndjson" \
+  "$tmpdir/input.ndjson" >"$tmp.out"
+printf '4\n' | cmp -s - "$tmp.out"
+
 "$clql" -f /id -m '/status=ready' '/id="b"' "$tmpdir/input.ndjson" >"$tmp.out"
 printf '%s\n%s\n' '{"id":"a"}' '{"id":"b","status":"ready"}' |
   cmp -s - "$tmp.out"
