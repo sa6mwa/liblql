@@ -1,0 +1,10 @@
+prefix=@LQL_PKGCONFIG_PREFIX_FROM_PCFILEDIR@
+exec_prefix=${prefix}
+libdir=@LQL_PKGCONFIG_LIBDIR@
+includedir=@LQL_PKGCONFIG_INCLUDEDIR@
+
+Name: liblql
+Description: C implementation of LQL
+Version: @LQL_RESOLVED_VERSION@
+Libs: -L${libdir} -llql
+Cflags: -I${includedir}

@@ -1,0 +1,8 @@
+CompileFlags:
+  CompilationDatabase: build/debug
+  Add:
+    - -Iinclude
+    - -Ibuild/debug/generated/include
+    - -std=c89
+Diagnostics:
+  UnusedIncludes: None

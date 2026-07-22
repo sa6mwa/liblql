@@ -1,0 +1,111 @@
+set(CPKT_TARGET_ID "${LQL_TARGET_ID}" CACHE STRING "pkt.systems target id")
+if(NOT CPKT_TARGET_ID)
+  set(CPKT_TARGET_ID "x86_64-linux-gnu" CACHE STRING "pkt.systems target id" FORCE)
+endif()
+
+set(CPKT_TOOLCHAIN_RESOLVER
+    "${CMAKE_CURRENT_LIST_DIR}/../scripts/cpkt-toolchains.sh")
+if(NOT EXISTS "${CPKT_TOOLCHAIN_RESOLVER}")
+  message(FATAL_ERROR "Missing Bootlin toolchain resolver: ${CPKT_TOOLCHAIN_RESOLVER}")
+endif()
+
+execute_process(
+  COMMAND "${CPKT_TOOLCHAIN_RESOLVER}" ensure "${CPKT_TARGET_ID}"
+  RESULT_VARIABLE CPKT_ENSURE_RESULT
+  OUTPUT_QUIET
+  ERROR_VARIABLE CPKT_ENSURE_ERROR)
+if(NOT CPKT_ENSURE_RESULT EQUAL 0)
+  message(FATAL_ERROR
+          "Unable to provision lifecycle toolchain for ${CPKT_TARGET_ID}: ${CPKT_ENSURE_ERROR}")
+endif()
+
+execute_process(
+  COMMAND "${CPKT_TOOLCHAIN_RESOLVER}" discover "${CPKT_TARGET_ID}"
+  RESULT_VARIABLE CPKT_DISCOVER_RESULT
+  OUTPUT_VARIABLE CPKT_DISCOVER_OUTPUT
+  ERROR_VARIABLE CPKT_DISCOVER_ERROR)
+if(NOT CPKT_DISCOVER_RESULT EQUAL 0)
+  message(FATAL_ERROR
+          "Unable to inspect lifecycle toolchain for ${CPKT_TARGET_ID}: ${CPKT_DISCOVER_ERROR}")
+endif()
+if(NOT CPKT_DISCOVER_OUTPUT MATCHES "(^|\n)status=ready(\n|$)")
+  message(FATAL_ERROR
+          "Lifecycle toolchain is not ready for ${CPKT_TARGET_ID}:\n${CPKT_DISCOVER_OUTPUT}")
+endif()
+
+function(cpkt_value name out)
+  string(REGEX MATCH "(^|\n)${name}=([^\n]+)" match "${CPKT_DISCOVER_OUTPUT}")
+  if(NOT match)
+    message(FATAL_ERROR
+            "Lifecycle toolchain did not report ${name} for ${CPKT_TARGET_ID}")
+  endif()
+  set(${out} "${CMAKE_MATCH_2}" PARENT_SCOPE)
+endfunction()
+
+cpkt_value(source CPKT_SOURCE)
+cpkt_value(root CPKT_ROOT)
+cpkt_value(prefix CPKT_PREFIX)
+cpkt_value(cc CPKT_CC)
+cpkt_value(cxx CPKT_CXX)
+cpkt_value(ld CPKT_LD)
+cpkt_value(ar CPKT_AR)
+cpkt_value(ranlib CPKT_RANLIB)
+cpkt_value(strip CPKT_STRIP)
+cpkt_value(nm CPKT_NM)
+
+if(CPKT_TARGET_ID MATCHES "linux")
+  cpkt_value(sysroot CPKT_SYSROOT)
+  cpkt_value(objcopy CPKT_OBJCOPY)
+  cpkt_value(objdump CPKT_OBJDUMP)
+  cpkt_value(addr2line CPKT_ADDR2LINE)
+  cpkt_value(readelf CPKT_READELF)
+  set(CMAKE_SYSTEM_NAME Linux)
+  if(CPKT_TARGET_ID MATCHES "^x86_64-")
+    set(CMAKE_SYSTEM_PROCESSOR x86_64)
+  elseif(CPKT_TARGET_ID MATCHES "^aarch64-")
+    set(CMAKE_SYSTEM_PROCESSOR aarch64)
+  elseif(CPKT_TARGET_ID MATCHES "^armhf-")
+    set(CMAKE_SYSTEM_PROCESSOR arm)
+  endif()
+  set(CMAKE_SYSROOT "${CPKT_SYSROOT}" CACHE PATH "" FORCE)
+  set(CMAKE_FIND_ROOT_PATH "${CPKT_SYSROOT}" "${CPKT_ROOT}" CACHE STRING "" FORCE)
+  set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER CACHE STRING "" FORCE)
+  set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY CACHE STRING "" FORCE)
+  set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY CACHE STRING "" FORCE)
+  set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY CACHE STRING "" FORCE)
+elseif(CPKT_TARGET_ID STREQUAL "arm64-apple-darwin")
+  cpkt_value(otool CPKT_OTOOL)
+  set(ENV{PATH} "${CPKT_ROOT}/bin:$ENV{PATH}")
+  set(CMAKE_SYSTEM_NAME Darwin)
+  set(CMAKE_SYSTEM_PROCESSOR arm64)
+  set(CMAKE_OSX_ARCHITECTURES arm64 CACHE STRING "" FORCE)
+  set(CMAKE_OTOOL "${CPKT_OTOOL}" CACHE FILEPATH "" FORCE)
+  set(CMAKE_INSTALL_NAME_TOOL "${CPKT_ROOT}/bin/${CPKT_PREFIX}-install_name_tool"
+      CACHE FILEPATH "" FORCE)
+  set(CMAKE_EXE_LINKER_FLAGS "--ld-path=${CPKT_LD}" CACHE STRING "" FORCE)
+  set(CMAKE_SHARED_LINKER_FLAGS "--ld-path=${CPKT_LD}" CACHE STRING "" FORCE)
+  set(CMAKE_MODULE_LINKER_FLAGS "--ld-path=${CPKT_LD}" CACHE STRING "" FORCE)
+else()
+  message(FATAL_ERROR "Unsupported lifecycle target: ${CPKT_TARGET_ID}")
+endif()
+
+set(CMAKE_C_COMPILER "${CPKT_CC}" CACHE FILEPATH "" FORCE)
+set(CMAKE_CXX_COMPILER "${CPKT_CXX}" CACHE FILEPATH "" FORCE)
+set(CMAKE_LINKER "${CPKT_LD}" CACHE FILEPATH "" FORCE)
+set(CMAKE_AR "${CPKT_AR}" CACHE FILEPATH "" FORCE)
+set(CMAKE_RANLIB "${CPKT_RANLIB}" CACHE FILEPATH "" FORCE)
+set(CMAKE_STRIP "${CPKT_STRIP}" CACHE FILEPATH "" FORCE)
+set(CMAKE_NM "${CPKT_NM}" CACHE FILEPATH "" FORCE)
+if(DEFINED CPKT_OBJCOPY)
+  set(CMAKE_OBJCOPY "${CPKT_OBJCOPY}" CACHE FILEPATH "" FORCE)
+endif()
+if(DEFINED CPKT_OBJDUMP)
+  set(CMAKE_OBJDUMP "${CPKT_OBJDUMP}" CACHE FILEPATH "" FORCE)
+endif()
+if(DEFINED CPKT_ADDR2LINE)
+  set(CMAKE_ADDR2LINE "${CPKT_ADDR2LINE}" CACHE FILEPATH "" FORCE)
+endif()
+if(DEFINED CPKT_READELF)
+  set(CMAKE_READELF "${CPKT_READELF}" CACHE FILEPATH "" FORCE)
+endif()
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)

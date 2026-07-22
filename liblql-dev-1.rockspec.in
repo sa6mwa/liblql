@@ -1,0 +1,43 @@
+package = "liblql"
+version = "@LQL_ROCK_VERSION@"
+
+source = {
+  url = "@LQL_ROCK_SOURCE_URL@",
+  dir = "@LQL_ROCK_SOURCE_DIR@"
+}
+
+description = {
+  summary = "Lua facade for liblql",
+  detailed = "Lua 5.5 bindings for liblql direct streaming selectors.",
+  homepage = "https://github.com/cjdelisle/liblql",
+  license = "MIT"
+}
+
+dependencies = {
+  "lua == 5.5"
+}
+
+external_dependencies = {
+  LIBLQL = {
+    header = "lql/lql.h",
+    library = "lql"
+  }
+}
+
+build = {
+  type = "builtin",
+  install = {
+    bin = {
+      ["lql.lua"] = "lua/bin/lql.lua"
+    }
+  },
+  modules = {
+    ["lql"] = "lua/lql/init.lua",
+    ["lql.core"] = {
+      sources = { "lua/lql_core.c" },
+      incdirs = { "$(LIBLQL_INCDIR)" },
+      libdirs = { "$(LIBLQL_LIBDIR)" },
+      libraries = { "lql" }
+    }
+  }
+}
