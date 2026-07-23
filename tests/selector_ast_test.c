@@ -1285,6 +1285,26 @@ static void test_invalid_cases(lql *ctx) {
       "{\"range\":{\"field\":\"/x\",\"gte\":\"1\\u0000junk\"}}",
       "{\"date\":{\"field\":\"/timestamp\",\"since\":\"today\\u0000junk\"}}"};
   size_t i;
+  selector = NULL;
+  if (expect_fail("invalid_json_exists_bare_path",
+                  ctx->selector_parse_json(ctx, "{\"exists\":\"status\"}",
+                                           strlen("{\"exists\":\"status\"}"),
+                                           &selector, &error))) {
+    if (error.code != LQL_STATUS_PARSE_ERROR ||
+        strcmp(error.message, "selector field must be a JSON pointer") != 0) {
+      fail("invalid_json_exists_bare_path",
+           "expected JSON pointer parse error");
+    }
+    ctx->selector_destroy(ctx, selector);
+  }
+  selector = NULL;
+  if (ctx->selector_parse_json(ctx, "{\"exists\":\"status\"}",
+                               strlen("{\"exists\":\"status\"}"), &selector,
+                               NULL) != LQL_STATUS_PARSE_ERROR) {
+    fail("invalid_json_exists_bare_path_without_error",
+         "expected parse error status without error details");
+  }
+  ctx->selector_destroy(ctx, selector);
   for (i = 0u; i < sizeof(bad_exprs) / sizeof(bad_exprs[0]); ++i) {
     selector = NULL;
     if (expect_fail("invalid_expr", ctx->selector_parse(ctx, bad_exprs[i],

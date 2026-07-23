@@ -1,5 +1,6 @@
 /build/
 /dist/
+/stash/
 compile_commands.json
 *.o
 *.a

@@ -369,11 +369,8 @@ static char *normalize_field_path(lql_selector_parser *ctx, const char *field) {
   size_t count;
   size_t i;
 
-  if (field == NULL) {
+  if (field == NULL || field[0] != '/') {
     return NULL;
-  }
-  if (field[0] != '/') {
-    return ctx->allocator->strdup(ctx->allocator, field);
   }
   out = NULL;
   out_len = 0u;
@@ -587,15 +584,13 @@ static lql_selector_literal_kind selector_literal_kind(const char *raw) {
 static int selector_kind_uses_textual_needles(lql_selector_kind kind) {
   return kind == LQL_SELECTOR_KIND_CONTAINS ||
          kind == LQL_SELECTOR_KIND_ICONTAINS ||
-         kind == LQL_SELECTOR_KIND_PREFIX ||
-         kind == LQL_SELECTOR_KIND_IPREFIX;
+         kind == LQL_SELECTOR_KIND_PREFIX || kind == LQL_SELECTOR_KIND_IPREFIX;
 }
 
 static int parse_any_values(lql_selector_parser *ctx, char *decoded,
                             lql_selector *selector,
                             int reject_surrounding_whitespace,
-                            int textual_needles,
-                            lql_error *error) {
+                            int textual_needles, lql_error *error) {
   char *cursor;
   char *bar;
   char *item;
@@ -994,6 +989,19 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
       goto fail;
     }
     if (key_is_field(key)) {
+      if (decoded[0] == '\0') {
+        ctx->allocator->destroy(ctx->allocator, decoded);
+        st = LQL_STATUS_PARSE_ERROR;
+        lql_set_error(error, LQL_STATUS_PARSE_ERROR, "selector field required");
+        goto fail;
+      }
+      if (decoded[0] != '/') {
+        ctx->allocator->destroy(ctx->allocator, decoded);
+        st = LQL_STATUS_PARSE_ERROR;
+        lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                      "selector field must be a JSON pointer");
+        goto fail;
+      }
       normalized = normalize_field_path(ctx, decoded);
       ctx->allocator->destroy(ctx->allocator, decoded);
       if (normalized == NULL) {
@@ -1021,11 +1029,10 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
         selector->value_set = 0;
         selector->value_kind = LQL_SELECTOR_LITERAL_STRING;
       } else {
-        selector_set_value_len(
-            ctx, selector, decoded, strlen(decoded),
-            selector_kind_uses_textual_needles(kind)
-                ? LQL_SELECTOR_LITERAL_STRING
-                : selector_literal_kind(*seen_slot));
+        selector_set_value_len(ctx, selector, decoded, strlen(decoded),
+                               selector_kind_uses_textual_needles(kind)
+                                   ? LQL_SELECTOR_LITERAL_STRING
+                                   : selector_literal_kind(*seen_slot));
       }
     } else if (kind == LQL_SELECTOR_KIND_DATE &&
                (key_is_after(key) || key_is_before(key) || key_is_since(key))) {
@@ -1235,6 +1242,13 @@ static lql_status parse_exists_body(lql_selector_parser *ctx, const char *body,
     token_list_cleanup(ctx, &parts);
     lql_set_error(error, LQL_STATUS_PARSE_ERROR,
                   "exists selector requires exactly one path");
+    return LQL_STATUS_PARSE_ERROR;
+  }
+  if (decoded[0] != '/') {
+    ctx->allocator->destroy(ctx->allocator, decoded);
+    token_list_cleanup(ctx, &parts);
+    lql_set_error(error, LQL_STATUS_PARSE_ERROR,
+                  "selector field must be a JSON pointer");
     return LQL_STATUS_PARSE_ERROR;
   }
   normalized = normalize_field_path(ctx, decoded);
@@ -1625,6 +1639,18 @@ static int selector_json_store_field(selector_json_state *state,
                                      lql_selector *selector,
                                      const char *value) {
   char *normalized;
+  if (value == NULL || value[0] == '\0') {
+    state->status = LQL_STATUS_PARSE_ERROR;
+    lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
+                  "selector field required");
+    return 0;
+  }
+  if (value[0] != '/') {
+    state->status = LQL_STATUS_PARSE_ERROR;
+    lql_set_error(state->error, LQL_STATUS_PARSE_ERROR,
+                  "selector field must be a JSON pointer");
+    return 0;
+  }
   normalized = normalize_field_path(&state->parser, value);
   if (normalized == NULL) {
     return 0;
@@ -2162,8 +2188,15 @@ static lql_status selector_json_string_end(void *user, lql_error *error) {
                                 "exists selector path contains NUL");
     }
     if (!selector_json_store_field(state, frame->selector, state->text)) {
-      return selector_json_fail(state, error, LQL_STATUS_NO_MEMORY,
-                                "out of memory");
+      return selector_json_fail(
+          state, error,
+          state->status != LQL_STATUS_OK ? state->status
+          : state->error != NULL && state->error->code != LQL_STATUS_OK
+              ? state->error->code
+              : LQL_STATUS_NO_MEMORY,
+          state->error != NULL && state->error->message[0] != '\0'
+              ? state->error->message
+              : "out of memory");
     }
     state->parser.allocator->destroy(state->parser.allocator,
                                      frame->pending_key);

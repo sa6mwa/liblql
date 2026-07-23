@@ -1,6 +1,6 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression tar-portability-check lifecycle-check lifecycle-version-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify release-upload-list verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all print-test-all-gates test-all-timed test-all-gates direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap direct-parity-smoke direct-parity-matrix direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression tar-portability-check lifecycle-check lifecycle-version-contract ctest-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify release-upload-list verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all print-test-all-gates test-all-timed test-all-gates selector-ast-contract sdk-parity-contract direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap sdk-parity-gate direct-parity-matrix direct-perf-gate direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
-TEST_ALL_GATES := lifecycle-check target-tool-check direct-reset direct-no-lonejson test mutation-literal-parity shared-only-smoke lua-test lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-selector-parity clql-mutation-parity package-verify direct-parity-matrix direct-callback-whitespace direct-live-heap
+TEST_ALL_GATES := lifecycle-check target-tool-check ctest-contract selector-ast-contract sdk-parity-contract direct-reset direct-no-lonejson test mutation-literal-parity shared-only-smoke lua-test lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-selector-parity clql-mutation-parity package-verify sdk-parity-gate direct-perf-gate direct-callback-whitespace direct-live-heap
 
 help:
 	@printf '%s\n' \
@@ -14,6 +14,7 @@ help:
 	  'make tar-portability-check  verify package tar option detection' \
 	  'make lifecycle-check  verify lifecycle preset/command contract' \
 	  'make lifecycle-version-contract  verify exact-tag and override version contract' \
+	  'make ctest-contract  verify CTest labels and timeouts' \
 	  'make target-tool-check  verify target inspection tool discovery' \
 	  'make build        build the debug lifecycle preset' \
 	  'make build-debug   build the debug self-contained liblql direct-execution implementation' \
@@ -57,14 +58,17 @@ help:
 	  'make release       verify version contract, clean, then run the full release proof graph' \
 	  'make print-release-version print the version used by package/release targets' \
 	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates with elapsed time' \
+	  'make selector-ast-contract  verify selector AST oracle inventory and source contract' \
+	  'make sdk-parity-contract  verify SDK parity gate coverage contract' \
 	  'make direct-reset  verify removed execution architecture stays removed' \
 	  'make direct-no-lonejson  verify liblql has no LoneJSON runtime dependency' \
 	  'make direct-probe  build the optimized direct-execution probe' \
 	  'make direct-bench  build the optimized direct benchmark runner' \
 	  'make direct-callback-whitespace  verify whitespace callback capture uses compact spool' \
 	  'make direct-live-heap  run Massif live-heap gate for direct execution' \
-	  'make direct-parity-smoke  run GCC C-vs-Go direct-execution parity smoke' \
-	  'make direct-parity-matrix run broader GCC C-vs-Go direct-execution parity matrix' \
+	  'make sdk-parity-gate  run fast liblql SDK-vs-Go parity gate' \
+	  'make direct-parity-matrix run broader liblql SDK-vs-Go parity matrix' \
+	  'make direct-perf-gate run selected hard C-vs-Go direct performance/RSS gate' \
 	  'make direct-profile-hotspots profile tight GCC direct-execution rows with perf' \
 	  'make bench-gate    run the accepted direct-execution performance gate' \
 	  'make perf-gate     alias for bench-gate' \
@@ -103,12 +107,15 @@ dependency-cache-privacy-regression:
 tar-portability-check:
 	@sh scripts/check_tar_portability.sh
 
-lifecycle-check: toolchain-check dependency-cache-check tar-portability-check
+lifecycle-check: toolchain-check dependency-cache-check tar-portability-check ctest-contract sdk-parity-contract
 	@python3 scripts/check_lifecycle_presets.py
 	@sh scripts/check_release_targets.sh
 
 lifecycle-version-contract:
 	@sh scripts/check_lifecycle_version_contract.sh
+
+ctest-contract:
+	@python3 scripts/check_ctest_contract.py
 
 target-tool-check:
 	@python3 -c 'import ast,pathlib; ast.parse(pathlib.Path("scripts/discover_target_tools.py").read_text(), "scripts/discover_target_tools.py")'
@@ -116,6 +123,12 @@ target-tool-check:
 	@sh scripts/check_darwin_linker_route.sh
 
 build: build-debug
+
+selector-ast-contract:
+	@sh scripts/check_selector_ast_contract.sh
+
+sdk-parity-contract:
+	@sh scripts/check_sdk_parity_contract.sh
 
 build-debug:
 	@sh scripts/build.sh
@@ -244,6 +257,7 @@ release-matrix:
 
 release-pipeline:
 	@$(MAKE) --no-print-directory -f Makefile test-all
+	@$(MAKE) --no-print-directory -f Makefile direct-parity-matrix
 	@$(MAKE) --no-print-directory -f Makefile release-matrix
 
 prerelease: release-pipeline
@@ -293,7 +307,7 @@ direct-callback-whitespace: direct-bench
 direct-live-heap: direct-bench
 	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench sh scripts/check_direct_live_heap.sh
 
-direct-parity-smoke: direct-bench
+sdk-parity-gate: direct-bench
 	@mkdir -p build
 	@cd reference/go-benchmark && go build -o ../../build/reference-lqlbench ./cmd/lqlbench
 	@cd reference/go-benchmark && go build -o ../../build/reference-benchvalidate ./cmd/benchvalidate
@@ -305,10 +319,16 @@ direct-parity-matrix: direct-bench
 	@cd reference/go-benchmark && go build -o ../../build/reference-benchvalidate ./cmd/benchvalidate
 	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench LQL_GO_BENCH_PATH=build/reference-lqlbench LQL_BENCHVALIDATE_PATH=build/reference-benchvalidate sh scripts/check_direct_parity_matrix.sh
 
+direct-perf-gate: direct-bench
+	@mkdir -p build
+	@cd reference/go-benchmark && go build -o ../../build/reference-lqlbench ./cmd/lqlbench
+	@cd reference/go-benchmark && go build -o ../../build/reference-benchvalidate ./cmd/benchvalidate
+	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench LQL_GO_BENCH_PATH=build/reference-lqlbench LQL_BENCHVALIDATE_PATH=build/reference-benchvalidate sh scripts/check_direct_perf_gate.sh
+
 direct-profile-hotspots: direct-bench
 	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench sh scripts/profile_direct_hotspots.sh
 
-bench-gate: direct-parity-matrix
+bench-gate: direct-perf-gate
 
 perf-gate: bench-gate
 

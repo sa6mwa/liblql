@@ -30,6 +30,12 @@ function(lql_allow_test_partial_initializers target)
     -Wno-missing-field-initializers)
 endfunction()
 
+function(lql_set_test_contract name labels timeout)
+  set_tests_properties(${name} PROPERTIES
+    LABELS "${labels}"
+    TIMEOUT ${timeout})
+endfunction()
+
 option(LQL_BUILD_STATIC "Build static liblql" ON)
 option(LQL_BUILD_SHARED "Build shared liblql" ON)
 option(LQL_BUILD_BINARY "Build clql command-line tool" ON)
@@ -173,6 +179,8 @@ if(BUILD_TESTING)
   add_test(NAME lql.example.filter_file_spooled
            COMMAND lql_filter_file_spooled_example
                    "${CMAKE_CURRENT_SOURCE_DIR}/examples/status.ndjson")
+  lql_set_test_contract(lql.example.filter_file_spooled
+                        "example-smoke;smoke;local" 5)
   add_executable(lql_rewrite_file_inline_spooled_example examples/rewrite_file_inline_spooled.c)
   target_link_libraries(lql_rewrite_file_inline_spooled_example PRIVATE ${LQL_INTERNAL_LIBRARY})
   lql_configure_c89_target(lql_rewrite_file_inline_spooled_example)
@@ -180,6 +188,8 @@ if(BUILD_TESTING)
            COMMAND sh -c
                    "tmp=\"$PWD/lql-inline-example.$$\"; cp \"${CMAKE_CURRENT_SOURCE_DIR}/examples/status.ndjson\" \"$tmp\" && \"$1\" \"$tmp\" && grep '\"processed\":true' \"$tmp\" >/dev/null; rc=$?; rm \"$tmp\"; exit $rc"
                    sh "$<TARGET_FILE:lql_rewrite_file_inline_spooled_example>")
+  lql_set_test_contract(lql.example.rewrite_file_inline_spooled
+                        "example-smoke;smoke;local" 5)
   add_executable(lql_json_scan_test tests/json_scan_test.c)
   target_include_directories(lql_json_scan_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -192,15 +202,18 @@ if(BUILD_TESTING)
   lql_configure_c89_target(lql_json_scan_test)
   lql_allow_test_partial_initializers(lql_json_scan_test)
   add_test(NAME lql.json_scan COMMAND lql_json_scan_test)
+  lql_set_test_contract(lql.json_scan "unit;local" 10)
   add_executable(lql_direct_stream_test tests/direct_stream_test.c)
   target_link_libraries(lql_direct_stream_test PRIVATE ${LQL_INTERNAL_LIBRARY})
   lql_configure_c89_target(lql_direct_stream_test)
   add_test(NAME lql.direct_stream COMMAND lql_direct_stream_test)
+  lql_set_test_contract(lql.direct_stream "unit;integration;local" 20)
   add_executable(lql_selector_ast_test tests/selector_ast_test.c)
   target_link_libraries(lql_selector_ast_test PRIVATE ${LQL_INTERNAL_LIBRARY})
   lql_configure_c89_target(lql_selector_ast_test)
   lql_allow_test_partial_initializers(lql_selector_ast_test)
   add_test(NAME lql.selector_ast COMMAND lql_selector_ast_test)
+  lql_set_test_contract(lql.selector_ast "unit;local" 10)
 endif()
 
 if(LQL_BUILD_DIRECT_PROBE)

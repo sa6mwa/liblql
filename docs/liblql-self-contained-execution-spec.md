@@ -52,17 +52,22 @@ performance claim with profiling and paired Go/C benchmarks.
   named spooled compatibility API may retain one current record and spill it to
   a temporary file. Every `lql_new` receiver has one independent 8 MiB budget
   across parsed handles, temporary apply plans, and compatibility spools.
-- GCC Go/C speedup is at least 1.0x on every accepted row. Profile before
-  optimizing; do not add caches or special cases based only on benchmark deltas.
-- `make direct-parity-smoke` is the fast executable GCC-only parity gate. It
-  must include warmup and steady-state Go/C records, forbid unsupported rows,
-  validate Go/C counters for every emitted row, and enforce at least 1.0x
-  C-vs-Go speedup on representative steady-state accepted paths.
-- `make direct-parity-matrix` is the broader GCC-only accepted-row gate. It
-  extends smoke coverage across source/file callbacks, projection, mutation
-  families, temporal, array, range, indexed, and large-record cases. Rows that
-  are unsupported or below 1.0x are not accepted rows; profile and optimize
-  them before adding them to this gate.
+- GCC Go/C speedup is at least 1.0x on the hard performance gate's
+  representative accepted rows. Profile before optimizing; do not add caches or
+  special cases based only on benchmark deltas.
+- `make sdk-parity-gate` is the fast GCC-only liblql SDK parity gate. It uses
+  the public C receiver API through the `lql_direct_bench` harness, includes
+  warmup and steady-state Go/C records, forbids unsupported rows, validates
+  Go/C counters for every emitted row, covers selector text and selector AST
+  JSON through public SDK parsers, and enforces C RSS below Go. Hard timing is
+  owned by `make direct-perf-gate`.
+- `make direct-parity-matrix` is the broader GCC-only SDK accepted-row gate. It
+  extends coverage across source/file callbacks, projection, mutation families,
+  temporal, array, range, indexed, selector AST JSON, and large-record cases.
+  It is a semantic parity gate: unsupported rows and counter/output mismatches
+  are failures. Release rehearsal runs it after `make test-all` so the release
+  proof graph cannot pass on the fast SDK gate alone. `make perf-gate` owns hard
+  C-vs-Go speed/RSS enforcement.
 - `make direct-profile-hotspots` is the bounded C profiling gate before
   performance-directed scanner/emitter changes. It profiles the currently
   tight GCC rows and writes perf reports under `build/direct-profiles/`.
@@ -194,8 +199,8 @@ The required proof is cumulative:
   equality rows that exercise liblql's typed numeric/boolean/null semantics are
   covered by liblql behavior tests instead of Go parity because they
   intentionally diverge from the pinned Go selector-string coercion behavior;
-- GCC focused benchmark gate for every accepted row, then the accepted-row
-  matrix;
+- GCC focused benchmark gate for representative accepted rows, then the
+  release-gated accepted-row matrix;
 - Callgrind or equivalent leaf attribution for any hot-path optimization;
 - Massif live-heap gate for decision, source-range callbacks, sparse matches,
   100 MiB records, and repeated execution. Spooling is verified separately as

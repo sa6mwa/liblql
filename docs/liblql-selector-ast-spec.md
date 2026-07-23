@@ -193,10 +193,15 @@ Serialization omits empty fields the same way Go omits `omitempty` fields. The
 zero-value selector serializes as an empty JSON object. JSON object member order
 is not a compatibility contract. The required contract is that Go-emitted
 selector AST JSON parses into liblql and liblql-emitted selector AST JSON parses
-as the same logical AST. JSON scalar equality is an intentional semantic
-divergence from Go: liblql treats unquoted text-selector numbers, booleans, and
-null as typed JSON scalar literals, quoted values as strings, and JSON numbers
-as equal by numeric value instead of by source spelling.
+as the same logical AST when the selector is executable by the Go SDK. Field
+paths are JSON pointers and must begin with `/`. The pinned Go parser can build
+a public AST containing bare fields such as `"status"`, but Go SDK execution
+rejects those selectors as invalid JSON pointers; liblql rejects them earlier
+at text parse, JSON import, or builder validation time. JSON scalar equality is
+an intentional semantic divergence from Go: liblql treats unquoted text-selector
+numbers, booleans, and null as typed JSON scalar literals, quoted values as
+strings, and JSON numbers as equal by numeric value instead of by source
+spelling.
 
 String terms have critical invariants:
 

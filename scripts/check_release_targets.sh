@@ -18,6 +18,8 @@ require_line '^prerelease: release-pipeline$' \
   'prerelease must share release-pipeline'
 require_line '^lifecycle-version-contract:$' \
   'lifecycle-version-contract target is missing'
+require_line '^ctest-contract:$' \
+  'ctest-contract target is missing'
 require_line '^prerelease-hardening: prerelease$' \
   'prerelease-hardening must preserve the shared prerelease graph'
 require_line '^package-checksums:$' \
@@ -28,10 +30,18 @@ require_line '^verify-release-privacy:$' \
   'verify-release-privacy target is missing'
 require_line '^clean-dist:$' \
   'clean-dist target is missing'
+require_line '^selector-ast-contract:$' \
+  'selector-ast-contract target is missing'
+require_line '^sdk-parity-contract:$' \
+  'sdk-parity-contract target is missing'
+require_line '^sdk-parity-gate: direct-bench$' \
+  'sdk-parity-gate must be the public liblql SDK parity gate'
 require_line '^direct-parity-matrix: direct-bench$' \
-  'direct-parity-matrix must be the public parity matrix target'
-require_line '^bench-gate: direct-parity-matrix$' \
-  'bench-gate must enforce the accepted direct parity matrix'
+  'direct-parity-matrix must preserve the broad SDK parity matrix target'
+require_line '^direct-perf-gate: direct-bench$' \
+  'direct-perf-gate must be the public direct performance target'
+require_line '^bench-gate: direct-perf-gate$' \
+  'bench-gate must enforce the selected hard direct performance gate'
 require_line '^release:$' \
   'release target is missing'
 
@@ -45,7 +55,8 @@ release_line=$(grep -n '^release:$' "$makefile" | cut -d: -f1 | head -1)
 pipeline_target_line=$(grep -n '^release-pipeline:$' "$makefile" |
   cut -d: -f1 | head -1)
 pipeline_test_line=$((pipeline_target_line + 1))
-pipeline_matrix_line=$((pipeline_target_line + 2))
+pipeline_parity_line=$((pipeline_target_line + 2))
+pipeline_matrix_line=$((pipeline_target_line + 3))
 version_line=$((release_line + 1))
 clean_line=$((release_line + 2))
 pipeline_line=$((release_line + 3))
@@ -54,6 +65,7 @@ clean_cmd=$(sed -n "${clean_line}p" "$makefile")
 pipeline_cmd=$(sed -n "${pipeline_line}p" "$makefile")
 tab=$(printf '\t')
 pipeline_test_cmd=$(sed -n "${pipeline_test_line}p" "$makefile")
+pipeline_parity_cmd=$(sed -n "${pipeline_parity_line}p" "$makefile")
 pipeline_matrix_cmd=$(sed -n "${pipeline_matrix_line}p" "$makefile")
 
 if [ "$pipeline_test_cmd" != "${tab}@\$(MAKE) --no-print-directory -f Makefile test-all" ]; then
@@ -61,8 +73,13 @@ if [ "$pipeline_test_cmd" != "${tab}@\$(MAKE) --no-print-directory -f Makefile t
   exit 1
 fi
 
+if [ "$pipeline_parity_cmd" != "${tab}@\$(MAKE) --no-print-directory -f Makefile direct-parity-matrix" ]; then
+  printf 'release target check: release-pipeline must run direct-parity-matrix after test-all\n' >&2
+  exit 1
+fi
+
 if [ "$pipeline_matrix_cmd" != "${tab}@\$(MAKE) --no-print-directory -f Makefile release-matrix" ]; then
-  printf 'release target check: release-pipeline must run release-matrix after test-all\n' >&2
+  printf 'release target check: release-pipeline must run release-matrix after direct-parity-matrix\n' >&2
   exit 1
 fi
 

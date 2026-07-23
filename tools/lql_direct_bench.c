@@ -602,11 +602,12 @@ static const char *const *mutations_for(const char *selector_name,
 }
 
 static int run_once(FILE *file, lql *ctx, lql_selector *selector,
-                    const char *expr, int reparse, const char *mode,
-                    int input_is_compact, lql_projection *projection,
-                    lql_mutation *mutation, size_t max_records,
-                    size_t max_bytes, lql_stream_result *result,
-                    bench_writer *writer, lql_error *error) {
+                    const char *expr, int selector_json, int reparse,
+                    const char *mode, int input_is_compact,
+                    lql_projection *projection, lql_mutation *mutation,
+                    size_t max_records, size_t max_bytes,
+                    lql_stream_result *result, bench_writer *writer,
+                    lql_error *error) {
   bench_reader reader;
   lql_stream_request request;
   lql_selector *temporary;
@@ -615,9 +616,16 @@ static int run_once(FILE *file, lql *ctx, lql_selector *selector,
     return 0;
   }
   temporary = NULL;
-  if (reparse &&
-      ctx->selector_parse(ctx, expr, &temporary, error) != LQL_STATUS_OK) {
-    return 0;
+  if (reparse) {
+    if (selector_json) {
+      if (ctx->selector_parse_json(ctx, expr, strlen(expr), &temporary,
+                                   error) != LQL_STATUS_OK) {
+        return 0;
+      }
+    } else if (ctx->selector_parse(ctx, expr, &temporary, error) !=
+               LQL_STATUS_OK) {
+      return 0;
+    }
   }
   memset(&reader, 0, sizeof(reader));
   reader.file = file;
@@ -704,6 +712,7 @@ int main(int argc, char **argv) {
   const char *unsupported_reason;
   size_t mutation_count;
   const char *const *mutations;
+  int selector_json;
   int skip_fixture_hash;
   int i;
 
@@ -716,6 +725,7 @@ int main(int argc, char **argv) {
   projection_path = "/id";
   max_records = 0u;
   max_bytes = 0u;
+  selector_json = 0;
   skip_fixture_hash = 0;
   for (i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--fixture") == 0 && i + 1 < argc) {
@@ -726,6 +736,8 @@ int main(int argc, char **argv) {
       selector_name = argv[++i];
     } else if (strcmp(argv[i], "--expr") == 0 && i + 1 < argc) {
       expr = argv[++i];
+    } else if (strcmp(argv[i], "--selector-json") == 0) {
+      selector_json = 1;
     } else if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
       mode = argv[++i];
     } else if (strcmp(argv[i], "--submode") == 0 && i + 1 < argc) {
@@ -760,8 +772,8 @@ int main(int argc, char **argv) {
       fprintf(stderr,
               "usage: %s --fixture PATH [--dataset NAME] [--selector-name "
               "NAME] [--expr SELECTOR] [--mode MODE] [--submode MODE] "
-              "[--projection-path JSON_POINTER] [--skip-fixture-hash] "
-              "[--max-records N] [--max-bytes N]\n",
+              "[--selector-json] [--projection-path JSON_POINTER] "
+              "[--skip-fixture-hash] [--max-records N] [--max-bytes N]\n",
               argv[0]);
       return 2;
     }
@@ -818,7 +830,10 @@ int main(int argc, char **argv) {
   if (!unsupported &&
       (lql_new(&ctx, &error) != LQL_STATUS_OK ||
        (strcmp(mode, "reparse_selector_each_run") != 0 &&
-        ctx->selector_parse(ctx, expr, &selector, &error) != LQL_STATUS_OK) ||
+        (selector_json ? ctx->selector_parse_json(ctx, expr, strlen(expr),
+                                                  &selector, &error)
+                       : ctx->selector_parse(ctx, expr, &selector, &error)) !=
+            LQL_STATUS_OK) ||
        ((mode_is_projection(mode) || mode_is_project_mutation(mode)) &&
         ctx->projection_parse(ctx, projection_paths, 1u, &projection, &error) !=
             LQL_STATUS_OK) ||
@@ -844,7 +859,7 @@ int main(int argc, char **argv) {
   }
   reparse = strcmp(mode, "reparse_selector_each_run") == 0;
   if (!unsupported && strcmp(submode, "steady_state") == 0 &&
-      !run_once(file, ctx, selector, expr, reparse, mode,
+      !run_once(file, ctx, selector, expr, selector_json, reparse, mode,
                 dataset_input_is_compact(dataset), projection, mutation,
                 max_records, max_bytes, &result, &writer, &error)) {
     fprintf(stderr, "lql_direct_bench: warmup failed: %s\n", error.message);
@@ -858,7 +873,7 @@ int main(int argc, char **argv) {
     lql_stream_result candidate_result;
     bench_writer candidate_writer;
     if (clock_gettime(CLOCK_MONOTONIC, &start) != 0 ||
-        !run_once(file, ctx, selector, expr, reparse, mode,
+        !run_once(file, ctx, selector, expr, selector_json, reparse, mode,
                   dataset_input_is_compact(dataset), projection, mutation,
                   max_records, max_bytes, &candidate_result, &candidate_writer,
                   &error) ||

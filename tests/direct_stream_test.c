@@ -396,6 +396,137 @@ static int run_json_selector_selection(lql *ctx, const char *json_selector,
   return !ok;
 }
 
+static int run_sdk_selector_output(lql *ctx, const char *selector_text,
+                                   const char *json_selector, const char *input,
+                                   const char *expected_output,
+                                   size_t expected_records,
+                                   size_t expected_matches) {
+  lql_selector *selector;
+  lql_stream_request request;
+  lql_stream_result result;
+  lql_error error;
+  test_reader reader;
+  test_writer writer;
+  lql_status status;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (selector_text != NULL) {
+    status = ctx->selector_parse(ctx, selector_text, &selector, &error);
+  } else {
+    status = ctx->selector_parse_json(ctx, json_selector, strlen(json_selector),
+                                      &selector, &error);
+  }
+  if (status != LQL_STATUS_OK) {
+    return 1;
+  }
+  memset(&reader, 0, sizeof(reader));
+  reader.data = (const unsigned char *)input;
+  reader.len = strlen(input);
+  reader.chunk_size = 1u;
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.reader = test_read;
+  request.reader_user = &reader;
+  request.selector = selector;
+  request.writer = test_write;
+  request.writer_user = &writer;
+  request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+  request.matched_only = 1;
+  status = ctx->stream_apply_spooled(ctx, &request, &result, &error);
+  ctx->selector_destroy(ctx, selector);
+  if (status != LQL_STATUS_OK || result.records_seen != expected_records ||
+      result.records_matched != expected_matches ||
+      writer.len != strlen(expected_output) ||
+      memcmp(writer.data, expected_output, writer.len) != 0) {
+    return 1;
+  }
+  return 0;
+}
+
+static int run_sdk_filter_file_output(lql *ctx, const char *selector_text,
+                                      const char *input,
+                                      const char *expected_output,
+                                      size_t expected_records,
+                                      size_t expected_matches) {
+  lql_selector *selector;
+  lql_error error;
+
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, selector_text, &selector, &error) !=
+      LQL_STATUS_OK) {
+    return 1;
+  }
+#if defined(__linux__)
+  {
+    lql_file_filter_request request;
+    lql_stream_result result;
+    test_writer writer;
+    FILE *input_file;
+    lql_status status;
+
+  input_file = fmemopen((void *)input, strlen(input), "rb");
+  if (input_file == NULL) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  memset(&writer, 0, sizeof(writer));
+  memset(&request, 0, sizeof(request));
+  request.input_file = input_file;
+  request.output_writer = test_write;
+  request.output_user = &writer;
+  request.selector = selector;
+  request.output_mode = LQL_STREAM_OUTPUT_SELECTED_RECORD;
+  request.matched_only = 1;
+  status = ctx->filter_file_spooled(ctx, &request, &result, &error);
+  if (fclose(input_file) != 0) {
+    status = LQL_STATUS_IO_ERROR;
+  }
+  ctx->selector_destroy(ctx, selector);
+  if (status != LQL_STATUS_OK || result.records_seen != expected_records ||
+      result.records_matched != expected_matches ||
+      writer.len != strlen(expected_output) ||
+      memcmp(writer.data, expected_output, writer.len) != 0) {
+    return 1;
+  }
+  return 0;
+  }
+#else
+  ctx->selector_destroy(ctx, selector);
+  (void)input;
+  (void)expected_output;
+  (void)expected_records;
+  (void)expected_matches;
+  return 0;
+#endif
+}
+
+static int selector_text_parse_fails(lql *ctx, const char *expr) {
+  lql_selector *selector;
+  lql_error error;
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse(ctx, expr, &selector, &error) == LQL_STATUS_OK) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  return 0;
+}
+
+static int selector_json_parse_fails(lql *ctx, const char *json_selector) {
+  lql_selector *selector;
+  lql_error error;
+  selector = NULL;
+  lql_error_init(&error);
+  if (ctx->selector_parse_json(ctx, json_selector, strlen(json_selector),
+                               &selector, &error) == LQL_STATUS_OK) {
+    ctx->selector_destroy(ctx, selector);
+    return 1;
+  }
+  return 0;
+}
+
 static int run_scalar_json_semantic_regressions(lql *ctx) {
   static const char scalar_text_input[] = "{\"v\":1}\n"
                                           "{\"v\":\"1\"}\n"
@@ -599,6 +730,136 @@ static int run_scalar_json_semantic_regressions(lql *ctx) {
                     "{\"v\":1e-9223372036854775808}\n"
                     "{\"v\":1e-9223372036854775809}\n",
                     2u, 1u)) {
+    return 1;
+  }
+  return 0;
+}
+
+static int run_bare_selector_field_rejection(lql *ctx) {
+  if (selector_text_parse_fails(ctx, "eq{field=,value=alpha}") ||
+      selector_text_parse_fails(ctx, "contains{field=,value=alpha}") ||
+      selector_text_parse_fails(ctx, "range{field=,gte=1}") ||
+      selector_text_parse_fails(ctx, "date{field=,value=2025-01-01}") ||
+      selector_text_parse_fails(ctx, "in{field=,any=alpha|beta}") ||
+      selector_json_parse_fails(
+          ctx, "{\"eq\":{\"field\":\"\",\"value\":\"alpha\"}}") ||
+      selector_json_parse_fails(
+          ctx, "{\"contains\":{\"field\":\"\",\"value\":\"alpha\"}}") ||
+      selector_json_parse_fails(ctx,
+                                "{\"range\":{\"field\":\"\",\"gte\":1}}") ||
+      selector_json_parse_fails(
+          ctx, "{\"date\":{\"field\":\"\",\"value\":\"2025-01-01\"}}") ||
+      selector_json_parse_fails(
+          ctx, "{\"in\":{\"field\":\"\",\"any\":[\"alpha\",\"beta\"]}}") ||
+      selector_json_parse_fails(ctx, "{\"eq\":{\"field\":\"value\\u0000tail\","
+                                     "\"value\":\"alpha\"}}")) {
+    return 1;
+  }
+  /*
+   * Go LQL can parse bare field spellings into its public Selector AST, but the
+   * SDK execution path rejects them as invalid JSON pointers.  liblql rejects
+   * them at parse/import time so downstream SDK users cannot create a selector
+   * that would execute in C but fail in Go.
+   */
+  if (selector_text_parse_fails(ctx, "eq{field=status,value=open}") ||
+      selector_text_parse_fails(ctx, "eq{f=status,v=open}") ||
+      selector_text_parse_fails(ctx, "contains{field=msg,value=Timeout}") ||
+      selector_text_parse_fails(ctx, "icontains{field=service,value=edge}") ||
+      selector_text_parse_fails(ctx, "prefix{field=service,value=AUTH}") ||
+      selector_text_parse_fails(ctx, "iprefix{field=service,value=auth}") ||
+      selector_text_parse_fails(ctx, "range{field=progress,gte=50,lt=80}") ||
+      selector_text_parse_fails(ctx,
+                                "date{field=timestamp,value=2025-02-10}") ||
+      selector_text_parse_fails(ctx, "in{field=status,any=open|queued}") ||
+      selector_text_parse_fails(ctx, "exists{meta/etag}") ||
+      selector_text_parse_fails(ctx, "not.eq{field=state,value=disabled}") ||
+      selector_text_parse_fails(
+          ctx, "and.eq{field=status,value=open},and.in{field=env,any=prod}") ||
+      selector_text_parse_fails(
+          ctx, "or.eq{field=status,value=open},or.eq{field=env,value=dev}") ||
+      selector_text_parse_fails(ctx, "eq{field=items[]/sku,value=ABC-123}") ||
+      selector_json_parse_fails(
+          ctx, "{\"eq\":{\"field\":\"status\",\"value\":\"open\"}}") ||
+      selector_json_parse_fails(
+          ctx, "{\"contains\":{\"field\":\"msg\",\"value\":\"Timeout\"}}") ||
+      selector_json_parse_fails(
+          ctx, "{\"range\":{\"field\":\"progress\",\"gte\":50}}") ||
+      selector_json_parse_fails(ctx, "{\"date\":{\"field\":\"timestamp\","
+                                     "\"value\":\"2025-02-10\"}}") ||
+      selector_json_parse_fails(
+          ctx, "{\"in\":{\"field\":\"status\",\"any\":[\"open\"]}}") ||
+      selector_json_parse_fails(ctx, "{\"exists\":\"meta/etag\"}")) {
+    return 1;
+  }
+  return 0;
+}
+
+static int run_sdk_selector_language_parity(lql *ctx) {
+  static const char input[] =
+      "{\"status\":\"open\",\"msg\":\"Timeout\",\"service\":\"AUTH\","
+      "\"progress\":75,\"timestamp\":\"2025-01-15\",\"env\":\"prod\","
+      "\"items\":[{\"sku\":\"ABC-123\"}],\"state\":\"enabled\"}\n"
+      "{\"status\":\"queued\",\"msg\":\"all good\",\"service\":\"billing\","
+      "\"progress\":40,\"timestamp\":\"2025-02-10\",\"env\":\"stage\","
+      "\"items\":[{\"sku\":\"NOPE\"}],\"state\":\"disabled\"}\n"
+      "{\"status\":\"closed\",\"msg\":\"degraded\",\"service\":\"EDGE\","
+      "\"progress\":50,\"timestamp\":\"2024-12-31\",\"env\":\"dev\","
+      "\"items\":[],\"state\":\"enabled\"}\n";
+  static const char first_record[] =
+      "{\"status\":\"open\",\"msg\":\"Timeout\",\"service\":\"AUTH\","
+      "\"progress\":75,\"timestamp\":\"2025-01-15\",\"env\":\"prod\","
+      "\"items\":[{\"sku\":\"ABC-123\"}],\"state\":\"enabled\"}\n";
+
+  /*
+   * This is intentionally SDK/API coverage, not CLI parity.  Downstream
+   * consumers import Go LQL parser/AST spellings through public liblql handle
+   * methods, so the regression must execute selector_parse,
+   * selector_parse_json, stream_apply_spooled, and filter_file_spooled
+   * directly.
+   */
+  if (run_sdk_selector_output(ctx,
+                              "and.eq{field=/status,value=open},"
+                              "and.contains{field=/msg,value=Timeout},"
+                              "and.range{field=/progress,gte=50,lt=80},"
+                              "and.date{field=/timestamp,after=2025-01-01,"
+                              "before=2025-02-01},"
+                              "and.in{field=/env,any=prod|stage},"
+                              "and.eq{field=/items[]/sku,value=ABC-123}",
+                              NULL, input, first_record, 3u, 1u)) {
+    fprintf(stderr, "sdk_selector_language_parity: text apply failed\n");
+    return 1;
+  }
+  if (run_sdk_selector_output(
+          ctx, NULL,
+          "{\"and\":[{\"eq\":{\"field\":\"/status\",\"value\":\"open\"}},"
+          "{\"contains\":{\"field\":\"/msg\",\"value\":\"Timeout\"}},"
+          "{\"range\":{\"field\":\"/progress\",\"gte\":50,\"lt\":80}},"
+          "{\"date\":{\"field\":\"/timestamp\",\"after\":\"2025-01-01\","
+          "\"before\":\"2025-02-01\"}},"
+          "{\"in\":{\"field\":\"/env\",\"any\":[\"prod\",\"stage\"]}},"
+          "{\"eq\":{\"field\":\"/items[]/sku\",\"value\":\"ABC-123\"}}]}",
+          input, first_record, 3u, 1u)) {
+    fprintf(stderr, "sdk_selector_language_parity: json apply failed\n");
+    return 1;
+  }
+  if (run_sdk_selector_output(
+          ctx,
+          "or.eq{field=/status,value=open},"
+          "or.eq{field=/env,value=dev}",
+          NULL, input,
+          "{\"status\":\"open\",\"msg\":\"Timeout\",\"service\":\"AUTH\","
+          "\"progress\":75,\"timestamp\":\"2025-01-15\",\"env\":\"prod\","
+          "\"items\":[{\"sku\":\"ABC-123\"}],\"state\":\"enabled\"}\n"
+          "{\"status\":\"closed\",\"msg\":\"degraded\",\"service\":\"EDGE\","
+          "\"progress\":50,\"timestamp\":\"2024-12-31\",\"env\":\"dev\","
+          "\"items\":[],\"state\":\"enabled\"}\n",
+          3u, 2u)) {
+    fprintf(stderr, "sdk_selector_language_parity: or apply failed\n");
+    return 1;
+  }
+  if (run_sdk_filter_file_output(ctx, "eq{field=/status,value=open}", input,
+                                 first_record, 3u, 1u)) {
+    fprintf(stderr, "sdk_selector_language_parity: file filter failed\n");
     return 1;
   }
   return 0;
@@ -7063,6 +7324,8 @@ int main(void) {
   RUN_CTX_TEST(run_mutation_parse_invalid_arguments);
   RUN_CTX_TEST(run_selector_json_write);
   RUN_CTX_TEST(run_scalar_json_semantic_regressions);
+  RUN_CTX_TEST(run_bare_selector_field_rejection);
+  RUN_CTX_TEST(run_sdk_selector_language_parity);
   RUN_CTX_TEST(run_status_selection);
   RUN_CTX_TEST(run_long_numeric_selector_regression);
   RUN_CTX_TEST(run_array_depth_state_regression);

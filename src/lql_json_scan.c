@@ -2627,8 +2627,7 @@ lql_json_match_terms_for_kind(const lql_json_scan *scan, unsigned long keys,
 
 static unsigned long
 lql_json_match_textual_value_terms(const lql_json_scan *scan,
-                                   unsigned long keys,
-                                   const size_t *segments) {
+                                   unsigned long keys, const size_t *segments) {
   unsigned long active;
   size_t i;
   active = 0ul;
@@ -4934,9 +4933,9 @@ lql_status lql_json_scan_flat_eq_ndjson(const lql_json_flat_eq_request *request,
     if (request->max_records != 0u && records >= request->max_records) {
       /*
        * Public stream limits must stop before any refill, otherwise sockets and
-       * interactive readers can block after the requested record count. Internal
-       * single-record rescans use the same bound only as a parse cap, so they
-       * finish normally when no public limit-stop flag is requested.
+       * interactive readers can block after the requested record count.
+       * Internal single-record rescans use the same bound only as a parse cap,
+       * so they finish normally when no public limit-stop flag is requested.
        */
       if (request->out_limit_stop != NULL) {
         *request->out_limit_stop = 1;

@@ -315,7 +315,8 @@ typedef struct lql_stream_result {
   size_t records_matched;
   /** Bytes consumed from `reader`, including NDJSON separators read. */
   size_t bytes_consumed;
-  /** Non-zero only when application returned success after a configured stop. */
+  /** Non-zero only when application returned success after a configured stop.
+   */
   int stopped_early;
   /** Reason for `stopped_early`, otherwise LQL_STREAM_STOP_NONE. */
   lql_stream_stop_reason stop_reason;
@@ -394,11 +395,12 @@ typedef struct lql_selector_node {
 /**
  * Borrowed details for string-like selector terms. Equality terms preserve
  * liblql's typed scalar matching internally, but this public view exposes the
- * original textual spelling. `contains`, `icontains`, `prefix`, and `iprefix`
- * are textual operators; scalar-looking needles such as `true`, `null`, and
- * `1` are stored and evaluated as string needles. Those predicates match JSON
- * string values and the textual form of JSON booleans and numbers; JSON `null`
- * is not treated as text.
+ * original textual spelling. `field` is a JSON pointer and must begin with `/`
+ * when supplied to parsers or builders. `contains`, `icontains`, `prefix`, and
+ * `iprefix` are textual operators; scalar-looking needles such as `true`,
+ * `null`, and `1` are stored and evaluated as string needles. Those predicates
+ * match JSON string values and the textual form of JSON booleans and numbers;
+ * JSON `null` is not treated as text.
  */
 typedef struct lql_selector_string_term {
   lql_string_view field;
@@ -422,7 +424,7 @@ typedef struct lql_selector_range_bound {
   lql_string_view datetime;
 } lql_selector_range_bound;
 
-/** Borrowed details for a range selector term. */
+/** Borrowed details for a range selector term; `field` is a JSON pointer. */
 typedef struct lql_selector_range_term {
   lql_string_view field;
   lql_selector_range_bound gt;
@@ -431,7 +433,7 @@ typedef struct lql_selector_range_term {
   lql_selector_range_bound lte;
 } lql_selector_range_term;
 
-/** Borrowed details for a date selector term. */
+/** Borrowed details for a date selector term; `field` is a JSON pointer. */
 typedef struct lql_selector_date_term {
   lql_string_view field;
   lql_string_view value;
@@ -445,7 +447,7 @@ typedef struct lql_selector_date_term {
   lql_string_view lte;
 } lql_selector_date_term;
 
-/** Borrowed details for an `in` selector term. */
+/** Borrowed details for an `in` selector term; `field` is a JSON pointer. */
 typedef struct lql_selector_in_term {
   lql_string_view field;
   size_t any_count;

@@ -104,6 +104,96 @@ func TestValidateSpeedupSubmodeIgnoresWarmupSpeed(t *testing.T) {
 	}
 }
 
+func TestValidateCounterParityWithoutTimingOrRSS(t *testing.T) {
+	goWarmup := completeComparisonRecord("go", "warmup_included", 10)
+	cWarmup := completeComparisonRecord("c", "warmup_included", 10)
+	goSteady := completeComparisonRecord("go", "steady_state", 10)
+	cSteady := completeComparisonRecord("c", "steady_state", 10)
+	cSteady.Matches = goSteady.Matches - 1
+	input := strings.Join([]string{
+		benchmarkRecordLine(t, goWarmup),
+		benchmarkRecordLine(t, cWarmup),
+		benchmarkRecordLine(t, goSteady),
+		benchmarkRecordLine(t, cSteady),
+	}, "\n") + "\n"
+	err := validate(strings.NewReader(input), validateOptions{
+		RequireCounterParity: true,
+		ForbidUnsupported:    true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "counters differ") {
+		t.Fatalf("validate() error = %v, want counter parity failure", err)
+	}
+}
+
+func TestValidateWithoutCounterParityAllowsSemanticOnlyUnchecked(t *testing.T) {
+	goWarmup := completeComparisonRecord("go", "warmup_included", 10)
+	cWarmup := completeComparisonRecord("c", "warmup_included", 10)
+	goSteady := completeComparisonRecord("go", "steady_state", 10)
+	cSteady := completeComparisonRecord("c", "steady_state", 10)
+	cSteady.Matches = goSteady.Matches - 1
+	input := strings.Join([]string{
+		benchmarkRecordLine(t, goWarmup),
+		benchmarkRecordLine(t, cWarmup),
+		benchmarkRecordLine(t, goSteady),
+		benchmarkRecordLine(t, cSteady),
+	}, "\n") + "\n"
+	err := validate(strings.NewReader(input), validateOptions{
+		ForbidUnsupported: true,
+	})
+	if err != nil {
+		t.Fatalf("validate() error = %v", err)
+	}
+}
+
+func TestValidateSpeedupRequiresCounterParity(t *testing.T) {
+	goWarmup := completeComparisonRecord("go", "warmup_included", 10)
+	cWarmup := completeComparisonRecord("c", "warmup_included", 10)
+	goSteady := completeComparisonRecord("go", "steady_state", 20)
+	cSteady := completeComparisonRecord("c", "steady_state", 10)
+	cSteady.Matches = goSteady.Matches - 1
+	input := strings.Join([]string{
+		benchmarkRecordLine(t, goWarmup),
+		benchmarkRecordLine(t, cWarmup),
+		benchmarkRecordLine(t, goSteady),
+		benchmarkRecordLine(t, cSteady),
+	}, "\n") + "\n"
+	err := validate(strings.NewReader(input), validateOptions{
+		MinCGoSpeedup:     1.0,
+		SpeedupSubmode:    "steady_state",
+		ForbidUnsupported: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "counters differ") {
+		t.Fatalf("validate() error = %v, want counter parity failure", err)
+	}
+}
+
+func TestValidateRSSRequiresFixtureParity(t *testing.T) {
+	goWarmup := completeComparisonRecord("go", "warmup_included", 10)
+	cWarmup := completeComparisonRecord("c", "warmup_included", 10)
+	goSteady := completeComparisonRecord("go", "steady_state", 10)
+	cSteady := completeComparisonRecord("c", "steady_state", 10)
+	goRSS := int64(100)
+	cRSS := int64(50)
+	goWarmup.PeakRSSBytes = &goRSS
+	cWarmup.PeakRSSBytes = &cRSS
+	goSteady.PeakRSSBytes = &goRSS
+	cSteady.PeakRSSBytes = &cRSS
+	cSteady.FixtureSHA256 = strings.Repeat("b", 64)
+	input := strings.Join([]string{
+		benchmarkRecordLine(t, goWarmup),
+		benchmarkRecordLine(t, cWarmup),
+		benchmarkRecordLine(t, goSteady),
+		benchmarkRecordLine(t, cSteady),
+	}, "\n") + "\n"
+	err := validate(strings.NewReader(input), validateOptions{
+		RequireCRSSBelowGo: true,
+		ForbidUnsupported:  true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "fixture_sha256 differs") {
+		t.Fatalf("validate() error = %v, want fixture parity failure", err)
+	}
+}
+
 func TestValidateRequiresCRSSBelowGo(t *testing.T) {
 	goWarmup := completeComparisonRecord("go", "warmup_included", 10)
 	cWarmup := completeComparisonRecord("c", "warmup_included", 10)

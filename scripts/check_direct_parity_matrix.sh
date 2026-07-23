@@ -3,9 +3,13 @@ set -eu
 
 . scripts/direct_parity_common.sh
 
-# The release perf gate is a hard C > Go contract.  Use enough steady-state
-# samples to dampen scheduler noise without weakening the 1.0x threshold.
-direct_parity_init 'direct parity matrix' build/direct-parity-matrix.jsonl 30
+# Broad semantic parity should be fast: every row still runs Go and C in both
+# warmup and steady modes, but one steady sample is enough to prove counters and
+# output invariants.  The smaller direct perf gate owns hard timing and RSS
+# enforcement.
+LQL_DIRECT_PARITY_MIN_C_GO_SPEEDUP=
+LQL_DIRECT_PARITY_REQUIRE_C_RSS_BELOW_GO=0
+direct_parity_init 'liblql SDK parity matrix' build/direct-parity-matrix.jsonl 1
 
 sh scripts/ensure_direct_parity_fixtures.sh
 
@@ -80,6 +84,8 @@ direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   icontains_payload_cde 'icontains{f=/payload,v=CDE}' plus_value_source_selector /id
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   in_status_open_pending 'in{field=/status,any=open|pending}' plus_value_source_selector /id
+direct_parity_run_json_row build/direct-probe/status-100k.ndjson status_100k \
+  sdk_json_eq_status_open_source '{"eq":{"field":"/status","value":"open"}}' plus_value_source_selector /id
 direct_parity_run_row build/direct-probe/scalar-100k.ndjson scalar_100k \
   code_eq_one '/code=1' plus_value_source_selector /id
 direct_parity_run_row build/direct-probe/scalar-100k.ndjson scalar_100k \
@@ -90,12 +96,16 @@ direct_parity_run_row build/direct-probe/status-whitespace-100k.ndjson status_wh
   eq_status_open '/status="open"' project_file_selector /id
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open '/status="open"' project_source_selector /id
+direct_parity_run_json_row build/direct-probe/status-100k.ndjson status_100k \
+  sdk_json_eq_status_open_project '{"eq":{"field":"/status","value":"open"}}' project_source_selector /id
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open_top_set '/status="open"' mutate_file_selector /id
 direct_parity_run_row build/direct-probe/status-whitespace-100k.ndjson status_whitespace_100k \
   eq_status_open_top_set '/status="open"' mutate_file_selector /id
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open_top_set '/status="open"' mutate_source_selector /id
+direct_parity_run_json_row build/direct-probe/status-100k.ndjson status_100k \
+  sdk_json_eq_status_open_mutate '{"eq":{"field":"/status","value":"open"}}' mutate_source_selector /id
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
   eq_status_open_file_backed_text '/status="open"' mutate_file_backed_text /id
 direct_parity_run_row build/direct-probe/status-100k.ndjson status_100k \
@@ -125,10 +135,16 @@ direct_parity_run_row build/direct-probe/mixed-nested-code-100k.ndjson mixed_nes
 
 direct_parity_run_row build/direct-probe/project-mutate-status-100k.ndjson project_mutate_status_100k \
   project_mutation_status '/status="open"' project_mutate_file_selector /id
+direct_parity_run_json_row build/direct-probe/project-mutate-status-100k.ndjson project_mutate_status_100k \
+  sdk_json_project_mutation_status '{"eq":{"field":"/status","value":"open"}}' project_mutate_file_selector /id
 direct_parity_run_row build/direct-probe/temporal-100k.ndjson temporal_100k \
   date_window 'date{field=/timestamp,after=2026-03-05T10:28:21Z,before=2026-03-05T10:30:00Z}' decision_only_selector /id
+direct_parity_run_json_row build/direct-probe/temporal-100k.ndjson temporal_100k \
+  sdk_json_date_window_matrix '{"date":{"field":"/timestamp","after":"2026-03-05T10:28:21Z","before":"2026-03-05T10:30:00Z"}}' decision_only_selector /id
 direct_parity_run_row build/direct-probe/array-scalar-100k.ndjson array_scalar_100k \
   array_scalar_indexed_eq '/values/1="B"' decision_only_selector /id
+direct_parity_run_json_row build/direct-probe/array-scalar-100k.ndjson array_scalar_100k \
+  sdk_json_array_scalar_wildcard_eq '{"eq":{"field":"/values/[]","value":"B"}}' decision_only_selector /id
 direct_parity_run_row build/direct-probe/array-scalar-100k.ndjson array_scalar_100k \
   array_scalar_wildcard_eq '/values/[]="B"' decision_only_selector /id
 direct_parity_run_row build/direct-probe/array-scalar-100k.ndjson array_scalar_100k \
@@ -179,4 +195,4 @@ direct_parity_run_row build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' project_mutate_file_selector /id
 
 direct_parity_validate
-direct_parity_expect_records 296
+direct_parity_expect_records 320

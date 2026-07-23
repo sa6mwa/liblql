@@ -22,13 +22,20 @@ for path in \
   src/lql_project.c \
   src/lql_mutation.c \
   src/clql.c \
-  bench \
-  parity; do
+  bench; do
   if git ls-files --error-unmatch "$path" >/dev/null 2>&1; then
     printf '%s\n' "removed path remains tracked: $path" >&2
     exit 1
   fi
 done
+
+parity_paths=$({ git ls-files 'parity/*'; find parity -type f 2>/dev/null || true; } |
+  sort -u)
+if [ "$parity_paths" != 'parity/oracle_inventory.tsv' ]; then
+  printf '%s\n' 'unexpected parity path remains:' >&2
+  printf '%s\n' "$parity_paths" >&2
+  exit 1
+fi
 
 for path in \
   lua/benchmarks \

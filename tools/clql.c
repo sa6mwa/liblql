@@ -791,7 +791,8 @@ static int run_to_output(lql *ctx, const clql_config *cfg,
       aggregate.bytes_consumed += result.bytes_consumed;
     }
     if (cfg->count_only &&
-        fprintf(output, "%lu\n", (unsigned long)aggregate.records_matched) < 0) {
+        fprintf(output, "%lu\n", (unsigned long)aggregate.records_matched) <
+            0) {
       fputs("clql: filter file: I/O error: unable to write count\n", stderr);
       goto fail;
     }
