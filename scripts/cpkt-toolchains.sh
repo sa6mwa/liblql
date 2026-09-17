@@ -89,22 +89,22 @@ require_target() {
 bootlin_meta() {
   case "$1" in
     x86_64-linux-gnu)
-      printf '%s\n' 'x86-64|x86-64--glibc--stable-2025.08-1|760acd5c3159448b618e237b61935335baada74fe0cdc0d7611826cb49b41c8c|x86_64-linux|x86_64-buildroot-linux-gnu/sysroot'
+      printf '%s\n' 'x86-64|x86-64--glibc--stable-2026.08-1|cde893afab04ac7dcd15c46aac214ff550441b982536124c88a71146a0eeedd3|x86_64-linux|x86_64-buildroot-linux-gnu/sysroot'
       ;;
     x86_64-linux-musl)
-      printf '%s\n' 'x86-64|x86-64--musl--stable-2025.08-1|09fca3aa89540f1b01b5f4210d488cbeb00f522044c53e9989b1dd8a38076912|x86_64-linux|x86_64-buildroot-linux-musl/sysroot'
+      printf '%s\n' 'x86-64|x86-64--musl--stable-2026.08-1|78d3a4683d6ac47b5ee73bd5bce210b55eb93dff1b137c61298af97eb0d2b5a6|x86_64-linux|x86_64-buildroot-linux-musl/sysroot'
       ;;
     aarch64-linux-gnu)
-      printf '%s\n' 'aarch64|aarch64--glibc--stable-2025.08-1|dfb47eee874eef9e8a7fc042eee4e0a183f444b6bcde6a82fef8f009918389c9|aarch64-linux|aarch64-buildroot-linux-gnu/sysroot'
+      printf '%s\n' 'aarch64|aarch64--glibc--stable-2026.08-1|0213efac9b5577f20d58de9431960a191347ffc2257b27ffe7250522bf1f7867|aarch64-linux|aarch64-buildroot-linux-gnu/sysroot'
       ;;
     aarch64-linux-musl)
-      printf '%s\n' 'aarch64|aarch64--musl--stable-2025.08-1|defba831ffa1175236f137069333e21ed46d4d19feb5080a90cf248b6fc2cb08|aarch64-linux|aarch64-buildroot-linux-musl/sysroot'
+      printf '%s\n' 'aarch64|aarch64--musl--stable-2026.08-1|b388c480a48e8e9f9b99e3d14e69219c4d61e5a2424a82faecb88a015b781a60|aarch64-linux|aarch64-buildroot-linux-musl/sysroot'
       ;;
     armhf-linux-gnu)
-      printf '%s\n' 'armv7-eabihf|armv7-eabihf--glibc--stable-2025.08-1|97d6fbaf19832002f3d6aa8fd31b2d29c1dc7b0752f4ae8ed35860fd33c1f9b4|arm-linux|arm-buildroot-linux-gnueabihf/sysroot'
+      printf '%s\n' 'armv7-eabihf|armv7-eabihf--glibc--stable-2026.08-1|9b7e25a74e87dac1e05d399444295e254a3073a056101e3197a859490e5701cd|arm-linux|arm-buildroot-linux-gnueabihf/sysroot'
       ;;
     armhf-linux-musl)
-      printf '%s\n' 'armv7-eabihf|armv7-eabihf--musl--stable-2025.08-1|2f3a34458c3a8b961bd09f89669130fcdc4c1dbc6e31ada720527e4ad3741c11|arm-linux|arm-buildroot-linux-musleabihf/sysroot'
+      printf '%s\n' 'armv7-eabihf|armv7-eabihf--musl--stable-2026.08-1|9147bafae4aa272321a3c6440d04d83b7e23411b2d344f875541d84c4444ba9b|arm-linux|arm-buildroot-linux-musleabihf/sysroot'
       ;;
     *) die "unsupported Bootlin target: $1" ;;
   esac
@@ -127,6 +127,37 @@ existing_compiler_file() {
   [[ "$path" != "$2" && -f "$path" ]] || return 1
   dir=$(CDPATH= cd -- "$(dirname -- "$path")" && pwd -P)
   printf '%s/%s\n' "$dir" "$(basename -- "$path")"
+}
+
+runtime_file() {
+  local compiler=$1 name=$2 path
+  path=$(compiler_file "$compiler" "$name")
+  [[ "$path" != "$name" && -f "$path" ]] || return 1
+  printf '%s/%s\n' "$(CDPATH= cd -- "$(dirname -- "$path")" && pwd -P)" \
+    "$(basename -- "$path")"
+}
+
+linux_dynamic_loader() {
+  local sysroot=$1 loader
+  loader=$(find "$sysroot" \( -type f -o -type l \) \
+    \( -name 'ld-linux*.so*' -o -name 'ld-musl-*.so.1' \) \
+    -print | LC_ALL=C sort | sed -n '1p')
+  [[ -n "$loader" && -x "$loader" ]] || return 1
+  printf '%s\n' "$loader"
+}
+
+linux_runtime_dirs() {
+  local cc=$1 cxx=$2 loader=$3 path dirs
+  dirs=$(dirname -- "$loader")
+  for path in "$(runtime_file "$cc" libgcc_s.so.1 || :)" \
+              "$(runtime_file "$cxx" libstdc++.so.6 || :)"; do
+    [[ -n "$path" ]] || continue
+    case ":$dirs:" in
+      *":$(dirname -- "$path"):"*) ;;
+      *) dirs="$dirs:$(dirname -- "$path")" ;;
+    esac
+  done
+  printf '%s\n' "$dirs"
 }
 
 bootlin_ready() {
@@ -214,7 +245,7 @@ install_bootlin_locked() {
 }
 
 print_bootlin_target() {
-  local target=$1 values arch name sha256 prefix sysroot_rel root cc cxx
+  local target=$1 values arch name sha256 prefix sysroot_rel root cc cxx loader runtime_dirs
   values=$(bootlin_values "$target")
   IFS='|' read -r arch name sha256 prefix sysroot_rel root <<<"$values"
   printf 'target=%s\ncache=%s\nsource=bootlin\narchive=%s.tar.xz\n' "$target" "$(cache_root)" "$name"
@@ -224,10 +255,12 @@ print_bootlin_target() {
   fi
   cc="$root/bin/$prefix-gcc"
   cxx="$root/bin/$prefix-g++"
+  loader=$(linux_dynamic_loader "$root/$sysroot_rel") || die "missing dynamic loader in Bootlin collection: $root"
+  runtime_dirs=$(linux_runtime_dirs "$cc" "$cxx" "$loader") || die "missing runtime libraries in Bootlin collection: $root"
   printf 'status=ready\nroot=%s\nprefix=%s\nsysroot=%s\nlibc=%s\n' "$root" "$prefix" "$root/$sysroot_rel" "${target##*-}"
   printf 'cc=%s\ncxx=%s\nld=%s\nar=%s\nranlib=%s\nstrip=%s\nnm=%s\nobjcopy=%s\nobjdump=%s\naddr2line=%s\ngdb=%s\nreadelf=%s\n' \
     "$cc" "$cxx" "$root/bin/$prefix-ld" "$root/bin/$prefix-ar" "$root/bin/$prefix-ranlib" "$root/bin/$prefix-strip" "$root/bin/$prefix-nm" "$root/bin/$prefix-objcopy" "$root/bin/$prefix-objdump" "$root/bin/$prefix-addr2line" "$root/bin/$prefix-gdb" "$root/bin/$prefix-readelf"
-  printf 'target_triple=%s\nlibstdcxx_a=%s\nlibgcc_a=%s\n' "${sysroot_rel%/sysroot}" "$(existing_compiler_file "$cxx" libstdc++.a)" "$(existing_compiler_file "$cxx" libgcc.a)"
+  printf 'target_triple=%s\ndynamic_loader=%s\nruntime_library_dirs=%s\nlibstdcxx_a=%s\nlibgcc_a=%s\n' "${sysroot_rel%/sysroot}" "$loader" "$runtime_dirs" "$(existing_compiler_file "$cxx" libstdc++.a)" "$(existing_compiler_file "$cxx" libgcc.a)"
 }
 
 print_darwin_target() {
@@ -265,7 +298,7 @@ print_env() {
   local target=$1 description key value
   description=$(report_target "$target")
   [[ "$description" == *$'status=ready'* ]] || die "target is missing; run: $0 ensure $target"
-  for key in source root prefix sysroot cc cxx ld ar ranlib strip nm objcopy objdump addr2line gdb readelf libstdcxx_a libgcc_a otool; do
+  for key in source root prefix sysroot cc cxx ld ar ranlib strip nm objcopy objdump addr2line gdb readelf dynamic_loader runtime_library_dirs libstdcxx_a libgcc_a otool; do
     value=$(printf '%s\n' "$description" | sed -n "s/^${key}=//p")
     [[ -z "$value" ]] || printf 'export %s=%q\n' "CPKT_TOOLCHAIN_${key^^}" "$value"
   done

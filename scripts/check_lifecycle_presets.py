@@ -32,6 +32,9 @@ REQUIRED_MAKE_TARGETS = {
     "deps-debug",
     "deps-release",
     "deps-cross",
+    "toolchain-check",
+    "toolchain-policy-check",
+    "development-runtime-check",
     "dependency-cache-check",
     "dependency-cache-privacy-regression",
     "lifecycle-version-contract",
@@ -48,6 +51,7 @@ REQUIRED_MAKE_TARGETS = {
     "selector-ast-contract",
     "lua-test",
     "lua-rock",
+    "lua-rock-toolchain-override-check",
     "lua-cli-smoke",
     "lua-artifact-privacy-regression",
     "release-lua-artifacts",
@@ -74,6 +78,8 @@ REQUIRED_MAKE_TARGETS = {
     "direct-profile-hotspots",
     "bench-gate",
     "perf-gate",
+    "finalize-slice",
+    "format",
     "clean",
     "clean-dist",
 }
@@ -94,6 +100,7 @@ REQUIRED_SCRIPT_SURFACES = {
     "scripts/verify_release_artifacts.sh",
     "scripts/verify_release_privacy.sh",
     "scripts/build_lua_rock.sh",
+    "scripts/check_lua_rock_toolchain_override.sh",
     "scripts/render_release_rockspec.sh",
     "scripts/stage_lua_rock_sources.sh",
     "scripts/validate_luarocks.sh",
@@ -104,6 +111,8 @@ REQUIRED_SCRIPT_SURFACES = {
     "scripts/check_shared_only_build.sh",
     "scripts/test_dependency_cache_config.sh",
     "scripts/check_dependency_cache_privacy_regression.sh",
+    "scripts/check_toolchain_policy.sh",
+    "scripts/check_development_runtime.sh",
     "scripts/check_lifecycle_version_contract.sh",
 }
 OLD_PHASE = "scanner"
@@ -192,6 +201,32 @@ def main() -> None:
     cmake_lists = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
     if "include(LqlDependencyCache)" not in cmake_lists:
         fail("CMake does not resolve CPKT_DEPENDENCY_CACHE through LqlDependencyCache")
+    if "include(LqlDevelopmentRuntime)" not in cmake_lists:
+        fail("CMake does not configure the Bootlin development runtime helper")
+    if "LIBLQL_TOOLCHAIN_OVERRIDE" not in cmake_lists:
+        fail("CMake does not expose the explicit non-Bootlin toolchain override")
+    if "CPKT_AFLPP_ACTIVE" not in cmake_lists:
+        fail("CMake does not recognize the lifecycle-owned AFL++ compiler wrapper")
+    if "stable-2026.08-1" not in (ROOT / "scripts/cpkt-toolchains.sh").read_text(encoding="utf-8"):
+        fail("Bootlin resolver is not pinned to stable-2026.08-1")
+    if "include(LqlLuaRuntime)" not in cmake_lists or "lql_lua_runner" not in cmake_lists:
+        fail("Lua facade does not provide the Bootlin runtime runner")
+    if "finalize-slice: format toolchain-policy-check development-runtime-check" not in MAKEFILE.read_text(encoding="utf-8"):
+        fail("finalize-slice does not run formatting and Bootlin policy/runtime checks")
+    if "tools/lql_lua_runner.c" not in MAKEFILE.read_text(encoding="utf-8"):
+        fail("format command omits the Lua runtime runner")
+    for path in (
+        "Makefile",
+        "scripts/run_lua_tests.sh",
+        "scripts/check_lua_rock.sh",
+        "scripts/check_lua_cli_smoke.sh",
+        "scripts/check_lua_clql_parity.py",
+        "scripts/check_lua_cli_parity.py",
+    ):
+        if "LD_LIBRARY_PATH" in (ROOT / path).read_text(encoding="utf-8"):
+            fail(f"Lua local execution must not export LD_LIBRARY_PATH: {path}")
+    if "LD_LIBRARY_PATH" in (ROOT / "scripts/check_pkgconfig_multiarch.sh").read_text(encoding="utf-8"):
+        fail("pkg-config verification must use an ELF runtime, not LD_LIBRARY_PATH")
 
     fuzz_vars = cache_vars(configure["fuzz"])
     if fuzz_vars.get("CMAKE_TOOLCHAIN_FILE") != "${sourceDir}/cmake/cpkt-aflpp-toolchain.cmake":

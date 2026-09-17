@@ -38,6 +38,8 @@ ensure_fixture build/direct-probe/project-mutate-status-100k.ndjson 100000 24 st
 ensure_fixture build/direct-probe/temporal-100k.ndjson 100000 24 temporal
 ensure_fixture build/direct-probe/array-scalar-100k.ndjson 100000 24 arrayscalar
 ensure_fixture build/direct-probe/array-exists-100k.ndjson 100000 24 arrayexists
+ensure_fixture build/direct-probe/array-selector-8k-p0.ndjson 8000 0 arrayselector
+ensure_fixture build/direct-probe/array-selector-100k-p0.ndjson 100000 0 arrayselector
 ensure_fixture build/direct-probe/range-code-100k.ndjson 100000 24 rangecode
 
 if [ ! -f build/direct-probe/file-backed-text.txt ]; then

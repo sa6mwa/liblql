@@ -29,10 +29,10 @@ case "$payload_bytes" in
 esac
 
 case "$shape" in
-  status|statusws|scalar|nested|nestedprojection|indexed|recursive|temporal|arrayscalar|arrayexists|rangecode|realworld|lockd)
+  status|statusws|scalar|nested|nestedprojection|indexed|recursive|temporal|arrayscalar|arrayexists|arrayselector|rangecode|realworld|lockd)
     ;;
   *)
-    printf '%s\n' 'fixture shape must be status, statusws, scalar, nested, nestedprojection, indexed, recursive, temporal, arrayscalar, arrayexists, rangecode, realworld, or lockd' >&2
+    printf '%s\n' 'fixture shape must be status, statusws, scalar, nested, nestedprojection, indexed, recursive, temporal, arrayscalar, arrayexists, arrayselector, rangecode, realworld, or lockd' >&2
     exit 2
     ;;
 esac
@@ -72,6 +72,20 @@ awk -v count="$2" -v payload_bytes="$payload_bytes" -v shape="$shape" 'BEGIN {
       } else {
         printf "{\"id\":\"id-%d\",\"values\":[\"A\"],\"payload\":\"", i
       }
+    } else if (shape == "arrayselector") {
+      mod = i % 8
+      tag_payload = (mod == 0) ? "\"tags\":[\"red\",\"blue\"]," : \
+        ((mod == 1) ? "\"tags\":\"red\"," : \
+        ((mod == 2) ? "\"tags\":[\"green\"]," : \
+        ((mod == 3) ? "\"tags\":null," : "")))
+      label_payload = (mod == 0 || mod == 4) ? "\"labels\":{\"env\":\"prod\",\"owner\":\"ALICE-Team\"}," : "\"labels\":{\"env\":\"dev\"},"
+      item_sku = (mod == 0 || mod == 5) ? "B" : "A"
+      item_price = (mod == 0 || mod == 5) ? 25 : 10
+      group_sku = (mod == 0 || mod == 6) ? "B" : "C"
+      battery = (mod == 0 || mod == 7) ? 3300 : 4100
+      msg = (mod == 0) ? "Error: Timeout while reading" : ((mod == 2) ? "warn: degraded" : "all good")
+      service = (mod == 0 || mod == 4) ? "Auth-Service" : "billing"
+      printf "{\"id\":\"id-%d\",%s%s\"items\":[{\"sku\":\"A\",\"price\":10},{\"sku\":\"%s\",\"price\":%d}],\"groups\":[{\"items\":[{\"sku\":\"%s\"}]}],\"metrics\":[{\"battery_mv\":4100},{\"battery_mv\":%d}],\"msg\":\"%s\",\"service\":\"%s\",\"payload\":\"", i, tag_payload, label_payload, item_sku, item_price, group_sku, battery, msg, service
     } else if (shape == "rangecode") {
       code = (i % 4 == 0) ? 1 : ((i % 4 == 1) ? 0 : 2)
       printf "{\"id\":\"id-%d\",\"code\":%d,\"payload\":\"", i, code

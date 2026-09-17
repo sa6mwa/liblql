@@ -1,6 +1,6 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check dependency-cache-check dependency-cache-privacy-regression tar-portability-check lifecycle-check lifecycle-version-contract ctest-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify release-upload-list verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all print-test-all-gates test-all-timed test-all-gates selector-ast-contract sdk-parity-contract direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap sdk-parity-gate direct-parity-matrix direct-perf-gate direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+.PHONY: help deps deps-debug deps-release deps-cross toolchain-check toolchain-policy-check development-runtime-check dependency-cache-check dependency-cache-privacy-regression tar-portability-check lifecycle-check lifecycle-version-contract ctest-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-rock-toolchain-override-check lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify release-upload-list verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all print-test-all-gates test-all-timed test-all-gates selector-ast-contract sdk-parity-contract direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap sdk-parity-gate direct-parity-matrix direct-perf-gate direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
-TEST_ALL_GATES := lifecycle-check target-tool-check ctest-contract selector-ast-contract sdk-parity-contract direct-reset direct-no-lonejson test mutation-literal-parity shared-only-smoke lua-test lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-selector-parity clql-mutation-parity package-verify sdk-parity-gate direct-perf-gate direct-callback-whitespace direct-live-heap
+TEST_ALL_GATES := lifecycle-check target-tool-check toolchain-policy-check ctest-contract selector-ast-contract sdk-parity-contract direct-reset direct-no-lonejson test development-runtime-check mutation-literal-parity shared-only-smoke lua-test lua-rock-toolchain-override-check lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-selector-parity clql-mutation-parity package-verify sdk-parity-gate direct-perf-gate direct-callback-whitespace direct-live-heap
 
 help:
 	@printf '%s\n' \
@@ -9,6 +9,8 @@ help:
 	  'make deps-cross    ensure all cross Bootlin GCC lifecycle tools' \
 	  'make deps          ensure cached Bootlin GCC and AFL++ lifecycle tools' \
 	  'make toolchain-check  run resolver syntax and unit checks' \
+	  'make toolchain-policy-check prove Linux builds reject host compilers unless explicitly overridden' \
+	  'make development-runtime-check verify local executables use the selected Bootlin loader and RPATH' \
 	  'make dependency-cache-check  verify shared dependency-cache resolution' \
 	  'make dependency-cache-privacy-regression  prove release privacy rejects dependency-cache paths' \
 	  'make tar-portability-check  verify package tar option detection' \
@@ -28,6 +30,7 @@ help:
 	  'make cross-test    run cross-target tool and Darwin linker-route checks' \
 	  'make lua-test      build and run Lua 5.5 facade smoke tests' \
 	  'make lua-rock      install Lua facade into repo-local LuaRocks tree' \
+	  'make lua-rock-toolchain-override-check  verify Lua rock honors the explicit compiler override' \
 	  'make lua-cli-smoke run installed lql.lua CLI smoke tests' \
 	  'make lua-cli-clql-parity compare lql.lua output against clql' \
 	  'make lua-cli-parity compare lql.lua output against Go lql' \
@@ -72,7 +75,7 @@ help:
 	  'make direct-profile-hotspots profile tight GCC direct-execution rows with perf' \
 	  'make bench-gate    run the accepted direct-execution performance gate' \
 	  'make perf-gate     alias for bench-gate' \
-	  'make finalize-slice run formatting and debug tests for a small slice' \
+	  'make finalize-slice run formatting, Bootlin policy/runtime, and debug test checks' \
 	  'make format        format retained C sources' \
 	  'make clean-dist    remove generated release artifacts under dist/' \
 	  'make clean         remove generated build and release output'
@@ -97,6 +100,12 @@ toolchain-check:
 	@bash -n scripts/test-cpkt-aflpp-resolver.sh
 	@bash scripts/test-cpkt-toolchain-resolvers.sh
 	@bash scripts/test-cpkt-aflpp-resolver.sh
+
+toolchain-policy-check:
+	@sh scripts/check_toolchain_policy.sh
+
+development-runtime-check: test build-debug-lua
+	@sh scripts/check_development_runtime.sh
 
 dependency-cache-check:
 	@sh scripts/test_dependency_cache_config.sh
@@ -143,7 +152,7 @@ build-debug-lua:
 	@sh scripts/remove_path.sh build/lua-sdk
 	@cmake --install build/release --prefix build/lua-sdk
 	@cmake --preset debug-lua
-	@cmake --build --preset debug-lua --target lql_lua_core
+	@cmake --build --preset debug-lua --target lql_lua_core lql_lua_runner
 
 test:
 	@sh scripts/test.sh
@@ -165,9 +174,12 @@ cross-test:
 lua-test: build-debug-lua
 	@sh scripts/run_lua_tests.sh
 
-lua-rock:
+lua-rock: build-debug-lua
 	@sh scripts/build_lua_rock.sh
 	@sh scripts/check_lua_rock.sh
+
+lua-rock-toolchain-override-check:
+	@sh scripts/check_lua_rock_toolchain_override.sh
 
 lua-cli-smoke: lua-rock
 	@sh scripts/check_lua_cli_smoke.sh
@@ -183,7 +195,8 @@ lua-cli-parity: lua-rock
 lua-env:
 	@printf "export LUA_PATH='%s/share/lua/5.5/?.lua;%s/share/lua/5.5/?/init.lua;;'\n" "$$(pwd -P)/build/luarocks" "$$(pwd -P)/build/luarocks"
 	@printf "export LUA_CPATH='%s/lib/lua/5.5/?.so;%s/lib/lua/5.5/?/core.so;;'\n" "$$(pwd -P)/build/luarocks" "$$(pwd -P)/build/luarocks"
-	@printf "export LD_LIBRARY_PATH='%s/lib'$${LD_LIBRARY_PATH:+\":$$LD_LIBRARY_PATH\"}\n" "$$(pwd -P)/build/lua-sdk"
+	@printf "export LQL_LUA_RUNNER='%s/build/debug-lua/lql_lua_runner'\n" "$$(pwd -P)"
+	@printf "export LQL_LUA_SDK_PREFIX='%s/build/lua-sdk'\n" "$$(pwd -P)"
 
 release-lua-artifacts:
 	@sh scripts/package_lua.sh
@@ -194,7 +207,7 @@ lua-artifact-smoke: release-lua-artifacts
 lua-artifact-privacy-regression:
 	@sh scripts/check_lua_artifact_privacy_regression.sh
 
-valgrind: build-debug
+valgrind: build-debug build-debug-lua
 	@sh scripts/check_valgrind.sh
 
 fuzz-smoke:
@@ -332,10 +345,10 @@ bench-gate: direct-perf-gate
 
 perf-gate: bench-gate
 
-finalize-slice: format test-debug
+finalize-slice: format toolchain-policy-check development-runtime-check
 
 format:
-	@clang-format -i include/lql/*.h src/*.c src/*.h tools/lql_direct_bench.c tools/clql.c fuzz/json_fuzz.c lua/lql_core.c examples/*.c
+	@clang-format -i include/lql/*.h src/*.c src/*.h tools/lql_direct_bench.c tools/lql_lua_runner.c tools/clql.c fuzz/json_fuzz.c lua/lql_core.c examples/*.c
 
 clean-dist:
 	@./scripts/clean.sh dist

@@ -22,12 +22,16 @@ require_fixed "$smoke" 'direct_parity_validate' \
   'sdk-parity-gate must validate counters, unsupported rows, and RSS policy'
 require_fixed "$common" '--require-counter-parity' \
   'shared SDK parity validation must compare Go/C semantic counters independently of timing/RSS gates'
-require_fixed "$smoke" 'direct_parity_expect_records 88' \
+require_fixed "$smoke" 'direct_parity_expect_records 100' \
   'sdk-parity-gate record count must be explicit'
 require_fixed "$smoke" 'direct_parity_expect_failure text' \
   'sdk-parity-gate must include text failure parity rows'
 require_fixed "$smoke" 'direct_parity_expect_failure json' \
   'sdk-parity-gate must include selector JSON failure parity rows'
+require_fixed "$smoke" 'array_selector_plain_in_does_not_scan_array' \
+  'sdk-parity-gate must cover plain in semantics on array-valued fields'
+require_fixed "$smoke" 'array_selector_array_wildcard_in' \
+  'sdk-parity-gate must cover in semantics through array wildcard fields'
 
 require_fixed "$matrix" 'LQL_DIRECT_PARITY_MIN_C_GO_SPEEDUP=' \
   'direct-parity-matrix must remain semantic-only for timing'
@@ -37,7 +41,7 @@ require_fixed "$matrix" 'wide_129_distinct_miss' \
   'direct-parity-matrix must keep the >64-term SDK selector stress row'
 require_fixed "$matrix" 'realworld_multi_clause_and' \
   'direct-parity-matrix must keep the broad realworld multi-clause semantic row'
-require_fixed "$matrix" 'direct_parity_expect_records 320' \
+require_fixed "$matrix" 'direct_parity_expect_records 376' \
   'direct-parity-matrix record count must be explicit'
 
 require_fixed "$matrix" 'sdk_json_eq_status_open_source' \
@@ -52,6 +56,14 @@ require_fixed "$matrix" 'sdk_json_date_window_matrix' \
   'selector AST JSON must be covered with temporal terms'
 require_fixed "$matrix" 'sdk_json_array_scalar_wildcard_eq' \
   'selector AST JSON must be covered with array wildcard terms'
+require_fixed "$matrix" 'array_selector_plain_in_does_not_scan_array' \
+  'direct-parity-matrix must cover plain in semantics on array-valued fields'
+require_fixed "$matrix" 'array_selector_array_wildcard_in' \
+  'direct-parity-matrix must cover in semantics through array wildcard fields'
+require_fixed "$matrix" 'sdk_json_array_selector_array_wildcard_in' \
+  'selector AST JSON must cover in semantics through array wildcard fields'
+require_fixed "$matrix" 'array_selector_object_wildcard_in' \
+  'direct-parity-matrix must cover in semantics through object wildcard fields'
 require_fixed "$matrix" 'large_4x25m' \
   'direct-parity-matrix must keep large-input SDK rows'
 
@@ -67,6 +79,8 @@ if grep -F 'realworld_multi_clause_and' "$perf" >/dev/null; then
 fi
 require_fixed "$perf" 'and_status_open_region_west' \
   'direct-perf-gate must keep a stable multi-clause AND hard timing row'
+require_fixed "$perf" "direct_parity_init 'direct perf gate' build/direct-perf-gate.jsonl 5" \
+  'direct-perf-gate must use five steady-state samples to resist scheduler noise'
 require_fixed "$perf" 'direct_parity_expect_records 48' \
   'direct-perf-gate record count must be explicit'
 

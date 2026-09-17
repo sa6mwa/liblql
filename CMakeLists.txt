@@ -10,9 +10,35 @@ include(CTest)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
-  message(FATAL_ERROR
-    "liblql Linux builds require lifecycle GCC; Clang is not a supported build or performance compiler")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  if(DEFINED ENV{LIBLQL_TOOLCHAIN_OVERRIDE} AND
+     "$ENV{LIBLQL_TOOLCHAIN_OVERRIDE}" STREQUAL "1")
+    message(WARNING
+      "LIBLQL_TOOLCHAIN_OVERRIDE=1: accepting caller-supplied Linux toolchain")
+  elseif(NOT DEFINED CPKT_SOURCE OR NOT CPKT_SOURCE STREQUAL "bootlin" OR
+         NOT DEFINED CPKT_ROOT)
+    message(FATAL_ERROR
+      "liblql Linux builds require the pinned Bootlin toolchain; set LIBLQL_TOOLCHAIN_OVERRIDE=1 only for an explicit caller-supplied override")
+  else()
+    string(FIND "${CMAKE_C_COMPILER}" "${CPKT_ROOT}/bin/"
+           LQL_BOOTLIN_COMPILER_PREFIX)
+    if(LQL_BOOTLIN_COMPILER_PREFIX EQUAL 0)
+      set(LQL_LIFECYCLE_COMPILER_ACCEPTED TRUE)
+    elseif(DEFINED CPKT_AFLPP_ACTIVE AND CPKT_AFLPP_ACTIVE AND
+           DEFINED CPKT_AFL_CC AND CMAKE_C_COMPILER STREQUAL CPKT_AFL_CC)
+      # AFL++ is built from and delegates to this same selected Bootlin GCC.
+      set(LQL_LIFECYCLE_COMPILER_ACCEPTED TRUE)
+    else()
+      set(LQL_LIFECYCLE_COMPILER_ACCEPTED FALSE)
+    endif()
+    if(NOT LQL_LIFECYCLE_COMPILER_ACCEPTED)
+      message(FATAL_ERROR
+        "liblql Linux builds require the pinned Bootlin toolchain; set LIBLQL_TOOLCHAIN_OVERRIDE=1 only for an explicit caller-supplied override")
+    elseif(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
+      message(FATAL_ERROR
+        "liblql Linux Bootlin builds require GCC")
+    endif()
+  endif()
 endif()
 
 function(lql_configure_c89_target target)
@@ -58,6 +84,8 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(LqlDependencyCache)
 include(LqlVersion)
+include(LqlDevelopmentRuntime)
+include(LqlLuaRuntime)
 
 get_filename_component(LQL_INSTALL_PREFIX_ABS "${CMAKE_INSTALL_PREFIX}" ABSOLUTE)
 if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
@@ -176,6 +204,7 @@ if(BUILD_TESTING)
   add_executable(lql_filter_file_spooled_example examples/filter_file_spooled.c)
   target_link_libraries(lql_filter_file_spooled_example PRIVATE ${LQL_INTERNAL_LIBRARY})
   lql_configure_c89_target(lql_filter_file_spooled_example)
+  lql_configure_development_runtime(lql_filter_file_spooled_example)
   add_test(NAME lql.example.filter_file_spooled
            COMMAND lql_filter_file_spooled_example
                    "${CMAKE_CURRENT_SOURCE_DIR}/examples/status.ndjson")
@@ -184,6 +213,7 @@ if(BUILD_TESTING)
   add_executable(lql_rewrite_file_inline_spooled_example examples/rewrite_file_inline_spooled.c)
   target_link_libraries(lql_rewrite_file_inline_spooled_example PRIVATE ${LQL_INTERNAL_LIBRARY})
   lql_configure_c89_target(lql_rewrite_file_inline_spooled_example)
+  lql_configure_development_runtime(lql_rewrite_file_inline_spooled_example)
   add_test(NAME lql.example.rewrite_file_inline_spooled
            COMMAND sh -c
                    "tmp=\"$PWD/lql-inline-example.$$\"; cp \"${CMAKE_CURRENT_SOURCE_DIR}/examples/status.ndjson\" \"$tmp\" && \"$1\" \"$tmp\" && grep '\"processed\":true' \"$tmp\" >/dev/null; rc=$?; rm \"$tmp\"; exit $rc"
@@ -201,17 +231,20 @@ if(BUILD_TESTING)
   endif()
   lql_configure_c89_target(lql_json_scan_test)
   lql_allow_test_partial_initializers(lql_json_scan_test)
+  lql_configure_development_runtime(lql_json_scan_test)
   add_test(NAME lql.json_scan COMMAND lql_json_scan_test)
   lql_set_test_contract(lql.json_scan "unit;local" 10)
   add_executable(lql_direct_stream_test tests/direct_stream_test.c)
   target_link_libraries(lql_direct_stream_test PRIVATE ${LQL_INTERNAL_LIBRARY})
   lql_configure_c89_target(lql_direct_stream_test)
+  lql_configure_development_runtime(lql_direct_stream_test)
   add_test(NAME lql.direct_stream COMMAND lql_direct_stream_test)
   lql_set_test_contract(lql.direct_stream "unit;integration;local" 20)
   add_executable(lql_selector_ast_test tests/selector_ast_test.c)
   target_link_libraries(lql_selector_ast_test PRIVATE ${LQL_INTERNAL_LIBRARY})
   lql_configure_c89_target(lql_selector_ast_test)
   lql_allow_test_partial_initializers(lql_selector_ast_test)
+  lql_configure_development_runtime(lql_selector_ast_test)
   add_test(NAME lql.selector_ast COMMAND lql_selector_ast_test)
   lql_set_test_contract(lql.selector_ast "unit;local" 10)
 endif()
@@ -221,10 +254,12 @@ if(LQL_BUILD_DIRECT_PROBE)
   target_compile_definitions(lql_direct_probe PRIVATE _POSIX_C_SOURCE=200809L)
   target_link_libraries(lql_direct_probe PRIVATE ${LQL_INTERNAL_LIBRARY})
   lql_configure_c89_target(lql_direct_probe)
+  lql_configure_development_runtime(lql_direct_probe)
   add_executable(lql_direct_bench tools/lql_direct_bench.c)
   target_compile_definitions(lql_direct_bench PRIVATE _POSIX_C_SOURCE=200809L)
   target_link_libraries(lql_direct_bench PRIVATE ${LQL_INTERNAL_LIBRARY})
   lql_configure_c89_target(lql_direct_bench)
+  lql_configure_development_runtime(lql_direct_bench)
 endif()
 
 if(LQL_BUILD_BINARY)
@@ -234,12 +269,16 @@ if(LQL_BUILD_BINARY)
     target_link_options(clql PRIVATE -static)
   endif()
   lql_configure_c89_target(clql)
+  if(NOT LQL_CLQL_STATIC)
+    lql_configure_development_runtime(clql)
+  endif()
 endif()
 
 if(LQL_BUILD_FUZZERS)
   add_executable(lql_json_fuzz fuzz/json_fuzz.c)
   target_link_libraries(lql_json_fuzz PRIVATE ${LQL_INTERNAL_LIBRARY})
   lql_configure_c89_target(lql_json_fuzz)
+  lql_configure_development_runtime(lql_json_fuzz)
 endif()
 
 if(LQL_BUILD_LUA)
@@ -248,38 +287,51 @@ if(LQL_BUILD_LUA)
     set(ENV{PKG_CONFIG_PATH}
         "${LQL_LUA_SDK_PREFIX}/${CMAKE_INSTALL_LIBDIR}/pkgconfig:$ENV{PKG_CONFIG_PATH}")
   endif()
-  pkg_check_modules(LUA55 REQUIRED lua5.5)
   pkg_check_modules(LIBLQL REQUIRED liblql)
-  if(NOT LUA55_INCLUDE_DIRS)
-    message(FATAL_ERROR "lua5.5 pkg-config did not report include directories")
+  if(NOT LIBLQL_LIBRARY_DIRS OR NOT LIBLQL_INCLUDE_DIRS)
+    message(FATAL_ERROR "liblql pkg-config did not report the installed SDK paths")
   endif()
-  list(GET LUA55_INCLUDE_DIRS 0 LUA55_INCLUDE_DIR)
-  set(LQL_LUA_STAGED_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/lua-host-include")
-  file(MAKE_DIRECTORY "${LQL_LUA_STAGED_INCLUDE}/lua5.5")
-  file(GLOB LQL_LUA_HEADERS "${LUA55_INCLUDE_DIR}/*.h")
-  foreach(header ${LQL_LUA_HEADERS})
-    file(COPY "${header}" DESTINATION "${LQL_LUA_STAGED_INCLUDE}/lua5.5")
-  endforeach()
-  find_file(LQL_LUA_MULTIARCH_HEADER lua5.5-deb-multiarch.h
-    PATHS /usr/include /usr/local/include
-    PATH_SUFFIXES x86_64-linux-gnu aarch64-linux-gnu arm-linux-gnueabihf
+  find_library(LQL_LUA_SDK_LIBRARY NAMES lql
+    PATHS ${LIBLQL_LIBRARY_DIRS}
+    NO_DEFAULT_PATH
     NO_CMAKE_FIND_ROOT_PATH)
-  if(LQL_LUA_MULTIARCH_HEADER)
-    file(COPY "${LQL_LUA_MULTIARCH_HEADER}"
-         DESTINATION "${LQL_LUA_STAGED_INCLUDE}/lua5.5")
+  if(NOT LQL_LUA_SDK_LIBRARY)
+    message(FATAL_ERROR "liblql pkg-config did not report a usable shared library")
   endif()
+  lql_prepare_lua_runtime(LQL_LUA_SOURCE_DIR)
+  file(GLOB LQL_LUA_RUNTIME_SOURCES CONFIGURE_DEPENDS
+    "${LQL_LUA_SOURCE_DIR}/src/*.c")
+  list(REMOVE_ITEM LQL_LUA_RUNTIME_SOURCES
+    "${LQL_LUA_SOURCE_DIR}/src/lua.c"
+    "${LQL_LUA_SOURCE_DIR}/src/luac.c")
+  add_library(lql_lua_runtime STATIC ${LQL_LUA_RUNTIME_SOURCES})
+  set_target_properties(lql_lua_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_include_directories(lql_lua_runtime PUBLIC
+    "${LQL_LUA_SOURCE_DIR}/src")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(lql_lua_runtime PRIVATE LUA_USE_LINUX)
+  endif()
+  target_link_libraries(lql_lua_runtime PUBLIC ${CMAKE_DL_LIBS} m)
   add_library(lql_lua_core MODULE lua/lql_core.c)
   set_target_properties(lql_lua_core PROPERTIES
     PREFIX ""
     OUTPUT_NAME core
     SKIP_BUILD_RPATH TRUE
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lua/lql")
-  target_link_directories(lql_lua_core PRIVATE ${LIBLQL_LIBRARY_DIRS})
-  target_link_libraries(lql_lua_core PRIVATE ${LIBLQL_LIBRARIES})
+  target_link_libraries(lql_lua_core PRIVATE "${LQL_LUA_SDK_LIBRARY}")
   target_include_directories(lql_lua_core SYSTEM PRIVATE
-    "${LQL_LUA_STAGED_INCLUDE}/lua5.5")
+    "${LQL_LUA_SOURCE_DIR}/src")
   target_include_directories(lql_lua_core PRIVATE ${LIBLQL_INCLUDE_DIRS})
   lql_configure_c89_target(lql_lua_core)
+
+  add_executable(lql_lua_runner tools/lql_lua_runner.c)
+  set_target_properties(lql_lua_runner PROPERTIES ENABLE_EXPORTS ON)
+  target_include_directories(lql_lua_runner SYSTEM PRIVATE
+    "${LQL_LUA_SOURCE_DIR}/src")
+  target_include_directories(lql_lua_runner PRIVATE ${LIBLQL_INCLUDE_DIRS})
+  target_link_libraries(lql_lua_runner PRIVATE lql_lua_runtime
+    "${LQL_LUA_SDK_LIBRARY}")
+  lql_configure_development_runtime(lql_lua_runner ${LIBLQL_LIBRARY_DIRS})
 endif()
 
 if(LQL_INSTALL)

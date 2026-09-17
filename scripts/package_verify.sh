@@ -420,8 +420,17 @@ verify_source_archive() {
     include/lql/lql.h \
     cmake/LqlVersion.cmake \
     cmake/LqlDependencyCache.cmake \
+    cmake/LqlDevelopmentRuntime.cmake \
+    cmake/LqlLuaRuntime.cmake \
+    tools/lql_lua_runner.c \
     scripts/cpkt-toolchains.sh \
+    scripts/check_toolchain_policy.sh \
+    scripts/check_development_runtime.sh \
+    scripts/check_lua_rock_toolchain_override.sh \
     scripts/test_dependency_cache_config.sh \
+    tests/dependency_cache_retry.cmake \
+    tests/dependency_cache_retry_server.py \
+    tests/fixtures/dependency-cache-retry-payload.txt \
     scripts/check_dependency_cache_privacy_regression.sh \
     scripts/package-verify.sh \
     scripts/package_clql.sh \

@@ -3,7 +3,6 @@ set -eu
 
 prefix=${LQL_INSTALL_PREFIX:-build/install-smoke}
 work=${LQL_INSTALL_CONSUMER_DIR:-build/install-consumer}
-cc=${CC:-}
 prefix_abs=$(CDPATH= cd -- "$prefix" && pwd -P)
 
 if [ ! -f "$prefix/include/lql/lql.h" ] ||
@@ -14,11 +13,41 @@ if [ ! -f "$prefix/include/lql/lql.h" ] ||
   exit 1
 fi
 
-if [ -z "$cc" ]; then
-  cc=$(scripts/cpkt-toolchains.sh discover x86_64-linux-gnu | sed -n 's/^cc=//p')
+toolchain_override=OFF
+runtime_loader=
+runtime_dirs=
+runtime_flags=
+consumer_rpath=
+if [ "${LIBLQL_TOOLCHAIN_OVERRIDE:-}" = "1" ]; then
+  toolchain_override=ON
+  cc_name=${CC:-cc}
+  cc=$(command -v "$cc_name" 2>/dev/null || :)
+  consumer_rpath="-Wl,-rpath,$prefix_abs/lib"
+else
+  toolchain_description=$(scripts/cpkt-toolchains.sh discover x86_64-linux-gnu)
+  toolchain_value() {
+    printf '%s\n' "$toolchain_description" | sed -n "s/^$1=//p"
+  }
+  cc=$(toolchain_value cc)
+  runtime_loader=$(toolchain_value dynamic_loader)
+  runtime_dirs=$(toolchain_value runtime_library_dirs)
+  if [ -z "$runtime_loader" ] || [ -z "$runtime_dirs" ]; then
+    printf '%s\n' 'install-tree check: selected Bootlin runtime metadata is incomplete' >&2
+    exit 1
+  fi
+  runtime_flags="-Wl,--dynamic-linker=$runtime_loader"
+  old_ifs=$IFS
+  IFS=:
+  set -- $runtime_dirs
+  IFS=$old_ifs
+  for runtime_dir
+  do
+    runtime_flags="$runtime_flags -Wl,--disable-new-dtags -Wl,-rpath,$runtime_dir"
+  done
+  consumer_rpath="-Wl,--disable-new-dtags -Wl,-rpath,$prefix_abs/lib"
 fi
 if [ ! -x "$cc" ]; then
-  printf 'install-tree check: missing C compiler: %s\n' "$cc" >&2
+  printf 'install-tree check: missing C compiler: %s\n' "${cc_name:-$cc}" >&2
   exit 1
 fi
 
@@ -50,17 +79,49 @@ project(liblql_cmake_consumer C)
 find_package(liblql CONFIG REQUIRED)
 add_executable(consumer ../smoke.c)
 target_link_libraries(consumer PRIVATE liblql::lql_shared)
+if(NOT LQL_SMOKE_TOOLCHAIN_OVERRIDE)
+  target_link_options(consumer PRIVATE
+    "-Wl,--dynamic-linker=${LQL_SMOKE_DYNAMIC_LOADER}"
+    "-Wl,--disable-new-dtags"
+    "-Wl,-rpath,${LQL_SMOKE_PREFIX_LIB}")
+  string(REPLACE ":" ";" LQL_SMOKE_RUNTIME_DIRS_LIST
+    "${LQL_SMOKE_RUNTIME_DIRS}")
+  foreach(runtime_dir IN LISTS LQL_SMOKE_RUNTIME_DIRS_LIST)
+    target_link_options(consumer PRIVATE
+      "-Wl,--disable-new-dtags"
+      "-Wl,-rpath,${runtime_dir}")
+  endforeach()
+else()
+  target_link_options(consumer PRIVATE "-Wl,-rpath,${LQL_SMOKE_PREFIX_LIB}")
+endif()
 CMAKE
 
-cmake -S "$work/cmake" -B "$work/cmake-build" \
-  -G Ninja \
-  -DCMAKE_C_COMPILER="$cc" \
-  -DCMAKE_PREFIX_PATH="$prefix_abs" >/dev/null
+if [ "$toolchain_override" = ON ]; then
+  cmake -S "$work/cmake" -B "$work/cmake-build" \
+    -G Ninja \
+    -DCMAKE_C_COMPILER="$cc" \
+    -DLQL_SMOKE_PREFIX_LIB="$prefix_abs/lib" \
+    -DLQL_SMOKE_TOOLCHAIN_OVERRIDE=ON \
+    -DCMAKE_PREFIX_PATH="$prefix_abs" >/dev/null
+else
+  cmake -S "$work/cmake" -B "$work/cmake-build" \
+    -G Ninja \
+    -DCMAKE_C_COMPILER="$cc" \
+    -DLQL_SMOKE_DYNAMIC_LOADER="$runtime_loader" \
+    -DLQL_SMOKE_RUNTIME_DIRS="$runtime_dirs" \
+    -DLQL_SMOKE_PREFIX_LIB="$prefix_abs/lib" \
+    -DLQL_SMOKE_TOOLCHAIN_OVERRIDE=OFF \
+    -DCMAKE_PREFIX_PATH="$prefix_abs" >/dev/null
+fi
 cmake --build "$work/cmake-build" >/dev/null
 
 PKG_CONFIG_PATH="$prefix_abs/lib/pkgconfig" pkg-config --exists liblql
 cflags=$(PKG_CONFIG_PATH="$prefix_abs/lib/pkgconfig" pkg-config --cflags liblql)
 libs=$(PKG_CONFIG_PATH="$prefix_abs/lib/pkgconfig" pkg-config --libs liblql)
-"$cc" $cflags "$work/smoke.c" $libs -o "$work/pkgconfig/consumer"
+"$cc" $cflags "$work/smoke.c" $libs $runtime_flags $consumer_rpath \
+  -o "$work/pkgconfig/consumer"
 
-printf 'install-tree check: CMake and pkg-config consumers built from %s\n' "$prefix_abs"
+"$work/cmake-build/consumer"
+"$work/pkgconfig/consumer"
+
+printf 'install-tree check: CMake and pkg-config consumers built and ran from %s\n' "$prefix_abs"

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -10,7 +11,17 @@ import tempfile
 CLQL = os.environ.get("CLQL_PATH", "build/release/clql")
 LUA_CLI = os.environ.get("LQL_LUA_CLI_PATH", "build/luarocks/bin/lql.lua")
 LUA_TREE = os.environ.get("LQL_LUAROCKS_TREE", "build/luarocks")
-LUA_SDK_PREFIX = os.environ.get("LQL_LUA_SDK_PREFIX", "build/lua-sdk")
+LUA_RUNNER = os.environ.get("LQL_LUA_RUNNER", "build/debug-lua/lql_lua_runner")
+
+
+def lua_script_path():
+    explicit = os.environ.get("LQL_LUA_CLI_SCRIPT")
+    if explicit:
+        return explicit
+    candidates = sorted(
+        pathlib.Path(LUA_TREE).glob("lib/luarocks/rocks-5.5/liblql/*/bin/lql.lua")
+    )
+    return str(candidates[0]) if len(candidates) == 1 else ""
 
 
 def fail(message):
@@ -36,14 +47,16 @@ def lua_env():
         f"{LUA_TREE}/lib/lua/5.5/?.so;"
         f"{LUA_TREE}/lib/lua/5.5/?/core.so;;"
     )
-    ld = env.get("LD_LIBRARY_PATH", "")
-    env["LD_LIBRARY_PATH"] = f"{LUA_SDK_PREFIX}/lib" + (f":{ld}" if ld else "")
     return env
 
 
 def run_lua(args):
     return subprocess.run(
-        [LUA_CLI, *args], text=True, capture_output=True, check=False, env=lua_env()
+        [LUA_RUNNER, lua_script_path(), *args],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=lua_env(),
     )
 
 
@@ -133,7 +146,12 @@ def assert_help_cluster():
 
 
 def main():
-    for binary, label in ((CLQL, "clql"), (LUA_CLI, "lql.lua")):
+    for binary, label in (
+        (CLQL, "clql"),
+        (LUA_RUNNER, "Bootlin Lua runner"),
+        (LUA_CLI, "lql.lua"),
+        (lua_script_path(), "installed Lua CLI script"),
+    ):
         if not os.path.exists(binary) or not os.access(binary, os.X_OK):
             fail(f"missing {label} binary: {binary}")
 

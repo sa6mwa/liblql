@@ -113,15 +113,29 @@ while deciding whether a positional argument is an input path.
 
 ## Lifecycle Surface
 
-This repository follows the pkt.systems CMake lifecycle. Linux builds use the
-pinned Bootlin GCC toolchains selected by `cmake/cpkt-toolchain.cmake`; host
-Clang is only a development tool for `clang-format` and `clangd`.
+This repository follows the pkt.systems CMake lifecycle. Linux builds use only
+the pinned Bootlin GCC `stable-2026.08-1` collections selected by
+`cmake/cpkt-toolchain.cmake`; host Clang is only a development tool for
+`clang-format` and `clangd`. A caller may deliberately supply another
+toolchain only with `LIBLQL_TOOLCHAIN_OVERRIDE=1`; the configure output records
+that exception. The same override applies to `make lua-rock`: set `CC` (or
+`LQL_LUA_ROCK_CC`) alongside it to select the caller-supplied Lua module
+compiler.
+
+Local tests, examples, benchmarks, fuzzers, development `clql`, and the Lua
+facade runner embed the selected Bootlin ELF interpreter and private transitive
+RPATH. They therefore run directly against that collection without changing
+host process library paths. Shipped SDK libraries and release CLI artifacts
+must remain portable and must not contain a toolchain-cache path.
 
 Useful local gates:
 
 ```sh
 make lifecycle-check
 make lifecycle-version-contract
+make toolchain-policy-check
+make development-runtime-check
+make finalize-slice
 make test
 make lua-cli-smoke
 make lua-cli-clql-parity
@@ -160,6 +174,16 @@ The Lua 5.5 facade is a LuaRocks source module over the public shared
 to `liblql.so`; it does not compile private liblql sources or statically embed
 `liblql.a`.
 
+Local facade tests build the official checksum-pinned Lua 5.5.1 source with
+the selected Bootlin compiler, then run Lua scripts through the private
+`build/debug-lua/lql_lua_runner` executable. The runner carries the Bootlin
+interpreter and RPATH plus the local SDK path. The CMake test module inherits
+that process runtime; the LuaRocks development module has its own transitive
+RPATH to the repo-local SDK. Host Lua and LuaRocks are package-management
+tooling only and never execute a Bootlin-built module.
+`make lua-env` prints module paths, the local SDK prefix, and the runner path;
+it intentionally never exports `LD_LIBRARY_PATH`.
+
 ```sh
 make lua-rock
 make lua-test
@@ -182,9 +206,35 @@ in liblql. `make lua-cli-clql-parity` compares `lql.lua` output against
 those comparisons.
 
 The Lua module exposes `lql.core` as the native public facade; `require("lql")`
-is only a zero-policy alias to that same table. It exposes the public liblql
-workflows that map safely to Lua: selector/projection/mutation parsing, string
-execution, spooled file filtering, inline spooled rewrite, status strings, and
-regular-file classification. Raw C callback surfaces such as `stream_apply`
-remain C-only because exposing them directly would force unsafe callback
-lifetime and ownership rules into Lua.
+is only a zero-policy alias to that same table. Selector values are C-owned
+userdata: Lua can parse, build, traverse, serialize, and JSON-round-trip the
+full public selector AST, but never owns or reimplements its tree. Builders
+cover `all`, `and`/`or`, `not`, string terms, range, date, `in`, and `exists`;
+`selector:root()` returns a borrowed C cursor whose children and term views are
+also C-backed.
+
+`client:stream_apply(reader, selector, options)` is the public true-streaming
+facade. `reader(capacity)` returns at most `capacity` bytes or `nil` at EOF;
+`nil, error` is a failed read, not EOF; `error` may be the facade's structured
+error table or the string returned by Lua file I/O (`nil, message, errno`).
+Output, range replay, decision, value, cancellation, and clock callbacks map
+directly to the corresponding public C callbacks. A `value` and a range
+`writer` are valid only during the callback that received them.
+`stream_apply_spooled` is the explicitly materialized compatibility variant and
+has the same Lua callback shape. Lua callback methods may return `true` or
+`nil, error`; callbacks that replay output should return that result unchanged.
+A callback failure is terminal for its current operation: the facade preserves
+its status and message and does not invoke another reader or writer. Retained
+mutations remain reusable, so a later operation retries their callbacks.
+Facade option and AST-builder tables may use `__index`; getter failures are
+returned as structured callback errors after cleanup, and callback functions
+are captured once when a retained mutation is created.
+Configured stream limits must be non-negative Lua integers representable by the
+target's `size_t`; oversized limits fail rather than wrapping.
+`filter_file_spooled` accepts a `writer` callback as its safe alternative to a
+C `FILE *`; inline rewrite deliberately does not because the underlying API
+rejects an external sink. For file-backed mutations, `file_value_open(path)`
+returns a fresh bounded reader function whose `nil, error` result likewise
+fails the operation, and `time_now` returns an integer Unix timestamp or
+`nil, error`. The binding roots those functions for the mutation userdata
+lifetime, then releases them with the C mutation handle.

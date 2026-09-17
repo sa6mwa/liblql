@@ -11,7 +11,16 @@ repository.
   `x86_64-linux-gnu`, `x86_64-linux-musl`, `aarch64-linux-gnu`,
   `aarch64-linux-musl`, `armhf-linux-gnu`, `armhf-linux-musl`, and
   `arm64-apple-darwin` when the local osxcross toolchain is available.
-- Compiler policy: Linux builds use cached Bootlin GCC collections only.
+- Compiler policy: Linux builds use cached Bootlin GCC `stable-2026.08-1`
+  collections only. `LIBLQL_TOOLCHAIN_OVERRIDE=1` is the sole explicit escape
+  hatch for a caller-supplied toolchain; no host compiler is selected by
+  fallback. Non-shipped development executables embed the selected Bootlin ELF
+  interpreter and private transitive RPATH, while shipped SDK/CLI artifacts are
+  verified free of toolchain-cache paths. Lua facade development additionally
+  builds checksum-pinned upstream Lua 5.5.1 with the selected Bootlin compiler
+  and executes modules through a local Bootlin-loader runner; host Lua and
+  LuaRocks remain package-management tooling and no test exports
+  `LD_LIBRARY_PATH`.
   Shared Bootlin and AFL++ cache publication is serialized with bounded
   per-collection `flock` locks (`CPKT_TOOLCHAIN_LOCK_TIMEOUT`, default
   600 seconds), validates cache hits before use, and publishes only completed
@@ -28,7 +37,8 @@ repository.
   whitespace; decision-only library callers should use
   `lql_stream_apply` directly.
 - Lua: restore the Lua facade and Lua release artifacts according to the
-  lifecycle Lua contract.
+  lifecycle Lua contract, with the local facade runtime built from the pinned
+  Lua 5.5.1 source archive in the shared verified dependency cache.
 - Fuzzing: remove ASan/libFuzzer-style lifecycle gates in favor of AFL++ GCC
   plugin fuzzing through the cached Bootlin x86_64 GNU toolchain.
 - Existing invariants: preserve self-contained direct execution, no LoneJSON
@@ -49,13 +59,13 @@ repository.
 | `debug` preset | `debug` preset | Debug build and unit tests | preset contract test, `make test` |
 | `release` preset | host/release and target release presets | Optimized benchmark/release build | benchmark gates, package matrix |
 | ASan/libFuzzer preset | removed | None; superseded by AFL++ | `make fuzz-smoke`, `make fuzz` |
-| host compiler discovery | Bootlin resolver | GCC C89 warning-clean builds | resolver tests, CMake cache inspection |
+| host compiler discovery | Bootlin resolver and explicit override policy | GCC C89 warning-clean builds; no fallback host compiler | resolver, policy, and development-runtime checks |
 | rewrite-specific Make targets | standard lifecycle Make surface | Direct reset, no-LoneJSON, parity, profile, live heap | `make test-all`, `make prerelease` |
 | no package surface | host binary SDK archive | static/shared liblql SDK | `make package-verify` |
 | no target tool helper | `scripts/discover_target_tools.sh` | package verification uses configured target tools | `make target-tool-check` |
 | no release matrix | `release-matrix` and `release` | local release proof | checksum/privacy/relocatability gates |
 | no CLI | `clql` example/binary | thin public stream adapter; selected output is explicitly spooled | `make clql-smoke` |
-| no Lua surface | Lua facade/source rock | Lua module parity with current expectations | `make lua-test`, Lua artifact verification |
+| no Lua surface | Lua facade/source rock and Bootlin runner | Lua module parity without host runtime leakage | `make lua-test`, development-runtime, and Lua artifact verification |
 | no fuzz surface | AFL++ fuzz target and corpus | parser/stream robustness | `make fuzz-smoke` |
 | no dependency archive cache contract | shared `CPKT_DEPENDENCY_CACHE` resolution | self-contained build does not download archives; future dependencies have one cache boundary | `make dependency-cache-check`, `make dependency-cache-privacy-regression` |
 
@@ -73,7 +83,8 @@ repository.
 5. The Lua facade, development rock, Lua tests, and release Lua artifacts are
    restored. The installed `lql.lua` reference executable calls the native
    `lql.core` binding directly and is checked against `clql` and the pinned Go
-   CLI for shared workflows.
+   CLI for shared workflows. Local module execution uses the Bootlin-built Lua
+   runner and its private RPATH rather than host Lua plus `LD_LIBRARY_PATH`.
 6. Install rules, CMake package config, pkg-config metadata, and extracted SDK
    consumer tests are in place for install-tree smoke, host binary SDK archive
    verification, and release matrix package verification.

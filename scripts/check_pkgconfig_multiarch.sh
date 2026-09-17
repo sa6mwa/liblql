@@ -3,14 +3,29 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 build_root=${LQL_PKGCONFIG_MULTIARCH_BUILD_DIR:-"$root/build/pkgconfig-multiarch"}
-cc=${CC:-}
+toolchain_override=${LIBLQL_TOOLCHAIN_OVERRIDE:-}
+toolchain=$($root/scripts/cpkt-toolchains.sh discover x86_64-linux-gnu)
 
-if [ -z "$cc" ]; then
-  cc=$("$root/scripts/cpkt-toolchains.sh" discover x86_64-linux-gnu |
-    sed -n 's/^cc=//p')
+toolchain_value() {
+  printf '%s\n' "$toolchain" | sed -n "s/^$1=//p"
+}
+
+if [ "$toolchain_override" = "1" ]; then
+  cc_name=${CC:-cc}
+  cc=$(command -v "$cc_name" 2>/dev/null || :)
+else
+  cc=$(toolchain_value cc)
 fi
 if [ ! -x "$cc" ]; then
-  printf 'pkg-config multiarch: missing C compiler: %s\n' "$cc" >&2
+  printf 'pkg-config multiarch: missing C compiler: %s\n' "${cc_name:-$cc}" >&2
+  exit 1
+fi
+runtime_loader=$(toolchain_value dynamic_loader)
+runtime_dirs=$(toolchain_value runtime_library_dirs)
+readelf_tool=$(toolchain_value readelf)
+if [ "$toolchain_override" != "1" ] && \
+   { [ -z "$runtime_loader" ] || [ -z "$runtime_dirs" ] || [ ! -x "$readelf_tool" ]; }; then
+  printf '%s\n' 'pkg-config multiarch: incomplete Bootlin runtime metadata' >&2
   exit 1
 fi
 
@@ -79,7 +94,6 @@ SMOKE
     pkg-config --cflags liblql)
   libs=$(PKG_CONFIG_PATH="$pc_dir" PKG_CONFIG_SYSROOT_DIR="$destdir" \
     pkg-config --libs liblql)
-  "$cc" $cflags "$consumer_dir/smoke.c" $libs -o "$consumer_dir/smoke"
   loader_libdir=$(PKG_CONFIG_PATH="$pc_dir" pkg-config --variable=libdir liblql)
   case $loader_libdir in
     "$destdir"/* | "")
@@ -88,7 +102,50 @@ SMOKE
       loader_libdir=$destdir$loader_libdir
       ;;
   esac
-  LD_LIBRARY_PATH=$loader_libdir "$consumer_dir/smoke"
+  runtime_flags=
+  if [ "$toolchain_override" = "1" ]; then
+    runtime_flags="-Wl,-rpath,$loader_libdir"
+  else
+    runtime_flags="-Wl,--dynamic-linker=$runtime_loader"
+    old_ifs=$IFS
+    IFS=:
+    set -- $runtime_dirs
+    IFS=$old_ifs
+    for runtime_dir
+    do
+      runtime_flags="$runtime_flags -Wl,--disable-new-dtags -Wl,-rpath,$runtime_dir"
+    done
+    runtime_flags="$runtime_flags -Wl,--disable-new-dtags -Wl,-rpath,$loader_libdir"
+  fi
+  "$cc" $cflags "$consumer_dir/smoke.c" $libs $runtime_flags \
+    -o "$consumer_dir/smoke"
+  if [ "$toolchain_override" != "1" ]; then
+    if ! "$readelf_tool" -l "$consumer_dir/smoke" | \
+      grep -F "Requesting program interpreter: $runtime_loader]" >/dev/null; then
+      printf 'pkg-config multiarch: consumer has wrong Bootlin interpreter: %s\n' \
+        "$consumer_dir/smoke" >&2
+      exit 1
+    fi
+    dynamic=$($readelf_tool -d "$consumer_dir/smoke")
+    if printf '%s\n' "$dynamic" | grep 'RUNPATH' >/dev/null; then
+      printf 'pkg-config multiarch: consumer uses RUNPATH: %s\n' \
+        "$consumer_dir/smoke" >&2
+      exit 1
+    fi
+    old_ifs=$IFS
+    IFS=:
+    set -- $runtime_dirs "$loader_libdir"
+    IFS=$old_ifs
+    for runtime_dir
+    do
+      if ! printf '%s\n' "$dynamic" | grep -F "$runtime_dir" >/dev/null; then
+        printf 'pkg-config multiarch: consumer is missing RPATH %s\n' \
+          "$runtime_dir" >&2
+        exit 1
+      fi
+    done
+  fi
+  "$consumer_dir/smoke"
 
   printf 'pkg-config multiarch: %s consumer built from %s\n' "$name" "$pc_path"
 }

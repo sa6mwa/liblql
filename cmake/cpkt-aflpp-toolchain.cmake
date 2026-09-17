@@ -33,3 +33,7 @@ cpkt_afl_value(helper CPKT_AFL_HELPER)
 set(ENV{AFL_PATH} "${CPKT_AFL_HELPER}")
 set(CMAKE_C_COMPILER "${CPKT_AFL_CC}" CACHE FILEPATH "" FORCE)
 set(CMAKE_CXX_COMPILER "${CPKT_AFL_CXX}" CACHE FILEPATH "" FORCE)
+set(CPKT_AFLPP_ACTIVE TRUE CACHE INTERNAL
+    "CMake compiler is the lifecycle-owned AFL++ wrapper")
+set(CPKT_AFL_CC "${CPKT_AFL_CC}" CACHE INTERNAL
+    "Lifecycle-owned AFL++ C compiler wrapper")

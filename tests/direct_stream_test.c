@@ -1789,6 +1789,12 @@ static int run_mapped_string_predicates(lql *ctx) {
   static const char array_scalar_exists_input[] = "{\"values\":[null,\"B\"]}\n"
                                                   "{\"values\":[\"B\",null]}\n"
                                                   "{\"values\":[\"A\"]}\n";
+  static const char array_membership_input[] =
+      "{\"tags\":[\"red\",\"blue\"]}\n"
+      "{\"tags\":\"red\"}\n"
+      "{\"tags\":[\"green\"]}\n"
+      "{\"tags\":null}\n"
+      "{}\n";
   static const char null_input[] = "{\"empty\":null,\"code\":1}\n"
                                    "{\"empty\":false,\"code\":2}\n"
                                    "{\"empty\":\"null\",\"code\":3}\n";
@@ -1983,6 +1989,19 @@ static int run_mapped_string_predicates(lql *ctx) {
       run_selection(ctx, "range{field=/codes/1,gte=2}", array_scalar_input, 3u,
                     2u)) {
     return 108;
+  }
+  /*
+   * Go lql treats /tags as the array value itself. Element membership is
+   * selected explicitly with /tags[]; plain in must not inspect array items.
+   */
+  if (run_selection(ctx, "in{field=/tags,any=red|blue}",
+                    array_membership_input, 5u, 1u) ||
+      run_selection(ctx, "in{field=/tags[],any=red|blue}",
+                    array_membership_input, 5u, 1u) ||
+      run_selection(ctx, "/tags[]=\"blue\"", array_membership_input, 5u, 1u) ||
+      run_selection(ctx, "contains{field=/tags[],value=blu}",
+                    array_membership_input, 5u, 1u)) {
+    return 113;
   }
   if (run_selection(ctx, "exists{/values/1}", array_scalar_exists_input, 3u,
                     1u) ||

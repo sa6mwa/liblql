@@ -7,7 +7,11 @@ set -eu
 # broad SDK parity matrix owns semantic coverage; this gate samples the rows
 # most likely to regress speed, RSS, source-range replay, mutation, file-backed
 # values, recursive selectors, and large-input streaming behavior.
-direct_parity_init 'direct perf gate' build/direct-perf-gate.jsonl 2
+# The C and Go measurements run in separate processes. Five steady-state
+# samples keep the best-of-samples policy used by both benchmark drivers while
+# rejecting scheduler outliers that can otherwise make an unchanged binary
+# fail a 1.0x hard threshold.
+direct_parity_init 'direct perf gate' build/direct-perf-gate.jsonl 5
 
 sh scripts/ensure_direct_parity_fixtures.sh
 

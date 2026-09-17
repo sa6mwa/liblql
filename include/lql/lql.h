@@ -21,14 +21,23 @@ extern "C" {
 
 /** Status returned by every fallible liblql operation. */
 typedef enum lql_status {
+  /** Operation completed successfully. */
   LQL_STATUS_OK = 0,
+  /** A required argument was NULL, malformed, or inconsistent. */
   LQL_STATUS_INVALID_ARGUMENT = 1,
+  /** The receiver's allocation budget was exhausted. */
   LQL_STATUS_NO_MEMORY = 2,
+  /** LQL selector, projection, or mutation syntax was invalid. */
   LQL_STATUS_PARSE_ERROR = 3,
+  /** Input was not valid JSON or strict NDJSON. */
   LQL_STATUS_JSON_ERROR = 4,
+  /** The requested feature cannot run under the selected API contract. */
   LQL_STATUS_UNSUPPORTED = 5,
+  /** Application stopped at a caller-requested successful boundary. */
   LQL_STATUS_STOP = 6,
+  /** A caller callback returned or reported an error. */
   LQL_STATUS_CALLBACK_ERROR = 7,
+  /** A reader, writer, or file operation failed. */
   LQL_STATUS_IO_ERROR = 8
 } lql_status;
 
@@ -44,10 +53,15 @@ typedef struct lql_error {
   char message[256];
 } lql_error;
 
+/** Opaque parsed selector; release it through `selector_destroy`. */
 typedef struct lql_selector lql_selector;
+/** Public receiver shell returned by `lql_new`. */
 typedef struct lql lql;
+/** Opaque parsed projection; release it through `projection_destroy`. */
 typedef struct lql_projection lql_projection;
+/** Opaque parsed mutation; release it through `mutation_destroy`. */
 typedef struct lql_mutation lql_mutation;
+/** Callback-scoped matched record supplied to `lql_stream_value_fn`. */
 typedef struct lql_stream_value lql_stream_value;
 
 /** Runtime capabilities of this liblql build; zero means unavailable. */
@@ -78,17 +92,29 @@ typedef struct lql_capabilities {
 
 /** Selector features represented by one parsed or constructed selector. */
 typedef struct lql_selector_capabilities {
+  /** Compound AND nodes are present. */
   int and_;
+  /** Compound OR nodes are present. */
   int or_;
+  /** NOT nodes are present. */
   int not_;
+  /** Equality nodes are present. */
   int eq;
+  /** Numeric or datetime range nodes are present. */
   int range;
+  /** Date nodes are present. */
   int date;
+  /** Membership nodes are present. */
   int in;
+  /** Prefix or case-insensitive prefix nodes are present. */
   int prefix;
+  /** Contains or case-insensitive contains nodes are present. */
   int contains;
+  /** Exists nodes are present. */
   int exists;
+  /** At least one JSON Pointer wildcard segment is present. */
   int wildcard_path;
+  /** At least one recursive JSON Pointer segment is present. */
   int recursive_path;
 } lql_selector_capabilities;
 
@@ -98,7 +124,9 @@ typedef struct lql_selector_capabilities {
  * caller.
  */
 typedef struct lql_string_view {
+  /** First byte of borrowed storage; not necessarily NUL-terminated. */
   const char *data;
+  /** Number of bytes beginning at `data`. */
   size_t len;
 } lql_string_view;
 
@@ -148,12 +176,19 @@ typedef void (*lql_mutation_file_close_fn)(void *user, void *reader_user);
  * Go-compatible naive-UTC forms. Neither path consults process locale.
  */
 typedef struct lql_mutation_parse_options {
+  /** Non-zero enables `file:`, `textfile:`, and `base64file:` values. */
   int enable_file_values;
+  /** Base directory for local relative file values. */
   lql_string_view file_value_base_dir;
+  /** Optional opaque-reference opener; requires `file_value_close`. */
   lql_mutation_file_open_fn file_value_open;
+  /** Closes every reader returned by `file_value_open`. */
   lql_mutation_file_close_fn file_value_close;
+  /** Caller context borrowed by the file-value callbacks. */
   void *file_value_user;
+  /** Optional clock for `time:...=NOW`; NULL uses `time(NULL)`. */
   lql_time_now_fn time_now;
+  /** Caller context borrowed by `time_now`. */
   void *time_user;
 } lql_mutation_parse_options;
 
@@ -213,7 +248,9 @@ typedef enum lql_stream_stop_reason {
 
 /** Final selection result for one zero-based NDJSON record index. */
 typedef struct lql_stream_decision {
+  /** Zero-based ordinal of the fully validated input record. */
   size_t record_index;
+  /** Non-zero when this record matched the request selector. */
   int matched;
 } lql_stream_decision;
 
@@ -237,8 +274,11 @@ typedef lql_stream_callback_result (*lql_stream_value_fn)(
 
 /** Application limits; zero for any member means unlimited. */
 typedef struct lql_stream_limits {
+  /** Maximum accepted records before a successful stop; zero is unlimited. */
   size_t max_records;
+  /** Maximum matched records before a successful stop; zero is unlimited. */
   size_t max_matches;
+  /** Maximum bytes consumed before a successful stop; zero is unlimited. */
   size_t max_bytes;
 } lql_stream_limits;
 
@@ -336,17 +376,29 @@ typedef struct lql_stream_result {
  * `rewrite_file_inline_spooled` for in-place updates.
  */
 typedef struct lql_file_filter_request {
+  /** Input path, or `-` for stdin; mutually exclusive with `input_file`. */
   const char *input_path;
+  /** Borrowed input stream; mutually exclusive with `input_path`. */
   FILE *input_file;
+  /** Output path, or `-` for stdout; exclusive with the other sinks. */
   const char *output_path;
+  /** Borrowed output stream; exclusive with the other sinks. */
   FILE *output_file;
+  /** Optional output callback; exclusive with output path and stream. */
   lql_stream_writer_fn output_writer;
+  /** Caller context borrowed by `output_writer`. */
   void *output_user;
+  /** Optional compiled selector; NULL selects every valid record. */
   const lql_selector *selector;
+  /** Projection for projection modes; borrowed for this call. */
   const lql_projection *projection;
+  /** Mutation for mutation modes; borrowed for this call. */
   const lql_mutation *mutation;
+  /** Requested transform; zero selects decision-only mode. */
   lql_stream_output_mode output_mode;
+  /** Non-zero suppresses unmatched transformed output. */
   int matched_only;
+  /** Non-zero writes only the match count and ignores transforms. */
   int count_only;
 } lql_file_filter_request;
 
@@ -388,7 +440,9 @@ typedef enum lql_selector_since_kind {
  * selector is alive and unchanged; callers must not inspect `impl`.
  */
 typedef struct lql_selector_node {
+  /** Kind of the node selected by this borrowed cursor. */
   lql_selector_node_kind kind;
+  /** Opaque borrowed implementation state; callers must not access it. */
   const void *impl;
 } lql_selector_node;
 
@@ -403,10 +457,15 @@ typedef struct lql_selector_node {
  * JSON `null` is not treated as text.
  */
 typedef struct lql_selector_string_term {
+  /** Borrowed JSON Pointer path. */
   lql_string_view field;
+  /** Non-zero when `value` is specified. */
   int value_present;
+  /** Borrowed textual needle when `value_present` is non-zero. */
   lql_string_view value;
+  /** Non-zero enables case-insensitive comparison. */
   int ignore_case;
+  /** Number of values available through the corresponding `*_any` accessor. */
   size_t any_count;
 } lql_selector_string_term;
 
@@ -418,38 +477,59 @@ typedef struct lql_selector_string_term {
  * evaluate and round-trip through `number_text`.
  */
 typedef struct lql_selector_range_bound {
+  /** Selects which bound representation is active. */
   lql_selector_bound_kind kind;
+  /** Finite convenience value for representable numeric bounds. */
   double number;
+  /** Borrowed authoritative JSON spelling for a numeric bound. */
   lql_string_view number_text;
+  /** Borrowed normalized datetime spelling for a datetime bound. */
   lql_string_view datetime;
 } lql_selector_range_bound;
 
 /** Borrowed details for a range selector term; `field` is a JSON pointer. */
 typedef struct lql_selector_range_term {
+  /** Borrowed JSON Pointer path. */
   lql_string_view field;
+  /** Strict lower bound. */
   lql_selector_range_bound gt;
+  /** Inclusive lower bound. */
   lql_selector_range_bound gte;
+  /** Strict upper bound. */
   lql_selector_range_bound lt;
+  /** Inclusive upper bound. */
   lql_selector_range_bound lte;
 } lql_selector_range_term;
 
 /** Borrowed details for a date selector term; `field` is a JSON pointer. */
 typedef struct lql_selector_date_term {
+  /** Borrowed JSON Pointer path. */
   lql_string_view field;
+  /** Borrowed exact date value. */
   lql_string_view value;
+  /** Borrowed relative or literal `since` spelling. */
   lql_string_view since;
+  /** Normalized classification of `since`. */
   lql_selector_since_kind since_kind;
+  /** Borrowed inclusive lower date alias. */
   lql_string_view after;
+  /** Borrowed exclusive upper date alias. */
   lql_string_view before;
+  /** Borrowed strict lower bound. */
   lql_string_view gt;
+  /** Borrowed inclusive lower bound. */
   lql_string_view gte;
+  /** Borrowed strict upper bound. */
   lql_string_view lt;
+  /** Borrowed inclusive upper bound. */
   lql_string_view lte;
 } lql_selector_date_term;
 
 /** Borrowed details for an `in` selector term; `field` is a JSON pointer. */
 typedef struct lql_selector_in_term {
+  /** Borrowed JSON Pointer path. */
   lql_string_view field;
+  /** Number of values available through `selector_node_in_term_any`. */
   size_t any_count;
 } lql_selector_in_term;
 

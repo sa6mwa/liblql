@@ -3,6 +3,17 @@ if(NOT CPKT_TARGET_ID)
   set(CPKT_TARGET_ID "x86_64-linux-gnu" CACHE STRING "pkt.systems target id" FORCE)
 endif()
 
+if(DEFINED ENV{LIBLQL_TOOLCHAIN_OVERRIDE} AND
+   NOT "$ENV{LIBLQL_TOOLCHAIN_OVERRIDE}" STREQUAL "")
+  if(NOT "$ENV{LIBLQL_TOOLCHAIN_OVERRIDE}" STREQUAL "1")
+    message(FATAL_ERROR
+      "LIBLQL_TOOLCHAIN_OVERRIDE must be exactly 1 when bypassing Bootlin")
+  endif()
+  message(WARNING
+    "LIBLQL_TOOLCHAIN_OVERRIDE=1: using the caller-supplied compiler/toolchain")
+  return()
+endif()
+
 set(CPKT_TOOLCHAIN_RESOLVER
     "${CMAKE_CURRENT_LIST_DIR}/../scripts/cpkt-toolchains.sh")
 if(NOT EXISTS "${CPKT_TOOLCHAIN_RESOLVER}")
@@ -59,6 +70,10 @@ if(CPKT_TARGET_ID MATCHES "linux")
   cpkt_value(objdump CPKT_OBJDUMP)
   cpkt_value(addr2line CPKT_ADDR2LINE)
   cpkt_value(readelf CPKT_READELF)
+  cpkt_value(dynamic_loader CPKT_DYNAMIC_LOADER)
+  cpkt_value(runtime_library_dirs CPKT_RUNTIME_LIBRARY_DIRS_RAW)
+  string(REPLACE ":" ";" CPKT_RUNTIME_LIBRARY_DIRS
+         "${CPKT_RUNTIME_LIBRARY_DIRS_RAW}")
   set(CMAKE_SYSTEM_NAME Linux)
   if(CPKT_TARGET_ID MATCHES "^x86_64-")
     set(CMAKE_SYSTEM_PROCESSOR x86_64)
@@ -109,3 +124,10 @@ if(DEFINED CPKT_READELF)
   set(CMAKE_READELF "${CPKT_READELF}" CACHE FILEPATH "" FORCE)
 endif()
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+set(CPKT_SOURCE "${CPKT_SOURCE}" CACHE INTERNAL "Selected lifecycle toolchain source")
+if(DEFINED CPKT_DYNAMIC_LOADER)
+  set(CPKT_DYNAMIC_LOADER "${CPKT_DYNAMIC_LOADER}" CACHE INTERNAL
+      "Bootlin dynamic loader for local development executables")
+  set(CPKT_RUNTIME_LIBRARY_DIRS "${CPKT_RUNTIME_LIBRARY_DIRS}" CACHE INTERNAL
+      "Bootlin runtime directories for local development executables")
+endif()

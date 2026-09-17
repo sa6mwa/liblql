@@ -275,6 +275,21 @@ Lua must support:
 - using selector userdata in query, projection-before-mutation, and mutation
   workflows.
 
+The facade also exposes both public apply paths. `stream_apply` keeps the Lua
+reader, range replay, output, decision, value, cancellation, and clock
+callbacks synchronous and bounded exactly as their C counterparts are.
+Callback-scoped stream values and range writers must become invalid on callback
+return. `stream_apply_spooled` is the separately named materializing
+compatibility facade; it must not be presented as true streaming. Lua maps
+path-backed filtering and inline rewrite to their C helpers, and maps a Lua
+output function to the file helper's public writer callback instead of exposing
+raw `FILE *` handles.
+
+Lua term snapshots use the same values accepted by their builders. In
+particular, a date term's `since_kind` is one of `none`, `now`, `today`,
+`yesterday`, or `literal`, and omitted date bounds are `nil` rather than empty
+strings, so a snapshot can be passed back to `selector_build_date` unchanged.
+
 Lua table helpers may be added for DX, for example to build a selector from a
 literal table or produce a table snapshot for assertions. Those helpers are
 conversion facades over liblql selector userdata. They must not become the
@@ -306,6 +321,8 @@ The selector AST work is not complete until all of these are executable gates:
   equality independent of source spelling;
 - Lua tests for selector userdata construction, traversal, JSON round-trips,
   optional table conversion helpers if present, and use in query workflows;
+- Lua tests for true-stream and explicitly spooled callback behavior, including
+  callback-scoped value/writer expiry and C-backed virtual mutation readers;
 - manifest rows in `parity/oracle_inventory.tsv` updated from `gap` or
   `partial` only when the cited tests prove the public behavior.
 

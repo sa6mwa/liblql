@@ -76,6 +76,24 @@ if [ -n "$private_matches" ]; then
   exit 1
 fi
 
+# The Lua facade is intentionally a direct client of the public receiver AST
+# API. Keep every construction, traversal, and serialization operation wired
+# to that API instead of allowing a Lua-owned parallel tree to grow unnoticed.
+for public_method in \
+  selector_root selector_node_child_count selector_node_child \
+  selector_node_string_term selector_node_string_term_any \
+  selector_node_range_term selector_node_date_term selector_node_in_term \
+  selector_node_in_term_any selector_node_exists_path selector_write_json \
+  selector_build_all selector_build_compound selector_build_not \
+  selector_build_string selector_build_range selector_build_date \
+  selector_build_in selector_build_exists; do
+  if ! grep -F -- "->${public_method}(" lua/lql_core.c >/dev/null; then
+    printf 'selector AST contract: Lua facade is missing public API use: %s\n' \
+      "$public_method" >&2
+    exit 1
+  fi
+done
+
 if ! grep -E '^sdk-parity-gate: direct-bench$' Makefile >/dev/null; then
   printf 'selector AST contract: sdk-parity-gate target is missing\n' >&2
   exit 1

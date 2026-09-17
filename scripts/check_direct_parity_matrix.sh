@@ -155,6 +155,40 @@ direct_parity_run_row build/direct-probe/array-exists-100k.ndjson array_exists_1
 # oracle anomaly is resolved. C and Go agree on the array-scalar wildcard-exists
 # fixture above, but the pinned Go benchmark reports one fewer match on
 # array-exists-100k.ndjson.
+#
+# Keep the broad array selector language rows on the smaller payload-free
+# fixture. The pinned Go streaming benchmark undercounts some long 100k
+# array-wildcard rows, while Go and C agree on the same semantics at this
+# size. The fast SDK gate still keeps the critical /tags versus /tags[] in
+# rows on the 100k fixture because that specific contract is stable there.
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_plain_in_does_not_scan_array 'in{field=/tags,any=red|blue}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_array_wildcard_in 'in{field=/tags[],any=red|blue}' decision_only_selector /id
+direct_parity_run_json_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  sdk_json_array_selector_array_wildcard_in '{"in":{"field":"/tags[]","any":["red","blue"]}}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_array_wildcard_eq '/tags[]="blue"' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_array_wildcard_contains 'contains{field=/tags[],value=blu}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_object_wildcard_in 'in{field=/labels/*,any=prod|stage}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_object_wildcard_icontains 'icontains{field=/labels/*,value=alice}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_prefix_iprefix 'iprefix{field=/service,value=auth}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_array_wildcard_child_eq '/items[]/sku="B"' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_object_wildcard_array_no_match '/items/*/sku="B"' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_array_wildcard_range 'range{field=/items[]/price,gte=20}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_any_child_range '/metrics/**/battery_mv<3600' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_nested_array_any_child '/groups[]/items/**/sku="B"' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-8k-p0.ndjson array_selector_8k_p0 \
+  array_selector_recursive_exists 'exists{/groups/.../sku}' decision_only_selector /id
 direct_parity_run_row build/direct-probe/range-code-100k.ndjson range_code_100k \
   range_code_eq_one 'range{field=/code,gte=1,lte=1}' decision_only_selector /id
 direct_parity_run_row build/direct-probe/recursive-10k.ndjson recursive_10k \
@@ -195,4 +229,4 @@ direct_parity_run_row build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' project_mutate_file_selector /id
 
 direct_parity_validate
-direct_parity_expect_records 320
+direct_parity_expect_records 376

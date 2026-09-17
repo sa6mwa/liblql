@@ -62,8 +62,14 @@ direct_parity_run_row build/direct-probe/temporal-100k.ndjson temporal_100k \
   date_window 'date{field=/timestamp,after=2026-03-05T10:28:21Z,before=2026-03-05T10:30:00Z}' decision_only_selector /id
 direct_parity_run_row build/direct-probe/array-scalar-100k.ndjson array_scalar_100k \
   array_scalar_indexed_eq '/values/1="B"' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-100k-p0.ndjson array_selector_100k_p0 \
+  array_selector_plain_in_does_not_scan_array 'in{field=/tags,any=red|blue}' decision_only_selector /id
+direct_parity_run_row build/direct-probe/array-selector-100k-p0.ndjson array_selector_100k_p0 \
+  array_selector_array_wildcard_in 'in{field=/tags[],any=red|blue}' decision_only_selector /id
+direct_parity_run_json_row build/direct-probe/array-selector-100k-p0.ndjson array_selector_100k_p0 \
+  sdk_json_array_selector_array_wildcard_in '{"in":{"field":"/tags[]","any":["red","blue"]}}' decision_only_selector /id
 direct_parity_run_row build/direct-probe/large-4x25m.ndjson large_4x25m \
   eq_status_open_top_set '/status="open"' mutate_file_selector /id
 
 direct_parity_validate
-direct_parity_expect_records 88
+direct_parity_expect_records 100
