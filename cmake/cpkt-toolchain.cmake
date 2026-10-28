@@ -14,20 +14,19 @@ if(DEFINED ENV{LIBLQL_TOOLCHAIN_OVERRIDE} AND
   return()
 endif()
 
-set(CPKT_TOOLCHAIN_RESOLVER
-    "${CMAKE_CURRENT_LIST_DIR}/../scripts/cpkt-toolchains.sh")
-if(NOT EXISTS "${CPKT_TOOLCHAIN_RESOLVER}")
-  message(FATAL_ERROR "Missing Bootlin toolchain resolver: ${CPKT_TOOLCHAIN_RESOLVER}")
+if(DEFINED ENV{CPKT_TOOLCHAIN_CACHE} AND NOT "$ENV{CPKT_TOOLCHAIN_CACHE}" STREQUAL "")
+  include("${CMAKE_CURRENT_LIST_DIR}/LqlCachePaths.cmake")
+  lql_check_cache_path("$ENV{CPKT_TOOLCHAIN_CACHE}" toolchains)
 endif()
 
-execute_process(
-  COMMAND "${CPKT_TOOLCHAIN_RESOLVER}" ensure "${CPKT_TARGET_ID}"
-  RESULT_VARIABLE CPKT_ENSURE_RESULT
-  OUTPUT_QUIET
-  ERROR_VARIABLE CPKT_ENSURE_ERROR)
-if(NOT CPKT_ENSURE_RESULT EQUAL 0)
-  message(FATAL_ERROR
-          "Unable to provision lifecycle toolchain for ${CPKT_TARGET_ID}: ${CPKT_ENSURE_ERROR}")
+set(CPKT_LIFECYCLE_SCRIPTS_DIR "${CMAKE_CURRENT_LIST_DIR}/../scripts"
+    CACHE PATH "Vendored lifecycle helper directory")
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
+     CPKT_LIFECYCLE_SCRIPTS_DIR LQL_TARGET_ID CPKT_TARGET_ID)
+set(CPKT_TOOLCHAIN_RESOLVER
+    "${CPKT_LIFECYCLE_SCRIPTS_DIR}/cpkt-toolchains.sh")
+if(NOT EXISTS "${CPKT_TOOLCHAIN_RESOLVER}")
+  message(FATAL_ERROR "Missing Bootlin toolchain resolver: ${CPKT_TOOLCHAIN_RESOLVER}")
 endif()
 
 execute_process(
@@ -41,7 +40,7 @@ if(NOT CPKT_DISCOVER_RESULT EQUAL 0)
 endif()
 if(NOT CPKT_DISCOVER_OUTPUT MATCHES "(^|\n)status=ready(\n|$)")
   message(FATAL_ERROR
-          "Lifecycle toolchain is not ready for ${CPKT_TARGET_ID}:\n${CPKT_DISCOVER_OUTPUT}")
+          "Lifecycle toolchain is not ready for ${CPKT_TARGET_ID}; prepare it with: ${CPKT_TOOLCHAIN_RESOLVER} ensure ${CPKT_TARGET_ID}\n${CPKT_DISCOVER_OUTPUT}")
 endif()
 
 function(cpkt_value name out)
@@ -70,10 +69,25 @@ if(CPKT_TARGET_ID MATCHES "linux")
   cpkt_value(objdump CPKT_OBJDUMP)
   cpkt_value(addr2line CPKT_ADDR2LINE)
   cpkt_value(readelf CPKT_READELF)
-  cpkt_value(dynamic_loader CPKT_DYNAMIC_LOADER)
-  cpkt_value(runtime_library_dirs CPKT_RUNTIME_LIBRARY_DIRS_RAW)
-  string(REPLACE ":" ";" CPKT_RUNTIME_LIBRARY_DIRS
-         "${CPKT_RUNTIME_LIBRARY_DIRS_RAW}")
+  # Runtime selection belongs to this consumer, not the generic resolver.
+  if(CPKT_TARGET_ID STREQUAL "x86_64-linux-gnu")
+    set(loader_name ld-linux-x86-64.so.2)
+  elseif(CPKT_TARGET_ID STREQUAL "x86_64-linux-musl")
+    set(loader_name ld-musl-x86_64.so.1)
+  elseif(CPKT_TARGET_ID STREQUAL "aarch64-linux-gnu")
+    set(loader_name ld-linux-aarch64.so.1)
+  elseif(CPKT_TARGET_ID STREQUAL "aarch64-linux-musl")
+    set(loader_name ld-musl-aarch64.so.1)
+  elseif(CPKT_TARGET_ID STREQUAL "armhf-linux-gnu")
+    set(loader_name ld-linux-armhf.so.3)
+  elseif(CPKT_TARGET_ID STREQUAL "armhf-linux-musl")
+    set(loader_name ld-musl-armhf.so.1)
+  endif()
+  set(CPKT_DYNAMIC_LOADER "${CPKT_SYSROOT}/lib/${loader_name}")
+  if(NOT EXISTS "${CPKT_DYNAMIC_LOADER}")
+    message(FATAL_ERROR "Selected Bootlin loader missing: ${CPKT_DYNAMIC_LOADER}")
+  endif()
+  set(CPKT_RUNTIME_LIBRARY_DIRS "${CPKT_SYSROOT}/lib" "${CPKT_SYSROOT}/usr/lib")
   set(CMAKE_SYSTEM_NAME Linux)
   if(CPKT_TARGET_ID MATCHES "^x86_64-")
     set(CMAKE_SYSTEM_PROCESSOR x86_64)
@@ -124,10 +138,10 @@ if(DEFINED CPKT_READELF)
   set(CMAKE_READELF "${CPKT_READELF}" CACHE FILEPATH "" FORCE)
 endif()
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-set(CPKT_SOURCE "${CPKT_SOURCE}" CACHE INTERNAL "Selected lifecycle toolchain source")
+set(CPKT_SOURCE "${CPKT_SOURCE}" CACHE INTERNAL "Selected lifecycle toolchain source" FORCE)
 if(DEFINED CPKT_DYNAMIC_LOADER)
   set(CPKT_DYNAMIC_LOADER "${CPKT_DYNAMIC_LOADER}" CACHE INTERNAL
-      "Bootlin dynamic loader for local development executables")
+      "Bootlin dynamic loader for local development executables" FORCE)
   set(CPKT_RUNTIME_LIBRARY_DIRS "${CPKT_RUNTIME_LIBRARY_DIRS}" CACHE INTERNAL
-      "Bootlin runtime directories for local development executables")
+      "Bootlin runtime directories for local development executables" FORCE)
 endif()

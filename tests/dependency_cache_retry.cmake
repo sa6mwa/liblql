@@ -6,8 +6,14 @@ get_filename_component(LQL_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 include("${LQL_SOURCE_ROOT}/cmake/LqlDependencyCache.cmake")
 
 file(SHA256 "${RETRY_ARCHIVE_SOURCE}" expected_sha256)
+if(DEFINED EXPECTED_SHA256)
+  set(expected_sha256 "${EXPECTED_SHA256}")
+endif()
+if(NOT DEFINED ARCHIVE_NAME)
+  set(ARCHIVE_NAME archive.tar.gz)
+endif()
 lql_acquire_verified_archive("dependency cache retry fixture" "${RETRY_ARCHIVE_URL}"
-                             "${expected_sha256}" "archive.tar.gz" archive)
+                             "${expected_sha256}" "${ARCHIVE_NAME}" archive)
 file(SHA256 "${archive}" actual_sha256)
 if(NOT actual_sha256 STREQUAL expected_sha256)
   message(FATAL_ERROR

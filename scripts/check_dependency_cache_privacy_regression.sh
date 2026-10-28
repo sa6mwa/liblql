@@ -2,11 +2,12 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+mkdir -p "$root/build/tmp"
 work=${LQL_DEPENDENCY_CACHE_PRIVACY_DIR:-"$root/build/dependency-cache-privacy-regression"}
 dist=$work/dist
 stage=$work/stage
 verify=$work/verify
-cache=$(mktemp -d "${TMPDIR:-/tmp}/liblql-shared-dependency-cache.XXXXXX")
+cache=$(mktemp -d "$root/build/tmp/liblql-shared-dependency-cache.XXXXXX")
 project=liblql
 
 trap 'sh "$root/scripts/remove_path.sh" "$cache"' EXIT HUP INT TERM
@@ -49,7 +50,10 @@ if (
   exit 1
 fi
 
-if ! grep -F 'dependency cache path leaked' "$work/verify.log" >/dev/null; then
+# An owned temporary cache is also inside the checkout. Either diagnostic is
+# valid, but it must identify the injected path rather than an unrelated error.
+if ! grep -F 'path leaked' "$work/verify.log" >/dev/null ||
+   ! grep -F "$cache" "$work/verify.log" >/dev/null; then
   printf '%s\n' 'dependency cache privacy: verifier failed without reporting the cache-path leak' >&2
   cat "$work/verify.log" >&2
   exit 1

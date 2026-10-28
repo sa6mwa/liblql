@@ -46,11 +46,13 @@ repository.
   C-vs-Go accepted-row parity at or above 1.0x, documented liblql JSON scalar
   equality behavior outside the pinned-Go accepted rows, and live heap at or
   below 256 KiB.
-- Dependency archives: current liblql has none.  CMake still resolves the
-  shared `CPKT_DEPENDENCY_CACHE` contract once so a future checksum-pinned
-  archive can be acquired through the lifecycle cache rather than a
-  project-local download path.  Bootlin and AFL++ remain separate
-  toolchain-cache concerns.
+- Dependency archives: native liblql is self-contained; Lua development builds
+  acquire the checksum-pinned Lua 5.5.1 source archive through
+  `CPKT_DEPENDENCY_CACHE`. Bootlin and AFL++ use the separate toolchain cache.
+- Version and source-package metadata use the shared CMake version resolver
+  without configuring a compiler or provisioning dependencies. Version-contract
+  fixtures redirect checkout-local cache overrides into their own generated
+  directories and preserve declared global-cache selections.
 
 ## Migration map
 
@@ -67,7 +69,7 @@ repository.
 | no CLI | `clql` example/binary | thin public stream adapter; selected output is explicitly spooled | `make clql-smoke` |
 | no Lua surface | Lua facade/source rock and Bootlin runner | Lua module parity without host runtime leakage | `make lua-test`, development-runtime, and Lua artifact verification |
 | no fuzz surface | AFL++ fuzz target and corpus | parser/stream robustness | `make fuzz-smoke` |
-| no dependency archive cache contract | shared `CPKT_DEPENDENCY_CACHE` resolution | self-contained build does not download archives; future dependencies have one cache boundary | `make dependency-cache-check`, `make dependency-cache-privacy-regression` |
+| no dependency archive cache contract | shared `CPKT_DEPENDENCY_CACHE` resolution | core remains self-contained; Lua source acquisition shares one verified cache boundary | `make dependency-cache-check`, `make dependency-cache-privacy-regression` |
 
 ## Completed migration status
 
@@ -89,7 +91,7 @@ repository.
    consumer tests are in place for install-tree smoke, host binary SDK archive
    verification, and release matrix package verification.
 7. Target-tool discovery for package generation and verification covers
-   configured CMake cache values, compiler sibling tools, PATH fallback, and
+   configured CMake cache values, compiler sibling tools, explicit overrides, and
    target mismatch checks. Package verification consumes it for ELF and Mach-O
    loader metadata checks.
 8. Package generation, checksum manifest generation, privacy scans,
@@ -102,3 +104,9 @@ repository.
 
 Future lifecycle gaps should be tracked as ordinary product or release work,
 not as unfinished migration items in this ledger.
+
+The current c89systems/cpkt alignment uses vendored lifecycle helpers without
+introducing a cpkt SDK dependency. Make owns the prerequisite graph and CTest
+runs the compiled CLI parity tests and host lifecycle fixtures. Required heap
+checks cannot skip missing inputs; source-rock builds, archive determinism,
+output ownership, target architecture and public-symbol boundaries are verified.

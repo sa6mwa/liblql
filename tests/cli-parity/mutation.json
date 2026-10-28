@@ -1,0 +1,3794 @@
+{
+  "inputs": [
+    "{}\n",
+    "{\"a\":{}}\n",
+    "{\"a\":{\"c\":2}}\n",
+    "{\"a\":null}\n",
+    "{\"arr\":[{\"x\":1},{\"x\":2}]}\n",
+    "{\"a\":1,\"b\":2}\n",
+    "{\"state\":{\"details\":{\"owner\":\"bob\"},\"metrics\":1}}\n",
+    "{\"state\":{\"count\":5}}\n",
+    "{\"items\":[{\"sku\":\"a\"},{\"sku\":\"b\"}]}\n",
+    "{\"items\":[{\"n\":1},{\"n\":2}]}\n",
+    "{\"items\":[1,2,{\"n\":3}]}\n",
+    "{\"items\":[[1,2],{\"n\":3}]}\n",
+    "{\"items\":[{\"0\":2},[2]]}\n",
+    "{\"0\":{},\"a\":[{\"a\":false,\"0\":\"\"}]}\n",
+    "{\"items\":[[2],{\"n\":3}]}\n",
+    "{\"items\":[{\"a\":{\"n\":1}},{\"a\":{\"n\":2}}]}\n",
+    "{\"items\":[[{\"n\":1}],[{\"n\":2}]]}\n",
+    "{\"items\":[[1,2]]}\n",
+    "{\"items\":[[{\"n\":1}]]}\n",
+    "{\"a\":1}\n",
+    "{\"x\":{\"a\":{\"n\":1}},\"y\":[{\"a\":{\"n\":2}}],\"z\":1}\n",
+    "{\"b\":{\"b\":1}}\n",
+    "{\"b\":1}\n",
+    "{\"a\":{\"b\":[[],[0]]}}\n",
+    "{\"a\":{\"x\":1}}\n",
+    "{\"b\":{\"a\":false}}\n",
+    "{\"a\":[[false,0,null]],\"b\":[]}\n",
+    "{\"r\":{\"x\":{\"a\":\"x\"}}}\n",
+    "{\"a\":{\"b\":2}}\n",
+    "{\"r\":[{\"a\":\"x\"}]}\n",
+    "{\"x\":{\"z\":[1,{\"a\":2}]}}\n",
+    "{\"a\":0,\"b\":0}\n",
+    "{\"r\":\"x\"}\n",
+    "{\"a\":-1}\n",
+    "{\"0\":[true,{\"a\":1}]}\n",
+    "{\"obj\":{\"a\":1}}\n",
+    "{\"obj\":1}\n",
+    "{\"b\":{}}\n",
+    "{\"a\":true}\n",
+    "{\"labels\":{\"a\":{\"x\":1},\"b\":{\"x\":2}}}\n",
+    "{\"labels\":{\"a\":{\"n\":1},\"b\":{\"n\":2}}}\n",
+    "{\"items\":[{\"parts\":[{\"sku\":\"a\"}]}]}\n",
+    "{\"items\":[{\"parts\":[{\"sku\":\"a\"}],\"sku\":\"top\"}]}\n",
+    "{\"items\":[{\"parts\":[{\"n\":1}],\"n\":2}]}\n",
+    "{\"a\":{\"x\":1,\"y\":2}}\n",
+    "{\"a\":{\"x\":{\"n\":1}}}\n",
+    "{\"b\":[1,2]}\n",
+    "{\"n\":1}\n",
+    "{\"items\":[{\"x\":1,\"y\":2},{\"x\":3}]}\n",
+    "{\"labels\":{\"env\":\"prod\",\"owner\":\"alice\"},\"items\":[{\"sku\":\"A\",\"price\":10},{\"sku\":\"B\",\"price\":20}],\"nested\":{\"items\":[{\"sku\":\"C\",\"price\":30}]}}\n",
+    "{\"labels\":{\"env\":\"prod\",\"owner\":\"alice\"},\"items\":[{\"sku\":\"A\",\"price\":10},{\"sku\":\"B\",\"price\":20}],\"groups\":[{\"items\":[{\"sku\":\"C\"}]}]}\n",
+    "{\"k0\":0}\n",
+    "{\"a\":{\"b\":1,\"c\":2}}\n",
+    "{\"a\":\"x\"}\n",
+    "{\"a\":{\"b\":{\"c\":2}}}\n",
+    "{\"x\":1,\"a\":{\"b\":2}}\n"
+  ],
+  "cases": [
+    {
+      "name": "missing nested increment",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "empty object nested increment",
+      "input": 1,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "nested increment appends to object",
+      "input": 2,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "nested increment replaces scalar parent",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "mixed set then increment",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "array nested remove",
+      "input": 4,
+      "args": [
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "array nested increment",
+      "input": 4,
+      "args": [
+        "-m",
+        "/arr/0/x=+1"
+      ]
+    },
+    {
+      "name": "delete alias",
+      "input": 5,
+      "args": [
+        "-m",
+        "delete:/a"
+      ]
+    },
+    {
+      "name": "del alias",
+      "input": 5,
+      "args": [
+        "-m",
+        "del:/a"
+      ]
+    },
+    {
+      "name": "time literal mutation",
+      "input": 0,
+      "args": [
+        "-m",
+        "time:/timestamp=2025-01-01T00:00:00+02:00"
+      ]
+    },
+    {
+      "name": "brace shorthand mutation",
+      "input": 0,
+      "args": [
+        "-m",
+        "/tags{/kind=document,/source=local}"
+      ]
+    },
+    {
+      "name": "nested brace shorthand mutation",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a{/b{/c=1,/d=2},/e=3}"
+      ]
+    },
+    {
+      "name": "empty set value",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a="
+      ]
+    },
+    {
+      "name": "bracket comma value",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=[1,2]"
+      ]
+    },
+    {
+      "name": "bracket spaced comma value",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=[1, 2]"
+      ]
+    },
+    {
+      "name": "raw text bracket comma value",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=x[y,z]"
+      ]
+    },
+    {
+      "name": "raw text brace comma value",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=x{y,z}"
+      ]
+    },
+    {
+      "name": "raw text quote comma value",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=foo\"bar,baz"
+      ]
+    },
+    {
+      "name": "raw apostrophe value",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=don't"
+      ]
+    },
+    {
+      "name": "raw double quote value",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=a\"b"
+      ]
+    },
+    {
+      "name": "literal open brace path",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a{=x"
+      ]
+    },
+    {
+      "name": "literal close brace path",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a}=x"
+      ]
+    },
+    {
+      "name": "literal bracket path",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a[=x"
+      ]
+    },
+    {
+      "name": "literal raw open brace value",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=x{y"
+      ]
+    },
+    {
+      "name": "literal raw close brace value",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=x}y"
+      ]
+    },
+    {
+      "name": "brace shorthand quoted comma",
+      "input": 6,
+      "args": [
+        "-m",
+        "/state/progress=ready",
+        "-m",
+        "/state/metrics++",
+        "-m",
+        "/state/details{/owner=\"alice\",/note=\"hi, world\"}",
+        "-m",
+        "/state/metrics=+3",
+        "-m",
+        "rm:/state/legacy"
+      ]
+    },
+    {
+      "name": "decrement shorthand",
+      "input": 7,
+      "args": [
+        "-m",
+        "/state/count--"
+      ]
+    },
+    {
+      "name": "array wildcard set",
+      "input": 8,
+      "args": [
+        "-m",
+        "/items/[]/seen=true"
+      ]
+    },
+    {
+      "name": "array compact wildcard set",
+      "input": 8,
+      "args": [
+        "-m",
+        "/items[]/seen=true"
+      ]
+    },
+    {
+      "name": "array wildcard increment",
+      "input": 9,
+      "args": [
+        "-m",
+        "/items/[]/n=+1"
+      ]
+    },
+    {
+      "name": "array wildcard increment preserves scalar elements",
+      "input": 10,
+      "args": [
+        "-m",
+        "/items[]/n=+1"
+      ]
+    },
+    {
+      "name": "array wildcard increment preserves array elements",
+      "input": 11,
+      "args": [
+        "-m",
+        "/items[]/n=+1"
+      ]
+    },
+    {
+      "name": "array wildcard increment indexes nested arrays",
+      "input": 12,
+      "args": [
+        "-m",
+        "/items[]/0=+1"
+      ]
+    },
+    {
+      "name": "numeric nested increment materializes object key over array parent",
+      "input": 13,
+      "args": [
+        "-m",
+        "/a/0=+1"
+      ]
+    },
+    {
+      "name": "array wildcard increment applies nested array wildcard only to arrays",
+      "input": 14,
+      "args": [
+        "-m",
+        "/items[]/[]=+1"
+      ]
+    },
+    {
+      "name": "array wildcard increment recurses through object children",
+      "input": 15,
+      "args": [
+        "-m",
+        "/items[]/a/n=+1"
+      ]
+    },
+    {
+      "name": "array wildcard increment recurses through array indexes",
+      "input": 16,
+      "args": [
+        "-m",
+        "/items[]/0/n=+1"
+      ]
+    },
+    {
+      "name": "array wildcard set updates nested array index",
+      "input": 17,
+      "args": [
+        "-m",
+        "/items[]/0=5"
+      ]
+    },
+    {
+      "name": "array wildcard set recurses through array indexes",
+      "input": 18,
+      "args": [
+        "-m",
+        "/items[]/0/n=5"
+      ]
+    },
+    {
+      "name": "array wildcard remove preserves indexed array shape",
+      "input": 17,
+      "args": [
+        "-m",
+        "rm:/items[]/0"
+      ]
+    },
+    {
+      "name": "missing recursive wildcard set is no-op",
+      "input": 0,
+      "args": [
+        "-m",
+        "/obj/**/n=5"
+      ]
+    },
+    {
+      "name": "missing ellipsis wildcard set is no-op",
+      "input": 0,
+      "args": [
+        "-m",
+        "/obj/.../n=5"
+      ]
+    },
+    {
+      "name": "top object wildcard set",
+      "input": 5,
+      "args": [
+        "-m",
+        "/*=3"
+      ]
+    },
+    {
+      "name": "top object wildcard increment",
+      "input": 5,
+      "args": [
+        "-m",
+        "/*=+1"
+      ]
+    },
+    {
+      "name": "top object wildcard remove",
+      "input": 5,
+      "args": [
+        "-m",
+        "rm:/*"
+      ]
+    },
+    {
+      "name": "top object wildcard nested set preserves scalar",
+      "input": 19,
+      "args": [
+        "-m",
+        "/*/n=5"
+      ]
+    },
+    {
+      "name": "top object wildcard nested set existing only",
+      "input": 20,
+      "args": [
+        "-m",
+        "/*/a/n=5"
+      ]
+    },
+    {
+      "name": "top object wildcard nested increment existing only",
+      "input": 20,
+      "args": [
+        "-m",
+        "/*/a/n=+1"
+      ]
+    },
+    {
+      "name": "top ellipsis nested set recurses existing only",
+      "input": 20,
+      "args": [
+        "-m",
+        "/.../n=5"
+      ]
+    },
+    {
+      "name": "top ellipsis set applies root key before descendants",
+      "input": 21,
+      "args": [
+        "-m",
+        "/.../b=5"
+      ]
+    },
+    {
+      "name": "top ellipsis increment applies root key before descendants",
+      "input": 22,
+      "args": [
+        "-m",
+        "/.../b=+1"
+      ]
+    },
+    {
+      "name": "top ellipsis remove applies root key before descendants",
+      "input": 21,
+      "args": [
+        "-m",
+        "rm:/.../b"
+      ]
+    },
+    {
+      "name": "ellipsis numeric segment selects array index before descendants",
+      "input": 23,
+      "args": [
+        "-m",
+        "/a/.../0=5"
+      ]
+    },
+    {
+      "name": "ellipsis numeric remove preserves array shape",
+      "input": 23,
+      "args": [
+        "-m",
+        "rm:/a/.../0"
+      ]
+    },
+    {
+      "name": "consecutive ellipsis set treats second ellipsis as wildcard",
+      "input": 24,
+      "args": [
+        "-m",
+        "/.../...=5"
+      ]
+    },
+    {
+      "name": "consecutive ellipsis set collapses before named key",
+      "input": 25,
+      "args": [
+        "-m",
+        "/.../.../b=x"
+      ]
+    },
+    {
+      "name": "consecutive ellipsis remove treats second ellipsis as wildcard",
+      "input": 24,
+      "args": [
+        "-m",
+        "rm:/.../..."
+      ]
+    },
+    {
+      "name": "ellipsis after wildcard set matches current object",
+      "input": 21,
+      "args": [
+        "-m",
+        "/*/.../b=x"
+      ]
+    },
+    {
+      "name": "ellipsis after wildcard set matches current array index",
+      "input": 26,
+      "args": [
+        "-m",
+        "/*/.../0=x"
+      ]
+    },
+    {
+      "name": "recursive object wildcard set continues into descendants",
+      "input": 27,
+      "args": [
+        "-m",
+        "/.../*/a=null"
+      ]
+    },
+    {
+      "name": "leading recursive object wildcard set matches zero depth",
+      "input": 28,
+      "args": [
+        "-m",
+        "/.../*/b=9"
+      ]
+    },
+    {
+      "name": "leading recursive object wildcard increment matches zero depth",
+      "input": 28,
+      "args": [
+        "-m",
+        "/.../*/b++"
+      ]
+    },
+    {
+      "name": "leading recursive object wildcard remove matches zero depth",
+      "input": 28,
+      "args": [
+        "-m",
+        "rm:/.../*/b"
+      ]
+    },
+    {
+      "name": "recursive any wildcard set continues into array descendants",
+      "input": 29,
+      "args": [
+        "-m",
+        "/.../**/a=null"
+      ]
+    },
+    {
+      "name": "recursive object wildcard does not carry recursion after star",
+      "input": 30,
+      "args": [
+        "-m",
+        "/x/.../*/*=v"
+      ]
+    },
+    {
+      "name": "top wildcard before concrete set preserves mutation order",
+      "input": 31,
+      "args": [
+        "-m",
+        "/*=1",
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "top concrete before wildcard set preserves mutation order",
+      "input": 31,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/*=1"
+      ]
+    },
+    {
+      "name": "missing concrete key is affected by later wildcard set",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/*=1"
+      ]
+    },
+    {
+      "name": "created concrete key is removed by later wildcard remove",
+      "input": 31,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "rm:/*"
+      ]
+    },
+    {
+      "name": "wildcard set replaces before later recursive increment validation",
+      "input": 32,
+      "args": [
+        "-m",
+        "/**=5",
+        "-m",
+        "/...=+1"
+      ]
+    },
+    {
+      "name": "recursive concrete suffix does not materialize scalar parent",
+      "input": 33,
+      "args": [
+        "-m",
+        "/.../a/1=+1"
+      ]
+    },
+    {
+      "name": "later recursive terminal applies to earlier created key",
+      "input": 0,
+      "args": [
+        "-m",
+        "/b=+1",
+        "-m",
+        "/.../...=5"
+      ]
+    },
+    {
+      "name": "repeated recursive segment before array wildcard stays meaningful",
+      "input": 34,
+      "args": [
+        "-m",
+        "/.../.../[]=5"
+      ]
+    },
+    {
+      "name": "top wildcard nested action applies under matched key",
+      "input": 1,
+      "args": [
+        "-m",
+        "/*/x=1",
+        "-m",
+        "/a/y=2"
+      ]
+    },
+    {
+      "name": "top wildcard nested action does not recreate removed key",
+      "input": 1,
+      "args": [
+        "-m",
+        "rm:/a",
+        "-m",
+        "/*/x=1"
+      ]
+    },
+    {
+      "name": "terminal repeated ellipsis increment preserves recursion",
+      "input": 35,
+      "args": [
+        "-m",
+        "/obj/.../...++"
+      ]
+    },
+    {
+      "name": "terminal repeated ellipsis increment ignores scalar anchor",
+      "input": 36,
+      "args": [
+        "-m",
+        "/obj/.../...++"
+      ]
+    },
+    {
+      "name": "missing increment array wildcard suffix is no-op",
+      "input": 37,
+      "args": [
+        "-m",
+        "/b/0/[]=+1"
+      ]
+    },
+    {
+      "name": "missing increment object wildcard suffix is no-op",
+      "input": 37,
+      "args": [
+        "-m",
+        "/b/0/*=+1"
+      ]
+    },
+    {
+      "name": "missing increment any wildcard suffix is no-op",
+      "input": 37,
+      "args": [
+        "-m",
+        "/b/0/**=+1"
+      ]
+    },
+    {
+      "name": "missing increment ellipsis suffix is no-op",
+      "input": 37,
+      "args": [
+        "-m",
+        "/b/0/...=+1"
+      ]
+    },
+    {
+      "name": "scalar parent object wildcard set is no-op",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a/*/n=x"
+      ]
+    },
+    {
+      "name": "scalar parent array wildcard set is no-op",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a/[]/n=x"
+      ]
+    },
+    {
+      "name": "scalar parent recursive wildcard set is no-op",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a/**/n=x"
+      ]
+    },
+    {
+      "name": "scalar parent later object wildcard set is no-op",
+      "input": 38,
+      "args": [
+        "-m",
+        "/a/0/*=x"
+      ]
+    },
+    {
+      "name": "scalar parent later object wildcard increment is no-op",
+      "input": 38,
+      "args": [
+        "-m",
+        "/a/0/*=+1"
+      ]
+    },
+    {
+      "name": "scalar parent later array wildcard set is no-op",
+      "input": 38,
+      "args": [
+        "-m",
+        "/a/x/[]/n=1"
+      ]
+    },
+    {
+      "name": "scalar parent later recursive wildcard set is no-op",
+      "input": 38,
+      "args": [
+        "-m",
+        "/a/x/**/n=1"
+      ]
+    },
+    {
+      "name": "skipped wildcard permits later top set",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/*/n=x",
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "skipped wildcard permits later nested set",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/*/n=x",
+        "-m",
+        "/a/b=2"
+      ]
+    },
+    {
+      "name": "skipped wildcard permits later increment",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/*=x",
+        "-m",
+        "/a++"
+      ]
+    },
+    {
+      "name": "array star wildcard increment",
+      "input": 9,
+      "args": [
+        "-m",
+        "/items/*/n=+1"
+      ]
+    },
+    {
+      "name": "array recursive wildcard increment",
+      "input": 9,
+      "args": [
+        "-m",
+        "/items/**/n=+1"
+      ]
+    },
+    {
+      "name": "object wildcard set",
+      "input": 39,
+      "args": [
+        "-m",
+        "/labels/*/seen=true"
+      ]
+    },
+    {
+      "name": "object wildcard increment",
+      "input": 40,
+      "args": [
+        "-m",
+        "/labels/*/n=+1"
+      ]
+    },
+    {
+      "name": "object recursive wildcard increment",
+      "input": 40,
+      "args": [
+        "-m",
+        "/labels/**/n=+1"
+      ]
+    },
+    {
+      "name": "recursive wildcard set",
+      "input": 41,
+      "args": [
+        "-m",
+        "/items/**/sku=patched"
+      ]
+    },
+    {
+      "name": "ellipsis recursive wildcard set",
+      "input": 42,
+      "args": [
+        "-m",
+        "/items/.../sku=patched"
+      ]
+    },
+    {
+      "name": "ellipsis recursive wildcard increment",
+      "input": 43,
+      "args": [
+        "-m",
+        "/items/.../n=+1"
+      ]
+    },
+    {
+      "name": "terminal ellipsis recursive wildcard set",
+      "input": 44,
+      "args": [
+        "-m",
+        "/a/...=3"
+      ]
+    },
+    {
+      "name": "terminal object wildcard increment",
+      "input": 45,
+      "args": [
+        "-m",
+        "/a/*/**=+1"
+      ]
+    },
+    {
+      "name": "terminal ellipsis wildcard increment",
+      "input": 45,
+      "args": [
+        "-m",
+        "/a/*/...=+1"
+      ]
+    },
+    {
+      "name": "terminal repeated recursive wildcard increment",
+      "input": 45,
+      "args": [
+        "-m",
+        "/a/**/**=+1"
+      ]
+    },
+    {
+      "name": "preserve array for later object wildcard increment",
+      "input": 46,
+      "args": [
+        "-m",
+        "/b/x/*=+1"
+      ]
+    },
+    {
+      "name": "preserve array for later array wildcard increment",
+      "input": 46,
+      "args": [
+        "-m",
+        "/b/x/[]=+1"
+      ]
+    },
+    {
+      "name": "preserve array for later recursive wildcard increment",
+      "input": 46,
+      "args": [
+        "-m",
+        "/b/x/**=+1"
+      ]
+    },
+    {
+      "name": "preserve array for later ellipsis wildcard increment",
+      "input": 46,
+      "args": [
+        "-m",
+        "/b/x/...=+1"
+      ]
+    },
+    {
+      "name": "signed negative zero increment is rejected",
+      "input": 47,
+      "args": [
+        "-m",
+        "/n=-0"
+      ]
+    },
+    {
+      "name": "wildcard remove",
+      "input": 48,
+      "args": [
+        "-m",
+        "rm:/items/[]/x"
+      ]
+    },
+    {
+      "name": "wildcard remove combo",
+      "input": 49,
+      "args": [
+        "-m",
+        "rm:/labels/*",
+        "-m",
+        "rm:/items[]/price",
+        "-m",
+        "rm:/items/**/sku",
+        "-m",
+        "rm:/nested/.../price"
+      ]
+    },
+    {
+      "name": "wildcard full mutation combo",
+      "input": 50,
+      "args": [
+        "-m",
+        "/labels/*=\"tagged\"",
+        "-m",
+        "/items/**/sku=\"X\"",
+        "-m",
+        "/items[]/price=+5",
+        "-m",
+        "/items/*/price=+1",
+        "-m",
+        "/groups/.../sku=\"Z\""
+      ]
+    },
+    {
+      "name": "mutations beyond one machine word",
+      "input": 0,
+      "args": [
+        "-m",
+        "/k0=0",
+        "-m",
+        "/k1=1",
+        "-m",
+        "/k2=2",
+        "-m",
+        "/k3=3",
+        "-m",
+        "/k4=4",
+        "-m",
+        "/k5=5",
+        "-m",
+        "/k6=6",
+        "-m",
+        "/k7=7",
+        "-m",
+        "/k8=8",
+        "-m",
+        "/k9=9",
+        "-m",
+        "/k10=10",
+        "-m",
+        "/k11=11",
+        "-m",
+        "/k12=12",
+        "-m",
+        "/k13=13",
+        "-m",
+        "/k14=14",
+        "-m",
+        "/k15=15",
+        "-m",
+        "/k16=16",
+        "-m",
+        "/k17=17",
+        "-m",
+        "/k18=18",
+        "-m",
+        "/k19=19",
+        "-m",
+        "/k20=20",
+        "-m",
+        "/k21=21",
+        "-m",
+        "/k22=22",
+        "-m",
+        "/k23=23",
+        "-m",
+        "/k24=24",
+        "-m",
+        "/k25=25",
+        "-m",
+        "/k26=26",
+        "-m",
+        "/k27=27",
+        "-m",
+        "/k28=28",
+        "-m",
+        "/k29=29",
+        "-m",
+        "/k30=30",
+        "-m",
+        "/k31=31",
+        "-m",
+        "/k32=32",
+        "-m",
+        "/k33=33",
+        "-m",
+        "/k34=34",
+        "-m",
+        "/k35=35",
+        "-m",
+        "/k36=36",
+        "-m",
+        "/k37=37",
+        "-m",
+        "/k38=38",
+        "-m",
+        "/k39=39",
+        "-m",
+        "/k40=40",
+        "-m",
+        "/k41=41",
+        "-m",
+        "/k42=42",
+        "-m",
+        "/k43=43",
+        "-m",
+        "/k44=44",
+        "-m",
+        "/k45=45",
+        "-m",
+        "/k46=46",
+        "-m",
+        "/k47=47",
+        "-m",
+        "/k48=48",
+        "-m",
+        "/k49=49",
+        "-m",
+        "/k50=50",
+        "-m",
+        "/k51=51",
+        "-m",
+        "/k52=52",
+        "-m",
+        "/k53=53",
+        "-m",
+        "/k54=54",
+        "-m",
+        "/k55=55",
+        "-m",
+        "/k56=56",
+        "-m",
+        "/k57=57",
+        "-m",
+        "/k58=58",
+        "-m",
+        "/k59=59",
+        "-m",
+        "/k60=60",
+        "-m",
+        "/k61=61",
+        "-m",
+        "/k62=62",
+        "-m",
+        "/k63=63",
+        "-m",
+        "/k64=64",
+        "-m",
+        "/k65=65",
+        "-m",
+        "/k66=66",
+        "-m",
+        "/k67=67",
+        "-m",
+        "/k68=68",
+        "-m",
+        "/k69=69",
+        "-m",
+        "/k70=70",
+        "-m",
+        "/k71=71",
+        "-m",
+        "/k72=72",
+        "-m",
+        "/k73=73",
+        "-m",
+        "/k74=74",
+        "-m",
+        "/k75=75",
+        "-m",
+        "/k76=76",
+        "-m",
+        "/k77=77",
+        "-m",
+        "/k78=78",
+        "-m",
+        "/k79=79",
+        "-m",
+        "/k80=80",
+        "-m",
+        "/k81=81",
+        "-m",
+        "/k82=82",
+        "-m",
+        "/k83=83",
+        "-m",
+        "/k84=84",
+        "-m",
+        "/k85=85",
+        "-m",
+        "/k86=86",
+        "-m",
+        "/k87=87",
+        "-m",
+        "/k88=88",
+        "-m",
+        "/k89=89",
+        "-m",
+        "/k90=90",
+        "-m",
+        "/k91=91",
+        "-m",
+        "/k92=92",
+        "-m",
+        "/k93=93",
+        "-m",
+        "/k94=94",
+        "-m",
+        "/k95=95",
+        "-m",
+        "/k96=96",
+        "-m",
+        "/k97=97",
+        "-m",
+        "/k98=98",
+        "-m",
+        "/k99=99",
+        "-m",
+        "/k100=100",
+        "-m",
+        "/k101=101",
+        "-m",
+        "/k102=102",
+        "-m",
+        "/k103=103",
+        "-m",
+        "/k104=104",
+        "-m",
+        "/k105=105",
+        "-m",
+        "/k106=106",
+        "-m",
+        "/k107=107",
+        "-m",
+        "/k108=108",
+        "-m",
+        "/k109=109",
+        "-m",
+        "/k110=110",
+        "-m",
+        "/k111=111",
+        "-m",
+        "/k112=112",
+        "-m",
+        "/k113=113",
+        "-m",
+        "/k114=114",
+        "-m",
+        "/k115=115",
+        "-m",
+        "/k116=116",
+        "-m",
+        "/k117=117",
+        "-m",
+        "/k118=118",
+        "-m",
+        "/k119=119",
+        "-m",
+        "/k120=120",
+        "-m",
+        "/k121=121",
+        "-m",
+        "/k122=122",
+        "-m",
+        "/k123=123",
+        "-m",
+        "/k124=124",
+        "-m",
+        "/k125=125",
+        "-m",
+        "/k126=126",
+        "-m",
+        "/k127=127",
+        "-m",
+        "/k128=128"
+      ]
+    },
+    {
+      "name": "mutations beyond one machine word with existing first key",
+      "input": 51,
+      "args": [
+        "-m",
+        "/k0=0",
+        "-m",
+        "/k1=1",
+        "-m",
+        "/k2=2",
+        "-m",
+        "/k3=3",
+        "-m",
+        "/k4=4",
+        "-m",
+        "/k5=5",
+        "-m",
+        "/k6=6",
+        "-m",
+        "/k7=7",
+        "-m",
+        "/k8=8",
+        "-m",
+        "/k9=9",
+        "-m",
+        "/k10=10",
+        "-m",
+        "/k11=11",
+        "-m",
+        "/k12=12",
+        "-m",
+        "/k13=13",
+        "-m",
+        "/k14=14",
+        "-m",
+        "/k15=15",
+        "-m",
+        "/k16=16",
+        "-m",
+        "/k17=17",
+        "-m",
+        "/k18=18",
+        "-m",
+        "/k19=19",
+        "-m",
+        "/k20=20",
+        "-m",
+        "/k21=21",
+        "-m",
+        "/k22=22",
+        "-m",
+        "/k23=23",
+        "-m",
+        "/k24=24",
+        "-m",
+        "/k25=25",
+        "-m",
+        "/k26=26",
+        "-m",
+        "/k27=27",
+        "-m",
+        "/k28=28",
+        "-m",
+        "/k29=29",
+        "-m",
+        "/k30=30",
+        "-m",
+        "/k31=31",
+        "-m",
+        "/k32=32",
+        "-m",
+        "/k33=33",
+        "-m",
+        "/k34=34",
+        "-m",
+        "/k35=35",
+        "-m",
+        "/k36=36",
+        "-m",
+        "/k37=37",
+        "-m",
+        "/k38=38",
+        "-m",
+        "/k39=39",
+        "-m",
+        "/k40=40",
+        "-m",
+        "/k41=41",
+        "-m",
+        "/k42=42",
+        "-m",
+        "/k43=43",
+        "-m",
+        "/k44=44",
+        "-m",
+        "/k45=45",
+        "-m",
+        "/k46=46",
+        "-m",
+        "/k47=47",
+        "-m",
+        "/k48=48",
+        "-m",
+        "/k49=49",
+        "-m",
+        "/k50=50",
+        "-m",
+        "/k51=51",
+        "-m",
+        "/k52=52",
+        "-m",
+        "/k53=53",
+        "-m",
+        "/k54=54",
+        "-m",
+        "/k55=55",
+        "-m",
+        "/k56=56",
+        "-m",
+        "/k57=57",
+        "-m",
+        "/k58=58",
+        "-m",
+        "/k59=59",
+        "-m",
+        "/k60=60",
+        "-m",
+        "/k61=61",
+        "-m",
+        "/k62=62",
+        "-m",
+        "/k63=63",
+        "-m",
+        "/k64=64",
+        "-m",
+        "/k65=65",
+        "-m",
+        "/k66=66",
+        "-m",
+        "/k67=67",
+        "-m",
+        "/k68=68",
+        "-m",
+        "/k69=69",
+        "-m",
+        "/k70=70",
+        "-m",
+        "/k71=71",
+        "-m",
+        "/k72=72",
+        "-m",
+        "/k73=73",
+        "-m",
+        "/k74=74",
+        "-m",
+        "/k75=75",
+        "-m",
+        "/k76=76",
+        "-m",
+        "/k77=77",
+        "-m",
+        "/k78=78",
+        "-m",
+        "/k79=79",
+        "-m",
+        "/k80=80",
+        "-m",
+        "/k81=81",
+        "-m",
+        "/k82=82",
+        "-m",
+        "/k83=83",
+        "-m",
+        "/k84=84",
+        "-m",
+        "/k85=85",
+        "-m",
+        "/k86=86",
+        "-m",
+        "/k87=87",
+        "-m",
+        "/k88=88",
+        "-m",
+        "/k89=89",
+        "-m",
+        "/k90=90",
+        "-m",
+        "/k91=91",
+        "-m",
+        "/k92=92",
+        "-m",
+        "/k93=93",
+        "-m",
+        "/k94=94",
+        "-m",
+        "/k95=95",
+        "-m",
+        "/k96=96",
+        "-m",
+        "/k97=97",
+        "-m",
+        "/k98=98",
+        "-m",
+        "/k99=99",
+        "-m",
+        "/k100=100",
+        "-m",
+        "/k101=101",
+        "-m",
+        "/k102=102",
+        "-m",
+        "/k103=103",
+        "-m",
+        "/k104=104",
+        "-m",
+        "/k105=105",
+        "-m",
+        "/k106=106",
+        "-m",
+        "/k107=107",
+        "-m",
+        "/k108=108",
+        "-m",
+        "/k109=109",
+        "-m",
+        "/k110=110",
+        "-m",
+        "/k111=111",
+        "-m",
+        "/k112=112",
+        "-m",
+        "/k113=113",
+        "-m",
+        "/k114=114",
+        "-m",
+        "/k115=115",
+        "-m",
+        "/k116=116",
+        "-m",
+        "/k117=117",
+        "-m",
+        "/k118=118",
+        "-m",
+        "/k119=119",
+        "-m",
+        "/k120=120",
+        "-m",
+        "/k121=121",
+        "-m",
+        "/k122=122",
+        "-m",
+        "/k123=123",
+        "-m",
+        "/k124=124",
+        "-m",
+        "/k125=125",
+        "-m",
+        "/k126=126",
+        "-m",
+        "/k127=127",
+        "-m",
+        "/k128=128"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=true"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=null"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a++"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "delete:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "del:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/arr/0/x=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/arr/[]/x=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "rm:/a",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "rm:/a/b",
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/arr/0/x=+1",
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "rm:/arr/0/x",
+        "-m",
+        "/arr/0/y=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 0,
+      "args": [
+        "-m",
+        "/arr/[]/x=+1",
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a=x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a=true"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a=null"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a++"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "delete:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "del:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/arr/0/x=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/arr/[]/x=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "rm:/a",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "rm:/a/b"
+      ],
+      "expected": [
+        {
+          "a": {}
+        }
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "rm:/a/b",
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "rm:/a/b"
+      ],
+      "expected": [
+        {
+          "a": {}
+        }
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/arr/0/x=+1",
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "rm:/arr/0/x",
+        "-m",
+        "/arr/0/y=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 19,
+      "args": [
+        "-m",
+        "/arr/[]/x=+1",
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a=x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a=true"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a=null"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a++"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "delete:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "del:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/arr/0/x=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/arr/[]/x=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "rm:/a",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "rm:/a/b",
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/arr/0/x=+1",
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "rm:/arr/0/x",
+        "-m",
+        "/arr/0/y=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 52,
+      "args": [
+        "-m",
+        "/arr/[]/x=+1",
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a=x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a=true"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a=null"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a++"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "delete:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "del:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/arr/0/x=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/arr/[]/x=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "rm:/a",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "rm:/a/b"
+      ],
+      "expected": [
+        {
+          "a": {}
+        }
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "rm:/a/b",
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "rm:/a/b"
+      ],
+      "expected": [
+        {
+          "a": {}
+        }
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/arr/0/x=+1",
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "rm:/arr/0/x",
+        "-m",
+        "/arr/0/y=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 3,
+      "args": [
+        "-m",
+        "/arr/[]/x=+1",
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a=x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a=true"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a=null"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a++"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "delete:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "del:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/arr/0/x=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/arr/[]/x=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "rm:/a",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "rm:/a/b"
+      ],
+      "expected": [
+        {
+          "a": {}
+        }
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "rm:/a/b",
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "rm:/a/b"
+      ],
+      "expected": [
+        {
+          "a": {}
+        }
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/arr/0/x=+1",
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "rm:/arr/0/x",
+        "-m",
+        "/arr/0/y=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 53,
+      "args": [
+        "-m",
+        "/arr/[]/x=+1",
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a=x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a=true"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a=null"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a++"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "delete:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "del:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/arr/0/x=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/arr/[]/x=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "rm:/a",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "rm:/a/b",
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/arr/0/x=+1",
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "rm:/arr/0/x",
+        "-m",
+        "/arr/0/y=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 54,
+      "args": [
+        "-m",
+        "/arr/[]/x=+1",
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a=x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a=true"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a=null"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a++"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "delete:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "del:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/arr/0/x=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/arr/[]/x=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "rm:/a",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "rm:/a/b",
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/arr/0/x=+1",
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "rm:/arr/0/x",
+        "-m",
+        "/arr/0/y=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 55,
+      "args": [
+        "-m",
+        "/arr/[]/x=+1",
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a=x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a=true"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a=null"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a++"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "delete:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "del:/a"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/arr/0/x=+1"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/arr/[]/x=3"
+      ]
+    },
+    {
+      "name": "single mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "rm:/a"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "rm:/a",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "rm:/a/b",
+        "-m",
+        "/a/b/c=z"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a/b=+1"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "/a=2"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a=2",
+        "-m",
+        "/a=+1",
+        "-m",
+        "/a/b=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/a/b=3",
+        "-m",
+        "/a/b=+1",
+        "-m",
+        "rm:/a/b"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/arr/0/x=+1",
+        "-m",
+        "rm:/arr/0/x"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "rm:/arr/0/x",
+        "-m",
+        "/arr/0/y=3"
+      ]
+    },
+    {
+      "name": "ordered mutation sweep",
+      "input": 4,
+      "args": [
+        "-m",
+        "/arr/[]/x=+1",
+        "-m",
+        "rm:/arr/[]/x"
+      ]
+    }
+  ]
+}

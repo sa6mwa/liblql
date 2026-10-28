@@ -170,6 +170,7 @@ target_include_directories(lql_common PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>")
 lql_configure_c89_target(lql_common)
+target_compile_options(lql_common PRIVATE -Wframe-larger-than=1024)
 
 if(LQL_BUILD_STATIC)
   add_library(lql_static STATIC $<TARGET_OBJECTS:lql_common>)
@@ -234,6 +235,14 @@ if(BUILD_TESTING)
   lql_configure_development_runtime(lql_json_scan_test)
   add_test(NAME lql.json_scan COMMAND lql_json_scan_test)
   lql_set_test_contract(lql.json_scan "unit;local" 10)
+  add_executable(lql_workspace_alloc_test tests/workspace_alloc_test.c)
+  target_include_directories(lql_workspace_alloc_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(lql_workspace_alloc_test PRIVATE lql_common)
+  lql_configure_c89_target(lql_workspace_alloc_test)
+  lql_configure_development_runtime(lql_workspace_alloc_test)
+  add_test(NAME lql.workspace_alloc COMMAND lql_workspace_alloc_test)
+  lql_set_test_contract(lql.workspace_alloc "unit;integration;local" 30)
   add_executable(lql_direct_stream_test tests/direct_stream_test.c)
   target_link_libraries(lql_direct_stream_test PRIVATE ${LQL_INTERNAL_LIBRARY})
   lql_configure_c89_target(lql_direct_stream_test)
@@ -247,6 +256,19 @@ if(BUILD_TESTING)
   lql_configure_development_runtime(lql_selector_ast_test)
   add_test(NAME lql.selector_ast COMMAND lql_selector_ast_test)
   lql_set_test_contract(lql.selector_ast "unit;local" 10)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+    add_executable(lql_thread_stack_test tests/thread_stack_test.c)
+    target_link_libraries(lql_thread_stack_test PRIVATE
+      ${LQL_INTERNAL_LIBRARY} Threads::Threads)
+    lql_configure_c89_target(lql_thread_stack_test)
+    target_compile_options(lql_thread_stack_test PRIVATE -Wframe-larger-than=1024)
+    lql_configure_development_runtime(lql_thread_stack_test)
+    add_test(NAME lql.thread_stack.default COMMAND lql_thread_stack_test)
+    add_test(NAME lql.thread_stack.small COMMAND lql_thread_stack_test small)
+    lql_set_test_contract(lql.thread_stack.default "integration;local" 30)
+    lql_set_test_contract(lql.thread_stack.small "integration;local" 30)
+  endif()
 endif()
 
 if(LQL_BUILD_DIRECT_PROBE)
@@ -332,6 +354,33 @@ if(LQL_BUILD_LUA)
   target_link_libraries(lql_lua_runner PRIVATE lql_lua_runtime
     "${LQL_LUA_SDK_LIBRARY}")
   lql_configure_development_runtime(lql_lua_runner ${LIBLQL_LIBRARY_DIRS})
+  if(BUILD_TESTING)
+    add_executable(lql_lua_fault_test tests/lua_fault_test.c lua/lql_core.c)
+    target_include_directories(lql_lua_fault_test SYSTEM PRIVATE
+      "${LQL_LUA_SOURCE_DIR}/src")
+    target_include_directories(lql_lua_fault_test PRIVATE ${LIBLQL_INCLUDE_DIRS})
+    target_link_libraries(lql_lua_fault_test PRIVATE lql_lua_runtime
+      "${LQL_LUA_SDK_LIBRARY}")
+    lql_configure_c89_target(lql_lua_fault_test)
+    lql_configure_development_runtime(lql_lua_fault_test ${LIBLQL_LIBRARY_DIRS})
+    add_test(NAME lql.lua.faults COMMAND lql_lua_fault_test
+      "${CMAKE_CURRENT_SOURCE_DIR}/lua/tests/lql_faults.lua")
+    lql_set_test_contract(lql.lua.faults "unit;integration;local" 60)
+    foreach(suite smoke lifetime close)
+      add_test(NAME lql.lua.${suite}
+        COMMAND "${CMAKE_COMMAND}" -E env
+          "LUA_PATH=${CMAKE_CURRENT_SOURCE_DIR}/lua/?.lua;${CMAKE_CURRENT_SOURCE_DIR}/lua/?/init.lua;;"
+          "LUA_CPATH=${CMAKE_CURRENT_BINARY_DIR}/lua/?.so;;"
+          "TMPDIR=${CMAKE_CURRENT_SOURCE_DIR}/build/tmp"
+          $<TARGET_FILE:lql_lua_runner>
+          "${CMAKE_CURRENT_SOURCE_DIR}/lua/tests/lql_${suite}.lua")
+      lql_set_test_contract(lql.lua.${suite} "unit;integration;local" 30)
+    endforeach()
+    add_test(NAME lql.lua.sdk_prefix
+      COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/lua_sdk_prefix.sh")
+    lql_set_test_contract(lql.lua.sdk_prefix "integration;local" 60)
+    set_tests_properties(lql.lua.sdk_prefix PROPERTIES RUN_SERIAL TRUE)
+  endif()
 endif()
 
 if(LQL_INSTALL)
@@ -361,4 +410,9 @@ if(LQL_INSTALL)
   install(EXPORT liblqlTargets
           NAMESPACE liblql::
           DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/liblql")
+endif()
+
+if(BUILD_TESTING)
+  include(LqlTestContract)
+  lql_verify_test_contract()
 endif()

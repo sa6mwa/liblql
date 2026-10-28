@@ -11,6 +11,7 @@
 #include <lua.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if LUA_VERSION_NUM != 505
@@ -26,13 +27,18 @@
 #define LUA_LQL_STREAM_WRITER "lql.stream_writer"
 #define LUA_LQL_MUTATION_CALLBACK_OWNERS "lql.mutation_callback_owners"
 
+typedef struct lua_lql_owner lua_lql_owner;
+typedef struct lua_lql_resource lua_lql_resource;
+
 typedef struct lua_lql_client {
   lql *ctx;
+  lua_lql_owner *owner;
 } lua_lql_client;
 
 typedef struct lua_lql_selector {
   lql *ctx;
   lql_selector *selector;
+  lua_lql_resource *resource;
 } lua_lql_selector;
 
 /* A cursor is a borrowed public C AST view. Its Lua uservalue retains the
@@ -40,11 +46,13 @@ typedef struct lua_lql_selector {
 typedef struct lua_lql_selector_node {
   lql *ctx;
   lql_selector_node node;
+  lua_lql_selector *owner;
 } lua_lql_selector_node;
 
 typedef struct lua_lql_projection {
   lql *ctx;
   lql_projection *projection;
+  lua_lql_resource *resource;
 } lua_lql_projection;
 
 /* A mutation keeps its callback options borrowed by the C handle. Persistent
@@ -54,6 +62,7 @@ typedef struct lua_lql_mutation_bridge {
   lua_State *lua;
   int callback_owner;
   int file_open_ref;
+  int file_close_ref;
   int time_now_ref;
   lql_status callback_status;
   char callback_message[256];
@@ -63,11 +72,13 @@ typedef struct lua_lql_mutation {
   lql *ctx;
   lql_mutation *mutation;
   lua_lql_mutation_bridge *bridge;
+  lua_lql_resource *resource;
 } lua_lql_mutation;
 
 typedef struct lua_lql_mutation_reader {
   lua_lql_mutation_bridge *bridge;
   int reader_ref;
+  int close_ref;
 } lua_lql_mutation_reader;
 
 typedef struct lua_lql_string_reader {
@@ -126,12 +137,14 @@ static int lua_lql_callback_error_result(lua_State *lua, int value_index,
                                          int error_index, lql_error *error,
                                          lql_status *out_status);
 
+static void lua_lql_mutation_bridge_destroy(lua_lql_mutation_bridge *bridge);
+
+#include "lql_callbacks.h"
+#include "lql_lifetime.h"
+
 static void *lua_lql_alloc(lua_State *lua, void *ptr, size_t old_size,
                            size_t new_size) {
-  lua_Alloc allocf;
-  void *user;
-  allocf = lua_getallocf(lua, &user);
-  return allocf(user, ptr, old_size, new_size);
+  return lua_lql_scratch_resize(lua, ptr, old_size, new_size);
 }
 
 static int lua_lql_getfield_callback(lua_State *lua) {
@@ -303,9 +316,17 @@ static int lua_lql_bridge_call(lua_lql_stream_bridge *bridge, int ref,
     return 0;
   }
   lua = bridge->lua;
+  if (lua_lql_scope_failed(lua)) {
+    lua_lql_bridge_fail(bridge, "lql handle finalized during active call");
+    return 0;
+  }
   lua_rawgeti(lua, LUA_REGISTRYINDEX, ref);
   lua_insert(lua, -arg_count - 1);
   if (lua_pcall(lua, arg_count, result_count, 0) == LUA_OK) {
+    if (lua_lql_scope_failed(lua)) {
+      lua_lql_bridge_fail(bridge, "lql handle finalized during active call");
+      return 0;
+    }
     return 1;
   }
   message = lua_tostring(lua, -1);
@@ -314,9 +335,9 @@ static int lua_lql_bridge_call(lua_lql_stream_bridge *bridge, int ref,
   return 0;
 }
 
-static lql_status lua_lql_bridge_write_ref(lua_lql_stream_bridge *bridge,
-                                           int ref, const void *data,
-                                           size_t len, lql_error *error) {
+static lql_status lua_lql_bridge_write_ref_body(lua_lql_stream_bridge *bridge,
+                                                int ref, const void *data,
+                                                size_t len, lql_error *error) {
   lua_State *lua;
   int accepted;
   lql_status result_status;
@@ -352,9 +373,9 @@ static lql_status lua_lql_bridge_write_ref(lua_lql_stream_bridge *bridge,
   return LQL_STATUS_OK;
 }
 
-static lql_status lua_lql_stream_reader(void *user, unsigned char *buffer,
-                                        size_t capacity, size_t *out_len,
-                                        lql_error *error) {
+static lql_status lua_lql_stream_reader_body(void *user, unsigned char *buffer,
+                                             size_t capacity, size_t *out_len,
+                                             lql_error *error) {
   lua_lql_stream_bridge *bridge;
   lua_State *lua;
   const char *chunk;
@@ -501,9 +522,11 @@ static int lua_lql_callback_error_result(lua_State *lua, int value_index,
 
 static int lua_lql_push_stream_writer(lua_State *lua,
                                       lql_stream_writer_fn writer,
-                                      void *writer_user, lql_error *error) {
+                                      void *writer_user, lql_error *error,
+                                      lua_lql_callback_frame *frame) {
   lua_lql_stream_writer *handle;
   handle = (lua_lql_stream_writer *)lua_newuserdatauv(lua, sizeof(*handle), 0);
+  frame->writer_handle = handle;
   handle->writer = writer;
   handle->writer_user = writer_user;
   handle->error = error;
@@ -513,14 +536,10 @@ static int lua_lql_push_stream_writer(lua_State *lua,
   return 1;
 }
 
-static lql_status lua_lql_stream_range_writer(void *user, size_t offset,
-                                              size_t len,
-                                              lql_stream_writer_fn writer,
-                                              void *writer_user,
-                                              lql_error *error) {
+static lql_status lua_lql_stream_range_writer_body(
+    void *user, size_t offset, size_t len, lql_stream_writer_fn writer,
+    void *writer_user, lql_error *error, lua_lql_callback_frame *frame) {
   lua_lql_stream_bridge *bridge;
-  lua_lql_stream_writer *handle;
-  int handle_ref;
   lql_status result_status;
   bridge = (lua_lql_stream_bridge *)user;
   if (bridge == NULL || bridge->range_ref == LUA_NOREF ||
@@ -529,26 +548,14 @@ static lql_status lua_lql_stream_range_writer(void *user, size_t offset,
   }
   lua_pushinteger(bridge->lua, (lua_Integer)offset);
   lua_pushinteger(bridge->lua, (lua_Integer)len);
-  lua_lql_push_stream_writer(bridge->lua, writer, writer_user, error);
+  lua_lql_push_stream_writer(bridge->lua, writer, writer_user, error, frame);
   /* Keep the temporary writer alive while lua_pcall removes its argument from
    * the stack. Lua code may retain it, but it becomes unusable on return. */
   lua_pushvalue(bridge->lua, -1);
-  handle_ref = luaL_ref(bridge->lua, LUA_REGISTRYINDEX);
+  frame->root = luaL_ref(bridge->lua, LUA_REGISTRYINDEX);
   if (!lua_lql_bridge_call(bridge, bridge->range_ref, 3, 2)) {
-    lua_rawgeti(bridge->lua, LUA_REGISTRYINDEX, handle_ref);
-    handle = (lua_lql_stream_writer *)luaL_checkudata(bridge->lua, -1,
-                                                      LUA_LQL_STREAM_WRITER);
-    handle->active = 0;
-    lua_pop(bridge->lua, 1);
-    luaL_unref(bridge->lua, LUA_REGISTRYINDEX, handle_ref);
     return lua_lql_bridge_status(bridge, error);
   }
-  lua_rawgeti(bridge->lua, LUA_REGISTRYINDEX, handle_ref);
-  handle = (lua_lql_stream_writer *)luaL_checkudata(bridge->lua, -1,
-                                                    LUA_LQL_STREAM_WRITER);
-  handle->active = 0;
-  lua_pop(bridge->lua, 1);
-  luaL_unref(bridge->lua, LUA_REGISTRYINDEX, handle_ref);
   if (lua_lql_callback_error_result(bridge->lua, -2, -1, error,
                                     &result_status)) {
     lua_pop(bridge->lua, 2);
@@ -571,8 +578,8 @@ static lql_status lua_lql_stream_range_writer(void *user, size_t offset,
 }
 
 static lql_stream_callback_result
-lua_lql_stream_decision(void *user, const lql_stream_decision *decision,
-                        lql_error *error) {
+lua_lql_stream_decision_body(void *user, const lql_stream_decision *decision,
+                             lql_error *error) {
   lua_lql_stream_bridge *bridge;
   int continue_running;
   lql_status result_status;
@@ -644,12 +651,11 @@ static int lua_lql_stream_value_size(lua_State *lua) {
 }
 
 static lql_stream_callback_result
-lua_lql_stream_on_value(void *user, const lql_stream_value *value,
-                        lql_error *error) {
+lua_lql_stream_on_value_body(void *user, const lql_stream_value *value,
+                             lql_error *error, lua_lql_callback_frame *frame) {
   lua_lql_stream_bridge *bridge;
   lua_lql_stream_value *handle;
   int continue_running;
-  int handle_ref;
   lql_status result_status;
   bridge = (lua_lql_stream_bridge *)user;
   if (bridge == NULL || bridge->value_ref == LUA_NOREF ||
@@ -658,29 +664,18 @@ lua_lql_stream_on_value(void *user, const lql_stream_value *value,
   }
   handle = (lua_lql_stream_value *)lua_newuserdatauv(bridge->lua,
                                                      sizeof(*handle), 0);
+  frame->value_handle = handle;
   handle->value = value;
   luaL_getmetatable(bridge->lua, LUA_LQL_STREAM_VALUE);
   lua_setmetatable(bridge->lua, -2);
   /* Retain the callback-scoped view across lua_pcall; it is invalidated before
    * the registry reference is released. */
   lua_pushvalue(bridge->lua, -1);
-  handle_ref = luaL_ref(bridge->lua, LUA_REGISTRYINDEX);
+  frame->root = luaL_ref(bridge->lua, LUA_REGISTRYINDEX);
   if (!lua_lql_bridge_call(bridge, bridge->value_ref, 1, 2)) {
-    lua_rawgeti(bridge->lua, LUA_REGISTRYINDEX, handle_ref);
-    handle = (lua_lql_stream_value *)luaL_checkudata(bridge->lua, -1,
-                                                     LUA_LQL_STREAM_VALUE);
-    handle->value = NULL;
-    lua_pop(bridge->lua, 1);
-    luaL_unref(bridge->lua, LUA_REGISTRYINDEX, handle_ref);
     (void)lua_lql_bridge_status(bridge, error);
     return LQL_STREAM_CALLBACK_ERROR;
   }
-  lua_rawgeti(bridge->lua, LUA_REGISTRYINDEX, handle_ref);
-  handle = (lua_lql_stream_value *)luaL_checkudata(bridge->lua, -1,
-                                                   LUA_LQL_STREAM_VALUE);
-  handle->value = NULL;
-  lua_pop(bridge->lua, 1);
-  luaL_unref(bridge->lua, LUA_REGISTRYINDEX, handle_ref);
   if (lua_lql_callback_error_result(bridge->lua, -2, -1, error,
                                     &result_status)) {
     lua_pop(bridge->lua, 2);
@@ -696,7 +691,7 @@ lua_lql_stream_on_value(void *user, const lql_stream_value *value,
                           : LQL_STREAM_CALLBACK_STOP;
 }
 
-static int lua_lql_stream_cancelled(void *user) {
+static int lua_lql_stream_cancelled_body(void *user) {
   lua_lql_stream_bridge *bridge;
   int cancelled;
   bridge = (lua_lql_stream_bridge *)user;
@@ -724,7 +719,7 @@ static int lua_lql_stream_cancelled(void *user) {
   return cancelled;
 }
 
-static time_t lua_lql_stream_time_now(void *user) {
+static time_t lua_lql_stream_time_now_body(void *user) {
   lua_lql_stream_bridge *bridge;
   lua_Integer value;
   bridge = (lua_lql_stream_bridge *)user;
@@ -776,7 +771,7 @@ static void lua_lql_stream_bridge_unref(lua_lql_stream_bridge *bridge) {
 #define LUA_LQL_UNREF_BRIDGE_FIELD(field)                                      \
   do {                                                                         \
     if (bridge->field != LUA_NOREF && bridge->field != LUA_REFNIL) {           \
-      luaL_unref(bridge->lua, LUA_REGISTRYINDEX, bridge->field);               \
+      lua_lql_unref(bridge->lua, LUA_REGISTRYINDEX, bridge->field);            \
       bridge->field = LUA_NOREF;                                               \
     }                                                                          \
   } while (0)
@@ -798,7 +793,7 @@ static void lua_lql_stream_bridge_hold(lua_lql_stream_bridge *bridge, int index,
     return;
   }
   lua_pushvalue(bridge->lua, index);
-  *out_ref = luaL_ref(bridge->lua, LUA_REGISTRYINDEX);
+  *out_ref = lua_lql_ref(bridge->lua, LUA_REGISTRYINDEX);
 }
 
 static void lua_lql_push_error(lua_State *lua, const lql_error *error,
@@ -828,8 +823,9 @@ static int lua_lql_return_error(lua_State *lua, const lql_error *error,
 static lua_lql_client *lua_lql_check_client(lua_State *lua, int index) {
   lua_lql_client *client;
   client = (lua_lql_client *)luaL_checkudata(lua, index, LUA_LQL_CLIENT);
-  luaL_argcheck(lua, client != NULL && client->ctx != NULL, index,
-                "closed lql client");
+  luaL_argcheck(
+      lua, client != NULL && client->owner != NULL && !client->owner->closed,
+      index, "closed lql client");
   return client;
 }
 
@@ -849,7 +845,8 @@ static lua_lql_selector *lua_lql_check_selector(lua_State *lua, int index) {
   lua_lql_selector *selector;
   selector = (lua_lql_selector *)luaL_checkudata(lua, index, LUA_LQL_SELECTOR);
   luaL_argcheck(lua,
-                selector != NULL && selector->ctx != NULL &&
+                selector != NULL && selector->resource != NULL &&
+                    !selector->resource->owner->closed &&
                     selector->selector != NULL,
                 index, "closed lql selector");
   return selector;
@@ -860,9 +857,11 @@ static lua_lql_selector_node *lua_lql_check_selector_node(lua_State *lua,
   lua_lql_selector_node *node;
   node = (lua_lql_selector_node *)luaL_checkudata(lua, index,
                                                   LUA_LQL_SELECTOR_NODE);
-  luaL_argcheck(lua,
-                node != NULL && node->ctx != NULL && node->node.impl != NULL,
-                index, "expired lql selector node");
+  luaL_argcheck(
+      lua,
+      node != NULL && node->owner != NULL && node->owner->resource != NULL &&
+          !node->owner->resource->owner->closed && node->node.impl != NULL,
+      index, "expired lql selector node");
   return node;
 }
 
@@ -871,7 +870,8 @@ static lua_lql_projection *lua_lql_check_projection(lua_State *lua, int index) {
   projection =
       (lua_lql_projection *)luaL_checkudata(lua, index, LUA_LQL_PROJECTION);
   luaL_argcheck(lua,
-                projection != NULL && projection->ctx != NULL &&
+                projection != NULL && projection->resource != NULL &&
+                    !projection->resource->owner->closed &&
                     projection->projection != NULL,
                 index, "closed lql projection");
   return projection;
@@ -881,7 +881,8 @@ static lua_lql_mutation *lua_lql_check_mutation(lua_State *lua, int index) {
   lua_lql_mutation *mutation;
   mutation = (lua_lql_mutation *)luaL_checkudata(lua, index, LUA_LQL_MUTATION);
   luaL_argcheck(lua,
-                mutation != NULL && mutation->ctx != NULL &&
+                mutation != NULL && mutation->resource != NULL &&
+                    !mutation->resource->owner->closed &&
                     mutation->mutation != NULL,
                 index, "closed lql mutation");
   return mutation;
@@ -891,10 +892,13 @@ static int lua_lql_push_selector(lua_State *lua, lua_lql_client *client,
                                  lql_selector *selector) {
   lua_lql_selector *handle;
   handle = (lua_lql_selector *)lua_newuserdatauv(lua, sizeof(*handle), 1);
+  memset(handle, 0, sizeof(*handle));
   handle->ctx = client->ctx;
-  handle->selector = selector;
+
   luaL_getmetatable(lua, LUA_LQL_SELECTOR);
   lua_setmetatable(lua, -2);
+  handle->resource = lua_lql_take_native(lua, selector);
+  handle->selector = selector;
   lua_pushvalue(lua, 1);
   lua_setiuservalue(lua, -2, 1);
   return 1;
@@ -906,6 +910,10 @@ static int lua_lql_push_selector_node(lua_State *lua, int owner_index, lql *ctx,
   handle = (lua_lql_selector_node *)lua_newuserdatauv(lua, sizeof(*handle), 1);
   handle->ctx = ctx;
   handle->node = node;
+  handle->owner = lua_lql_test_selector(lua, owner_index);
+  if (handle->owner == NULL) {
+    handle->owner = lua_lql_check_selector_node(lua, owner_index)->owner;
+  }
   luaL_getmetatable(lua, LUA_LQL_SELECTOR_NODE);
   lua_setmetatable(lua, -2);
   lua_pushvalue(lua, owner_index);
@@ -1005,10 +1013,13 @@ static int lua_lql_push_projection(lua_State *lua, lua_lql_client *client,
                                    lql_projection *projection) {
   lua_lql_projection *handle;
   handle = (lua_lql_projection *)lua_newuserdatauv(lua, sizeof(*handle), 1);
+  memset(handle, 0, sizeof(*handle));
   handle->ctx = client->ctx;
-  handle->projection = projection;
+
   luaL_getmetatable(lua, LUA_LQL_PROJECTION);
   lua_setmetatable(lua, -2);
+  handle->resource = lua_lql_take_native(lua, projection);
+  handle->projection = projection;
   lua_pushvalue(lua, 1);
   lua_setiuservalue(lua, -2, 1);
   return 1;
@@ -1075,6 +1086,11 @@ lua_lql_mutation_bridge_bind_userdata(lua_State *lua,
     lua_rawgeti(lua, LUA_REGISTRYINDEX, bridge->file_open_ref);
     lua_setfield(lua, owner_index, "file_value_open");
   }
+  if (bridge->file_close_ref != LUA_NOREF &&
+      bridge->file_close_ref != LUA_REFNIL) {
+    lua_rawgeti(lua, LUA_REGISTRYINDEX, bridge->file_close_ref);
+    lua_setfield(lua, owner_index, "file_value_close");
+  }
   if (bridge->time_now_ref != LUA_NOREF && bridge->time_now_ref != LUA_REFNIL) {
     lua_rawgeti(lua, LUA_REGISTRYINDEX, bridge->time_now_ref);
     lua_setfield(lua, owner_index, "time_now");
@@ -1088,12 +1104,14 @@ lua_lql_mutation_bridge_bind_userdata(lua_State *lua,
   lua_pop(lua, 2);
   if (bridge->file_open_ref != LUA_NOREF &&
       bridge->file_open_ref != LUA_REFNIL) {
-    luaL_unref(lua, LUA_REGISTRYINDEX, bridge->file_open_ref);
+    lua_lql_unref(lua, LUA_REGISTRYINDEX, bridge->file_open_ref);
   }
   if (bridge->time_now_ref != LUA_NOREF && bridge->time_now_ref != LUA_REFNIL) {
-    luaL_unref(lua, LUA_REGISTRYINDEX, bridge->time_now_ref);
+    lua_lql_unref(lua, LUA_REGISTRYINDEX, bridge->time_now_ref);
   }
   bridge->file_open_ref = LUA_NOREF;
+  lua_lql_unref(lua, LUA_REGISTRYINDEX, bridge->file_close_ref);
+  bridge->file_close_ref = LUA_NOREF;
   bridge->time_now_ref = LUA_NOREF;
   bridge->callback_owner = 1;
 }
@@ -1103,11 +1121,21 @@ static int lua_lql_push_mutation(lua_State *lua, lua_lql_client *client,
                                  lua_lql_mutation_bridge *bridge) {
   lua_lql_mutation *handle;
   handle = (lua_lql_mutation *)lua_newuserdatauv(lua, sizeof(*handle), 1);
+  memset(handle, 0, sizeof(*handle));
   handle->ctx = client->ctx;
-  handle->mutation = mutation;
-  handle->bridge = bridge;
+
   luaL_getmetatable(lua, LUA_LQL_MUTATION);
   lua_setmetatable(lua, -2);
+  handle->resource = lua_lql_take_native(lua, mutation);
+  handle->mutation = mutation;
+  handle->bridge = bridge;
+  handle->resource->bridge = bridge;
+  if (bridge != NULL) {
+    lua_lql_forget_scratch(lua, bridge);
+    lua_lql_forget_ref(lua, bridge->file_open_ref);
+    lua_lql_forget_ref(lua, bridge->file_close_ref);
+    lua_lql_forget_ref(lua, bridge->time_now_ref);
+  }
   lua_pushvalue(lua, 1);
   lua_setiuservalue(lua, -2, 1);
   return 1;
@@ -1121,6 +1149,7 @@ static lql_status lua_lql_selector_arg(lua_State *lua, lua_lql_client *client,
                                        int *owned, lql_error *error) {
   lua_lql_selector *handle;
   const char *expr;
+  lql_status status;
   *out = NULL;
   *owned = 0;
   if (lua_isnoneornil(lua, index)) {
@@ -1133,6 +1162,7 @@ static lql_status lua_lql_selector_arg(lua_State *lua, lua_lql_client *client,
       strcpy(error->message, "selector belongs to another lql client");
       return LQL_STATUS_INVALID_ARGUMENT;
     }
+    lua_lql_borrow(lua, handle->resource);
     *out = handle->selector;
     return LQL_STATUS_OK;
   }
@@ -1143,7 +1173,14 @@ static lql_status lua_lql_selector_arg(lua_State *lua, lua_lql_client *client,
   }
   expr = lua_tostring(lua, index);
   *owned = 1;
-  return client->ctx->selector_parse(client->ctx, expr, out, error);
+  status = client->ctx->selector_parse(client->ctx, expr, out, error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, *out, LUA_LQL_OWN_SELECTOR, error);
+    if (status != LQL_STATUS_OK) {
+      *out = NULL;
+    }
+  }
+  return status;
 }
 
 static lql_status lua_lql_string_list_arg(lua_State *lua, int index,
@@ -1224,7 +1261,7 @@ static void lua_lql_registry_refs_release(lua_State *lua,
   }
   for (i = 0u; i < roots->count; ++i) {
     if (roots->refs[i] != LUA_NOREF && roots->refs[i] != LUA_REFNIL) {
-      luaL_unref(lua, LUA_REGISTRYINDEX, roots->refs[i]);
+      lua_lql_unref(lua, LUA_REGISTRYINDEX, roots->refs[i]);
     }
   }
   if (roots->refs != NULL) {
@@ -1262,7 +1299,7 @@ static int lua_lql_registry_refs_hold(lua_State *lua,
     roots->capacity = capacity;
   }
   lua_pushvalue(lua, index);
-  roots->refs[roots->count] = luaL_ref(lua, LUA_REGISTRYINDEX);
+  roots->refs[roots->count] = lua_lql_ref(lua, LUA_REGISTRYINDEX);
   roots->count += 1u;
   return 1;
 }
@@ -1319,6 +1356,7 @@ static lql_status lua_lql_projection_arg(lua_State *lua, lua_lql_client *client,
       strcpy(error->message, "projection belongs to another lql client");
       return LQL_STATUS_INVALID_ARGUMENT;
     }
+    lua_lql_borrow(lua, handle->resource);
     *out = handle->projection;
     return LQL_STATUS_OK;
   }
@@ -1330,6 +1368,12 @@ static lql_status lua_lql_projection_arg(lua_State *lua, lua_lql_client *client,
   }
   *owned = 1;
   status = client->ctx->projection_parse(client->ctx, items, count, out, error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, *out, LUA_LQL_OWN_PROJECTION, error);
+    if (status != LQL_STATUS_OK) {
+      *out = NULL;
+    }
+  }
   lua_lql_string_list_free(lua, items, count);
   return status;
 }
@@ -1386,6 +1430,16 @@ lua_lql_mutation_bridge_status(lua_lql_mutation_bridge *bridge,
   return bridge->callback_status;
 }
 
+static lql_status
+lua_lql_mutation_application_status(lua_lql_mutation_bridge *bridge,
+                                    lql_status status, lql_error *error) {
+  if (status == LQL_STATUS_OK && bridge != NULL &&
+      bridge->callback_status != LQL_STATUS_OK) {
+    return lua_lql_mutation_bridge_status(bridge, error);
+  }
+  return status;
+}
+
 static int lua_lql_mutation_bridge_call(lua_lql_mutation_bridge *bridge,
                                         int ref, const char *callback_name,
                                         int arg_count, int result_count) {
@@ -1395,6 +1449,11 @@ static int lua_lql_mutation_bridge_call(lua_lql_mutation_bridge *bridge,
     return 0;
   }
   lua = bridge->lua;
+  if (lua_lql_scope_failed(lua)) {
+    lua_lql_mutation_bridge_fail(bridge,
+                                 "lql handle finalized during active call");
+    return 0;
+  }
   if (ref != LUA_NOREF && ref != LUA_REFNIL) {
     lua_rawgeti(lua, LUA_REGISTRYINDEX, ref);
   } else if (!lua_lql_mutation_bridge_push_callback(bridge, callback_name)) {
@@ -1404,6 +1463,11 @@ static int lua_lql_mutation_bridge_call(lua_lql_mutation_bridge *bridge,
   }
   lua_insert(lua, -arg_count - 1);
   if (lua_pcall(lua, arg_count, result_count, 0) == LUA_OK) {
+    if (lua_lql_scope_failed(lua)) {
+      lua_lql_mutation_bridge_fail(bridge,
+                                   "lql handle finalized during active call");
+      return 0;
+    }
     return 1;
   }
   message = lua_tostring(lua, -1);
@@ -1420,25 +1484,29 @@ static void lua_lql_mutation_bridge_destroy(lua_lql_mutation_bridge *bridge) {
   lua = bridge->lua;
   if (bridge->file_open_ref != LUA_NOREF &&
       bridge->file_open_ref != LUA_REFNIL) {
-    luaL_unref(lua, LUA_REGISTRYINDEX, bridge->file_open_ref);
+    lua_lql_unref(lua, LUA_REGISTRYINDEX, bridge->file_open_ref);
   }
+  lua_lql_unref(lua, LUA_REGISTRYINDEX, bridge->file_close_ref);
   if (bridge->time_now_ref != LUA_NOREF && bridge->time_now_ref != LUA_REFNIL) {
-    luaL_unref(lua, LUA_REGISTRYINDEX, bridge->time_now_ref);
+    lua_lql_unref(lua, LUA_REGISTRYINDEX, bridge->time_now_ref);
   }
   if (bridge->callback_owner) {
-    lua_lql_push_mutation_callback_owners(lua);
-    lua_pushlightuserdata(lua, bridge);
-    lua_pushnil(lua);
-    lua_rawset(lua, -3);
+    lua_getfield(lua, LUA_REGISTRYINDEX, LUA_LQL_MUTATION_CALLBACK_OWNERS);
+    if (lua_istable(lua, -1)) {
+      lua_pushlightuserdata(lua, bridge);
+      lua_pushnil(lua);
+      lua_rawset(lua, -3);
+    }
     lua_pop(lua, 1);
   }
   (void)lua_lql_alloc(lua, bridge, sizeof(*bridge), 0u);
 }
 
-static lql_status lua_lql_mutation_file_reader(void *user,
-                                               unsigned char *buffer,
-                                               size_t capacity, size_t *out_len,
-                                               lql_error *error) {
+static lql_status lua_lql_mutation_file_reader_body(void *user,
+                                                    unsigned char *buffer,
+                                                    size_t capacity,
+                                                    size_t *out_len,
+                                                    lql_error *error) {
   lua_lql_mutation_reader *reader;
   lua_lql_mutation_bridge *bridge;
   lua_State *lua;
@@ -1497,62 +1565,79 @@ static lql_status lua_lql_mutation_file_reader(void *user,
   return LQL_STATUS_OK;
 }
 
-static void lua_lql_mutation_file_close(void *user, void *reader_user) {
-  lua_lql_mutation_bridge *bridge;
+static void lua_lql_mutation_reader_dispose(lua_lql_mutation_reader *reader) {
+  lua_State *lua;
+  lua = reader->bridge->lua;
+  lua_lql_unref(lua, LUA_REGISTRYINDEX, reader->reader_ref);
+  lua_lql_unref(lua, LUA_REGISTRYINDEX, reader->close_ref);
+  (void)lua_lql_alloc(lua, reader, sizeof(*reader), 0u);
+}
+
+static void lua_lql_mutation_file_close_body(void *user) {
   lua_lql_mutation_reader *reader;
-  bridge = (lua_lql_mutation_bridge *)user;
+  lua_lql_mutation_bridge *bridge;
+  lua_State *lua;
+  lql_error error;
+  lql_status status;
+  const char *message;
+  reader = (lua_lql_mutation_reader *)user;
+  bridge = reader->bridge;
+  lua = bridge->lua;
+  lua_rawgeti(lua, LUA_REGISTRYINDEX, reader->close_ref);
+  lua_rawgeti(lua, LUA_REGISTRYINDEX, reader->reader_ref);
+  /* Cleanup runs even after read failure or a close request. Do not use the
+   * ordinary callback gate, which intentionally rejects further source calls.
+   */
+  if (lua_pcall(lua, 1, 2, 0) != LUA_OK) {
+    message = lua_tostring(lua, -1);
+    lua_lql_mutation_bridge_fail(bridge, message);
+    return;
+  }
+  lql_error_init(&error);
+  if (lua_lql_callback_error_result(lua, -2, -1, &error, &status)) {
+    lua_lql_mutation_bridge_fail_status(bridge, status, error.message);
+  } else if (lua_isboolean(lua, -2) && !lua_toboolean(lua, -2)) {
+    lua_lql_mutation_bridge_fail(
+        bridge, "Lua file_value_close callback rejected cleanup");
+  } else if (lua_lql_scope_failed(lua)) {
+    lua_lql_mutation_bridge_fail(bridge,
+                                 "lql handle closed during active call");
+  }
+}
+
+static void lua_lql_mutation_file_close(void *user, void *reader_user) {
+  lua_lql_mutation_reader *reader;
+  lua_lql_callback_frame frame;
+  (void)user;
   reader = (lua_lql_mutation_reader *)reader_user;
   if (reader == NULL) {
     return;
   }
-  if (reader->reader_ref != LUA_NOREF && reader->reader_ref != LUA_REFNIL) {
-    luaL_unref(reader->bridge->lua, LUA_REGISTRYINDEX, reader->reader_ref);
+  if (reader->close_ref != LUA_NOREF && reader->close_ref != LUA_REFNIL) {
+    memset(&frame, 0, sizeof(frame));
+    frame.kind = LUA_LQL_FILE_CLOSE;
+    frame.user = reader;
+    (void)lua_lql_callback_protected(reader->bridge->lua, &frame);
   }
-  (void)lua_lql_alloc(bridge != NULL ? bridge->lua : reader->bridge->lua,
-                      reader, sizeof(*reader), 0u);
+  lua_lql_mutation_reader_dispose(reader);
 }
 
-static lql_status lua_lql_mutation_file_open(void *user, lql_string_view path,
-                                             lql_stream_reader_fn *out_reader,
-                                             void **out_reader_user,
-                                             lql_error *error) {
+static lql_status
+lua_lql_mutation_file_open_body(void *user, lql_string_view path,
+                                lql_stream_reader_fn *out_reader,
+                                void **out_reader_user, lql_error *error) {
   lua_lql_mutation_bridge *bridge;
   lua_lql_mutation_reader *reader;
   lua_State *lua;
-  lql_status result_status;
+  lql_status status;
+  int called;
   bridge = (lua_lql_mutation_bridge *)user;
-  if (bridge == NULL || out_reader == NULL || out_reader_user == NULL) {
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
   lua = bridge->lua;
   *out_reader = NULL;
   *out_reader_user = NULL;
-  lua_pushlstring(lua, path.data != NULL ? path.data : "", path.len);
-  if (!lua_lql_mutation_bridge_call(bridge, bridge->file_open_ref,
-                                    "file_value_open", 1, 2)) {
-    return lua_lql_mutation_bridge_status(bridge, error);
-  }
-  if (lua_lql_callback_error_result(lua, -2, -1, error, &result_status)) {
-    lua_pop(lua, 2);
-    lua_lql_mutation_bridge_fail_status(
-        bridge, result_status,
-        error != NULL ? error->message : lql_status_string(result_status));
-    return result_status;
-  }
-  if (lua_type(lua, -2) != LUA_TFUNCTION) {
-    lua_pop(lua, 2);
-    lua_lql_mutation_bridge_fail(bridge,
-                                 "Lua file_value_open must return a function");
-    if (error != NULL) {
-      error->code = bridge->callback_status;
-      strcpy(error->message, bridge->callback_message);
-    }
-    return bridge->callback_status;
-  }
   reader =
       (lua_lql_mutation_reader *)lua_lql_alloc(lua, NULL, 0u, sizeof(*reader));
   if (reader == NULL) {
-    lua_pop(lua, 2);
     if (error != NULL) {
       error->code = LQL_STATUS_NO_MEMORY;
       strcpy(error->message, "out of memory");
@@ -1560,14 +1645,57 @@ static lql_status lua_lql_mutation_file_open(void *user, lql_string_view path,
     return LQL_STATUS_NO_MEMORY;
   }
   reader->bridge = bridge;
-  lua_pop(lua, 1);
-  reader->reader_ref = luaL_ref(lua, LUA_REGISTRYINDEX);
+  reader->reader_ref = LUA_NOREF;
+  reader->close_ref = LUA_NOREF;
+  /* Reserve an occupied registry slot before invoking the opener. Replacing
+   * that slot with its returned function cannot allocate or abandon a reader.
+   */
+  lua_pushboolean(lua, 1);
+  reader->reader_ref = lua_lql_ref(lua, LUA_REGISTRYINDEX);
+  if (bridge->file_close_ref != LUA_NOREF &&
+      bridge->file_close_ref != LUA_REFNIL) {
+    lua_rawgeti(lua, LUA_REGISTRYINDEX, bridge->file_close_ref);
+    reader->close_ref = lua_lql_ref(lua, LUA_REGISTRYINDEX);
+  } else if (lua_lql_mutation_bridge_push_callback(bridge,
+                                                   "file_value_close")) {
+    reader->close_ref = lua_lql_ref(lua, LUA_REGISTRYINDEX);
+  }
+  lua_pushlstring(lua, path.data != NULL ? path.data : "", path.len);
+  called = lua_lql_mutation_bridge_call(bridge, bridge->file_open_ref,
+                                        "file_value_open", 1, 2);
+  if (!called) {
+    /* An opener may return a reader after closing its active owner. Pair that
+     * successful acquisition before propagating the operation's close error. */
+    if (lua_gettop(lua) >= 3 && lua_type(lua, -2) == LUA_TFUNCTION) {
+      lua_pushvalue(lua, -2);
+      lua_rawseti(lua, LUA_REGISTRYINDEX, reader->reader_ref);
+      lua_lql_mutation_file_close(bridge, reader);
+    } else {
+      lua_lql_mutation_reader_dispose(reader);
+    }
+    return lua_lql_mutation_bridge_status(bridge, error);
+  }
+  if (lua_lql_callback_error_result(lua, -2, -1, error, &status)) {
+    lua_lql_mutation_bridge_fail_status(
+        bridge, status,
+        error != NULL ? error->message : lql_status_string(status));
+    lua_lql_mutation_reader_dispose(reader);
+    return status;
+  }
+  if (lua_type(lua, -2) != LUA_TFUNCTION) {
+    lua_lql_mutation_bridge_fail(bridge,
+                                 "Lua file_value_open must return a function");
+    lua_lql_mutation_reader_dispose(reader);
+    return lua_lql_mutation_bridge_status(bridge, error);
+  }
+  lua_pushvalue(lua, -2);
+  lua_rawseti(lua, LUA_REGISTRYINDEX, reader->reader_ref);
   *out_reader = lua_lql_mutation_file_reader;
   *out_reader_user = reader;
   return LQL_STATUS_OK;
 }
 
-static time_t lua_lql_mutation_time_now(void *user) {
+static time_t lua_lql_mutation_time_now_body(void *user) {
   lua_lql_mutation_bridge *bridge;
   lua_Integer value;
   lql_error error;
@@ -1607,6 +1735,7 @@ static int lua_lql_mutation_options(lua_State *lua, int index,
                                     lql_error *error) {
   lua_lql_mutation_bridge *bridge;
   int file_open_ref;
+  int file_close_ref;
   int time_now_ref;
   int has_file_open;
   int has_time_now;
@@ -1647,6 +1776,7 @@ static int lua_lql_mutation_options(lua_State *lua, int index,
   has_file_open = 0;
   has_time_now = 0;
   file_open_ref = LUA_NOREF;
+  file_close_ref = LUA_NOREF;
   time_now_ref = LUA_NOREF;
   if (!lua_lql_getfield_protected(lua, index, "file_value_open", error)) {
     goto fail_refs;
@@ -1659,7 +1789,22 @@ static int lua_lql_mutation_options(lua_State *lua, int index,
       goto fail_refs;
     }
     has_file_open = 1;
-    file_open_ref = luaL_ref(lua, LUA_REGISTRYINDEX);
+    file_open_ref = lua_lql_ref(lua, LUA_REGISTRYINDEX);
+  } else {
+    lua_pop(lua, 1);
+  }
+  if (!lua_lql_getfield_protected(lua, index, "file_value_close", error)) {
+    goto fail_refs;
+  }
+  if (!lua_isnil(lua, -1)) {
+    if (lua_type(lua, -1) != LUA_TFUNCTION || !has_file_open) {
+      lua_pop(lua, 1);
+      error->code = LQL_STATUS_INVALID_ARGUMENT;
+      strcpy(error->message,
+             "file_value_close requires a function and file_value_open");
+      goto fail_refs;
+    }
+    file_close_ref = lua_lql_ref(lua, LUA_REGISTRYINDEX);
   } else {
     lua_pop(lua, 1);
   }
@@ -1674,7 +1819,7 @@ static int lua_lql_mutation_options(lua_State *lua, int index,
       goto fail_refs;
     }
     has_time_now = 1;
-    time_now_ref = luaL_ref(lua, LUA_REGISTRYINDEX);
+    time_now_ref = lua_lql_ref(lua, LUA_REGISTRYINDEX);
   } else {
     lua_pop(lua, 1);
   }
@@ -1692,6 +1837,7 @@ static int lua_lql_mutation_options(lua_State *lua, int index,
   bridge->lua = lua;
   bridge->callback_owner = 0;
   bridge->file_open_ref = file_open_ref;
+  bridge->file_close_ref = file_close_ref;
   bridge->time_now_ref = time_now_ref;
   bridge->callback_status = LQL_STATUS_OK;
   if (has_file_open) {
@@ -1708,11 +1854,12 @@ static int lua_lql_mutation_options(lua_State *lua, int index,
   return 1;
 
 fail_refs:
+  lua_lql_unref(lua, LUA_REGISTRYINDEX, file_close_ref);
   if (file_open_ref != LUA_NOREF && file_open_ref != LUA_REFNIL) {
-    luaL_unref(lua, LUA_REGISTRYINDEX, file_open_ref);
+    lua_lql_unref(lua, LUA_REGISTRYINDEX, file_open_ref);
   }
   if (time_now_ref != LUA_NOREF && time_now_ref != LUA_REFNIL) {
-    luaL_unref(lua, LUA_REGISTRYINDEX, time_now_ref);
+    lua_lql_unref(lua, LUA_REGISTRYINDEX, time_now_ref);
   }
   return 0;
 }
@@ -1742,6 +1889,12 @@ static lql_status lua_lql_mutation_arg(lua_State *lua, lua_lql_client *client,
       return LQL_STATUS_INVALID_ARGUMENT;
     }
     lua_lql_mutation_bridge_begin_application(handle->bridge);
+    lua_lql_borrow(lua, handle->resource);
+    if (handle->bridge != NULL) {
+      lua_getiuservalue(lua, index, 1);
+      (void)lua_lql_ref(lua, LUA_REGISTRYINDEX);
+    }
+    *out_bridge = handle->bridge;
     *out = handle->mutation;
     return LQL_STATUS_OK;
   }
@@ -1766,6 +1919,12 @@ static lql_status lua_lql_mutation_arg(lua_State *lua, lua_lql_client *client,
   *owned = 1;
   status = client->ctx->mutation_parse_with_options(client->ctx, items, count,
                                                     &options, out, error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, *out, LUA_LQL_OWN_MUTATION, error);
+    if (status != LQL_STATUS_OK) {
+      *out = NULL;
+    }
+  }
   lua_lql_registry_refs_release(lua, &roots);
   lua_lql_string_list_free(lua, items, count);
   if (*out_bridge != NULL && (*out_bridge)->callback_status != LQL_STATUS_OK) {
@@ -1773,7 +1932,7 @@ static lql_status lua_lql_mutation_arg(lua_State *lua, lua_lql_client *client,
     error->code = status;
     strcpy(error->message, (*out_bridge)->callback_message);
     if (*out != NULL) {
-      client->ctx->mutation_destroy(client->ctx, *out);
+      lua_lql_destroy_temporary(lua, *out);
       *out = NULL;
     }
   }
@@ -1786,55 +1945,54 @@ static lql_status lua_lql_mutation_arg(lua_State *lua, lua_lql_client *client,
 
 static int lua_lql_client_gc(lua_State *lua) {
   lua_lql_client *client;
+  lua_lql_owner *owner;
   client = (lua_lql_client *)luaL_checkudata(lua, 1, LUA_LQL_CLIENT);
-  if (client != NULL && client->ctx != NULL) {
-    client->ctx->destroy(client->ctx);
-    client->ctx = NULL;
+  if (client->owner != NULL) {
+    owner = client->owner;
+    client->owner = NULL;
+    owner->closed = 1;
+    if (owner->active == 0u) {
+      client->ctx = NULL;
+    }
+    lua_lql_owner_release(owner);
   }
   return 0;
 }
 
 static int lua_lql_selector_gc(lua_State *lua) {
-  lua_lql_selector *selector;
-  selector = (lua_lql_selector *)luaL_checkudata(lua, 1, LUA_LQL_SELECTOR);
-  if (selector != NULL && selector->ctx != NULL && selector->selector != NULL) {
-    selector->ctx->selector_destroy(selector->ctx, selector->selector);
-    selector->selector = NULL;
-  }
-  if (selector != NULL) {
-    selector->ctx = NULL;
-  }
+  lua_lql_selector *handle;
+  handle = (lua_lql_selector *)luaL_checkudata(lua, 1, LUA_LQL_SELECTOR);
+  lua_lql_resource_close(handle->resource);
+  handle->resource = NULL;
+  handle->selector = NULL;
+  handle->ctx = NULL;
+  lua_pushnil(lua);
+  lua_setiuservalue(lua, 1, 1);
   return 0;
 }
 
 static int lua_lql_projection_gc(lua_State *lua) {
-  lua_lql_projection *projection;
-  projection =
-      (lua_lql_projection *)luaL_checkudata(lua, 1, LUA_LQL_PROJECTION);
-  if (projection != NULL && projection->ctx != NULL &&
-      projection->projection != NULL) {
-    projection->ctx->projection_destroy(projection->ctx,
-                                        projection->projection);
-    projection->projection = NULL;
-  }
-  if (projection != NULL) {
-    projection->ctx = NULL;
-  }
+  lua_lql_projection *handle;
+  handle = (lua_lql_projection *)luaL_checkudata(lua, 1, LUA_LQL_PROJECTION);
+  lua_lql_resource_close(handle->resource);
+  handle->resource = NULL;
+  handle->projection = NULL;
+  handle->ctx = NULL;
+  lua_pushnil(lua);
+  lua_setiuservalue(lua, 1, 1);
   return 0;
 }
 
 static int lua_lql_mutation_gc(lua_State *lua) {
-  lua_lql_mutation *mutation;
-  mutation = (lua_lql_mutation *)luaL_checkudata(lua, 1, LUA_LQL_MUTATION);
-  if (mutation != NULL && mutation->ctx != NULL && mutation->mutation != NULL) {
-    mutation->ctx->mutation_destroy(mutation->ctx, mutation->mutation);
-    mutation->mutation = NULL;
-  }
-  if (mutation != NULL) {
-    lua_lql_mutation_bridge_destroy(mutation->bridge);
-    mutation->bridge = NULL;
-    mutation->ctx = NULL;
-  }
+  lua_lql_mutation *handle;
+  handle = (lua_lql_mutation *)luaL_checkudata(lua, 1, LUA_LQL_MUTATION);
+  lua_lql_resource_close(handle->resource);
+  handle->resource = NULL;
+  handle->mutation = NULL;
+  handle->ctx = NULL;
+  handle->bridge = NULL;
+  lua_pushnil(lua);
+  lua_setiuservalue(lua, 1, 1);
   return 0;
 }
 
@@ -1844,10 +2002,22 @@ static int lua_lql_new(lua_State *lua) {
   lql_status status;
   client = (lua_lql_client *)lua_newuserdatauv(lua, sizeof(*client), 0);
   client->ctx = NULL;
+  client->owner = NULL;
   luaL_getmetatable(lua, LUA_LQL_CLIENT);
   lua_setmetatable(lua, -2);
   lql_error_init(&error);
+  client->owner = (lua_lql_owner *)calloc(1u, sizeof(*client->owner));
+  if (client->owner == NULL) {
+    return lua_lql_return_error(lua, NULL, LQL_STATUS_NO_MEMORY);
+  }
   status = lql_new(&client->ctx, &error);
+  if (status == LQL_STATUS_OK) {
+    client->owner->ctx = client->ctx;
+    client->owner->refs = 1u;
+  } else {
+    free(client->owner);
+    client->owner = NULL;
+  }
   if (status != LQL_STATUS_OK) {
     lua_pop(lua, 1);
     return lua_lql_return_error(lua, &error, status);
@@ -1911,6 +2081,12 @@ static int lua_lql_client_selector_parse(lua_State *lua) {
   selector = NULL;
   lql_error_init(&error);
   status = client->ctx->selector_parse(client->ctx, expr, &selector, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, selector, LUA_LQL_OWN_SELECTOR, &error);
+    if (status != LQL_STATUS_OK) {
+      selector = NULL;
+    }
+  }
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
   }
@@ -1928,6 +2104,12 @@ static int lua_lql_client_selector_parse_or(lua_State *lua) {
   selector = NULL;
   lql_error_init(&error);
   status = client->ctx->selector_parse_or(client->ctx, expr, &selector, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, selector, LUA_LQL_OWN_SELECTOR, &error);
+    if (status != LQL_STATUS_OK) {
+      selector = NULL;
+    }
+  }
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
   }
@@ -1947,6 +2129,12 @@ static int lua_lql_client_selector_parse_json(lua_State *lua) {
   lql_error_init(&error);
   status = client->ctx->selector_parse_json(client->ctx, json, json_len,
                                             &selector, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, selector, LUA_LQL_OWN_SELECTOR, &error);
+    if (status != LQL_STATUS_OK) {
+      selector = NULL;
+    }
+  }
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
   }
@@ -2052,6 +2240,12 @@ static int lua_lql_selector_build_all(lua_State *lua) {
   selector = NULL;
   lql_error_init(&error);
   status = client->ctx->selector_build_all(client->ctx, &selector, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, selector, LUA_LQL_OWN_SELECTOR, &error);
+    if (status != LQL_STATUS_OK) {
+      selector = NULL;
+    }
+  }
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
   }
@@ -2105,6 +2299,12 @@ static int lua_lql_selector_build_compound(lua_State *lua) {
   selector = NULL;
   status = client->ctx->selector_build_compound(client->ctx, kind, children,
                                                 count, &selector, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, selector, LUA_LQL_OWN_SELECTOR, &error);
+    if (status != LQL_STATUS_OK) {
+      selector = NULL;
+    }
+  }
   (void)lua_lql_alloc(lua, (void *)children, count * sizeof(*children), 0u);
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
@@ -2130,6 +2330,12 @@ static int lua_lql_selector_build_not(lua_State *lua) {
   lql_error_init(&error);
   status = client->ctx->selector_build_not(client->ctx, child->selector,
                                            &selector, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, selector, LUA_LQL_OWN_SELECTOR, &error);
+    if (status != LQL_STATUS_OK) {
+      selector = NULL;
+    }
+  }
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
   }
@@ -2202,6 +2408,12 @@ static int lua_lql_selector_build_string(lua_State *lua) {
   selector = NULL;
   status = client->ctx->selector_build_string(client->ctx, kind, &term,
                                               any_values, &selector, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, selector, LUA_LQL_OWN_SELECTOR, &error);
+    if (status != LQL_STATUS_OK) {
+      selector = NULL;
+    }
+  }
   (void)lua_lql_alloc(lua, any_values, any_count * sizeof(*any_values), 0u);
   lua_lql_registry_refs_release(lua, &roots);
   if (status != LQL_STATUS_OK) {
@@ -2316,6 +2528,12 @@ static int lua_lql_selector_build_range(lua_State *lua) {
   selector = NULL;
   status =
       client->ctx->selector_build_range(client->ctx, &term, &selector, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, selector, LUA_LQL_OWN_SELECTOR, &error);
+    if (status != LQL_STATUS_OK) {
+      selector = NULL;
+    }
+  }
   lua_lql_registry_refs_release(lua, &roots);
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
@@ -2415,6 +2633,12 @@ static int lua_lql_selector_build_date(lua_State *lua) {
   selector = NULL;
   status =
       client->ctx->selector_build_date(client->ctx, &term, &selector, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, selector, LUA_LQL_OWN_SELECTOR, &error);
+    if (status != LQL_STATUS_OK) {
+      selector = NULL;
+    }
+  }
   lua_lql_registry_refs_release(lua, &roots);
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
@@ -2451,6 +2675,12 @@ static int lua_lql_selector_build_in(lua_State *lua) {
   selector = NULL;
   status = client->ctx->selector_build_in(client->ctx, &term, any_values,
                                           &selector, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, selector, LUA_LQL_OWN_SELECTOR, &error);
+    if (status != LQL_STATUS_OK) {
+      selector = NULL;
+    }
+  }
   (void)lua_lql_alloc(lua, any_values, any_count * sizeof(*any_values), 0u);
   lua_lql_registry_refs_release(lua, &roots);
   if (status != LQL_STATUS_OK) {
@@ -2471,6 +2701,12 @@ static int lua_lql_selector_build_exists(lua_State *lua) {
   lql_error_init(&error);
   status =
       client->ctx->selector_build_exists(client->ctx, path, &selector, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, selector, LUA_LQL_OWN_SELECTOR, &error);
+    if (status != LQL_STATUS_OK) {
+      selector = NULL;
+    }
+  }
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
   }
@@ -2495,6 +2731,13 @@ static int lua_lql_client_projection_parse(lua_State *lua) {
   projection = NULL;
   status = client->ctx->projection_parse(client->ctx, items, count, &projection,
                                          &error);
+  if (status == LQL_STATUS_OK) {
+    status =
+        lua_lql_track_native(lua, projection, LUA_LQL_OWN_PROJECTION, &error);
+    if (status != LQL_STATUS_OK) {
+      projection = NULL;
+    }
+  }
   lua_lql_string_list_free(lua, items, count);
   if (status != LQL_STATUS_OK) {
     return lua_lql_return_error(lua, &error, status);
@@ -2535,6 +2778,12 @@ static int lua_lql_client_mutation_parse(lua_State *lua) {
   mutation = NULL;
   status = client->ctx->mutation_parse_with_options(
       client->ctx, items, count, &options, &mutation, &error);
+  if (status == LQL_STATUS_OK) {
+    status = lua_lql_track_native(lua, mutation, LUA_LQL_OWN_MUTATION, &error);
+    if (status != LQL_STATUS_OK) {
+      mutation = NULL;
+    }
+  }
   lua_lql_registry_refs_release(lua, &roots);
   lua_lql_string_list_free(lua, items, count);
   if (bridge != NULL && bridge->callback_status != LQL_STATUS_OK) {
@@ -2542,7 +2791,7 @@ static int lua_lql_client_mutation_parse(lua_State *lua) {
     error.code = status;
     strcpy(error.message, bridge->callback_message);
     if (mutation != NULL) {
-      client->ctx->mutation_destroy(client->ctx, mutation);
+      lua_lql_destroy_temporary(lua, mutation);
       mutation = NULL;
     }
   }
@@ -2603,7 +2852,7 @@ static int lua_lql_client_selector_capabilities(lua_State *lua) {
   memset(&caps, 0, sizeof(caps));
   client->ctx->selector_capabilities_get(client->ctx, selector, &caps);
   if (owned) {
-    client->ctx->selector_destroy(client->ctx, selector);
+    lua_lql_destroy_temporary(lua, selector);
   }
   return lua_lql_push_selector_capabilities(lua, &caps);
 }
@@ -2995,7 +3244,7 @@ static int lua_lql_stream_option_function(lua_State *lua, int options_index,
              "stream option %s must be a function", name);
     return 0;
   }
-  *out_ref = luaL_ref(lua, LUA_REGISTRYINDEX);
+  *out_ref = lua_lql_ref(lua, LUA_REGISTRYINDEX);
   return 1;
 }
 
@@ -3111,7 +3360,7 @@ static int lua_lql_stream_apply_common(lua_State *lua, int spooled) {
   }
   lua_lql_stream_bridge_init(&bridge, lua);
   lua_pushvalue(lua, 2);
-  bridge.reader_ref = luaL_ref(lua, LUA_REGISTRYINDEX);
+  bridge.reader_ref = lua_lql_ref(lua, LUA_REGISTRYINDEX);
   lql_error_init(&error);
   if (!lua_lql_stream_option_function(lua, options_index, "range_writer",
                                       &bridge.range_ref, &error) ||
@@ -3232,6 +3481,11 @@ static int lua_lql_stream_apply_common(lua_State *lua, int spooled) {
   request.projection = projection;
   request.mutation = mutation;
   memset(&result, 0, sizeof(result));
+  if (status == LQL_STATUS_OK && lua_lql_scope_failed(lua)) {
+    status = LQL_STATUS_CALLBACK_ERROR;
+    error.code = status;
+    strcpy(error.message, "lql handle finalized during active call");
+  }
   if (status == LQL_STATUS_OK) {
     if (spooled) {
       status = client->ctx->stream_apply_spooled(client->ctx, &request, &result,
@@ -3246,15 +3500,16 @@ static int lua_lql_stream_apply_common(lua_State *lua, int spooled) {
     error.code = status;
     strcpy(error.message, bridge.callback_message);
   }
+  status = lua_lql_mutation_application_status(mutation_bridge, status, &error);
   if (mutation_owned) {
-    client->ctx->mutation_destroy(client->ctx, mutation);
+    lua_lql_destroy_temporary(lua, mutation);
     lua_lql_mutation_bridge_destroy(mutation_bridge);
   }
   if (projection_owned) {
-    client->ctx->projection_destroy(client->ctx, projection);
+    lua_lql_destroy_temporary(lua, projection);
   }
   if (selector_owned) {
-    client->ctx->selector_destroy(client->ctx, selector);
+    lua_lql_destroy_temporary(lua, selector);
   }
   lua_lql_stream_bridge_unref(&bridge);
   if (status != LQL_STATUS_OK) {
@@ -3339,7 +3594,7 @@ static int lua_lql_apply_string_spooled(lua_State *lua) {
     }
     if (status != LQL_STATUS_OK) {
       if (owned) {
-        client->ctx->selector_destroy(client->ctx, selector);
+        lua_lql_destroy_temporary(lua, selector);
       }
       lua_lql_stream_bridge_unref(&transform_roots);
       return lua_lql_return_error(lua, &error, status);
@@ -3357,10 +3612,10 @@ static int lua_lql_apply_string_spooled(lua_State *lua) {
     }
     if (status != LQL_STATUS_OK) {
       if (projection_owned) {
-        client->ctx->projection_destroy(client->ctx, projection);
+        lua_lql_destroy_temporary(lua, projection);
       }
       if (owned) {
-        client->ctx->selector_destroy(client->ctx, selector);
+        lua_lql_destroy_temporary(lua, selector);
       }
       lua_lql_stream_bridge_unref(&transform_roots);
       return lua_lql_return_error(lua, &error, status);
@@ -3392,17 +3647,24 @@ static int lua_lql_apply_string_spooled(lua_State *lua) {
     }
   }
   memset(&result, 0, sizeof(result));
-  status =
-      client->ctx->stream_apply_spooled(client->ctx, &request, &result, &error);
+  if (lua_lql_scope_failed(lua)) {
+    status = LQL_STATUS_CALLBACK_ERROR;
+    error.code = status;
+    strcpy(error.message, "lql handle finalized during active call");
+  } else {
+    status = client->ctx->stream_apply_spooled(client->ctx, &request, &result,
+                                               &error);
+  }
+  status = lua_lql_mutation_application_status(mutation_bridge, status, &error);
   if (mutation_owned) {
-    client->ctx->mutation_destroy(client->ctx, mutation);
+    lua_lql_destroy_temporary(lua, mutation);
     lua_lql_mutation_bridge_destroy(mutation_bridge);
   }
   if (projection_owned) {
-    client->ctx->projection_destroy(client->ctx, projection);
+    lua_lql_destroy_temporary(lua, projection);
   }
   if (owned) {
-    client->ctx->selector_destroy(client->ctx, selector);
+    lua_lql_destroy_temporary(lua, selector);
   }
   lua_lql_stream_bridge_unref(&transform_roots);
   if (status != LQL_STATUS_OK) {
@@ -3531,7 +3793,7 @@ static int lua_lql_filter_file_common(lua_State *lua, int rewrite_inline) {
     }
     if (status != LQL_STATUS_OK) {
       if (owned) {
-        client->ctx->selector_destroy(client->ctx, selector);
+        lua_lql_destroy_temporary(lua, selector);
       }
       lua_lql_stream_bridge_unref(&output_bridge);
       return lua_lql_return_error(lua, &error, status);
@@ -3549,10 +3811,10 @@ static int lua_lql_filter_file_common(lua_State *lua, int rewrite_inline) {
     }
     if (status != LQL_STATUS_OK) {
       if (projection_owned) {
-        client->ctx->projection_destroy(client->ctx, projection);
+        lua_lql_destroy_temporary(lua, projection);
       }
       if (owned) {
-        client->ctx->selector_destroy(client->ctx, selector);
+        lua_lql_destroy_temporary(lua, selector);
       }
       lua_lql_stream_bridge_unref(&output_bridge);
       return lua_lql_return_error(lua, &error, status);
@@ -3562,14 +3824,14 @@ static int lua_lql_filter_file_common(lua_State *lua, int rewrite_inline) {
   if (!lua_lql_stream_option_function(lua, 4, "writer",
                                       &output_bridge.writer_ref, &error)) {
     if (mutation_owned) {
-      client->ctx->mutation_destroy(client->ctx, mutation);
+      lua_lql_destroy_temporary(lua, mutation);
       lua_lql_mutation_bridge_destroy(mutation_bridge);
     }
     if (projection_owned) {
-      client->ctx->projection_destroy(client->ctx, projection);
+      lua_lql_destroy_temporary(lua, projection);
     }
     if (owned) {
-      client->ctx->selector_destroy(client->ctx, selector);
+      lua_lql_destroy_temporary(lua, selector);
     }
     lua_lql_stream_bridge_unref(&output_bridge);
     return lua_lql_return_error(lua, &error, error.code);
@@ -3581,14 +3843,14 @@ static int lua_lql_filter_file_common(lua_State *lua, int rewrite_inline) {
     strcpy(error.message, "file writer cannot be combined with inline rewrite, "
                           "stdout, or output_path");
     if (mutation_owned) {
-      client->ctx->mutation_destroy(client->ctx, mutation);
+      lua_lql_destroy_temporary(lua, mutation);
       lua_lql_mutation_bridge_destroy(mutation_bridge);
     }
     if (projection_owned) {
-      client->ctx->projection_destroy(client->ctx, projection);
+      lua_lql_destroy_temporary(lua, projection);
     }
     if (owned) {
-      client->ctx->selector_destroy(client->ctx, selector);
+      lua_lql_destroy_temporary(lua, selector);
     }
     lua_lql_stream_bridge_unref(&output_bridge);
     return lua_lql_return_error(lua, &error, error.code);
@@ -3608,14 +3870,14 @@ static int lua_lql_filter_file_common(lua_State *lua, int rewrite_inline) {
   if (lua_istable(lua, 4)) {
     if (!lua_lql_getfield_protected(lua, 4, "matched_only", &error)) {
       if (mutation_owned) {
-        client->ctx->mutation_destroy(client->ctx, mutation);
+        lua_lql_destroy_temporary(lua, mutation);
         lua_lql_mutation_bridge_destroy(mutation_bridge);
       }
       if (projection_owned) {
-        client->ctx->projection_destroy(client->ctx, projection);
+        lua_lql_destroy_temporary(lua, projection);
       }
       if (owned) {
-        client->ctx->selector_destroy(client->ctx, selector);
+        lua_lql_destroy_temporary(lua, selector);
       }
       lua_lql_buffer_dispose(&output);
       lua_lql_stream_bridge_unref(&output_bridge);
@@ -3652,7 +3914,11 @@ static int lua_lql_filter_file_common(lua_State *lua, int rewrite_inline) {
     file_request.output_writer = lua_lql_discard_write;
   }
   memset(&result, 0, sizeof(result));
-  if (rewrite_inline) {
+  if (lua_lql_scope_failed(lua)) {
+    error.code = LQL_STATUS_CALLBACK_ERROR;
+    strcpy(error.message, "lql handle finalized during active call");
+    status = error.code;
+  } else if (rewrite_inline) {
     status = client->ctx->rewrite_file_inline_spooled(
         client->ctx, &file_request, &result, &error);
   } else {
@@ -3664,15 +3930,16 @@ static int lua_lql_filter_file_common(lua_State *lua, int rewrite_inline) {
     error.code = status;
     strcpy(error.message, output_bridge.callback_message);
   }
+  status = lua_lql_mutation_application_status(mutation_bridge, status, &error);
   if (mutation_owned) {
-    client->ctx->mutation_destroy(client->ctx, mutation);
+    lua_lql_destroy_temporary(lua, mutation);
     lua_lql_mutation_bridge_destroy(mutation_bridge);
   }
   if (projection_owned) {
-    client->ctx->projection_destroy(client->ctx, projection);
+    lua_lql_destroy_temporary(lua, projection);
   }
   if (owned) {
-    client->ctx->selector_destroy(client->ctx, selector);
+    lua_lql_destroy_temporary(lua, selector);
   }
   lua_lql_stream_bridge_unref(&output_bridge);
   if (status != LQL_STATUS_OK) {
@@ -3780,20 +4047,51 @@ static const luaL_Reg lua_lql_projection_methods[] = {
 static const luaL_Reg lua_lql_mutation_methods[] = {
     {"count", lua_lql_mutation_count}, {NULL, NULL}};
 
+static int lua_lql_close(lua_State *lua) {
+  lua_CFunction release;
+  release = lua_tocfunction(lua, lua_upvalueindex(1));
+  (void)release(lua);
+  lua_pushboolean(lua, 1);
+  return 1;
+}
+
 static void lua_lql_register_type(lua_State *lua, const char *name,
                                   lua_CFunction gc, const luaL_Reg *methods) {
   luaL_newmetatable(lua, name);
   if (gc != NULL) {
     lua_pushcfunction(lua, gc);
     lua_setfield(lua, -2, "__gc");
+    lua_pushcfunction(lua, gc);
+    lua_setfield(lua, -2, "__close");
   }
   lua_newtable(lua);
-  luaL_setfuncs(lua, methods, 0);
+  if (gc != NULL) {
+    lua_pushcfunction(lua, gc);
+    lua_pushcclosure(lua, lua_lql_close, 1);
+    lua_setfield(lua, -2, "close");
+  }
+  if (strcmp(name, LUA_LQL_STREAM_VALUE) == 0 ||
+      strcmp(name, LUA_LQL_STREAM_WRITER) == 0) {
+    luaL_setfuncs(lua, methods, 0);
+  } else {
+    const luaL_Reg *method;
+    for (method = methods; method->name != NULL; ++method) {
+      lua_pushcfunction(lua, method->func);
+      lua_pushcclosure(lua, lua_lql_guard_method, 1);
+      lua_setfield(lua, -2, method->name);
+    }
+  }
   lua_setfield(lua, -2, "__index");
   lua_pop(lua, 1);
 }
 
 int luaopen_lql_core(lua_State *lua) {
+  lua_rawgetp(lua, LUA_REGISTRYINDEX, &lua_lql_scope_key);
+  if (lua_isnil(lua, -1)) {
+    lua_pushlightuserdata(lua, NULL);
+    lua_rawsetp(lua, LUA_REGISTRYINDEX, &lua_lql_scope_key);
+  }
+  lua_pop(lua, 1);
   lua_lql_register_type(lua, LUA_LQL_CLIENT, lua_lql_client_gc,
                         lua_lql_client_methods);
   lua_lql_register_type(lua, LUA_LQL_SELECTOR, lua_lql_selector_gc,

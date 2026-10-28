@@ -9,27 +9,29 @@ project=liblql
 preset=${target}-release
 build_dir=build/$preset
 dist_dir=${LQL_DIST_DIR:-dist}
+sh "$root/scripts/check_owned_path.sh" "$dist_dir"
 checksum_mode=${LQL_PACKAGE_CHECKSUM_MODE:-reset}
 version_header=$build_dir/generated/include/lql/version.h
 build_testing=OFF
 
-if [ "$target" = "x86_64-linux-gnu" ]; then
-  build_testing=ON
-fi
+case "$target" in
+  x86_64-linux-gnu|arm64-apple-darwin) build_testing=ON ;;
+esac
 
+sh scripts/deps.sh "$target" >/dev/null
 cmake --preset "$preset" \
   -DBUILD_TESTING="$build_testing" \
   -DLQL_BUILD_STATIC=ON \
   -DLQL_BUILD_SHARED=ON \
-  -DLQL_BUILD_BINARY=OFF \
-  -DLQL_CLQL_STATIC=OFF \
+  -DLQL_BUILD_BINARY=ON \
+  -DLQL_CLQL_STATIC=ON \
   -DLQL_BUILD_DIRECT_PROBE=OFF
 cmake --build --preset "$preset"
-if [ "$build_testing" = "ON" ]; then
+if [ "$target" = "x86_64-linux-gnu" ]; then
   # The host package is executable on this release machine, so it runs the
-  # comprehensive optimized CTest suite before staging. Cross packages are
-  # build/link/package verified unless the project opts into a runner contract.
-  ctest --test-dir "$build_dir" --output-on-failure
+  # comprehensive optimized CTest suite before staging. Darwin tests compile
+  # under Clang but cannot run here; ARM runtime smokes use extracted archives.
+  ctest --test-dir "$build_dir" --stop-on-failure --output-on-failure --no-tests=error
 fi
 
 if [ ! -f "$version_header" ]; then

@@ -21,6 +21,22 @@
       }
     },
     {
+      "name": "musl-debug",
+      "inherits": "debug",
+      "cacheVariables": {
+        "LQL_TARGET_ID": "x86_64-linux-musl",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "musl-release",
+      "inherits": "release",
+      "cacheVariables": {
+        "LQL_TARGET_ID": "x86_64-linux-musl",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
       "name": "debug-lua",
       "inherits": "debug",
       "cacheVariables": {
@@ -114,11 +130,24 @@
         "CMAKE_BUILD_TYPE": "Release",
         "LQL_DIST_DIR": "${sourceDir}/dist",
         "LQL_TARGET_ID": "arm64-apple-darwin",
+        "BUILD_TESTING": "ON",
+        "LQL_BUILD_STATIC": "ON",
+        "LQL_BUILD_SHARED": "ON",
+        "LQL_BUILD_BINARY": "ON",
+        "LQL_CLQL_STATIC": "ON",
         "LQL_BUILD_DIRECT_PROBE": "OFF"
       }
     }
   ],
   "buildPresets": [
+    {
+      "name": "musl-debug",
+      "configurePreset": "musl-debug"
+    },
+    {
+      "name": "musl-release",
+      "configurePreset": "musl-release"
+    },
     {
       "name": "debug",
       "configurePreset": "debug"
@@ -169,6 +198,20 @@
     }
   ],
   "testPresets": [
+    {
+      "name": "musl-debug",
+      "configurePreset": "musl-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "musl-release",
+      "configurePreset": "musl-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
     {
       "name": "debug",
       "configurePreset": "debug",

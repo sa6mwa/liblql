@@ -10,7 +10,7 @@ case "$root" in
 esac
 case "${1:-all}" in
   all)
-    sh "$root/scripts/remove_path.sh" "$root/build" "$root/dist"
+    sh "$root/scripts/remove_path.sh" "$root/build" "$root/dist" "$root/.cache"
     ;;
   dist)
     sh "$root/scripts/remove_path.sh" "$root/dist"

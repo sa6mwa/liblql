@@ -20,8 +20,9 @@ if [ ! -x "$cc" ]; then
   printf 'pkg-config multiarch: missing C compiler: %s\n' "${cc_name:-$cc}" >&2
   exit 1
 fi
-runtime_loader=$(toolchain_value dynamic_loader)
-runtime_dirs=$(toolchain_value runtime_library_dirs)
+sysroot=$(toolchain_value sysroot)
+runtime_loader=$sysroot/lib/ld-linux-x86-64.so.2
+runtime_dirs=$sysroot/lib:$sysroot/usr/lib
 readelf_tool=$(toolchain_value readelf)
 if [ "$toolchain_override" != "1" ] && \
    { [ -z "$runtime_loader" ] || [ -z "$runtime_dirs" ] || [ ! -x "$readelf_tool" ]; }; then
@@ -32,7 +33,7 @@ fi
 sh "$root/scripts/remove_path.sh" "$build_root"
 
 normalize_path() {
-  python3 -c 'import os, sys; print(os.path.normpath(sys.argv[1]))' "$1"
+  realpath -m -- "$1"
 }
 
 check_case() {

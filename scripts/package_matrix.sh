@@ -6,6 +6,7 @@ cd "$root"
 
 project=liblql
 dist_dir=${LQL_DIST_DIR:-dist}
+sh "$root/scripts/check_owned_path.sh" "$dist_dir"
 targets=${LQL_RELEASE_TARGETS:-"x86_64-linux-gnu x86_64-linux-musl aarch64-linux-gnu aarch64-linux-musl armhf-linux-gnu armhf-linux-musl"}
 
 if scripts/cpkt-toolchains.sh discover arm64-apple-darwin |

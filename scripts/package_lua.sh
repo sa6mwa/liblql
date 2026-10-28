@@ -6,18 +6,16 @@ cd "$root"
 
 project=liblql
 dist_dir=${LQL_DIST_DIR:-dist}
+sh "$root/scripts/check_owned_path.sh" "$dist_dir"
 checksum_mode=${LQL_PACKAGE_CHECKSUM_MODE:-reset}
 build_dir=${LQL_LUA_PACKAGE_BUILD_DIR:-build/package-lua}
+sh "$root/scripts/check_owned_path.sh" "$build_dir"
 version_build=build/package-lua-version
 version_header=$version_build/generated/include/lql/version.h
 
 sh scripts/remove_path.sh "$version_build"
-cmake -S . -B "$version_build" -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/cpkt-toolchain.cmake \
-  -DLQL_TARGET_ID=x86_64-linux-gnu \
-  -DBUILD_TESTING=OFF \
-  -DLQL_BUILD_DIRECT_PROBE=OFF \
-  >/dev/null
+cmake -DLQL_VERSION_HEADER="$version_header" \
+  -P cmake/PrintLqlVersion.cmake >/dev/null
 
 if [ ! -f "$version_header" ]; then
   printf 'package lua: missing generated version header: %s\n' "$version_header" >&2
@@ -55,6 +53,8 @@ sh scripts/create_tar_gz.sh "$build_dir" "$source_archive" "$root_name"
 
 mkdir -p "$build_dir/rockpack"
 cp "$rockspec" "$source_archive" "$build_dir/rockpack/"
+chmod 644 "$build_dir/rockpack/"*
+TZ=UTC touch -t 198001010000.00 "$build_dir/rockpack/"*
 sh scripts/remove_path.sh "$src_rock"
 (
   cd "$build_dir/rockpack"

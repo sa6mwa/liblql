@@ -6,22 +6,15 @@ cd "$root"
 
 project=liblql
 dist_dir=${LQL_DIST_DIR:-dist}
+sh "$root/scripts/check_owned_path.sh" "$dist_dir"
 checksum_mode=${LQL_PACKAGE_CHECKSUM_MODE:-reset}
 build_dir=${LQL_SOURCE_PACKAGE_BUILD_DIR:-build/package-source}
+sh "$root/scripts/check_owned_path.sh" "$build_dir"
 version_build=build/package-source-version
 version_header=$version_build/generated/include/lql/version.h
 
 remove_path() {
-  path=$1
-  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
-    return 0
-  fi
-  if [ -d "$path" ] && [ ! -L "$path" ]; then
-    find "$path" ! -type d -exec rm -- {} \;
-    find "$path" -depth -type d -exec rmdir -- {} \;
-  else
-    rm -- "$path"
-  fi
+  sh "$root/scripts/remove_path.sh" "$@"
 }
 
 remove_matching_files() {
@@ -33,12 +26,8 @@ remove_matching_files() {
 }
 
 remove_path "$version_build"
-cmake -S . -B "$version_build" -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/cpkt-toolchain.cmake \
-  -DLQL_TARGET_ID=x86_64-linux-gnu \
-  -DBUILD_TESTING=OFF \
-  -DLQL_BUILD_DIRECT_PROBE=OFF \
-  >/dev/null
+cmake -DLQL_VERSION_HEADER="$version_header" \
+  -P cmake/PrintLqlVersion.cmake >/dev/null
 
 if [ ! -f "$version_header" ]; then
   printf 'package source: missing generated version header: %s\n' "$version_header" >&2

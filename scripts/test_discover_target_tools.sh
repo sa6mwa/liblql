@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+mkdir -p "$root/build/tmp"
 
-tmp=${TMPDIR:-/tmp}/liblql-discover-tools.$$
+tmp=$root/build/tmp/liblql-discover-tools.$$
 
 cleanup() {
   sh scripts/remove_path.sh "$tmp"
@@ -38,9 +40,21 @@ grep "READELF=$tmp/toolchain/bin/x86_64-linux-readelf" "$tmp/out" >/dev/null
 
 sh scripts/remove_path.sh "$tmp/toolchain/bin/x86_64-linux-readelf"
 touch_exec "$tmp/path/readelf"
-PATH="$tmp/path:$PATH" scripts/discover_target_tools.sh \
+if PATH="$tmp/path:$PATH" scripts/discover_target_tools.sh \
+  "$tmp/build" x86_64-linux-gnu >"$tmp/out" 2>"$tmp/err"; then
+  printf '%s\n' 'discover target tools: selected an unqualified host tool' >&2
+  exit 1
+fi
+LQL_READELF="$tmp/path/readelf" scripts/discover_target_tools.sh \
   "$tmp/build" x86_64-linux-gnu >"$tmp/out"
 grep "READELF=$tmp/path/readelf" "$tmp/out" >/dev/null
+
+if LQL_READELF="$tmp/missing-readelf" scripts/discover_target_tools.sh \
+  "$tmp/build" x86_64-linux-gnu >"$tmp/out" 2>"$tmp/err"; then
+  printf '%s\n' 'discover target tools: accepted missing explicit tool' >&2
+  exit 1
+fi
+grep 'LQL_READELF is not executable' "$tmp/err" >/dev/null
 
 if scripts/discover_target_tools.sh "$tmp/build" x86_64-linux-musl \
   >"$tmp/out" 2>"$tmp/err"; then

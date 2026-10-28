@@ -28,6 +28,12 @@ run_memcheck() {
 
 run_memcheck build/debug/lql_json_scan_test
 run_memcheck build/debug/lql_direct_stream_test
+run_memcheck build/debug/lql_workspace_alloc_test
+run_memcheck build/debug/lql_thread_stack_test
+printf '%s\n' 'valgrind memcheck: Lua allocation failures and native cleanup'
+valgrind --quiet --leak-check=full --show-leak-kinds=definite,possible \
+  --errors-for-leak-kinds=definite,possible --error-exitcode=97 \
+  build/debug-lua/lql_lua_fault_test lua/tests/lql_faults.lua
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 lua_runner=$root/build/debug-lua/lql_lua_runner
@@ -51,3 +57,10 @@ LUA_CPATH="$lua_module_dir/?.so;$lua_module_dir/?/core.so;;" \
     --errors-for-leak-kinds=definite,possible \
     --error-exitcode=97 \
     "$lua_runner" "$lua_test"
+
+for suite in lifetime close; do
+  TMPDIR="$root/build/tmp" LUA_CPATH="$lua_module_dir/?.so;;" \
+    valgrind --quiet --leak-check=full --show-leak-kinds=definite,possible \
+      --errors-for-leak-kinds=definite,possible --error-exitcode=97 \
+      "$lua_runner" "$root/lua/tests/lql_$suite.lua"
+done

@@ -1,11 +1,13 @@
 #!/usr/bin/env sh
 set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+mkdir -p "$root/build/tmp"
 
 limit_bytes=262144
 expected_cases=24
 checked_cases=0
 binary=${LQL_DIRECT_BENCH_PATH:-build/release/lql_direct_bench}
-massif_out=${TMPDIR:-/tmp}/liblql-direct-live-heap.$$
+massif_out=$root/build/tmp/liblql-direct-live-heap.$$
 
 cleanup() {
   sh scripts/remove_path.sh "$massif_out"
@@ -13,12 +15,12 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 if ! command -v valgrind >/dev/null 2>&1; then
-  printf '%s\n' 'SKIP: valgrind is required for the direct live-heap gate'
-  exit 0
+  printf '%s\n' 'direct live heap: valgrind is required' >&2
+  exit 1
 fi
 if [ ! -x "$binary" ]; then
-  printf '%s\n' 'SKIP: direct benchmark binary is unavailable'
-  exit 0
+  printf '%s\n' 'direct live heap: direct benchmark binary is unavailable' >&2
+  exit 1
 fi
 
 sh scripts/ensure_direct_parity_fixtures.sh
@@ -29,10 +31,14 @@ check_case() {
   selector_name=$3
   expr=$4
   mode=$5
-  samples=${6:-2}
+  # One measured pass plus the benchmark's initial pass covers cold and reused
+  # execution. Heap peaks do not need repeated timing samples. Keep the explicit
+  # eight-repeat retention case below.
+  samples=${6:-1}
+  started=$(date +%s)
   if [ ! -f "$fixture" ]; then
-    printf 'SKIP: fixture is unavailable: %s\n' "$fixture"
-    return 0
+    printf 'direct live heap: fixture is unavailable: %s\n' "$fixture" >&2
+    exit 1
   fi
   LQL_BENCH_SAMPLES=$samples valgrind --tool=massif --stacks=no --time-unit=B \
     --massif-out-file="$massif_out" "$binary" \
@@ -47,8 +53,9 @@ check_case() {
       "$dataset" "$selector_name" "$mode" "$samples" "$peak" "$limit_bytes" >&2
     exit 1
   fi
-  printf 'direct live heap %s/%s/%s samples=%s: %s bytes (limit %s bytes)\n' \
-    "$dataset" "$selector_name" "$mode" "$samples" "$peak" "$limit_bytes"
+  elapsed=$(( $(date +%s) - started ))
+  printf 'direct live heap %s/%s/%s samples=%s: %s bytes (limit %s bytes), %ss\n' \
+    "$dataset" "$selector_name" "$mode" "$samples" "$peak" "$limit_bytes" "$elapsed"
   checked_cases=$((checked_cases + 1))
 }
 

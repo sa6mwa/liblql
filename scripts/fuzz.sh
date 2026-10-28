@@ -3,6 +3,7 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
+sh scripts/deps.sh fuzz >/dev/null
 
 # The AFL++ cache root includes the selected Bootlin collection identity.  A
 # collection update therefore changes the compiler wrapper path; CMake cannot

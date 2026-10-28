@@ -12,15 +12,17 @@ elseif(DEFINED ENV{CPKT_DEPENDENCY_CACHE} AND
   set(CPKT_DEPENDENCY_CACHE "$ENV{CPKT_DEPENDENCY_CACHE}")
 elseif(DEFINED ENV{XDG_CACHE_HOME} AND
        NOT "$ENV{XDG_CACHE_HOME}" STREQUAL "")
-  set(CPKT_DEPENDENCY_CACHE "$ENV{XDG_CACHE_HOME}/c.pkt.systems/deps")
+  set(CPKT_DEPENDENCY_CACHE "$ENV{XDG_CACHE_HOME}/cpkt/deps")
 elseif(DEFINED ENV{HOME} AND NOT "$ENV{HOME}" STREQUAL "")
-  set(CPKT_DEPENDENCY_CACHE "$ENV{HOME}/.cache/c.pkt.systems/deps")
+  set(CPKT_DEPENDENCY_CACHE "$ENV{HOME}/.cache/cpkt/deps")
 else()
   message(FATAL_ERROR
     "CPKT_DEPENDENCY_CACHE, XDG_CACHE_HOME, or HOME is required to resolve the shared dependency archive cache")
 endif()
 
 file(TO_CMAKE_PATH "${CPKT_DEPENDENCY_CACHE}" CPKT_DEPENDENCY_CACHE)
+include("${CMAKE_CURRENT_LIST_DIR}/LqlCachePaths.cmake")
+lql_check_cache_path("${CPKT_DEPENDENCY_CACHE}" deps)
 set(CPKT_DEPENDENCY_CACHE "${CPKT_DEPENDENCY_CACHE}" CACHE PATH
     "Shared verified dependency archive cache" FORCE)
 
@@ -28,6 +30,11 @@ set(CPKT_DEPENDENCY_CACHE "${CPKT_DEPENDENCY_CACHE}" CACHE PATH
 # extraction below their disposable build directory; no cache path may reach a
 # shipped artifact or exported package metadata.
 function(lql_acquire_verified_archive component url sha256 archive_name out_archive)
+  string(LENGTH "${sha256}" digest_length)
+  if(NOT digest_length EQUAL 64 OR NOT sha256 MATCHES "^[0-9a-fA-F]+$" OR
+     NOT archive_name MATCHES "^[A-Za-z0-9._+-]+$")
+    message(FATAL_ERROR "${component}: expected a SHA-256 digest and a plain archive filename")
+  endif()
   set(cache_dir "${CPKT_DEPENDENCY_CACHE}/archives/sha256/${sha256}")
   set(archive "${cache_dir}/${archive_name}")
   set(lock "${CPKT_DEPENDENCY_CACHE}/locks/${sha256}.lock")
@@ -47,12 +54,30 @@ function(lql_acquire_verified_archive component url sha256 archive_name out_arch
   endif()
 
   if(NOT EXISTS "${archive}")
+    # The digest is identity; a changed upstream basename must reuse the same
+    # verified bytes without an acquisition request.
+    file(GLOB candidates "${cache_dir}/*")
+    foreach(candidate IN LISTS candidates)
+      if(IS_DIRECTORY "${candidate}" OR candidate MATCHES "\\.tmp$")
+        continue()
+      endif()
+      file(SHA256 "${candidate}" candidate_sha256)
+      if(candidate_sha256 STREQUAL sha256)
+        configure_file("${candidate}" "${archive}.tmp" COPYONLY)
+        file(RENAME "${archive}.tmp" "${archive}")
+        break()
+      endif()
+    endforeach()
+  endif()
+
+  if(NOT EXISTS "${archive}")
     set(temporary "${archive}.tmp")
     file(REMOVE "${temporary}")
     set(download_ok FALSE)
     foreach(attempt RANGE 1 3)
       file(DOWNLOAD "${url}" "${temporary}"
            TLS_VERIFY ON
+           TIMEOUT 60 INACTIVITY_TIMEOUT 20
            STATUS download_status
            LOG download_log)
       list(GET download_status 0 download_code)

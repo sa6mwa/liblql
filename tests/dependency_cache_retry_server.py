@@ -14,6 +14,11 @@ class RetryHandler(BaseHTTPRequestHandler):
     requests = 0
 
     def do_GET(self):
+        if self.path == "/shutdown":
+            self.send_response(200)
+            self.end_headers()
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
         type(self).requests += 1
         request = type(self).requests
         print(f"REQUEST {request}", flush=True)
@@ -25,7 +30,6 @@ class RetryHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(PAYLOAD)))
         self.end_headers()
         self.wfile.write(PAYLOAD)
-        threading.Thread(target=self.server.shutdown, daemon=True).start()
 
     def log_message(self, _format, *_args):
         return

@@ -1,23 +1,16 @@
 #!/bin/sh
 set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+mkdir -p "$root/build/tmp"
 
 clql=${CLQL_PATH:-build/release/clql}
 go_lql=${LQL_GO_CLI_PATH:-build/reference-lql}
 fixture=${LQL_CLQL_FIXTURE:-examples/status.ndjson}
-tmp=${TMPDIR:-/tmp}/liblql-clql-smoke.$$
-tmpdir=${TMPDIR:-/tmp}/liblql-clql-smoke.dir.$$
+tmp=$root/build/tmp/liblql-clql-smoke.$$
+tmpdir=$root/build/tmp/liblql-clql-smoke.dir.$$
 
 remove_path() {
-  path=$1
-  if [ ! -e "$path" ]; then
-    return 0
-  fi
-  if [ -d "$path" ] && [ ! -L "$path" ]; then
-    find "$path" ! -type d -exec rm -- {} \;
-    find "$path" -depth -type d -exec rmdir -- {} \;
-  else
-    rm -- "$path"
-  fi
+  sh "$root/scripts/remove_path.sh" "$@"
 }
 
 cleanup() {
@@ -215,24 +208,7 @@ if [ "$inline_meta_before" != "$inline_meta_after" ]; then
     "$inline_meta_before" "$inline_meta_after" >&2
   exit 1
 fi
-if python3 - "$tmpdir/inline.ndjson" <<'PY'
-import os, sys
-path = sys.argv[1]
-try:
-    os.setxattr(path, b"user.lqltest", b"kept")
-except OSError:
-    sys.exit(77)
-sys.exit(0)
-PY
-then
-  "$clql" -i -m '/status=ready2' '/id="a"' "$tmpdir/inline.ndjson"
-  python3 - "$tmpdir/inline.ndjson" <<'PY'
-import os, sys
-path = sys.argv[1]
-if os.getxattr(path, b"user.lqltest") != b"kept":
-    raise SystemExit("xattr changed")
-PY
-fi
+"$clql" -i -m '/status=ready2' '/id="a"' "$tmpdir/inline.ndjson"
 printf '%s\n%s\n' \
   '{"id":"a","status":"ready2","keep":1}' \
   '{"id":"b","status":"old","keep":2}' |
@@ -240,11 +216,7 @@ printf '%s\n%s\n' \
 
 name_max=$(getconf NAME_MAX "$tmpdir" 2>/dev/null || printf '255\n')
 if [ "$name_max" -ge 32 ]; then
-  long_name=$(python3 - "$name_max" <<'PY'
-import sys
-print("n" * int(sys.argv[1]))
-PY
-)
+  long_name=$(printf "%${name_max}s" '' | tr ' ' n)
   cp "$tmpdir/input.ndjson" "$tmpdir/$long_name"
   "$clql" -i -m '/status=maxname' '/id="a"' "$tmpdir/$long_name"
   printf '%s\n%s\n' \

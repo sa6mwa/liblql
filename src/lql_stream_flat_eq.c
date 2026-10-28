@@ -1568,10 +1568,11 @@ static lql_status lql_flat_eq_file_read(lql_flat_eq_file_stream *stream,
   return LQL_STATUS_OK;
 }
 
-static lql_status lql_flat_eq_file_textlike(const lql_mutation_action *action,
+static lql_status lql_flat_eq_file_textlike(lql_allocator *allocator,
+                                            const lql_mutation_action *action,
                                             int strict, int *out_textlike,
                                             lql_error *error) {
-  unsigned char buffer[4096];
+  unsigned char *buffer;
   lql_flat_eq_utf8_state utf8;
   lql_flat_eq_file_stream stream;
   size_t amount;
@@ -1580,12 +1581,19 @@ static lql_status lql_flat_eq_file_textlike(const lql_mutation_action *action,
 
   *out_textlike = 0;
   memset(&utf8, 0, sizeof(utf8));
+  buffer = (unsigned char *)allocator->alloc(allocator, 4096u);
+  if (buffer == NULL) {
+    lql_set_error(error, LQL_STATUS_NO_MEMORY,
+                  "out of memory allocating file value buffer");
+    return LQL_STATUS_NO_MEMORY;
+  }
   status = lql_flat_eq_file_open(action, &stream, error);
-  if (status != LQL_STATUS_OK)
+  if (status != LQL_STATUS_OK) {
+    allocator->destroy(allocator, buffer);
     return status;
+  }
   for (;;) {
-    status =
-        lql_flat_eq_file_read(&stream, buffer, sizeof(buffer), &amount, error);
+    status = lql_flat_eq_file_read(&stream, buffer, 4096u, &amount, error);
     if (status != LQL_STATUS_OK)
       break;
     if (amount == 0u)
@@ -1624,6 +1632,7 @@ static lql_status lql_flat_eq_file_textlike(const lql_mutation_action *action,
     *out_textlike = 1;
 done:
   lql_flat_eq_file_close(&stream);
+  allocator->destroy(allocator, buffer);
   return status;
 }
 
@@ -1632,7 +1641,8 @@ lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
                                   const lql_mutation_action *action,
                                   int validate_utf8, lql_error *error) {
   static const char hex[] = "0123456789abcdef";
-  unsigned char buffer[4096];
+  unsigned char *buffer;
+  lql_allocator *allocator;
   lql_flat_eq_utf8_state utf8;
   lql_flat_eq_file_stream stream;
   size_t amount;
@@ -1640,15 +1650,23 @@ lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
   lql_status status;
 
   memset(&utf8, 0, sizeof(utf8));
+  allocator = state->program->allocator;
+  buffer = (unsigned char *)allocator->alloc(allocator, 4096u);
+  if (buffer == NULL) {
+    lql_set_error(error, LQL_STATUS_NO_MEMORY,
+                  "out of memory allocating file value buffer");
+    return LQL_STATUS_NO_MEMORY;
+  }
   status = lql_flat_eq_file_open(action, &stream, error);
-  if (status != LQL_STATUS_OK)
+  if (status != LQL_STATUS_OK) {
+    allocator->destroy(allocator, buffer);
     return status;
+  }
   status = lql_flat_eq_write(state, "\"", 1u, error);
   if (status != LQL_STATUS_OK)
     goto done;
   for (;;) {
-    status =
-        lql_flat_eq_file_read(&stream, buffer, sizeof(buffer), &amount, error);
+    status = lql_flat_eq_file_read(&stream, buffer, 4096u, &amount, error);
     if (status != LQL_STATUS_OK || amount == 0u)
       break;
     for (i = 0u; i < amount; ++i) {
@@ -1697,6 +1715,7 @@ lql_flat_eq_file_text_json_string(lql_flat_eq_state *state,
     status = lql_flat_eq_write(state, "\"", 1u, error);
 done:
   lql_flat_eq_file_close(&stream);
+  allocator->destroy(allocator, buffer);
   return status;
 }
 
@@ -1706,9 +1725,10 @@ lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
                                     lql_error *error) {
   static const char table[] =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  unsigned char buffer[12288];
+  unsigned char *buffer;
+  lql_allocator *allocator;
   unsigned char carry[3];
-  char outbuf[16384];
+  char *outbuf;
   lql_flat_eq_file_stream stream;
   size_t amount;
   size_t i;
@@ -1716,17 +1736,26 @@ lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
   size_t out_len;
   lql_status status;
 
+  allocator = state->program->allocator;
+  buffer = (unsigned char *)allocator->alloc(allocator, 28672u);
+  if (buffer == NULL) {
+    lql_set_error(error, LQL_STATUS_NO_MEMORY,
+                  "out of memory allocating file value buffer");
+    return LQL_STATUS_NO_MEMORY;
+  }
+  outbuf = (char *)buffer + 12288u;
   status = lql_flat_eq_file_open(action, &stream, error);
-  if (status != LQL_STATUS_OK)
+  if (status != LQL_STATUS_OK) {
+    allocator->destroy(allocator, buffer);
     return status;
+  }
   status = lql_flat_eq_write(state, "\"", 1u, error);
   if (status != LQL_STATUS_OK)
     goto done;
   carry_len = 0u;
   out_len = 0u;
   for (;;) {
-    status =
-        lql_flat_eq_file_read(&stream, buffer, sizeof(buffer), &amount, error);
+    status = lql_flat_eq_file_read(&stream, buffer, 12288u, &amount, error);
     if (status != LQL_STATUS_OK || amount == 0u)
       break;
     i = 0u;
@@ -1767,7 +1796,7 @@ lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
   }
   if (status == LQL_STATUS_OK && carry_len != 0u) {
     unsigned long triple;
-    if (out_len + 4u > sizeof(outbuf)) {
+    if (out_len + 4u > 16384u) {
       status = lql_flat_eq_write(state, outbuf, out_len, error);
       if (status != LQL_STATUS_OK)
         goto done;
@@ -1790,6 +1819,7 @@ lql_flat_eq_file_base64_json_string(lql_flat_eq_state *state,
     status = lql_flat_eq_write(state, "\"", 1u, error);
 done:
   lql_flat_eq_file_close(&stream);
+  allocator->destroy(allocator, buffer);
   return status;
 }
 
@@ -1802,7 +1832,8 @@ static lql_status lql_flat_eq_file_value(lql_flat_eq_state *state,
   if (action->value_kind == LQL_MUTATION_VALUE_FILE_BASE64)
     return lql_flat_eq_file_base64_json_string(state, action, error);
   if (action->value_kind == LQL_MUTATION_VALUE_FILE_TEXT) {
-    status = lql_flat_eq_file_textlike(action, 1, &textlike, error);
+    status = lql_flat_eq_file_textlike(state->program->allocator, action, 1,
+                                       &textlike, error);
     if (status != LQL_STATUS_OK)
       return status;
     /*
@@ -1812,7 +1843,8 @@ static lql_status lql_flat_eq_file_value(lql_flat_eq_state *state,
      */
     return lql_flat_eq_file_text_json_string(state, action, 1, error);
   }
-  status = lql_flat_eq_file_textlike(action, 0, &textlike, error);
+  status = lql_flat_eq_file_textlike(state->program->allocator, action, 0,
+                                     &textlike, error);
   if (status != LQL_STATUS_OK)
     return status;
   return textlike ? lql_flat_eq_file_text_json_string(state, action, 1, error)
@@ -1839,7 +1871,8 @@ lql_flat_eq_preflight_file_mutations(const lql_flat_eq_program *program,
        * invalid mutation inputs never leave consumers with a valid-looking
        * prefix.
        */
-      status = lql_flat_eq_file_textlike(action, 1, &textlike, error);
+      status = lql_flat_eq_file_textlike(program->allocator, action, 1,
+                                         &textlike, error);
       if (status != LQL_STATUS_OK)
         return status;
     }
@@ -6312,7 +6345,7 @@ static lql_status lql_flat_eq_scan_capture_batch(const lql_json_spool *source,
   lql_json_flat_eq_request request;
   lql_json_spool_reader reader;
   lql_json_spool capture_spool;
-  lql_json_capture_span spans[LQL_FLAT_EQ_TERM_CAPACITY];
+  lql_json_capture_span *spans;
   lql_flat_eq_capture_batch batch;
   lql_status status;
   if (source == NULL || program == NULL || count == 0u ||
@@ -6324,8 +6357,15 @@ static lql_status lql_flat_eq_scan_capture_batch(const lql_json_spool *source,
   if (status != LQL_STATUS_OK) {
     return status;
   }
+  spans = (lql_json_capture_span *)program->allocator->calloc(
+      program->allocator, count, sizeof(*spans));
+  if (spans == NULL) {
+    lql_json_spool_cleanup(&capture_spool);
+    lql_set_error(error, LQL_STATUS_NO_MEMORY,
+                  "out of memory allocating capture spans");
+    return LQL_STATUS_NO_MEMORY;
+  }
   memset(&request, 0, sizeof(request));
-  memset(spans, 0, sizeof(spans));
   lql_json_spool_reader_init(&reader, source);
   batch.target = program->capture_spans + offset;
   batch.source = spans;
@@ -6349,6 +6389,7 @@ static lql_status lql_flat_eq_scan_capture_batch(const lql_json_spool *source,
     status = LQL_STATUS_JSON_ERROR;
   }
   lql_json_spool_cleanup(&capture_spool);
+  program->allocator->destroy(program->allocator, spans);
   return status;
 }
 

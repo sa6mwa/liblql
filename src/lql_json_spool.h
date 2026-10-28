@@ -11,7 +11,7 @@ typedef struct lql_json_spool {
   size_t memory_len;
   size_t size;
   FILE *file;
-  unsigned char read_cache[4096];
+  unsigned char *read_cache;
   size_t read_cache_offset;
   size_t read_cache_len;
 } lql_json_spool;

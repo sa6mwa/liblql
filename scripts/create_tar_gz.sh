@@ -1,9 +1,13 @@
 #!/bin/sh
 set -eu
+TZ=UTC
+export TZ
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 
 base_dir=$1
 archive=$2
 root_name=$3
+sh "$root/scripts/check_owned_path.sh" "$archive" "$base_dir/$root_name"
 tmp_tar=$archive.tmp.tar
 tmp_list=$archive.tmp.files
 touch_stamp=197001010000.00
@@ -20,6 +24,11 @@ normalize_mtime() {
 
 sh scripts/remove_path.sh "$tmp_tar" "$tmp_list" "$archive"
 normalize_mtime "$base_dir/$root_name"
+# Staging umask must not change shipped modes. Preserve executable files and
+# symlinks while normalizing ordinary files and directories.
+find "$base_dir/$root_name" -type d -exec chmod 755 {} +
+find "$base_dir/$root_name" -type f -perm /111 -exec chmod 755 {} +
+find "$base_dir/$root_name" -type f ! -perm /111 -exec chmod 644 {} +
 
 if printf '%s\n' "$tar_version" | grep 'GNU tar' >/dev/null 2>&1; then
   tar -C "$base_dir" --sort=name --owner=0 --group=0 --numeric-owner \

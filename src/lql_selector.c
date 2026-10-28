@@ -896,8 +896,10 @@ static lql_status parse_key_values(lql_selector_parser *ctx, char *body,
   st = LQL_STATUS_NO_MEMORY;
   st = split_assignments(ctx, body, &parts, error);
   if (st != LQL_STATUS_OK) {
+    token_list_cleanup(ctx, &parts);
     return st;
   }
+  st = LQL_STATUS_NO_MEMORY;
   for (i = 0u; i < parts.count; ++i) {
     eq = strchr(parts.items[i], '=');
     if (eq == NULL) {
@@ -1224,6 +1226,7 @@ static lql_status parse_exists_body(lql_selector_parser *ctx, const char *body,
   memset(selector, 0, sizeof(*selector));
   st = split_top(ctx, body, &parts, error);
   if (st != LQL_STATUS_OK) {
+    token_list_cleanup(ctx, &parts);
     return st;
   }
   if (parts.count != 1u || strchr(parts.items[0], '=') != NULL) {
@@ -3839,26 +3842,31 @@ static lql_status append_token_to_group(lql_selector_parser *ctx,
     return append_token_to_group(ctx, child_group, rest, error);
   }
   if (parse_simple_wrapper(token, &wrapper, &rest)) {
-    indexed_group wrapped;
-    memset(&wrapped, 0, sizeof(wrapped));
-    wrapped.selector.kind = wrapper;
-    st = append_token_to_group(ctx, &wrapped, rest, error);
+    indexed_group *wrapped;
+    wrapped = (indexed_group *)ctx->allocator->calloc(ctx->allocator, 1u,
+                                                      sizeof(*wrapped));
+    if (wrapped == NULL)
+      return LQL_STATUS_NO_MEMORY;
+    wrapped->selector.kind = wrapper;
+    st = append_token_to_group(ctx, wrapped, rest, error);
     if (st == LQL_STATUS_OK) {
-      st = finalize_indexed_group(ctx, &wrapped,
-                                  wrapper == LQL_SELECTOR_KIND_OR);
+      st =
+          finalize_indexed_group(ctx, wrapped, wrapper == LQL_SELECTOR_KIND_OR);
     }
     if (st == LQL_STATUS_OK) {
-      st = append_plain_group_node(ctx, group, &wrapped.selector, error);
+      st = append_plain_group_node(ctx, group, &wrapped->selector, error);
     }
-    lql_selector_cleanup(ctx->receiver, &wrapped.selector);
-    lql_selector_cleanup(ctx->receiver, &wrapped.or_group);
-    indexed_groups_cleanup(ctx, wrapped.groups, wrapped.group_count);
+    lql_selector_cleanup(ctx->receiver, &wrapped->selector);
+    lql_selector_cleanup(ctx->receiver, &wrapped->or_group);
+    indexed_groups_cleanup(ctx, wrapped->groups, wrapped->group_count);
+    ctx->allocator->destroy(ctx->allocator, wrapped);
     return st;
   }
 
   memset(&child, 0, sizeof(child));
   st = parse_one(ctx, token, &child, error);
   if (st != LQL_STATUS_OK) {
+    lql_selector_cleanup(ctx->receiver, &child);
     return st;
   }
   st = append_plain_group_node(ctx, group, &child, error);
@@ -3913,6 +3921,34 @@ static lql_status finalize_indexed_group(lql_selector_parser *ctx,
   return LQL_STATUS_OK;
 }
 
+static lql_status parse_group_tokens(lql_selector_parser *ctx,
+                                     const lql_token_list *tokens, int or_mode,
+                                     lql_selector *selector, lql_error *error) {
+  indexed_group *group;
+  size_t i;
+  lql_status status;
+  group = (indexed_group *)ctx->allocator->calloc(ctx->allocator, 1u,
+                                                  sizeof(*group));
+  if (group == NULL)
+    return LQL_STATUS_NO_MEMORY;
+  group->selector.kind = or_mode ? LQL_SELECTOR_KIND_OR : LQL_SELECTOR_KIND_AND;
+  status = LQL_STATUS_OK;
+  for (i = 0u; i < tokens->count && status == LQL_STATUS_OK; ++i) {
+    status = append_token_to_group(ctx, group, tokens->items[i], error);
+  }
+  if (status == LQL_STATUS_OK)
+    status = finalize_indexed_group(ctx, group, or_mode);
+  if (status == LQL_STATUS_OK) {
+    *selector = group->selector;
+    memset(&group->selector, 0, sizeof(group->selector));
+  }
+  lql_selector_cleanup(ctx->receiver, &group->selector);
+  lql_selector_cleanup(ctx->receiver, &group->or_group);
+  indexed_groups_cleanup(ctx, group->groups, group->group_count);
+  ctx->allocator->destroy(ctx->allocator, group);
+  return status;
+}
+
 LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
                                                            const char *expr,
                                                            int or_mode,
@@ -3923,14 +3959,12 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
   lql_allocator *allocator;
   lql_token_list tokens;
   lql_selector *selector;
-  indexed_group root_group;
   lql_selector_kind wrapper;
   char *index;
   const char *rest;
   int wrapper_status;
   int needs_group;
   int wrapper_probe_oom;
-  size_t i;
   lql_status st;
 
   if (out == NULL) {
@@ -3959,6 +3993,7 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
   }
   st = split_top(ctx, expr, &tokens, error);
   if (st != LQL_STATUS_OK) {
+    token_list_cleanup(ctx, &tokens);
     return st;
   }
   selector = (lql_selector *)ctx->allocator->calloc(ctx->allocator, 1u,
@@ -3985,52 +4020,14 @@ LQL_INTERNAL_SYMBOL lql_status lql_parse_selector_internal(lql *self,
       } else if (!needs_group) {
         st = parse_one(ctx, tokens.items[0], selector, error);
       } else {
-        memset(&root_group, 0, sizeof(root_group));
-        root_group.selector.kind =
-            or_mode ? LQL_SELECTOR_KIND_OR : LQL_SELECTOR_KIND_AND;
-        st = append_token_to_group(ctx, &root_group, tokens.items[0], error);
-        if (st == LQL_STATUS_OK) {
-          st = finalize_indexed_group(ctx, &root_group, or_mode);
-        }
-        if (st == LQL_STATUS_OK) {
-          *selector = root_group.selector;
-          memset(&root_group.selector, 0, sizeof(root_group.selector));
-        }
-        lql_selector_cleanup(ctx->receiver, &root_group.selector);
-        indexed_groups_cleanup(ctx, root_group.groups, root_group.group_count);
+        st = parse_group_tokens(ctx, &tokens, or_mode, selector, error);
       }
     } else {
-      memset(&root_group, 0, sizeof(root_group));
-      root_group.selector.kind =
-          or_mode ? LQL_SELECTOR_KIND_OR : LQL_SELECTOR_KIND_AND;
-      st = append_token_to_group(ctx, &root_group, tokens.items[0], error);
-      if (st == LQL_STATUS_OK) {
-        st = finalize_indexed_group(ctx, &root_group, or_mode);
-      }
-      if (st == LQL_STATUS_OK) {
-        *selector = root_group.selector;
-        memset(&root_group.selector, 0, sizeof(root_group.selector));
-      }
-      lql_selector_cleanup(ctx->receiver, &root_group.selector);
-      indexed_groups_cleanup(ctx, root_group.groups, root_group.group_count);
+      st = parse_group_tokens(ctx, &tokens, or_mode, selector, error);
     }
     ctx->allocator->destroy(ctx->allocator, index);
   } else {
-    memset(&root_group, 0, sizeof(root_group));
-    root_group.selector.kind =
-        or_mode ? LQL_SELECTOR_KIND_OR : LQL_SELECTOR_KIND_AND;
-    for (i = 0u; i < tokens.count && st == LQL_STATUS_OK; ++i) {
-      st = append_token_to_group(ctx, &root_group, tokens.items[i], error);
-    }
-    if (st == LQL_STATUS_OK) {
-      st = finalize_indexed_group(ctx, &root_group, or_mode);
-    }
-    if (st == LQL_STATUS_OK) {
-      *selector = root_group.selector;
-      memset(&root_group.selector, 0, sizeof(root_group.selector));
-    }
-    lql_selector_cleanup(ctx->receiver, &root_group.selector);
-    indexed_groups_cleanup(ctx, root_group.groups, root_group.group_count);
+    st = parse_group_tokens(ctx, &tokens, or_mode, selector, error);
   }
   token_list_cleanup(ctx, &tokens);
   if (st != LQL_STATUS_OK) {

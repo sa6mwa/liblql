@@ -2,6 +2,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+mkdir -p "$root/build/tmp"
 tree=${LQL_LUAROCKS_TREE:-$root/build/luarocks}
 sdk_prefix=${LQL_LUA_SDK_PREFIX:-$root/build/lua-sdk}
 fixture=${LQL_LUA_CLI_FIXTURE:-$root/examples/status.ndjson}
@@ -33,7 +34,7 @@ run_lua() {
     "$lua_runner" "$lua_script" "$@"
 }
 
-tmp=${TMPDIR:-/tmp}/liblql-lua-cli.$$
+tmp=$root/build/tmp/liblql-lua-cli.$$
 cleanup() {
   sh "$root/scripts/remove_path.sh" "$tmp.out" "$tmp.err" "$tmp.json" \
     "$tmp.content" "$tmp.empty"

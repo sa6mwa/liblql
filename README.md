@@ -34,7 +34,14 @@ values; JSON `null` is not treated as text. `lql_stream_apply` live heap, not
 RSS, is the primary embedded-memory invariant and must remain at or below 256
 KiB, including the 100 MiB current-record gate. Every `lql_new`
 receiver also owns an independent 8 MiB allocation budget covering parsed
-selectors, projections, mutations, apply plans, and compatibility spools. The
+selectors, projections, mutations, apply plans, parser workspace, replay buffers,
+file-value buffers, and compatibility spools. Numeric and temporal workspace is
+allocated only when the query needs it. Core library builds reject function
+frames larger than 1 KiB; large buffers belong to the receiver allocator.
+`make thread-stack-check` runs public API regressions on default and 64 KiB
+worker stacks with both glibc and musl in Debug and Release builds, including
+deep nesting, concurrent clients, callbacks, projection, and file-value mutation.
+Allocation-failure tests also verify quota accounting and cleanup. The
 explicitly spooled compatibility executor keeps 64 KiB of the current record in
 memory before it spills to disk.
 
@@ -122,6 +129,71 @@ that exception. The same override applies to `make lua-rock`: set `CC` (or
 `LQL_LUA_ROCK_CC`) alongside it to select the caller-supplied Lua module
 compiler.
 
+The lifecycle comes from [c89systems/cpkt](https://github.com/c89systems/cpkt),
+but liblql does not depend on the cpkt SDK. The helper collection in `scripts/`
+is vendored from its `pkt-systems-cmake-lifecycle` skill at commit
+`5afb8f58c66201aaf12e7863fbbbf84ab5e8e6b6`: `require-host-bash.sh`,
+`cpkt-archive-cache.sh`, `cpkt-toolchains.sh`, `cpkt-aflpp.sh`,
+`cpkt-afl-runtime.sh` and their two resolver tests. Keep that collection together
+when updating it. Host Bash 4.4 or newer is required.
+The copied helpers retain their upstream MIT notice in `scripts/LICENSE.cpkt`.
+
+Toolchains use `${CPKT_TOOLCHAIN_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/cpkt/toolchains}`;
+dependency archives use `${CPKT_DEPENDENCY_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/cpkt/deps}`.
+Build entrypoints prepare the required tools before configuring. Direct CMake
+configuration only discovers prepared tools; use `make deps-debug` first for
+native builds, `make deps-cross` for Linux cross builds, or
+`bash scripts/cpkt-toolchains.sh ensure arm64-apple-darwin` for prepared osxcross.
+`make clean` removes `build/`, `dist/` and local `.cache/`, preserving global caches.
+Builds default to eight jobs (`LQL_BUILD_JOBS`); tests and public Make operations
+run serially. Run `make build` to prepare the compilation database used by `.clangd`.
+
+`make build` prepares both the native and Lua compilation databases and their
+real generated/dependency headers; `.clangd` selects the matching database for
+each surface. `make test-all` uses Make's prerequisite graph so each shared build/install
+prerequisite runs once. CLI parity runs through CTest with a compiled Go test
+binary; its 89 selector and 361 mutation cases are checked-in fixtures under
+`tests/cli-parity/`. Python is used only by the local dependency HTTP fixture.
+Required checks fail on missing inputs, and CTest selections reject empty suites.
+`make format-check` verifies formatting without editing sources.
+
+`make test` is the short native build/test loop. `make prerelease` shares one
+serial Make graph for the full checks, broad SDK parity, and release packages;
+it reuses native/Lua prerequisites and benchmark tools within that invocation.
+Host version/tag/source-packaging behavior runs once; five small cache-routing
+tests cover local, global, mixed, spaced, and no-HOME environments separately.
+The 24 heap profiles retain both first-use and reused execution, the 100 MiB
+record, and the eight-repeat retention sentinel. They use one measured sample
+per ordinary case; the performance gate keeps five samples. Heap output includes
+per-case elapsed time; CTest and parity gates report their own durations.
+Use `time make prerelease` for the complete wall time. Cross packages receive
+architecture, exports, runtime-metadata, and archive checks. Archive verification
+also runs a small QEMU suite for aarch64/armhf with glibc/musl: extracted shared
+and static SDK consumers plus CLI selection, projection, mutation, version, and
+invalid-input checks. Consumers exercise default worker stacks and 64 KiB stacks
+where permitted (otherwise the platform's reported minimum). Full semantic,
+performance, and memory-checking suites stay native.
+
+`make package-qemu-smoke` reruns only those 12 ARM artifact smoke tests against
+the checksum-listed archives already in `dist/`, using its own generated tree.
+Prepare archives with `make release-matrix`. Workstation prerequisites are
+`qemu-aarch64` and `qemu-arm` on PATH (the QEMU user-mode package) and the selected
+Bootlin collections from `make deps-cross`. Missing runners/sysroots and runtime
+failures fail the gate; verification never installs tools or rebuilds packages.
+Darwin validation and packaging share explicit preset settings that compile
+tests under Clang on both cold and warm builds. Packaging does not execute
+Darwin test binaries on Linux.
+
+Output overrides must stay in this checkout's `build/`, `dist/` or `.cache/`.
+Cache overrides use `build/`, `.cache/` or the declared global cpkt cache.
+Cleanup rejects traversal and symlinks into other locations. Archive verification
+checks actual target architecture, exact public exports, shared/static installed
+consumers and a negative private-symbol consumer. Lua source rocks are built and
+run from their extracted bytes. Released Lua archives contain facade source and
+LuaRocks metadata; repository development helpers stay in the full source archive.
+`make release` requires the default branch, a clean tracked worktree, an exact
+lightweight version tag and a verified commit signature before it cleans outputs.
+
 Local tests, examples, benchmarks, fuzzers, development `clql`, and the Lua
 facade runner embed the selected Bootlin ELF interpreter and private transitive
 RPATH. They therefore run directly against that collection without changing
@@ -184,6 +256,11 @@ tooling only and never execute a Bootlin-built module.
 `make lua-env` prints module paths, the local SDK prefix, and the runner path;
 it intentionally never exports `LD_LIBRARY_PATH`.
 
+`LQL_LUA_SDK_PREFIX` may select another owned SDK installation under this
+checkout's generated directories. `make lua-rock` reuses a prepared runner only
+when it loads that exact SDK library; otherwise it prepares a separate runner.
+An explicitly supplied `LQL_LUA_RUNNER` must match the selected SDK.
+
 ```sh
 make lua-rock
 make lua-test
@@ -213,6 +290,22 @@ cover `all`, `and`/`or`, `not`, string terms, range, date, `in`, and `exists`;
 `selector:root()` returns a borrowed C cursor whose children and term views are
 also C-backed.
 
+Clients, selectors, projections and mutations support `handle:close()` and Lua
+5.5 scope cleanup (`local client <close> = assert(lql.new())`). `close()` returns
+`true`, including on repeated calls; scope cleanup preserves an exception already
+being unwound. Closing a client invalidates its children's operations, while
+their native owners remain alive until child cleanup completes. Borrowed cursors,
+values and writers have no independent close method.
+
+Userdata retains its native owner through active methods and callbacks. Closing
+an active handle makes it unusable immediately; the operation returns a callback
+error and releases native resources after the C call unwinds. Cursors expire
+when their selector is closed. Ordinary nested calls on the same client remain
+supported. Lua allocation failures during
+callback setup and result construction release temporary plans and buffers.
+`make lua-test` covers these lifetimes and allocation-failure regressions;
+`make valgrind` also checks their native memory cleanup.
+
 `client:stream_apply(reader, selector, options)` is the public true-streaming
 facade. `reader(capacity)` returns at most `capacity` bytes or `nil` at EOF;
 `nil, error` is a failed read, not EOF; `error` may be the facade's structured
@@ -238,3 +331,15 @@ returns a fresh bounded reader function whose `nil, error` result likewise
 fails the operation, and `time_now` returns an integer Unix timestamp or
 `nil, error`. The binding roots those functions for the mutation userdata
 lifetime, then releases them with the C mutation handle.
+
+A custom `file_value_open` may also supply `file_value_close(reader_function)`.
+It is captured when the mutation is parsed and gets one protected cleanup attempt
+for each successfully returned reader, including read failure, early stop, and
+closing the active mutation. It is optional for existing function-only readers;
+supplying it without an opener is an argument error. It may return `true` or no
+value on success, or `false` / `nil, error` on failure. Cleanup exceptions and
+errors are reported through the enclosing operation; an earlier operation error
+wins. The native close callback returns no status, so cleanup failure may be
+reported after output was written or an inline rewrite committed. Closing a
+mutation outside an application releases its captured callbacks without invoking
+`file_value_close`, because no readers remain open between applications.

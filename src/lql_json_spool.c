@@ -13,7 +13,7 @@
 #include <string.h>
 #include <sys/types.h>
 
-#define LQL_JSON_SPOOL_IO_BUFFER_BYTES 32768u
+#define LQL_JSON_SPOOL_IO_BUFFER_BYTES 4096u
 
 static void lql_json_spool_error(lql_error *error, lql_status status,
                                  const char *message) {
@@ -78,8 +78,10 @@ void lql_json_spool_cleanup(lql_json_spool *spool) {
   lql_json_spool_reset(spool);
   if (spool->allocator != NULL) {
     spool->allocator->destroy(spool->allocator, spool->memory);
+    spool->allocator->destroy(spool->allocator, spool->read_cache);
   }
   spool->memory = NULL;
+  spool->read_cache = NULL;
 }
 
 static lql_status lql_json_spool_spill(lql_json_spool *spool,
@@ -148,41 +150,16 @@ size_t lql_json_spool_size(const lql_json_spool *spool) {
 lql_status lql_json_spool_write_to(const lql_json_spool *spool,
                                    lql_stream_writer_fn writer,
                                    void *writer_user, lql_error *error) {
-  unsigned char buffer[LQL_JSON_SPOOL_IO_BUFFER_BYTES];
-  size_t amount;
-  lql_status status;
-  if (spool == NULL || spool->memory == NULL || writer == NULL) {
-    lql_json_spool_error(error, LQL_STATUS_INVALID_ARGUMENT,
-                         "JSON spool and writer are required");
-    return LQL_STATUS_INVALID_ARGUMENT;
-  }
-  if (spool->file == NULL) {
-    return writer(writer_user, spool->memory, spool->memory_len, error);
-  }
-  if (fflush(spool->file) != 0 || lql_json_spool_seek(spool->file, 0u) != 0) {
-    lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
-                         "unable to read JSON spool file");
-    return LQL_STATUS_IO_ERROR;
-  }
-  while ((amount = fread(buffer, 1u, sizeof(buffer), spool->file)) != 0u) {
-    status = writer(writer_user, buffer, amount, error);
-    if (status != LQL_STATUS_OK) {
-      return status;
-    }
-  }
-  if (ferror(spool->file)) {
-    lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
-                         "unable to read JSON spool file");
-    return LQL_STATUS_IO_ERROR;
-  }
-  return LQL_STATUS_OK;
+  return lql_json_spool_write_slice(spool, 0u, spool == NULL ? 0u : spool->size,
+                                    writer, writer_user, error);
 }
 
 lql_status lql_json_spool_write_slice(const lql_json_spool *spool,
                                       size_t offset, size_t len,
                                       lql_stream_writer_fn writer,
                                       void *writer_user, lql_error *error) {
-  unsigned char buffer[LQL_JSON_SPOOL_IO_BUFFER_BYTES];
+  unsigned char *buffer;
+  size_t capacity;
   lql_status status;
   if (spool == NULL || spool->memory == NULL || writer == NULL ||
       offset > spool->size || len > spool->size - offset) {
@@ -193,26 +170,38 @@ lql_status lql_json_spool_write_slice(const lql_json_spool *spool,
   if (spool->file == NULL) {
     return writer(writer_user, spool->memory + offset, len, error);
   }
-  if (fflush(spool->file) != 0 ||
-      lql_json_spool_seek(spool->file, offset) != 0) {
-    lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
-                         "unable to seek JSON spool slice");
-    return LQL_STATUS_IO_ERROR;
+  if (len == 0u)
+    return LQL_STATUS_OK;
+  capacity = len > LQL_JSON_SPOOL_IO_BUFFER_BYTES
+                 ? LQL_JSON_SPOOL_IO_BUFFER_BYTES
+                 : len;
+  buffer = (unsigned char *)spool->allocator->alloc(spool->allocator, capacity);
+  if (buffer == NULL) {
+    lql_json_spool_error(error, LQL_STATUS_NO_MEMORY,
+                         "out of memory reading JSON spool");
+    return LQL_STATUS_NO_MEMORY;
   }
+  status = LQL_STATUS_OK;
   while (len != 0u) {
     size_t amount;
-    amount = len > sizeof(buffer) ? sizeof(buffer) : len;
-    if (fread(buffer, 1u, amount, spool->file) != amount) {
+    amount = len > capacity ? capacity : len;
+    /* Seek per chunk: a writer callback may itself replay another slice. */
+    if (fflush(spool->file) != 0 ||
+        lql_json_spool_seek(spool->file, offset) != 0 ||
+        fread(buffer, 1u, amount, spool->file) != amount) {
       lql_json_spool_error(error, LQL_STATUS_IO_ERROR,
                            "unable to read JSON spool slice");
-      return LQL_STATUS_IO_ERROR;
+      status = LQL_STATUS_IO_ERROR;
+      break;
     }
     status = writer(writer_user, buffer, amount, error);
     if (status != LQL_STATUS_OK)
-      return status;
+      break;
+    offset += amount;
     len -= amount;
   }
-  return LQL_STATUS_OK;
+  spool->allocator->destroy(spool->allocator, buffer);
+  return status;
 }
 
 lql_status lql_json_spool_byte_at(const lql_json_spool *spool, size_t offset,
@@ -230,6 +219,15 @@ lql_status lql_json_spool_byte_at(const lql_json_spool *spool, size_t offset,
     return LQL_STATUS_OK;
   }
   mutable_spool = (lql_json_spool *)spool;
+  if (mutable_spool->read_cache == NULL) {
+    mutable_spool->read_cache = (unsigned char *)spool->allocator->alloc(
+        spool->allocator, LQL_JSON_SPOOL_IO_BUFFER_BYTES);
+    if (mutable_spool->read_cache == NULL) {
+      lql_json_spool_error(error, LQL_STATUS_NO_MEMORY,
+                           "out of memory reading JSON spool");
+      return LQL_STATUS_NO_MEMORY;
+    }
+  }
   if (offset >= mutable_spool->read_cache_offset &&
       offset <
           mutable_spool->read_cache_offset + mutable_spool->read_cache_len) {
@@ -237,8 +235,8 @@ lql_status lql_json_spool_byte_at(const lql_json_spool *spool, size_t offset,
     return LQL_STATUS_OK;
   }
   amount = spool->size - offset;
-  if (amount > sizeof(mutable_spool->read_cache))
-    amount = sizeof(mutable_spool->read_cache);
+  if (amount > LQL_JSON_SPOOL_IO_BUFFER_BYTES)
+    amount = LQL_JSON_SPOOL_IO_BUFFER_BYTES;
   if (fflush(spool->file) != 0 ||
       lql_json_spool_seek(spool->file, offset) != 0 ||
       fread(mutable_spool->read_cache, 1u, amount, spool->file) != amount) {
@@ -291,6 +289,7 @@ lql_status lql_json_spool_find_string_end(const lql_json_spool *spool,
                                           size_t offset, size_t end,
                                           size_t *out, lql_error *error) {
   lql_json_spool *mutable_spool;
+  lql_status status;
   unsigned char ch;
   size_t pos;
   int escaped;
@@ -299,8 +298,9 @@ lql_status lql_json_spool_find_string_end(const lql_json_spool *spool,
                          "JSON spool string scan arguments are invalid");
     return LQL_STATUS_INVALID_ARGUMENT;
   }
-  if (lql_json_spool_byte_at(spool, offset, &ch, error) != LQL_STATUS_OK)
-    return error == NULL ? LQL_STATUS_IO_ERROR : error->code;
+  status = lql_json_spool_byte_at(spool, offset, &ch, error);
+  if (status != LQL_STATUS_OK)
+    return status;
   if (ch != (unsigned char)'"') {
     lql_json_spool_error(error, LQL_STATUS_JSON_ERROR,
                          "JSON spool string scan expected quote");
@@ -333,8 +333,8 @@ lql_status lql_json_spool_find_string_end(const lql_json_spool *spool,
     size_t amount;
     size_t i;
     amount = end - pos;
-    if (amount > sizeof(mutable_spool->read_cache))
-      amount = sizeof(mutable_spool->read_cache);
+    if (amount > LQL_JSON_SPOOL_IO_BUFFER_BYTES)
+      amount = LQL_JSON_SPOOL_IO_BUFFER_BYTES;
     if (fread(mutable_spool->read_cache, 1u, amount, spool->file) != amount) {
       mutable_spool->read_cache_len = 0u;
       lql_json_spool_error(error, LQL_STATUS_IO_ERROR,

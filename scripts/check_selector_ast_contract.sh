@@ -94,7 +94,7 @@ for public_method in \
   fi
 done
 
-if ! grep -E '^sdk-parity-gate: direct-bench$' Makefile >/dev/null; then
+if ! grep -E '^sdk-parity-gate: direct-bench([[:space:]]|$)' Makefile >/dev/null; then
   printf 'selector AST contract: sdk-parity-gate target is missing\n' >&2
   exit 1
 fi

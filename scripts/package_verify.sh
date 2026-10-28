@@ -2,12 +2,18 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+mkdir -p "$root/build/tmp"
 cd "$root"
 
 project=liblql
 dist_dir=${LQL_DIST_DIR:-dist}
+sh "$root/scripts/check_owned_path.sh" "$dist_dir"
 target_arg=${1:-all}
-work=${LQL_PACKAGE_VERIFY_DIR:-build/package-verify}
+default_work=build/package-verify
+if [ "$target_arg" = qemu ]; then
+  default_work=build/package-qemu-smoke
+fi
+work=${LQL_PACKAGE_VERIFY_DIR:-$default_work}
 
 find_manifest() {
   manifests=$(find "$dist_dir" -maxdepth 1 -name "$project-*-CHECKSUMS" -type f | sort)
@@ -23,28 +29,28 @@ find_manifest() {
 manifest=$(find_manifest)
 version=$(basename "$manifest" | sed "s/^$project-//;s/-CHECKSUMS\$//")
 repo=$(pwd -P)
-home=${HOME:-}
+user_home=${HOME:-}
 if [ -n "${CPKT_DEPENDENCY_CACHE:-}" ]; then
   dependency_cache=$CPKT_DEPENDENCY_CACHE
 elif [ -n "${XDG_CACHE_HOME:-}" ]; then
-  dependency_cache=$XDG_CACHE_HOME/c.pkt.systems/deps
-elif [ -n "$home" ]; then
-  dependency_cache=$home/.cache/c.pkt.systems/deps
+  dependency_cache=$XDG_CACHE_HOME/cpkt/deps
+elif [ -n "$user_home" ]; then
+  dependency_cache=$user_home/.cache/cpkt/deps
 else
   dependency_cache=
 fi
 if [ -n "${CPKT_TOOLCHAIN_CACHE:-}" ]; then
   toolchain_cache=$CPKT_TOOLCHAIN_CACHE
 elif [ -n "${XDG_CACHE_HOME:-}" ]; then
-  toolchain_cache=$XDG_CACHE_HOME/c.pkt.systems/toolchains
-elif [ -n "$home" ]; then
-  toolchain_cache=$home/.cache/c.pkt.systems/toolchains
+  toolchain_cache=$XDG_CACHE_HOME/cpkt/toolchains
+elif [ -n "$user_home" ]; then
+  toolchain_cache=$user_home/.cache/cpkt/toolchains
 else
   toolchain_cache=
 fi
 
 if grep -a -n -F "$repo" "$manifest" >/dev/null ||
-  { [ -n "$home" ] && grep -a -n -F "$home" "$manifest" >/dev/null; } ||
+  { [ -n "$user_home" ] && grep -a -n -F "$user_home" "$manifest" >/dev/null; } ||
   { [ -n "$dependency_cache" ] && grep -a -n -F "$dependency_cache" "$manifest" >/dev/null; } ||
   { [ -n "$toolchain_cache" ] && grep -a -n -F "$toolchain_cache" "$manifest" >/dev/null; } ||
   grep -a -n -E 'file://|/tmp/|/var/tmp/' "$manifest" >/dev/null; then
@@ -68,8 +74,8 @@ if [ "$listed" != "$release_artifacts" ]; then
   printf 'listed:\n%s\nartifacts:\n%s\n' "$listed" "$release_artifacts" >&2
   exit 1
 fi
-expected_uploads=$(mktemp "${TMPDIR:-/tmp}/liblql-release-uploads.XXXXXX")
-actual_uploads=$(mktemp "${TMPDIR:-/tmp}/liblql-release-uploads.XXXXXX")
+expected_uploads=$(mktemp "$root/build/tmp/liblql-release-uploads.XXXXXX")
+actual_uploads=$(mktemp "$root/build/tmp/liblql-release-uploads.XXXXXX")
 trap 'rm -f "$expected_uploads" "$actual_uploads"' EXIT HUP INT TERM
 {
   printf '%s\n' "$manifest"
@@ -90,15 +96,15 @@ verify_privacy() {
   prefix=$2
   allow_runtime_temp=${3:-0}
   repo=$(pwd -P)
-  home=${HOME:-}
+  user_home=${HOME:-}
   if grep -R -a -n -F "$repo" "$prefix" >/dev/null 2>&1; then
     printf 'package verify: repository path leaked into %s\n' "$archive" >&2
     grep -R -a -n -F "$repo" "$prefix" >&2
     exit 1
   fi
-  if [ -n "$home" ] && grep -R -a -n -F "$home" "$prefix" >/dev/null 2>&1; then
+  if [ -n "$user_home" ] && grep -R -a -n -F "$user_home" "$prefix" >/dev/null 2>&1; then
     printf 'package verify: HOME path leaked into %s\n' "$archive" >&2
-    grep -R -a -n -F "$home" "$prefix" >&2
+    grep -R -a -n -F "$user_home" "$prefix" >&2
     exit 1
   fi
   if [ -n "$dependency_cache" ] &&
@@ -133,15 +139,15 @@ verify_source_privacy() {
   archive=$1
   prefix=$2
   repo=$(pwd -P)
-  home=${HOME:-}
+  user_home=${HOME:-}
   if grep -R -a -n -F "$repo" "$prefix" >/dev/null 2>&1; then
     printf 'package verify: repository path leaked into %s\n' "$archive" >&2
     grep -R -a -n -F "$repo" "$prefix" >&2
     exit 1
   fi
-  if [ -n "$home" ] && grep -R -a -n -F "$home" "$prefix" >/dev/null 2>&1; then
+  if [ -n "$user_home" ] && grep -R -a -n -F "$user_home" "$prefix" >/dev/null 2>&1; then
     printf 'package verify: HOME path leaked into %s\n' "$archive" >&2
-    grep -R -a -n -F "$home" "$prefix" >&2
+    grep -R -a -n -F "$user_home" "$prefix" >&2
     exit 1
   fi
   if [ -n "$dependency_cache" ] &&
@@ -161,9 +167,9 @@ verify_source_privacy() {
     grep -R -a -n -F "file://$repo" "$prefix" >&2
     exit 1
   fi
-  if [ -n "$home" ] && grep -R -a -n -F "file://$home" "$prefix" >/dev/null 2>&1; then
+  if [ -n "$user_home" ] && grep -R -a -n -F "file://$user_home" "$prefix" >/dev/null 2>&1; then
     printf 'package verify: HOME file URL leaked into %s\n' "$archive" >&2
-    grep -R -a -n -F "file://$home" "$prefix" >&2
+    grep -R -a -n -F "file://$user_home" "$prefix" >&2
     exit 1
   fi
 }
@@ -216,6 +222,28 @@ verify_darwin_runtime_paths() {
   fi
 }
 
+verify_arm_smoke() {
+  qemu_target=$1
+  qemu_product=$2
+  qemu_prefix=$3
+  qemu_sdk=
+  qemu_clql=
+  case "$qemu_product" in
+    sdk) qemu_sdk=$(cd "$qemu_prefix" && pwd -P) ;;
+    cli) qemu_clql=$(cd "$qemu_prefix" && pwd -P)/bin/clql ;;
+  esac
+  qemu_build=$work/qemu-$qemu_product-$qemu_target
+  cmake -S "$repo/tests/qemu" -B "$qemu_build" -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE="$repo/cmake/cpkt-toolchain.cmake" \
+    -DLQL_TARGET_ID="$qemu_target" \
+    -DLQL_QEMU_SDK_PREFIX="$qemu_sdk" -DLQL_QEMU_CLQL="$qemu_clql" \
+    -DLQL_QEMU_VERSION="$version"
+  if [ "$qemu_product" = sdk ]; then
+    cmake --build "$qemu_build"
+  fi
+  ctest --test-dir "$qemu_build" --stop-on-failure --output-on-failure --no-tests=error
+}
+
 verify_payload() {
   target=$1
   archive=$dist_dir/$project-$version-$target.tar.gz
@@ -266,6 +294,9 @@ verify_payload() {
         fi
       done
       verify_darwin_runtime_paths "$target" "$prefix"
+      sh scripts/check_owned_path.sh "$work"
+      scripts/check_library_symbols.sh "$prefix/lib/liblql.0.dylib" "$target" "build/$target-release"
+      scripts/check_artifact_architecture.sh "$prefix/lib/liblql.0.dylib" "$target" "build/$target-release"
       ;;
     *-linux-*)
       for path in lib/liblql.so lib/liblql.so.0; do
@@ -275,6 +306,8 @@ verify_payload() {
         fi
       done
       verify_linux_runtime_paths "$target" "$prefix"
+      scripts/check_library_symbols.sh "$prefix/lib/liblql.so.0" "$target" "build/$target-release"
+      scripts/check_artifact_architecture.sh "$prefix/lib/liblql.so.0" "$target" "build/$target-release"
       ;;
     *)
       printf 'package verify: unsupported target: %s\n' "$target" >&2
@@ -288,6 +321,9 @@ verify_payload() {
     LQL_INSTALL_PREFIX="$prefix" \
     LQL_INSTALL_CONSUMER_DIR="$work/install-consumer-$target" \
       sh scripts/check_install_tree.sh
+  elif [ "${target#armhf-linux-}" != "$target" ] ||
+       [ "${target#aarch64-linux-}" != "$target" ]; then
+    verify_arm_smoke "$target" sdk "$prefix"
   else
     printf 'package verify: skipped executable consumer smoke for cross target %s\n' "$target"
   fi
@@ -365,6 +401,8 @@ verify_clql_payload() {
     exit 1
   fi
 
+  scripts/check_artifact_architecture.sh "$binary" "$target" "build/$target-release"
+
   case "$target" in
     *-linux-*)
       verify_linux_clql "$target" "$binary"
@@ -384,6 +422,9 @@ verify_clql_payload() {
   verify_privacy "$archive" "$prefix" 1
   if [ "$target" = "x86_64-linux-gnu" ] && [ "$(uname -m)" = "x86_64" ]; then
     "$binary" --version >/dev/null
+  elif [ "${target#armhf-linux-}" != "$target" ] ||
+       [ "${target#aarch64-linux-}" != "$target" ]; then
+    verify_arm_smoke "$target" cli "$prefix"
   else
     printf 'package verify: skipped clql execution for cross target %s\n' "$target"
   fi
@@ -419,12 +460,36 @@ verify_source_archive() {
     RELEASE_MANIFEST \
     include/lql/lql.h \
     cmake/LqlVersion.cmake \
+    cmake/PrintLqlVersion.cmake \
+    cmake/LqlCachePaths.cmake \
     cmake/LqlDependencyCache.cmake \
     cmake/LqlDevelopmentRuntime.cmake \
     cmake/LqlLuaRuntime.cmake \
+    cmake/LqlTestContract.cmake \
     tools/lql_lua_runner.c \
     scripts/cpkt-toolchains.sh \
+    scripts/LICENSE.cpkt \
+    scripts/require-host-bash.sh \
+    scripts/cpkt-archive-cache.sh \
+    scripts/cpkt-afl-runtime.sh \
+    tests/lifecycle/CMakeLists.txt \
+    tests/lifecycle/integration.sh \
+    tests/lifecycle/presets.cmake \
+    tests/lifecycle/qemu.cmake \
+    tests/qemu/CMakeLists.txt \
+    tests/qemu/consumer.c \
+    tests/qemu/cli.cmake \
     scripts/check_toolchain_policy.sh \
+    scripts/check_owned_path.sh \
+    scripts/check_library_symbols.sh \
+    scripts/check_artifact_architecture.sh \
+    scripts/check_lua_symbols.sh \
+    scripts/check_release_commit.sh \
+    scripts/lql_public_symbols.txt \
+    tests/cli-parity/CMakeLists.txt \
+    tests/cli-parity/parity_test.go \
+    tests/cli-parity/selector.json \
+    tests/cli-parity/mutation.json \
     scripts/check_development_runtime.sh \
     scripts/check_lua_rock_toolchain_override.sh \
     scripts/test_dependency_cache_config.sh \
@@ -440,6 +505,8 @@ verify_source_archive() {
     scripts/stage_lua_rock_sources.sh \
     lua/bin/lql.lua \
     lua/lql_core.c \
+    lua/lql_lifetime.h \
+    lua/lql_callbacks.h \
     lua/lql/init.lua
   do
     if [ ! -e "$prefix/$path" ]; then
@@ -490,7 +557,7 @@ verify_source_archive() {
     -DCMAKE_TOOLCHAIN_FILE="$prefix_abs/cmake/cpkt-toolchain.cmake" \
     -DLQL_TARGET_ID=x86_64-linux-gnu >/dev/null
   cmake --build "$source_build_abs" >/dev/null
-  ctest --test-dir "$source_build_abs" --output-on-failure >/dev/null
+  ctest --test-dir "$source_build_abs" --stop-on-failure --output-on-failure --no-tests=error >/dev/null
   if ! grep '#define LQL_VERSION "'$version'"' \
     "$source_build_abs/generated/include/lql/version.h" >/dev/null; then
     printf 'package verify: source build generated wrong version\n' >&2
@@ -527,11 +594,9 @@ verify_lua_source_archive() {
     liblql-dev-1.rockspec.in \
     lua/bin/lql.lua \
     lua/lql_core.c \
+    lua/lql_lifetime.h \
+    lua/lql_callbacks.h \
     lua/lql/init.lua \
-    scripts/build_lua_rock.sh \
-    scripts/render_release_rockspec.sh \
-    scripts/run_lua_tests.sh \
-    scripts/stage_lua_rock_sources.sh \
     "$project-$version-1.rockspec"
   do
     if [ ! -e "$prefix/$path" ]; then
@@ -558,6 +623,9 @@ verify_lua_source_archive() {
       "$lua_version" "$version" >&2
     exit 1
   fi
+  (cd "$prefix" && find . -type f | sed 's#^\./##' | LC_ALL=C sort) >"$work/lua-actual-manifest"
+  LC_ALL=C sort "$prefix/RELEASE_MANIFEST" >"$work/lua-expected-manifest"
+  cmp "$work/lua-actual-manifest" "$work/lua-expected-manifest"
   verify_source_privacy "$archive" "$prefix"
   printf 'package verify: verified %s\n' "$archive"
 }
@@ -628,7 +696,29 @@ verify_lua_src_rock() {
     printf 'package verify: local path leaked into Lua source rock: %s\n' "$rock" >&2
     exit 1
   fi
-  printf 'package verify: verified %s\n' "$rock"
+  # Build the exact extracted source-rock bytes against the installed public
+  # SDK, then execute them with the selected collection's Lua runtime.
+  release_tree=$(realpath -m "$work/released-lua-tree")
+  sdk_prefix=$repo/build/lua-sdk
+  lua_include=$repo/build/debug-lua/lua-5.5.1/src
+  lua_runner=$repo/build/debug-lua/lql_lua_runner
+  if [ ! -f "$lua_include/lua.h" ] || [ ! -x "$lua_runner" ] ||
+     [ ! -f "$sdk_prefix/lib/liblql.so.0" ]; then
+    printf '%s\n' 'package verify: prepare native Lua prerequisites with make build-debug-lua' >&2
+    exit 1
+  fi
+  description=$(scripts/cpkt-toolchains.sh discover x86_64-linux-gnu)
+  lua_cc=$(printf '%s\n' "$description" | sed -n 's/^cc=//p')
+  (
+    cd "$nested/$project-lua-$version"
+    luarocks --lua-version=5.5 --tree "$release_tree" \
+      make "$project-$version-1.rockspec" --deps-mode=none "LIBLQL_DIR=$sdk_prefix" \
+      "LUA_INCDIR=$lua_include" "CC=$lua_cc" "LD=$lua_cc" \
+      'LIBFLAG=-shared -Wl,--disable-new-dtags'
+  )
+  LQL_LUAROCKS_TREE="$release_tree" LQL_LUA_SDK_PREFIX="$sdk_prefix" \
+    LQL_LUA_RUNNER="$lua_runner" sh scripts/check_lua_rock.sh
+  printf 'package verify: built, ran, and verified %s\n' "$rock"
 }
 
 if [ "$target_arg" = "all" ]; then
@@ -667,6 +757,17 @@ else
     printf 'package verify: verified checksum manifest %s\n' "$manifest"
   elif [ "$target_arg" = "archives" ] || [ "$target_arg" = "privacy" ]; then
     "$0" all
+  elif [ "$target_arg" = "qemu" ]; then
+    for target in aarch64-linux-gnu aarch64-linux-musl armhf-linux-gnu armhf-linux-musl; do
+      for artifact in "$project-$version-$target.tar.gz" "clql-$version-$target.tar.gz"; do
+        if ! printf '%s\n' "$listed" | grep -Fx "$artifact" >/dev/null; then
+          printf 'package verify: QEMU smoke requires checksum-listed artifact %s\n' "$artifact" >&2
+          exit 1
+        fi
+      done
+      verify_payload "$target"
+      verify_clql_payload "$target"
+    done
   elif [ "$target_arg" = "source" ]; then
     verify_source_archive
   elif [ "$target_arg" = "lua" ]; then

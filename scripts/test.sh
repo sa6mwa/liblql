@@ -3,6 +3,4 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
-cmake --preset debug
-cmake --build --preset debug
-ctest --preset debug
+exec make --no-print-directory test

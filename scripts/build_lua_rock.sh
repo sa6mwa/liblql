@@ -4,6 +4,7 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 sdk_prefix=${LQL_LUA_SDK_PREFIX:-$root/build/lua-sdk}
 tree=${LQL_LUAROCKS_TREE:-$root/build/luarocks}
+sh "$root/scripts/check_owned_path.sh" "$sdk_prefix" "$tree"
 rockspec_dir=$root/build/luarocks-rockspec
 source_dir=$root/build/luarocks-src
 version_header=$root/build/release/generated/include/lql/version.h
@@ -38,9 +39,9 @@ if [ -z "$lua_cc" ] || [ ! -x "$lua_cc" ]; then
   exit 1
 fi
 
-cmake --preset release
-cmake --build --preset release
-sh "$root/scripts/remove_path.sh" "$sdk_prefix" "$tree" "$rockspec_dir" "$source_dir"
+# Make prepares the SDK and runner once for all dependent checks. Only a
+# caller-selected SDK prefix needs a separate install of those same bytes.
+sh "$root/scripts/remove_path.sh" "$tree" "$rockspec_dir" "$source_dir"
 cmake --install "$root/build/release" --prefix "$sdk_prefix"
 
 if [ ! -f "$version_header" ]; then
@@ -55,6 +56,7 @@ fi
 
 mkdir -p "$rockspec_dir" "$source_dir/lua/bin" "$source_dir/lua/lql"
 cp "$root/lua/lql_core.c" "$source_dir/lua/"
+cp "$root/lua/lql_lifetime.h" "$root/lua/lql_callbacks.h" "$source_dir/lua/"
 cp "$root/lua/bin/lql.lua" "$source_dir/lua/bin/"
 cp "$root/lua/lql/init.lua" "$source_dir/lua/lql/"
 rockspec=$rockspec_dir/liblql-$version-1.rockspec

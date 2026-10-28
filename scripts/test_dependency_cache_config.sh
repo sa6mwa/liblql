@@ -2,7 +2,8 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/liblql-dependency-cache.XXXXXX")
+mkdir -p "$root/build/tmp"
+tmp=$(mktemp -d "$root/build/tmp/liblql-dependency-cache.XXXXXX")
 trap 'sh "$root/scripts/remove_path.sh" "$tmp"' EXIT HUP INT TERM
 test_script=$root/tests/dependency_cache_config.cmake
 retry_test_script=$root/tests/dependency_cache_retry.cmake
@@ -16,10 +17,10 @@ env CPKT_DEPENDENCY_CACHE="$tmp/environment" XDG_CACHE_HOME="$tmp/xdg" \
   HOME="$tmp/home" cmake -DEXPECTED_CPKT_DEPENDENCY_CACHE="$tmp/environment" \
   -P "$test_script" >/dev/null
 env -u CPKT_DEPENDENCY_CACHE XDG_CACHE_HOME="$tmp/xdg" HOME="$tmp/home" \
-  cmake -DEXPECTED_CPKT_DEPENDENCY_CACHE="$tmp/xdg/c.pkt.systems/deps" \
+  cmake -DEXPECTED_CPKT_DEPENDENCY_CACHE="$tmp/xdg/cpkt/deps" \
   -P "$test_script" >/dev/null
 env -u CPKT_DEPENDENCY_CACHE -u XDG_CACHE_HOME HOME="$tmp/home" \
-  cmake -DEXPECTED_CPKT_DEPENDENCY_CACHE="$tmp/home/.cache/c.pkt.systems/deps" \
+  cmake -DEXPECTED_CPKT_DEPENDENCY_CACHE="$tmp/home/.cache/cpkt/deps" \
   -P "$test_script" >/dev/null
 
 if env -u CPKT_DEPENDENCY_CACHE -u XDG_CACHE_HOME -u HOME cmake \
@@ -58,16 +59,46 @@ fi
 cmake -DCPKT_DEPENDENCY_CACHE="$tmp/retry-cache" \
   -DRETRY_ARCHIVE_URL="http://127.0.0.1:$retry_port/archive.tar.gz" \
   -DRETRY_ARCHIVE_SOURCE="$retry_fixture" -P "$retry_test_script" >/dev/null
+
+# Hits and renamed basenames reuse the digest without any HTTP requests.
+for name in archive.tar.gz renamed.tar.gz; do
+  cmake -DCPKT_DEPENDENCY_CACHE="$tmp/retry-cache" \
+    -DARCHIVE_NAME="$name" \
+    -DRETRY_ARCHIVE_URL="http://127.0.0.1:$retry_port/archive.tar.gz" \
+    -DRETRY_ARCHIVE_SOURCE="$retry_fixture" -P "$retry_test_script" >/dev/null
+done
+[ "$(grep -c '^REQUEST ' "$server_log")" = 2 ]
+digest=$(sha256sum "$retry_fixture" | awk '{print $1}')
+archive_dir=$tmp/retry-cache/archives/sha256/$digest
+rm "$archive_dir/renamed.tar.gz"
+printf corrupt >"$archive_dir/archive.tar.gz"
+cmake -DCPKT_DEPENDENCY_CACHE="$tmp/retry-cache" \
+  -DRETRY_ARCHIVE_URL="http://127.0.0.1:$retry_port/archive.tar.gz" \
+  -DRETRY_ARCHIVE_SOURCE="$retry_fixture" -P "$retry_test_script" >/dev/null
+[ "$(grep -c '^REQUEST ' "$server_log")" = 3 ]
+wrong_digest=0000000000000000000000000000000000000000000000000000000000000000
+if cmake -DCPKT_DEPENDENCY_CACHE="$tmp/retry-cache" \
+  -DEXPECTED_SHA256="$wrong_digest" \
+  -DRETRY_ARCHIVE_URL="http://127.0.0.1:$retry_port/archive.tar.gz" \
+  -DRETRY_ARCHIVE_SOURCE="$retry_fixture" -P "$retry_test_script" \
+  >"$tmp/wrong-digest.log" 2>&1; then
+  printf '%s\n' 'dependency cache: accepted wrong checksum' >&2; exit 1
+fi
+grep 'checksum mismatch' "$tmp/wrong-digest.log" >/dev/null
+[ ! -e "$tmp/retry-cache/archives/sha256/$wrong_digest/archive.tar.gz" ]
+[ ! -e "$tmp/retry-cache/archives/sha256/$wrong_digest/archive.tar.gz.tmp" ]
+[ "$(grep -c '^REQUEST ' "$server_log")" = 6 ]
+curl -fsS "http://127.0.0.1:$retry_port/shutdown" >/dev/null
 if ! wait "$server_pid"; then
   printf '%s\n' 'dependency cache retry: fixture server failed' >&2
   sed -n '1,120p' "$server_log" >&2
   exit 1
 fi
 server_pid=
-if ! grep -Fx 'REQUEST 2' "$server_log" >/dev/null; then
+if ! grep -Fx 'REQUEST 6' "$server_log" >/dev/null; then
   printf '%s\n' 'dependency cache retry: expected one transient failure followed by a retry' >&2
   sed -n '1,120p' "$server_log" >&2
   exit 1
 fi
 
-printf '%s\n' 'dependency cache config: precedence, failure, and retry contracts passed'
+printf '%s\n' 'dependency cache: precedence, retry, digest hits, renamed hits, corruption and checksum rejection passed'

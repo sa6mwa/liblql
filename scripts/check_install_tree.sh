@@ -29,8 +29,9 @@ else
     printf '%s\n' "$toolchain_description" | sed -n "s/^$1=//p"
   }
   cc=$(toolchain_value cc)
-  runtime_loader=$(toolchain_value dynamic_loader)
-  runtime_dirs=$(toolchain_value runtime_library_dirs)
+  sysroot=$(toolchain_value sysroot)
+  runtime_loader=$sysroot/lib/ld-linux-x86-64.so.2
+  runtime_dirs=$sysroot/lib:$sysroot/usr/lib
   if [ -z "$runtime_loader" ] || [ -z "$runtime_dirs" ]; then
     printf '%s\n' 'install-tree check: selected Bootlin runtime metadata is incomplete' >&2
     exit 1
@@ -79,6 +80,10 @@ project(liblql_cmake_consumer C)
 find_package(liblql CONFIG REQUIRED)
 add_executable(consumer ../smoke.c)
 target_link_libraries(consumer PRIVATE liblql::lql_shared)
+if(TARGET liblql::lql_static)
+  add_executable(consumer_static ../smoke.c)
+  target_link_libraries(consumer_static PRIVATE liblql::lql_static)
+endif()
 if(NOT LQL_SMOKE_TOOLCHAIN_OVERRIDE)
   target_link_options(consumer PRIVATE
     "-Wl,--dynamic-linker=${LQL_SMOKE_DYNAMIC_LOADER}"
@@ -91,6 +96,14 @@ if(NOT LQL_SMOKE_TOOLCHAIN_OVERRIDE)
       "-Wl,--disable-new-dtags"
       "-Wl,-rpath,${runtime_dir}")
   endforeach()
+  if(TARGET consumer_static)
+    target_link_options(consumer_static PRIVATE
+      "-Wl,--dynamic-linker=${LQL_SMOKE_DYNAMIC_LOADER}"
+      "-Wl,--disable-new-dtags")
+    foreach(runtime_dir IN LISTS LQL_SMOKE_RUNTIME_DIRS_LIST)
+      target_link_options(consumer_static PRIVATE "-Wl,-rpath,${runtime_dir}")
+    endforeach()
+  endif()
 else()
   target_link_options(consumer PRIVATE "-Wl,-rpath,${LQL_SMOKE_PREFIX_LIB}")
 endif()
@@ -123,5 +136,21 @@ libs=$(PKG_CONFIG_PATH="$prefix_abs/lib/pkgconfig" pkg-config --libs liblql)
 
 "$work/cmake-build/consumer"
 "$work/pkgconfig/consumer"
+if [ -x "$work/cmake-build/consumer_static" ]; then
+  "$work/cmake-build/consumer_static"
+fi
+
+# A successful public consumer above establishes the toolchain and link flags;
+# a hidden implementation entry point must not become an installed C API.
+cat >"$work/private.c" <<'PRIVATE'
+extern int lql_json_scan_flat_eq_ndjson(void);
+int main(void) { return lql_json_scan_flat_eq_ndjson(); }
+PRIVATE
+if "$cc" "$work/private.c" $libs $runtime_flags $consumer_rpath \
+  -o "$work/private-consumer" >"$work/private.log" 2>&1; then
+  printf '%s\n' 'install-tree check: private implementation symbol was linkable' >&2
+  exit 1
+fi
+grep 'lql_json_scan_flat_eq_ndjson' "$work/private.log" >/dev/null
 
 printf 'install-tree check: CMake and pkg-config consumers built and ran from %s\n' "$prefix_abs"

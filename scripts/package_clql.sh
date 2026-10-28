@@ -10,13 +10,19 @@ library_project=liblql
 preset=${target}-release
 build_dir=build/$preset
 dist_dir=${LQL_DIST_DIR:-dist}
+sh "$root/scripts/check_owned_path.sh" "$dist_dir"
 checksum_mode=${LQL_PACKAGE_CHECKSUM_MODE:-reset}
 version_header=$build_dir/generated/include/lql/version.h
+build_testing=OFF
+case "$target" in
+  x86_64-linux-gnu|arm64-apple-darwin) build_testing=ON ;;
+esac
 
+sh scripts/deps.sh "$target" >/dev/null
 cmake --preset "$preset" \
-  -DBUILD_TESTING=OFF \
+  -DBUILD_TESTING="$build_testing" \
   -DLQL_BUILD_STATIC=ON \
-  -DLQL_BUILD_SHARED=OFF \
+  -DLQL_BUILD_SHARED=ON \
   -DLQL_BUILD_BINARY=ON \
   -DLQL_CLQL_STATIC=ON \
   -DLQL_BUILD_DIRECT_PROBE=OFF

@@ -1,8 +1,9 @@
 CompileFlags:
   CompilationDatabase: build/debug
-  Add:
-    - -Iinclude
-    - -Ibuild/debug/generated/include
-    - -std=c89
 Diagnostics:
   UnusedIncludes: None
+---
+If:
+  PathMatch: (lua/.*\.c|tests/lua_.*\.c)
+CompileFlags:
+  CompilationDatabase: build/debug-lua

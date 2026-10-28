@@ -4,7 +4,7 @@ if(NOT CPKT_TARGET_ID STREQUAL "x86_64-linux-gnu")
   message(FATAL_ERROR "AFL++ fuzzing is native x86_64-linux-gnu only")
 endif()
 
-set(CPKT_AFLPP_RESOLVER "${CMAKE_CURRENT_LIST_DIR}/../scripts/cpkt-aflpp.sh")
+set(CPKT_AFLPP_RESOLVER "${CPKT_LIFECYCLE_SCRIPTS_DIR}/cpkt-aflpp.sh")
 if(NOT EXISTS "${CPKT_AFLPP_RESOLVER}")
   message(FATAL_ERROR "Missing AFL++ resolver: ${CPKT_AFLPP_RESOLVER}")
 endif()
@@ -15,7 +15,7 @@ execute_process(
   OUTPUT_VARIABLE CPKT_AFL_OUTPUT
   ERROR_VARIABLE CPKT_AFL_ERROR)
 if(NOT CPKT_AFL_RESULT EQUAL 0)
-  message(FATAL_ERROR "Unable to provision pinned AFL++: ${CPKT_AFL_ERROR}")
+  message(FATAL_ERROR "Pinned AFL++ unavailable; run ${CPKT_AFLPP_RESOLVER} ensure: ${CPKT_AFL_ERROR}")
 endif()
 
 function(cpkt_afl_value name out)

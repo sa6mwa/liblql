@@ -15,7 +15,12 @@ mkdir -p "$work"
 env LIBLQL_TOOLCHAIN_OVERRIDE=1 CC=gcc \
   CPKT_TOOLCHAIN_CACHE="$work/empty-toolchain-cache" \
   LQL_LUA_SDK_PREFIX="$work/sdk" LQL_LUAROCKS_TREE="$work/luarocks" \
-  make -C "$root" lua-rock
+  sh "$root/scripts/build_lua_rock.sh"
+env LIBLQL_TOOLCHAIN_OVERRIDE=1 CC=gcc \
+  CPKT_TOOLCHAIN_CACHE="$work/empty-toolchain-cache" \
+  LQL_LUA_SDK_PREFIX="$work/sdk" LQL_LUAROCKS_TREE="$work/luarocks" \
+  LQL_LUA_RUNNER_BUILD_DIR="$work/runner" \
+  sh "$root/scripts/check_lua_rock.sh"
 
 if [ -e "$work/empty-toolchain-cache" ]; then
   printf '%s\n' 'lua-rock override: unexpectedly consulted the Bootlin toolchain cache' >&2

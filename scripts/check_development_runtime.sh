@@ -19,8 +19,8 @@ value() {
 
 cc=$(value cc)
 readelf_tool=$(value readelf)
-loader=$(value dynamic_loader)
-runtime_dirs=$(value runtime_library_dirs)
+loader=$(sed -n 's/^CPKT_DYNAMIC_LOADER:INTERNAL=//p' "$build_dir/CMakeCache.txt")
+runtime_dirs=$(sed -n 's/^CPKT_RUNTIME_LIBRARY_DIRS:INTERNAL=//p' "$build_dir/CMakeCache.txt" | tr ';' ':')
 configured_cc=$(sed -n 's/^CMAKE_C_COMPILER:[^=]*=//p' "$build_dir/CMakeCache.txt")
 
 if [ "$configured_cc" != "$cc" ]; then

@@ -5,14 +5,14 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 build_dir=${LQL_SHARED_ONLY_BUILD_DIR:-"$root/build/shared-only"}
 install_dir=$build_dir/install
 
-sh "$root/scripts/remove_path.sh" "$build_dir"
+sh "$root/scripts/check_owned_path.sh" "$build_dir"
 cmake -S "$root" -B "$build_dir" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$root/cmake/cpkt-toolchain.cmake" \
   -DLQL_TARGET_ID=x86_64-linux-gnu \
   -DLQL_BUILD_STATIC=OFF \
   -DLQL_BUILD_SHARED=ON
 cmake --build "$build_dir"
-ctest --test-dir "$build_dir" --output-on-failure
+ctest --test-dir "$build_dir" --stop-on-failure --output-on-failure --no-tests=error
 
 if [ ! -f "$build_dir/liblql.so" ]; then
   printf 'shared-only build: missing shared liblql artifact\n' >&2
@@ -23,6 +23,7 @@ if [ -e "$build_dir/liblql.a" ]; then
   exit 1
 fi
 
+sh "$root/scripts/remove_path.sh" "$install_dir"
 cmake --install "$build_dir" --prefix "$install_dir"
 if [ -e "$install_dir/lib/liblql.a" ]; then
   printf 'shared-only build: unexpectedly installed liblql.a\n' >&2

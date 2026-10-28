@@ -682,99 +682,70 @@ static int inline_xattr_set_error_ignorable(const char *name, int error_code) {
 #endif
 }
 
-static int copy_inline_xattrs(int source_fd, int fd) {
-  char stack_names[4096];
+static int copy_inline_xattrs(lql_allocator *allocator, int source_fd, int fd) {
   char *names;
+  char *value;
   ssize_t names_len;
-  ssize_t need;
+  ssize_t value_len;
+  size_t value_capacity;
   size_t offset;
-  names = stack_names;
-  names_len = inline_listxattr_fd(source_fd, names, sizeof(stack_names));
-  if (names_len < 0 && errno == ERANGE) {
-    need = inline_listxattr_fd(source_fd, NULL, 0u);
-    if (need < 0) {
-      return 0;
-    }
-    if (need == 0) {
-      return 1;
-    }
-    names = (char *)malloc((size_t)need);
-    if (names == NULL) {
-      return 0;
-    }
-    names_len = inline_listxattr_fd(source_fd, names, (size_t)need);
-  }
-  if (names_len < 0) {
-    if (names != stack_names) {
-      free(names);
-    }
+  int saved_errno;
+  int result;
+  names = NULL;
+  value = NULL;
+  result = 0;
+  names_len = inline_listxattr_fd(source_fd, NULL, 0u);
+  if (names_len < 0)
     return errno == ENOTSUP || errno == EOPNOTSUPP;
+  if (names_len == 0)
+    return 1;
+  names = (char *)allocator->alloc(allocator, (size_t)names_len);
+  if (names == NULL) {
+    errno = ENOMEM;
+    return 0;
   }
+  names_len = inline_listxattr_fd(source_fd, names, (size_t)names_len);
+  if (names_len < 0)
+    goto done;
   offset = 0u;
   while (offset < (size_t)names_len) {
     const char *name;
-    char stack_value[4096];
-    char *value;
-    ssize_t value_len;
     name = names + offset;
     offset += strlen(name) + 1u;
-    value = stack_value;
-    value_len = inline_getxattr_fd(source_fd, name, value, sizeof(stack_value));
-    if (value_len < 0 && errno == ERANGE) {
-      need = inline_getxattr_fd(source_fd, name, NULL, 0u);
-      if (need < 0) {
-        if (names != stack_names) {
-          free(names);
-        }
-        return 0;
-      }
-      value = (char *)malloc((size_t)need);
-      if (value == NULL) {
-        if (names != stack_names) {
-          free(names);
-        }
-        return 0;
-      }
-      value_len = inline_getxattr_fd(source_fd, name, value, (size_t)need);
-    }
+    value_len = inline_getxattr_fd(source_fd, name, NULL, 0u);
     if (value_len < 0) {
-      if (value != stack_value) {
-        free(value);
-      }
-      if (errno == ENODATA) {
+      if (errno == ENODATA)
         continue;
-      }
-      if (names != stack_names) {
-        free(names);
-      }
-      return 0;
+      goto done;
     }
-    if (inline_setxattr(fd, name, value, (size_t)value_len) != 0) {
-      int set_errno;
-      set_errno = errno;
-      if (value != stack_value) {
-        free(value);
-      }
-      if (inline_xattr_set_error_ignorable(name, set_errno)) {
-        continue;
-      }
-      if (names != stack_names) {
-        free(names);
-      }
-      errno = set_errno;
-      return 0;
+    value_capacity = value_len == 0 ? 1u : (size_t)value_len;
+    value = (char *)allocator->alloc(allocator, value_capacity);
+    if (value == NULL) {
+      errno = ENOMEM;
+      goto done;
     }
-    if (value != stack_value) {
-      free(value);
+    value_len = inline_getxattr_fd(source_fd, name, value, value_capacity);
+    if (value_len < 0) {
+      if (errno != ENODATA)
+        goto done;
+    } else if (inline_setxattr(fd, name, value, (size_t)value_len) != 0 &&
+               !inline_xattr_set_error_ignorable(name, errno)) {
+      goto done;
     }
+    allocator->destroy(allocator, value);
+    value = NULL;
   }
-  if (names != stack_names) {
-    free(names);
-  }
-  return 1;
+  result = 1;
+done:
+  saved_errno = errno;
+  allocator->destroy(allocator, value);
+  allocator->destroy(allocator, names);
+  errno = saved_errno;
+  return result;
 }
 #else
-static int copy_inline_xattrs(int source_fd, int fd) {
+static int copy_inline_xattrs(lql_allocator *allocator, int source_fd, int fd) {
+  (void)allocator;
   (void)source_fd;
   (void)fd;
   return 1;
@@ -883,10 +854,10 @@ lql_status lql_rewrite_file_inline_spooled_internal(
     status = LQL_STATUS_IO_ERROR;
   }
   if (status == LQL_STATUS_OK &&
-      !copy_inline_xattrs(source_check_fd, fileno(tmp))) {
-    lql_set_error(error, LQL_STATUS_IO_ERROR,
-                  "unable to preserve inline file metadata");
-    status = LQL_STATUS_IO_ERROR;
+      !copy_inline_xattrs(lql_allocator_from_receiver(self), source_check_fd,
+                          fileno(tmp))) {
+    status = errno == ENOMEM ? LQL_STATUS_NO_MEMORY : LQL_STATUS_IO_ERROR;
+    lql_set_error(error, status, "unable to preserve inline file metadata");
   }
   if (status == LQL_STATUS_OK && fsync(fileno(tmp)) != 0) {
     lql_set_error(error, LQL_STATUS_IO_ERROR, "unable to sync inline output");

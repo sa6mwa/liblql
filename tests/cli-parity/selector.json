@@ -1,0 +1,1294 @@
+{
+  "inputs": [
+    "{\"id\":\"a\",\"status\":\"open\",\"single\":\"true\",\"count_text\":\"1\",\"progress\":75,\"timestamp\":\"2025-01-15T10:00:00Z\",\"service\":\"AUTH-edge\",\"msg\":\"timeout on auth edge\",\"greeting\":\"hello world\",\"region\":\"us\",\"state\":\"enabled\",\"active\":true,\"metadata\":{\"etag\":\"abc\"},\"labels\":{\"env\":\"production\",\"tier\":\"edge\"},\"items\":[{\"sku\":\"ABC-123\"},{\"sku\":\"ZZZ\"}],\"nested\":{\"items\":[{\"sku\":\"DEEP\"}]},\"values\":[\"A\",\"B\"],\"emoji\":\"こんにちは 😀\"}\n{\"id\":\"b\",\"status\":\"queued\",\"progress\":40,\"timestamp\":\"2025-02-10\",\"service\":\"billing\",\"msg\":\"all good\",\"greeting\":\"goodbye jupiter\",\"region\":\"eu\",\"state\":\"disabled\",\"active\":false,\"labels\":{\"env\":\"staging\"},\"items\":[{\"sku\":\"NOPE\"}],\"values\":[\"C\",\"D\"]}\n{\"id\":\"c\",\"status\":\"closed\",\"progress\":50,\"timestamp\":\"2024-12-31T23:59:59Z\",\"service\":\"EDGE-cache\",\"msg\":\"degraded cache\",\"greeting\":\"other\",\"region\":\"apac\",\"state\":\"enabled\",\"active\":false,\"metadata\":{},\"labels\":{\"env\":\"production\"},\"items\":[{\"parts\":[{\"sku\":\"ABC-123\"}]}],\"values\":[\"B\"]}\n{\"id\":\"d\",\"status\":\"open,closed\",\"single\":\"not-true\",\"count_text\":\"not-1\",\"progress\":60,\"timestamp\":\"2026-03-11T01:11:28.123456789Z\",\"service\":\"misc\",\"msg\":\"hello world\",\"greeting\":\"hello world\",\"region\":\"us\",\"state\":\"enabled\",\"metadata\":{},\"meta,etag\":\"comma\",\"labels\":{\"env\":\"test\"},\"items\":[],\"values\":[]}\n{\"status\":\"open\",\"timestamp\":\"2026-03-11T00:11:28.123Z\",\"service\":\"misc\",\"msg\":\"terminal ellipsis anchor\",\"greeting\":\"other\",\"region\":\"eu\",\"state\":\"enabled\",\"metadata\":{},\"labels\":{},\"items\":[\"ABC-123\",{\"sku\":\"other\"}],\"values\":[],\"a\":\"\"}\n{\"id\":\"e\",\"status\":\"time\",\"single\":\"true\",\"count_text\":\"1\",\"progress\":61,\"timestamp\":\"2026-03-11T01:11:28.123+01:00\",\"service\":\"misc\",\"msg\":\"timezone fraction\",\"greeting\":\"other\",\"region\":\"eu\",\"state\":\"enabled\",\"metadata\":{},\"labels\":{\"env\":\"test\"},\"items\":[],\"values\":[]}\n{\"id\":\"f\",\"status\":\"time\",\"single\":\"false\",\"count_text\":\"1.0\",\"progress\":62,\"timestamp\":\"2026-03-11T00:11:28.123Z\",\"service\":\"misc\",\"msg\":\"utc fraction\",\"greeting\":\"other\",\"region\":\"eu\",\"state\":\"enabled\",\"metadata\":{},\"labels\":{\"env\":\"test\"},\"items\":[],\"values\":[]}\n",
+    "{\"a\":{\"b\":3}}\n{\"a\":{\"b\":null}}\n{\"a\":{\"b\":false}}\n{\"a\":[3]}\n",
+    "{\"0\":{\"a\":[1,{\"n\":2}]},\"items\":\"1\",\"a\":[1,2]}\n",
+    "{\"items\":[{\"a\":[null]},{\"a\":[1]}]}\n",
+    "{\"x\":{\"a\":1,\"z\":[1]}}\n",
+    "{\"x\":{\"b\":1}}\n",
+    "{\"0\":{\"a\":\"\"}}\n",
+    "{\"x\":[{\"0\":{\"a\":\"\"}},\"\"]}\n",
+    "{\"a\":{\"star\":[{\"star\":[1,true]},[null]]}}\n",
+    "{\"a\":{\"0\":{\"a\":\"x\",\"0\":{\"0\":\"y\"}}}}\n",
+    "{\"b\":\"y\"}\n",
+    "{}\n",
+    "{\"a\":null}\n",
+    "1\n{\"a\":false}\n",
+    "{\"id\":\"wide\",\"k0\":0,\"k1\":1,\"k2\":2,\"k3\":3,\"k4\":4,\"k5\":5,\"k6\":6,\"k7\":7,\"k8\":8,\"k9\":9,\"k10\":10,\"k11\":11,\"k12\":12,\"k13\":13,\"k14\":14,\"k15\":15,\"k16\":16,\"k17\":17,\"k18\":18,\"k19\":19,\"k20\":20,\"k21\":21,\"k22\":22,\"k23\":23,\"k24\":24,\"k25\":25,\"k26\":26,\"k27\":27,\"k28\":28,\"k29\":29,\"k30\":30,\"k31\":31,\"k32\":32,\"k33\":33,\"k34\":34,\"k35\":35,\"k36\":36,\"k37\":37,\"k38\":38,\"k39\":39,\"k40\":40,\"k41\":41,\"k42\":42,\"k43\":43,\"k44\":44,\"k45\":45,\"k46\":46,\"k47\":47,\"k48\":48,\"k49\":49,\"k50\":50,\"k51\":51,\"k52\":52,\"k53\":53,\"k54\":54,\"k55\":55,\"k56\":56,\"k57\":57,\"k58\":58,\"k59\":59,\"k60\":60,\"k61\":61,\"k62\":62,\"k63\":63,\"k64\":64,\"k65\":65,\"k66\":66,\"k67\":67,\"k68\":68,\"k69\":69,\"k70\":70,\"k71\":71,\"k72\":72,\"k73\":73,\"k74\":74,\"k75\":75,\"k76\":76,\"k77\":77,\"k78\":78,\"k79\":79,\"k80\":80,\"k81\":81,\"k82\":82,\"k83\":83,\"k84\":84,\"k85\":85,\"k86\":86,\"k87\":87,\"k88\":88,\"k89\":89,\"k90\":90,\"k91\":91,\"k92\":92,\"k93\":93,\"k94\":94,\"k95\":95,\"k96\":96,\"k97\":97,\"k98\":98,\"k99\":99,\"k100\":100,\"k101\":101,\"k102\":102,\"k103\":103,\"k104\":104,\"k105\":105,\"k106\":106,\"k107\":107,\"k108\":108,\"k109\":109,\"k110\":110,\"k111\":111,\"k112\":112,\"k113\":113,\"k114\":114,\"k115\":115,\"k116\":116,\"k117\":117,\"k118\":118,\"k119\":119,\"k120\":120,\"k121\":121,\"k122\":122,\"k123\":123,\"k124\":124,\"k125\":125,\"k126\":126,\"k127\":127,\"k128\":128}\n",
+    "{\"status\":\"open\"}\n",
+    "{\"id\":\"long\",\"msg\":\"xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaay\"}\n"
+  ],
+  "cases": [
+    {
+      "name": "shorthand eq quoted",
+      "input": 0,
+      "args": [
+        "/status=\"open\""
+      ]
+    },
+    {
+      "name": "shorthand eq single quoted bool string",
+      "input": 0,
+      "args": [
+        "/single='true'"
+      ]
+    },
+    {
+      "name": "shorthand eq single quoted number string",
+      "input": 0,
+      "args": [
+        "/count_text='1'"
+      ]
+    },
+    {
+      "name": "shorthand neq",
+      "input": 0,
+      "args": [
+        "/status!=closed"
+      ]
+    },
+    {
+      "name": "shorthand numeric gte",
+      "input": 0,
+      "args": [
+        "/progress>=50"
+      ]
+    },
+    {
+      "name": "shorthand datetime gte",
+      "input": 0,
+      "args": [
+        "/timestamp>=\"2025-01-01T00:00:00Z\""
+      ]
+    },
+    {
+      "name": "array index shorthand",
+      "input": 0,
+      "args": [
+        "/items/0/sku=\"ABC-123\""
+      ]
+    },
+    {
+      "name": "object wildcard shorthand",
+      "input": 0,
+      "args": [
+        "/labels/*=\"production\""
+      ]
+    },
+    {
+      "name": "array wildcard shorthand",
+      "input": 0,
+      "args": [
+        "/items[]/sku=\"ABC-123\""
+      ]
+    },
+    {
+      "name": "recursive wildcard shorthand",
+      "input": 0,
+      "args": [
+        "/items/**/sku=\"ABC-123\""
+      ]
+    },
+    {
+      "name": "ellipsis wildcard shorthand",
+      "input": 0,
+      "args": [
+        "/items/.../sku=\"ABC-123\""
+      ]
+    },
+    {
+      "name": "terminal recursive wildcard shorthand",
+      "input": 0,
+      "args": [
+        "/**=\"\""
+      ]
+    },
+    {
+      "name": "terminal ellipsis wildcard shorthand",
+      "input": 0,
+      "args": [
+        "/...=\"\""
+      ]
+    },
+    {
+      "name": "terminal ellipsis anchor shorthand",
+      "input": 0,
+      "args": [
+        "/a/...=\"\""
+      ]
+    },
+    {
+      "name": "nested terminal ellipsis wildcard shorthand",
+      "input": 0,
+      "args": [
+        "/items/...=\"ABC-123\""
+      ]
+    },
+    {
+      "name": "ellipsis followed by object wildcard",
+      "input": 0,
+      "args": [
+        "/.../*=\"\""
+      ]
+    },
+    {
+      "name": "ellipsis followed by array index",
+      "input": 0,
+      "args": [
+        "/items/.../0=\"ABC-123\""
+      ]
+    },
+    {
+      "name": "ellipsis followed by array wildcard",
+      "input": 0,
+      "args": [
+        "/items/.../[]=\"ABC-123\""
+      ]
+    },
+    {
+      "name": "repeated ellipsis selector",
+      "input": 0,
+      "args": [
+        "/.../...=\"ABC-123\""
+      ]
+    },
+    {
+      "name": "wildcard between repeated ellipsis selector",
+      "input": 0,
+      "args": [
+        "/.../*/...=\"ABC-123\""
+      ]
+    },
+    {
+      "name": "eq full",
+      "input": 0,
+      "args": [
+        "eq{field=/status,value=open}"
+      ]
+    },
+    {
+      "name": "eq alias",
+      "input": 0,
+      "args": [
+        "eq{f=/status,v=open}"
+      ]
+    },
+    {
+      "name": "eq full numeric literal",
+      "input": 0,
+      "args": [
+        "eq{field=/progress,value=75}"
+      ]
+    },
+    {
+      "name": "eq full boolean literal",
+      "input": 0,
+      "args": [
+        "eq{field=/active,value=true}"
+      ]
+    },
+    {
+      "name": "contains value",
+      "input": 0,
+      "args": [
+        "contains{field=/msg,value=timeout}"
+      ]
+    },
+    {
+      "name": "contains value assignment order",
+      "input": 0,
+      "args": [
+        "contains{value=timeout,field=/msg}"
+      ]
+    },
+    {
+      "name": "contains value multiline assignments",
+      "input": 0,
+      "args": [
+        "contains{\nfield=/msg\nvalue=timeout\n}"
+      ]
+    },
+    {
+      "name": "eq single quoted comma",
+      "input": 0,
+      "args": [
+        "eq{field=/status,value='open,closed'}"
+      ]
+    },
+    {
+      "name": "contains single quoted phrase",
+      "input": 0,
+      "args": [
+        "contains{field=/msg,value='hello world'}"
+      ]
+    },
+    {
+      "name": "contains any",
+      "input": 0,
+      "args": [
+        "contains{field=/msg,any=timeout|degraded}"
+      ]
+    },
+    {
+      "name": "contains alias any",
+      "input": 0,
+      "args": [
+        "contains{field=/msg,a=timeout|degraded}"
+      ]
+    },
+    {
+      "name": "contains ignore case bool alias",
+      "input": 0,
+      "args": [
+        "contains{field=/msg,value=TIMEOUT,ignoreCase=t}"
+      ]
+    },
+    {
+      "name": "contains omitted value",
+      "input": 0,
+      "args": [
+        "contains{field=/msg}"
+      ]
+    },
+    {
+      "name": "contains empty value",
+      "input": 0,
+      "args": [
+        "contains{field=/msg,value=\"\"}"
+      ]
+    },
+    {
+      "name": "icontains empty value",
+      "input": 0,
+      "args": [
+        "icontains{field=/msg,value=\"\"}"
+      ]
+    },
+    {
+      "name": "icontains value",
+      "input": 0,
+      "args": [
+        "icontains{field=/service,value=edge}"
+      ]
+    },
+    {
+      "name": "icontains any",
+      "input": 0,
+      "args": [
+        "icontains{field=/service,any=AUTH|EDGE}"
+      ]
+    },
+    {
+      "name": "icontains alias any",
+      "input": 0,
+      "args": [
+        "icontains{field=/service,a=AUTH|EDGE}"
+      ]
+    },
+    {
+      "name": "prefix value",
+      "input": 0,
+      "args": [
+        "prefix{field=/service,value=AUTH}"
+      ]
+    },
+    {
+      "name": "prefix alias value",
+      "input": 0,
+      "args": [
+        "prefix{f=/service,v=AUTH}"
+      ]
+    },
+    {
+      "name": "iprefix value",
+      "input": 0,
+      "args": [
+        "iprefix{field=/service,value=auth}"
+      ]
+    },
+    {
+      "name": "iprefix alias value",
+      "input": 0,
+      "args": [
+        "iprefix{f=/service,v=auth}"
+      ]
+    },
+    {
+      "name": "iprefix empty value",
+      "input": 0,
+      "args": [
+        "iprefix{field=/service,value=\"\"}"
+      ]
+    },
+    {
+      "name": "prefix omitted value",
+      "input": 0,
+      "args": [
+        "prefix{field=/service}"
+      ]
+    },
+    {
+      "name": "range full",
+      "input": 0,
+      "args": [
+        "range{field=/progress,gte=50,lt=80}"
+      ]
+    },
+    {
+      "name": "range gt lte",
+      "input": 0,
+      "args": [
+        "range{field=/progress,gt=40,lte=75}"
+      ]
+    },
+    {
+      "name": "range datetime quoted",
+      "input": 0,
+      "args": [
+        "range{field=/timestamp,gte=\"2025-01-01T00:00:00Z\"}"
+      ]
+    },
+    {
+      "name": "date after before",
+      "input": 0,
+      "args": [
+        "date{field=/timestamp,after=2025-01-01,before=2025-02-01}"
+      ]
+    },
+    {
+      "name": "date aliases",
+      "input": 0,
+      "args": [
+        "date{f=/timestamp,a=2025-01-01,b=2025-02-01}"
+      ]
+    },
+    {
+      "name": "date value",
+      "input": 0,
+      "args": [
+        "date{field=/timestamp,value=2025-02-10}"
+      ]
+    },
+    {
+      "name": "date gte lt",
+      "input": 0,
+      "args": [
+        "date{field=/timestamp,gte=2025-01-01,lt=2025-02-01}"
+      ]
+    },
+    {
+      "name": "datetime naive fraction",
+      "input": 0,
+      "args": [
+        "/timestamp=\"2026-03-11T01:11:28.123456789\""
+      ]
+    },
+    {
+      "name": "datetime timezone fraction",
+      "input": 0,
+      "args": [
+        "/timestamp=\"2026-03-11T00:11:28.123Z\""
+      ]
+    },
+    {
+      "name": "in any",
+      "input": 0,
+      "args": [
+        "in{field=/status,any=open|queued}"
+      ]
+    },
+    {
+      "name": "in alias",
+      "input": 0,
+      "args": [
+        "in{f=/status,a=open|queued}"
+      ]
+    },
+    {
+      "name": "in any phrases",
+      "input": 0,
+      "args": [
+        "in{field=/greeting,any=\"hello world|goodbye jupiter\"}"
+      ]
+    },
+    {
+      "name": "exists bare",
+      "input": 0,
+      "args": [
+        "exists{/metadata/etag}"
+      ]
+    },
+    {
+      "name": "exists single quoted comma",
+      "input": 0,
+      "args": [
+        "exists{'/meta,etag'}"
+      ]
+    },
+    {
+      "name": "not eq",
+      "input": 0,
+      "args": [
+        "not.eq{field=/state,value=disabled}"
+      ]
+    },
+    {
+      "name": "not contains full",
+      "input": 0,
+      "args": [
+        "not.contains{field=/msg,value=degraded}"
+      ]
+    },
+    {
+      "name": "and prefixed",
+      "input": 0,
+      "args": [
+        "and.eq{field=/status,value=open},and.range{field=/progress,gte=50}"
+      ]
+    },
+    {
+      "name": "and indexed nested or",
+      "input": 0,
+      "args": [
+        "and.0.eq{field=/status,value=open},and.1.or.0.in{f=/region,a=us|eu},and.1.or.1.exists{/metadata/etag}"
+      ]
+    },
+    {
+      "name": "or prefixed",
+      "input": 0,
+      "args": [
+        "or.eq{field=/region,value=us},or.eq{field=/region,value=eu}"
+      ]
+    },
+    {
+      "name": "or indexed nested and full",
+      "input": 0,
+      "args": [
+        "or.0.eq{field=/region,value=us},or.1.and.0.range{field=/progress,gte=50},or.1.and.0.exists{/metadata/etag}"
+      ]
+    },
+    {
+      "name": "cli or flag",
+      "input": 0,
+      "args": [
+        "-O",
+        "/status=\"open\"",
+        "/status=\"queued\""
+      ]
+    },
+    {
+      "name": "projection",
+      "input": 0,
+      "args": [
+        "-f",
+        "/id",
+        "-f",
+        "/emoji",
+        "/status=\"open\""
+      ]
+    },
+    {
+      "name": "invalid selector",
+      "input": 0,
+      "args": [
+        "contains{field=/msg,value=}"
+      ]
+    },
+    {
+      "name": "numeric shorthand ignores container",
+      "input": 1,
+      "args": [
+        "/a>=2"
+      ]
+    },
+    {
+      "name": "numeric range ignores container",
+      "input": 1,
+      "args": [
+        "range{field=/a,gte=2}"
+      ]
+    },
+    {
+      "name": "recursive selector after object wildcard",
+      "input": 2,
+      "args": [
+        "/*/...=1"
+      ]
+    },
+    {
+      "name": "recursive selector after array wildcard",
+      "input": 3,
+      "args": [
+        "/items[]/...=1"
+      ]
+    },
+    {
+      "name": "recursive selector through any and array wildcards",
+      "input": 4,
+      "args": [
+        "/x/.../**/[]=1"
+      ]
+    },
+    {
+      "name": "recursive selector after named path does not overmatch",
+      "input": 5,
+      "args": [
+        "/.../x/b/...=1"
+      ]
+    },
+    {
+      "name": "recursive selector numeric object key before object wildcard",
+      "input": 6,
+      "args": [
+        "/.../0/*=\"\""
+      ]
+    },
+    {
+      "name": "recursive selector numeric object key nested below array",
+      "input": 7,
+      "args": [
+        "/.../0/*=\"\""
+      ]
+    },
+    {
+      "name": "recursive selector branch state does not leak into sibling values",
+      "input": 8,
+      "args": [
+        "/a/.../[]/0!=1"
+      ]
+    },
+    {
+      "name": "recursive selector preserves branch state across object siblings",
+      "input": 9,
+      "args": [
+        "/.../0/0=\"y\""
+      ]
+    },
+    {
+      "name": "consecutive recursive selector keeps zero-depth match",
+      "input": 10,
+      "args": [
+        "/.../.../b=\"y\""
+      ]
+    },
+    {
+      "name": "terminal recursive exists includes empty root object",
+      "input": 11,
+      "args": [
+        "exists{/...}"
+      ]
+    },
+    {
+      "name": "terminal recursive exists includes root object with null child",
+      "input": 12,
+      "args": [
+        "exists{/...}"
+      ]
+    },
+    {
+      "name": "terminal recursive omitted prefix includes root object",
+      "input": 11,
+      "args": [
+        "prefix{field=/...}"
+      ]
+    },
+    {
+      "name": "terminal recursive omitted contains includes root object",
+      "input": 12,
+      "args": [
+        "contains{field=/...}"
+      ]
+    },
+    {
+      "name": "scalar root does not satisfy field inequality",
+      "input": 13,
+      "args": [
+        "/a!=true"
+      ]
+    },
+    {
+      "name": "selectors beyond one machine word",
+      "input": 14,
+      "args": [
+        "/k0=0",
+        "/k1=1",
+        "/k2=2",
+        "/k3=3",
+        "/k4=4",
+        "/k5=5",
+        "/k6=6",
+        "/k7=7",
+        "/k8=8",
+        "/k9=9",
+        "/k10=10",
+        "/k11=11",
+        "/k12=12",
+        "/k13=13",
+        "/k14=14",
+        "/k15=15",
+        "/k16=16",
+        "/k17=17",
+        "/k18=18",
+        "/k19=19",
+        "/k20=20",
+        "/k21=21",
+        "/k22=22",
+        "/k23=23",
+        "/k24=24",
+        "/k25=25",
+        "/k26=26",
+        "/k27=27",
+        "/k28=28",
+        "/k29=29",
+        "/k30=30",
+        "/k31=31",
+        "/k32=32",
+        "/k33=33",
+        "/k34=34",
+        "/k35=35",
+        "/k36=36",
+        "/k37=37",
+        "/k38=38",
+        "/k39=39",
+        "/k40=40",
+        "/k41=41",
+        "/k42=42",
+        "/k43=43",
+        "/k44=44",
+        "/k45=45",
+        "/k46=46",
+        "/k47=47",
+        "/k48=48",
+        "/k49=49",
+        "/k50=50",
+        "/k51=51",
+        "/k52=52",
+        "/k53=53",
+        "/k54=54",
+        "/k55=55",
+        "/k56=56",
+        "/k57=57",
+        "/k58=58",
+        "/k59=59",
+        "/k60=60",
+        "/k61=61",
+        "/k62=62",
+        "/k63=63",
+        "/k64=64",
+        "/k65=65",
+        "/k66=66",
+        "/k67=67",
+        "/k68=68",
+        "/k69=69",
+        "/k70=70",
+        "/k71=71",
+        "/k72=72",
+        "/k73=73",
+        "/k74=74",
+        "/k75=75",
+        "/k76=76",
+        "/k77=77",
+        "/k78=78",
+        "/k79=79",
+        "/k80=80",
+        "/k81=81",
+        "/k82=82",
+        "/k83=83",
+        "/k84=84",
+        "/k85=85",
+        "/k86=86",
+        "/k87=87",
+        "/k88=88",
+        "/k89=89",
+        "/k90=90",
+        "/k91=91",
+        "/k92=92",
+        "/k93=93",
+        "/k94=94",
+        "/k95=95",
+        "/k96=96",
+        "/k97=97",
+        "/k98=98",
+        "/k99=99",
+        "/k100=100",
+        "/k101=101",
+        "/k102=102",
+        "/k103=103",
+        "/k104=104",
+        "/k105=105",
+        "/k106=106",
+        "/k107=107",
+        "/k108=108",
+        "/k109=109",
+        "/k110=110",
+        "/k111=111",
+        "/k112=112",
+        "/k113=113",
+        "/k114=114",
+        "/k115=115",
+        "/k116=116",
+        "/k117=117",
+        "/k118=118",
+        "/k119=119",
+        "/k120=120",
+        "/k121=121",
+        "/k122=122",
+        "/k123=123",
+        "/k124=124",
+        "/k125=125",
+        "/k126=126",
+        "/k127=127",
+        "/k128=128"
+      ]
+    },
+    {
+      "name": "selector miss beyond one machine word",
+      "input": 14,
+      "args": [
+        "/k0=0",
+        "/k1=1",
+        "/k2=2",
+        "/k3=3",
+        "/k4=4",
+        "/k5=5",
+        "/k6=6",
+        "/k7=7",
+        "/k8=8",
+        "/k9=9",
+        "/k10=10",
+        "/k11=11",
+        "/k12=12",
+        "/k13=13",
+        "/k14=14",
+        "/k15=15",
+        "/k16=16",
+        "/k17=17",
+        "/k18=18",
+        "/k19=19",
+        "/k20=20",
+        "/k21=21",
+        "/k22=22",
+        "/k23=23",
+        "/k24=24",
+        "/k25=25",
+        "/k26=26",
+        "/k27=27",
+        "/k28=28",
+        "/k29=29",
+        "/k30=30",
+        "/k31=31",
+        "/k32=32",
+        "/k33=33",
+        "/k34=34",
+        "/k35=35",
+        "/k36=36",
+        "/k37=37",
+        "/k38=38",
+        "/k39=39",
+        "/k40=40",
+        "/k41=41",
+        "/k42=42",
+        "/k43=43",
+        "/k44=44",
+        "/k45=45",
+        "/k46=46",
+        "/k47=47",
+        "/k48=48",
+        "/k49=49",
+        "/k50=50",
+        "/k51=51",
+        "/k52=52",
+        "/k53=53",
+        "/k54=54",
+        "/k55=55",
+        "/k56=56",
+        "/k57=57",
+        "/k58=58",
+        "/k59=59",
+        "/k60=60",
+        "/k61=61",
+        "/k62=62",
+        "/k63=63",
+        "/k64=64",
+        "/k65=65",
+        "/k66=66",
+        "/k67=67",
+        "/k68=68",
+        "/k69=69",
+        "/k70=70",
+        "/k71=71",
+        "/k72=72",
+        "/k73=73",
+        "/k74=74",
+        "/k75=75",
+        "/k76=76",
+        "/k77=77",
+        "/k78=78",
+        "/k79=79",
+        "/k80=80",
+        "/k81=81",
+        "/k82=82",
+        "/k83=83",
+        "/k84=84",
+        "/k85=85",
+        "/k86=86",
+        "/k87=87",
+        "/k88=88",
+        "/k89=89",
+        "/k90=90",
+        "/k91=91",
+        "/k92=92",
+        "/k93=93",
+        "/k94=94",
+        "/k95=95",
+        "/k96=96",
+        "/k97=97",
+        "/k98=98",
+        "/k99=99",
+        "/k100=100",
+        "/k101=101",
+        "/k102=102",
+        "/k103=103",
+        "/k104=104",
+        "/k105=105",
+        "/k106=106",
+        "/k107=107",
+        "/k108=108",
+        "/k109=109",
+        "/k110=110",
+        "/k111=111",
+        "/k112=112",
+        "/k113=113",
+        "/k114=114",
+        "/k115=115",
+        "/k116=116",
+        "/k117=117",
+        "/k118=118",
+        "/k119=119",
+        "/k120=120",
+        "/k121=121",
+        "/k122=122",
+        "/k123=123",
+        "/k124=124",
+        "/k125=125",
+        "/k126=126",
+        "/k127=127",
+        "/k128=missing"
+      ]
+    },
+    {
+      "name": "wide shared in disjunct",
+      "input": 15,
+      "args": [
+        "in{field=/status,any=open|other-0}",
+        "in{field=/status,any=open|other-1}",
+        "in{field=/status,any=open|other-2}",
+        "in{field=/status,any=open|other-3}",
+        "in{field=/status,any=open|other-4}",
+        "in{field=/status,any=open|other-5}",
+        "in{field=/status,any=open|other-6}",
+        "in{field=/status,any=open|other-7}",
+        "in{field=/status,any=open|other-8}",
+        "in{field=/status,any=open|other-9}",
+        "in{field=/status,any=open|other-10}",
+        "in{field=/status,any=open|other-11}",
+        "in{field=/status,any=open|other-12}",
+        "in{field=/status,any=open|other-13}",
+        "in{field=/status,any=open|other-14}",
+        "in{field=/status,any=open|other-15}",
+        "in{field=/status,any=open|other-16}",
+        "in{field=/status,any=open|other-17}",
+        "in{field=/status,any=open|other-18}",
+        "in{field=/status,any=open|other-19}",
+        "in{field=/status,any=open|other-20}",
+        "in{field=/status,any=open|other-21}",
+        "in{field=/status,any=open|other-22}",
+        "in{field=/status,any=open|other-23}",
+        "in{field=/status,any=open|other-24}",
+        "in{field=/status,any=open|other-25}",
+        "in{field=/status,any=open|other-26}",
+        "in{field=/status,any=open|other-27}",
+        "in{field=/status,any=open|other-28}",
+        "in{field=/status,any=open|other-29}",
+        "in{field=/status,any=open|other-30}",
+        "in{field=/status,any=open|other-31}",
+        "in{field=/status,any=open|other-32}",
+        "in{field=/status,any=open|other-33}",
+        "in{field=/status,any=open|other-34}",
+        "in{field=/status,any=open|other-35}",
+        "in{field=/status,any=open|other-36}",
+        "in{field=/status,any=open|other-37}",
+        "in{field=/status,any=open|other-38}",
+        "in{field=/status,any=open|other-39}",
+        "in{field=/status,any=open|other-40}",
+        "in{field=/status,any=open|other-41}",
+        "in{field=/status,any=open|other-42}",
+        "in{field=/status,any=open|other-43}",
+        "in{field=/status,any=open|other-44}",
+        "in{field=/status,any=open|other-45}",
+        "in{field=/status,any=open|other-46}",
+        "in{field=/status,any=open|other-47}",
+        "in{field=/status,any=open|other-48}",
+        "in{field=/status,any=open|other-49}",
+        "in{field=/status,any=open|other-50}",
+        "in{field=/status,any=open|other-51}",
+        "in{field=/status,any=open|other-52}",
+        "in{field=/status,any=open|other-53}",
+        "in{field=/status,any=open|other-54}",
+        "in{field=/status,any=open|other-55}",
+        "in{field=/status,any=open|other-56}",
+        "in{field=/status,any=open|other-57}",
+        "in{field=/status,any=open|other-58}",
+        "in{field=/status,any=open|other-59}",
+        "in{field=/status,any=open|other-60}",
+        "in{field=/status,any=open|other-61}",
+        "in{field=/status,any=open|other-62}",
+        "in{field=/status,any=open|other-63}",
+        "in{field=/status,any=open|other-64}",
+        "in{field=/status,any=open|other-65}",
+        "in{field=/status,any=open|other-66}",
+        "in{field=/status,any=open|other-67}",
+        "in{field=/status,any=open|other-68}",
+        "in{field=/status,any=open|other-69}",
+        "in{field=/status,any=open|other-70}",
+        "in{field=/status,any=open|other-71}",
+        "in{field=/status,any=open|other-72}",
+        "in{field=/status,any=open|other-73}",
+        "in{field=/status,any=open|other-74}",
+        "in{field=/status,any=open|other-75}",
+        "in{field=/status,any=open|other-76}",
+        "in{field=/status,any=open|other-77}",
+        "in{field=/status,any=open|other-78}",
+        "in{field=/status,any=open|other-79}",
+        "in{field=/status,any=open|other-80}",
+        "in{field=/status,any=open|other-81}",
+        "in{field=/status,any=open|other-82}",
+        "in{field=/status,any=open|other-83}",
+        "in{field=/status,any=open|other-84}",
+        "in{field=/status,any=open|other-85}",
+        "in{field=/status,any=open|other-86}",
+        "in{field=/status,any=open|other-87}",
+        "in{field=/status,any=open|other-88}",
+        "in{field=/status,any=open|other-89}",
+        "in{field=/status,any=open|other-90}",
+        "in{field=/status,any=open|other-91}",
+        "in{field=/status,any=open|other-92}",
+        "in{field=/status,any=open|other-93}",
+        "in{field=/status,any=open|other-94}",
+        "in{field=/status,any=open|other-95}",
+        "in{field=/status,any=open|other-96}",
+        "in{field=/status,any=open|other-97}",
+        "in{field=/status,any=open|other-98}",
+        "in{field=/status,any=open|other-99}",
+        "in{field=/status,any=open|other-100}",
+        "in{field=/status,any=open|other-101}",
+        "in{field=/status,any=open|other-102}",
+        "in{field=/status,any=open|other-103}",
+        "in{field=/status,any=open|other-104}",
+        "in{field=/status,any=open|other-105}",
+        "in{field=/status,any=open|other-106}",
+        "in{field=/status,any=open|other-107}",
+        "in{field=/status,any=open|other-108}",
+        "in{field=/status,any=open|other-109}",
+        "in{field=/status,any=open|other-110}",
+        "in{field=/status,any=open|other-111}",
+        "in{field=/status,any=open|other-112}",
+        "in{field=/status,any=open|other-113}",
+        "in{field=/status,any=open|other-114}",
+        "in{field=/status,any=open|other-115}",
+        "in{field=/status,any=open|other-116}",
+        "in{field=/status,any=open|other-117}",
+        "in{field=/status,any=open|other-118}",
+        "in{field=/status,any=open|other-119}",
+        "in{field=/status,any=open|other-120}",
+        "in{field=/status,any=open|other-121}",
+        "in{field=/status,any=open|other-122}",
+        "in{field=/status,any=open|other-123}",
+        "in{field=/status,any=open|other-124}",
+        "in{field=/status,any=open|other-125}",
+        "in{field=/status,any=open|other-126}",
+        "in{field=/status,any=open|other-127}",
+        "in{field=/status,any=open|other-128}"
+      ]
+    },
+    {
+      "name": "projection beyond one machine word",
+      "input": 14,
+      "args": [
+        "-f",
+        "/k0",
+        "-f",
+        "/k1",
+        "-f",
+        "/k2",
+        "-f",
+        "/k3",
+        "-f",
+        "/k4",
+        "-f",
+        "/k5",
+        "-f",
+        "/k6",
+        "-f",
+        "/k7",
+        "-f",
+        "/k8",
+        "-f",
+        "/k9",
+        "-f",
+        "/k10",
+        "-f",
+        "/k11",
+        "-f",
+        "/k12",
+        "-f",
+        "/k13",
+        "-f",
+        "/k14",
+        "-f",
+        "/k15",
+        "-f",
+        "/k16",
+        "-f",
+        "/k17",
+        "-f",
+        "/k18",
+        "-f",
+        "/k19",
+        "-f",
+        "/k20",
+        "-f",
+        "/k21",
+        "-f",
+        "/k22",
+        "-f",
+        "/k23",
+        "-f",
+        "/k24",
+        "-f",
+        "/k25",
+        "-f",
+        "/k26",
+        "-f",
+        "/k27",
+        "-f",
+        "/k28",
+        "-f",
+        "/k29",
+        "-f",
+        "/k30",
+        "-f",
+        "/k31",
+        "-f",
+        "/k32",
+        "-f",
+        "/k33",
+        "-f",
+        "/k34",
+        "-f",
+        "/k35",
+        "-f",
+        "/k36",
+        "-f",
+        "/k37",
+        "-f",
+        "/k38",
+        "-f",
+        "/k39",
+        "-f",
+        "/k40",
+        "-f",
+        "/k41",
+        "-f",
+        "/k42",
+        "-f",
+        "/k43",
+        "-f",
+        "/k44",
+        "-f",
+        "/k45",
+        "-f",
+        "/k46",
+        "-f",
+        "/k47",
+        "-f",
+        "/k48",
+        "-f",
+        "/k49",
+        "-f",
+        "/k50",
+        "-f",
+        "/k51",
+        "-f",
+        "/k52",
+        "-f",
+        "/k53",
+        "-f",
+        "/k54",
+        "-f",
+        "/k55",
+        "-f",
+        "/k56",
+        "-f",
+        "/k57",
+        "-f",
+        "/k58",
+        "-f",
+        "/k59",
+        "-f",
+        "/k60",
+        "-f",
+        "/k61",
+        "-f",
+        "/k62",
+        "-f",
+        "/k63",
+        "-f",
+        "/k64",
+        "-f",
+        "/k65",
+        "-f",
+        "/k66",
+        "-f",
+        "/k67",
+        "-f",
+        "/k68",
+        "-f",
+        "/k69",
+        "-f",
+        "/k70",
+        "-f",
+        "/k71",
+        "-f",
+        "/k72",
+        "-f",
+        "/k73",
+        "-f",
+        "/k74",
+        "-f",
+        "/k75",
+        "-f",
+        "/k76",
+        "-f",
+        "/k77",
+        "-f",
+        "/k78",
+        "-f",
+        "/k79",
+        "-f",
+        "/k80",
+        "-f",
+        "/k81",
+        "-f",
+        "/k82",
+        "-f",
+        "/k83",
+        "-f",
+        "/k84",
+        "-f",
+        "/k85",
+        "-f",
+        "/k86",
+        "-f",
+        "/k87",
+        "-f",
+        "/k88",
+        "-f",
+        "/k89",
+        "-f",
+        "/k90",
+        "-f",
+        "/k91",
+        "-f",
+        "/k92",
+        "-f",
+        "/k93",
+        "-f",
+        "/k94",
+        "-f",
+        "/k95",
+        "-f",
+        "/k96",
+        "-f",
+        "/k97",
+        "-f",
+        "/k98",
+        "-f",
+        "/k99",
+        "-f",
+        "/k100",
+        "-f",
+        "/k101",
+        "-f",
+        "/k102",
+        "-f",
+        "/k103",
+        "-f",
+        "/k104",
+        "-f",
+        "/k105",
+        "-f",
+        "/k106",
+        "-f",
+        "/k107",
+        "-f",
+        "/k108",
+        "-f",
+        "/k109",
+        "-f",
+        "/k110",
+        "-f",
+        "/k111",
+        "-f",
+        "/k112",
+        "-f",
+        "/k113",
+        "-f",
+        "/k114",
+        "-f",
+        "/k115",
+        "-f",
+        "/k116",
+        "-f",
+        "/k117",
+        "-f",
+        "/k118",
+        "-f",
+        "/k119",
+        "-f",
+        "/k120",
+        "-f",
+        "/k121",
+        "-f",
+        "/k122",
+        "-f",
+        "/k123",
+        "-f",
+        "/k124",
+        "-f",
+        "/k125",
+        "-f",
+        "/k126",
+        "-f",
+        "/k127",
+        "-f",
+        "/k128",
+        "/id=wide"
+      ]
+    },
+    {
+      "name": "contains needle beyond old fast-path capacity",
+      "input": 16,
+      "args": [
+        "contains{field=/msg,value=\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
+      ]
+    },
+    {
+      "name": "icontains needle beyond old fast-path capacity",
+      "input": 16,
+      "args": [
+        "icontains{field=/msg,value=\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}"
+      ]
+    }
+  ]
+}

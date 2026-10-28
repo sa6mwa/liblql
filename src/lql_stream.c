@@ -132,7 +132,7 @@ static lql_status lql_stream_apply_common(lql *self,
   handled = 0;
   status = lql_stream_apply_flat_eq(self, request, result, error, allow_spool,
                                     &handled);
-  if (handled) {
+  if (status != LQL_STATUS_OK || handled) {
     return status;
   }
   lql_set_error(error, LQL_STATUS_UNSUPPORTED,

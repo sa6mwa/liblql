@@ -1,6 +1,23 @@
-.PHONY: help deps deps-debug deps-release deps-cross toolchain-check toolchain-policy-check development-runtime-check dependency-cache-check dependency-cache-privacy-regression tar-portability-check lifecycle-check lifecycle-version-contract ctest-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-rock-toolchain-override-check lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify release-upload-list verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all print-test-all-gates test-all-timed test-all-gates selector-ast-contract sdk-parity-contract direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap sdk-parity-gate direct-parity-matrix direct-perf-gate direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
+LQL_OPERATIONS := help deps deps-debug deps-release deps-cross toolchain-check toolchain-policy-check development-runtime-check dependency-cache-check dependency-cache-privacy-regression tar-portability-check lifecycle-check lifecycle-version-contract ctest-contract target-tool-check build build-debug build-release build-debug-lua test test-debug mutation-literal-parity shared-only-smoke cross-build cross-test lua-test lua-rock lua-rock-toolchain-override-check lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-env release-lua-artifacts lua-artifact-smoke lua-artifact-privacy-regression valgrind fuzz-smoke fuzz install-smoke clql-smoke clql-selector-parity clql-mutation-parity package package-clql package-source package-source-smoke source-manifest-exactness package-checksums package-verify release-upload-list verify-release-archives verify-release-privacy release-matrix release-pipeline prerelease prerelease-hardening prerelease-live release print-release-version test-all print-test-all-gates test-all-timed test-all-gates selector-ast-contract sdk-parity-contract direct-reset direct-no-lonejson direct-probe direct-bench direct-callback-whitespace direct-live-heap sdk-parity-gate direct-parity-matrix direct-perf-gate direct-profile-hotspots bench-gate perf-gate finalize-slice format clean clean-dist
 
-TEST_ALL_GATES := lifecycle-check target-tool-check toolchain-policy-check ctest-contract selector-ast-contract sdk-parity-contract direct-reset direct-no-lonejson test development-runtime-check mutation-literal-parity shared-only-smoke lua-test lua-rock-toolchain-override-check lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-selector-parity clql-mutation-parity package-verify sdk-parity-gate direct-perf-gate direct-callback-whitespace direct-live-heap
+LQL_BUILD_JOBS ?= 8
+LQL_OPERATIONS += reference-lql reference-benchmarks cli-parity-driver cli-parity-contract format-check thread-stack-check package-qemu-smoke
+.DEFAULT_GOAL := help
+.PHONY: $(LQL_OPERATIONS) lifecycle-workspace
+export CMAKE_BUILD_PARALLEL_LEVEL := $(LQL_BUILD_JOBS)
+export CTEST_PARALLEL_LEVEL := 1
+export TMPDIR := $(CURDIR)/build/tmp
+
+# Multiple public operations share mutable build/install trees.
+.NOTPARALLEL:
+
+$(filter-out help clean clean-dist print-test-all-gates print-release-version release-upload-list lua-env,$(LQL_OPERATIONS)): | lifecycle-workspace
+
+lifecycle-workspace:
+	@sh scripts/check_owned_path.sh '$(CURDIR)/build' '$(CURDIR)/dist' '$(CURDIR)/.cache'
+	@mkdir -p "$(TMPDIR)"
+
+TEST_ALL_GATES ?= cli-parity-contract lifecycle-check lifecycle-version-contract target-tool-check toolchain-policy-check ctest-contract selector-ast-contract sdk-parity-contract direct-reset direct-no-lonejson test thread-stack-check development-runtime-check mutation-literal-parity shared-only-smoke lua-test lua-rock-toolchain-override-check lua-cli-smoke lua-cli-clql-parity lua-cli-parity lua-artifact-privacy-regression dependency-cache-privacy-regression valgrind fuzz-smoke install-smoke clql-smoke clql-selector-parity clql-mutation-parity package-verify sdk-parity-gate direct-perf-gate direct-callback-whitespace direct-live-heap format-check
 
 help:
 	@printf '%s\n' \
@@ -18,12 +35,13 @@ help:
 	  'make lifecycle-version-contract  verify exact-tag and override version contract' \
 	  'make ctest-contract  verify CTest labels and timeouts' \
 	  'make target-tool-check  verify target inspection tool discovery' \
-	  'make build        build the debug lifecycle preset' \
+	  'make build        prepare native and Lua debug builds and editor databases' \
 	  'make build-debug   build the debug self-contained liblql direct-execution implementation' \
 	  'make build-release build the optimized self-contained liblql direct-execution implementation' \
 	  'make build-debug-lua build the Lua 5.5 facade module' \
 	  'make test          build and run the direct-stream test suite' \
 	  'make test-debug    alias for make test' \
+	  'make thread-stack-check verify default and 64 KiB workers on glibc/musl, Debug/Release' \
 	  'make mutation-literal-parity  verify C and pinned Go mutation literal semantics' \
 	  'make shared-only-smoke  configure, build, and test without liblql.a' \
 	  'make cross-build   build and verify release cross-target package matrix' \
@@ -51,6 +69,7 @@ help:
 	  'make source-manifest-exactness verify source archive payload matches RELEASE_MANIFEST' \
 		  'make package-checksums verify the release checksum manifest' \
 		  'make package-verify verify checksum-listed host package artifacts' \
+	  'make package-qemu-smoke run small SDK/CLI smokes against all four packaged ARM/libc pairs' \
 		  'make release-upload-list print manifest-selected release upload files' \
 		  'make verify-release-archives verify checksum-listed release archives' \
 	  'make verify-release-privacy verify release artifact privacy/relocatability' \
@@ -58,7 +77,7 @@ help:
 	  'make prerelease    run the full release proof graph without cleaning first' \
 	  'make prerelease-hardening alias for prerelease until extra hardening exists' \
 	  'make prerelease-live fail-closed placeholder for opt-in live checks' \
-	  'make release       verify version contract, clean, then run the full release proof graph' \
+	  'make release       require signed tagged default-branch commit, clean, then prove release' \
 	  'make print-release-version print the version used by package/release targets' \
 	  'make test-all      run reset, dependency, test, memcheck, parity, and heap gates with elapsed time' \
 	  'make selector-ast-contract  verify selector AST oracle inventory and source contract' \
@@ -84,54 +103,54 @@ deps:
 	@sh scripts/deps.sh
 
 deps-debug:
-	@bash scripts/cpkt-toolchains.sh ensure x86_64-linux-gnu
+	@sh scripts/deps.sh x86_64-linux-gnu >/dev/null
 
 deps-release:
-	@bash scripts/cpkt-toolchains.sh ensure all
-	@bash scripts/cpkt-aflpp.sh ensure
+	@sh scripts/deps.sh
 
 deps-cross:
 	@bash scripts/cpkt-toolchains.sh ensure all
 
-toolchain-check:
-	@bash -n scripts/cpkt-toolchains.sh
-	@bash -n scripts/cpkt-aflpp.sh
-	@bash -n scripts/test-cpkt-toolchain-resolvers.sh
-	@bash -n scripts/test-cpkt-aflpp-resolver.sh
-	@bash scripts/test-cpkt-toolchain-resolvers.sh
-	@bash scripts/test-cpkt-aflpp-resolver.sh
+toolchain-check: lifecycle-test-configure
+	@mkdir -p "$(TMPDIR)"
+	@ctest --test-dir build/lifecycle-check -R '^lifecycle.(toolchains|afl|integration)$$' --stop-on-failure --output-on-failure --no-tests=error
+
+.PHONY: lifecycle-test-configure
+lifecycle-test-configure: | lifecycle-workspace
+	@cmake -S tests/lifecycle -B build/lifecycle-check
 
 toolchain-policy-check:
 	@sh scripts/check_toolchain_policy.sh
 
-development-runtime-check: test build-debug-lua
+development-runtime-check: build-debug build-debug-lua
 	@sh scripts/check_development_runtime.sh
 
-dependency-cache-check:
-	@sh scripts/test_dependency_cache_config.sh
+dependency-cache-check: lifecycle-test-configure
+	@ctest --test-dir build/lifecycle-check -R '^lifecycle.dependency_cache$$' --stop-on-failure --output-on-failure --no-tests=error
 
 dependency-cache-privacy-regression:
 	@sh scripts/check_dependency_cache_privacy_regression.sh
 
-tar-portability-check:
-	@sh scripts/check_tar_portability.sh
+tar-portability-check: lifecycle-test-configure
+	@ctest --test-dir build/lifecycle-check -R '^lifecycle.tar$$' --stop-on-failure --output-on-failure --no-tests=error
 
-lifecycle-check: toolchain-check dependency-cache-check tar-portability-check ctest-contract sdk-parity-contract
-	@python3 scripts/check_lifecycle_presets.py
+lifecycle-check: lifecycle-test-configure ctest-contract sdk-parity-contract
+	@ctest --test-dir build/lifecycle-check --stop-on-failure --output-on-failure --no-tests=error
+	@cmake -P tests/lifecycle/presets.cmake
 	@sh scripts/check_release_targets.sh
 
 lifecycle-version-contract:
-	@sh scripts/check_lifecycle_version_contract.sh
+	@bash scripts/check_lifecycle_version_contract.sh
 
-ctest-contract:
-	@python3 scripts/check_ctest_contract.py
+ctest-contract: build-debug
 
 target-tool-check:
-	@python3 -c 'import ast,pathlib; ast.parse(pathlib.Path("scripts/discover_target_tools.py").read_text(), "scripts/discover_target_tools.py")'
+	@mkdir -p "$(TMPDIR)"
+	@bash -n scripts/discover_target_tools.sh
 	@sh scripts/test_discover_target_tools.sh
 	@sh scripts/check_darwin_linker_route.sh
 
-build: build-debug
+build: build-debug build-debug-lua
 
 selector-ast-contract:
 	@sh scripts/check_selector_ast_contract.sh
@@ -142,20 +161,18 @@ sdk-parity-contract:
 build-debug:
 	@sh scripts/build.sh
 
-build-release:
+build-release: deps-debug
 	@cmake --preset release
 	@cmake --build --preset release
 
-build-debug-lua:
-	@cmake --preset release
-	@cmake --build --preset release
-	@sh scripts/remove_path.sh build/lua-sdk
+build-debug-lua: build-release
 	@cmake --install build/release --prefix build/lua-sdk
 	@cmake --preset debug-lua
-	@cmake --build --preset debug-lua --target lql_lua_core lql_lua_runner
+	@cmake --build --preset debug-lua --target lql_lua_core lql_lua_runner lql_lua_fault_test
+	@scripts/check_lua_symbols.sh build/debug-lua/lua/lql/core.so build/debug-lua
 
-test:
-	@sh scripts/test.sh
+test: build-debug
+	@ctest --preset debug --stop-on-failure --no-tests=error
 
 test-debug: test
 
@@ -165,32 +182,43 @@ mutation-literal-parity: test
 shared-only-smoke:
 	@sh scripts/check_shared_only_build.sh
 
-cross-build:
+thread-stack-check: test build-release
+	@sh scripts/check_thread_stack.sh
+
+cross-build: build-debug-lua thread-stack-check
 	@sh scripts/cross_build.sh
 
 cross-test:
 	@sh scripts/cross_test.sh
 
 lua-test: build-debug-lua
-	@sh scripts/run_lua_tests.sh
+	@ctest --test-dir build/debug-lua -R '^lql.lua.' --stop-on-failure --output-on-failure --no-tests=error
 
 lua-rock: build-debug-lua
 	@sh scripts/build_lua_rock.sh
 	@sh scripts/check_lua_rock.sh
 
-lua-rock-toolchain-override-check:
+lua-rock-toolchain-override-check: build-debug-lua
 	@sh scripts/check_lua_rock_toolchain_override.sh
 
 lua-cli-smoke: lua-rock
 	@sh scripts/check_lua_cli_smoke.sh
 
-lua-cli-clql-parity: build-release lua-rock
-	@CLQL_PATH=build/release/clql LQL_LUA_CLI_PATH=build/luarocks/bin/lql.lua python3 scripts/check_lua_clql_parity.py
+cli-parity-driver:
+	@cmake -S tests/cli-parity -B build/cli-parity -G Ninja
+	@cmake --build build/cli-parity
 
-lua-cli-parity: lua-rock
-	@mkdir -p build
-	@repo=$$(pwd); modver=$$(cd reference/go-benchmark && go list -m -f '{{.Version}}' pkt.systems/lql); moddir="$$(go env GOPATH)/pkg/mod/pkt.systems/lql@$$modver"; cd "$$moddir" && go build -o "$$repo/build/reference-lql" ./cmd/lql
-	@LQL_GO_CLI_PATH=build/reference-lql LQL_LUA_CLI_PATH=build/luarocks/bin/lql.lua python3 scripts/check_lua_cli_parity.py
+cli-parity-contract: cli-parity-driver
+	@ctest --test-dir build/cli-parity -R '^cli.EmptySelection$$' --stop-on-failure --output-on-failure --no-tests=error
+
+reference-lql:
+	@cd reference/go-benchmark && go build -o ../../build/reference-lql pkt.systems/lql/cmd/lql
+
+lua-cli-clql-parity: build-release lua-rock cli-parity-driver
+	@ctest --test-dir build/cli-parity -R '^cli.LuaC$$' --stop-on-failure --output-on-failure --no-tests=error
+
+lua-cli-parity: lua-rock reference-lql cli-parity-driver
+	@ctest --test-dir build/cli-parity -R '^cli.LuaGo$$' --stop-on-failure --output-on-failure --no-tests=error
 
 lua-env:
 	@printf "export LUA_PATH='%s/share/lua/5.5/?.lua;%s/share/lua/5.5/?/init.lua;;'\n" "$$(pwd -P)/build/luarocks" "$$(pwd -P)/build/luarocks"
@@ -201,7 +229,7 @@ lua-env:
 release-lua-artifacts:
 	@sh scripts/package_lua.sh
 
-lua-artifact-smoke: release-lua-artifacts
+lua-artifact-smoke: build-debug-lua release-lua-artifacts
 	@sh scripts/package-verify.sh lua
 
 lua-artifact-privacy-regression:
@@ -220,20 +248,15 @@ install-smoke: build-release
 	@sh scripts/check_install_tree.sh
 	@sh scripts/check_pkgconfig_multiarch.sh
 
-clql-smoke: build-release
-	@mkdir -p build
-	@repo=$$(pwd); modver=$$(cd reference/go-benchmark && go list -m -f '{{.Version}}' pkt.systems/lql); moddir="$$(go env GOPATH)/pkg/mod/pkt.systems/lql@$$modver"; cd "$$moddir" && go build -o "$$repo/build/reference-lql" ./cmd/lql
+clql-smoke: build-release reference-lql cli-parity-driver
 	@LQL_GO_CLI_PATH=build/reference-lql sh scripts/check_clql_smoke.sh
+	@ctest --test-dir build/cli-parity -R '^cli.ClqlXattr$$' --stop-on-failure --output-on-failure --no-tests=error
 
-clql-selector-parity: build-release
-	@mkdir -p build
-	@repo=$$(pwd); modver=$$(cd reference/go-benchmark && go list -m -f '{{.Version}}' pkt.systems/lql); moddir="$$(go env GOPATH)/pkg/mod/pkt.systems/lql@$$modver"; cd "$$moddir" && go build -o "$$repo/build/reference-lql" ./cmd/lql
-	@LQL_GO_CLI_PATH=build/reference-lql CLQL_PATH=build/release/clql python3 scripts/check_clql_selector_parity.py
+clql-selector-parity: build-release reference-lql cli-parity-driver
+	@ctest --test-dir build/cli-parity -R '^cli.Selector$$' --stop-on-failure --output-on-failure --no-tests=error
 
-clql-mutation-parity: build-release
-	@mkdir -p build
-	@repo=$$(pwd); modver=$$(cd reference/go-benchmark && go list -m -f '{{.Version}}' pkt.systems/lql); moddir="$$(go env GOPATH)/pkg/mod/pkt.systems/lql@$$modver"; cd "$$moddir" && go build -o "$$repo/build/reference-lql" ./cmd/lql
-	@LQL_GO_CLI_PATH=build/reference-lql CLQL_PATH=build/release/clql python3 scripts/check_clql_mutation_parity.py
+clql-mutation-parity: build-release reference-lql cli-parity-driver
+	@ctest --test-dir build/cli-parity -R '^cli.Mutation$$' --stop-on-failure --output-on-failure --no-tests=error
 
 package:
 	@sh scripts/package.sh x86_64-linux-gnu
@@ -256,6 +279,9 @@ package-checksums:
 package-verify: package-clql
 	@sh scripts/package-verify.sh all
 
+package-qemu-smoke:
+	@sh scripts/package-verify.sh qemu
+
 release-upload-list:
 	@sh scripts/print_release_uploads.sh
 
@@ -265,13 +291,12 @@ verify-release-archives:
 verify-release-privacy:
 	@sh scripts/verify_release_privacy.sh
 
-release-matrix:
+release-matrix: build-debug-lua
 	@sh scripts/run_linux_release_matrix.sh
 
-release-pipeline:
-	@$(MAKE) --no-print-directory -f Makefile test-all
-	@$(MAKE) --no-print-directory -f Makefile direct-parity-matrix
-	@$(MAKE) --no-print-directory -f Makefile release-matrix
+# One Make invocation owns the proof graph, so matching prerequisite builds
+# are shared across all three serial stages.
+release-pipeline: test-all-gates direct-parity-matrix release-matrix
 
 prerelease: release-pipeline
 
@@ -281,6 +306,7 @@ prerelease-live:
 	@printf '%s\n' 'SKIP: liblql has no live external-provider prerelease checks'
 
 release:
+	@sh scripts/check_release_commit.sh
 	@$(MAKE) lifecycle-version-contract
 	@$(MAKE) clean
 	@$(MAKE) release-pipeline
@@ -292,13 +318,13 @@ test-all:
 	@$(MAKE) --no-print-directory -f Makefile test-all-timed
 
 test-all-timed:
-	@sh scripts/test_all.sh
+	@time $(MAKE) --no-print-directory test-all-gates
 
 print-test-all-gates:
 	@printf '%s\n' '$(TEST_ALL_GATES)'
 
-test-all-gates:
-	@TEST_ALL_GATES='$(TEST_ALL_GATES)' sh scripts/test_all.sh
+test-all-gates: $(TEST_ALL_GATES)
+	@test -n '$(strip $(TEST_ALL_GATES))' || { echo 'test-all: empty gate selection' >&2; exit 1; }
 
 direct-reset:
 	@sh scripts/check_direct_execution_reset.sh
@@ -306,13 +332,9 @@ direct-reset:
 direct-no-lonejson: build-debug build-release
 	@sh scripts/check_no_lonejson_dependency.sh
 
-direct-probe:
-	@cmake --preset release
-	@cmake --build --preset release --target lql_direct_probe
+direct-probe: build-release
 
-direct-bench:
-	@cmake --preset release
-	@cmake --build --preset release --target lql_direct_bench
+direct-bench: build-release
 
 direct-callback-whitespace: direct-bench
 	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench sh scripts/check_direct_callback_whitespace.sh
@@ -320,22 +342,18 @@ direct-callback-whitespace: direct-bench
 direct-live-heap: direct-bench
 	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench sh scripts/check_direct_live_heap.sh
 
-sdk-parity-gate: direct-bench
+reference-benchmarks:
 	@mkdir -p build
 	@cd reference/go-benchmark && go build -o ../../build/reference-lqlbench ./cmd/lqlbench
 	@cd reference/go-benchmark && go build -o ../../build/reference-benchvalidate ./cmd/benchvalidate
+
+sdk-parity-gate: direct-bench reference-benchmarks
 	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench LQL_GO_BENCH_PATH=build/reference-lqlbench LQL_BENCHVALIDATE_PATH=build/reference-benchvalidate sh scripts/check_direct_parity_smoke.sh
 
-direct-parity-matrix: direct-bench
-	@mkdir -p build
-	@cd reference/go-benchmark && go build -o ../../build/reference-lqlbench ./cmd/lqlbench
-	@cd reference/go-benchmark && go build -o ../../build/reference-benchvalidate ./cmd/benchvalidate
+direct-parity-matrix: direct-bench reference-benchmarks
 	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench LQL_GO_BENCH_PATH=build/reference-lqlbench LQL_BENCHVALIDATE_PATH=build/reference-benchvalidate sh scripts/check_direct_parity_matrix.sh
 
-direct-perf-gate: direct-bench
-	@mkdir -p build
-	@cd reference/go-benchmark && go build -o ../../build/reference-lqlbench ./cmd/lqlbench
-	@cd reference/go-benchmark && go build -o ../../build/reference-benchvalidate ./cmd/benchvalidate
+direct-perf-gate: direct-bench reference-benchmarks
 	@LQL_DIRECT_BENCH_PATH=build/release/lql_direct_bench LQL_GO_BENCH_PATH=build/reference-lqlbench LQL_BENCHVALIDATE_PATH=build/reference-benchvalidate sh scripts/check_direct_perf_gate.sh
 
 direct-profile-hotspots: direct-bench
@@ -346,9 +364,14 @@ bench-gate: direct-perf-gate
 perf-gate: bench-gate
 
 finalize-slice: format toolchain-policy-check development-runtime-check
+	@$(MAKE) --no-print-directory format-check
 
 format:
-	@clang-format -i include/lql/*.h src/*.c src/*.h tools/lql_direct_bench.c tools/lql_lua_runner.c tools/clql.c fuzz/json_fuzz.c lua/lql_core.c examples/*.c
+	@clang-format -i include/lql/*.h src/*.c src/*.h tools/lql_direct_bench.c tools/lql_lua_runner.c tools/clql.c fuzz/json_fuzz.c lua/lql_core.c lua/*.h tests/lua_fault_test.c tests/thread_stack_test.c tests/workspace_alloc_test.c tests/qemu/consumer.c examples/*.c
+
+format-check:
+	@clang-format --dry-run --Werror include/lql/*.h src/*.c src/*.h tools/lql_direct_bench.c tools/lql_lua_runner.c tools/clql.c fuzz/json_fuzz.c lua/lql_core.c lua/*.h tests/lua_fault_test.c tests/thread_stack_test.c tests/workspace_alloc_test.c tests/qemu/consumer.c examples/*.c
+	@unformatted=$$(gofmt -l tests/cli-parity/*.go) && test -z "$$unformatted"
 
 clean-dist:
 	@./scripts/clean.sh dist
